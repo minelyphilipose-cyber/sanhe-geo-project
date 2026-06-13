@@ -52,6 +52,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -421,6 +422,10 @@ public class BatchArticleGenerationService {
 
     public BatchArticleGenerationDetailResponse retryFailed(Long batchId) {
         currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
+        return retryFailedSystem(batchId);
+    }
+
+    public BatchArticleGenerationDetailResponse retryFailedSystem(Long batchId) {
         BatchArticleGenerationBatch batch = batchMapper.selectById(batchId);
         if (batch == null) {
             throw new BizException(404, "Batch not found");
@@ -447,6 +452,32 @@ public class BatchArticleGenerationService {
         return detail(batchId);
     }
 
+    public int recoverStalledBatches(int limit, Duration staleAfter) {
+        int safeLimit = limit <= 0 ? 20 : limit;
+        Duration safeStaleAfter = staleAfter == null || staleAfter.isZero() || staleAfter.isNegative()
+                ? Duration.ofMinutes(15)
+                : staleAfter;
+        LocalDateTime cutoff = LocalDateTime.now().minus(safeStaleAfter);
+        List<BatchArticleGenerationBatch> batches = batchMapper.selectList(
+                new LambdaQueryWrapper<BatchArticleGenerationBatch>()
+                        .in(BatchArticleGenerationBatch::getStatus, List.of(STATUS_PENDING, STATUS_RUNNING))
+                        .isNull(BatchArticleGenerationBatch::getFinishedAt)
+                        .le(BatchArticleGenerationBatch::getUpdatedAt, cutoff)
+                        .orderByAsc(BatchArticleGenerationBatch::getId)
+                        .last("LIMIT " + safeLimit)
+        );
+        if (batches == null || batches.isEmpty()) {
+            return 0;
+        }
+        int recovered = 0;
+        for (BatchArticleGenerationBatch batch : batches) {
+            if (recoverStalledBatch(batch, cutoff)) {
+                recovered++;
+            }
+        }
+        return recovered;
+    }
+
     private void runBatch(Long batchId) {
         BatchArticleGenerationBatch batch = batchMapper.selectById(batchId);
         if (batch == null) {
@@ -458,10 +489,7 @@ public class BatchArticleGenerationService {
                         .eq(BatchArticleGenerationTask::getBatchId, batchId)
                         .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
         );
-        for (BatchArticleGenerationTask task : tasks) {
-            runTask(batch, task);
-        }
-        completeBatch(batchId);
+        submitBatchTasks(batch, tasks);
     }
 
     private void runBatchTasks(Long batchId, List<Long> taskIds) {
@@ -479,10 +507,74 @@ public class BatchArticleGenerationService {
                         .in(BatchArticleGenerationTask::getId, taskIds)
                         .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
         );
-        for (BatchArticleGenerationTask task : tasks) {
-            runTask(batch, task);
+        submitBatchTasks(batch, tasks);
+    }
+
+    private void submitBatchTasks(BatchArticleGenerationBatch batch, List<BatchArticleGenerationTask> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            completeBatch(batch.getId());
+            return;
         }
-        completeBatch(batchId);
+        for (BatchArticleGenerationTask task : tasks) {
+            submitBatchTask(batch, task);
+        }
+    }
+
+    private void submitBatchTask(BatchArticleGenerationBatch batch, BatchArticleGenerationTask task) {
+        try {
+            articleAiDraftExecutor.execute(() -> {
+                try {
+                    runTask(batch, task);
+                } finally {
+                    completeBatch(task.getBatchId());
+                }
+            });
+        } catch (RuntimeException ex) {
+            log.warn("batch article generation task rejected batchId={} taskId={} error={}",
+                    task.getBatchId(), task.getId(), ex.getMessage());
+            markTaskFailed(task, ex);
+            completeBatch(task.getBatchId());
+        }
+    }
+
+    private boolean recoverStalledBatch(BatchArticleGenerationBatch batch, LocalDateTime cutoff) {
+        List<BatchArticleGenerationTask> tasks = selectBatchTasks(batch.getId());
+        List<Long> resumableTaskIds = new ArrayList<>();
+        for (BatchArticleGenerationTask task : tasks) {
+            if (STATUS_PENDING.equals(task.getStatus())) {
+                resumableTaskIds.add(task.getId());
+                continue;
+            }
+            if (STATUS_RUNNING.equals(task.getStatus()) && isTaskStalled(task, cutoff)) {
+                resetTaskForRecovery(task);
+                resumableTaskIds.add(task.getId());
+            }
+        }
+        if (resumableTaskIds.isEmpty()) {
+            completeBatch(batch.getId());
+            return false;
+        }
+        log.info("recover stalled batch article generation batchId={} taskCount={}", batch.getId(), resumableTaskIds.size());
+        try {
+            articleAiDraftExecutor.execute(() -> runBatchTasks(batch.getId(), resumableTaskIds));
+            return true;
+        } catch (RuntimeException ex) {
+            log.warn("recover stalled batch article generation rejected batchId={} error={}", batch.getId(), ex.getMessage());
+            return false;
+        }
+    }
+
+    private boolean isTaskStalled(BatchArticleGenerationTask task, LocalDateTime cutoff) {
+        LocalDateTime marker = task.getUpdatedAt() != null ? task.getUpdatedAt() : task.getStartedAt();
+        return marker == null || !marker.isAfter(cutoff);
+    }
+
+    private void resetTaskForRecovery(BatchArticleGenerationTask task) {
+        task.setStatus(STATUS_PENDING);
+        task.setStartedAt(null);
+        task.setFinishedAt(null);
+        task.setErrorMessage(null);
+        taskMapper.updateById(task);
     }
 
     private void runTask(BatchArticleGenerationBatch batch, BatchArticleGenerationTask task) {

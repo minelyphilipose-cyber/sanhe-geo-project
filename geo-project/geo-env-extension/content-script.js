@@ -124,10 +124,14 @@ async function fillPayload(payload) {
   const identityCheck = resolveFillIdentityCheck(payload)
   const titleElement = findTitleElement(fillProfile)
   const expectedTitle = payload.title || payload.articleTitle || ''
+  const filledTitle = normalizeTitleForPlatform(expectedTitle, fillProfile)
+  if (expectedTitle && !filledTitle) {
+    throw new Error(`${platformDisplayName(fillProfile.platform)}标题长度不符合平台要求：${expectedTitle}`)
+  }
   const rawHtml = payload.renderedHtml || payload.html || payload.content || ''
   const coverImageCleanup = removeCoverImageFromContent(rawHtml, resolvePayloadCoverImageUrl(payload))
   const normalizedContent = removeDuplicateLeadingTitle(coverImageCleanup.html, expectedTitle)
-  const titleFilled = await fillTitle(payload.title || payload.articleTitle || '', titleElement, fillProfile)
+  const titleFilled = await fillTitle(filledTitle, titleElement, fillProfile)
   const contentElement = findContentElement(titleElement, fillProfile)
   if (titleElement && contentElement && titleElement === contentElement && normalizePlatform(fillProfile.platform) !== 'baijiahao') {
     throw new Error(`标题和正文命中同一元素：${describeElement(titleElement)}`)
@@ -139,8 +143,11 @@ async function fillPayload(payload) {
     throw new Error(`未找到${!titleFilled ? '标题' : ''}${!titleFilled && !contentFilled ? '和' : ''}${!contentFilled ? '正文' : ''}输入框；${diagnostics}`)
   }
   await delay(500)
-  verifyFilled(titleElement, contentElement, expectedTitle, normalizedContent.html, fillProfile)
-  const publishOptions = await fillPlatformPublishOptions(payload, fillProfile)
+  verifyFilled(titleElement, contentElement, filledTitle, normalizedContent.html, fillProfile)
+  const publishPayload = filledTitle && filledTitle !== expectedTitle
+    ? { ...payload, title: filledTitle, articleTitle: filledTitle }
+    : payload
+  const publishOptions = await fillPlatformPublishOptions(publishPayload, fillProfile)
   normalizeEditorViewport(fillProfile)
   const draftState = detectDraftState()
   const identityText = identityCheck.message ? `${identityCheck.message}，` : ''
@@ -151,18 +158,28 @@ async function fillPayload(payload) {
   const optionText = publishOptions.message ? `${publishOptions.message}，` : ''
   const draftText = draftState.message ? `${draftState.message}，` : ''
   showStatus(`${identityText}${contentText ? `${contentText}，` : ''}${optionText}${draftText}标题和正文已填充：标题=${describeElement(titleElement)}，正文=${describeElement(contentElement)}，请人工核对后发布`, 'success')
-  return {
+  return normalizeFillResult({
     titleFilled,
     contentFilled,
     tagsFilled,
     publishOptions,
+    platform: fillProfile.platform,
+    taskId: payload.taskId || null,
     identityCheck,
     draftState,
     removedDuplicateTitle: normalizedContent.removedTitle,
     removedDuplicateCoverImage: coverImageCleanup.removed,
+    titleNormalizedForPlatform: Boolean(expectedTitle && filledTitle !== expectedTitle),
+    filledTitle,
     titleElement: describeElement(titleElement),
     contentElement: describeElement(contentElement),
-  }
+  }, payload)
+}
+
+function normalizeFillResult(fillResult, context = {}) {
+  return globalThis.__GEO_FILL_RESULT__?.normalizeFillResult
+    ? globalThis.__GEO_FILL_RESULT__.normalizeFillResult(fillResult, context)
+    : fillResult
 }
 
 async function fillPlatformPublishOptions(payload, fillProfile) {
@@ -559,16 +576,20 @@ async function fillToutiaoScheduledPublish(scheduledAt, platform, context = {}) 
   if (isToutiaoScheduleTimeExpired(value)) {
     throw new Error(`头条定时发布时间已过期或过近：${value.full}，请重新创建未来时间的排期`)
   }
+  assertToutiaoTitleReadyForPublish(context.title)
+  hideGeoFillStatus()
   await closeToutiaoPreviewDialogIfOpen(platform)
-  window.scrollTo(0, document.body.scrollHeight)
+  scrollToToutiaoPublishFooter()
   await delay(500)
   const button = await waitForCondition(
     () => findToutiaoPublishActionButton('定时发布'),
     8000,
     `头条定时发布按钮未找到；${describeToutiaoPublishActions()}`,
   )
-  await clickTrustedActionOnce(button, { platform })
-  await delay(800)
+  const scheduleClick = await clickToutiaoSchedulePublishButton(button, value, platform)
+  if (!scheduleClick?.filled) {
+    await ensureToutiaoScheduleSelectorOpen(value, platform)
+  }
   if (isToutiaoPreviewLayerOpen() || findToutiaoPreviewBackButton() || findToutiaoPreviewConfirmButton()) {
     const confirmPreview = await waitForCondition(
       () => findToutiaoPreviewConfirmButton(),
@@ -578,13 +599,15 @@ async function fillToutiaoScheduledPublish(scheduledAt, platform, context = {}) 
     await clickTrustedActionOnce(confirmPreview, { platform })
     await delay(800)
   }
-  let filled = false
+  let filled = Boolean(scheduleClick?.filled)
   try {
-    filled = await waitForCondition(
-      () => fillToutiaoScheduleInputs(value, platform),
-      10000,
-      `头条定时发布弹窗时间输入框未找到；target=${value.full}；${describeToutiaoScheduleDialog()}`,
-    )
+    if (!filled) {
+      filled = await waitForCondition(
+        () => fillToutiaoScheduleInputs(value, platform),
+        10000,
+        `头条定时发布弹窗时间输入框未找到；target=${value.full}；${describeToutiaoScheduleDialog()}`,
+      )
+    }
   } catch (error) {
     const frameResult = await fillToutiaoScheduleAcrossFrames(value, platform)
     if (frameResult?.scheduled) {
@@ -1019,6 +1042,153 @@ function findToutiaoBottomPublishActionButton(target) {
   const groupedTarget = grouped.find((item) => item.text === target)
   if (groupedTarget) return groupedTarget.el
 
+  const direct = Array.from(document.querySelectorAll('button.publish-btn, .publish-footer-content button, .footer-btn button'))
+    .filter(isVisibleElement)
+    .map((el) => ({
+      el,
+      text: normalizeText(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || ''),
+      rect: el.getBoundingClientRect(),
+      disabled: Boolean(el.disabled) || el.getAttribute('aria-disabled') === 'true',
+    }))
+    .filter((item) => !item.disabled && item.text === target && isLikelyBottomPublishBarButton(item))
+    .sort((left, right) => right.rect.top - left.rect.top || left.rect.left - right.rect.left)[0]
+  if (direct) return direct.el
+
+  return null
+}
+
+async function clickToutiaoSchedulePublishButton(button, value, platform) {
+  const target = findToutiaoSchedulePublishClickTarget(button)
+  if (!target) {
+    throw new Error(`头条定时发布按钮点击目标未确认；target=${value.full}；${describeToutiaoScheduleDialog()}`)
+  }
+
+  hideGeoFillStatus()
+  target.scrollIntoView?.({ block: 'center', inline: 'center' })
+  await delay(180)
+  target.click?.()
+  const domResult = await waitForToutiaoScheduleButtonEffect(value, platform, 1500)
+  if (domResult) return domResult
+
+  if (isToutiaoScheduleModeSelected()) {
+    return { opened: true, filled: false, modeOnly: true }
+  }
+
+  throw new Error(`头条定时发布按钮 DOM 点击后未打开定时设置，为避免误触发预览并发布已停止；target=${value.full}；${describeToutiaoScheduleDialog()}`)
+}
+
+async function waitForToutiaoScheduleButtonEffect(value, platform, timeoutMs) {
+  return waitForCondition(
+    async () => {
+      if (await fillToutiaoScheduleInputs(value, platform)) {
+        return { opened: true, filled: true }
+      }
+      if (findToutiaoScheduleDialog() || collectToutiaoScheduleDropdownControls(document).length >= 3) {
+        return { opened: true, filled: false }
+      }
+      if (isToutiaoPreviewLayerOpen() || findToutiaoPreviewBackButton() || findToutiaoPreviewConfirmButton()) {
+        throw new Error(`头条定时发布按钮误触发预览并发布；target=${value.full}；${describeToutiaoScheduleDialog()}`)
+      }
+      return false
+    },
+    timeoutMs,
+    null,
+  ).catch((error) => {
+    if (error?.message) throw error
+    return false
+  })
+}
+
+function findToutiaoSchedulePublishClickTarget(button) {
+  if (!button) return null
+  const clickable = button.closest?.('button.publish-btn, button, a, [role="button"]') || button
+  const text = normalizeText(clickable.textContent || clickable.getAttribute?.('aria-label') || clickable.getAttribute?.('title') || '')
+  if (text === '定时发布' && isVisibleElement(clickable)) return clickable
+  if (normalizeText(button.textContent || '') === '定时发布' && isVisibleElement(button)) return button
+  return null
+}
+
+function isToutiaoScheduleEntryOpened() {
+  return Boolean(
+    findToutiaoScheduleDialog()
+    || isToutiaoPreviewLayerOpen()
+    || findToutiaoPreviewBackButton()
+    || findToutiaoPreviewConfirmButton()
+  )
+}
+
+async function ensureToutiaoScheduleSelectorOpen(value, platform) {
+  if (findToutiaoScheduleDialog() || collectToutiaoScheduleDropdownControls(document).length >= 3) return true
+  if (!isToutiaoScheduleModeSelected()) return false
+
+  const triggers = findToutiaoScheduleSelectorTriggers(value)
+  for (const trigger of triggers) {
+    hideGeoFillStatus()
+    await clickTrustedActionOnce(trigger, { platform })
+    const opened = await waitForCondition(
+      () => findToutiaoScheduleDialog() || collectToutiaoScheduleDropdownControls(document).length >= 3,
+      2200,
+      null,
+    ).catch(() => false)
+    if (opened) return true
+  }
+  return false
+}
+
+function isToutiaoScheduleModeSelected() {
+  const buttons = collectToutiaoBottomPublishButtons(findToutiaoPreviewDialog())
+  const texts = buttons.map((item) => item.text)
+  return texts.includes('预览并发布') && !texts.includes('定时发布')
+}
+
+function findToutiaoScheduleSelectorTriggers(value) {
+  const candidates = []
+  const texts = ['发文设置', '发布设置', '定时发布', '发布时间', '选择时间', value.monthDay, value.time]
+  for (const text of texts.filter(Boolean)) {
+    const exact = findVisibleTextElement(text, { exact: true, maxLength: 24 })
+    if (exact) candidates.push(exact)
+    const loose = findVisibleTextElement(text, { exact: false, maxLength: 80 })
+    if (loose) candidates.push(loose)
+  }
+
+  const footer = findToutiaoPublishFooterContainer()
+  if (footer) {
+    candidates.push(...Array.from(footer.querySelectorAll('button, [role="button"], a, div, span'))
+      .filter(isVisibleElement)
+      .filter((el) => {
+        const text = normalizeText(el.textContent || el.getAttribute?.('aria-label') || el.getAttribute?.('title') || '')
+        return /发文设置|发布设置|定时|时间|\d{1,2}月\d{1,2}日|\d{1,2}:\d{2}/.test(text)
+      }))
+  }
+
+  return candidates
+    .map((el) => el.closest?.('button, a, [role="button"]') || el)
+    .filter(Boolean)
+    .filter(isVisibleElement)
+    .filter((el) => {
+      const text = normalizeText(el.textContent || el.getAttribute?.('aria-label') || el.getAttribute?.('title') || '')
+      return text && !['预览', '预览并发布'].includes(text)
+    })
+    .filter((el, index, items) => items.indexOf(el) === index)
+    .sort((left, right) => {
+      const leftFooter = footer && footer.contains(left) ? 0 : 1
+      const rightFooter = footer && footer.contains(right) ? 0 : 1
+      const leftRect = left.getBoundingClientRect()
+      const rightRect = right.getBoundingClientRect()
+      return leftFooter - rightFooter || rightRect.top - leftRect.top || leftRect.left - rightRect.left
+    })
+    .slice(0, 8)
+}
+
+function findToutiaoPublishFooterContainer() {
+  const buttons = collectToutiaoBottomPublishButtons(findToutiaoPreviewDialog())
+  const first = buttons[0]?.el
+  let current = first
+  for (let depth = 0; current && depth < 8; depth += 1) {
+    const text = normalizeText(current.textContent || '')
+    if (text.includes('预览') && text.includes('预览并发布')) return current
+    current = current.parentElement
+  }
   return null
 }
 
@@ -1468,7 +1638,12 @@ function describeToutiaoScheduleDialog() {
       placeholder: input.getAttribute('placeholder') || '',
       aria: input.getAttribute('aria-label') || '',
     }))
-  return `previewOpen=${isToutiaoPreviewLayerOpen()}; lastTrustedClick=${describeLastTrustedClick()}; ${describeToutiaoPublishActions()}; scheduleControls=${scheduleControls.join('|') || '-'}; scheduleText=${text || '-'}; inputs=${JSON.stringify(inputs).slice(0, 420)}`
+  const triggerHints = findToutiaoScheduleSelectorTriggers({ monthDay: '', time: '' }).map((el) => {
+    const rect = el.getBoundingClientRect()
+    const value = normalizeText(el.textContent || el.getAttribute?.('aria-label') || el.getAttribute?.('title') || '')
+    return `${value || '-'}@${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)}x${Math.round(rect.height)}`
+  }).slice(0, 8)
+  return `previewOpen=${isToutiaoPreviewLayerOpen()}; scheduleModeSelected=${isToutiaoScheduleModeSelected()}; lastTrustedClick=${describeLastTrustedClick()}; ${describeToutiaoPublishActions()}; scheduleTriggers=${triggerHints.join('|') || '-'}; scheduleControls=${scheduleControls.join('|') || '-'}; scheduleText=${text || '-'}; inputs=${JSON.stringify(inputs).slice(0, 420)}`
 }
 
 function describeLastTrustedClick() {
@@ -1484,6 +1659,25 @@ async function scrollToToutiaoSection(labelText) {
   }
   label.scrollIntoView?.({ block: 'center', inline: 'nearest' })
   await delay(250)
+}
+
+function scrollToToutiaoPublishFooter() {
+  window.scrollTo(0, document.body.scrollHeight)
+  const root = document.scrollingElement || document.documentElement
+  if (root) root.scrollTop = root.scrollHeight
+  document.body.scrollTop = document.body.scrollHeight
+  const footer = findToutiaoPublishFooterContainer()
+  if (footer) {
+    footer.scrollIntoView?.({ block: 'end', inline: 'nearest' })
+    return
+  }
+  for (const el of Array.from(document.querySelectorAll('main, section, div'))) {
+    if (!el || el.scrollHeight <= el.clientHeight + 80) continue
+    const text = normalizeText(el.textContent || '')
+    if (text.includes('预览') && text.includes('定时发布')) {
+      el.scrollTop = el.scrollHeight
+    }
+  }
 }
 
 async function clickToutiaoOptionNearLabel(labelText, optionText, platform) {
@@ -1825,7 +2019,7 @@ function hasToutiaoCoverThumbnail() {
 }
 
 async function openToutiaoCoverDrawer(platform) {
-  if (findLatestFileInput()) return
+  if (findToutiaoCoverDrawerFileInput()) return
   const label = findVisibleTextElement('展示封面')
   await ensureToutiaoCoverModeSelected('单图', platform)
   const entries = findToutiaoCoverUploadEntries(label)
@@ -1835,13 +2029,13 @@ async function openToutiaoCoverDrawer(platform) {
   for (const entry of entries) {
     await clickClosestAction(entry, { platform })
     await delay(600)
-    if (findLatestFileInput() || findVisibleTextElement('本地上传') || findVisibleTextElement('上传图片') || findToutiaoCoverDrawer()) {
+    if (findToutiaoCoverDrawerFileInput() || findVisibleTextElement('本地上传') || findVisibleTextElement('上传图片') || findToutiaoCoverDrawer()) {
       break
     }
   }
-  if (!findLatestFileInput() && !findVisibleTextElement('本地上传') && !findVisibleTextElement('上传图片') && !findToutiaoCoverDrawer()) {
+  if (!findToutiaoCoverDrawerFileInput() && !findVisibleTextElement('本地上传') && !findVisibleTextElement('上传图片') && !findToutiaoCoverDrawer()) {
     await waitForCondition(
-      () => findLatestFileInput() || findVisibleTextElement('本地上传') || findVisibleTextElement('上传图片') || findToutiaoCoverDrawer(),
+      () => findToutiaoCoverDrawerFileInput() || findVisibleTextElement('本地上传') || findVisibleTextElement('上传图片') || findToutiaoCoverDrawer(),
       5000,
       `等待头条封面上传抽屉超时；${describeToutiaoCoverArea(label)}`,
     )
@@ -1942,9 +2136,10 @@ function describeToutiaoCoverArea(label) {
 }
 
 async function uploadToutiaoCoverImage(imageUrl, platform) {
-  let fileInput = findLatestFileInput()
+  let fileInput = findToutiaoCoverDrawerFileInput()
   if (!fileInput) {
-    const localUpload = findVisibleTextElement('本地上传', { exact: false, maxLength: 12 })
+    const localUpload = findToutiaoCoverLocalUploadButton()
+      || findVisibleTextElement('本地上传', { exact: false, maxLength: 12 })
       || findVisibleTextElement('上传图片', { exact: false, maxLength: 12 })
       || findVisibleTextElement('选择图片', { exact: false, maxLength: 12 })
     if (localUpload) {
@@ -1952,7 +2147,7 @@ async function uploadToutiaoCoverImage(imageUrl, platform) {
       await delay(500)
     }
     fileInput = await waitForCondition(
-      () => findLatestFileInput(),
+      () => findToutiaoCoverDrawerFileInput(),
       8000,
       '头条封面本地上传文件框未找到',
     )
@@ -1994,7 +2189,7 @@ async function setFileInputFromLocalHelper(imageUrl, platform) {
     throw new Error(`${platformDisplayName(platform)}本地文件上传通道失败：${response?.error || '扩展后台未响应'}`)
   }
   await delay(500)
-  const fileInput = findLatestFileInput()
+  const fileInput = findToutiaoCoverDrawerFileInput()
   fileInput?.dispatchEvent(new Event('input', { bubbles: true }))
   fileInput?.dispatchEvent(new Event('change', { bubbles: true }))
   return response
@@ -2047,6 +2242,66 @@ function describeToutiaoUploadState(localUpload) {
 function findLatestFileInput() {
   const inputs = Array.from(document.querySelectorAll('input[type="file"]'))
   return inputs[inputs.length - 1] || null
+}
+
+function findToutiaoCoverDrawerFileInput() {
+  const drawer = findToutiaoCoverDrawer()
+  const roots = [drawer, document].filter(Boolean)
+  const selectors = [
+    '.btn-upload-handle.upload-handler input[type="file"][accept*="image"]',
+    '.upload-handler input[type="file"][accept*="image"]',
+    '#upload-drag-input[type="file"][accept*="image"]',
+    'input[type="file"][accept*="image"]',
+  ]
+  for (const root of roots) {
+    for (const selector of selectors) {
+      const candidates = Array.from(root.querySelectorAll(selector))
+        .filter((input) => isLikelyToutiaoCoverFileInput(input))
+      if (candidates.length) return candidates[0]
+    }
+  }
+  return null
+}
+
+function isLikelyToutiaoCoverFileInput(input) {
+  if (!input) return false
+  const descriptor = normalizeText([
+    input.getAttribute('accept') || '',
+    input.id || '',
+    input.name || '',
+    input.className || '',
+    collectAncestorText(input, 5),
+  ].join(' '))
+  return descriptor.includes('image')
+    && /上传图片|本地上传|扫码上传|btn-upload|upload|upload-drag-input/.test(descriptor)
+}
+
+function findToutiaoCoverLocalUploadButton() {
+  const drawer = findToutiaoCoverDrawer()
+  const root = drawer || document
+  return Array.from(root.querySelectorAll('button, [role="button"], div, span'))
+    .filter(isVisibleElement)
+    .map((el) => ({
+      el,
+      text: normalizeText(el.textContent || el.getAttribute?.('aria-label') || el.getAttribute?.('title') || ''),
+      className: String(el.className || ''),
+    }))
+    .filter((item) => item.text.includes('本地上传') || /btn-upload|upload-btn/.test(item.className))
+    .map((item) => item.el.closest?.('button, [role="button"]') || item.el)[0] || null
+}
+
+function collectAncestorText(el, maxDepth) {
+  const parts = []
+  let current = el
+  for (let depth = 0; current && depth < maxDepth; depth += 1) {
+    parts.push(current.id || '')
+    parts.push(String(current.className || ''))
+    parts.push(String(current.getAttribute?.('data-e2e') || ''))
+    const text = normalizeText(current.textContent || '')
+    if (text && text.length <= 120) parts.push(text)
+    current = current.parentElement
+  }
+  return parts.join(' ')
 }
 
 async function fetchImageAsFile(imageUrl) {
@@ -2930,6 +3185,30 @@ function normalizeAccountName(value) {
     .trim()
 }
 
+function normalizeTitleForPlatform(title, fillProfile = null) {
+  const text = String(title || '').trim()
+  if (normalizePlatform(fillProfile?.platform) !== 'toutiao') return text
+  return normalizeToutiaoTitle(text)
+}
+
+function normalizeToutiaoTitle(title) {
+  const chars = Array.from(String(title || '').trim())
+  if (chars.length <= 30) return chars.join('')
+  const truncated = chars.slice(0, 30).join('').replace(/[，,。；;、：:！？!?]+$/g, '').trim()
+  return truncated || chars.slice(0, 30).join('').trim()
+}
+
+function assertToutiaoTitleReadyForPublish(title = '') {
+  const titleElement = findTitleElement(buildFillProfile({ platform: 'toutiao' }))
+  const titleText = String(readElementText(titleElement) || title || '').trim()
+  const length = Array.from(titleText).length
+  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '')
+  const invalidText = bodyText.includes('标题长度应在2-30个字之间') || bodyText.includes('标题长度应在2-30字之间')
+  if (length < 2 || length > 30 || (invalidText && (length < 2 || length > 30))) {
+    throw new Error(`头条标题不符合发布要求：长度=${length}/30，标题="${titleText.slice(0, 60)}"；${describeElement(titleElement)}`)
+  }
+}
+
 async function fillTitle(title, titleElement, fillProfile = null) {
   if (!title) return false
   const el = titleElement
@@ -3435,7 +3714,12 @@ async function requestTrustedClick(el, options = {}) {
   if (rect.width <= 0 || rect.height <= 0) return
   const clientX = Math.round(rect.left + rect.width * (options.clickRatioX || 0.5))
   const clientY = Math.round(rect.top + rect.height * (options.clickRatioY || 0.5))
-  await requestTrustedClickAt({ clientX, clientY }, options.platform, normalizeText(el.textContent || el.getAttribute('aria-label') || '').slice(0, 30), rect)
+  await requestTrustedClickAt(
+    { clientX, clientY },
+    options.platform,
+    options.label || normalizeText(el.textContent || el.getAttribute('aria-label') || '').slice(0, 30),
+    rect,
+  )
 }
 
 async function requestTrustedClickAt(point, platform, label = '', rect = null) {
@@ -3975,6 +4259,10 @@ function describeElement(el) {
 
 
 function showStatus(message, type) {
+  if (type !== 'error') {
+    hideGeoFillStatus()
+    return
+  }
   const id = 'geo-env-fill-status'
   let el = document.getElementById(id)
   if (!el) {
@@ -3994,8 +4282,11 @@ function showStatus(message, type) {
       boxShadow: '0 8px 24px rgba(15, 23, 42, .18)',
       whiteSpace: 'pre-wrap',
       wordBreak: 'break-word',
+      pointerEvents: 'none',
     })
     document.documentElement.appendChild(el)
+  } else {
+    el.style.pointerEvents = 'none'
   }
   const colors = {
     info: '#245bff',
@@ -4015,6 +4306,14 @@ function showStatus(message, type) {
   } else {
     el.style.display = 'block'
   }
+}
+
+function hideGeoFillStatus() {
+  const el = document.getElementById('geo-env-fill-status')
+  if (!el) return false
+  window.clearTimeout(el._geoHideTimer)
+  el.style.display = 'none'
+  return true
 }
 
 function delay(ms) {

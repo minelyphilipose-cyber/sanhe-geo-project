@@ -17,33 +17,6 @@
         show-icon
         :title="douyinCapability.liveVerificationBlocked ? (douyinCapability.description || '抖音图文暂不可联调') : `抖音图文未开启：${douyinCapability.disabledReason || 'feature flag disabled'}`"
       />
-      <div v-if="wechatCapability?.readinessChecks?.length" class="platform-readiness-panel">
-        <div class="cover-picker-header">
-          <span>公众号接入自检</span>
-          <el-tag size="small" :type="wechatReadinessSummary.type">{{ wechatReadinessSummary.label }}</el-tag>
-        </div>
-        <div class="platform-readiness-list">
-          <div v-for="item in wechatCapability.readinessChecks" :key="item.code" class="platform-readiness-item">
-            <span class="platform-readiness-label">{{ item.label }}</span>
-            <el-tag size="small" :type="readinessTagType(item.status)">{{ readinessStatusLabel(item.status) }}</el-tag>
-            <span class="platform-readiness-message">{{ item.message }}</span>
-          </div>
-        </div>
-      </div>
-      <div v-if="douyinCapability?.readinessChecks?.length" class="platform-readiness-panel">
-        <div class="cover-picker-header">
-          <span>抖音接入自检</span>
-          <el-tag size="small" :type="douyinReadinessSummary.type">{{ douyinReadinessSummary.label }}</el-tag>
-        </div>
-        <div class="platform-readiness-list">
-          <div v-for="item in douyinCapability.readinessChecks" :key="item.code" class="platform-readiness-item">
-            <span class="platform-readiness-label">{{ item.label }}</span>
-            <el-tag size="small" :type="readinessTagType(item.status)">{{ readinessStatusLabel(item.status) }}</el-tag>
-            <span class="platform-readiness-message">{{ item.message }}</span>
-          </div>
-        </div>
-      </div>
-
       <div class="media-grid">
         <button
           class="media-platform"
@@ -495,8 +468,6 @@ const douyinTextValue = computed({
   set: (value) => emit('update:douyinText', value),
 })
 
-const wechatReadinessSummary = computed(() => readinessSummary(props.wechatCapability?.readinessChecks || []))
-const douyinReadinessSummary = computed(() => readinessSummary(props.douyinCapability?.readinessChecks || []))
 const helperHealthSummary = computed(() => {
   const health = props.localHelperHealth
   if (!health) return ''
@@ -505,32 +476,6 @@ const helperHealthSummary = computed(() => {
   const supervised = health.runtime?.supervised ? 'supervisor 托管' : '直接运行'
   return `${pid} · ${startedAt} · ${supervised}`
 })
-
-function readinessSummary(checks: Array<{ status?: string | null }>) {
-  if (checks.some((item) => item.status === 'missing')) {
-    return { type: 'danger' as const, label: '需补配置' }
-  }
-  if (checks.some((item) => item.status === 'warning')) {
-    return { type: 'warning' as const, label: '待上线' }
-  }
-  return { type: 'success' as const, label: '已就绪' }
-}
-
-function readinessTagType(status?: string | null): TagType {
-  if (status === 'ok') return 'success'
-  if (status === 'missing') return 'danger'
-  if (status === 'warning') return 'warning'
-  return 'info'
-}
-
-function readinessStatusLabel(status?: string | null) {
-  const map: Record<string, string> = {
-    ok: '通过',
-    warning: '待处理',
-    missing: '缺失',
-  }
-  return status ? (map[status] || status) : '-'
-}
 
 function formatShortTime(value?: string | null) {
   if (!value) return '-'
@@ -628,46 +573,6 @@ function formatShortTime(value?: string | null) {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
-}
-
-.platform-readiness-panel {
-  padding: 14px;
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background: #ffffff;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
-}
-
-.platform-readiness-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.platform-readiness-item {
-  display: grid;
-  align-items: center;
-  min-height: 44px;
-  padding: 9px 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #f8fafc;
-  grid-template-columns: minmax(92px, auto) auto minmax(0, 1fr);
-  gap: 8px;
-}
-
-.platform-readiness-label {
-  color: #0f172a;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.platform-readiness-message {
-  overflow: hidden;
-  color: #64748b;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .media-grid {

@@ -134,6 +134,7 @@ class ContentDistributionServiceTest {
                 new ObjectMapper(),
                 mock(AuthorityMediaDistributionAdapter.class),
                 articleImagePublicUrlRewriter,
+                mock(ArticleCoverSelectionService.class),
                 mock(ForumBoardRoutingService.class)
         );
     }

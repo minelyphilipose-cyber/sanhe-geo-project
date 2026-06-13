@@ -16,6 +16,7 @@ import {
   abandonSemiAutoDistribution,
   checkSelfMediaAccountAuth,
   confirmSemiAutoDistribution,
+  createSelfMediaPlatformQuickSchedule,
   distributeContentArticleToSelfMediaAccount,
   getArticleDistribution,
   getContentArticleDetail,
@@ -24,6 +25,7 @@ import {
   getSelfMediaAccountsByBrand,
   getWechatMpAuthUrl,
   getWechatMpCapability,
+  previewSelfMediaPlatformQuickSchedule,
   refreshDistributionTaskReviewStatus,
 } from '@/api/content'
 import { getBrandImageFolders, getBrandMaterialPreviewUrl, getCompanyDistributionQuotas } from '@/api/customer'
@@ -72,6 +74,14 @@ function createRequestId(prefix = 'self_media') {
     return crypto.randomUUID()
   }
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function formatDateTimeText(value?: string | null) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value.replace('T', ' ').slice(0, 16)
+  const pad = (num: number) => String(num).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 function isImageFileType(fileType?: string | null) {
@@ -700,32 +710,77 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     selectedSelfMediaAccountId.value = null
     selectedCoverMaterialId.value = null
     selectedDouyinImageMaterialIds.value = []
+    await submitPlatformQuickSchedule(platform)
+  }
+
+  async function submitPlatformQuickSchedule(platform: SemiAutoPlatform) {
+    if (!mediaDistributeArticleId.value) {
+      ElMessage.warning('请选择要分发的文章')
+      return
+    }
+    if (!mediaDistributeBrandId.value) {
+      await showSetupPrompt({
+        title: '文章品牌缺失',
+        issue: '当前文章未绑定品牌，系统无法判断要使用哪个品牌的自媒体账号和 AdsPower 浏览器环境。',
+        location: '内容管理 > 文章详情',
+        action: '先为文章选择所属品牌，再回到自媒体分发继续操作。',
+      })
+      return
+    }
     const accounts = semiAutoAccountsByPlatform(platform)
     if (!accounts.length) {
       await showSelfMediaAccountSetupPrompt(platform, `当前品牌暂无${semiAutoPlatformLabel(platform)}账号，无法创建分发任务。`)
       return
     }
-    await refreshBrowserEnvironmentAccountStatuses()
-    const activeAccounts = accounts.filter((account) => account.status === 'active')
-    const fillableAccount = activeAccounts.find((account) => canSubmitSemiAutoEnvironmentTask(account))
-    if (fillableAccount) {
-      void submitSemiAutoEnvironmentTask(fillableAccount)
-      return
+    selfMediaSubmitting.value = true
+    try {
+      const preview = (await previewSelfMediaPlatformQuickSchedule({
+        articleId: mediaDistributeArticleId.value,
+        platform,
+      })).data.data
+      let replaceNextScheduled = false
+      if (preview.action === 'replace_required') {
+        await ElMessageBox.confirm(
+          preview.message || '该平台本月文章已做排期处理，若继续发布将替换已排期文章，是否继续？',
+          '确认替换排期',
+          {
+            type: 'warning',
+            confirmButtonText: '是，继续',
+            cancelButtonText: '否',
+          },
+        )
+        replaceNextScheduled = true
+      } else if (preview.action !== 'ready') {
+        ElMessage.warning(preview.message || `${semiAutoPlatformLabel(platform)}当前无法创建排期`)
+        return
+      }
+      const created = (await createSelfMediaPlatformQuickSchedule({
+        articleId: mediaDistributeArticleId.value,
+        platform,
+        replaceNextScheduled,
+      })).data.data
+      if (created.action === 'replace_required') {
+        ElMessage.warning(created.message || '需要确认替换后才能继续创建排期')
+        return
+      }
+      if (created.action !== 'created') {
+        ElMessage.warning(created.message || `${semiAutoPlatformLabel(platform)}排期未创建`)
+        return
+      }
+      const schedule = created.createResponse?.createdSchedules?.[0]
+      const publishAt = schedule?.plannedPublishAt || created.plannedPublishAt
+      const attemptAt = schedule?.nextAttemptAt || created.nextAttemptAt
+      ElMessage.success(`${semiAutoPlatformLabel(platform)}排期已创建，预计发布时间 ${formatDateTimeText(publishAt)}，系统处理时间 ${formatDateTimeText(attemptAt)}`)
+      mediaDistributeVisible.value = false
+      await refreshDistributionHistory()
+      await options.load()
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(error instanceof Error ? error.message : `${semiAutoPlatformLabel(platform)}排期创建失败`)
+      }
+    } finally {
+      selfMediaSubmitting.value = false
     }
-
-    const loginRequiredAccount = activeAccounts.find((account) => environmentAccountOf(account))
-    if (loginRequiredAccount) {
-      ElMessage.warning(`${semiAutoPlatformLabel(platform)}当前不能填充：${environmentAccountActionHint(loginRequiredAccount)}`)
-      void openSemiAutoEnvironmentForLogin(loginRequiredAccount)
-      return
-    }
-
-    const activeAccount = activeAccounts[0]
-    if (activeAccount) {
-      await showBrandEnvironmentSetupPrompt(`${semiAutoPlatformLabel(platform)}账号尚未绑定指纹浏览器环境，当前不能打开环境并填充。`)
-      return
-    }
-    await showSelfMediaAccountSetupPrompt(platform, `${semiAutoPlatformLabel(platform)}账号当前不可用，无法创建分发任务。`)
   }
 
   function semiAutoAccountsByPlatform(platform: SemiAutoPlatform) {
@@ -1018,7 +1073,10 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
           browserEnvironmentAccountId: taskBrowserEnvironmentAccountId,
           platform: account.platform,
           url: defaultSemiAutoPublishUrl(account.platform),
-          expectedPlatformAccountId: binding.expectedPlatformAccountId || account.platformAccountId || null,
+          expectedPlatformAccountId: comparablePlatformAccountId(
+            account.platform,
+            binding.expectedPlatformAccountId || account.platformAccountId || null,
+          ),
           expectedAccountName: binding.expectedAccountName || account.accountName || null,
           backendTask,
         },
@@ -1035,6 +1093,13 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     } finally {
       selfMediaSubmitting.value = false
     }
+  }
+
+  function comparablePlatformAccountId(platform?: string | null, platformAccountId?: string | null) {
+    const value = platformAccountId?.trim()
+    const normalizedPlatform = platform?.trim().toLowerCase()
+    if (!value || !normalizedPlatform) return value || null
+    return value.toLowerCase().startsWith(`geo-${normalizedPlatform}-`) ? null : value
   }
 
   async function refreshDistributionHistory() {

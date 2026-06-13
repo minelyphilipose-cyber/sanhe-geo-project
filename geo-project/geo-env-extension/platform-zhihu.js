@@ -1,5 +1,6 @@
 ;(function installZhihuPlatform(global) {
   const HOME_URL = 'https://www.zhihu.com/'
+  const CREATOR_CENTER_URL = 'https://www.zhihu.com/creator/manage/creation/article'
   const WRITE_URL = 'https://zhuanlan.zhihu.com/write'
 
   const RETRYABLE_FAILURE_CODES = new Set([
@@ -37,7 +38,7 @@
       const url = new URL(value)
       if (url.pathname.includes('/write') || url.pathname.endsWith('/edit')) return false
       if (url.hostname === 'zhuanlan.zhihu.com') return /^\/p\/[^/]+/.test(url.pathname)
-      if (url.hostname !== 'www.zhihu.com') return false
+      if (url.hostname !== 'www.zhihu.com' && url.hostname !== 'zhihu.com') return false
       return /^\/p\/[^/]+/.test(url.pathname) || /^\/article\/[^/]+/.test(url.pathname) || /^\/question\/[^/]+\/answer\/[^/]+/.test(url.pathname)
     } catch {
       return false
@@ -193,6 +194,9 @@
   }
 
   function readIdentity(deps = {}) {
+    const creatorCenterIdentity = readCreatorCenterIdentity(deps)
+    if (creatorCenterIdentity) return creatorCenterIdentity
+
     const accountIds = new Set()
     const accountNames = new Set()
     const profileUrls = new Set()
@@ -207,6 +211,81 @@
       accountNames: Array.from(accountNames),
       profileUrls: Array.from(profileUrls),
       diagnostics: `href=${location.href}; visibleTextLength=${visibleText.length}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}; profileUrls=${Array.from(profileUrls).join(',') || '-'}; cookieKeys=${document.cookie.split(';').map((item) => item.split('=')[0]?.trim()).filter(Boolean).slice(0, 20).join(',') || '-'}`,
+    }
+  }
+
+  function readCreatorCenterIdentity(deps = {}) {
+    if (!isCreatorCenterLocation()) return null
+    const accountIds = new Set()
+    const accountNames = new Set()
+    const profileUrls = new Set()
+    const name = findCreatorCenterAccountName(deps)
+    if (!name) return null
+    accountNames.add(name)
+    collectCreatorCenterProfileUrls(accountIds, profileUrls)
+    return {
+      implemented: true,
+      accountIds: Array.from(accountIds),
+      accountNames: Array.from(accountNames),
+      profileUrls: Array.from(profileUrls),
+      diagnostics: `href=${location.href}; source=creator_center; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}; profileUrls=${Array.from(profileUrls).join(',') || '-'}`,
+    }
+  }
+
+  function isCreatorCenterLocation() {
+    return (location.hostname === 'www.zhihu.com' || location.hostname === 'zhihu.com')
+      && location.pathname.startsWith('/creator/')
+  }
+
+  function findCreatorCenterAccountName(deps = {}) {
+    const direct = findCreatorCenterAccountNameByClass(deps)
+    if (direct) return direct
+
+    const candidates = []
+    for (const el of Array.from(document.querySelectorAll('main [role="navigation"] *'))) {
+      if (!isVisibleWithDeps(el, deps)) continue
+      const rect = el.getBoundingClientRect?.()
+      if (!rect || rect.left > 620 || rect.top < 60 || rect.top > 380) continue
+      const text = normalizeAccountName(el.textContent || '')
+      if (!isLikelyCreatorCenterAccountName(text)) continue
+      candidates.push({
+        text,
+        score: (rect.top >= 120 && rect.top <= 300 ? 20 : 0)
+          + (rect.left >= 240 && rect.left <= 560 ? 10 : 0)
+          - Math.abs(text.length - 8),
+      })
+    }
+    candidates.sort((a, b) => b.score - a.score)
+    return candidates[0]?.text || ''
+  }
+
+  function findCreatorCenterAccountNameByClass(deps = {}) {
+    const selectors = [
+      '[class*="LevelInfoV2-creatorInfo"]',
+      '[class*="creatorInfo"]',
+    ]
+    for (const selector of selectors) {
+      for (const el of Array.from(document.querySelectorAll(selector))) {
+        if (!isVisibleWithDeps(el, deps)) continue
+        const text = normalizeAccountName(el.textContent || '')
+        if (isLikelyCreatorCenterAccountName(text)) return text
+      }
+    }
+    return ''
+  }
+
+  function isLikelyCreatorCenterAccountName(value) {
+    const text = normalizeAccountName(value)
+    if (!isLikelyAccountName(text)) return false
+    if (/^(创作中心|内容管理|评论管理|数据分析|收益变现|活动中心|创作成长|个人中心|创作主页|等你来答|发布内容)$/.test(text)) return false
+    if (/^Lv\s*\d+$/i.test(text)) return false
+    if (/^创作分\s*\d+$/i.test(text)) return false
+    return true
+  }
+
+  function collectCreatorCenterProfileUrls(accountIds, profileUrls) {
+    for (const el of Array.from(document.querySelectorAll('a[href*="/people/"], a[href*="/org/"]'))) {
+      collectProfileHref(el.getAttribute('href') || '', accountIds, profileUrls, location.href)
     }
   }
 
@@ -1054,6 +1133,7 @@
 
   global.__GEO_ZHIHU_PLATFORM__ = {
     HOME_URL,
+    CREATOR_CENTER_URL,
     WRITE_URL,
     classifyFailureCode,
     isPublishedArticleUrl,

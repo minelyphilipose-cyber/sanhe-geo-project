@@ -14,6 +14,7 @@ import type {
   SelfMediaScheduleCapability,
   SelfMediaPublishSchedule,
   SelfMediaPublishScheduleCreateResponse,
+  SelfMediaPlatformQuickScheduleResponse,
   DouyinAuthUrl,
   DouyinCapability,
   DouyinPlatformOptions,
@@ -1389,6 +1390,25 @@ export function createSelfMediaPublishSchedules(data: {
   return request.post<R<SelfMediaPublishScheduleCreateResponse>>('/content/self-media-schedules', data, {
     headers: {
       'Idempotency-Key': `manual-schedule-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    },
+  })
+}
+
+export function previewSelfMediaPlatformQuickSchedule(data: {
+  articleId: number
+  platform: string
+}) {
+  return request.post<R<SelfMediaPlatformQuickScheduleResponse>>('/content/self-media-schedules/platform-quick-preview', data)
+}
+
+export function createSelfMediaPlatformQuickSchedule(data: {
+  articleId: number
+  platform: string
+  replaceNextScheduled?: boolean
+}) {
+  return request.post<R<SelfMediaPlatformQuickScheduleResponse>>('/content/self-media-schedules/platform-quick-create', data, {
+    headers: {
+      'Idempotency-Key': `platform-quick-schedule-${data.articleId}-${data.platform}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     },
   })
 }

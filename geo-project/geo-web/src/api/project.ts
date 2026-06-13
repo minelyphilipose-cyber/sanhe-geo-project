@@ -68,6 +68,12 @@ export interface ProjectSelfMediaScheduleBatchDetailItem {
   generationTaskId?: number
   generationStatus?: string | null
   generationErrorMessage?: string | null
+  generationTopic?: string | null
+  generationArticleType?: string | null
+  generationCreatedAt?: string | null
+  generationUpdatedAt?: string | null
+  generationStartedAt?: string | null
+  generationFinishedAt?: string | null
   articleId?: number | null
   articleTitle?: string | null
   selfMediaAccountId?: number
@@ -127,6 +133,10 @@ export function getProjectSelfMediaScheduleBatch(id: number, targetMonth: string
 
 export function getProjectSelfMediaScheduleBatchDetail(id: number, targetMonth: string) {
   return request.get<R<ProjectSelfMediaScheduleBatchDetail | null>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/detail`)
+}
+
+export function retryProjectSelfMediaScheduleBatchFailedItems(id: number, targetMonth: string) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/retry-failed`)
 }
 
 export function previewProjectSelfMediaAutoSchedule(id: number, data: ProjectSelfMediaAutoSchedulePayload) {

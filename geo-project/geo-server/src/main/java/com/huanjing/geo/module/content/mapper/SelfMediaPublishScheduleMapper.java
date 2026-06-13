@@ -25,6 +25,19 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
     List<SelfMediaPublishSchedule> selectByRequestId(@Param("requestId") Long requestId);
 
     @Select("""
+            SELECT *
+            FROM self_media_publish_schedule
+            WHERE article_id = #{articleId}
+              AND self_media_account_id = #{selfMediaAccountId}
+              AND platform = #{platform}
+            ORDER BY id DESC
+            LIMIT 1
+            """)
+    SelfMediaPublishSchedule selectLatestByArticleAccountAndPlatform(@Param("articleId") Long articleId,
+                                                                     @Param("selfMediaAccountId") Long selfMediaAccountId,
+                                                                     @Param("platform") String platform);
+
+    @Select("""
             <script>
             SELECT *
             FROM self_media_publish_schedule
@@ -168,6 +181,24 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
 
     @Select("""
             <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE article_id = #{articleId}
+              <if test="excludedScheduleId != null">
+                AND id != #{excludedScheduleId}
+              </if>
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    long countActiveByArticleId(@Param("articleId") Long articleId,
+                                @Param("excludedScheduleId") Long excludedScheduleId,
+                                @Param("statuses") List<String> statuses);
+
+    @Select("""
+            <script>
             SELECT *
             FROM self_media_publish_schedule
             WHERE status IN
@@ -227,6 +258,69 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                                              @Param("periodStart") LocalDateTime periodStart,
                                              @Param("periodEnd") LocalDateTime periodEnd,
                                              @Param("statuses") List<String> statuses);
+
+    @Select("""
+            SELECT *
+            FROM self_media_publish_schedule
+            WHERE brand_id = #{brandId}
+              AND platform = #{platform}
+              AND planned_publish_at &gt;= #{periodStart}
+              AND planned_publish_at &lt; #{periodEnd}
+              AND status = 'pending'
+              AND (locked_until IS NULL OR locked_until &lt; #{now})
+            ORDER BY planned_publish_at ASC, id ASC
+            LIMIT 1
+            """)
+    SelfMediaPublishSchedule selectNextReplaceablePendingByBrandPlatformAndPeriod(@Param("brandId") Long brandId,
+                                                                                  @Param("platform") String platform,
+                                                                                  @Param("periodStart") LocalDateTime periodStart,
+                                                                                  @Param("periodEnd") LocalDateTime periodEnd,
+                                                                                  @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE self_media_publish_schedule
+            SET status = 'cancelled',
+                cancelled_at = #{now},
+                failure_code = 'REPLACED_BY_OPERATOR_QUICK_SCHEDULE',
+                failure_message = '运营确认后由平台快速排期替换',
+                locked_until = NULL,
+                next_attempt_at = NULL,
+                updated_at = #{now}
+            WHERE id = #{scheduleId}
+              AND brand_id = #{brandId}
+              AND platform = #{platform}
+              AND planned_publish_at &gt;= #{periodStart}
+              AND planned_publish_at &lt; #{periodEnd}
+              AND status = 'pending'
+              AND (locked_until IS NULL OR locked_until &lt; #{now})
+            """)
+    int cancelReplaceablePendingSchedule(@Param("scheduleId") Long scheduleId,
+                                         @Param("brandId") Long brandId,
+                                         @Param("platform") String platform,
+                                         @Param("periodStart") LocalDateTime periodStart,
+                                         @Param("periodEnd") LocalDateTime periodEnd,
+                                         @Param("now") LocalDateTime now);
+
+    @Select("""
+            <script>
+            SELECT *
+            FROM self_media_publish_schedule
+            WHERE brand_id = #{brandId}
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND (
+                (next_attempt_at IS NOT NULL AND next_attempt_at &gt;= #{from} AND next_attempt_at &lt; #{to})
+                OR (next_attempt_at IS NULL AND planned_publish_at IS NOT NULL AND planned_publish_at &gt;= #{from} AND planned_publish_at &lt; #{to})
+              )
+            ORDER BY COALESCE(next_attempt_at, planned_publish_at), id ASC
+            </script>
+            """)
+    List<SelfMediaPublishSchedule> selectBrandActiveScheduleSlots(@Param("brandId") Long brandId,
+                                                                  @Param("from") LocalDateTime from,
+                                                                  @Param("to") LocalDateTime to,
+                                                                  @Param("statuses") List<String> statuses);
 
     @Update("""
             <script>

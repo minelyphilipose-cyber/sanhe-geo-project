@@ -14,11 +14,13 @@ import com.huanjing.geo.module.content.wechat.WechatTokenAwareExecutor;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,7 +52,21 @@ class WechatMpAdapterTest {
     }
 
     @Test
-    void submitToTarget_savesDraftByDefault() {
+    void validate_missingCoverRejectsBeforePlatformCall() {
+        Fixture fixture = fixture(false);
+        TargetContext.SelfMediaTarget target = new TargetContext.SelfMediaTarget(
+                fixture.account, null, List.of(), List.of(), null, null, "request-1", Map.of());
+
+        var ex = assertThrows(com.huanjing.geo.common.exception.BizException.class,
+                () -> fixture.adapter.validate(article(), "markdown body", target));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("请选择公众号封面图片", ex.getMessage());
+        verify(fixture.wechatMpClient, never()).addDraft(any(), any());
+    }
+
+    @Test
+    void submitToTarget_savesDraftByDefaultAndBuildsSanitizedPayload() {
         Fixture fixture = fixture(false);
         TargetContext.SelfMediaTarget target = target(fixture.account, Map.of());
 
@@ -59,6 +75,23 @@ class WechatMpAdapterTest {
         assertTrue(result.isSuccess());
         assertEquals("draft_media_id", result.getPlatformArticleId());
         assertEquals("saved_to_draft", result.getExternalStatus());
+        assertTrue(result.getRequestPayload().contains("\"platform\":\"wechat_mp\""));
+        assertTrue(result.getRequestPayload().contains("\"authorizerAppid\":\"wx-appid\""));
+        assertTrue(result.getRequestPayload().contains("\"coverMaterialId\":100"));
+        assertTrue(result.getRequestPayload().contains("\"title\":\"测试标题\""));
+        assertTrue(result.getRequestPayload().contains("\"author\":\"三禾\""));
+        assertTrue(result.getRequestPayload().contains("\"thumbMediaId\":\"thumb_media_id\""));
+        assertFalse(result.getRequestPayload().contains("access-token"));
+        assertFalse(result.getRequestPayload().contains("<p>wechat body</p>"));
+
+        ArgumentCaptor<WechatMpClient.DraftArticle> draftCaptor = ArgumentCaptor.forClass(WechatMpClient.DraftArticle.class);
+        verify(fixture.wechatMpClient).addDraft(eq("access-token"), draftCaptor.capture());
+        WechatMpClient.DraftArticle draftArticle = draftCaptor.getValue();
+        assertEquals("测试标题", draftArticle.title());
+        assertEquals("三禾", draftArticle.author());
+        assertEquals("wechat body", draftArticle.digest());
+        assertEquals("<p>wechat body</p>", draftArticle.content());
+        assertEquals("thumb_media_id", draftArticle.thumbMediaId());
         verify(fixture.wechatMpClient, never()).submitPublish(any(), any());
     }
 

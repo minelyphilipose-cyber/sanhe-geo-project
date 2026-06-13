@@ -24,6 +24,14 @@ public class SelfMediaPublishScheduleCreateRequest {
     @NotNull
     private LocalDateTime windowEnd;
 
+    /**
+     * Optional execution window for browser/helper fill tasks.
+     * When absent, the system derives execution time from the platform publish window.
+     */
+    private LocalDateTime executionWindowStart;
+
+    private LocalDateTime executionWindowEnd;
+
     private String scheduleStrategy;
 
     private Integer minIntervalMinutes;

@@ -37,6 +37,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -388,6 +390,63 @@ class BatchArticleGenerationServiceTest {
         assertThat(notices.get(0).items().get(0).reason()).contains("未配置启用模板");
     }
 
+    @Test
+    void submitBatchTasksDispatchesEachTaskToArticleExecutor() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        BatchArticleGenerationTask first = generationTask(101L, 77L);
+        BatchArticleGenerationTask second = generationTask(102L, 77L);
+
+        ReflectionTestUtils.invokeMethod(service, "submitBatchTasks", batch, List.of(first, second));
+
+        assertThat(executor.commands).hasSize(2);
+    }
+
+    @Test
+    void recoverStalledBatchesResubmitsPendingTasks() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        batch.setStatus("pending");
+        batch.setUpdatedAt(LocalDateTime.now().minusMinutes(30));
+        BatchArticleGenerationTask task = generationTask(101L, 77L);
+        task.setStatus("pending");
+        when(batchMapper.selectList(any())).thenReturn(List.of(batch));
+        when(taskMapper.selectList(any())).thenReturn(List.of(task));
+
+        int recovered = service.recoverStalledBatches(10, Duration.ofMinutes(15));
+
+        assertEquals(1, recovered);
+        assertThat(executor.commands).hasSize(1);
+        verify(taskMapper, never()).updateById(task);
+    }
+
+    @Test
+    void recoverStalledBatchesResetsStaleRunningTasks() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        batch.setStatus("running");
+        batch.setUpdatedAt(LocalDateTime.now().minusMinutes(30));
+        BatchArticleGenerationTask task = generationTask(101L, 77L);
+        task.setStatus("running");
+        task.setUpdatedAt(LocalDateTime.now().minusMinutes(30));
+        task.setStartedAt(LocalDateTime.now().minusMinutes(30));
+        when(batchMapper.selectList(any())).thenReturn(List.of(batch));
+        when(taskMapper.selectList(any())).thenReturn(List.of(task));
+
+        int recovered = service.recoverStalledBatches(10, Duration.ofMinutes(15));
+
+        assertEquals(1, recovered);
+        assertEquals("pending", task.getStatus());
+        assertThat(executor.commands).hasSize(1);
+        verify(taskMapper).updateById(task);
+    }
+
     private BatchArticlePromptBuilder.PromptBuildInput promptInput() {
         Project project = new Project();
         project.setId(1L);
@@ -487,5 +546,21 @@ class BatchArticleGenerationServiceTest {
         ArticleAutoImageInsertionService service = mock(ArticleAutoImageInsertionService.class);
         when(service.insertForChannel(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
         return service;
+    }
+
+    private BatchArticleGenerationTask generationTask(Long id, Long batchId) {
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(id);
+        task.setBatchId(batchId);
+        return task;
+    }
+
+    private static class CapturingExecutor implements Executor {
+        private final List<Runnable> commands = new java.util.ArrayList<>();
+
+        @Override
+        public void execute(Runnable command) {
+            commands.add(command);
+        }
     }
 }

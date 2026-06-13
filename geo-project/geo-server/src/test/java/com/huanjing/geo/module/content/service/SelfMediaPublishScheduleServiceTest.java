@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.distribution.TargetContext;
+import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
@@ -21,6 +22,7 @@ import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishC
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleMode;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
+import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
@@ -36,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -47,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -117,6 +121,7 @@ class SelfMediaPublishScheduleServiceTest {
                 companyChannelQuotaService,
                 brandAccessService,
                 currentUserService,
+                new BusinessCalendarService(new ObjectMapper()),
                 new ObjectMapper()
         );
     }
@@ -173,6 +178,45 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(1, response.getRejectedItems().size());
         assertEquals("ACTIVE_SCHEDULE_EXISTS", response.getRejectedItems().get(0).getCode());
         verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void createSchedules_rejectsWhenArticleHasActiveSelfMediaSchedule() {
+        prepareValidArticleAndAccount();
+        when(scheduleMapper.countActiveByArticleId(eq(10L), eq(null), anyList())).thenReturn(1L);
+        stubRequestInsert();
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(validRequest(), "new-key");
+
+        assertTrue(response.getCreatedSchedules().isEmpty());
+        assertEquals(1, response.getRejectedItems().size());
+        assertEquals("ARTICLE_SELF_MEDIA_SCHEDULE_ACTIVE", response.getRejectedItems().get(0).getCode());
+        verify(browserEnvironmentService, never()).validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean());
+        verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void createSchedules_marksArticleDistributingWhenScheduleCreated() {
+        ArticleDraft article = article();
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+        when(brandMapper.selectById(8L)).thenReturn(brand());
+        when(accountMapper.selectById(20L)).thenReturn(account());
+        when(scheduleCapabilityService.readiness("toutiao", SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(51L);
+            return 1;
+        });
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(validRequest(), "new-key");
+
+        assertEquals(1, response.getCreatedSchedules().size());
+        assertEquals("distributing", article.getStatus());
+        verify(articleDraftMapper).updateById(article);
     }
 
     @Test
@@ -314,13 +358,48 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(1, response.getCreatedSchedules().size());
         ArgumentCaptor<SelfMediaPublishSchedule> captor = ArgumentCaptor.forClass(SelfMediaPublishSchedule.class);
         verify(scheduleMapper).insert(captor.capture());
-        assertEquals(plannedAt.minusMinutes(130), captor.getValue().getNextAttemptAt());
+        assertTrue(!captor.getValue().getNextAttemptAt().isBefore(plannedAt.minusMinutes(130)));
+        assertTrue(isInBusinessAttemptWindow(captor.getValue().getNextAttemptAt()));
         assertEquals(4, captor.getValue().getMaxAttempts());
         assertEquals("article title for check", captor.getValue().getPublishCheckTitle());
         assertEquals("https://cdn.example.test/cover.png", captor.getValue().getPublishCheckCoverUrl());
         assertEquals("阜阳", captor.getValue().getPublishCheckLocationName());
         assertTrue(captor.getValue().getPublishCheckFingerprint().matches("[0-9a-f]{64}"));
-        verify(companyChannelQuotaService).reserveSelfMediaSchedule(6L, 7L, "toutiao", 51L);
+        ArgumentCaptor<List<CompanyChannelQuotaService.SelfMediaScheduleQuotaReservation>> quotaCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(companyChannelQuotaService).reserveSelfMediaSchedules(eq(6L), quotaCaptor.capture());
+        assertEquals(1, quotaCaptor.getValue().size());
+        assertEquals(51L, quotaCaptor.getValue().get(0).scheduleId());
+        assertEquals(7L, quotaCaptor.getValue().get(0).projectId());
+        assertEquals("toutiao", quotaCaptor.getValue().get(0).platform());
+    }
+
+    @Test
+    void createSchedules_usesExplicitExecutionWindowAsFillTime() {
+        prepareValidArticleAndAccount();
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        stubRequestInsert();
+        SelfMediaPublishScheduleCreateRequest request = validRequest();
+        LocalDateTime executionAt = LocalDateTime.now().plusDays(3).withHour(9).withMinute(15).withSecond(0).withNano(0);
+        LocalDateTime plannedAt = executionAt.plusMinutes(130);
+        request.setWindowStart(plannedAt);
+        request.setWindowEnd(plannedAt);
+        request.setExecutionWindowStart(executionAt);
+        request.setExecutionWindowEnd(executionAt);
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(51L);
+            return 1;
+        });
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(request, "new-key");
+
+        assertEquals(1, response.getCreatedSchedules().size());
+        ArgumentCaptor<SelfMediaPublishSchedule> captor = ArgumentCaptor.forClass(SelfMediaPublishSchedule.class);
+        verify(scheduleMapper).insert(captor.capture());
+        assertEquals(plannedAt, captor.getValue().getPlannedPublishAt());
+        assertEquals(plannedAt, captor.getValue().getPlatformScheduledAt());
+        assertEquals(executionAt, captor.getValue().getNextAttemptAt());
     }
 
     @Test
@@ -348,6 +427,41 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void createSchedulesReservesCreatedRowsInOneBatch() {
+        ArticleDraft first = article();
+        ArticleDraft second = article();
+        second.setId(11L);
+        when(articleDraftMapper.selectById(10L)).thenReturn(first);
+        when(articleDraftMapper.selectById(11L)).thenReturn(second);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+        when(brandMapper.selectById(8L)).thenReturn(brand());
+        when(accountMapper.selectById(20L)).thenReturn(account());
+        when(scheduleCapabilityService.readiness("toutiao", SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(row.getArticleId() == 10L ? 61L : 62L);
+            return 1;
+        });
+        SelfMediaPublishScheduleCreateRequest request = validRequest();
+        request.setArticleIds(List.of(10L, 11L));
+        request.setWindowEnd(request.getWindowStart().plusHours(1));
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(request, "batch-key");
+
+        assertEquals(2, response.getCreatedSchedules().size());
+        ArgumentCaptor<List<CompanyChannelQuotaService.SelfMediaScheduleQuotaReservation>> quotaCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(companyChannelQuotaService).reserveSelfMediaSchedules(eq(6L), quotaCaptor.capture());
+        assertEquals(2, quotaCaptor.getValue().size());
+        assertEquals(List.of(61L, 62L), quotaCaptor.getValue().stream()
+                .map(CompanyChannelQuotaService.SelfMediaScheduleQuotaReservation::scheduleId)
+                .toList());
+    }
+
+    @Test
     void createSystemSchedulesUsesProvidedOperatorWithoutBrandAccessCheck() {
         prepareValidArticleAndAccount();
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
@@ -366,6 +480,116 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(66L, captor.getValue().getCreatedBy());
         assertEquals(66L, captor.getValue().getUpdatedBy());
         verify(brandAccessService, never()).requireBrandAccess(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void previewPlatformQuickScheduleRejectsExplicitOtherPlatformArticle() {
+        ArticleDraft article = article();
+        article.setContentStyle("xiaohongshu_note");
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+
+        SelfMediaPlatformQuickScheduleResponse response = service.previewPlatformQuickSchedule(quickRequest("toutiao", false));
+
+        assertEquals("article_type_mismatch", response.getAction());
+        assertEquals("ARTICLE_PLATFORM_MISMATCH", response.getCode());
+        verify(accountMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void previewPlatformQuickScheduleRequiresReplacementWhenMonthlyQuotaAlreadyPlanned() {
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 3, 3));
+        SelfMediaPublishSchedule replaceable = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        replaceable.setId(70L);
+        replaceable.setPlannedPublishAt(LocalDateTime.now().plusHours(3));
+        replaceable.setNextAttemptAt(LocalDateTime.now().plusMinutes(50));
+        when(scheduleMapper.selectNextReplaceablePendingByBrandPlatformAndPeriod(anyLong(), eq("toutiao"), any(), any(), any()))
+                .thenReturn(replaceable);
+
+        SelfMediaPlatformQuickScheduleResponse response = service.previewPlatformQuickSchedule(quickRequest("toutiao", false));
+
+        assertEquals("replace_required", response.getAction());
+        assertEquals(70L, response.getReplaceScheduleId());
+        assertEquals("该平台本月文章已做排期处理，若继续发布将替换已排期文章，是否继续？", response.getMessage());
+        verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void createPlatformQuickScheduleReplacesPendingScheduleAndCreatesNewOne() {
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 3, 3));
+        SelfMediaPublishSchedule replaceable = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        replaceable.setId(70L);
+        replaceable.setPlannedPublishAt(LocalDateTime.now().plusHours(3));
+        replaceable.setNextAttemptAt(LocalDateTime.now().plusMinutes(50));
+        when(scheduleMapper.selectNextReplaceablePendingByBrandPlatformAndPeriod(anyLong(), eq("toutiao"), any(), any(), any()))
+                .thenReturn(replaceable);
+        when(scheduleMapper.selectById(70L)).thenReturn(replaceable);
+        when(scheduleMapper.cancelReplaceablePendingSchedule(eq(70L), anyLong(), eq("toutiao"), any(), any(), any()))
+                .thenReturn(1);
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of());
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(71L);
+            return 1;
+        });
+
+        SelfMediaPlatformQuickScheduleResponse response = service.createPlatformQuickSchedule(quickRequest("toutiao", true), "quick-key");
+
+        assertEquals("created", response.getAction());
+        assertEquals(1, response.getCreateResponse().getCreatedSchedules().size());
+        verify(scheduleMapper).cancelReplaceablePendingSchedule(eq(70L), eq(8L), eq("toutiao"), any(), any(), any());
+        verify(companyChannelQuotaService).refundSelfMediaSchedule(70L);
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(71L));
+    }
+
+    @Test
+    void createPlatformQuickScheduleStopsWhenReplaceTargetWasClaimed() {
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 3, 3));
+        SelfMediaPublishSchedule replaceable = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        replaceable.setId(70L);
+        replaceable.setPlannedPublishAt(LocalDateTime.now().plusHours(3));
+        when(scheduleMapper.selectNextReplaceablePendingByBrandPlatformAndPeriod(anyLong(), eq("toutiao"), any(), any(), any()))
+                .thenReturn(replaceable);
+        when(scheduleMapper.selectById(70L)).thenReturn(replaceable);
+        when(scheduleMapper.cancelReplaceablePendingSchedule(eq(70L), anyLong(), eq("toutiao"), any(), any(), any()))
+                .thenReturn(0);
+
+        assertThrows(BizException.class, () -> service.createPlatformQuickSchedule(quickRequest("toutiao", true), "quick-key"));
+
+        verify(scheduleMapper, never()).insert(any(SelfMediaPublishSchedule.class));
+        verify(companyChannelQuotaService, never()).refundSelfMediaSchedule(anyLong());
+    }
+
+    @Test
+    void previewPlatformQuickScheduleUsesBrandLevelSafetyIntervalAcrossProjects() {
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        LocalDateTime occupied = LocalDateTime.now().plusMinutes(1).withSecond(0).withNano(0);
+        SelfMediaPublishSchedule slot = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        slot.setId(80L);
+        slot.setNextAttemptAt(occupied);
+        slot.setPlannedPublishAt(occupied.plusHours(2));
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of(slot));
+
+        SelfMediaPlatformQuickScheduleResponse response = service.previewPlatformQuickSchedule(quickRequest("toutiao", false));
+
+        assertEquals("ready", response.getAction());
+        assertTrue(!response.getNextAttemptAt().isBefore(occupied.plusMinutes(3)));
+        assertEquals(3, response.getBrandSafetyIntervalMinutes());
     }
 
     @Test
@@ -971,10 +1195,29 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED, response.getStatus());
         assertEquals("platform-schedule-1", response.getPlatformScheduleId());
         assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
-        assertEquals(publishAt, response.getNextAttemptAt());
+        assertEquals(LocalDateTime.of(2026, 6, 2, 9, 15), response.getNextAttemptAt());
         verify(scheduleMapper).updateById(scheduling);
         verify(companyChannelQuotaService).confirmDistribution(302L);
         verify(environmentLockService).release(102L);
+    }
+
+    @Test
+    void markClaimedScheduledSpreadsDeferredPublishCheckByBrandInterval() {
+        SelfMediaPublishSchedule scheduling = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
+        scheduling.setId(102L);
+        LocalDateTime publishAt = LocalDateTime.of(2026, 6, 1, 18, 30);
+        scheduling.setPlatformScheduledAt(publishAt);
+        when(scheduleMapper.selectById(102L)).thenReturn(scheduling);
+        SelfMediaPublishSchedule occupied = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        occupied.setId(201L);
+        occupied.setNextAttemptAt(LocalDateTime.of(2026, 6, 2, 9, 15));
+        when(scheduleMapper.selectBrandActiveScheduleSlots(eq(8L), any(), any(), anyList()))
+                .thenReturn(List.of(occupied));
+
+        SelfMediaPublishScheduleVO response = service.markClaimedScheduled(102L, "platform-schedule-1", "{\"ok\":true}");
+
+        assertEquals(LocalDateTime.of(2026, 6, 2, 9, 18), response.getNextAttemptAt());
+        verify(scheduleMapper).updateById(scheduling);
     }
 
     @Test
@@ -1124,6 +1367,14 @@ class SelfMediaPublishScheduleServiceTest {
         return request;
     }
 
+    private SelfMediaPlatformQuickScheduleRequest quickRequest(String platform, boolean replaceNextScheduled) {
+        SelfMediaPlatformQuickScheduleRequest request = new SelfMediaPlatformQuickScheduleRequest();
+        request.setArticleId(10L);
+        request.setPlatform(platform);
+        request.setReplaceNextScheduled(replaceNextScheduled);
+        return request;
+    }
+
     private ArticleDraft article() {
         ArticleDraft row = new ArticleDraft();
         row.setId(10L);
@@ -1187,5 +1438,11 @@ class SelfMediaPublishScheduleServiceTest {
         row.setPlatform("toutiao");
         row.setStatus(status);
         return row;
+    }
+
+    private boolean isInBusinessAttemptWindow(LocalDateTime value) {
+        LocalTime time = value.toLocalTime();
+        return (!time.isBefore(LocalTime.of(9, 15)) && !time.isAfter(LocalTime.of(11, 30)))
+                || (!time.isBefore(LocalTime.of(14, 30)) && !time.isAfter(LocalTime.of(17, 30)));
     }
 }

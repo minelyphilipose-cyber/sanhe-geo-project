@@ -26,6 +26,7 @@ import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleConfigMapp
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchVO;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchDetailVO;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleConfigVO;
@@ -77,11 +78,13 @@ public class ProjectSelfMediaScheduleService {
     private final SelfMediaPublishAutoScheduleService autoScheduleService;
     private final SelfMediaPublishScheduleService scheduleService;
     private final BatchArticleGenerationService generationService;
+    private final ArticleCoverSelectionService coverSelectionService;
     private final BusinessCalendarService businessCalendarService;
     private final CompanyChannelQuotaService companyChannelQuotaService;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
     private final ObjectMapper objectMapper;
+    private final SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
 
     public ProjectSelfMediaScheduleConfigVO getConfig(Long projectId) {
         Project project = requireProject(projectId);
@@ -139,6 +142,7 @@ public class ProjectSelfMediaScheduleService {
         if (batch == null) {
             return null;
         }
+        batch = settleTerminalGenerationFailure(batch);
         ProjectSelfMediaScheduleBatchDetailVO detail = new ProjectSelfMediaScheduleBatchDetailVO();
         detail.setBatch(ProjectSelfMediaScheduleBatchVO.from(batch));
         GenerationPayload payload = readGenerationPayload(batch.getRequestPayload());
@@ -147,10 +151,60 @@ public class ProjectSelfMediaScheduleService {
         }
         Map<Long, SelfMediaAccount> accountCache = new LinkedHashMap<>();
         Map<Long, ArticleDraft> articleCache = new LinkedHashMap<>();
+        Map<ScheduleRejectedKey, SelfMediaPublishScheduleRejectedItemVO> rejectedItems =
+                readScheduleRejectedItems(batch.getResultSnapshot());
         for (GenerationPlan plan : payload.plans()) {
-            detail.getItems().add(toDetailItem(batch, plan, accountCache, articleCache));
+            detail.getItems().add(toDetailItem(batch, plan, rejectedItems, accountCache, articleCache));
         }
         return detail;
+    }
+
+    public ProjectSelfMediaScheduleBatchDetailVO retryFailedItems(Long projectId, String targetMonth) {
+        Project project = requireProject(projectId);
+        requireProjectOperate(project);
+        ProjectSelfMediaScheduleBatch batch = batchMapper.selectByProjectAndMonth(projectId, targetMonth);
+        if (batch == null) {
+            throw new BizException(ERROR_CODE, "自动排期批次不存在");
+        }
+        GenerationPayload payload = readGenerationPayload(batch.getRequestPayload());
+        if (payload == null || payload.plans() == null || payload.plans().isEmpty()) {
+            throw new BizException(ERROR_CODE, "自动排期批次缺少文章生成计划");
+        }
+        Map<ScheduleRejectedKey, SelfMediaPublishScheduleRejectedItemVO> rejectedItems =
+                readScheduleRejectedItems(batch.getResultSnapshot());
+        LinkedHashSet<Long> failedGenerationBatchIds = new LinkedHashSet<>();
+        List<GeneratedSchedulePlan> rejectedSchedulePlans = new ArrayList<>();
+        for (GenerationPlan plan : payload.plans()) {
+            BatchArticleGenerationTask task = generationTaskMapper.selectById(plan.generationTaskId());
+            if (task != null && "failed".equals(task.getStatus())) {
+                failedGenerationBatchIds.add(plan.generationBatchId());
+            } else if (task != null && "success".equals(task.getStatus()) && task.getArticleId() != null
+                    && findRejectedItem(rejectedItems, task.getArticleId(), plan) != null
+                    && findScheduleForGenerationPlan(batch, plan) == null) {
+                rejectedSchedulePlans.add(new GeneratedSchedulePlan(plan, task.getArticleId()));
+            }
+        }
+        if (failedGenerationBatchIds.isEmpty() && rejectedSchedulePlans.isEmpty()) {
+            throw new BizException(ERROR_CODE, "当前批次没有可重试的失败项");
+        }
+        for (Long generationBatchId : failedGenerationBatchIds) {
+            generationService.retryFailedSystem(generationBatchId);
+        }
+        if (!rejectedSchedulePlans.isEmpty()) {
+            SelfMediaPublishAutoScheduleResponse retried = createSchedulesFromGenerated(
+                    batch,
+                    payload,
+                    rejectedSchedulePlans,
+                    "retry-" + System.currentTimeMillis()
+            );
+            mergeRetriedScheduleResult(batch, payload, rejectedSchedulePlans, retried);
+        }
+        if (!failedGenerationBatchIds.isEmpty()) {
+            batch.setStatus("processing");
+            batch.setFailureMessage("失败项已重新入队，等待文章生成完成");
+        }
+        batchMapper.updateById(batch);
+        return getBatchDetail(projectId, targetMonth);
     }
 
     public SelfMediaPublishAutoScheduleResponse previewForProject(Long projectId,
@@ -178,10 +232,11 @@ public class ProjectSelfMediaScheduleService {
         }
         SelfMediaPublishAutoScheduleRequest autoRequest = toAutoRequest(project, config, request);
         ProjectSelfMediaScheduleBatch existed = batchMapper.selectByProjectAndMonth(projectId, autoRequest.getTargetMonth());
+        existed = settleTerminalGenerationFailure(existed);
         if (isActiveOrCompletedBatch(existed)) {
             throw new BizException(ERROR_CODE, "该项目本月已创建过自动化排期，不能重复创建");
         }
-        return acceptGenerationBatch(project, config, request, triggerMode, operator.getId());
+        return acceptGenerationBatch(project, config, request, triggerMode, operator.getId(), existed);
     }
 
     public int createDueEnabledProjects(String targetMonth, int limit) {
@@ -191,7 +246,9 @@ public class ProjectSelfMediaScheduleService {
                 break;
             }
             try {
-                if (batchMapper.selectByProjectAndMonth(config.getProjectId(), targetMonth) != null) {
+                ProjectSelfMediaScheduleBatch existed = settleTerminalGenerationFailure(
+                        batchMapper.selectByProjectAndMonth(config.getProjectId(), targetMonth));
+                if (isActiveOrCompletedBatch(existed)) {
                     continue;
                 }
                 Project project = projectMapper.selectById(config.getProjectId());
@@ -205,10 +262,10 @@ public class ProjectSelfMediaScheduleService {
                 ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
                 request.setSelfMediaAccountIds(accountIds);
                 request.setTargetMonth(targetMonth);
-                request.setScheduleStrategy(config.getDefaultScheduleStrategy());
+                request.setScheduleStrategy(SelfMediaPublishAutoScheduleService.STRATEGY_PLATFORM_SPECIFIC);
                 request.setIncludeAdjustedWorkdays(config.getIncludeAdjustedWorkdays());
                 Long operatorId = resolveSystemOperatorId(project, config);
-                acceptGenerationBatch(project, config, request, TRIGGER_JOB, operatorId);
+                acceptGenerationBatch(project, config, request, TRIGGER_JOB, operatorId, existed);
                 processed++;
             } catch (Exception ex) {
                 log.warn("project self-media auto schedule skipped projectId={} month={} error={}",
@@ -249,7 +306,8 @@ public class ProjectSelfMediaScheduleService {
                                                                        ProjectSelfMediaScheduleConfig config,
                                                                        ProjectSelfMediaAutoScheduleRequest request,
                                                                        String triggerMode,
-                                                                       Long operatorId) {
+                                                                       Long operatorId,
+                                                                       ProjectSelfMediaScheduleBatch reusableBatch) {
         SelfMediaPublishAutoScheduleRequest autoRequest = toAutoRequest(project, config, request);
         List<Long> accountIds = autoRequest.getSelfMediaAccountIds().isEmpty()
                 ? selectBrandAccountIds(project.getBrandId())
@@ -259,21 +317,32 @@ public class ProjectSelfMediaScheduleService {
             throw new BizException(ERROR_CODE, "该项目本月自媒体平台剩余额度为 0，无法创建自动化排期");
         }
 
-        ProjectSelfMediaScheduleBatch batch = newBatch(project, autoRequest, triggerMode, operatorId);
+        ProjectSelfMediaScheduleBatch batch = reusableBatch == null
+                ? newBatch(project, autoRequest, triggerMode, operatorId)
+                : resetReusableBatch(reusableBatch, project, autoRequest, triggerMode, operatorId);
         batch.setStatus("processing");
         batch.setArticleCount(plans.size());
         batch.setAccountCount((int) plans.stream().map(AccountPublishPlan::accountId).distinct().count());
         batch.setPlannedCount(plans.size());
+        batch.setCreatedCount(0);
+        batch.setRejectedCount(0);
+        batch.setGenerationBatchIds(null);
+        batch.setResultSnapshot(null);
+        batch.setFailureMessage(null);
         batch.setRequestPayload(toJson(Map.of(
                 "targetMonth", autoRequest.getTargetMonth(),
                 "scheduleStrategy", autoRequest.getScheduleStrategy(),
                 "includeAdjustedWorkdays", autoRequest.getIncludeAdjustedWorkdays(),
                 "plans", plans
         )));
-        try {
-            batchMapper.insert(batch);
-        } catch (DuplicateKeyException ex) {
-            throw new BizException(ERROR_CODE, "该项目本月已存在自动化排期批次");
+        if (reusableBatch == null) {
+            try {
+                batchMapper.insert(batch);
+            } catch (DuplicateKeyException ex) {
+                throw new BizException(ERROR_CODE, "该项目本月已存在自动化排期批次");
+            }
+        } else {
+            batchMapper.updateById(batch);
         }
         try {
             List<GenerationPlan> generationPlans = createGenerationBatches(project, batch, plans, operatorId);
@@ -384,7 +453,12 @@ public class ProjectSelfMediaScheduleService {
             }
         }
         if (generated.isEmpty()) {
-            throw new BizException(ERROR_CODE, "自动排期文章生成全部失败");
+            batch.setStatus("failed");
+            batch.setCreatedCount(0);
+            batch.setRejectedCount(failed);
+            batch.setFailureMessage("自动排期文章生成全部失败");
+            batchMapper.updateById(batch);
+            return true;
         }
         SelfMediaPublishAutoScheduleResponse response = createSchedulesFromGenerated(batch, payload, generated);
         int created = response.getCreatedSchedules().size() + response.getExistingSchedules().size();
@@ -401,10 +475,17 @@ public class ProjectSelfMediaScheduleService {
     private SelfMediaPublishAutoScheduleResponse createSchedulesFromGenerated(ProjectSelfMediaScheduleBatch batch,
                                                                              GenerationPayload payload,
                                                                              List<GeneratedSchedulePlan> generated) {
+        return createSchedulesFromGenerated(batch, payload, generated, null);
+    }
+
+    private SelfMediaPublishAutoScheduleResponse createSchedulesFromGenerated(ProjectSelfMediaScheduleBatch batch,
+                                                                             GenerationPayload payload,
+                                                                             List<GeneratedSchedulePlan> generated,
+                                                                             String requestKeySuffix) {
         YearMonth targetMonth = YearMonth.parse(payload.targetMonth());
-        List<BusinessCalendarService.PublishSlot> slots = businessCalendarService.selectEvenly(
+        List<BusinessCalendarService.PublishSlot> slots = selectSlotsEvenlyByPlatform(
                 targetMonth,
-                generated.size(),
+                generated,
                 payload.includeAdjustedWorkdays()
         );
         SelfMediaPublishAutoScheduleResponse response = acceptedResponse(
@@ -416,18 +497,23 @@ public class ProjectSelfMediaScheduleService {
         for (int i = 0; i < generated.size(); i++) {
             GeneratedSchedulePlan plan = generated.get(i);
             BusinessCalendarService.PublishSlot slot = slots.get(i);
+            String scheduleStrategy = resolveItemStrategy(payload.scheduleStrategy(), plan.plan().platform());
+            LocalDateTime plannedPublishAt = resolvePlannedPublishAt(slot, plan.plan().platform(), scheduleStrategy);
             SelfMediaPublishScheduleCreateRequest request = new SelfMediaPublishScheduleCreateRequest();
             request.setBrandId(batch.getBrandId());
             request.setArticleIds(List.of(plan.articleId()));
             request.setSelfMediaAccountIds(List.of(plan.plan().selfMediaAccountId()));
-            request.setWindowStart(slot.plannedAt());
-            request.setWindowEnd(slot.plannedAt());
-            request.setScheduleStrategy(payload.scheduleStrategy());
-            request.setMinIntervalMinutes(1);
+            request.setWindowStart(plannedPublishAt);
+            request.setWindowEnd(plannedPublishAt);
+            request.setExecutionWindowStart(slot.plannedAt());
+            request.setExecutionWindowEnd(slot.plannedAt());
+            request.setScheduleStrategy(scheduleStrategy);
+            request.setMinIntervalMinutes(3);
+            ensureArticleCoverIfRequired(batch.getBrandId(), plan.plan().platform(), plan.articleId());
             try {
                 SelfMediaPublishScheduleCreateResponse created = scheduleService.createSystemSchedules(
                         request,
-                        projectAutoScheduleRequestKey(batch, plan.plan()),
+                        projectAutoScheduleRequestKey(batch, plan.plan(), requestKeySuffix),
                         batch.getCreatedBy()
                 );
                 response.getCreatedSchedules().addAll(created.getCreatedSchedules());
@@ -449,6 +535,122 @@ public class ProjectSelfMediaScheduleService {
         response.setPlannedCount(response.getCreatedSchedules().size() + response.getExistingSchedules().size());
         response.setRejectedCount(response.getRejectedItems().size());
         return response;
+    }
+
+    private void mergeRetriedScheduleResult(ProjectSelfMediaScheduleBatch batch,
+                                            GenerationPayload payload,
+                                            List<GeneratedSchedulePlan> retriedPlans,
+                                            SelfMediaPublishAutoScheduleResponse retried) {
+        SelfMediaPublishAutoScheduleResponse snapshot = readAutoScheduleResponse(batch.getResultSnapshot());
+        if (snapshot == null) {
+            snapshot = acceptedResponse(batch.getBrandId(), payload.targetMonth(), payload.scheduleStrategy(), payload.plans().size());
+        }
+        LinkedHashSet<ScheduleRejectedKey> retriedKeys = new LinkedHashSet<>();
+        for (GeneratedSchedulePlan plan : retriedPlans) {
+            retriedKeys.add(new ScheduleRejectedKey(
+                    plan.articleId(),
+                    plan.plan().selfMediaAccountId(),
+                    normalizePlatform(plan.plan().platform())
+            ));
+        }
+        List<SelfMediaPublishScheduleRejectedItemVO> remainingRejected = new ArrayList<>();
+        for (SelfMediaPublishScheduleRejectedItemVO item : snapshot.getRejectedItems()) {
+            ScheduleRejectedKey key = item == null ? null : new ScheduleRejectedKey(
+                    item.getArticleId(),
+                    item.getSelfMediaAccountId(),
+                    normalizePlatform(item.getPlatform())
+            );
+            if (key == null || !retriedKeys.contains(key)) {
+                remainingRejected.add(item);
+            }
+        }
+        remainingRejected.addAll(retried.getRejectedItems());
+        snapshot.setRejectedItems(remainingRejected);
+        snapshot.getCreatedSchedules().addAll(retried.getCreatedSchedules());
+        snapshot.getExistingSchedules().addAll(retried.getExistingSchedules());
+        snapshot.setCreatedSchedules(snapshot.getCreatedSchedules().stream().distinct().toList());
+        snapshot.setExistingSchedules(snapshot.getExistingSchedules().stream().distinct().toList());
+        snapshot.setRejectedCount(snapshot.getRejectedItems().size());
+        snapshot.setPlannedCount(snapshot.getCreatedSchedules().size() + snapshot.getExistingSchedules().size());
+
+        int failedGenerationCount = countFailedGenerationTasks(payload);
+        int created = (batch.getCreatedCount() == null ? 0 : batch.getCreatedCount())
+                + retried.getCreatedSchedules().size()
+                + retried.getExistingSchedules().size();
+        int rejected = failedGenerationCount + snapshot.getRejectedItems().size();
+        batch.setCreatedCount(created);
+        batch.setRejectedCount(rejected);
+        batch.setResultSnapshot(toJson(snapshot));
+        batch.setStatus(rejected > 0 ? "partial_failed" : "created");
+        batch.setFailureMessage(rejected > 0 ? "部分文章生成或排期失败" : null);
+    }
+
+    private int countFailedGenerationTasks(GenerationPayload payload) {
+        if (payload == null || payload.plans() == null) {
+            return 0;
+        }
+        int failed = 0;
+        for (GenerationPlan plan : payload.plans()) {
+            BatchArticleGenerationTask task = generationTaskMapper.selectById(plan.generationTaskId());
+            if (task != null && "failed".equals(task.getStatus())) {
+                failed++;
+            }
+        }
+        return failed;
+    }
+
+    private List<BusinessCalendarService.PublishSlot> selectSlotsEvenlyByPlatform(YearMonth targetMonth,
+                                                                                  List<GeneratedSchedulePlan> generated,
+                                                                                  boolean includeAdjustedWorkdays) {
+        Map<String, List<Integer>> indexesByPlatform = new LinkedHashMap<>();
+        for (int i = 0; i < generated.size(); i++) {
+            String platform = normalizePlatform(generated.get(i).plan().platform());
+            indexesByPlatform.computeIfAbsent(firstText(platform, "unknown"), ignored -> new ArrayList<>()).add(i);
+        }
+        List<BusinessCalendarService.PublishSlot> result = new ArrayList<>();
+        for (int i = 0; i < generated.size(); i++) {
+            result.add(null);
+        }
+        for (List<Integer> indexes : indexesByPlatform.values()) {
+            List<BusinessCalendarService.PublishSlot> platformSlots = businessCalendarService.selectEvenly(
+                    targetMonth,
+                    indexes.size(),
+                    includeAdjustedWorkdays
+            );
+            for (int i = 0; i < indexes.size(); i++) {
+                result.set(indexes.get(i), platformSlots.get(i));
+            }
+        }
+        return result;
+    }
+
+    private LocalDateTime resolvePlannedPublishAt(BusinessCalendarService.PublishSlot executionSlot,
+                                                  String platform,
+                                                  String scheduleStrategy) {
+        int leadMinutes = Math.max(0, scheduleAdapterRouter.rules(platform, scheduleStrategy).fillLeadMinutes());
+        return executionSlot.plannedAt().plusMinutes(leadMinutes);
+    }
+
+    private void ensureArticleCoverIfRequired(Long brandId, String platform, Long articleId) {
+        if (articleId == null) {
+            return;
+        }
+        boolean requiresCoverUpload = scheduleAdapterRouter.contract(platform)
+                .map(contract -> contract.requiresCoverUpload())
+                .orElse(false);
+        if (!requiresCoverUpload) {
+            return;
+        }
+        ArticleDraft article = articleDraftMapper.selectById(articleId);
+        if (article == null || StringUtils.hasText(article.getCoverImageUrl())) {
+            return;
+        }
+        String coverUrl = coverSelectionService.selectRandomCoverUrl(brandId);
+        if (!StringUtils.hasText(coverUrl)) {
+            return;
+        }
+        article.setCoverImageUrl(coverUrl);
+        articleDraftMapper.updateById(article);
     }
 
     private List<AccountPublishPlan> buildAccountPublishPlans(Project project, String targetMonth, List<Long> accountIds) {
@@ -514,8 +716,20 @@ public class ProjectSelfMediaScheduleService {
         }
     }
 
+    private SelfMediaPublishAutoScheduleResponse readAutoScheduleResponse(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(value, SelfMediaPublishAutoScheduleResponse.class);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     private ProjectSelfMediaScheduleBatchDetailVO.Item toDetailItem(ProjectSelfMediaScheduleBatch batch,
                                                                     GenerationPlan plan,
+                                                                    Map<ScheduleRejectedKey, SelfMediaPublishScheduleRejectedItemVO> rejectedItems,
                                                                     Map<Long, SelfMediaAccount> accountCache,
                                                                     Map<Long, ArticleDraft> articleCache) {
         ProjectSelfMediaScheduleBatchDetailVO.Item item = new ProjectSelfMediaScheduleBatchDetailVO.Item();
@@ -533,6 +747,15 @@ public class ProjectSelfMediaScheduleService {
         if (task != null) {
             item.setGenerationStatus(task.getStatus());
             item.setGenerationErrorMessage(task.getErrorMessage());
+            item.setGenerationTopic(task.getTopicAsQuestion());
+            if (!StringUtils.hasText(item.getGenerationTopic())) {
+                item.setGenerationTopic(task.getTopic());
+            }
+            item.setGenerationArticleType(task.getArticleType());
+            item.setGenerationCreatedAt(task.getCreatedAt());
+            item.setGenerationUpdatedAt(task.getUpdatedAt());
+            item.setGenerationStartedAt(task.getStartedAt());
+            item.setGenerationFinishedAt(task.getFinishedAt());
             item.setArticleId(task.getArticleId());
             if (task.getArticleId() != null) {
                 ArticleDraft article = articleCache.computeIfAbsent(task.getArticleId(), articleDraftMapper::selectById);
@@ -555,8 +778,57 @@ public class ProjectSelfMediaScheduleService {
             item.setLockedUntil(schedule.getLockedUntil());
             item.setScheduleFailureCode(schedule.getFailureCode());
             item.setScheduleFailureMessage(schedule.getFailureMessage());
+        } else {
+            SelfMediaPublishScheduleRejectedItemVO rejected = findRejectedItem(rejectedItems, item.getArticleId(), plan);
+            if (rejected != null) {
+                item.setScheduleStatus("rejected");
+                item.setScheduleFailureCode(rejected.getCode());
+                item.setScheduleFailureMessage(firstText(rejected.getMessage(), rejected.getCode()));
+            }
         }
         return item;
+    }
+
+    private Map<ScheduleRejectedKey, SelfMediaPublishScheduleRejectedItemVO> readScheduleRejectedItems(String value) {
+        if (!StringUtils.hasText(value)) {
+            return Map.of();
+        }
+        try {
+            SelfMediaPublishAutoScheduleResponse response =
+                    objectMapper.readValue(value, SelfMediaPublishAutoScheduleResponse.class);
+            if (response.getRejectedItems() == null || response.getRejectedItems().isEmpty()) {
+                return Map.of();
+            }
+            Map<ScheduleRejectedKey, SelfMediaPublishScheduleRejectedItemVO> result = new LinkedHashMap<>();
+            for (SelfMediaPublishScheduleRejectedItemVO item : response.getRejectedItems()) {
+                if (item == null || item.getArticleId() == null || item.getSelfMediaAccountId() == null) {
+                    continue;
+                }
+                result.put(new ScheduleRejectedKey(
+                        item.getArticleId(),
+                        item.getSelfMediaAccountId(),
+                        normalizePlatform(item.getPlatform())
+                ), item);
+            }
+            return result;
+        } catch (Exception ex) {
+            return Map.of();
+        }
+    }
+
+    private SelfMediaPublishScheduleRejectedItemVO findRejectedItem(
+            Map<ScheduleRejectedKey, SelfMediaPublishScheduleRejectedItemVO> rejectedItems,
+            Long articleId,
+            GenerationPlan plan
+    ) {
+        if (rejectedItems.isEmpty() || articleId == null || plan == null) {
+            return null;
+        }
+        return rejectedItems.get(new ScheduleRejectedKey(
+                articleId,
+                plan.selfMediaAccountId(),
+                normalizePlatform(plan.platform())
+        ));
     }
 
     private SelfMediaPublishSchedule findScheduleForGenerationPlan(ProjectSelfMediaScheduleBatch batch, GenerationPlan plan) {
@@ -564,15 +836,36 @@ public class ProjectSelfMediaScheduleService {
                 batch.getBrandId(),
                 projectAutoScheduleRequestKey(batch, plan)
         );
-        if (request == null || request.getId() == null) {
+        if (request != null && request.getId() != null) {
+            List<SelfMediaPublishSchedule> schedules = selfMediaPublishScheduleMapper.selectByRequestId(request.getId());
+            if (!schedules.isEmpty()) {
+                return schedules.get(0);
+            }
+        }
+        BatchArticleGenerationTask task = generationTaskMapper.selectById(plan.generationTaskId());
+        if (task == null || task.getArticleId() == null) {
             return null;
         }
-        List<SelfMediaPublishSchedule> schedules = selfMediaPublishScheduleMapper.selectByRequestId(request.getId());
-        return schedules.isEmpty() ? null : schedules.get(0);
+        return selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(
+                task.getArticleId(),
+                plan.selfMediaAccountId(),
+                normalizePlatform(plan.platform())
+        );
     }
 
     private String projectAutoScheduleRequestKey(ProjectSelfMediaScheduleBatch batch, GenerationPlan plan) {
-        return "project-auto-" + batch.getId() + "-" + plan.generationTaskId();
+        return projectAutoScheduleRequestKey(batch, plan, null);
+    }
+
+    private String projectAutoScheduleRequestKey(ProjectSelfMediaScheduleBatch batch, GenerationPlan plan, String suffix) {
+        String base = "project-auto-" + batch.getId() + "-" + plan.generationTaskId();
+        if (!StringUtils.hasText(suffix)) {
+            return base;
+        }
+        return base + "-" + suffix;
+    }
+
+    private record ScheduleRejectedKey(Long articleId, Long selfMediaAccountId, String platform) {
     }
 
     private List<Long> selectBrandAccountIds(Long brandId) {
@@ -606,8 +899,7 @@ public class ProjectSelfMediaScheduleService {
         autoRequest.setTargetMonth(request.getTargetMonth());
         autoRequest.setScheduleStrategy(firstText(
                 request.getScheduleStrategy(),
-                config == null ? null : config.getDefaultScheduleStrategy(),
-                SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE
+                SelfMediaPublishAutoScheduleService.STRATEGY_PLATFORM_SPECIFIC
         ));
         autoRequest.setIncludeAdjustedWorkdays(request.getIncludeAdjustedWorkdays() != null
                 ? request.getIncludeAdjustedWorkdays()
@@ -637,13 +929,60 @@ public class ProjectSelfMediaScheduleService {
         return batch;
     }
 
+    private ProjectSelfMediaScheduleBatch resetReusableBatch(ProjectSelfMediaScheduleBatch batch,
+                                                             Project project,
+                                                             SelfMediaPublishAutoScheduleRequest request,
+                                                             String triggerMode,
+                                                             Long operatorId) {
+        batch.setProjectId(project.getId());
+        batch.setBrandId(project.getBrandId());
+        batch.setCompanyId(project.getCompanyId());
+        batch.setTargetMonth(request.getTargetMonth());
+        batch.setTriggerMode(StringUtils.hasText(triggerMode) ? triggerMode : TRIGGER_MANUAL);
+        batch.setScheduleStrategy(request.getScheduleStrategy());
+        batch.setUpdatedBy(operatorId);
+        return batch;
+    }
+
+    private ProjectSelfMediaScheduleBatch settleTerminalGenerationFailure(ProjectSelfMediaScheduleBatch batch) {
+        if (batch == null || !"processing".equals(batch.getStatus())) {
+            return batch;
+        }
+        GenerationPayload payload = readGenerationPayload(batch.getRequestPayload());
+        if (payload == null || payload.plans() == null || payload.plans().isEmpty()) {
+            return batch;
+        }
+        int success = 0;
+        int failed = 0;
+        for (GenerationPlan plan : payload.plans()) {
+            BatchArticleGenerationTask task = generationTaskMapper.selectById(plan.generationTaskId());
+            if (task == null || "failed".equals(task.getStatus())) {
+                failed++;
+                continue;
+            }
+            if ("success".equals(task.getStatus()) && task.getArticleId() != null) {
+                success++;
+                continue;
+            }
+            return batch;
+        }
+        if (success == 0 && failed == payload.plans().size()) {
+            batch.setStatus("failed");
+            batch.setCreatedCount(0);
+            batch.setRejectedCount(failed);
+            batch.setFailureMessage("自动排期文章生成全部失败");
+            batchMapper.updateById(batch);
+        }
+        return batch;
+    }
+
     private ProjectSelfMediaScheduleConfig defaultConfig(Project project) {
         ProjectSelfMediaScheduleConfig row = new ProjectSelfMediaScheduleConfig();
         row.setProjectId(project.getId());
         row.setBrandId(project.getBrandId());
         row.setCompanyId(project.getCompanyId());
         row.setAutoScheduleEnabled(false);
-        row.setDefaultScheduleStrategy(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE);
+        row.setDefaultScheduleStrategy(SelfMediaPublishAutoScheduleService.STRATEGY_PLATFORM_SPECIFIC);
         row.setIncludeAdjustedWorkdays(false);
         return row;
     }
@@ -692,6 +1031,18 @@ public class ProjectSelfMediaScheduleService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String resolveItemStrategy(String requestedStrategy, String platform) {
+        String normalized = firstText(requestedStrategy, SelfMediaPublishAutoScheduleService.STRATEGY_PLATFORM_SPECIFIC);
+        if (!SelfMediaPublishAutoScheduleService.STRATEGY_PLATFORM_SPECIFIC.equals(normalized)) {
+            return normalized;
+        }
+        return scheduleAdapterRouter.contract(platform)
+                .map(contract -> contract.supportsBackendDelayedPublish()
+                        ? SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH
+                        : SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE)
+                .orElse(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE);
     }
 
     private String trimMessage(String value) {

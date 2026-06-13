@@ -22,8 +22,8 @@ public class BusinessCalendarService {
     private static final int ERROR_CODE = 70041;
     private static final String RESOURCE_PATTERN = "calendar/business-calendar-%d.json";
     private static final List<PublishWindow> DEFAULT_WINDOWS = List.of(
-            new PublishWindow("morning", LocalTime.of(9, 30), LocalTime.of(11, 30), LocalTime.of(10, 0)),
-            new PublishWindow("afternoon", LocalTime.of(14, 0), LocalTime.of(17, 30), LocalTime.of(15, 0))
+            new PublishWindow("morning", LocalTime.of(9, 15), LocalTime.of(11, 30), LocalTime.of(9, 15)),
+            new PublishWindow("afternoon", LocalTime.of(14, 30), LocalTime.of(17, 30), LocalTime.of(14, 30))
     );
 
     private final ObjectMapper objectMapper;
@@ -144,14 +144,27 @@ public class BusinessCalendarService {
             if (start == null || end == null || preferred == null) {
                 continue;
             }
-            result.add(new PublishWindow(
+            PublishWindow normalized = normalizeWindow(new PublishWindow(
                     StringUtils.hasText(node.path("name").asText(null)) ? node.path("name").asText() : "custom",
                     start,
                     end,
                     preferred
             ));
+            if (normalized != null) {
+                result.add(normalized);
+            }
         }
         return result;
+    }
+
+    private PublishWindow normalizeWindow(PublishWindow window) {
+        for (PublishWindow policy : DEFAULT_WINDOWS) {
+            if (!policy.name().equalsIgnoreCase(window.name())) {
+                continue;
+            }
+            return policy;
+        }
+        return window;
     }
 
     private LocalDate parseDate(String value) {

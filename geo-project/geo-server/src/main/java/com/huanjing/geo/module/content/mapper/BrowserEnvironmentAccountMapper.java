@@ -58,4 +58,33 @@ public interface BrowserEnvironmentAccountMapper extends BaseMapper<BrowserEnvir
             """)
     List<BrowserEnvironmentAccount> selectActiveByBrandIdAndPlatform(@Param("brandId") Long brandId,
                                                                      @Param("platform") String platform);
+
+    @Select("""
+            SELECT bea.*
+            FROM browser_environment_account bea
+            JOIN browser_environment be
+              ON be.id = bea.browser_environment_id
+             AND be.deleted_at IS NULL
+            WHERE bea.deleted_at IS NULL
+              AND bea.brand_id = #{brandId}
+              AND be.brand_id = #{brandId}
+              AND bea.platform = #{platform}
+            ORDER BY bea.id ASC
+            """)
+    List<BrowserEnvironmentAccount> selectAllActiveByBrandIdAndPlatform(@Param("brandId") Long brandId,
+                                                                        @Param("platform") String platform);
+
+    @Select("""
+            SELECT bea.*
+            FROM browser_environment_account bea
+            JOIN browser_environment be
+              ON be.id = bea.browser_environment_id
+             AND be.deleted_at IS NULL
+             AND be.status = 'active'
+            WHERE bea.deleted_at IS NULL
+              AND bea.brand_id = #{brandId}
+              AND be.brand_id = #{brandId}
+            ORDER BY be.environment_key ASC, bea.platform ASC, bea.id ASC
+            """)
+    List<BrowserEnvironmentAccount> selectActiveRuntimeConfigsByBrandId(@Param("brandId") Long brandId);
 }

@@ -6,6 +6,7 @@ import com.huanjing.geo.common.storage.ObjectStorageService;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -16,6 +17,7 @@ import java.util.HexFormat;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ArticleBodyProvider {
 
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
@@ -45,6 +47,9 @@ public class ArticleBodyProvider {
             throw new BizException(500, "Article body archive unavailable", ex);
         }
         String checksum = sha256Hex(bytes);
+        if (!StringUtils.hasText(version.getContentChecksum())) {
+            log.warn("Article archive checksum is empty, versionId={}, objectKey={}", versionId, version.getContentObjectKey());
+        }
         if (StringUtils.hasText(version.getContentChecksum())
                 && !version.getContentChecksum().equalsIgnoreCase(checksum)) {
             throw new BizException(500, "Article body archive checksum mismatch");

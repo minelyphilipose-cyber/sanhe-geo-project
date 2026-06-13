@@ -92,6 +92,12 @@ public class ProjectController {
         return R.ok(projectSelfMediaScheduleService.getBatchDetail(id, targetMonth));
     }
 
+    @PostMapping("/{id:\\d+}/self-media-schedule-batches/{targetMonth}/retry-failed")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> retryFailedSelfMediaScheduleBatchItems(@PathVariable Long id,
+                                                                                           @PathVariable String targetMonth) {
+        return R.ok(projectSelfMediaScheduleService.retryFailedItems(id, targetMonth));
+    }
+
     @PostMapping("/{id:\\d+}/self-media-schedules/auto-preview")
     public R<SelfMediaPublishAutoScheduleResponse> previewSelfMediaAutoSchedules(
             @PathVariable Long id,

@@ -13,7 +13,7 @@ import java.time.YearMonth;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "geo.self-media.auto-schedule.job", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "geo.self-media.auto-schedule.job", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class ProjectSelfMediaAutoScheduleJob {
     private final ProjectSelfMediaScheduleService projectSelfMediaScheduleService;
     @Value("${geo.self-media.auto-schedule.job.limit:50}")

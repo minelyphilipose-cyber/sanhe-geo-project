@@ -27,6 +27,7 @@ public class ArticleImagePublicUrlRewriter {
 
     private static final Pattern MARKDOWN_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*]\\(([^\\s)]+)(?:\\s+\"[^\"]*\")?\\)");
     private static final Pattern MATERIAL_API_PATH_PATTERN = Pattern.compile(".*/api/brands/(\\d+)/materials/(\\d+)/(?:stream|preview-url)$");
+    private static final Pattern PUBLIC_MATERIAL_API_PATH_PATTERN = Pattern.compile(".*/api/public/brand-materials/(\\d+)/stream$");
 
     private final BrandMaterialMapper brandMaterialMapper;
     private final BrandMaterialPublicUrlService publicUrlService;
@@ -54,6 +55,28 @@ public class ArticleImagePublicUrlRewriter {
         Map<String, BrandMaterial> replacements = resolveMaterials(project.getBrandId(), Set.of(normalized));
         BrandMaterial material = replacements.get(normalized);
         return material == null ? imageUrl : publicUrlService.buildPublicStreamUrl(material);
+    }
+
+    public boolean canResolveBrandMaterial(Project project, String imageUrl) {
+        String normalized = normalizeUrl(imageUrl);
+        return StringUtils.hasText(normalized)
+                && project != null
+                && project.getBrandId() != null
+                && !resolveMaterials(project.getBrandId(), Set.of(normalized)).isEmpty();
+    }
+
+    public boolean isManagedBrandMaterialUrl(String imageUrl) {
+        String normalized = normalizeUrl(imageUrl);
+        if (!StringUtils.hasText(normalized)) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(normalized);
+            return MATERIAL_API_PATH_PATTERN.matcher(uri.getPath()).matches()
+                    || PUBLIC_MATERIAL_API_PATH_PATTERN.matcher(uri.getPath()).matches();
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
     private Map<String, BrandMaterial> resolveMaterials(Long brandId, Set<String> imageUrls) {
@@ -90,6 +113,11 @@ public class ArticleImagePublicUrlRewriter {
     private BrandMaterial resolveByMaterialApiUrl(Long brandId, String imageUrl) {
         try {
             URI uri = URI.create(imageUrl);
+            Matcher publicMatcher = PUBLIC_MATERIAL_API_PATH_PATTERN.matcher(uri.getPath());
+            if (publicMatcher.matches()) {
+                Long materialId = Long.valueOf(publicMatcher.group(1));
+                return usableBrandMaterial(brandId, materialId);
+            }
             Matcher matcher = MATERIAL_API_PATH_PATTERN.matcher(uri.getPath());
             if (!matcher.matches()) {
                 return null;
@@ -99,17 +127,21 @@ public class ArticleImagePublicUrlRewriter {
             if (!brandId.equals(urlBrandId)) {
                 return null;
             }
-            BrandMaterial material = brandMaterialMapper.selectById(materialId);
-            if (material == null
-                    || !brandId.equals(material.getBrandId())
-                    || !"brand_image".equals(material.getCategory())
-                    || !StringUtils.hasText(material.getObjectKey())) {
-                return null;
-            }
-            return material;
+            return usableBrandMaterial(brandId, materialId);
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    private BrandMaterial usableBrandMaterial(Long brandId, Long materialId) {
+        BrandMaterial material = brandMaterialMapper.selectById(materialId);
+        if (material == null
+                || !brandId.equals(material.getBrandId())
+                || !"brand_image".equals(material.getCategory())
+                || !StringUtils.hasText(material.getObjectKey())) {
+            return null;
+        }
+        return material;
     }
 
     private Set<String> extractImageUrls(String markdown) {

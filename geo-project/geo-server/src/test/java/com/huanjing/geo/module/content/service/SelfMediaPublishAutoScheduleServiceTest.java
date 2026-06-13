@@ -1,11 +1,19 @@
 package com.huanjing.geo.module.content.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishAutoScheduleRequest;
+import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleMode;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
+import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -24,6 +32,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentCaptor.forClass;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,6 +45,7 @@ class SelfMediaPublishAutoScheduleServiceTest {
     private BrandMapper brandMapper;
     private CompanyChannelQuotaService quotaService;
     private BrandAccessService brandAccessService;
+    private SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
     private SelfMediaPublishAutoScheduleService service;
 
     @BeforeEach
@@ -45,6 +56,7 @@ class SelfMediaPublishAutoScheduleServiceTest {
         brandMapper = mock(BrandMapper.class);
         quotaService = mock(CompanyChannelQuotaService.class);
         brandAccessService = mock(BrandAccessService.class);
+        scheduleAdapterRouter = mock(SelfMediaPlatformScheduleAdapterRouter.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
         SysUser user = new SysUser();
         user.setId(99L);
@@ -62,6 +74,16 @@ class SelfMediaPublishAutoScheduleServiceTest {
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 0, 2));
         when(quotaService.selfMediaDistributionQuota(6L, "baijiahao"))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:baijiahao", "month", "2026-06", 0, 2));
+        when(scheduleAdapterRouter.contract("toutiao")).thenReturn(java.util.Optional.of(contract(
+                "toutiao",
+                SelfMediaPlatformScheduleMode.PLATFORM_NATIVE
+        )));
+        when(scheduleAdapterRouter.contract("baijiahao")).thenReturn(java.util.Optional.of(contract(
+                "baijiahao",
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED
+        )));
+        when(scheduleService.createSchedules(any(SelfMediaPublishScheduleCreateRequest.class), anyString()))
+                .thenReturn(new SelfMediaPublishScheduleCreateResponse());
 
         service = new SelfMediaPublishAutoScheduleService(
                 new BusinessCalendarService(new ObjectMapper()),
@@ -71,7 +93,8 @@ class SelfMediaPublishAutoScheduleServiceTest {
                 brandMapper,
                 quotaService,
                 brandAccessService,
-                currentUserService
+                currentUserService,
+                scheduleAdapterRouter
         );
     }
 
@@ -105,6 +128,21 @@ class SelfMediaPublishAutoScheduleServiceTest {
                 .allMatch(item -> "CHANNEL_QUOTA_EXHAUSTED".equals(item.getRejectionCode())));
     }
 
+    @Test
+    void createResolvesScheduleStrategyPerPlatformWhenRequestUsesPlatformSpecificMode() {
+        service.create(request(List.of(10L), List.of(20L, 21L)));
+
+        org.mockito.ArgumentCaptor<SelfMediaPublishScheduleCreateRequest> captor =
+                forClass(SelfMediaPublishScheduleCreateRequest.class);
+        verify(scheduleService, atLeastOnce()).createSchedules(captor.capture(), anyString());
+
+        List<String> strategies = captor.getAllValues().stream()
+                .map(SelfMediaPublishScheduleCreateRequest::getScheduleStrategy)
+                .toList();
+        assertTrue(strategies.contains(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE));
+        assertTrue(strategies.contains(SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH));
+    }
+
     private SelfMediaPublishAutoScheduleRequest request(List<Long> articleIds, List<Long> accountIds) {
         SelfMediaPublishAutoScheduleRequest request = new SelfMediaPublishAutoScheduleRequest();
         request.setBrandId(8L);
@@ -119,5 +157,19 @@ class SelfMediaPublishAutoScheduleServiceTest {
         account.setId(id);
         account.setPlatform(platform);
         return account;
+    }
+
+    private SelfMediaPlatformCapabilityContract contract(String platform, SelfMediaPlatformScheduleMode mode) {
+        return new SelfMediaPlatformCapabilityContract(
+                platform,
+                platform,
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                mode,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        );
     }
 }

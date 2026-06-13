@@ -55,6 +55,22 @@
           </div>
         </section>
 
+        <section v-if="selfMediaCapabilityVisible" class="detail-card wide-card">
+          <div class="card-title self-media-check-title">
+            <span>{{ selfMediaCapabilityTitle }}</span>
+            <el-tag size="small" :type="selfMediaReadinessSummary.type">{{ selfMediaReadinessSummary.label }}</el-tag>
+          </div>
+          <div v-if="selfMediaCapabilityLoading" class="self-media-check-loading">正在加载接入状态...</div>
+          <div v-else-if="selfMediaReadinessChecks.length" class="self-media-check-grid">
+            <div v-for="item in selfMediaReadinessChecks" :key="item.code" class="self-media-check-item">
+              <span class="self-media-check-label">{{ item.label }}</span>
+              <el-tag size="small" :type="readinessTagType(item.status)">{{ readinessStatusLabel(item.status) }}</el-tag>
+              <span class="self-media-check-message">{{ item.message }}</span>
+            </div>
+          </div>
+          <el-empty v-else description="暂无接入自检信息" :image-size="72" />
+        </section>
+
         <section class="detail-card">
           <div class="card-title">站点配置</div>
           <div class="info-list">
@@ -114,8 +130,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
+import { getDouyinCapability, getWechatMpCapability } from '@/api/content'
 import { getPublishSites, testPublishSite } from '@/api/publishSite'
-import type { PublishSite } from '@/types'
+import type { DouyinCapability, DouyinReadinessCheck, PublishSite, WechatMpCapability, WechatReadinessCheck } from '@/types'
 
 interface BoardInfo {
   fid: number
@@ -148,7 +165,10 @@ const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const testing = ref(false)
+const selfMediaCapabilityLoading = ref(false)
 const publishSites = ref<PublishSite[]>([])
+const wechatCapability = ref<WechatMpCapability | null>(null)
+const douyinCapability = ref<DouyinCapability | null>(null)
 const routeCode = computed(() => String(route.params.code || ''))
 
 const staticPlatforms: PlatformDetail[] = [
@@ -176,6 +196,19 @@ const platform = computed<PlatformDetail | null>(() => {
   return staticPlatforms.find((item) => item.code === routeCode.value) || null
 })
 const isWechatPlatform = computed(() => platform.value?.code === 'wechat')
+const isDouyinPlatform = computed(() => platform.value?.code === 'douyin')
+const selfMediaCapabilityVisible = computed(() => isWechatPlatform.value || isDouyinPlatform.value)
+const selfMediaCapabilityTitle = computed(() => {
+  if (isWechatPlatform.value) return '公众号接入自检'
+  if (isDouyinPlatform.value) return '抖音接入自检'
+  return '自媒体接入自检'
+})
+const selfMediaReadinessChecks = computed<Array<WechatReadinessCheck | DouyinReadinessCheck>>(() => {
+  if (isWechatPlatform.value) return wechatCapability.value?.readinessChecks || []
+  if (isDouyinPlatform.value) return douyinCapability.value?.readinessChecks || []
+  return []
+})
+const selfMediaReadinessSummary = computed(() => readinessSummary(selfMediaReadinessChecks.value))
 
 function staticPlatform(code: string, name: string, logoText: string, logoClass: string, categoryName: string): PlatformDetail {
   return {
@@ -272,6 +305,54 @@ async function loadDetail() {
   } finally {
     loading.value = false
   }
+  await loadSelfMediaCapability()
+}
+
+async function loadSelfMediaCapability() {
+  if (!selfMediaCapabilityVisible.value) return
+  selfMediaCapabilityLoading.value = true
+  try {
+    if (isWechatPlatform.value) {
+      const { data } = await getWechatMpCapability()
+      wechatCapability.value = data.data
+    } else if (isDouyinPlatform.value) {
+      const { data } = await getDouyinCapability()
+      douyinCapability.value = data.data
+    }
+  } catch {
+    ElMessage.error('加载自媒体接入自检失败')
+  } finally {
+    selfMediaCapabilityLoading.value = false
+  }
+}
+
+function readinessSummary(checks: Array<{ status?: string | null }>) {
+  if (checks.some((item) => item.status === 'missing')) {
+    return { type: 'danger' as const, label: '需补配置' }
+  }
+  if (checks.some((item) => item.status === 'warning')) {
+    return { type: 'warning' as const, label: '待处理' }
+  }
+  if (!checks.length) {
+    return { type: 'info' as const, label: '未加载' }
+  }
+  return { type: 'success' as const, label: '已就绪' }
+}
+
+function readinessTagType(status?: string | null) {
+  if (status === 'ok') return 'success'
+  if (status === 'missing') return 'danger'
+  if (status === 'warning') return 'warning'
+  return 'info'
+}
+
+function readinessStatusLabel(status?: string | null) {
+  const map: Record<string, string> = {
+    ok: '通过',
+    warning: '待处理',
+    missing: '缺失',
+  }
+  return status ? (map[status] || status) : '-'
 }
 
 async function testSite() {
@@ -434,6 +515,55 @@ onMounted(loadDetail)
   border-bottom: 1px solid #eef2f7;
 }
 
+.self-media-check-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.self-media-check-loading {
+  padding: 14px;
+  color: #64748b;
+  font-size: 13px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+}
+
+.self-media-check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.self-media-check-item {
+  display: grid;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  grid-template-columns: minmax(116px, auto) auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.self-media-check-label {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.self-media-check-message {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .summary-row,
 .info-item,
 .board-row {
@@ -551,6 +681,8 @@ onMounted(loadDetail)
   }
 
   .detail-grid,
+  .self-media-check-grid,
+  .self-media-check-item,
   .summary-row,
   .info-item,
   .board-row {

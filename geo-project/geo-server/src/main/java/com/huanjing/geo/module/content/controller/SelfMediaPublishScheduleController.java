@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishAutoScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCancelRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
@@ -9,6 +10,7 @@ import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleManualResultR
 import com.huanjing.geo.module.content.service.SelfMediaPublishAutoScheduleService;
 import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
+import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -36,6 +38,19 @@ public class SelfMediaPublishScheduleController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody SelfMediaPublishScheduleCreateRequest request) {
         return R.ok(scheduleService.createSchedules(request, idempotencyKey));
+    }
+
+    @PostMapping("/self-media-schedules/platform-quick-preview")
+    public R<SelfMediaPlatformQuickScheduleResponse> previewPlatformQuickSchedule(
+            @Valid @RequestBody SelfMediaPlatformQuickScheduleRequest request) {
+        return R.ok(scheduleService.previewPlatformQuickSchedule(request));
+    }
+
+    @PostMapping("/self-media-schedules/platform-quick-create")
+    public R<SelfMediaPlatformQuickScheduleResponse> createPlatformQuickSchedule(
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody SelfMediaPlatformQuickScheduleRequest request) {
+        return R.ok(scheduleService.createPlatformQuickSchedule(request, idempotencyKey));
     }
 
     @PostMapping("/self-media-schedules/auto-preview")

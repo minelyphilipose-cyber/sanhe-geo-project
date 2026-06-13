@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.PlatformAccountIdentityPolicy;
 import com.huanjing.geo.module.audit.ActorType;
 import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
@@ -104,6 +105,7 @@ public class ContentDistributionService {
     private final ObjectMapper objectMapper;
     private final AuthorityMediaDistributionAdapter authorityMediaDistributionAdapter;
     private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
+    private final ArticleCoverSelectionService articleCoverSelectionService;
     private final ForumBoardRoutingService forumBoardRoutingService;
 
     @Transactional
@@ -497,7 +499,7 @@ public class ContentDistributionService {
         currentUserService.ensureBrandAccess(operator, site.getBrandId(), "official_site");
         requireDistributionAccess(operator, site.getBrandId());
 
-        String content = requireLatestContent(article.getId());
+        String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         OfficialCmsSiteAdapter adapter = resolveOfficialCmsAdapter();
         DistributionTask task = createAttemptForBrandOfficialSite(article, site, operator.getId());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.BRAND_OFFICIAL_SITE, task.getId());
@@ -554,7 +556,7 @@ public class ContentDistributionService {
         Brand brand = brandAccessService.requireBrandAccess(brandGeoTarget.brandId(), operator.getId(), BrandAccessAction.OPERATE);
         String siteCode = validateBrandGeoSite(brand);
 
-        String content = requireLatestContent(article.getId());
+        String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         BrandGeoSiteAdapter adapter = resolveBrandGeoSiteAdapter();
         DistributionTask task = createAttemptForBrandGeoSite(article, brand, operator.getId());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.BRAND_GEO_SITE, task.getId());
@@ -755,7 +757,7 @@ public class ContentDistributionService {
             String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
             SemiAutoSelfMediaAdapter adapter = resolveSemiAutoSelfMediaAdapter(account.getPlatform());
             SemiAutoFillTask fillTask = adapter.prepareFillTask(article, content, adapter.fillProfile());
-            String fillPayload = toFillPayload(fillTask, environmentBinding, project);
+            String fillPayload = toFillPayload(fillTask, environmentBinding, project, article);
             updateSemiAutoTaskPrepared(reusable.getId(), fillPayload);
         }
         applyEnvironmentInfo(reusable, environmentBinding);
@@ -935,7 +937,7 @@ public class ContentDistributionService {
         String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         SemiAutoSelfMediaAdapter adapter = resolveSemiAutoSelfMediaAdapter(account.getPlatform());
         SemiAutoFillTask fillTask = adapter.prepareFillTask(article, content, adapter.fillProfile());
-        String fillPayload = toFillPayload(fillTask, environmentBinding, project, mpTarget.platformOptions());
+        String fillPayload = toFillPayload(fillTask, environmentBinding, project, article, mpTarget.platformOptions());
         DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
         updateSemiAutoTaskPrepared(task.getId(), fillPayload);
 
@@ -1515,7 +1517,7 @@ public class ContentDistributionService {
     }
 
     private String toFillPayload(SemiAutoFillTask fillTask, BrowserEnvironmentAccount environmentBinding) {
-        return toFillPayload(fillTask, environmentBinding, null);
+        return toFillPayload(fillTask, environmentBinding, null, null);
     }
 
     private String toFillPayload(SemiAutoFillTask fillTask, BrowserEnvironmentAccount environmentBinding, Project project) {
@@ -1525,15 +1527,25 @@ public class ContentDistributionService {
     private String toFillPayload(SemiAutoFillTask fillTask,
                                  BrowserEnvironmentAccount environmentBinding,
                                  Project project,
+                                 ArticleDraft article) {
+        return toFillPayload(fillTask, environmentBinding, project, article, null);
+    }
+
+    private String toFillPayload(SemiAutoFillTask fillTask,
+                                 BrowserEnvironmentAccount environmentBinding,
+                                 Project project,
+                                 ArticleDraft article,
                                  Map<String, Object> platformOptions) {
         try {
             ObjectNode payloadNode = objectMapper.valueToTree(fillTask);
-            rewriteFillPayloadCoverImageUrl(payloadNode, project);
+            rewriteFillPayloadCoverImageUrl(payloadNode, project, article);
             appendTargetPlatformOptions(payloadNode, platformOptions);
             appendBrandSelfMediaPublishOptions(payloadNode, project);
             if (environmentBinding != null) {
-                if (StringUtils.hasText(environmentBinding.getExpectedPlatformAccountId())) {
-                    payloadNode.put("expectedPlatformAccountId", environmentBinding.getExpectedPlatformAccountId());
+                String expectedPlatformAccountId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(
+                        environmentBinding.getPlatform(), environmentBinding.getExpectedPlatformAccountId());
+                if (StringUtils.hasText(expectedPlatformAccountId)) {
+                    payloadNode.put("expectedPlatformAccountId", expectedPlatformAccountId);
                 }
                 if (StringUtils.hasText(environmentBinding.getExpectedAccountName())) {
                     payloadNode.put("expectedAccountName", environmentBinding.getExpectedAccountName());
@@ -1560,14 +1572,33 @@ public class ContentDistributionService {
         source.fields().forEachRemaining(entry -> target.set(entry.getKey(), entry.getValue()));
     }
 
-    private void rewriteFillPayloadCoverImageUrl(ObjectNode payloadNode, Project project) {
+    private void rewriteFillPayloadCoverImageUrl(ObjectNode payloadNode, Project project, ArticleDraft article) {
         if (payloadNode == null || project == null || !payloadNode.hasNonNull("coverImageUrl")) {
             return;
         }
-        String rewritten = articleImagePublicUrlRewriter.rewriteUrl(project, payloadNode.path("coverImageUrl").asText());
+        String original = payloadNode.path("coverImageUrl").asText();
+        boolean managedMaterialUrl = articleImagePublicUrlRewriter.isManagedBrandMaterialUrl(original);
+        boolean resolvableMaterialUrl = articleImagePublicUrlRewriter.canResolveBrandMaterial(project, original);
+        if (managedMaterialUrl && !resolvableMaterialUrl) {
+            String fallbackCover = articleCoverSelectionService.selectRandomCoverUrl(project.getBrandId());
+            if (StringUtils.hasText(fallbackCover)) {
+                payloadNode.put("coverImageUrl", fallbackCover);
+                persistFallbackCover(article, fallbackCover);
+            }
+            return;
+        }
+        String rewritten = articleImagePublicUrlRewriter.rewriteUrl(project, original);
         if (StringUtils.hasText(rewritten)) {
             payloadNode.put("coverImageUrl", rewritten);
         }
+    }
+
+    private void persistFallbackCover(ArticleDraft article, String fallbackCover) {
+        if (article == null || article.getId() == null || !StringUtils.hasText(fallbackCover)) {
+            return;
+        }
+        article.setCoverImageUrl(fallbackCover);
+        articleDraftMapper.updateById(article);
     }
 
     private void appendBrandSelfMediaPublishOptions(ObjectNode payloadNode, Project project) {

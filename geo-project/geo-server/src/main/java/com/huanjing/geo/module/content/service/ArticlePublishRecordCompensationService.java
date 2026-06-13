@@ -169,7 +169,7 @@ public class ArticlePublishRecordCompensationService {
                     publish_status,
                     published_at,
                     verified_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row.articleId(),
                 row.distributionTaskId(),

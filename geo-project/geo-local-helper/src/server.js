@@ -1925,14 +1925,45 @@ async function choosePuppeteerImageInputs(inputs) {
       id: el.id || '',
       name: el.name || '',
       className: String(el.className || ''),
+      visible: (() => {
+        const rect = el.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+      })(),
+      nearbyText: (() => {
+        let current = el
+        const parts = []
+        for (let depth = 0; current && depth < 7; depth += 1) {
+          parts.push(current.id || '')
+          parts.push(String(current.className || ''))
+          parts.push(current.getAttribute?.('data-e2e') || '')
+          const text = String(current.textContent || '').replace(/\s+/g, '')
+          if (text && text.length <= 180) parts.push(text)
+          current = current.parentElement
+        }
+        return parts.join(' ')
+      })(),
     })).catch(() => ({}))
-    const text = `${meta.accept} ${meta.id} ${meta.name} ${meta.className}`.toLowerCase()
+    const text = `${meta.accept} ${meta.id} ${meta.name} ${meta.className} ${meta.nearbyText}`.toLowerCase()
     if (text.includes('image') || text.includes('jpg') || text.includes('png') || /upload|cover|file/.test(text)) {
-      if (text.includes('drag')) fallback.push(input)
-      else preferred.push(input)
+      const item = { input, score: scorePuppeteerImageInput(text, meta) }
+      if (text.includes('drag')) fallback.push(item)
+      else preferred.push(item)
     }
   }
-  return preferred.concat(fallback).length ? preferred.concat(fallback) : inputs.slice().reverse()
+  const candidates = preferred.concat(fallback)
+  candidates.sort((left, right) => right.score - left.score)
+  return candidates.length ? candidates.map((item) => item.input) : inputs.slice().reverse()
+}
+
+function scorePuppeteerImageInput(descriptor, meta) {
+  let score = 0
+  if (/(image|jpg|jpeg|png|webp)/.test(descriptor)) score += 20
+  if (/btn-upload-handle|upload-handler|本地上传|上传图片|btn-upload|upload-btn/.test(descriptor)) score += 120
+  if (/upload-drag-input/.test(descriptor)) score += 90
+  if (/扫码上传/.test(descriptor)) score -= 30
+  if (/头像|avatar|logo|账号|profile/.test(descriptor)) score -= 80
+  if (meta?.visible) score += 5
+  return score
 }
 
 async function chooseZhihuCoverImageInputs(inputs) {

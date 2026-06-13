@@ -10,6 +10,12 @@ import org.apache.ibatis.annotations.Update;
 @Mapper
 public interface CompanyChannelQuotaUsageMapper extends BaseMapper<CompanyChannelQuotaUsage> {
 
+    @Update("SET SESSION innodb_lock_wait_timeout = #{seconds}")
+    int setSessionLockWaitTimeout(@Param("seconds") int seconds);
+
+    @Update("SET SESSION innodb_lock_wait_timeout = DEFAULT")
+    int resetSessionLockWaitTimeout();
+
     @Insert("INSERT IGNORE INTO company_channel_quota_usage " +
             "(company_id, channel_code, period_type, period_key, quota_limit, used_count) " +
             "VALUES (#{companyId}, #{channelCode}, #{periodType}, #{periodKey}, #{quotaLimit}, 0)")
@@ -30,6 +36,19 @@ public interface CompanyChannelQuotaUsageMapper extends BaseMapper<CompanyChanne
                    @Param("channelCode") String channelCode,
                    @Param("periodType") String periodType,
                    @Param("periodKey") String periodKey);
+
+    @Update("UPDATE company_channel_quota_usage " +
+            "SET used_count = used_count + #{amount} " +
+            "WHERE company_id = #{companyId} " +
+            "  AND channel_code = #{channelCode} " +
+            "  AND period_type = #{periodType} " +
+            "  AND period_key = #{periodKey} " +
+            "  AND used_count + #{amount} <= quota_limit")
+    int tryReserveAmount(@Param("companyId") Long companyId,
+                         @Param("channelCode") String channelCode,
+                         @Param("periodType") String periodType,
+                         @Param("periodKey") String periodKey,
+                         @Param("amount") int amount);
 
     @Update("UPDATE company_channel_quota_usage " +
             "SET used_count = used_count - 1 " +

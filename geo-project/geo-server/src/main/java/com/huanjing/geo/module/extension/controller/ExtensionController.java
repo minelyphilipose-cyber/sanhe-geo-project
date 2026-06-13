@@ -15,6 +15,7 @@ import com.huanjing.geo.module.extension.dto.ExtensionSelfMediaAccountResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionSessionVO;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
+import com.huanjing.geo.module.extension.dto.ExtensionRuntimeConfigResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListItemResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
@@ -177,6 +178,22 @@ public class ExtensionController {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(cookieCaptureService.listAccounts(session.getOperatorId()));
+    }
+
+    @GetMapping("/runtime-config")
+    public R<ExtensionRuntimeConfigResponse> runtimeConfig(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @RequestParam(required = false) String environmentKey,
+            @RequestParam(required = false) String platform
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(browserEnvironmentService.extensionRuntimeConfig(
+                session.getBrandId(),
+                session.getOperatorId(),
+                environmentKey,
+                platform
+        ));
     }
 
     @PostMapping("/browser-environment-accounts/{id}/login-status")

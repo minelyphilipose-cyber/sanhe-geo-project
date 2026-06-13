@@ -52,6 +52,21 @@ public class AsyncExecutorConfig {
     @Value("${audit.threadpool.queue-capacity:1000}")
     private int auditQueueCapacity;
 
+    @Value("${article.ai-draft.threadpool.core-pool-size:4}")
+    private int articleAiDraftCorePoolSize;
+
+    @Value("${article.ai-draft.threadpool.max-pool-size:4}")
+    private int articleAiDraftMaxPoolSize;
+
+    @Value("${article.ai-draft.threadpool.queue-capacity:100}")
+    private int articleAiDraftQueueCapacity;
+
+    @Value("${article.ai-draft.threadpool.keep-alive-seconds:60}")
+    private int articleAiDraftKeepAliveSeconds;
+
+    @Value("${article.ai-draft.threadpool.await-termination-seconds:30}")
+    private int articleAiDraftAwaitTerminationSeconds;
+
     @Bean("taskExecutor")
     public Executor taskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -135,14 +150,14 @@ public class AsyncExecutorConfig {
     @Bean("articleAiDraftExecutor")
     public Executor articleAiDraftExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(4);
-        executor.setQueueCapacity(100);
-        executor.setKeepAliveSeconds(60);
+        executor.setCorePoolSize(Math.max(1, articleAiDraftCorePoolSize));
+        executor.setMaxPoolSize(Math.max(articleAiDraftCorePoolSize, articleAiDraftMaxPoolSize));
+        executor.setQueueCapacity(Math.max(0, articleAiDraftQueueCapacity));
+        executor.setKeepAliveSeconds(Math.max(1, articleAiDraftKeepAliveSeconds));
         executor.setThreadNamePrefix("article-ai-draft-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(30);
+        executor.setAwaitTerminationSeconds(Math.max(1, articleAiDraftAwaitTerminationSeconds));
         executor.initialize();
         return executor;
     }

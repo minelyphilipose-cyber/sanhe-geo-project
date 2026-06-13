@@ -79,6 +79,7 @@ class ContentDistributionSemiAutoServiceTest {
     private CompanyChannelQuotaService companyChannelQuotaService;
     private AuditService auditService;
     private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
+    private ArticleCoverSelectionService articleCoverSelectionService;
     private BrowserEnvironmentService browserEnvironmentService;
     private ContentDistributionService service;
 
@@ -97,6 +98,7 @@ class ContentDistributionSemiAutoServiceTest {
         companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         auditService = mock(AuditService.class);
         articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
+        articleCoverSelectionService = mock(ArticleCoverSelectionService.class);
         browserEnvironmentService = mock(BrowserEnvironmentService.class);
         when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
         when(articleDraftMapper.update(eq(null), any())).thenReturn(1);
@@ -129,6 +131,7 @@ class ContentDistributionSemiAutoServiceTest {
                 new ObjectMapper(),
                 mock(AuthorityMediaDistributionAdapter.class),
                 articleImagePublicUrlRewriter,
+                articleCoverSelectionService,
                 mock(ForumBoardRoutingService.class)
         );
     }
@@ -307,6 +310,36 @@ class ContentDistributionSemiAutoServiceTest {
         assertEquals(1L, payload.path("platformOptions").path("scheduleId").asLong());
         assertEquals("2026-06-03T15:53:00", payload.path("platformOptions").path("scheduledAt").asText());
         assertEquals("2026-06-03T15:53:00", payload.path("platformOptions").path("platformScheduledAt").asText());
+    }
+
+    @Test
+    void invalidManagedCoverUrlIsReplacedAndPersistedBeforeIssuingFillPayload() throws Exception {
+        stubApprovedArticleProjectAndContent();
+        ArticleDraft article = articleDraftMapper.selectById(20L);
+        article.setCoverImageUrl("http://127.0.0.1:8080/api/public/brand-materials/48/stream?sig=stale");
+        when(articleImagePublicUrlRewriter.isManagedBrandMaterialUrl(article.getCoverImageUrl())).thenReturn(true);
+        when(articleImagePublicUrlRewriter.canResolveBrandMaterial(any(), eq(article.getCoverImageUrl()))).thenReturn(false);
+        when(articleCoverSelectionService.selectRandomCoverUrl(10L)).thenReturn("http://127.0.0.1:8080/api/public/brand-materials/49/stream?sig=fresh");
+        when(distributionTaskMapper.selectList(any())).thenReturn(List.of());
+        when(distributionTaskMapper.insert(any())).thenAnswer(invocation -> {
+            DistributionTask task = invocation.getArgument(0);
+            task.setId(50L);
+            return 1;
+        });
+        when(fillTokenService.issueInternalWithoutVersionCheck(60L, 10L, 99L, 50L))
+                .thenReturn(new FillTokenIssueResponse("ft.token", 200L, "nonce"));
+
+        DistributionTask task = service.distributeTo(
+                20L,
+                new TargetContext.SelfMediaTarget(cookieAccount(), null, List.of(), List.of(), null, null, "req-1", Map.of())
+        );
+
+        var payload = new ObjectMapper().readTree(task.getFillPayload());
+        assertEquals("http://127.0.0.1:8080/api/public/brand-materials/49/stream?sig=fresh",
+                payload.path("coverImageUrl").asText());
+        assertEquals("http://127.0.0.1:8080/api/public/brand-materials/49/stream?sig=fresh",
+                article.getCoverImageUrl());
+        verify(articleDraftMapper).updateById(article);
     }
 
     @Test

@@ -1351,6 +1351,22 @@ export interface SelfMediaPublishScheduleCreateResponse {
   rejectedItems: SelfMediaPublishScheduleRejectedItem[]
 }
 
+export interface SelfMediaPlatformQuickScheduleResponse {
+  action: 'ready' | 'created' | 'replace_required' | 'quota_exhausted' | 'article_type_mismatch' | 'account_or_environment_not_ready' | 'rejected' | string
+  code?: string | null
+  message?: string | null
+  articleId?: number | null
+  brandId?: number | null
+  platform?: string | null
+  platformLabel?: string | null
+  selfMediaAccountId?: number | null
+  replaceScheduleId?: number | null
+  plannedPublishAt?: string | null
+  nextAttemptAt?: string | null
+  brandSafetyIntervalMinutes?: number | null
+  createResponse?: SelfMediaPublishScheduleCreateResponse | null
+}
+
 export interface SelfMediaScheduleCapability {
   id?: number | null
   platform: string

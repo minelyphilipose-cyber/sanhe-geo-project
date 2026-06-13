@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
+import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
@@ -23,6 +24,7 @@ import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMap
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
+import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleRejectedItemVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
@@ -44,6 +46,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -58,6 +61,8 @@ import java.util.Set;
 public class SelfMediaPublishScheduleService {
     private static final int ERROR_CODE = 70040;
     private static final int DEFAULT_INTERVAL_MINUTES = 30;
+    private static final int QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES = 3;
+    private static final int QUICK_SCHEDULE_SLOT_LOOKAHEAD_HOURS = 12;
     private static final int REQUEST_TTL_HOURS = 24;
     private static final int DEFAULT_CLAIM_LIMIT = 10;
     private static final int PUBLISH_CHECK_TOTAL_ATTEMPTS = 4;
@@ -142,6 +147,7 @@ public class SelfMediaPublishScheduleService {
     private final CompanyChannelQuotaService companyChannelQuotaService;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
+    private final BusinessCalendarService businessCalendarService;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -162,6 +168,55 @@ public class SelfMediaPublishScheduleService {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
         }
         return createSchedulesInternal(validated, operatorId, idempotencyKeyHeader);
+    }
+
+    @Transactional
+    public SelfMediaPlatformQuickScheduleResponse previewPlatformQuickSchedule(SelfMediaPlatformQuickScheduleRequest request) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        QuickSchedulePlan plan = buildQuickSchedulePlan(request, operator.getId());
+        return plan.response();
+    }
+
+    @Transactional
+    public SelfMediaPlatformQuickScheduleResponse createPlatformQuickSchedule(SelfMediaPlatformQuickScheduleRequest request,
+                                                                             String idempotencyKeyHeader) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        QuickSchedulePlan plan = buildQuickSchedulePlan(request, operator.getId());
+        if ("replace_required".equals(plan.response().getAction())) {
+            if (!Boolean.TRUE.equals(request.getReplaceNextScheduled())) {
+                return plan.response();
+            }
+            SelfMediaPublishSchedule replaceTarget = scheduleMapper.selectById(plan.response().getReplaceScheduleId());
+            if (replaceTarget == null) {
+                fail("REPLACE_TARGET_NOT_AVAILABLE", "可替换排期已开始执行或不存在，请刷新后重试");
+            }
+            LocalDateTime now = LocalDateTime.now();
+            PeriodWindow replacementMonth = currentMonth(now);
+            int replaced = scheduleMapper.cancelReplaceablePendingSchedule(
+                    replaceTarget.getId(),
+                    plan.response().getBrandId(),
+                    plan.response().getPlatform(),
+                    replacementMonth.start(),
+                    replacementMonth.end(),
+                    now
+            );
+            if (replaced <= 0) {
+                fail("REPLACE_TARGET_NOT_AVAILABLE", "可替换排期已开始执行或不存在，请刷新后重试");
+            }
+            refundScheduleQuotaIfPresent(replaceTarget);
+            plan = buildQuickSchedulePlan(request, operator.getId(), true);
+        } else if (!"ready".equals(plan.response().getAction())) {
+            return plan.response();
+        }
+        SelfMediaPublishScheduleCreateResponse created = createQuickSchedule(plan, operator.getId(), idempotencyKeyHeader);
+        SelfMediaPlatformQuickScheduleResponse response = plan.response();
+        response.setAction(created.getCreatedSchedules().isEmpty() ? "rejected" : "created");
+        response.setCode(created.getCreatedSchedules().isEmpty() ? "QUICK_SCHEDULE_NOT_CREATED" : "QUICK_SCHEDULE_CREATED");
+        response.setMessage(created.getCreatedSchedules().isEmpty()
+                ? firstRejectedMessage(created)
+                : "已创建平台快速排期，系统将按品牌安全间隔自动打开 AdsPower 环境处理");
+        response.setCreateResponse(created);
+        return response;
     }
 
     private SelfMediaPublishScheduleCreateResponse createSchedulesInternal(ValidatedRequest validated,
@@ -195,7 +250,9 @@ public class SelfMediaPublishScheduleService {
         response.setRequestIdempotencyKey(requestKey);
 
         LocalDateTime plannedCursor = validated.windowStart();
+        LocalDateTime executionCursor = validated.executionWindowStart();
         QuotaPrecheck quotaPrecheck = quotaPrecheck(validated.brandId());
+        List<ScheduleQuotaReservation> quotaReservations = new ArrayList<>();
         for (Long articleId : validated.articleIds()) {
             ArticleDraft article = articleDraftMapper.selectById(articleId);
             for (Long accountId : validated.accountIds()) {
@@ -209,14 +266,22 @@ public class SelfMediaPublishScheduleService {
                             "SCHEDULE_WINDOW_FULL", "排期时间窗口已满，请扩大时间窗口或减少排期数量", null));
                     continue;
                 }
+                if (executionCursor.isAfter(validated.executionWindowEnd())) {
+                    response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
+                            "SCHEDULE_EXECUTION_WINDOW_FULL", "执行填充时间窗口已满，请扩大时间窗口或减少排期数量", null));
+                    continue;
+                }
                 int requiredLeadMinutes = requiredPlatformScheduleCreateLeadMinutes(
                         validated.strategy(),
                         candidate.account().getPlatform()
                 );
-                if (isPlatformScheduleTooClose(validated.strategy(), plannedCursor, candidate.account().getPlatform())) {
+                LocalDateTime validationBaseTime = validated.hasExplicitExecutionWindow()
+                        ? executionCursor
+                        : LocalDateTime.now();
+                if (isPlatformScheduleTooClose(validated.strategy(), validationBaseTime, plannedCursor, candidate.account().getPlatform())) {
                     response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
                             "PLATFORM_SCHEDULE_TIME_TOO_CLOSE",
-                            "平台定时发布时间需至少晚于当前时间 " + minutesText(requiredLeadMinutes),
+                            "平台定时发布时间需至少晚于执行填充时间 " + minutesText(requiredLeadMinutes),
                             null));
                     continue;
                 }
@@ -224,10 +289,10 @@ public class SelfMediaPublishScheduleService {
                         validated.strategy(),
                         candidate.account().getPlatform()
                 );
-                if (isPlatformScheduleTooFar(validated.strategy(), plannedCursor, candidate.account().getPlatform())) {
+                if (isPlatformScheduleTooFar(validated.strategy(), validationBaseTime, plannedCursor, candidate.account().getPlatform())) {
                     response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
                             "PLATFORM_SCHEDULE_TIME_TOO_FAR",
-                            "平台定时发布时间最多支持当前时间后 " + minutesText(maxRemainingMinutes),
+                            "平台定时发布时间最多支持执行填充时间后 " + minutesText(maxRemainingMinutes),
                             null));
                     continue;
                 }
@@ -238,11 +303,17 @@ public class SelfMediaPublishScheduleService {
                     continue;
                 }
                 SelfMediaPublishSchedule inserted = createScheduleRow(requestRow, operatorId, candidate,
-                        plannedCursor, validated.strategy(), quotaPrecheck.companyId);
+                        plannedCursor, executionCursor, validated.strategy());
                 if (inserted != null) {
                     quotaPrecheck.consume(candidate.account().getPlatform());
+                    quotaReservations.add(new ScheduleQuotaReservation(
+                            inserted.getId(),
+                            candidate.article().getProjectId(),
+                            inserted.getPlatform()
+                    ));
                     response.getCreatedSchedules().add(SelfMediaPublishScheduleVO.from(inserted));
                     plannedCursor = plannedCursor.plusMinutes(validated.intervalMinutes());
+                    executionCursor = executionCursor.plusMinutes(validated.intervalMinutes());
                 } else {
                     response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
                             "ACTIVE_SCHEDULE_EXISTS", "同一文章、账号和计划时间已存在活跃排期", null));
@@ -250,6 +321,124 @@ public class SelfMediaPublishScheduleService {
             }
         }
 
+        reserveScheduleQuotas(quotaPrecheck.companyId, quotaReservations);
+        requestRow.setScheduleCount(response.getCreatedSchedules().size());
+        requestRow.setStatus("completed");
+        requestMapper.updateById(requestRow);
+        return response;
+    }
+
+    private QuickSchedulePlan buildQuickSchedulePlan(SelfMediaPlatformQuickScheduleRequest request, Long operatorId) {
+        return buildQuickSchedulePlan(request, operatorId, false);
+    }
+
+    private QuickSchedulePlan buildQuickSchedulePlan(SelfMediaPlatformQuickScheduleRequest request,
+                                                     Long operatorId,
+                                                     boolean quotaReplacementAlreadyApplied) {
+        if (request == null || request.getArticleId() == null || request.getArticleId() <= 0) {
+            fail("INVALID_ARTICLE", "articleId must be a positive number");
+        }
+        String platform = normalize(request.getPlatform());
+        if (!StringUtils.hasText(platform)) {
+            fail("INVALID_PLATFORM", "platform must not be blank");
+        }
+        ArticleDraft article = articleDraftMapper.selectById(request.getArticleId());
+        if (article == null) {
+            return quickResponse("rejected", "ARTICLE_NOT_FOUND", "文章不存在", request.getArticleId(), null,
+                    platform, null, null, null, null);
+        }
+        Project project = article.getProjectId() == null ? null : projectMapper.selectById(article.getProjectId());
+        if (project == null || project.getBrandId() == null) {
+            return quickResponse("rejected", "ARTICLE_BRAND_MISSING", "当前文章未绑定品牌，无法创建平台排期",
+                    article.getId(), null, platform, null, null, null, null);
+        }
+        Long brandId = project.getBrandId();
+        brandAccessService.requireBrandAccess(brandId, operatorId, BrandAccessAction.OPERATE);
+        if (!platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION).contains(platform)) {
+            return quickResponse("rejected", "PLATFORM_NOT_AUTOMATED",
+                    platformLabel(platform) + "当前不支持 AdsPower 自动排期，请使用该平台已有分发方式",
+                    article.getId(), brandId, platform, null, null, null, null);
+        }
+        String incompatibleMessage = articlePlatformIncompatibleMessage(article, platform);
+        if (StringUtils.hasText(incompatibleMessage)) {
+            return quickResponse("article_type_mismatch", "ARTICLE_PLATFORM_MISMATCH", incompatibleMessage,
+                    article.getId(), brandId, platform, null, null, null, null);
+        }
+        SelfMediaAccount account = selectActivePlatformAccount(brandId, platform);
+        if (account == null) {
+            return quickResponse("account_or_environment_not_ready", "SELF_MEDIA_ACCOUNT_NOT_FOUND",
+                    "当前品牌暂无可用的" + platformLabel(platform) + "账号，无法创建排期",
+                    article.getId(), brandId, platform, null, null, null, null);
+        }
+        String strategy = quickScheduleStrategy(platform);
+        Candidate candidate = validateCandidate(brandId, article, article.getId(), account.getId(), strategy);
+        if (candidate.rejected() != null) {
+            return quickResponse(actionForRejected(candidate.rejected().getCode()), candidate.rejected().getCode(),
+                    candidate.rejected().getMessage(), article.getId(), brandId, platform, account.getId(),
+                    null, null, null);
+        }
+        LocalDateTime now = LocalDateTime.now();
+        PeriodWindow month = currentMonth(now);
+        if (!quotaReplacementAlreadyApplied) {
+            SelfMediaPublishScheduleRejectedItemVO quotaRejected = quotaPrecheck(brandId)
+                    .check(article.getId(), account.getId(), platform);
+            if (quotaRejected != null) {
+                SelfMediaPublishSchedule replaceable = scheduleMapper.selectNextReplaceablePendingByBrandPlatformAndPeriod(
+                        brandId, platform, month.start(), month.end(), now);
+                if (replaceable != null) {
+                    return quickResponse("replace_required", "MONTH_PLATFORM_SCHEDULE_ALREADY_PLANNED",
+                            "该平台本月文章已做排期处理，若继续发布将替换已排期文章，是否继续？",
+                            article.getId(), brandId, platform, account.getId(), replaceable.getId(),
+                            replaceable.getPlannedPublishAt(), replaceable.getNextAttemptAt());
+                }
+                return quickResponse("quota_exhausted", quotaRejected.getCode(),
+                        platformLabel(platform) + "本月可发布额度已用完，当前无法继续创建排期。请下月额度恢复后再发布，或调整品牌套餐额度。",
+                        article.getId(), brandId, platform, account.getId(), null, null, null);
+            }
+        }
+        LocalDateTime nextAttemptAt = nextBrandSafeAttemptAt(brandId, now);
+        LocalDateTime plannedPublishAt = plannedPublishAtForQuickSchedule(platform, strategy, nextAttemptAt, now);
+        return quickResponse("ready", "READY", "可以创建" + platformLabel(platform) + "平台快速排期",
+                article.getId(), brandId, platform, account.getId(), null, plannedPublishAt, nextAttemptAt)
+                .withPlan(new QuickScheduleData(candidate, strategy, plannedPublishAt));
+    }
+
+    private SelfMediaPublishScheduleCreateResponse createQuickSchedule(QuickSchedulePlan plan,
+                                                                      Long operatorId,
+                                                                      String idempotencyKeyHeader) {
+        QuickScheduleData data = plan.data();
+        ValidatedRequest validated = new ValidatedRequest(
+                plan.response().getBrandId(),
+                List.of(plan.response().getArticleId()),
+                List.of(plan.response().getSelfMediaAccountId()),
+                plan.response().getPlannedPublishAt(),
+                plan.response().getPlannedPublishAt(),
+                plan.response().getPlannedPublishAt(),
+                plan.response().getPlannedPublishAt(),
+                false,
+                data.strategy(),
+                QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES
+        );
+        String normalizedPayload = normalizedPayload(validated);
+        String requestKey = StringUtils.hasText(idempotencyKeyHeader)
+                ? idempotencyKeyHeader.trim()
+                : sha256("quick|" + normalizedPayload + "|" + System.nanoTime());
+        SelfMediaPublishScheduleRequest requestRow = createRequestRow(validated, operatorId, requestKey,
+                sha256(normalizedPayload), normalizedPayload);
+        requestMapper.insert(requestRow);
+
+        SelfMediaPublishScheduleCreateResponse response = new SelfMediaPublishScheduleCreateResponse();
+        response.setRequestId(requestRow.getId());
+        response.setRequestIdempotencyKey(requestKey);
+        SelfMediaPublishSchedule inserted = createScheduleRow(requestRow, operatorId, data.candidate(),
+                data.plannedPublishAt(), null, data.strategy());
+        if (inserted == null) {
+            response.getRejectedItems().add(rejected(plan.response().getArticleId(), plan.response().getSelfMediaAccountId(),
+                    plan.response().getPlatform(), "ACTIVE_SCHEDULE_EXISTS", "同一文章、账号和计划时间已存在活跃排期", null));
+        } else {
+            reserveScheduleQuota(inserted, data.candidate().article().getProjectId(), quotaPrecheck(plan.response().getBrandId()).companyId);
+            response.getCreatedSchedules().add(SelfMediaPublishScheduleVO.from(inserted));
+        }
         requestRow.setScheduleCount(response.getCreatedSchedules().size());
         requestRow.setStatus("completed");
         requestMapper.updateById(requestRow);
@@ -1090,6 +1279,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(null);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
+        markArticlePublished(row.getArticleId());
         confirmDistributionQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         reconcileAlerts(row);
@@ -1111,6 +1301,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(trimToNull(failureMessage));
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
+        releaseArticleIfNoActiveSchedule(row);
         refundScheduleQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         reconcileAlerts(row);
@@ -1197,6 +1388,7 @@ public class SelfMediaPublishScheduleService {
         if (!PLATFORM_SUBMITTED_STATUSES.contains(status)) {
             refundScheduleQuotaIfPresent(row);
             refundDistributionQuotaIfPresent(row);
+            releaseArticleIfNoActiveSchedule(row);
         }
         environmentLockService.release(row.getId());
         return SelfMediaPublishScheduleVO.from(row);
@@ -1218,6 +1410,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(trimToNull(reason));
         touch(row);
         scheduleMapper.updateById(row);
+        releaseArticleIfNoActiveSchedule(row);
         refundScheduleQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         return SelfMediaPublishScheduleVO.from(row);
@@ -1236,6 +1429,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(null);
         touch(row);
         scheduleMapper.updateById(row);
+        markArticlePublished(row.getArticleId());
         confirmScheduleQuotaIfPresent(row);
         confirmDistributionQuotaIfPresent(row);
         environmentLockService.release(row.getId());
@@ -1253,6 +1447,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(trimToNull(failureMessage));
         touch(row);
         scheduleMapper.updateById(row);
+        releaseArticleIfNoActiveSchedule(row);
         refundScheduleQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         return SelfMediaPublishScheduleVO.from(row);
@@ -1352,6 +1547,17 @@ public class SelfMediaPublishScheduleService {
         if (windowStart == null || windowEnd == null || windowEnd.isBefore(windowStart)) {
             fail("INVALID_SCHEDULE_WINDOW", "排期时间窗口无效");
         }
+        boolean hasExplicitExecutionWindow = request.getExecutionWindowStart() != null
+                || request.getExecutionWindowEnd() != null;
+        LocalDateTime executionWindowStart = request.getExecutionWindowStart() == null
+                ? windowStart
+                : request.getExecutionWindowStart();
+        LocalDateTime executionWindowEnd = request.getExecutionWindowEnd() == null
+                ? (hasExplicitExecutionWindow ? executionWindowStart : windowEnd)
+                : request.getExecutionWindowEnd();
+        if (executionWindowEnd.isBefore(executionWindowStart)) {
+            fail("INVALID_EXECUTION_WINDOW", "执行填充时间窗口无效");
+        }
         String strategy = StringUtils.hasText(request.getScheduleStrategy())
                 ? request.getScheduleStrategy().trim().toLowerCase(Locale.ROOT)
                 : SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE;
@@ -1373,7 +1579,8 @@ public class SelfMediaPublishScheduleService {
         if (interval <= 0) {
             fail("INVALID_INTERVAL", "最小错峰间隔必须大于 0");
         }
-        return new ValidatedRequest(request.getBrandId(), articleIds, accountIds, windowStart, windowEnd, strategy, interval);
+        return new ValidatedRequest(request.getBrandId(), articleIds, accountIds, windowStart, windowEnd,
+                executionWindowStart, executionWindowEnd, hasExplicitExecutionWindow, strategy, interval);
     }
 
     private SelfMediaPublishSchedule requireScheduleWithAccess(Long id) {
@@ -1443,6 +1650,10 @@ public class SelfMediaPublishScheduleService {
             return Candidate.rejected(rejected(articleId, accountId, platform,
                     "ARTICLE_ALREADY_PUBLISHED", "文章已发布或已分发，不能重复创建自媒体排期", null));
         }
+        if (hasActiveSelfMediaSchedule(articleId, null)) {
+            return Candidate.rejected(rejected(articleId, accountId, platform,
+                    "ARTICLE_SELF_MEDIA_SCHEDULE_ACTIVE", "文章已有自媒体排期正在处理，不能重复创建分发任务", null));
+        }
         if (!ACTIVE_ARTICLE_STATUS.contains(articleStatus)) {
             return Candidate.rejected(rejected(articleId, accountId, platform,
                     "ARTICLE_NOT_READY", "仅已就绪或未发布文章可创建自动排期", null));
@@ -1501,8 +1712,8 @@ public class SelfMediaPublishScheduleService {
                                                        Long operatorId,
                                                        Candidate candidate,
                                                        LocalDateTime plannedAt,
-                                                       String strategy,
-                                                       Long companyId) {
+                                                       LocalDateTime executionAt,
+                                                       String strategy) {
         String baseKey = baseIdempotencyKey(candidate.article().getId(), candidate.account().getId(), plannedAt, strategy);
         SelfMediaPublishSchedule active = scheduleMapper.selectActiveByBaseIdempotencyKey(
                 baseKey, new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES));
@@ -1534,13 +1745,19 @@ public class SelfMediaPublishScheduleService {
         row.setPublishCheckFingerprint(publishCheckFingerprint(row));
         row.setAttemptCount(0);
         row.setMaxAttempts(resolveMaxAttempts(candidate.account().getPlatform(), strategy));
-        row.setNextAttemptAt(resolveScheduleExecutionAttemptTime(plannedAt, candidate.account().getPlatform(), strategy));
+        row.setNextAttemptAt(resolveScheduleExecutionAttemptTime(
+                requestRow.getBrandId(),
+                plannedAt,
+                executionAt,
+                candidate.account().getPlatform(),
+                strategy
+        ));
         row.setCreatedBy(operatorId);
         row.setUpdatedBy(operatorId);
 
         try {
             scheduleMapper.insert(row);
-            reserveScheduleQuota(row, candidate.article().getProjectId(), companyId);
+            markArticleDistributing(row.getArticleId());
             return row;
         } catch (DuplicateKeyException duplicate) {
             return null;
@@ -1578,11 +1795,18 @@ public class SelfMediaPublishScheduleService {
         return max == null ? 1 : max + 1;
     }
 
-    private LocalDateTime resolveScheduleExecutionAttemptTime(LocalDateTime plannedAt, String platform, String strategy) {
+    private LocalDateTime resolveScheduleExecutionAttemptTime(Long brandId,
+                                                              LocalDateTime plannedAt,
+                                                              LocalDateTime executionAt,
+                                                              String platform,
+                                                              String strategy) {
+        if (executionAt != null) {
+            return nextBrandSafeAttemptAt(brandId, executionAt, null);
+        }
         int leadMinutes = resolveScheduleExecutionLeadMinutes(platform, strategy);
         LocalDateTime fillAt = plannedAt.minusMinutes(leadMinutes);
         LocalDateTime now = LocalDateTime.now();
-        return fillAt.isBefore(now) ? now : fillAt;
+        return nextBrandSafeAttemptAt(brandId, fillAt.isBefore(now) ? now : fillAt, null);
     }
 
     private int resolveScheduleExecutionLeadMinutes(String platform, String strategy) {
@@ -1593,7 +1817,7 @@ public class SelfMediaPublishScheduleService {
         LocalDateTime target = row.getPlatformScheduledAt() != null
                 ? row.getPlatformScheduledAt()
                 : row.getPlannedPublishAt();
-        return target == null ? LocalDateTime.now() : target;
+        return nextBrandSafeAttemptAt(row.getBrandId(), target == null ? LocalDateTime.now() : target, row.getId());
     }
 
     private LocalDateTime nextPublishCheckRetryAt(SelfMediaPublishSchedule row, int maxAttempts) {
@@ -1605,7 +1829,7 @@ public class SelfMediaPublishScheduleService {
         int delayMinutes = PUBLISH_CHECK_RETRY_DELAYS_MINUTES[
                 Math.min(retryIndex, PUBLISH_CHECK_RETRY_DELAYS_MINUTES.length - 1)
         ];
-        return LocalDateTime.now().plusMinutes(delayMinutes);
+        return nextBrandSafeAttemptAt(row.getBrandId(), LocalDateTime.now().plusMinutes(delayMinutes), row.getId());
     }
 
     private void reconcileAlerts(SelfMediaPublishSchedule row) {
@@ -1623,7 +1847,39 @@ public class SelfMediaPublishScheduleService {
         int delayMinutes = SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES[
                 Math.min(retryIndex, SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES.length - 1)
         ];
-        return LocalDateTime.now().plusMinutes(delayMinutes);
+        return nextBrandSafeAttemptAt(row.getBrandId(), LocalDateTime.now().plusMinutes(delayMinutes), row.getId());
+    }
+
+    private LocalDateTime clampToBusinessAttemptWindow(LocalDateTime candidate) {
+        if (candidate == null) {
+            return null;
+        }
+        LocalDateTime cursor = candidate.withSecond(0).withNano(0);
+        YearMonth month = YearMonth.from(cursor);
+        for (int i = 0; i < 3; i++) {
+            List<BusinessCalendarService.BusinessDay> days;
+            try {
+                days = businessCalendarService.publishDays(month, false);
+            } catch (RuntimeException ex) {
+                return cursor;
+            }
+            for (BusinessCalendarService.BusinessDay day : days) {
+                for (BusinessCalendarService.PublishWindow window : day.windows()) {
+                    LocalDateTime start = day.date().atTime(window.start());
+                    LocalDateTime end = day.date().atTime(window.end());
+                    if (cursor.isAfter(end)) {
+                        continue;
+                    }
+                    if (cursor.isBefore(start)) {
+                        return start;
+                    }
+                    return cursor;
+                }
+            }
+            month = month.plusMonths(1);
+            cursor = month.atDay(1).atStartOfDay();
+        }
+        return candidate.withSecond(0).withNano(0);
     }
 
     private boolean isScheduleExecutionRetryableFailure(String failureCode) {
@@ -1634,6 +1890,54 @@ public class SelfMediaPublishScheduleService {
         if (row != null && row.getDistributionTaskId() != null) {
             companyChannelQuotaService.confirmDistribution(row.getDistributionTaskId());
         }
+    }
+
+    private void markArticleDistributing(Long articleId) {
+        ArticleDraft article = articleId == null ? null : articleDraftMapper.selectById(articleId);
+        if (article == null) {
+            return;
+        }
+        String status = normalize(article.getStatus());
+        if (!ACTIVE_ARTICLE_STATUS.contains(status)) {
+            return;
+        }
+        article.setStatus("distributing");
+        articleDraftMapper.updateById(article);
+    }
+
+    private void markArticlePublished(Long articleId) {
+        ArticleDraft article = articleId == null ? null : articleDraftMapper.selectById(articleId);
+        if (article == null) {
+            return;
+        }
+        article.setStatus("published");
+        articleDraftMapper.updateById(article);
+    }
+
+    private void releaseArticleIfNoActiveSchedule(SelfMediaPublishSchedule row) {
+        if (row == null || row.getArticleId() == null) {
+            return;
+        }
+        if (hasActiveSelfMediaSchedule(row.getArticleId(), row.getId())) {
+            return;
+        }
+        ArticleDraft article = articleDraftMapper.selectById(row.getArticleId());
+        if (article == null || !"distributing".equals(normalize(article.getStatus()))) {
+            return;
+        }
+        article.setStatus("approved");
+        articleDraftMapper.updateById(article);
+    }
+
+    private boolean hasActiveSelfMediaSchedule(Long articleId, Long excludedScheduleId) {
+        if (articleId == null) {
+            return false;
+        }
+        return scheduleMapper.countActiveByArticleId(
+                articleId,
+                excludedScheduleId,
+                new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
+        ) > 0;
     }
 
     private void refundDistributionQuotaIfPresent(SelfMediaPublishSchedule row) {
@@ -1651,6 +1955,22 @@ public class SelfMediaPublishScheduleService {
                 projectId,
                 row.getPlatform(),
                 row.getId()
+        );
+    }
+
+    private void reserveScheduleQuotas(Long companyId, List<ScheduleQuotaReservation> reservations) {
+        if (companyId == null || companyId <= 0 || reservations == null || reservations.isEmpty()) {
+            return;
+        }
+        companyChannelQuotaService.reserveSelfMediaSchedules(
+                companyId,
+                reservations.stream()
+                        .map(item -> new CompanyChannelQuotaService.SelfMediaScheduleQuotaReservation(
+                                item.projectId(),
+                                item.platform(),
+                                item.scheduleId()
+                        ))
+                        .toList()
         );
     }
 
@@ -1722,20 +2042,28 @@ public class SelfMediaPublishScheduleService {
                 && !platformScheduledAt.isAfter(now.plusMinutes(minRemainingMinutes));
     }
 
-    private boolean isPlatformScheduleTooClose(String strategy, LocalDateTime plannedAt, String platform) {
+    private boolean isPlatformScheduleTooClose(String strategy,
+                                               LocalDateTime executionAt,
+                                               LocalDateTime plannedAt,
+                                               String platform) {
         int requiredLeadMinutes = requiredPlatformScheduleCreateLeadMinutes(strategy, platform);
         return SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalize(strategy))
                 && plannedAt != null
+                && executionAt != null
                 && requiredLeadMinutes > 0
-                && !plannedAt.isAfter(LocalDateTime.now().plusMinutes(requiredLeadMinutes));
+                && plannedAt.isBefore(executionAt.plusMinutes(requiredLeadMinutes));
     }
 
-    private boolean isPlatformScheduleTooFar(String strategy, LocalDateTime plannedAt, String platform) {
+    private boolean isPlatformScheduleTooFar(String strategy,
+                                             LocalDateTime executionAt,
+                                             LocalDateTime plannedAt,
+                                             String platform) {
         int maxRemainingMinutes = maxPlatformScheduleRemainingMinutes(strategy, platform);
         return SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalize(strategy))
                 && plannedAt != null
+                && executionAt != null
                 && maxRemainingMinutes > 0
-                && plannedAt.isAfter(LocalDateTime.now().plusMinutes(maxRemainingMinutes));
+                && plannedAt.isAfter(executionAt.plusMinutes(maxRemainingMinutes));
     }
 
     private int requiredPlatformScheduleCreateLeadMinutes(String strategy, String platform) {
@@ -1784,6 +2112,8 @@ public class SelfMediaPublishScheduleService {
         payload.put("selfMediaAccountIds", request.accountIds());
         payload.put("windowStart", request.windowStart().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
         payload.put("windowEnd", request.windowEnd().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        payload.put("executionWindowStart", request.executionWindowStart().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        payload.put("executionWindowEnd", request.executionWindowEnd().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
         payload.put("scheduleStrategy", request.strategy());
         payload.put("minIntervalMinutes", request.intervalMinutes());
         try {
@@ -1842,6 +2172,165 @@ public class SelfMediaPublishScheduleService {
             }
         }
         return "ENVIRONMENT_ACCOUNT_NOT_READY";
+    }
+
+    private QuickSchedulePlan quickResponse(String action,
+                                            String code,
+                                            String message,
+                                            Long articleId,
+                                            Long brandId,
+                                            String platform,
+                                            Long accountId,
+                                            Long replaceScheduleId,
+                                            LocalDateTime plannedPublishAt,
+                                            LocalDateTime nextAttemptAt) {
+        return new QuickSchedulePlan(SelfMediaPlatformQuickScheduleResponse.builder()
+                .action(action)
+                .code(code)
+                .message(message)
+                .articleId(articleId)
+                .brandId(brandId)
+                .platform(platform)
+                .platformLabel(platformLabel(platform))
+                .selfMediaAccountId(accountId)
+                .replaceScheduleId(replaceScheduleId)
+                .plannedPublishAt(plannedPublishAt)
+                .nextAttemptAt(nextAttemptAt)
+                .brandSafetyIntervalMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES)
+                .build(), null);
+    }
+
+    private String firstRejectedMessage(SelfMediaPublishScheduleCreateResponse response) {
+        if (response != null && response.getRejectedItems() != null && !response.getRejectedItems().isEmpty()) {
+            SelfMediaPublishScheduleRejectedItemVO rejected = response.getRejectedItems().get(0);
+            return StringUtils.hasText(rejected.getMessage()) ? rejected.getMessage() : "平台快速排期未创建";
+        }
+        return "平台快速排期未创建";
+    }
+
+    private String actionForRejected(String code) {
+        String normalized = normalize(code);
+        if (normalized.contains("quota")) return "quota_exhausted";
+        if (normalized.contains("environment") || normalized.contains("account")) return "account_or_environment_not_ready";
+        if (normalized.contains("capability") || normalized.contains("strategy")) return "rejected";
+        if (normalized.contains("article")) return "article_type_mismatch";
+        return "rejected";
+    }
+
+    private SelfMediaAccount selectActivePlatformAccount(Long brandId, String platform) {
+        return selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getBrandId, brandId)
+                .eq(SelfMediaAccount::getPlatform, platform)
+                .eq(SelfMediaAccount::getStatus, "active")
+                .isNull(SelfMediaAccount::getDeletedAt)
+                .orderByDesc(SelfMediaAccount::getUpdatedAt)
+                .orderByDesc(SelfMediaAccount::getId)
+                .last("LIMIT 1"));
+    }
+
+    private String quickScheduleStrategy(String platform) {
+        return scheduleAdapterRouter.contract(platform)
+                .map(contract -> contract.supportsBackendDelayedPublish()
+                        ? SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH
+                        : SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE)
+                .orElse(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE);
+    }
+
+    private String articlePlatformIncompatibleMessage(ArticleDraft article, String platform) {
+        String explicit = explicitArticlePlatform(article);
+        if (StringUtils.hasText(explicit) && !platform.equals(explicit)) {
+            return "当前文章类型适配" + platformLabel(explicit) + "，不能发布到" + platformLabel(platform) + "。请先选择适配该平台的文章后再创建排期。";
+        }
+        return null;
+    }
+
+    private String explicitArticlePlatform(ArticleDraft article) {
+        if (article == null) return null;
+        String joined = normalize(String.join(" ",
+                String.valueOf(article.getTargetChannel()),
+                String.valueOf(article.getContentStyle()),
+                String.valueOf(article.getChannelGroupCode()),
+                String.valueOf(article.getChannelSubCode()),
+                String.valueOf(article.getArticleTypeCode()),
+                String.valueOf(article.getTemplateSource())
+        ));
+        if (joined.contains("xiaohongshu") || joined.contains("xhs") || joined.contains("小红书")) return "xiaohongshu";
+        if (joined.contains("toutiao") || joined.contains("头条")) return "toutiao";
+        if (joined.contains("baijiahao") || joined.contains("百家号")) return "baijiahao";
+        if (joined.contains("zhihu") || joined.contains("知乎")) return "zhihu";
+        if (joined.contains("douyin") || joined.contains("抖音")) return "douyin";
+        if (joined.contains("wechat") || joined.contains("公众号")) return "wechat";
+        return null;
+    }
+
+    private LocalDateTime nextBrandSafeAttemptAt(Long brandId, LocalDateTime now) {
+        return nextBrandSafeAttemptAt(brandId, now.plusSeconds(10).withNano(0), null);
+    }
+
+    private LocalDateTime nextBrandSafeAttemptAt(Long brandId, LocalDateTime candidate, Long excludedScheduleId) {
+        LocalDateTime cursor = clampToBusinessAttemptWindow(candidate);
+        if (brandId == null || cursor == null) {
+            return cursor;
+        }
+        List<SelfMediaPublishSchedule> slots = scheduleMapper.selectBrandActiveScheduleSlots(
+                brandId,
+                cursor.minusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES),
+                cursor.plusHours(QUICK_SCHEDULE_SLOT_LOOKAHEAD_HOURS),
+                new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
+        );
+        boolean moved;
+        do {
+            moved = false;
+            for (SelfMediaPublishSchedule slot : slots == null ? List.<SelfMediaPublishSchedule>of() : slots) {
+                if (excludedScheduleId != null && excludedScheduleId.equals(slot.getId())) {
+                    continue;
+                }
+                LocalDateTime occupied = slot.getNextAttemptAt() != null ? slot.getNextAttemptAt() : slot.getPlannedPublishAt();
+                if (occupied == null) continue;
+                long distance = Math.abs(java.time.Duration.between(occupied, cursor).toMinutes());
+                if (distance < QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES) {
+                    cursor = clampToBusinessAttemptWindow(
+                            occupied.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES).withSecond(0).withNano(0));
+                    moved = true;
+                }
+            }
+        } while (moved);
+        return cursor;
+    }
+
+    private LocalDateTime plannedPublishAtForQuickSchedule(String platform,
+                                                           String strategy,
+                                                           LocalDateTime nextAttemptAt,
+                                                           LocalDateTime now) {
+        SelfMediaPlatformScheduleRules rules = scheduleAdapterRouter.rules(platform, strategy);
+        int fillLead = Math.max(0, rules.fillLeadMinutes());
+        LocalDateTime planned = nextAttemptAt.plusMinutes(fillLead);
+        int requiredLead = requiredPlatformScheduleCreateLeadMinutes(strategy, platform);
+        if (requiredLead > 0 && !planned.isAfter(now.plusMinutes(requiredLead))) {
+            planned = now.plusMinutes(requiredLead + 1).withSecond(0).withNano(0);
+        }
+        int maxRemaining = maxPlatformScheduleRemainingMinutes(strategy, platform);
+        if (maxRemaining > 0 && planned.isAfter(now.plusMinutes(maxRemaining))) {
+            fail("PLATFORM_SCHEDULE_TIME_TOO_FAR", platformLabel(platform) + "定时发布时间超过平台可选范围");
+        }
+        return planned.withSecond(0).withNano(0);
+    }
+
+    private PeriodWindow currentMonth(LocalDateTime now) {
+        LocalDateTime start = LocalDateTime.of(now.getYear(), now.getMonth(), 1, 0, 0);
+        return new PeriodWindow(start, start.plusMonths(1));
+    }
+
+    private String platformLabel(String platform) {
+        return switch (normalize(platform)) {
+            case "toutiao" -> "头条";
+            case "baijiahao" -> "百家号";
+            case "zhihu" -> "知乎";
+            case "xiaohongshu" -> "小红书";
+            case "douyin" -> "抖音图文";
+            case "wechat", "wechat_mp" -> "微信公众号";
+            default -> StringUtils.hasText(platform) ? platform : "自媒体平台";
+        };
     }
 
     private Set<String> platformsByChannel(SelfMediaPlatformPublishChannel channel) {
@@ -2076,8 +2565,26 @@ public class SelfMediaPublishScheduleService {
                                     List<Long> accountIds,
                                     LocalDateTime windowStart,
                                     LocalDateTime windowEnd,
+                                    LocalDateTime executionWindowStart,
+                                    LocalDateTime executionWindowEnd,
+                                    boolean hasExplicitExecutionWindow,
                                     String strategy,
                                     int intervalMinutes) {
+    }
+
+    private record PeriodWindow(LocalDateTime start, LocalDateTime end) {
+    }
+
+    private record QuickScheduleData(Candidate candidate,
+                                     String strategy,
+                                     LocalDateTime plannedPublishAt) {
+    }
+
+    private record QuickSchedulePlan(SelfMediaPlatformQuickScheduleResponse response,
+                                     QuickScheduleData data) {
+        QuickSchedulePlan withPlan(QuickScheduleData data) {
+            return new QuickSchedulePlan(response, data);
+        }
     }
 
     private record Candidate(ArticleDraft article,
@@ -2087,6 +2594,11 @@ public class SelfMediaPublishScheduleService {
         static Candidate rejected(SelfMediaPublishScheduleRejectedItemVO item) {
             return new Candidate(null, null, null, item);
         }
+    }
+
+    private record ScheduleQuotaReservation(Long scheduleId,
+                                            Long projectId,
+                                            String platform) {
     }
 
     private record QueueClaimProfile(List<String> expectedStatuses, String targetStatus) {

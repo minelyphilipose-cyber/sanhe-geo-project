@@ -190,8 +190,7 @@
       8000,
       `百家号定时发布弹窗未就绪；target=${value.full}；${describeBaijiahaoState(deps)}`,
     )
-    value = resolveScheduleValueAgainstDialog(value, dialog, deps)
-    await fillScheduleDropdowns(dialog, value, platform, deps)
+    value = await fillScheduleDropdowns(dialog, value, platform, deps)
     const confirm = await requireDependency(deps.waitForCondition, 'waitForCondition')(
       () => findScheduleConfirmButton(deps),
       8000,
@@ -199,6 +198,7 @@
     )
     await clickScheduleConfirmWithThrottle(confirm, value, platform, deps, timing)
     const verification = await waitForPublishSubmitted(value, context, deps)
+    await dismissScheduleDialogAfterSubmit(deps, platform)
     return {
       filled: true,
       scheduled: true,
@@ -258,34 +258,65 @@
   }
 
   async function fillScheduleDropdowns(dialog, value, platform, deps) {
-    const targets = [value.monthDay, `${Number(value.hour)}点`, `${Number(value.minute)}分`]
-    for (let index = 0; index < targets.length; index += 1) {
+    let activeValue = value
+    const requestedTargets = [value.monthDay, `${Number(value.hour)}点`, `${Number(value.minute)}分`]
+    for (let index = 0; index < 3; index += 1) {
+      const target = requestedTargets[index]
       const controls = collectScheduleControls(dialog, deps)
       const control = controls[index]
       if (!control) {
-        throw new Error(`百家号定时发布弹窗下拉控件未找到：${targets[index]}；${describeScheduleDialog(deps)}`)
+        throw new Error(`百家号定时发布弹窗下拉控件未找到：${target}；${describeScheduleDialog(deps)}`)
       }
       const current = normalizeText(deps, control.textContent || control.getAttribute?.('aria-label') || '')
-      if (sameScheduleToken(current, targets[index])) continue
+      if (sameScheduleToken(current, target)) continue
       await requireDependency(deps.clickTrustedActionOnce, 'clickTrustedActionOnce')(control, { platform })
       await requireDependency(deps.delay, 'delay')(300)
-      const option = await findScheduleOptionWithScroll(targets[index], control, deps, 8000)
+      const option = await findScheduleOptionWithScroll(target, control, deps, 8000)
       if (option) {
         await requireDependency(deps.clickTrustedActionOnce, 'clickTrustedActionOnce')(option, { platform })
         await requireDependency(deps.delay, 'delay')(400)
-        if (sameScheduleToken(control.textContent || control.getAttribute?.('aria-label') || '', targets[index])) continue
+        if (sameScheduleToken(control.textContent || control.getAttribute?.('aria-label') || '', target)) {
+          activeValue = resolveScheduleValueAgainstDialog(activeValue, dialog, deps)
+          continue
+        }
       }
-      const keyboardSelected = await selectScheduleOptionByKeyboard(targets[index], control, deps)
-      if (!keyboardSelected) {
-        throw new Error(`百家号定时发布下拉选项未找到：${targets[index]}；${describeScheduleDialog(deps)}`)
+      const keyboardSelected = await selectScheduleOptionByKeyboard(target, control, deps)
+      const latestValue = resolveScheduleValueAgainstDialog(activeValue, dialog, deps)
+      const latestControl = collectScheduleControls(dialog, deps)[index] || control
+      if (keyboardSelected || sameScheduleToken(latestControl.textContent || latestControl.getAttribute?.('aria-label') || '', target)) {
+        activeValue = latestValue
+        await requireDependency(deps.delay, 'delay')(400)
+        continue
       }
-      await requireDependency(deps.delay, 'delay')(400)
+      if (canAcceptPlatformScheduleValue(activeValue, latestValue, index)) {
+        activeValue = latestValue
+        await requireDependency(deps.delay, 'delay')(400)
+        continue
+      }
+      throw new Error(`百家号定时发布下拉选项未找到：${target}；${describeScheduleDialog(deps)}`)
     }
+    const finalValue = readScheduleValueFromDialog(dialog, activeValue, deps)
+    if (finalValue?.full && Number.isFinite(finalValue.timestamp)) {
+      return finalValue.full === value.full ? value : { ...finalValue, adjustedFrom: value.full }
+    }
+    return activeValue
+  }
+
+  function canAcceptPlatformScheduleValue(requestedValue, platformValue, failedIndex) {
+    if (failedIndex < 1) return false
+    if (!requestedValue?.full || !Number.isFinite(requestedValue.timestamp)) return false
+    if (!platformValue?.full || !Number.isFinite(platformValue.timestamp)) return false
+    if (platformValue.full === requestedValue.full) return true
+    if (platformValue.timestamp < requestedValue.timestamp) return false
+    if (platformValue.timestamp - requestedValue.timestamp > 2 * 60 * 60 * 1000) return false
+    platformValue.adjustedFrom = requestedValue.adjustedFrom || requestedValue.full
+    return true
   }
 
   function resolveScheduleValueAgainstDialog(value, dialog, deps) {
     const platformValue = readScheduleValueFromDialog(dialog, value, deps)
     if (!platformValue?.full || !Number.isFinite(platformValue.timestamp)) return value
+    if (platformValue.full === value.full) return value
     if (platformValue.timestamp <= value.timestamp) return value
     return { ...platformValue, adjustedFrom: value.full }
   }
@@ -329,6 +360,42 @@
       await requireDependency(deps.delay, 'delay')(700)
     }
     throw new Error(`百家号发布后未检测到成功状态；target=${value.full}；${describeBaijiahaoState(deps)}`)
+  }
+
+  async function dismissScheduleDialogAfterSubmit(deps, platform) {
+    const delay = requireDependency(deps.delay, 'delay')
+    const waitForCondition = requireDependency(deps.waitForCondition, 'waitForCondition')
+    const closed = await waitForCondition(
+      () => !findScheduleDialog(deps),
+      2500,
+      null,
+    ).catch(() => false)
+    if (closed) return true
+    if (!hasPublishSubmittedSignal()) return false
+    const dialog = findScheduleDialog(deps)
+    const root = dialog?.closest?.('[role="dialog"]') || dialog
+    const close = findScheduleDialogCloseButton(root, deps)
+    if (!close) return false
+    await requireDependency(deps.clickTrustedActionOnce, 'clickTrustedActionOnce')(close, { platform })
+    await delay(500)
+    return !findScheduleDialog(deps)
+  }
+
+  function hasPublishSubmittedSignal() {
+    const text = document.body?.innerText || document.body?.textContent || ''
+    return /发布成功|定时发布成功|提交成功|审核中/.test(text)
+      || /\/content|\/manage|\/success/.test(location.href)
+  }
+
+  function findScheduleDialogCloseButton(root, deps) {
+    if (!root) return null
+    const explicit = findDialogButtonByText(root, 'Close', deps)
+      || findDialogButtonByText(root, '关闭', deps)
+      || findDialogButtonByText(root, '取消', deps)
+    if (explicit) return explicit
+    return collectActions(deps, root)
+      .filter((item) => /^(Close|关闭|取消|×|x)$/i.test(item.text))
+      .sort((left, right) => right.rect.top - left.rect.top || right.rect.left - left.rect.left)[0]?.el || null
   }
 
   function verifySubmitted(value, context, deps) {

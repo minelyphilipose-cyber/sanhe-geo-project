@@ -37,7 +37,7 @@ async function load() {
   const config = {
     apiBase: 'http://119.45.154.127',
     helperBase: 'http://127.0.0.1:17891',
-    environmentKey: 'geo_b',
+    environmentKey: '',
     environmentAccountId: '',
     selfMediaAccountId: '',
     platform: '',
@@ -66,6 +66,10 @@ function renderStoredLogs(events) {
       if (event.ok) return `${time} 登录状态上报成功：environmentKey=${event.environmentKey || '-'}，platform=${event.platform || '-'}，status=${event.status || '-'}`
       return `${time} 登录状态上报失败：platform=${event.platform || '-'}，${event.error || 'unknown error'}`
     }
+    if (event.type === 'runtime_config') {
+      if (event.ok) return `${time} 配置发现成功：environmentKey=${event.environmentKey || '-'}，platform=${event.platform || '-'}，status=${event.status || '-'}`
+      return `${time} 配置发现未采用：${event.error || event.selectionStatus || 'unknown'}`
+    }
     if (event.ok) return `${time} 自动处理成功：taskId=${event.taskId || '-'}，platform=${event.platform || '-'}`
     return `${time} 自动处理失败：${event.error || 'unknown error'}`
   }).join('\n')
@@ -76,7 +80,7 @@ function collectConfig() {
   return {
     apiBase: normalizeBaseUrl(fields.apiBase.value || 'http://119.45.154.127'),
     helperBase: normalizeBaseUrl(fields.helperBase.value || 'http://127.0.0.1:17891'),
-    environmentKey: fields.environmentKey.value.trim() || 'geo_b',
+    environmentKey: fields.environmentKey.value.trim(),
     environmentAccountId: fields.environmentAccountId.value ? Number(fields.environmentAccountId.value) : null,
     selfMediaAccountId: fields.selfMediaAccountId.value ? Number(fields.selfMediaAccountId.value) : null,
     platform: normalizePlatform(fields.platform.value),

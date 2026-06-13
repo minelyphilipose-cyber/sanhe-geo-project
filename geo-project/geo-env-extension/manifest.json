@@ -21,6 +21,7 @@
     "http://127.0.0.1/*",
     "https://mp.toutiao.com/*",
     "https://zhuanlan.zhihu.com/*",
+    "https://zhihu.com/*",
     "https://www.zhihu.com/*",
     "https://creator.xiaohongshu.com/*",
     "https://www.xiaohongshu.com/*",
@@ -31,12 +32,14 @@
       "matches": [
         "https://mp.toutiao.com/*",
         "https://zhuanlan.zhihu.com/*",
+        "https://zhihu.com/*",
         "https://www.zhihu.com/*",
         "https://creator.xiaohongshu.com/*",
         "https://www.xiaohongshu.com/*",
         "https://baijiahao.baidu.com/*"
       ],
       "js": [
+        "fill-result.js",
         "platform-baijiahao.js",
         "platform-xiaohongshu.js",
         "platform-zhihu.js",

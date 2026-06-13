@@ -7,6 +7,7 @@ import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleItemVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
@@ -36,6 +37,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class SelfMediaPublishAutoScheduleService {
     private static final int ERROR_CODE = 70042;
+    public static final String STRATEGY_PLATFORM_SPECIFIC = "platform_specific";
 
     private final BusinessCalendarService businessCalendarService;
     private final SelfMediaPublishScheduleService scheduleService;
@@ -45,6 +47,7 @@ public class SelfMediaPublishAutoScheduleService {
     private final CompanyChannelQuotaService companyChannelQuotaService;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
+    private final SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
 
     public SelfMediaPublishAutoScheduleResponse preview(SelfMediaPublishAutoScheduleRequest request) {
         return plan(request, false);
@@ -74,7 +77,7 @@ public class SelfMediaPublishAutoScheduleService {
             createRequest.setSelfMediaAccountIds(List.of(item.getSelfMediaAccountId()));
             createRequest.setWindowStart(item.getPlannedPublishAt());
             createRequest.setWindowEnd(item.getPlannedPublishAt());
-            createRequest.setScheduleStrategy(normalizeStrategy(request.getScheduleStrategy()));
+            createRequest.setScheduleStrategy(resolveItemStrategy(request.getScheduleStrategy(), item.getPlatform()));
             createRequest.setMinIntervalMinutes(1);
             String idempotencyKey = autoIdempotencyKey(request.getBrandId(), item, createRequest.getScheduleStrategy());
             SelfMediaPublishScheduleCreateResponse created = operatorId == null
@@ -272,7 +275,7 @@ public class SelfMediaPublishAutoScheduleService {
                 accountIds,
                 platforms,
                 month,
-                normalizeStrategy(request.getScheduleStrategy()),
+                normalizeStrategyMode(request.getScheduleStrategy()),
                 Boolean.TRUE.equals(request.getIncludeAdjustedWorkdays())
         );
     }
@@ -291,10 +294,22 @@ public class SelfMediaPublishAutoScheduleService {
         return new ArrayList<>(result);
     }
 
-    private String normalizeStrategy(String value) {
+    private String normalizeStrategyMode(String value) {
         return StringUtils.hasText(value)
                 ? value.trim()
-                : SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE;
+                : STRATEGY_PLATFORM_SPECIFIC;
+    }
+
+    private String resolveItemStrategy(String requestedStrategy, String platform) {
+        String normalized = normalizeStrategyMode(requestedStrategy);
+        if (!STRATEGY_PLATFORM_SPECIFIC.equals(normalized)) {
+            return normalized;
+        }
+        return scheduleAdapterRouter.contract(platform)
+                .map(contract -> contract.supportsBackendDelayedPublish()
+                        ? SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH
+                        : SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE)
+                .orElse(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE);
     }
 
     private String normalize(String value) {

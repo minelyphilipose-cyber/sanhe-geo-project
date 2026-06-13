@@ -21,13 +21,23 @@ import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DeadlockLoserDataAccessException;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -42,6 +52,8 @@ public class CompanyChannelQuotaService {
     private static final String BIZ_TYPE_SELF_MEDIA_SCHEDULE = "self_media_schedule";
     private static final int RESERVED_TIMEOUT_MINUTES = 30;
     private static final int RESERVED_SCAN_BATCH_SIZE = 200;
+    private static final int QUOTA_RESERVE_MAX_ATTEMPTS = 2;
+    private static final int QUOTA_RESERVE_LOCK_WAIT_SECONDS = 2;
     private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
     private static final Set<String> FAILED_TASK_STATUS = Set.of("failed", "cancelled", "canceled");
 
@@ -51,8 +63,8 @@ public class CompanyChannelQuotaService {
     private final DistributionTaskMapper distributionTaskMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final SystemAlertService systemAlertService;
+    private final PlatformTransactionManager transactionManager;
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public CompanyChannelQuotaLedger reserveDistribution(Long companyId, Long projectId, String targetKind, Long distributionTaskId) {
         if (distributionTaskId == null) {
             throw new BizException(400, "distribution_task_id is required for quota reservation");
@@ -61,7 +73,6 @@ public class CompanyChannelQuotaService {
         return reserveDistributionForChannel(companyId, projectId, channel, distributionTaskId);
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public CompanyChannelQuotaLedger reserveSelfMediaDistribution(Long companyId,
                                                                   Long projectId,
                                                                   String platform,
@@ -73,7 +84,6 @@ public class CompanyChannelQuotaService {
         return reserveDistributionForChannel(companyId, projectId, channel, distributionTaskId);
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public CompanyChannelQuotaLedger reserveSelfMediaSchedule(Long companyId,
                                                               Long projectId,
                                                               String platform,
@@ -81,8 +91,32 @@ public class CompanyChannelQuotaService {
         if (scheduleId == null) {
             throw new BizException(400, "schedule_id is required for quota reservation");
         }
-        String channel = resolveSelfMediaPlatformChannel(platform);
-        return reserveForBiz(companyId, projectId, channel, BIZ_TYPE_SELF_MEDIA_SCHEDULE, String.valueOf(scheduleId));
+        return reserveSelfMediaSchedules(companyId, List.of(new SelfMediaScheduleQuotaReservation(
+                projectId,
+                platform,
+                scheduleId
+        ))).get(0);
+    }
+
+    public List<CompanyChannelQuotaLedger> reserveSelfMediaSchedules(Long companyId,
+                                                                     List<SelfMediaScheduleQuotaReservation> reservations) {
+        if (reservations == null || reservations.isEmpty()) {
+            return List.of();
+        }
+        List<BizQuotaReservation> bizReservations = new ArrayList<>();
+        for (SelfMediaScheduleQuotaReservation reservation : reservations) {
+            if (reservation == null || reservation.scheduleId() == null) {
+                throw new BizException(400, "schedule_id is required for quota reservation");
+            }
+            String channel = resolveSelfMediaPlatformChannel(reservation.platform());
+            bizReservations.add(new BizQuotaReservation(
+                    reservation.projectId(),
+                    channel,
+                    BIZ_TYPE_SELF_MEDIA_SCHEDULE,
+                    String.valueOf(reservation.scheduleId())
+            ));
+        }
+        return reserveForBizBatch(companyId, bizReservations);
     }
 
     private CompanyChannelQuotaLedger reserveDistributionForChannel(Long companyId,
@@ -97,35 +131,149 @@ public class CompanyChannelQuotaService {
                                                     String channel,
                                                     String bizType,
                                                     String bizId) {
+        return reserveForBizBatch(companyId, List.of(new BizQuotaReservation(projectId, channel, bizType, bizId))).get(0);
+    }
+
+    private List<CompanyChannelQuotaLedger> reserveForBizBatch(Long companyId,
+                                                               List<BizQuotaReservation> reservations) {
+        RuntimeException lastFailure = null;
+        for (int attempt = 1; attempt <= QUOTA_RESERVE_MAX_ATTEMPTS; attempt++) {
+            try {
+                return reserveForBizBatchInNewTransaction(companyId, reservations);
+            } catch (RuntimeException ex) {
+                if (!isTransientQuotaLockFailure(ex)) {
+                    throw ex;
+                }
+                lastFailure = ex;
+                if (isLockWaitTimeout(ex) || attempt == QUOTA_RESERVE_MAX_ATTEMPTS) {
+                    break;
+                }
+                sleepBeforeQuotaRetry(attempt);
+            }
+        }
+        log.warn("Quota reservation lock conflict, companyId={}, reservationCount={}, reason={}",
+                companyId, reservations == null ? 0 : reservations.size(),
+                lastFailure == null ? "unknown" : lastFailure.getMessage());
+        log.debug("Quota reservation lock conflict stack", lastFailure);
+        throw new BizException(409, "渠道配额正在被其它排期任务占用，请稍后重试", lastFailure);
+    }
+
+    private List<CompanyChannelQuotaLedger> reserveForBizBatchInNewTransaction(Long companyId,
+                                                                               List<BizQuotaReservation> reservations) {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return tx.execute(status -> reserveForBizBatchInTransaction(companyId, reservations));
+    }
+
+    private List<CompanyChannelQuotaLedger> reserveForBizBatchInTransaction(Long companyId,
+                                                                            List<BizQuotaReservation> reservations) {
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
-        SnapshotQuota quota = resolveSnapshotQuota(binding, channel);
-        String periodKey = periodKey(quota.periodType());
-
-        CompanyChannelQuotaLedger existed = ledgerMapper.selectByBiz(bizType, bizId);
-        if (existed != null) {
-            return existed;
+        List<CompanyChannelQuotaLedger> ledgers = new ArrayList<>();
+        Map<QuotaGroupKey, List<BizQuotaReservation>> grouped = new LinkedHashMap<>();
+        for (BizQuotaReservation reservation : reservations) {
+            CompanyChannelQuotaLedger existed = ledgerMapper.selectByBiz(reservation.bizType(), reservation.bizId());
+            if (existed != null) {
+                ledgers.add(existed);
+                continue;
+            }
+            SnapshotQuota quota = resolveSnapshotQuota(binding, reservation.channel());
+            String periodKey = periodKey(quota.periodType());
+            QuotaGroupKey key = new QuotaGroupKey(reservation.channel(), quota.periodType(), periodKey, quota.quotaLimit());
+            grouped.computeIfAbsent(key, ignored -> new ArrayList<>()).add(reservation);
         }
 
-        usageMapper.insertIgnore(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
-        usageMapper.updateQuotaLimit(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
-        int reserved = usageMapper.tryReserve(companyId, channel, quota.periodType(), periodKey);
-        if (reserved != 1) {
-            throw new BizException(400, "Distribution quota exhausted for channel " + channel);
+        for (Map.Entry<QuotaGroupKey, List<BizQuotaReservation>> entry : grouped.entrySet()) {
+            QuotaGroupKey key = entry.getKey();
+            List<BizQuotaReservation> groupReservations = entry.getValue();
+            reserveQuotaGroup(companyId, key, groupReservations.size());
+            for (BizQuotaReservation reservation : groupReservations) {
+                CompanyChannelQuotaLedger ledger = createReservedLedger(companyId, reservation, key);
+                ledgerMapper.insert(ledger);
+                ledgers.add(ledger);
+            }
         }
+        return ledgers;
+    }
 
+    private void reserveQuotaGroup(Long companyId, QuotaGroupKey key, int amount) {
+        try {
+            usageMapper.setSessionLockWaitTimeout(QUOTA_RESERVE_LOCK_WAIT_SECONDS);
+            usageMapper.insertIgnore(companyId, key.channel(), key.periodType(), key.periodKey(), key.quotaLimit());
+            usageMapper.updateQuotaLimit(companyId, key.channel(), key.periodType(), key.periodKey(), key.quotaLimit());
+            int reserved = amount == 1
+                    ? usageMapper.tryReserve(companyId, key.channel(), key.periodType(), key.periodKey())
+                    : usageMapper.tryReserveAmount(companyId, key.channel(), key.periodType(), key.periodKey(), amount);
+            if (reserved != 1) {
+                throw new BizException(400, "Distribution quota exhausted for channel " + key.channel());
+            }
+        } finally {
+            resetQuotaLockWaitTimeout(companyId, key.channel(), key.periodType(), key.periodKey());
+        }
+    }
+
+    private CompanyChannelQuotaLedger createReservedLedger(Long companyId,
+                                                           BizQuotaReservation reservation,
+                                                           QuotaGroupKey key) {
         CompanyChannelQuotaLedger ledger = new CompanyChannelQuotaLedger();
         ledger.setCompanyId(companyId);
-        ledger.setProjectId(projectId);
-        ledger.setChannelCode(channel);
-        ledger.setPeriodType(quota.periodType());
-        ledger.setPeriodKey(periodKey);
+        ledger.setProjectId(reservation.projectId());
+        ledger.setChannelCode(key.channel());
+        ledger.setPeriodType(key.periodType());
+        ledger.setPeriodKey(key.periodKey());
         ledger.setDeltaCount(1);
         ledger.setStatus("reserved");
-        ledger.setBizType(bizType);
-        ledger.setBizId(bizId);
+        ledger.setBizType(reservation.bizType());
+        ledger.setBizId(reservation.bizId());
         ledger.setReservedAt(LocalDateTime.now(BUSINESS_ZONE));
-        ledgerMapper.insert(ledger);
         return ledger;
+    }
+
+    private void resetQuotaLockWaitTimeout(Long companyId, String channel, String periodType, String periodKey) {
+        try {
+            usageMapper.resetSessionLockWaitTimeout();
+        } catch (RuntimeException ex) {
+            log.warn("Quota lock wait timeout reset failed, companyId={}, channel={}, periodType={}, periodKey={}, reason={}",
+                    companyId, channel, periodType, periodKey, ex.getMessage());
+            log.debug("Quota lock wait timeout reset failure stack", ex);
+        }
+    }
+
+    private boolean isTransientQuotaLockFailure(Throwable ex) {
+        for (Throwable current = ex; current != null; current = current.getCause()) {
+            if (current instanceof CannotAcquireLockException
+                    || current instanceof DeadlockLoserDataAccessException
+                    || current instanceof PessimisticLockingFailureException
+                    || current instanceof QueryTimeoutException) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null && (message.contains("Lock wait timeout exceeded")
+                    || message.contains("Deadlock found")
+                    || message.contains("Statement cancelled due to timeout"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isLockWaitTimeout(Throwable ex) {
+        for (Throwable current = ex; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message != null && (message.contains("Lock wait timeout exceeded")
+                    || message.contains("Statement cancelled due to timeout"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void sleepBeforeQuotaRetry(int attempt) {
+        try {
+            Thread.sleep(100L * attempt);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new BizException(409, "渠道配额正在被其它排期任务占用，请稍后重试", interrupted);
+        }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -184,8 +332,6 @@ public class CompanyChannelQuotaService {
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
         SnapshotQuota quota = resolveSnapshotQuota(binding, channel);
         String periodKey = periodKey(quota.periodType());
-        usageMapper.insertIgnore(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
-        usageMapper.updateQuotaLimit(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
         CompanyChannelQuotaUsage usage = usageMapper.selectOne(
                 new LambdaQueryWrapper<CompanyChannelQuotaUsage>()
                         .eq(CompanyChannelQuotaUsage::getCompanyId, companyId)
@@ -376,6 +522,23 @@ public class CompanyChannelQuotaService {
     }
 
     private record SnapshotQuota(String periodType, int quotaLimit) {
+    }
+
+    public record SelfMediaScheduleQuotaReservation(Long projectId,
+                                                    String platform,
+                                                    Long scheduleId) {
+    }
+
+    private record BizQuotaReservation(Long projectId,
+                                       String channel,
+                                       String bizType,
+                                       String bizId) {
+    }
+
+    private record QuotaGroupKey(String channel,
+                                 String periodType,
+                                 String periodKey,
+                                 int quotaLimit) {
     }
 
     public record DistributionQuotaView(String channelCode,

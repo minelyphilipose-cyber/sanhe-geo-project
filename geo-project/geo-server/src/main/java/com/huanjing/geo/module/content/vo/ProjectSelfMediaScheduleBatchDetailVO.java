@@ -17,6 +17,12 @@ public class ProjectSelfMediaScheduleBatchDetailVO {
         private Long generationTaskId;
         private String generationStatus;
         private String generationErrorMessage;
+        private String generationTopic;
+        private String generationArticleType;
+        private LocalDateTime generationCreatedAt;
+        private LocalDateTime generationUpdatedAt;
+        private LocalDateTime generationStartedAt;
+        private LocalDateTime generationFinishedAt;
         private Long articleId;
         private String articleTitle;
         private Long selfMediaAccountId;

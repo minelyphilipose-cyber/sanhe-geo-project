@@ -181,6 +181,44 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
+    void duplicateVerifiedScheduleAckIsIdempotentAfterFilledState() {
+        stubTask("filled");
+        when(taskMapper.markSemiAutoFilled(eq(30L), any())).thenReturn(0);
+        Map<String, Object> request = Map.of(
+                "fillResult", Map.of(
+                        "publishOptions", Map.of(
+                                "scheduled", true,
+                                "publishVerification", Map.of(
+                                        "verified", true,
+                                        "platformStatus", "scheduled",
+                                        "matchedTitle", "title"
+                                )
+                        )
+                )
+        );
+
+        assertEquals("filled", service.ackFilled(30L, 99L, 7L, request).status());
+
+        verify(selfMediaPublishScheduleService).markDistributionTaskScheduled(eq(30L), any(String.class));
+        verify(auditSupport).record(
+                eq("SEMI_AUTO_TASK_FILLED_IDEMPOTENT"),
+                eq(AuditResult.SUCCESS),
+                eq(AuditMode.SYNC),
+                eq(false),
+                eq(99L),
+                eq(10L),
+                eq(20L),
+                eq(30L),
+                eq(7L),
+                eq("DISTRIBUTION_TASK"),
+                eq("30"),
+                eq(null),
+                eq(null),
+                any()
+        );
+    }
+
+    @Test
     void duplicateAckWritesDeniedAudit() {
         stubTask("filling");
         when(taskMapper.markSemiAutoFilled(eq(30L), any())).thenReturn(0);

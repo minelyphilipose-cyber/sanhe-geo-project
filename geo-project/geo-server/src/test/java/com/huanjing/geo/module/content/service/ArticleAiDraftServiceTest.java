@@ -92,6 +92,7 @@ class ArticleAiDraftServiceTest {
         ArticleGenerationEngine generationEngine = new ArticleGenerationEngine(
                 llmInvoker,
                 modelResolver,
+                mock(com.huanjing.geo.common.llm.router.LlmPlatformRouter.class),
                 mock(MarkdownImageReferenceValidator.class),
                 promptFilter,
                 mock(BatchArticleQualityChecker.class)

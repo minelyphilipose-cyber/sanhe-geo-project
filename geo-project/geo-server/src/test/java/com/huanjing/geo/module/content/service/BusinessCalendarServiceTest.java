@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.DayOfWeek;
+import java.time.LocalTime;
 import java.time.YearMonth;
 import java.util.List;
 
@@ -32,7 +33,9 @@ class BusinessCalendarServiceTest {
 
         assertEquals(13, slots.size());
         assertEquals(13, slots.stream().map(BusinessCalendarService.PublishSlot::date).distinct().count());
-        assertTrue(slots.stream().allMatch(slot -> slot.plannedAt().getHour() == 10 || slot.plannedAt().getHour() == 15));
+        assertTrue(slots.stream().allMatch(slot ->
+                slot.plannedAt().toLocalTime().equals(LocalTime.of(9, 15))
+                        || slot.plannedAt().toLocalTime().equals(LocalTime.of(14, 30))));
         assertTrue(slots.stream().noneMatch(slot -> "端午节".equals(slot.dayName())));
     }
 }

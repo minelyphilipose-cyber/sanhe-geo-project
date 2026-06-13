@@ -88,6 +88,88 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
+    void reportLoginStatus_ignoresSyntheticActualPlatformAccountId() {
+        when(environmentAccountMapper.selectById(30L)).thenReturn(binding(null, null, BrowserEnvironmentConstants.LOGIN_UNKNOWN, "zhihu"));
+        when(environmentAccountMapper.selectOne(any())).thenReturn(null);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("jnhbdxh", "zhihu"));
+
+        service.reportLoginStatus(30L, new BrowserEnvironmentLoginStatusRequest(
+                "geo_b",
+                10L,
+                "zhihu",
+                "geo-zhihu-990006013-5c1e1fe979ab4941",
+                "jnhbdxh",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ));
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        BrowserEnvironmentAccount updated = captor.getValue();
+        assertNull(updated.getExpectedPlatformAccountId());
+        assertEquals("jnhbdxh", updated.getExpectedAccountName());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, updated.getLoginStatus());
+    }
+
+    @Test
+    void reportLoginStatusByBrandAndPlatformUsesSelfMediaAccountIdWhenProvided() {
+        BrowserEnvironmentAccount row = binding(null, "jnhbdxh", BrowserEnvironmentConstants.LOGIN_UNKNOWN, "zhihu");
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L)).thenReturn(row);
+        when(environmentAccountMapper.selectById(30L)).thenReturn(row);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("jnhbdxh", "zhihu"));
+
+        service.reportLoginStatusForExtensionByBrandAndPlatform(1L, new com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest(
+                10L,
+                "zhihu",
+                null,
+                "jnhbdxh",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ), 99L);
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, captor.getValue().getLoginStatus());
+    }
+
+    @Test
+    void reportLoginStatusByBrandAndPlatformResolvesTargetByDetectedAccountName() {
+        BrowserEnvironmentAccount other = binding(null, "三合星链-小编", BrowserEnvironmentConstants.LOGIN_UNKNOWN, "zhihu");
+        other.setId(31L);
+        other.setSelfMediaAccountId(11L);
+        BrowserEnvironmentAccount target = binding(null, null, BrowserEnvironmentConstants.LOGIN_UNKNOWN, "zhihu");
+        target.setId(32L);
+        target.setSelfMediaAccountId(12L);
+        when(environmentAccountMapper.selectAllActiveByBrandIdAndPlatform(1L, "zhihu"))
+                .thenReturn(List.of(other, target));
+        when(environmentAccountMapper.selectById(32L)).thenReturn(target);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(11L)).thenReturn(account("三合星链-小编", "zhihu"));
+        when(selfMediaAccountMapper.selectById(12L)).thenReturn(account("jnhbdxh", "zhihu"));
+
+        service.reportLoginStatusForExtensionByBrandAndPlatform(1L, new com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest(
+                null,
+                "zhihu",
+                null,
+                "jnhbdxh",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ), 99L);
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        BrowserEnvironmentAccount updated = captor.getValue();
+        assertEquals(32L, updated.getId());
+        assertEquals("jnhbdxh", updated.getExpectedAccountName());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, updated.getLoginStatus());
+    }
+
+    @Test
     void reportLoginStatus_mismatchCanRecoverToLoggedInWhenIdentityMatchesExpected() {
         when(environmentAccountMapper.selectById(30L)).thenReturn(binding("expected", "name", BrowserEnvironmentConstants.LOGIN_MISMATCH));
         when(environmentMapper.selectById(20L)).thenReturn(environment());
@@ -107,6 +189,54 @@ class BrowserEnvironmentServiceTest {
         ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
         verify(environmentAccountMapper).updateById(captor.capture());
         assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, captor.getValue().getLoginStatus());
+    }
+
+    @Test
+    void reportLoginStatus_matchesPlatformPrefixedDisplayName() {
+        when(environmentAccountMapper.selectById(30L)).thenReturn(binding(null, "知乎 / jnhbdxh", BrowserEnvironmentConstants.LOGIN_MISMATCH, "zhihu"));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("jnhbdxh", "zhihu"));
+
+        service.reportLoginStatus(30L, new BrowserEnvironmentLoginStatusRequest(
+                "geo_b",
+                10L,
+                "zhihu",
+                null,
+                "jnhbdxh",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ));
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, captor.getValue().getLoginStatus());
+    }
+
+    @Test
+    void reportLoginStatus_backfillsReadableAccountNameWhenSyntheticPlatformIdCannotBeRead() {
+        when(environmentAccountMapper.selectById(30L)).thenReturn(binding("geo-zhihu-990006013-5c1e1fe979ab4941", null,
+                BrowserEnvironmentConstants.LOGIN_MISMATCH, "zhihu"));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("jnhbdxh", "zhihu"));
+        when(environmentAccountMapper.selectOne(any())).thenReturn(null);
+
+        service.reportLoginStatus(30L, new BrowserEnvironmentLoginStatusRequest(
+                "geo_b",
+                10L,
+                "zhihu",
+                null,
+                "jnhbdxh",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ));
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        BrowserEnvironmentAccount updated = captor.getValue();
+        assertEquals("jnhbdxh", updated.getExpectedAccountName());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, updated.getLoginStatus());
     }
 
     @Test
@@ -169,6 +299,22 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
+    void validateForTaskCreation_backfillsMissingExpectedNameWhenPlatformIdAlreadyExists() {
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                .thenReturn(binding("geo-zhihu-990006013-5c1e1fe979ab4941", null,
+                        BrowserEnvironmentConstants.LOGIN_LOGGED_IN, "zhihu"));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(environmentAccountMapper.selectOne(any())).thenReturn(null);
+
+        BrowserEnvironmentAccount response = service.validateForTaskCreation(account("jnhbdxh", "zhihu"));
+
+        assertEquals("jnhbdxh", response.getExpectedAccountName());
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        assertEquals("jnhbdxh", captor.getValue().getExpectedAccountName());
+    }
+
+    @Test
     void validateForTaskCreation_rejectsMissingExpectedIdentityWhenAccountHasNoIdentity() {
         when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
                 .thenReturn(binding(null, null, BrowserEnvironmentConstants.LOGIN_LOGGED_IN));
@@ -195,6 +341,26 @@ class BrowserEnvironmentServiceTest {
         BrowserEnvironmentAccount response = service.validateForTaskCreation(account("三合星链-小编"), false);
 
         assertEquals(BrowserEnvironmentConstants.LOGIN_UNKNOWN, response.getLoginStatus());
+    }
+
+    @Test
+    void validateForTaskCreation_strictModeRejectsMismatchLoginStatus() {
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                .thenReturn(binding(null, "三合星链-小编", BrowserEnvironmentConstants.LOGIN_MISMATCH));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+
+        assertThrows(BizException.class, () -> service.validateForTaskCreation(account("三合星链-小编")));
+    }
+
+    @Test
+    void validateForTaskCreation_relaxedModeAllowsMismatchLoginStatus() {
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                .thenReturn(binding(null, "三合星链-小编", BrowserEnvironmentConstants.LOGIN_MISMATCH));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+
+        BrowserEnvironmentAccount response = service.validateForTaskCreation(account("三合星链-小编"), false);
+
+        assertEquals(BrowserEnvironmentConstants.LOGIN_MISMATCH, response.getLoginStatus());
     }
 
     @Test
@@ -288,6 +454,36 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
+    void extensionRuntimeConfigSelectsSingleMatchingBinding() {
+        when(environmentAccountMapper.selectActiveRuntimeConfigsByBrandId(1L))
+                .thenReturn(List.of(binding("expected", "name", BrowserEnvironmentConstants.LOGIN_LOGGED_IN)));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+
+        var response = service.extensionRuntimeConfig(1L, 99L, "geo_b", "toutiao");
+
+        assertEquals("selected", response.selectionStatus());
+        assertEquals("http://127.0.0.1:17891", response.helperBase());
+        assertEquals(30L, response.selected().browserEnvironmentAccountId());
+        assertEquals("geo_b", response.selected().environmentKey());
+        assertEquals("toutiao", response.selected().platform());
+    }
+
+    @Test
+    void extensionRuntimeConfigDoesNotGuessWhenMultipleBindingsMatch() {
+        BrowserEnvironmentAccount left = binding("left", "left-name", BrowserEnvironmentConstants.LOGIN_LOGGED_IN);
+        BrowserEnvironmentAccount right = binding("right", "right-name", BrowserEnvironmentConstants.LOGIN_UNKNOWN);
+        right.setId(31L);
+        when(environmentAccountMapper.selectActiveRuntimeConfigsByBrandId(1L)).thenReturn(List.of(left, right));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+
+        var response = service.extensionRuntimeConfig(1L, 99L, "geo_b", "toutiao");
+
+        assertEquals("ambiguous", response.selectionStatus());
+        assertNull(response.selected());
+        assertEquals(2, response.candidates().size());
+    }
+
+    @Test
     void deleteEnvironmentSoftDeletesWithDeletedAtInsteadOfPhysicalDelete() {
         when(environmentMapper.selectById(20L)).thenReturn(environment());
 
@@ -339,12 +535,16 @@ class BrowserEnvironmentServiceTest {
     }
 
     private BrowserEnvironmentAccount binding(String expectedId, String expectedName, String status) {
+        return binding(expectedId, expectedName, status, "toutiao");
+    }
+
+    private BrowserEnvironmentAccount binding(String expectedId, String expectedName, String status, String platform) {
         BrowserEnvironmentAccount row = new BrowserEnvironmentAccount();
         row.setId(30L);
         row.setBrandId(1L);
         row.setBrowserEnvironmentId(20L);
         row.setSelfMediaAccountId(10L);
-        row.setPlatform("toutiao");
+        row.setPlatform(platform);
         row.setExpectedPlatformAccountId(expectedId);
         row.setExpectedAccountName(expectedName);
         row.setLoginStatus(status);
@@ -356,10 +556,14 @@ class BrowserEnvironmentServiceTest {
     }
 
     private SelfMediaAccount account(String accountName) {
+        return account(accountName, "toutiao");
+    }
+
+    private SelfMediaAccount account(String accountName, String platform) {
         SelfMediaAccount row = new SelfMediaAccount();
         row.setId(10L);
         row.setBrandId(1L);
-        row.setPlatform("toutiao");
+        row.setPlatform(platform);
         row.setAccountName(accountName);
         return row;
     }

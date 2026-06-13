@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
+import com.huanjing.geo.module.content.constant.PlatformAccountIdentityPolicy;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountCreateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountUpdateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest;
@@ -20,6 +21,7 @@ import com.huanjing.geo.module.content.vo.BrowserEnvironmentAccountVO;
 import com.huanjing.geo.module.content.vo.BrowserEnvironmentVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.extension.dto.ExtensionRuntimeConfigResponse;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -155,7 +157,8 @@ public class BrowserEnvironmentService {
         row.setBrowserEnvironmentId(environment.getId());
         row.setSelfMediaAccountId(account.getId());
         row.setPlatform(account.getPlatform());
-        row.setExpectedPlatformAccountId(trimToNull(request.expectedPlatformAccountId()));
+        row.setExpectedPlatformAccountId(PlatformAccountIdentityPolicy.comparablePlatformAccountId(
+                account.getPlatform(), request.expectedPlatformAccountId()));
         row.setExpectedAccountName(trimToNull(request.expectedAccountName()));
         ensureExpectedIdentityNotClaimed(null, account.getBrandId(), account.getPlatform(),
                 row.getExpectedPlatformAccountId(), row.getExpectedAccountName());
@@ -183,7 +186,8 @@ public class BrowserEnvironmentService {
         BrowserEnvironmentAccount row = requireEnvironmentAccount(id);
         brandAccessService.requireBrandAccess(row.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
         if (request.expectedPlatformAccountId() != null) {
-            row.setExpectedPlatformAccountId(trimToNull(request.expectedPlatformAccountId()));
+            row.setExpectedPlatformAccountId(PlatformAccountIdentityPolicy.comparablePlatformAccountId(
+                    row.getPlatform(), request.expectedPlatformAccountId()));
         }
         if (request.expectedAccountName() != null) {
             row.setExpectedAccountName(trimToNull(request.expectedAccountName()));
@@ -309,15 +313,29 @@ public class BrowserEnvironmentService {
             fail("PLATFORM_REQUIRED", "平台不能为空");
         }
         brandAccessService.requireBrandAccess(brandId, operatorId, BrandAccessAction.OPERATE);
-        List<BrowserEnvironmentAccount> rows =
-                environmentAccountMapper.selectActiveByBrandIdAndPlatform(brandId, platform);
-        if (rows == null || rows.isEmpty()) {
+        if (request.selfMediaAccountId() != null) {
+            BrowserEnvironmentAccount row = environmentAccountMapper.selectActiveBySelfMediaAccountId(request.selfMediaAccountId());
+            if (row == null || !brandId.equals(row.getBrandId()) || !platform.equals(row.getPlatform())) {
+                fail("ENVIRONMENT_ACCOUNT_BINDING_NOT_FOUND", "未找到指定自媒体账号对应的环境账号绑定");
+            }
+            BrowserEnvironment environment = requireEnvironment(row.getBrowserEnvironmentId());
+            BrowserEnvironmentLoginStatusRequest normalizedRequest = new BrowserEnvironmentLoginStatusRequest(
+                    environment.getEnvironmentKey(),
+                    request.selfMediaAccountId(),
+                    platform,
+                    request.actualPlatformAccountId(),
+                    request.actualAccountName(),
+                    request.loginStatus(),
+                    request.errorCode(),
+                    request.errorMessage()
+            );
+            return reportLoginStatusForOperator(row.getId(), normalizedRequest, operatorId);
+        }
+        BrowserEnvironmentAccount target = resolveBrandPlatformReportTarget(brandId, platform, request);
+        if (target == null) {
             fail("BRAND_PLATFORM_BINDING_NOT_FOUND", "未找到品牌与平台对应的环境账号绑定");
         }
-        if (rows.size() > 1) {
-            fail("BRAND_PLATFORM_BINDING_AMBIGUOUS", "同一品牌与平台存在多个环境账号绑定，请改用环境标识上报");
-        }
-        BrowserEnvironment environment = requireEnvironment(rows.get(0).getBrowserEnvironmentId());
+        BrowserEnvironment environment = requireEnvironment(target.getBrowserEnvironmentId());
         BrowserEnvironmentLoginStatusRequest normalizedRequest = new BrowserEnvironmentLoginStatusRequest(
                 environment.getEnvironmentKey(),
                 request.selfMediaAccountId(),
@@ -328,7 +346,48 @@ public class BrowserEnvironmentService {
                 request.errorCode(),
                 request.errorMessage()
         );
-        return reportLoginStatusForOperator(rows.get(0).getId(), normalizedRequest, operatorId);
+        return reportLoginStatusForOperator(target.getId(), normalizedRequest, operatorId);
+    }
+
+    private BrowserEnvironmentAccount resolveBrandPlatformReportTarget(Long brandId,
+                                                                       String platform,
+                                                                       BrowserEnvironmentBrandLoginStatusRequest request) {
+        String actualId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(platform, request.actualPlatformAccountId());
+        String actualName = trimToNull(request.actualAccountName());
+        List<BrowserEnvironmentAccount> rows =
+                environmentAccountMapper.selectAllActiveByBrandIdAndPlatform(brandId, platform);
+        if (rows == null || rows.isEmpty()) {
+            return null;
+        }
+        if (rows.size() == 1) {
+            return rows.get(0);
+        }
+        List<BrowserEnvironmentAccount> matched = rows.stream()
+                .filter(row -> reportIdentityMatches(row, actualId, actualName))
+                .toList();
+        if (matched.size() == 1) {
+            return matched.get(0);
+        }
+        if (matched.size() > 1) {
+            fail("BRAND_PLATFORM_BINDING_AMBIGUOUS", "识别到的平台账号命中多个环境账号绑定，请检查自媒体账号名称是否重复");
+        }
+        fail("BRAND_PLATFORM_ACCOUNT_NOT_MATCHED", "当前登录的平台账号未匹配到品牌下的自媒体账号绑定");
+        return null;
+    }
+
+    private boolean reportIdentityMatches(BrowserEnvironmentAccount row, String actualId, String actualName) {
+        if (StringUtils.hasText(actualId)) {
+            String expectedId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(
+                    row.getPlatform(), row.getExpectedPlatformAccountId());
+            if (StringUtils.hasText(expectedId) && expectedId.equals(actualId)) {
+                return true;
+            }
+        }
+        if (accountNameMatches(row.getPlatform(), row.getExpectedAccountName(), actualName)) {
+            return true;
+        }
+        SelfMediaAccount account = selfMediaAccountMapper.selectById(row.getSelfMediaAccountId());
+        return accountNameMatches(row.getPlatform(), account == null ? null : account.getAccountName(), actualName);
     }
 
     private BrowserEnvironmentAccountVO reportLoginStatusForOperator(Long id,
@@ -340,7 +399,7 @@ public class BrowserEnvironmentService {
         SelfMediaAccount account = requireSelfMediaAccount(row.getSelfMediaAccountId());
         validateStatusReportOwnership(row, environment, account, request);
         String incoming = normalizeLoginStatus(request.loginStatus());
-        String target = resolveReportedStatus(row, incoming, request);
+        String target = resolveReportedStatus(row, incoming, request, account);
         assertTransitionAllowed(row.getLoginStatus(), target);
         LocalDateTime now = LocalDateTime.now();
         row.setLoginStatus(target);
@@ -362,6 +421,36 @@ public class BrowserEnvironmentService {
         SysUser operator = currentUserService.requireCurrentUser();
         brandAccessService.requireBrandAccess(row.getBrandId(), operator.getId(), BrandAccessAction.READ);
         return toAccountVO(row);
+    }
+
+    public ExtensionRuntimeConfigResponse extensionRuntimeConfig(Long brandId,
+                                                                 Long operatorId,
+                                                                 String environmentKey,
+                                                                 String platform) {
+        if (brandId == null) {
+            fail("BRAND_REQUIRED", "品牌不能为空");
+        }
+        brandAccessService.requireBrandAccess(brandId, operatorId, BrandAccessAction.OPERATE);
+        String requestedEnvironmentKey = trimToNull(environmentKey);
+        String requestedPlatform = trimToNull(platform);
+        List<ExtensionRuntimeConfigResponse.RuntimeEnvironmentConfig> candidates =
+                environmentAccountMapper.selectActiveRuntimeConfigsByBrandId(brandId).stream()
+                        .map(this::toRuntimeEnvironmentConfig)
+                        .filter(item -> requestedEnvironmentKey == null || requestedEnvironmentKey.equals(item.environmentKey()))
+                        .filter(item -> requestedPlatform == null || requestedPlatform.equals(item.platform()))
+                        .toList();
+        ExtensionRuntimeConfigResponse.RuntimeEnvironmentConfig selected =
+                candidates.size() == 1 ? candidates.get(0) : null;
+        String selectionStatus = selected != null
+                ? "selected"
+                : candidates.isEmpty() ? "not_found" : "ambiguous";
+        return new ExtensionRuntimeConfigResponse(
+                brandId,
+                "http://127.0.0.1:17891",
+                selectionStatus,
+                selected,
+                candidates
+        );
     }
 
     public BrowserEnvironmentAccount getActiveBinding(Long selfMediaAccountId) {
@@ -387,8 +476,11 @@ public class BrowserEnvironmentService {
         if (!StringUtils.hasText(binding.getExpectedPlatformAccountId())
                 && !StringUtils.hasText(binding.getExpectedAccountName())) {
             applyAccountIdentityExpectation(binding, account);
+        } else if (!StringUtils.hasText(binding.getExpectedAccountName())
+                && StringUtils.hasText(account.getAccountName())) {
+            applyAccountNameExpectation(binding, account);
         }
-        if (BrowserEnvironmentConstants.LOGIN_MISMATCH.equals(binding.getLoginStatus())) {
+        if (requireLoggedIn && BrowserEnvironmentConstants.LOGIN_MISMATCH.equals(binding.getLoginStatus())) {
             fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_ACCOUNT_MISMATCH, "环境内登录账号与绑定账号不一致");
         }
         if (requireLoggedIn && !BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(binding.getLoginStatus())) {
@@ -398,7 +490,8 @@ public class BrowserEnvironmentService {
     }
 
     private void applyAccountIdentityExpectation(BrowserEnvironmentAccount binding, SelfMediaAccount account) {
-        String expectedPlatformAccountId = trimToNull(account.getPlatformAccountId());
+        String expectedPlatformAccountId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(
+                account.getPlatform(), account.getPlatformAccountId());
         String expectedAccountName = trimToNull(account.getAccountName());
         if (!StringUtils.hasText(expectedPlatformAccountId) && !StringUtils.hasText(expectedAccountName)) {
             fail(BrowserEnvironmentConstants.ERR_IDENTITY_EXPECTATION_MISSING, "自媒体账号缺少环境账号身份预期值");
@@ -411,13 +504,27 @@ public class BrowserEnvironmentService {
         environmentAccountMapper.updateById(binding);
     }
 
+    private void applyAccountNameExpectation(BrowserEnvironmentAccount binding, SelfMediaAccount account) {
+        String expectedAccountName = trimToNull(account.getAccountName());
+        if (!StringUtils.hasText(expectedAccountName)) {
+            return;
+        }
+        ensureExpectedIdentityNotClaimed(binding.getId(), binding.getBrandId(), binding.getPlatform(),
+                null, expectedAccountName);
+        binding.setExpectedAccountName(expectedAccountName);
+        binding.setUpdatedAt(LocalDateTime.now());
+        environmentAccountMapper.updateById(binding);
+    }
+
     private String resolveReportedStatus(BrowserEnvironmentAccount row,
                                          String incoming,
-                                         BrowserEnvironmentLoginStatusRequest request) {
+                                         BrowserEnvironmentLoginStatusRequest request,
+                                         SelfMediaAccount account) {
         if (!BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(incoming)) {
             return incoming;
         }
-        String actualId = trimToNull(request.actualPlatformAccountId());
+        String actualId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(
+                row.getPlatform(), request.actualPlatformAccountId());
         String actualName = trimToNull(request.actualAccountName());
         if (!StringUtils.hasText(row.getExpectedPlatformAccountId())
                 && !StringUtils.hasText(row.getExpectedAccountName())) {
@@ -431,12 +538,52 @@ public class BrowserEnvironmentService {
         }
         boolean idMatches = StringUtils.hasText(row.getExpectedPlatformAccountId())
                 && row.getExpectedPlatformAccountId().equals(actualId);
-        boolean nameMatches = StringUtils.hasText(row.getExpectedAccountName())
-                && row.getExpectedAccountName().equals(actualName);
+        boolean nameMatches = accountNameMatches(row.getPlatform(), row.getExpectedAccountName(), actualName);
+        if (!nameMatches
+                && !StringUtils.hasText(row.getExpectedAccountName())
+                && accountNameMatches(row.getPlatform(), account.getAccountName(), actualName)) {
+            ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(), null, actualName);
+            row.setExpectedAccountName(actualName);
+            nameMatches = true;
+        }
         if (idMatches || nameMatches) {
             return BrowserEnvironmentConstants.LOGIN_LOGGED_IN;
         }
         return BrowserEnvironmentConstants.LOGIN_MISMATCH;
+    }
+
+    private boolean accountNameMatches(String platform, String expectedAccountName, String actualAccountName) {
+        String expected = normalizeAccountNameForMatch(platform, expectedAccountName);
+        String actual = normalizeAccountNameForMatch(platform, actualAccountName);
+        return StringUtils.hasText(expected) && expected.equals(actual);
+    }
+
+    private String normalizeAccountNameForMatch(String platform, String value) {
+        String text = trimToNull(value);
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        String normalized = text.replaceAll("\\s+", "");
+        String platformName = platformDisplayName(platform);
+        if (StringUtils.hasText(platformName)) {
+            String prefix = platformName + "/";
+            if (normalized.startsWith(prefix) && normalized.length() > prefix.length()) {
+                normalized = normalized.substring(prefix.length());
+            }
+        }
+        return normalized;
+    }
+
+    private String platformDisplayName(String platform) {
+        String normalized = trimToNull(platform);
+        if (!StringUtils.hasText(normalized)) return null;
+        return switch (normalized) {
+            case "toutiao" -> "头条";
+            case "zhihu" -> "知乎";
+            case "xiaohongshu" -> "小红书";
+            case "baijiahao" -> "百家号";
+            default -> normalized;
+        };
     }
 
     private void ensureExpectedIdentityNotClaimed(Long currentId,
@@ -493,6 +640,23 @@ public class BrowserEnvironmentService {
 
     private BrowserEnvironmentAccountVO toAccountVO(BrowserEnvironmentAccount row) {
         return BrowserEnvironmentAccountVO.from(row, environmentMapper.selectById(row.getBrowserEnvironmentId()));
+    }
+
+    private ExtensionRuntimeConfigResponse.RuntimeEnvironmentConfig toRuntimeEnvironmentConfig(BrowserEnvironmentAccount row) {
+        BrowserEnvironment environment = environmentMapper.selectById(row.getBrowserEnvironmentId());
+        return new ExtensionRuntimeConfigResponse.RuntimeEnvironmentConfig(
+                row.getId(),
+                row.getBrowserEnvironmentId(),
+                environment == null ? null : environment.getEnvironmentKey(),
+                environment == null ? null : environment.getName(),
+                environment == null ? null : environment.getProvider(),
+                environment == null ? null : environment.getProviderProfileId(),
+                row.getSelfMediaAccountId(),
+                row.getPlatform(),
+                row.getExpectedPlatformAccountId(),
+                row.getExpectedAccountName(),
+                row.getLoginStatus()
+        );
     }
 
     private BrowserEnvironment requireEnvironment(Long id) {

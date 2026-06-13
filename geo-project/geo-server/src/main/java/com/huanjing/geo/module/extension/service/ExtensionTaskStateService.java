@@ -89,10 +89,29 @@ public class ExtensionTaskStateService {
         LocalDateTime now = now();
         int affected = taskMapper.markSemiAutoFilled(taskId, now);
         if (affected != 1) {
+            if (isSuccessfulAckAlreadyApplied(context.task())) {
+                auditSuccess("SEMI_AUTO_TASK_FILLED_IDEMPOTENT", context, operatorId, extensionSessionId,
+                        detail("status", context.task().getStatus(), "reason", "ACK_ALREADY_APPLIED"));
+                applyScheduleAckResult(taskId, request);
+                return new ExtensionTaskStateResponse(taskId, context.task().getStatus());
+            }
             auditDenied("SEMI_AUTO_TASK_FILLED", context, operatorId, extensionSessionId, "STALE_STATE");
             throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
         }
         auditSuccess("SEMI_AUTO_TASK_FILLED", context, operatorId, extensionSessionId, detail("filledAt", now));
+        applyScheduleAckResult(taskId, request);
+        return new ExtensionTaskStateResponse(taskId, STATUS_FILLED);
+    }
+
+    private boolean isSuccessfulAckAlreadyApplied(DistributionTask task) {
+        if (task == null) {
+            return false;
+        }
+        String status = task.getStatus();
+        return STATUS_FILLED.equals(status) || STATUS_PUBLISHED.equals(status);
+    }
+
+    private void applyScheduleAckResult(Long taskId, Map<String, Object> request) {
         String diagnosticsJson = diagnosticsJson(request);
         if (hasVerifiedImmediatePublishResult(request)) {
             selfMediaPublishScheduleService.markDistributionTaskPublishedConfirmed(
@@ -105,7 +124,6 @@ public class ExtensionTaskStateService {
         } else {
             selfMediaPublishScheduleService.markDistributionTaskFilled(taskId, diagnosticsJson);
         }
-        return new ExtensionTaskStateResponse(taskId, STATUS_FILLED);
     }
 
     @Transactional
