@@ -874,6 +874,9 @@ public class SelfMediaPublishScheduleService {
                 normalizedAllowedPlatforms
         );
         for (SelfMediaPublishSchedule candidate : candidates) {
+            if (operatorId != null && postponeLocalAgentClaimOutsideBusinessWindow(candidate, now)) {
+                continue;
+            }
             if (isExpiredPlatformScheduleExecution(candidate, now)) {
                 markExpiredPlatformScheduleExecution(candidate, now);
                 continue;
@@ -896,6 +899,18 @@ public class SelfMediaPublishScheduleService {
             environmentLockService.release(candidate.getId());
         }
         return null;
+    }
+
+    private boolean postponeLocalAgentClaimOutsideBusinessWindow(SelfMediaPublishSchedule row, LocalDateTime now) {
+        LocalDateTime nextWindow = clampToBusinessAttemptWindow(now);
+        if (nextWindow == null || !nextWindow.isAfter(now.withSecond(0).withNano(0))) {
+            return false;
+        }
+        row.setNextAttemptAt(nextBrandSafeAttemptAt(row.getBrandId(), nextWindow, row.getId()));
+        row.setLockedUntil(null);
+        row.setUpdatedAt(now);
+        scheduleMapper.updateById(row);
+        return true;
     }
 
     private boolean recoverTimedOutLocalAgentSchedule(SelfMediaPublishSchedule row, LocalDateTime now) {
@@ -1257,10 +1272,13 @@ public class SelfMediaPublishScheduleService {
     private LocalDateTime nextPendingPlatformScheduleCheckAt(SelfMediaPublishSchedule row) {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime platformScheduledAt = row.getPlatformScheduledAt();
+        LocalDateTime candidate;
         if (platformScheduledAt != null && platformScheduledAt.isAfter(now)) {
-            return platformScheduledAt.plusMinutes(3);
+            candidate = platformScheduledAt.plusMinutes(3);
+        } else {
+            candidate = now.plusMinutes(5);
         }
-        return now.plusMinutes(5);
+        return nextBrandSafeAttemptAt(row.getBrandId(), candidate, row.getId());
     }
 
     @Transactional

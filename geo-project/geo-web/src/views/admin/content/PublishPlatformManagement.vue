@@ -1055,8 +1055,11 @@ function buildForumContentConstraints() {
       enabled: board.enabled,
       default: board.default,
     }))
+  const postPageUrl = drawerForm.apiEndpoint.trim()
   return JSON.stringify({
     baseUrl: normalizeForumBaseUrl(drawerForm.domain || drawerForm.apiEndpoint),
+    postPageUrl,
+    postSubmitUrl: normalizeDiscuzPostSubmitUrl(postPageUrl),
     boards,
     requestTimeoutMs: 30000,
     successUrlRegex: '(thread|forum)-\\d+',
@@ -1070,6 +1073,22 @@ function normalizeForumBaseUrl(raw: string) {
   const forumIndex = normalized.indexOf('/forum.php')
   const base = forumIndex > 0 ? normalized.slice(0, forumIndex + 1) : normalized
   return base.endsWith('/') ? base : `${base}/`
+}
+
+function normalizeDiscuzPostSubmitUrl(raw: string) {
+  let value = raw.trim()
+  if (!value) return ''
+  value = ensureUrlQueryParam(value, 'extra', '')
+  return ensureUrlQueryParam(value, 'topicsubmit', 'yes')
+}
+
+function ensureUrlQueryParam(raw: string, name: string, value: string) {
+  const [beforeHash, hash = ''] = raw.split('#', 2)
+  const queryIndex = beforeHash.indexOf('?')
+  const query = queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : ''
+  const params = new URLSearchParams(query)
+  if (params.has(name)) return raw
+  return `${beforeHash}${queryIndex >= 0 ? '&' : '?'}${name}=${value}${hash ? `#${hash}` : ''}`
 }
 
 function addForumBoard() {

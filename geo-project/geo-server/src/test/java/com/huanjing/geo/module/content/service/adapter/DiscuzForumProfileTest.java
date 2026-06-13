@@ -44,4 +44,18 @@ class DiscuzForumProfileTest {
         assertThat(copy.postSubmitUri().toString())
                 .isEqualTo("https://bbs.ahv.cc/forum.php?mod=post&action=newthread&fid=18&extra=&topicsubmit=yes");
     }
+
+    @Test
+    void explicitPostSubmitUrlCanUseDifferentPathFromBaseUrl() {
+        DiscuzForumProfile profile = new DiscuzForumProfile();
+        profile.setBaseUrl("https://www.right.com.cn/");
+        profile.setFid(317);
+        profile.setPostPageUrl("https://www.right.com.cn/forum/forum.php?mod=post&action=newthread&fid=?");
+        profile.setPostSubmitUrl("https://www.right.com.cn/forum/forum.php?mod=post&action=newthread&fid=?&extra=&topicsubmit=yes");
+
+        assertThat(profile.postPageUri().toString())
+                .isEqualTo("https://www.right.com.cn/forum/forum.php?mod=post&action=newthread&fid=317");
+        assertThat(profile.postSubmitUri().toString())
+                .isEqualTo("https://www.right.com.cn/forum/forum.php?mod=post&action=newthread&fid=317&extra=&topicsubmit=yes");
+    }
 }

@@ -431,7 +431,8 @@ public class DiscuzHttpForumPublisher {
                     "projectId", payload.projectId(),
                     "title", payload.title(),
                     "fid", profile.getFid(),
-                    "postPageUrl", profile.getPostPageUrl(),
+                    "postPageUrl", profile.postPageUri().toString(),
+                    "postSubmitUrl", profile.postSubmitUri().toString(),
                     "contentMode", "bbcode"
             ));
         } catch (Exception ex) {

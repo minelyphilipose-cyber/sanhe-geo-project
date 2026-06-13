@@ -38,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
@@ -56,8 +57,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doReturn;
 
 class SelfMediaPublishScheduleServiceTest {
     private SelfMediaPublishScheduleMapper scheduleMapper;
@@ -74,6 +77,7 @@ class SelfMediaPublishScheduleServiceTest {
     private ContentDistributionService contentDistributionService;
     private CompanyChannelQuotaService companyChannelQuotaService;
     private BrandAccessService brandAccessService;
+    private BusinessCalendarService businessCalendarService;
     private SelfMediaPublishScheduleService service;
 
     @BeforeEach
@@ -104,6 +108,7 @@ class SelfMediaPublishScheduleServiceTest {
         SysUser user = new SysUser();
         user.setId(99L);
         when(currentUserService.requireCurrentUser()).thenReturn(user);
+        businessCalendarService = spy(new BusinessCalendarService(new ObjectMapper()));
 
         service = new SelfMediaPublishScheduleService(
                 scheduleMapper,
@@ -121,7 +126,7 @@ class SelfMediaPublishScheduleServiceTest {
                 companyChannelQuotaService,
                 brandAccessService,
                 currentUserService,
-                new BusinessCalendarService(new ObjectMapper()),
+                businessCalendarService,
                 new ObjectMapper()
         );
     }
@@ -746,6 +751,7 @@ class SelfMediaPublishScheduleServiceTest {
 
     @Test
     void claimNextTaskForLocalAgentPersistsQuotaFailureWhenDistributionTaskPrepareFails() {
+        stubCurrentTimeInsideBusinessWindow();
         SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         candidate.setId(104L);
         candidate.setPlatform("xiaohongshu");
@@ -790,6 +796,7 @@ class SelfMediaPublishScheduleServiceTest {
 
     @Test
     void claimNextPublishCheckForLocalAgentClaimsScheduledPublishCheckQueue() {
+        stubCurrentTimeInsideBusinessWindow();
         SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED);
         candidate.setId(103L);
         candidate.setCreatedBy(99L);
@@ -833,6 +840,93 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void claimNextTaskForLocalAgentPostponesDueTaskOutsideBusinessWindow() {
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(109L);
+        candidate.setBrandId(8L);
+        candidate.setPlatform("toutiao");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        LocalDate nextBusinessDay = LocalDate.now().plusDays(1);
+        LocalDateTime nextWindowStart = nextBusinessDay.atTime(9, 15);
+        doReturn(List.of(new BusinessCalendarService.BusinessDay(
+                nextBusinessDay,
+                0,
+                "工作日",
+                1,
+                false,
+                List.of(new BusinessCalendarService.PublishWindow(
+                        "morning",
+                        LocalTime.of(9, 15),
+                        LocalTime.of(11, 30),
+                        LocalTime.of(9, 15)
+                ))
+        ))).when(businessCalendarService).publishDays(any(), eq(false));
+        when(scheduleMapper.selectDueQueueCandidatesForOperator(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(99L),
+                eq("toutiao"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
+        )).thenReturn(List.of(candidate));
+
+        var response = service.claimNextTaskForLocalAgent(99L, "toutiao", 10);
+
+        assertNull(response);
+        assertEquals(nextWindowStart, candidate.getNextAttemptAt());
+        verify(scheduleMapper).updateById(candidate);
+        verify(environmentLockService, never()).tryAcquire(anyLong(), anyLong(), any(), any());
+        verify(scheduleMapper, never()).claimQueueSchedule(anyLong(), anyString(), anyList(), anyString(), any(), any());
+    }
+
+    @Test
+    void claimNextTaskForLocalAgentPostponesOutsideBusinessWindowAfterExistingBrandSlot() {
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(113L);
+        candidate.setBrandId(8L);
+        candidate.setPlatform("toutiao");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        LocalDate nextBusinessDay = LocalDate.now().plusDays(1);
+        LocalDateTime nextWindowStart = nextBusinessDay.atTime(9, 15);
+        doReturn(List.of(new BusinessCalendarService.BusinessDay(
+                nextBusinessDay,
+                0,
+                "工作日",
+                1,
+                false,
+                List.of(new BusinessCalendarService.PublishWindow(
+                        "morning",
+                        LocalTime.of(9, 15),
+                        LocalTime.of(11, 30),
+                        LocalTime.of(9, 15)
+                ))
+        ))).when(businessCalendarService).publishDays(any(), eq(false));
+        SelfMediaPublishSchedule occupied = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        occupied.setId(201L);
+        occupied.setBrandId(8L);
+        occupied.setNextAttemptAt(nextWindowStart);
+        when(scheduleMapper.selectBrandActiveScheduleSlots(eq(8L), any(), any(), anyList()))
+                .thenReturn(List.of(occupied));
+        when(scheduleMapper.selectDueQueueCandidatesForOperator(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(99L),
+                eq("toutiao"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
+        )).thenReturn(List.of(candidate));
+
+        var response = service.claimNextTaskForLocalAgent(99L, "toutiao", 10);
+
+        assertNull(response);
+        assertEquals(nextWindowStart.plusMinutes(3), candidate.getNextAttemptAt());
+        verify(scheduleMapper).updateById(candidate);
+        verify(environmentLockService, never()).tryAcquire(anyLong(), anyLong(), any(), any());
+    }
+
+    @Test
     void markClaimedPublishCheckUnknownSchedulesDelayedRetryWhenAttemptsRemain() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
         row.setId(104L);
@@ -871,6 +965,44 @@ class SelfMediaPublishScheduleServiceTest {
         assertTrue(response.getNextAttemptAt().isAfter(row.getPlatformScheduledAt()));
         verify(scheduleMapper).updateById(row);
         verify(environmentLockService).release(108L);
+    }
+
+    @Test
+    void markClaimedPublishCheckUnknownMovesPendingPlatformScheduleCheckIntoBusinessWindow() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        row.setId(112L);
+        row.setBrandId(8L);
+        row.setPlatform("xiaohongshu");
+        LocalDate platformPublishDate = LocalDate.now().plusDays(1);
+        row.setPlatformScheduledAt(platformPublishDate.atTime(23, 0));
+        row.setAttemptCount(4);
+        row.setMaxAttempts(4);
+        LocalDate nextBusinessDay = platformPublishDate.plusDays(1);
+        LocalDateTime nextWindowStart = nextBusinessDay.atTime(9, 15);
+        doReturn(List.of(new BusinessCalendarService.BusinessDay(
+                nextBusinessDay,
+                0,
+                "工作日",
+                1,
+                false,
+                List.of(new BusinessCalendarService.PublishWindow(
+                        "morning",
+                        LocalTime.of(9, 15),
+                        LocalTime.of(11, 30),
+                        LocalTime.of(9, 15)
+                ))
+        ))).when(businessCalendarService).publishDays(any(), eq(false));
+        when(scheduleMapper.selectById(112L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedPublishCheckUnknown(
+                112L,
+                "{\"pendingScheduled\":true,\"reason\":\"platform schedule time not due\"}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
+        assertEquals(nextWindowStart, response.getNextAttemptAt());
+        verify(scheduleMapper).updateById(row);
+        verify(environmentLockService).release(112L);
     }
 
     @Test
@@ -1222,6 +1354,7 @@ class SelfMediaPublishScheduleServiceTest {
 
     @Test
     void claimNextTaskForLocalAgentUsesAttemptScopedDistributionRequestId() {
+        stubCurrentTimeInsideBusinessWindow();
         SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         candidate.setId(109L);
         candidate.setPlatform("baijiahao");
@@ -1338,6 +1471,23 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("WORKS_LIST_VERIFY_TIMEOUT", response.getFailureCode());
         verify(companyChannelQuotaService).refundDistribution(300L);
         verify(environmentLockService).release(100L);
+    }
+
+    private void stubCurrentTimeInsideBusinessWindow() {
+        LocalDate today = LocalDate.now();
+        doReturn(List.of(new BusinessCalendarService.BusinessDay(
+                today,
+                0,
+                "工作日",
+                1,
+                false,
+                List.of(new BusinessCalendarService.PublishWindow(
+                        "test",
+                        LocalTime.of(0, 0),
+                        LocalTime.of(23, 59),
+                        LocalTime.of(9, 15)
+                ))
+        ))).when(businessCalendarService).publishDays(any(), eq(false));
     }
 
     private void prepareValidArticleAndAccount() {
