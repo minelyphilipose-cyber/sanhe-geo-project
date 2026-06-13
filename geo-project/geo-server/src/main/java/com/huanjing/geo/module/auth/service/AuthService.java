@@ -10,6 +10,7 @@ import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.PermissionService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AuthService {
 
     private static final String REFRESH_KEY_PREFIX = "refresh:";
@@ -68,14 +70,24 @@ public class AuthService {
                         .partnerId(user.getPartnerId())
                         .phone(user.getPhone())
                         .email(user.getEmail())
-                        .avatarUrl(minioStorageService.resolveAccessibleUrl(
-                                user.getAvatarObjectKey(),
-                                user.getAvatarUrl(),
-                                86400
-                        ))
+                        .avatarUrl(resolveAvatarUrl(user))
                         .permissions(permissionService.listPermKeys(user))
                         .build())
                 .build();
+    }
+
+    private String resolveAvatarUrl(SysUser user) {
+        try {
+            return minioStorageService.resolveAccessibleUrl(
+                    user.getAvatarObjectKey(),
+                    user.getAvatarUrl(),
+                    86400
+            );
+        } catch (BizException ex) {
+            log.warn("Resolve login avatar url failed, fallback to stored url userId={}, objectKey={}, code={}, msg={}",
+                    user.getId(), user.getAvatarObjectKey(), ex.getCode(), ex.getMessage());
+            return user.getAvatarUrl();
+        }
     }
 
     public String refresh(String refreshToken) {

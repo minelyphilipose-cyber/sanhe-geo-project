@@ -26,17 +26,11 @@ public class ObjectStorageRetentionDryRunService {
     private static final int DEFAULT_LIMIT_PER_PREFIX = 100;
     private static final int MAX_LIMIT_PER_PREFIX = 1_000;
 
-    private static final List<ObjectKeyColumn> OBJECT_KEY_COLUMNS = List.of(
-            new ObjectKeyColumn("article_draft_version", "content_object_key", "archive/article/",
-                    "archived article markdown body"),
-            new ObjectKeyColumn("report_period_freeze", "snapshot_object_key", "retention/freeze/report-period/",
-                    "frozen poll detail report snapshot")
-    );
-
     private final ObjectStorageService objectStorageService;
     private final JdbcTemplate jdbcTemplate;
     private final CurrentUserService currentUserService;
     private final DataRetentionRunAuditService auditService;
+    private final ObjectStorageKeyRegistry objectStorageKeyRegistry;
 
     public ObjectStorageRetentionDryRunResponse dryRun(ObjectStorageRetentionDryRunRequest request) {
         currentUserService.ensurePermission("dispatch.task.release");
@@ -96,7 +90,7 @@ public class ObjectStorageRetentionDryRunService {
 
     private int liveReferenceCount(String objectKey) {
         int count = 0;
-        for (ObjectKeyColumn column : OBJECT_KEY_COLUMNS) {
+        for (ObjectStorageKeyRegistry.ObjectKeyColumn column : objectStorageKeyRegistry.columns()) {
             Integer references = jdbcTemplate.queryForObject("""
                     SELECT COUNT(1)
                       FROM %s
@@ -108,10 +102,7 @@ public class ObjectStorageRetentionDryRunService {
     }
 
     private List<String> resolvePrefixes(String requestedPrefix) {
-        List<String> managed = OBJECT_KEY_COLUMNS.stream()
-                .map(ObjectKeyColumn::managedPrefix)
-                .distinct()
-                .toList();
+        List<String> managed = objectStorageKeyRegistry.managedPrefixes();
         if (!StringUtils.hasText(requestedPrefix)) {
             return managed;
         }
@@ -124,7 +115,7 @@ public class ObjectStorageRetentionDryRunService {
     }
 
     private List<ObjectStorageReferenceColumnVO> referenceColumnVOs() {
-        return OBJECT_KEY_COLUMNS.stream()
+        return objectStorageKeyRegistry.columns().stream()
                 .map(column -> new ObjectStorageReferenceColumnVO(
                         column.tableName(),
                         column.columnName(),
@@ -174,6 +165,4 @@ public class ObjectStorageRetentionDryRunService {
         return Math.min(value, MAX_LIMIT_PER_PREFIX);
     }
 
-    private record ObjectKeyColumn(String tableName, String columnName, String managedPrefix, String note) {
-    }
 }

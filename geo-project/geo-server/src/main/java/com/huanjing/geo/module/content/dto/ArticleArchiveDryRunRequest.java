@@ -6,6 +6,7 @@ import java.time.LocalDate;
 
 @Data
 public class ArticleArchiveDryRunRequest {
+    private Boolean dryRun = true;
     private Long projectId;
     private LocalDate publishedStartDate;
     private LocalDate publishedEndDate;

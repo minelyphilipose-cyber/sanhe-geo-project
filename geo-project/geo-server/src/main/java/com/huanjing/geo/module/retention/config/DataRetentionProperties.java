@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "geo.retention")
 public class DataRetentionProperties {
     private Scheduler scheduler = new Scheduler();
+    private ArticleArchive articleArchive = new ArticleArchive();
+    private ContentUrlRewrite contentUrlRewrite = new ContentUrlRewrite();
     private ExecutePromotion executePromotion = new ExecutePromotion();
 
     @Data
@@ -18,6 +20,16 @@ public class DataRetentionProperties {
         private int limitPerDomain = 100;
         private int pollHotRetentionDays = 120;
         private int objectSafetyAgeHours = 24;
+    }
+
+    @Data
+    public static class ArticleArchive {
+        private boolean executeEnabled = false;
+    }
+
+    @Data
+    public static class ContentUrlRewrite {
+        private boolean executeEnabled = false;
     }
 
     @Data

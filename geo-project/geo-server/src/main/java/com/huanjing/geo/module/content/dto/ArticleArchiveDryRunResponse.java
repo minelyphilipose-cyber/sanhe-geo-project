@@ -18,6 +18,9 @@ public class ArticleArchiveDryRunResponse {
     private Integer candidateCount = 0;
     private Integer eligibleCount = 0;
     private Integer blockedCount = 0;
+    private Integer archivedCount = 0;
+    private Integer skippedCount = 0;
+    private Integer failedCount = 0;
     private Long estimatedBytes = 0L;
     private List<ArticleArchiveDryRunItemVO> items = new ArrayList<>();
 }

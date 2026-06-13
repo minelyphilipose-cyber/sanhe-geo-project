@@ -558,6 +558,14 @@ daily summary reconciliation failed
 
 ## 8. 对象存储抽象与归档协议
 
+### MinIO -> 腾讯云 COS 迁移口径
+
+- 目标云存储为腾讯云 COS；业务代码仍保持 provider-neutral `ObjectStorageService` 抽象，不把 COS bucket、appid、region、endpoint 写入业务 key。
+- DB 仅保存逻辑 key，例如 `archive/article/...`、`retention/freeze/report-period/...`；迁移语义是“同一逻辑 key 从 MinIO verify-copy 到 COS”，DB 引用不变。
+- `geo.storage.provider=minio|cos` 控制当前读写 provider，默认 `minio`；切换期允许 `provider=cos` 且 `read-fallback-to-minio=true`，用于 COS 读不到时回落 MinIO。
+- 迁移入口 `POST /api/data-retention/object-storage/migrate` 默认 dry-run；execute 还需 `geo.storage.migration.execute-enabled=true`。迁移按 DB key 登记清单驱动，不扫描整桶。
+- execute 只做 `read MinIO -> put COS(same key) -> read COS -> SHA-256 校验`；本阶段不删除 MinIO 对象、不置空 DB 正文。
+
 ### 新增抽象
 
 业务代码统一依赖：
@@ -579,7 +587,7 @@ public interface ObjectStorageService {
 
 未来实现：
 
-- `AliyunOssObjectStorageAdapter`。
+- `CosObjectStorageAdapter`。
 
 约束：
 

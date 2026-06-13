@@ -19,6 +19,9 @@ public class ArticleArchiveDryRunItemVO {
     private LocalDateTime contentPurgedAt;
     private Boolean eligible;
     private List<String> blockedReasons = new ArrayList<>();
+    private String action;
+    private String result;
+    private String errorMessage;
     private String plannedObjectKey;
     private String contentChecksum;
     private Long contentBytes;

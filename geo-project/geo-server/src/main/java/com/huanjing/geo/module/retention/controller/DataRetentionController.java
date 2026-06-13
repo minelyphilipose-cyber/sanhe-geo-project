@@ -8,8 +8,14 @@ import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunRequest;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunResponse;
 import com.huanjing.geo.module.presale.dto.DataRetentionSlimDryRunRequest;
 import com.huanjing.geo.module.presale.dto.DataRetentionSlimDryRunResponse;
+import com.huanjing.geo.module.retention.dto.ContentUrlRewriteRequest;
+import com.huanjing.geo.module.retention.dto.ContentUrlRewriteResponse;
 import com.huanjing.geo.module.retention.dto.ObjectStorageRetentionDryRunRequest;
 import com.huanjing.geo.module.retention.dto.ObjectStorageRetentionDryRunResponse;
+import com.huanjing.geo.module.retention.dto.ObjectStorageMigrationRequest;
+import com.huanjing.geo.module.retention.dto.ObjectStorageMigrationResponse;
+import com.huanjing.geo.module.retention.service.ContentUrlRewriteService;
+import com.huanjing.geo.module.retention.service.ObjectStorageMigrationService;
 import com.huanjing.geo.module.retention.service.ObjectStorageRetentionDryRunService;
 import com.huanjing.geo.module.retention.service.PollRetentionDryRunService;
 import com.huanjing.geo.module.retention.service.DataRetentionSlimDryRunService;
@@ -30,6 +36,8 @@ public class DataRetentionController {
     private final ArticleRetentionDryRunService articleRetentionDryRunService;
     private final PollRetentionDryRunService pollRetentionDryRunService;
     private final ObjectStorageRetentionDryRunService objectStorageRetentionDryRunService;
+    private final ObjectStorageMigrationService objectStorageMigrationService;
+    private final ContentUrlRewriteService contentUrlRewriteService;
 
     @PostMapping("/slim/dry-run")
     public R<DataRetentionSlimDryRunResponse> slimDryRun(@RequestBody DataRetentionSlimDryRunRequest request) {
@@ -39,6 +47,11 @@ public class DataRetentionController {
     @PostMapping("/articles/archive/dry-run")
     public R<ArticleArchiveDryRunResponse> articleArchiveDryRun(@RequestBody ArticleArchiveDryRunRequest request) {
         return R.ok(articleRetentionDryRunService.dryRunArchive(request == null ? new ArticleArchiveDryRunRequest() : request));
+    }
+
+    @PostMapping("/articles/archive")
+    public R<ArticleArchiveDryRunResponse> articleArchive(@RequestBody ArticleArchiveDryRunRequest request) {
+        return R.ok(articleRetentionDryRunService.archive(request == null ? new ArticleArchiveDryRunRequest() : request));
     }
 
     @PostMapping("/poll-results/dry-run")
@@ -51,5 +64,26 @@ public class DataRetentionController {
             @RequestBody ObjectStorageRetentionDryRunRequest request) {
         return R.ok(objectStorageRetentionDryRunService.dryRun(
                 request == null ? new ObjectStorageRetentionDryRunRequest() : request));
+    }
+
+    @PostMapping("/object-storage/migrate")
+    public R<ObjectStorageMigrationResponse> objectStorageMigrate(
+            @RequestBody ObjectStorageMigrationRequest request) {
+        return R.ok(objectStorageMigrationService.migrate(
+                request == null ? new ObjectStorageMigrationRequest() : request));
+    }
+
+    @PostMapping("/content-url-rewrite/dry-run")
+    public R<ContentUrlRewriteResponse> contentUrlRewriteDryRun(
+            @RequestBody ContentUrlRewriteRequest request) {
+        return R.ok(contentUrlRewriteService.dryRun(
+                request == null ? new ContentUrlRewriteRequest() : request));
+    }
+
+    @PostMapping("/content-url-rewrite")
+    public R<ContentUrlRewriteResponse> contentUrlRewrite(
+            @RequestBody ContentUrlRewriteRequest request) {
+        return R.ok(contentUrlRewriteService.rewrite(
+                request == null ? new ContentUrlRewriteRequest() : request));
     }
 }

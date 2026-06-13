@@ -185,6 +185,17 @@ semi-auto:
           - img
 
 geo:
+  storage:
+    provider: ${GEO_STORAGE_PROVIDER:minio}
+    read-fallback-to-minio: ${GEO_STORAGE_READ_FALLBACK_TO_MINIO:false}
+    migration:
+      execute-enabled: ${GEO_STORAGE_MIGRATION_EXECUTE_ENABLED:false}
+    cos:
+      region: ${COS_REGION:}
+      bucket: ${COS_BUCKET:}
+      endpoint: ${COS_INTERNAL_ENDPOINT:}
+      secret-id: ${COS_SECRET_ID:}
+      secret-key: ${COS_SECRET_KEY:}
   security:
     init-admin-password:
       enabled: ${GEO_INIT_ADMIN_PASSWORD_ENABLED:false}
