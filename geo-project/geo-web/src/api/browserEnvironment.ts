@@ -46,6 +46,62 @@ export interface BrowserEnvironment {
   updatedAt?: string | null
 }
 
+export interface SelfMediaAutomationReadinessIssue {
+  code: string
+  level: 'error' | 'warning' | string
+  title: string
+  action: string
+  actionKey?: string | null
+}
+
+export interface SelfMediaAutomationAccountReadiness {
+  selfMediaAccountId: number
+  platform: string
+  accountName?: string | null
+  bindingConfigured: boolean
+  browserEnvironmentAccountId?: number | null
+  loginStatus?: BrowserEnvironmentLoginStatus | null
+  loginReady: boolean
+  issueCode?: string | null
+  issueMessage?: string | null
+}
+
+export interface SelfMediaAutomationReadiness {
+  brandId: number
+  status: 'ready' | 'warning' | 'blocked' | string
+  ready: boolean
+  localAgent: {
+    bound: boolean
+    online: boolean
+    sessionId?: number | null
+    helperName?: string | null
+    lastSeenAt?: string | null
+    expiresAt?: string | null
+  }
+  browserEnvironment: {
+    configured: boolean
+    active: boolean
+    id?: number | null
+    environmentKey?: string | null
+    providerProfileId?: string | null
+    name?: string | null
+  }
+  extensionBinding: {
+    bound: boolean
+    online: boolean
+    sessionId?: number | null
+    environmentKey?: string | null
+    providerProfileId?: string | null
+    extensionVersion?: string | null
+    expectedVersion?: string | null
+    versionSupported?: boolean
+    lastSeenAt?: string | null
+    expiresAt?: string | null
+  }
+  accounts: SelfMediaAutomationAccountReadiness[]
+  issues: SelfMediaAutomationReadinessIssue[]
+}
+
 export interface BrowserEnvironmentCreatePayload {
   brandId: number
   provider?: string | null
@@ -77,6 +133,10 @@ export interface BrowserEnvironmentAccountUpdatePayload {
 
 export function listBrowserEnvironments(brandId: number) {
   return request.get<R<BrowserEnvironment[]>>('/v1/browser-environments', { params: { brandId } })
+}
+
+export function getSelfMediaAutomationReadiness(brandId: number) {
+  return request.get<R<SelfMediaAutomationReadiness>>(`/v1/brands/${brandId}/self-media-automation/readiness`)
 }
 
 export function createBrowserEnvironment(payload: BrowserEnvironmentCreatePayload) {

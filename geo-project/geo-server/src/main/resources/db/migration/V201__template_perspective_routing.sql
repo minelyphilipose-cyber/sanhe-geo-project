@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS brand_channel_template_perspective (
 DROP PROCEDURE IF EXISTS v201_add_column_if_missing;
 DELIMITER $$
 CREATE PROCEDURE v201_add_column_if_missing(
-    IN p_table_name VARCHAR(64),
-    IN p_column_name VARCHAR(64),
+    IN p_table_name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+    IN p_column_name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
     IN p_ddl TEXT
 )
 BEGIN
@@ -110,8 +110,8 @@ UPDATE article_draft SET perspective_code = 'customer' WHERE perspective_code IS
 DROP PROCEDURE IF EXISTS v201_add_index_if_missing;
 DELIMITER $$
 CREATE PROCEDURE v201_add_index_if_missing(
-    IN p_table_name VARCHAR(64),
-    IN p_index_name VARCHAR(64),
+    IN p_table_name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+    IN p_index_name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
     IN p_ddl TEXT
 )
 BEGIN
@@ -133,8 +133,8 @@ DELIMITER ;
 DROP PROCEDURE IF EXISTS v201_add_fk_if_missing;
 DELIMITER $$
 CREATE PROCEDURE v201_add_fk_if_missing(
-    IN p_table_name VARCHAR(64),
-    IN p_constraint_name VARCHAR(64),
+    IN p_table_name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+    IN p_constraint_name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
     IN p_ddl TEXT
 )
 BEGIN

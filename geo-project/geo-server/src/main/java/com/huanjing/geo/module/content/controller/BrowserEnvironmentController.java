@@ -9,6 +9,7 @@ import com.huanjing.geo.module.content.dto.BrowserEnvironmentUpdateRequest;
 import com.huanjing.geo.module.content.service.BrowserEnvironmentService;
 import com.huanjing.geo.module.content.vo.BrowserEnvironmentAccountVO;
 import com.huanjing.geo.module.content.vo.BrowserEnvironmentVO;
+import com.huanjing.geo.module.content.vo.SelfMediaAutomationReadinessVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +35,11 @@ public class BrowserEnvironmentController {
     @GetMapping("/browser-environments")
     public R<List<BrowserEnvironmentVO>> listEnvironments(@RequestParam Long brandId) {
         return R.ok(browserEnvironmentService.listEnvironments(brandId));
+    }
+
+    @GetMapping("/brands/{brandId}/self-media-automation/readiness")
+    public R<SelfMediaAutomationReadinessVO> selfMediaAutomationReadiness(@PathVariable Long brandId) {
+        return R.ok(browserEnvironmentService.selfMediaAutomationReadiness(brandId));
     }
 
     @PostMapping("/browser-environments")

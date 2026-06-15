@@ -70,6 +70,10 @@ function renderStoredLogs(events) {
       if (event.ok) return `${time} 配置发现成功：environmentKey=${event.environmentKey || '-'}，platform=${event.platform || '-'}，status=${event.status || '-'}`
       return `${time} 配置发现未采用：${event.error || event.selectionStatus || 'unknown'}`
     }
+    if (event.type === 'bind_intent') {
+      if (event.ok) return `${time} 自动绑定成功：environmentKey=${event.environmentKey || '-'}，brandId=${event.brandId || '-'}`
+      return `${time} 自动绑定失败：${event.error || 'unknown error'}`
+    }
     if (event.ok) return `${time} 自动处理成功：taskId=${event.taskId || '-'}，platform=${event.platform || '-'}`
     return `${time} 自动处理失败：${event.error || 'unknown error'}`
   }).join('\n')
@@ -189,3 +193,12 @@ selfTestBtn.addEventListener('click', async () => {
 })
 
 load().catch((error) => log(`加载失败：${error.message}`))
+
+sendMessage({ type: 'GEO_ENV_BIND_FROM_INTENT' })
+  .then(async (response) => {
+    if (!response?.ok || response.skipped) return
+    renderStatus(response.session)
+    log(`已通过本地助手自动绑定：environmentKey=${response.config?.environmentKey || '-'}`)
+    await load()
+  })
+  .catch((error) => log(`自动绑定失败：${error.message}`))

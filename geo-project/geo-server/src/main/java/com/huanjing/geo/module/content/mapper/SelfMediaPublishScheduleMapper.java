@@ -9,6 +9,7 @@ import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Mapper
@@ -23,6 +24,124 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
             </script>
             """)
     List<SelfMediaPublishSchedule> selectByRequestId(@Param("requestId") Long requestId);
+
+    @Select("""
+            SELECT status AS name, COUNT(1) AS total
+            FROM self_media_publish_schedule
+            GROUP BY status
+            ORDER BY total DESC
+            """)
+    List<Map<String, Object>> countGroupedByStatus();
+
+    @Select("""
+            <script>
+            SELECT platform AS name,
+                   SUM(CASE WHEN status IN
+                     <foreach collection="activeStatuses" item="status" open="(" separator="," close=")">
+                       #{status}
+                     </foreach>
+                     THEN 1 ELSE 0 END) AS active_total,
+                   SUM(CASE WHEN status IN ('schedule_failed', 'publish_failed', 'manual_required') THEN 1 ELSE 0 END) AS failed_total,
+                   SUM(CASE WHEN (
+                     status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now})
+                   ) OR (
+                     status IN ('publish_due', 'publish_unknown') AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now})
+                   ) OR (
+                     status = 'scheduled' AND next_attempt_at IS NULL AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now}
+                   ) THEN 1 ELSE 0 END) AS due_total
+            FROM self_media_publish_schedule
+            WHERE (
+              status IN
+                <foreach collection="activeStatuses" item="status" open="(" separator="," close=")">
+                  #{status}
+                </foreach>
+            ) OR status IN ('schedule_failed', 'publish_failed', 'manual_required')
+            GROUP BY platform
+            ORDER BY active_total DESC, failed_total DESC
+            </script>
+            """)
+    List<Map<String, Object>> countGroupedByPlatform(@Param("activeStatuses") List<String> activeStatuses,
+                                                     @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT failure_code AS name, COUNT(1) AS total
+            FROM self_media_publish_schedule
+            WHERE failure_code IS NOT NULL
+              AND failure_code != ''
+              AND status IN ('schedule_failed', 'publish_failed', 'manual_required', 'publish_unknown', 'pending')
+            GROUP BY failure_code
+            ORDER BY total DESC
+            LIMIT #{limit}
+            """)
+    List<Map<String, Object>> countGroupedByFailureCode(@Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE queue_kind = #{queueKind}
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND (
+                (#{queueKind} != 'publish_result_check' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now}))
+                OR (#{queueKind} = 'publish_result_check' AND (
+                  next_attempt_at &lt;= #{now}
+                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'publish_unknown'))
+                  OR (next_attempt_at IS NULL AND status = 'scheduled' AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now})
+                ))
+              )
+              AND (locked_until IS NULL OR locked_until &lt; #{now})
+            </script>
+            """)
+    long countDueByQueue(@Param("queueKind") String queueKind,
+                         @Param("statuses") List<String> statuses,
+                         @Param("now") LocalDateTime now);
+
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    long countByStatuses(@Param("statuses") List<String> statuses);
+
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND locked_until IS NOT NULL
+              AND locked_until &gt; #{now}
+            </script>
+            """)
+    long countLockedByStatuses(@Param("statuses") List<String> statuses,
+                               @Param("now") LocalDateTime now);
+
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE created_by = #{operatorId}
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND locked_until IS NOT NULL
+              AND locked_until &gt; #{now}
+            </script>
+            """)
+    long countLockedByOperatorAndStatuses(@Param("operatorId") Long operatorId,
+                                          @Param("statuses") List<String> statuses,
+                                          @Param("now") LocalDateTime now);
 
     @Select("""
             SELECT *
@@ -277,6 +396,29 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                                                                                   @Param("periodEnd") LocalDateTime periodEnd,
                                                                                   @Param("now") LocalDateTime now);
 
+    @Select("""
+            SELECT *
+            FROM self_media_publish_schedule
+            WHERE brand_id = #{brandId}
+              AND platform = #{platform}
+              AND planned_publish_at >= #{periodStart}
+              AND planned_publish_at < #{periodEnd}
+              AND status = 'pending'
+              AND (locked_until IS NULL OR locked_until < #{now})
+              AND COALESCE(next_attempt_at, planned_publish_at) >= #{replaceAfter}
+              AND platform_schedule_id IS NULL
+              AND platform_publish_id IS NULL
+              AND (platform_published_url IS NULL OR platform_published_url = '')
+            ORDER BY COALESCE(next_attempt_at, planned_publish_at) ASC, planned_publish_at ASC, id ASC
+            LIMIT 1
+            """)
+    SelfMediaPublishSchedule selectSafeReplaceablePendingByBrandPlatformAndPeriod(@Param("brandId") Long brandId,
+                                                                                  @Param("platform") String platform,
+                                                                                  @Param("periodStart") LocalDateTime periodStart,
+                                                                                  @Param("periodEnd") LocalDateTime periodEnd,
+                                                                                  @Param("now") LocalDateTime now,
+                                                                                  @Param("replaceAfter") LocalDateTime replaceAfter);
+
     @Update("""
             UPDATE self_media_publish_schedule
             SET status = 'cancelled',
@@ -300,6 +442,35 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                                          @Param("periodStart") LocalDateTime periodStart,
                                          @Param("periodEnd") LocalDateTime periodEnd,
                                          @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE self_media_publish_schedule
+            SET status = 'cancelled',
+                cancelled_at = #{now},
+                failure_code = 'REPLACED_BY_OPERATOR_QUICK_DISPATCH',
+                failure_message = '运营点击平台快速分发时安全替换',
+                locked_until = NULL,
+                next_attempt_at = NULL,
+                updated_at = #{now}
+            WHERE id = #{scheduleId}
+              AND brand_id = #{brandId}
+              AND platform = #{platform}
+              AND planned_publish_at >= #{periodStart}
+              AND planned_publish_at < #{periodEnd}
+              AND status = 'pending'
+              AND (locked_until IS NULL OR locked_until < #{now})
+              AND COALESCE(next_attempt_at, planned_publish_at) >= #{replaceAfter}
+              AND platform_schedule_id IS NULL
+              AND platform_publish_id IS NULL
+              AND (platform_published_url IS NULL OR platform_published_url = '')
+            """)
+    int cancelSafeReplaceablePendingSchedule(@Param("scheduleId") Long scheduleId,
+                                             @Param("brandId") Long brandId,
+                                             @Param("platform") String platform,
+                                             @Param("periodStart") LocalDateTime periodStart,
+                                             @Param("periodEnd") LocalDateTime periodEnd,
+                                             @Param("now") LocalDateTime now,
+                                             @Param("replaceAfter") LocalDateTime replaceAfter);
 
     @Select("""
             <script>

@@ -385,6 +385,14 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="轮换主体" min-width="180">
+          <template #default="{ row }">
+            <div class="detail-task-cell">
+              <span>{{ row.subjectBrandName || row.subjectBrandId || '-' }}</span>
+              <small v-if="row.sourceBrandName && row.sourceBrandName !== row.subjectBrandName">信源：{{ row.sourceBrandName }}</small>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="平台账号" width="180">
           <template #default="{ row }">
             <div class="detail-task-cell">

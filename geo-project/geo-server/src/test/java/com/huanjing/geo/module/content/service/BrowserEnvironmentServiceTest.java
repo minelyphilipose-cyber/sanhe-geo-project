@@ -14,6 +14,11 @@ import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
 import com.huanjing.geo.module.content.mapper.BrowserEnvironmentMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.extension.config.ExtensionProperties;
+import com.huanjing.geo.module.extension.entity.ExtensionSession;
+import com.huanjing.geo.module.extension.entity.LocalAgentSession;
+import com.huanjing.geo.module.extension.mapper.ExtensionSessionMapper;
+import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,6 +44,9 @@ class BrowserEnvironmentServiceTest {
     private BrowserEnvironmentAccountMapper environmentAccountMapper;
     private BrowserEnvironmentMapper environmentMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
+    private LocalAgentSessionMapper localAgentSessionMapper;
+    private ExtensionSessionMapper extensionSessionMapper;
+    private ExtensionProperties extensionProperties;
     private BrowserEnvironmentService service;
 
     @BeforeEach
@@ -48,6 +56,9 @@ class BrowserEnvironmentServiceTest {
         environmentMapper = mock(BrowserEnvironmentMapper.class);
         environmentAccountMapper = mock(BrowserEnvironmentAccountMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
+        localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
+        extensionSessionMapper = mock(ExtensionSessionMapper.class);
+        extensionProperties = new ExtensionProperties();
         CurrentUserService currentUserService = mock(CurrentUserService.class);
         SysUser operator = new SysUser();
         operator.setId(99L);
@@ -56,8 +67,11 @@ class BrowserEnvironmentServiceTest {
                 environmentMapper,
                 environmentAccountMapper,
                 selfMediaAccountMapper,
+                localAgentSessionMapper,
+                extensionSessionMapper,
                 mock(BrandAccessService.class),
-                currentUserService
+                currentUserService,
+                extensionProperties
         );
     }
 
@@ -82,7 +96,7 @@ class BrowserEnvironmentServiceTest {
         ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
         verify(environmentAccountMapper).updateById(captor.capture());
         BrowserEnvironmentAccount updated = captor.getValue();
-        assertEquals("1865234056392716", updated.getExpectedPlatformAccountId());
+        assertNull(updated.getExpectedPlatformAccountId());
         assertEquals("阜阳全屋智能家居", updated.getExpectedAccountName());
         assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, updated.getLoginStatus());
     }
@@ -324,12 +338,14 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
-    void validateForTaskCreation_strictModeRejectsUnknownLoginStatus() {
+    void validateForTaskCreation_strictModeAllowsUnknownLoginStatus() {
         when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
                 .thenReturn(binding(null, "三合星链-小编", BrowserEnvironmentConstants.LOGIN_UNKNOWN));
         when(environmentMapper.selectById(20L)).thenReturn(environment());
 
-        assertThrows(BizException.class, () -> service.validateForTaskCreation(account("三合星链-小编")));
+        BrowserEnvironmentAccount response = service.validateForTaskCreation(account("三合星链-小编"));
+
+        assertEquals(BrowserEnvironmentConstants.LOGIN_UNKNOWN, response.getLoginStatus());
     }
 
     @Test
@@ -344,12 +360,14 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
-    void validateForTaskCreation_strictModeRejectsMismatchLoginStatus() {
+    void validateForTaskCreation_strictModeAllowsMismatchLoginStatus() {
         when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
                 .thenReturn(binding(null, "三合星链-小编", BrowserEnvironmentConstants.LOGIN_MISMATCH));
         when(environmentMapper.selectById(20L)).thenReturn(environment());
 
-        assertThrows(BizException.class, () -> service.validateForTaskCreation(account("三合星链-小编")));
+        BrowserEnvironmentAccount response = service.validateForTaskCreation(account("三合星链-小编"));
+
+        assertEquals(BrowserEnvironmentConstants.LOGIN_MISMATCH, response.getLoginStatus());
     }
 
     @Test
@@ -523,6 +541,109 @@ class BrowserEnvironmentServiceTest {
         assertTrue(ex.getMessage().contains("AdsPower 浏览器编号或环境代号已被其他启用环境使用"));
     }
 
+    @Test
+    void selfMediaAutomationReadinessReturnsReadyWhenAllRuntimeLinksAreHealthy() {
+        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of(localAgentSession()));
+        when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(extensionSession()));
+        when(environmentMapper.selectList(any())).thenReturn(List.of(environment()));
+        when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of(account("阜阳全屋智能家居", "toutiao")));
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                .thenReturn(binding("1865234056392716", "阜阳全屋智能家居", BrowserEnvironmentConstants.LOGIN_LOGGED_IN));
+
+        var response = service.selfMediaAutomationReadiness(1L);
+
+        assertEquals("ready", response.status());
+        assertTrue(response.ready());
+        assertTrue(response.localAgent().online());
+        assertTrue(response.browserEnvironment().active());
+        assertTrue(response.extensionBinding().online());
+        assertNull(response.extensionBinding().expectedVersion());
+        assertTrue(response.extensionBinding().versionSupported());
+        assertEquals(1, response.accounts().size());
+        assertTrue(response.accounts().get(0).loginReady());
+        assertTrue(response.issues().isEmpty());
+    }
+
+    @Test
+    void selfMediaAutomationReadinessReportsDisabledEnvironmentSeparatelyFromMissingConfig() {
+        BrowserEnvironment disabled = environment();
+        disabled.setStatus(BrowserEnvironmentConstants.ENV_STATUS_DISABLED);
+        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of(localAgentSession()));
+        when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(extensionSession()));
+        when(environmentMapper.selectList(any())).thenReturn(List.of(disabled));
+        when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of());
+
+        var response = service.selfMediaAutomationReadiness(1L);
+
+        assertEquals("blocked", response.status());
+        assertTrue(response.browserEnvironment().configured());
+        assertTrue(response.issues().stream().anyMatch(issue -> "ADSPOWER_ENVIRONMENT_DISABLED".equals(issue.code())));
+    }
+
+    @Test
+    void selfMediaAutomationReadinessWarnsWhenExtensionVersionIsOutdated() {
+        extensionProperties.getEnv().setExpectedVersion("0.1.0");
+        ExtensionSession outdated = extensionSession();
+        outdated.setExtensionVersion("0.0.9");
+        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of(localAgentSession()));
+        when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(outdated));
+        when(environmentMapper.selectList(any())).thenReturn(List.of(environment()));
+        when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of(account("阜阳全屋智能家居", "toutiao")));
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                .thenReturn(binding("1865234056392716", "阜阳全屋智能家居", BrowserEnvironmentConstants.LOGIN_LOGGED_IN));
+
+        var response = service.selfMediaAutomationReadiness(1L);
+
+        assertEquals("warning", response.status());
+        assertTrue(response.ready());
+        assertEquals("0.1.0", response.extensionBinding().expectedVersion());
+        assertTrue(!response.extensionBinding().versionSupported());
+        assertTrue(response.issues().stream().anyMatch(issue -> "EXTENSION_VERSION_OUTDATED".equals(issue.code())));
+    }
+
+    @Test
+    void selfMediaAutomationReadinessPrefersSessionMatchingDefaultEnvironment() {
+        ExtensionSession otherEnvironment = extensionSession();
+        otherEnvironment.setId(51L);
+        otherEnvironment.setEnvironmentKey("other_env");
+        otherEnvironment.setProviderProfileId("other-profile");
+        otherEnvironment.setLastSeenAt(LocalDateTime.now().minusSeconds(10));
+        ExtensionSession matching = extensionSession();
+        matching.setId(52L);
+        matching.setEnvironmentKey("geo_b");
+        matching.setProviderProfileId("profile-1");
+        matching.setLastSeenAt(LocalDateTime.now().minusMinutes(2));
+        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of(localAgentSession()));
+        when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(otherEnvironment, matching));
+        when(environmentMapper.selectList(any())).thenReturn(List.of(environment()));
+        when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of(account("阜阳全屋智能家居", "toutiao")));
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                .thenReturn(binding("1865234056392716", "阜阳全屋智能家居", BrowserEnvironmentConstants.LOGIN_LOGGED_IN));
+
+        var response = service.selfMediaAutomationReadiness(1L);
+
+        assertEquals(52L, response.extensionBinding().sessionId());
+        assertEquals("geo_b", response.extensionBinding().environmentKey());
+        assertEquals("profile-1", response.extensionBinding().providerProfileId());
+    }
+
+    @Test
+    void selfMediaAutomationReadinessIssueProvidesActionKey() {
+        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of());
+        when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of());
+        when(environmentMapper.selectList(any())).thenReturn(List.of());
+        when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of());
+
+        var response = service.selfMediaAutomationReadiness(1L);
+
+        assertTrue(response.issues().stream()
+                .anyMatch(issue -> "LOCAL_AGENT_NOT_BOUND".equals(issue.code())
+                        && "OPEN_LOCAL_HELPER_SETUP".equals(issue.actionKey())));
+        assertTrue(response.issues().stream()
+                .anyMatch(issue -> "ADSPOWER_ENVIRONMENT_NOT_CONFIGURED".equals(issue.code())
+                        && "IMPORT_ADSPOWER_ENVIRONMENT".equals(issue.actionKey())));
+    }
+
     private BrowserEnvironment environment() {
         BrowserEnvironment row = new BrowserEnvironment();
         row.setId(20L);
@@ -565,6 +686,27 @@ class BrowserEnvironmentServiceTest {
         row.setBrandId(1L);
         row.setPlatform(platform);
         row.setAccountName(accountName);
+        return row;
+    }
+
+    private LocalAgentSession localAgentSession() {
+        LocalAgentSession row = new LocalAgentSession();
+        row.setId(40L);
+        row.setOperatorId(99L);
+        row.setHelperName("local-helper");
+        row.setLastSeenAt(LocalDateTime.now().minusMinutes(1));
+        row.setExpiresAt(LocalDateTime.now().plusHours(1));
+        return row;
+    }
+
+    private ExtensionSession extensionSession() {
+        ExtensionSession row = new ExtensionSession();
+        row.setId(50L);
+        row.setBrandId(1L);
+        row.setOperatorId(99L);
+        row.setExtensionVersion("1.0.0");
+        row.setLastSeenAt(LocalDateTime.now().minusMinutes(1));
+        row.setExpiresAt(LocalDateTime.now().plusHours(1));
         return row;
     }
 }

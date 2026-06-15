@@ -147,19 +147,27 @@ public class ArticleAutoImageInsertionService {
     }
 
     private String markdownImage(ImageRef image) {
-        return "<p><img src=\"" + escapeHtmlAttribute(image.url().trim()) + "\" alt=\""
-                + escapeHtmlAttribute(image.alt()) + "\" style=\"display:block;max-width:100%;width:auto;height:auto;object-fit:contain;margin:16px auto;border-radius:6px;\" /></p>";
+        return "![" + escapeMarkdownImageAlt(image.alt()) + "](" + escapeMarkdownImageUrl(image.url().trim()) + ")";
     }
 
-    private String escapeHtmlAttribute(String value) {
+    private String escapeMarkdownImageAlt(String value) {
         if (!StringUtils.hasText(value)) {
             return "";
         }
         return value
-                .replace("&", "&amp;")
-                .replace("\"", "&quot;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;");
+                .replace("\\", "\\\\")
+                .replace("]", "\\]")
+                .replace("\r", " ")
+                .replace("\n", " ");
+    }
+
+    private String escapeMarkdownImageUrl(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value
+                .replace(" ", "%20")
+                .replace(")", "%29");
     }
 
     private String normalizeType(String fileType) {

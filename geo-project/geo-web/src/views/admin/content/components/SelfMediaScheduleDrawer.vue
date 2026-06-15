@@ -13,6 +13,7 @@
       <el-select v-model="query.status" class="schedule-filter" clearable placeholder="状态">
         <el-option v-for="item in scheduleStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
+      <el-input v-model="query.failureCode" class="schedule-filter is-wide" clearable placeholder="失败码" @keyup.enter="search" />
       <el-select v-model="query.health" class="schedule-filter" clearable placeholder="健康">
         <el-option v-for="item in scheduleHealthOptions" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
@@ -108,6 +109,7 @@
           <template #default="scope">
             <div class="schedule-actions">
               <el-button link type="primary" @click="showDiagnostics(scope.row)">诊断</el-button>
+              <el-button v-if="canHandleMaterials(scope.row)" link type="primary" @click="handleMaterials(scope.row)">处理素材</el-button>
               <el-button v-if="canRetryNow(scope.row)" link type="primary" @click="retryNow(scope.row)">立即重试</el-button>
               <el-button v-if="canRecheck(scope.row)" link type="primary" @click="recheck(scope.row)">重新校验</el-button>
               <el-button v-if="canMarkManual(scope.row)" link type="warning" @click="markManual(scope.row)">转人工</el-button>
@@ -164,6 +166,10 @@
         <section class="schedule-diagnostics-section">
           <h4>处理建议</h4>
           <p class="schedule-diagnostics-advice">{{ recommendationText(diagnosticsRow) }}</p>
+          <div class="schedule-diagnostics-actions">
+            <el-button v-if="canHandleMaterials(diagnosticsRow)" type="primary" @click="handleMaterials(diagnosticsRow)">处理素材</el-button>
+            <el-button v-if="canRetryNow(diagnosticsRow)" @click="retryNow(diagnosticsRow)">立即重试</el-button>
+          </div>
         </section>
 
         <section v-if="platformDiagnosticsFields.length" class="schedule-diagnostics-section">
@@ -207,6 +213,8 @@ type ScheduleHealth = 'failed' | 'manual' | 'overdue' | 'running' | 'waiting' | 
 const props = defineProps<{
   modelValue: boolean
   canPublish: boolean
+  initialFailureCode?: string | null
+  initialStatus?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -231,6 +239,7 @@ const query = reactive({
   selfMediaAccountId: '',
   platform: '',
   status: '',
+  failureCode: '',
   health: '' as '' | ScheduleHealth,
 })
 
@@ -382,7 +391,15 @@ const platformDiagnosticsFields = computed(() => {
 
 watch(() => props.modelValue, (opened) => {
   if (opened) {
+    applyInitialFilters()
     load()
+  }
+})
+
+watch(() => [props.initialFailureCode, props.initialStatus], () => {
+  if (props.modelValue) {
+    applyInitialFilters()
+    search()
   }
 })
 
@@ -400,6 +417,7 @@ function queryParams() {
     selfMediaAccountId: positiveNumberInput(query.selfMediaAccountId),
     platform: query.platform || undefined,
     status: query.status || undefined,
+    failureCode: query.failureCode.trim() || undefined,
     current: page.current,
     size: page.size,
   }
@@ -430,8 +448,16 @@ function resetQuery() {
   query.selfMediaAccountId = ''
   query.platform = ''
   query.status = ''
+  query.failureCode = ''
   query.health = ''
   search()
+}
+
+function applyInitialFilters() {
+  query.failureCode = props.initialFailureCode?.trim() || ''
+  query.status = props.initialStatus?.trim() || ''
+  query.health = ''
+  page.current = 1
 }
 
 function handleSizeChange(size: number) {
@@ -636,6 +662,8 @@ function failureCodeLabel(code?: string | null) {
     IDENTITY_EXPECTATION_MISSING: '缺少账号校验信息',
     COVER_MATERIAL_NOT_FOUND: '封面素材不存在',
     COVER_IMAGE_UNSUPPORTED: '封面图片类型不支持',
+    MATERIAL_IMAGE_UNAVAILABLE: '素材图片不可用',
+    PUBLIC_MATERIAL_NOT_FOUND: '素材公开链接失效',
     WORKS_LIST_VERIFY_TIMEOUT: '作品列表回查超时',
     PAGE_LOAD_TIMEOUT: '页面加载或执行超时',
     EDITOR_NOT_READY: '编辑器未就绪',
@@ -796,11 +824,33 @@ function canRecheck(row: SelfMediaPublishSchedule) {
   return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed'].includes(row.status)
 }
 
-function canRetryNow(row: SelfMediaPublishSchedule) {
-  if (!props.canPublish) return false
+function canRetryNow(row: SelfMediaPublishSchedule | null) {
+  if (!props.canPublish || !row) return false
   if (['cancelled', 'published_confirmed', 'cancel_pending_platform', 'routed_to_semi_auto'].includes(row.status)) return false
   if (row.queueKind === 'publish_result_check') return ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed', 'manual_required'].includes(row.status)
   return ['pending', 'filling', 'filled_verified', 'scheduling', 'schedule_failed', 'manual_required'].includes(row.status) && !isLocked(row)
+}
+
+function isMaterialFailure(row: SelfMediaPublishSchedule | null) {
+  if (!row) return false
+  const code = row.failureCode || ''
+  if (['MATERIAL_IMAGE_UNAVAILABLE', 'PUBLIC_MATERIAL_NOT_FOUND', 'COVER_MATERIAL_NOT_FOUND', 'COVER_IMAGE_UNSUPPORTED'].includes(code)) return true
+  const text = `${row.failureMessage || ''} ${row.diagnosticsJson || ''}`
+  return text.includes('/api/public/brand-materials/')
+    || text.includes('Material not found')
+    || text.includes('image content-type is not supported')
+    || text.includes('content-type is not supported')
+}
+
+function canHandleMaterials(row: SelfMediaPublishSchedule | null) {
+  return Boolean(props.canPublish && row?.articleId && isMaterialFailure(row))
+}
+
+function handleMaterials(row: SelfMediaPublishSchedule | null) {
+  if (!row?.articleId) return
+  diagnosticsVisible.value = false
+  emit('openArticle', row.articleId)
+  ElMessage.info('请在文章详情中替换失效的封面或正文图片，保存后回到排期明细点击“立即重试”。')
 }
 
 function canMarkManual(row: SelfMediaPublishSchedule) {
@@ -864,7 +914,8 @@ async function confirmFailed(row: SelfMediaPublishSchedule) {
   }
 }
 
-async function retryNow(row: SelfMediaPublishSchedule) {
+async function retryNow(row: SelfMediaPublishSchedule | null) {
+  if (!row) return
   try {
     await ElMessageBox.confirm(`确认立即重试排期 #${row.id}？`, '立即重试', {
       confirmButtonText: '立即重试',
@@ -951,6 +1002,7 @@ function alertTypeLabel(value?: string | null) {
 }
 
 function recommendationText(row: SelfMediaPublishSchedule) {
+  if (isMaterialFailure(row)) return '素材公开链接返回 404 或非图片内容。请点击“处理素材”打开文章，替换失效的封面/正文图片并保存，然后点击“立即重试”。'
   if (row.failureActionHint) return row.failureActionHint
   if (row.failureCode === 'LOCAL_AGENT_HEARTBEAT_TIMEOUT') return '本地助手执行心跳超时；确认本地助手、AdsPower 和平台页面正常后，可点击“立即重试”。'
   if (isBackendDelayedPlatform(row.platform)) {
@@ -1001,6 +1053,10 @@ function platformLabel(value?: string | null) {
 
 .schedule-filter {
   width: 150px;
+}
+
+.schedule-filter.is-wide {
+  width: 240px;
 }
 
 .schedule-health-grid {
@@ -1198,6 +1254,13 @@ function platformLabel(value?: string | null) {
   color: #374151;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.schedule-diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .schedule-diagnostics-json {

@@ -11,7 +11,6 @@ import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
 import com.huanjing.geo.module.content.mapper.SelfMediaScheduleCapabilityMapper;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
-import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.vo.SelfMediaScheduleCapabilityVO;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -116,13 +115,6 @@ public class SelfMediaScheduleCapabilityService {
         }
         if (STRATEGY_BACKEND_DELAYED_PUBLISH.equals(strategy) && !contract.supportsBackendDelayedPublish()) {
             return PlatformScheduleReadiness.rejected("PLATFORM_BACKEND_DELAYED_UNSUPPORTED", "平台契约声明不支持后台延迟发布");
-        }
-        if (STRATEGY_BACKEND_DELAYED_PUBLISH.equals(strategy)
-                && SelfMediaPlatformPublishChannel.OFFICIAL_API.equals(contract.publishChannel())) {
-            return PlatformScheduleReadiness.rejected(
-                    "PLATFORM_BACKEND_DELAYED_EXECUTOR_MISSING",
-                    "官方 API 后台延迟发布执行器尚未接入"
-            );
         }
         if (!List.of(STRATEGY_PLATFORM_SCHEDULE, STRATEGY_BACKEND_DELAYED_PUBLISH).contains(strategy)) {
             return PlatformScheduleReadiness.rejected("PLATFORM_SCHEDULE_STRATEGY_DISABLED", "平台 v1 策略未启用自动定时发布");

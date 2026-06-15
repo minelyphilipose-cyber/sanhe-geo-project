@@ -438,6 +438,42 @@ class ContentDistributionServiceTest {
     }
 
     @Test
+    void distributeTo_selfMedia_orphanDistributingArticle_recoversAndCreatesNewTask() {
+        givenCommonData();
+        when(articleDraftMapper.selectById(1L)).thenReturn(articleWithStatus("distributing"));
+        when(distributionTaskMapper.selectCount(any())).thenReturn(0L);
+        selfMediaAdapter.result = SubmitResult.success(200, "{}", "{\"media_id\":\"draft-1\"}", null, "draft-1");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));
+
+        DistributionTask result = contentDistributionService.distributeTo(1L, selfMediaTarget("wechat_mp"));
+
+        assertEquals("submitted", result.getStatus());
+        verify(distributionTaskMapper).insert(any());
+        ArgumentCaptor<LambdaUpdateWrapper<ArticleDraft>> updateCaptor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(articleDraftMapper, times(3)).update(eq(null), updateCaptor.capture());
+        List<Object> updatedValues = updateCaptor.getAllValues().stream()
+                .flatMap(wrapper -> wrapper.getParamNameValuePairs().values().stream())
+                .toList();
+        assertTrue(updatedValues.contains("approved"));
+        assertTrue(updatedValues.contains("distributing"));
+        assertTrue(updatedValues.contains("distributed"));
+    }
+
+    @Test
+    void distributeTo_selfMedia_distributingArticleWithActiveTask_stillBlocks() {
+        givenCommonData();
+        when(articleDraftMapper.selectById(1L)).thenReturn(articleWithStatus("distributing"));
+        when(distributionTaskMapper.selectCount(any())).thenReturn(1L);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> contentDistributionService.distributeTo(1L, selfMediaTarget("wechat_mp")));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("Article is already distributing and no reusable semi-auto task was found", ex.getMessage());
+        verify(distributionTaskMapper, never()).insert(any());
+    }
+
+    @Test
     void refreshDistributionTaskReviewStatus_publishedUpdatesReviewFields() {
         givenCommonData();
         DistributionTask task = new DistributionTask();

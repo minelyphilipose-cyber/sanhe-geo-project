@@ -29,6 +29,7 @@ import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchDetailVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.entity.Project;
@@ -58,6 +59,7 @@ import static org.mockito.Mockito.when;
 
 class ProjectSelfMediaScheduleServiceTest {
     private ProjectMapper projectMapper;
+    private BrandMapper brandMapper;
     private ProjectSelfMediaScheduleConfigMapper configMapper;
     private ProjectSelfMediaScheduleBatchMapper batchMapper;
     private ArticleDraftMapper articleDraftMapper;
@@ -79,6 +81,7 @@ class ProjectSelfMediaScheduleServiceTest {
     @BeforeEach
     void setUp() {
         projectMapper = mock(ProjectMapper.class);
+        brandMapper = mock(BrandMapper.class);
         configMapper = mock(ProjectSelfMediaScheduleConfigMapper.class);
         batchMapper = mock(ProjectSelfMediaScheduleBatchMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
@@ -103,6 +106,7 @@ class ProjectSelfMediaScheduleServiceTest {
 
         service = new ProjectSelfMediaScheduleService(
                 projectMapper,
+                brandMapper,
                 configMapper,
                 batchMapper,
                 articleDraftMapper,

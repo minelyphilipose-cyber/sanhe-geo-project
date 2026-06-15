@@ -1594,7 +1594,7 @@ function previewImageUrl(fileUrl: string) {
 }
 
 function renderPreviewMarkdown(content: string) {
-  const html = markdown.render(content)
+  const html = markdown.render(normalizeArticlePreviewMarkdown(content))
   const previewUrls = imagePreviewUrls.value
   if (!Object.keys(previewUrls).length) {
     return html
@@ -1609,6 +1609,27 @@ function renderPreviewMarkdown(content: string) {
     }
   })
   return template.innerHTML
+}
+
+function normalizeArticlePreviewMarkdown(content: string) {
+  return content.replace(/(?:<p\b[^>]*>\s*)?<img\b([^>]*)>(?:\s*<\/p>)?/gi, (_matched, attributes: string) => {
+    const src = readHtmlAttribute(attributes, 'src')
+    if (!src) return ''
+    const alt = readHtmlAttribute(attributes, 'alt') || '图片'
+    return `\n![${escapeMarkdownAlt(alt)}](${src})\n`
+  })
+}
+
+function readHtmlAttribute(attributes: string, name: string) {
+  const pattern = new RegExp(`\\b${name}=("|')([^"']*)\\1`, 'i')
+  const match = attributes.match(pattern)
+  return match?.[2] ? decodeHtmlAttribute(match[2]) : ''
+}
+
+function decodeHtmlAttribute(value: string) {
+  const textarea = document.createElement('textarea')
+  textarea.innerHTML = value
+  return textarea.value
 }
 
 function confirmImagePicker() {

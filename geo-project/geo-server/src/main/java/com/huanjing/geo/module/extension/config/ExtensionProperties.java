@@ -13,6 +13,7 @@ public class ExtensionProperties {
     private LongToken longToken = new LongToken();
     private BindCode bindCode = new BindCode();
     private Version version = new Version();
+    private Env env = new Env();
 
     @Data
     public static class FillToken {
@@ -37,5 +38,14 @@ public class ExtensionProperties {
     @Data
     public static class Version {
         private boolean allowPrerelease = false;
+    }
+
+    @Data
+    public static class Env {
+        /**
+         * Optional expected geo-env-extension version for readiness prompts only.
+         * Empty value disables outdated-version warnings.
+         */
+        private String expectedVersion = "";
     }
 }

@@ -53,7 +53,10 @@ class ArticleAutoImageInsertionServiceTest {
 
         assertThat(result).contains("api/public/brand-materials/1/stream?sig=a");
         assertThat(result).contains("api/public/brand-materials/2/stream?sig=b");
-        assertThat(result).contains("style=\"display:block;max-width:100%;width:auto;height:auto;object-fit:contain;");
+        assertThat(result).contains("![第一张.png](https://app.example.com/api/public/brand-materials/1/stream?sig=a)");
+        assertThat(result).contains("![第二张.png](https://app.example.com/api/public/brand-materials/2/stream?sig=b)");
+        assertThat(result).doesNotContain("<img");
+        assertThat(result).doesNotContain("<p>");
         assertThat(result.indexOf("api/public/brand-materials/"))
                 .isGreaterThan(result.indexOf("第二段文字。"))
                 .isLessThan(result.indexOf("第三段文字。"));

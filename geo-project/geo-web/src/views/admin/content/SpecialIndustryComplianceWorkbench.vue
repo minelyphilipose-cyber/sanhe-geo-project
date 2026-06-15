@@ -2,8 +2,8 @@
   <div class="special-compliance-page admin-page">
     <div class="admin-page-header">
       <div>
-        <div class="admin-page-kicker">合规运营</div>
-        <h1 class="admin-page-title">特殊行业合规工作台</h1>
+        <div class="admin-page-kicker">专项运营</div>
+        <h1 class="admin-page-title">行业专项工作台</h1>
         <div class="admin-page-subtitle">集中处理医疗等强监管行业的法务确认、合规失败、命中日志和生成历史。</div>
       </div>
       <el-button @click="openSpecialIndustryConfig">规则配置</el-button>

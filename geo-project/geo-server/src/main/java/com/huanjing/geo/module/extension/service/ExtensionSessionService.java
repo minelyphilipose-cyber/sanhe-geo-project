@@ -64,6 +64,8 @@ public class ExtensionSessionService {
             Long brandId,
             Long operatorId,
             String installId,
+            String environmentKey,
+            String providerProfileId,
             String deviceFingerprint,
             String extensionVersion,
             String userAgent
@@ -72,6 +74,8 @@ public class ExtensionSessionService {
                 brandId,
                 operatorId,
                 installId,
+                environmentKey,
+                providerProfileId,
                 deviceFingerprint,
                 extensionVersion,
                 userAgent
@@ -90,7 +94,8 @@ public class ExtensionSessionService {
                 String.valueOf(response.sessionId()),
                 null,
                 null,
-                detail("installId", installId, "extensionVersion", extensionVersion, "expiresAt", response.expiresAt())
+                detail("installId", installId, "environmentKey", environmentKey, "providerProfileId", providerProfileId,
+                        "extensionVersion", extensionVersion, "expiresAt", response.expiresAt())
         );
         return response;
     }
@@ -99,6 +104,8 @@ public class ExtensionSessionService {
             Long brandId,
             Long operatorId,
             String installId,
+            String environmentKey,
+            String providerProfileId,
             String deviceFingerprint,
             String extensionVersion,
             String userAgent
@@ -117,6 +124,8 @@ public class ExtensionSessionService {
         session.setTokenHashAlg(HashAlgorithm.SHA_256.dbValue());
         session.setTokenSalt(token.saltHex());
         session.setInstallId(installId);
+        session.setEnvironmentKey(trimToNull(environmentKey));
+        session.setProviderProfileId(trimToNull(providerProfileId));
         session.setDeviceFingerprintHash(fingerprintHash(deviceFingerprint));
         session.setDeviceFingerprintHashAlg(HashAlgorithm.SHA_256.dbValue());
         session.setExtensionVersion(extensionVersion);
@@ -157,6 +166,8 @@ public class ExtensionSessionService {
                 session.getBrandId(),
                 session.getOperatorId(),
                 session.getInstallId(),
+                session.getEnvironmentKey(),
+                session.getProviderProfileId(),
                 null,
                 StringUtils.hasText(extensionVersion) ? extensionVersion : session.getExtensionVersion(),
                 userAgent
@@ -279,6 +290,10 @@ public class ExtensionSessionService {
 
     private String fingerprintHash(String fingerprint) {
         return StringUtils.hasText(fingerprint) ? HashSupport.sha256Hex(fingerprint) : null;
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     /**

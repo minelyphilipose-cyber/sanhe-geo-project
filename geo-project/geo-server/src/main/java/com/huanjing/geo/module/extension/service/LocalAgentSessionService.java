@@ -272,6 +272,7 @@ public class LocalAgentSessionService {
         String path = requireText(value, "path is required");
         if (!path.startsWith("/v1/poc/")
                 && !path.startsWith("/v1/extension/")
+                && !path.startsWith("/v1/adspower/")
                 && !path.startsWith("/api/v1/local-agent/")) {
             throw new BizException(400, "unsupported local helper path");
         }
