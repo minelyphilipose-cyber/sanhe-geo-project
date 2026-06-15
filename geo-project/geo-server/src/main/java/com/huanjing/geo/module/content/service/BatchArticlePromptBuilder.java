@@ -150,7 +150,7 @@ public class BatchArticlePromptBuilder {
         String contentAngle = resolveContentAngle(input);
         String audiencePerspective = resolveAudiencePerspective(input.articleIndexInBatch());
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
-        List<String> recentTitles = resolveHistoryTitles(input.project().getId(), 10);
+        List<String> recentTitles = resolveHistoryTitles(input.sourceBrandId(), input.project().getId(), 10);
         String userPrompt = buildUserPrompt(input, contentAngle, audiencePerspective, businessFocus, recentTitles);
         userPrompt = withTitleGuideInstruction(userPrompt, input.titleGuide());
 
@@ -181,6 +181,10 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("promptVersion", PROMPT_VERSION);
         inputSnapshot.put("projectId", input.project().getId());
         inputSnapshot.put("brandId", input.project().getBrandId());
+        inputSnapshot.put("sourceProjectId", input.sourceProjectId());
+        inputSnapshot.put("sourceBrandId", input.sourceBrandId());
+        inputSnapshot.put("subjectProjectId", input.subjectProjectId());
+        inputSnapshot.put("subjectBrandId", input.subjectBrandId());
         inputSnapshot.put("topic", input.topic());
         inputSnapshot.put("topicAsQuestion", input.topicAsQuestion());
         inputSnapshot.put("topicSource", input.topicSource());
@@ -215,7 +219,7 @@ public class BatchArticlePromptBuilder {
         String contentAngle = resolveContentAngle(input);
         String audiencePerspective = resolveAudiencePerspective(input.articleIndexInBatch());
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
-        List<String> recentTitles = resolveHistoryTitles(input.project().getId(), 10);
+        List<String> recentTitles = resolveHistoryTitles(input.sourceBrandId(), input.project().getId(), 10);
         String contactBlock = buildContactBlock(template, input.brand());
         Map<String, String> brandFacts = buildBrandFacts(input);
         String templateSystemPrompt = StringUtils.hasText(version.getSystemPrompt()) ? version.getSystemPrompt() : SYSTEM_PROMPT;
@@ -255,6 +259,10 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("templateVersionId", version.getId());
         inputSnapshot.put("projectId", input.project().getId());
         inputSnapshot.put("brandId", input.project().getBrandId());
+        inputSnapshot.put("sourceProjectId", input.sourceProjectId());
+        inputSnapshot.put("sourceBrandId", input.sourceBrandId());
+        inputSnapshot.put("subjectProjectId", input.subjectProjectId());
+        inputSnapshot.put("subjectBrandId", input.subjectBrandId());
         inputSnapshot.put("topic", input.topic());
         inputSnapshot.put("topicAsQuestion", input.topicAsQuestion());
         inputSnapshot.put("topicSource", input.topicSource());
@@ -658,11 +666,12 @@ public class BatchArticlePromptBuilder {
         }
     }
 
-    private List<String> resolveHistoryTitles(Long projectId, int limit) {
+    private List<String> resolveHistoryTitles(Long sourceBrandId, Long projectId, int limit) {
         return articleDraftMapper.selectList(
                 new LambdaQueryWrapper<ArticleDraft>()
                         .select(ArticleDraft::getTitle, ArticleDraft::getCreatedAt)
-                        .eq(ArticleDraft::getProjectId, projectId)
+                        .eq(sourceBrandId != null, ArticleDraft::getSourceBrandId, sourceBrandId)
+                        .eq(sourceBrandId == null, ArticleDraft::getProjectId, projectId)
                         .ge(ArticleDraft::getCreatedAt, LocalDateTime.now().minusDays(30))
                         .orderByDesc(ArticleDraft::getCreatedAt)
                         .last("LIMIT " + Math.max(1, limit))
@@ -774,7 +783,40 @@ public class BatchArticlePromptBuilder {
                                    String perspectiveCode,
                                    String perspectiveMatchedScope,
                                    Long perspectiveMatchedConfigId,
-                                   List<BrandOfferingPromptSelector.SelectedOffering> selectedOfferings) {
+                                   List<BrandOfferingPromptSelector.SelectedOffering> selectedOfferings,
+                                   Long sourceProjectId,
+                                   Long sourceBrandId,
+                                   Long subjectProjectId,
+                                   Long subjectBrandId) {
+        public PromptBuildInput(Project project,
+                                Brand brand,
+                                String brandStatement,
+                                String topicSource,
+                                String topic,
+                                String topicAsQuestion,
+                                Long keywordGroupId,
+                                String keywordGroupName,
+                                List<String> relatedKeywords,
+                                String articleType,
+                                String contentStyle,
+                                String length,
+                                String extraPrompt,
+                                int articleIndexInBatch,
+                                List<String> forbiddenPhrases,
+                                String titleGuide,
+                                String perspectiveCode,
+                                String perspectiveMatchedScope,
+                                Long perspectiveMatchedConfigId,
+                                List<BrandOfferingPromptSelector.SelectedOffering> selectedOfferings) {
+            this(project, brand, brandStatement, topicSource, topic, topicAsQuestion, keywordGroupId, keywordGroupName,
+                    relatedKeywords, articleType, contentStyle, length, extraPrompt, articleIndexInBatch,
+                    forbiddenPhrases, titleGuide, perspectiveCode, perspectiveMatchedScope, perspectiveMatchedConfigId,
+                    selectedOfferings,
+                    project == null ? null : project.getId(),
+                    brand == null ? null : brand.getId(),
+                    project == null ? null : project.getId(),
+                    brand == null ? null : brand.getId());
+        }
     }
 
     public record PromptBuildResult(String systemPrompt,

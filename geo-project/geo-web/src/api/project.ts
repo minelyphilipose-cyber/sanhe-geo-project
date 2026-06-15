@@ -66,6 +66,11 @@ export interface ProjectSelfMediaScheduleBatch {
 export interface ProjectSelfMediaScheduleBatchDetailItem {
   generationBatchId?: number
   generationTaskId?: number
+  sourceBrandId?: number | null
+  sourceBrandName?: string | null
+  subjectBrandId?: number | null
+  subjectBrandName?: string | null
+  subjectProjectId?: number | null
   generationStatus?: string | null
   generationErrorMessage?: string | null
   generationTopic?: string | null

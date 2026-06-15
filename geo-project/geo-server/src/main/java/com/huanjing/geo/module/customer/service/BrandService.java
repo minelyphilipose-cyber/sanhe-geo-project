@@ -120,6 +120,8 @@ public class BrandService {
         validateBrandIndustry(industry, company);
         brand.setIndustry(industry);
         brand.setComplianceIndustryCode(normalizeComplianceIndustryCode(req.getComplianceIndustryCode()));
+        brand.setCoverableIndustries(normalizeCoverableIndustries(req.getCoverableIndustries()));
+        brand.setAllowThirdPartyPromotion(req.getAllowThirdPartyPromotion() == null || req.getAllowThirdPartyPromotion());
         brand.setBrandName(req.getBrandName());
         brand.setBrandShortName(req.getBrandShortName());
         brand.setBrandSlug(generateBrandSlug(req.getCompanyId()));
@@ -197,6 +199,12 @@ public class BrandService {
         validateBrandIndustry(industry, company);
         brand.setIndustry(industry);
         brand.setComplianceIndustryCode(normalizeComplianceIndustryCode(req.getComplianceIndustryCode()));
+        if (req.getCoverableIndustries() != null) {
+            brand.setCoverableIndustries(normalizeCoverableIndustries(req.getCoverableIndustries()));
+        }
+        if (req.getAllowThirdPartyPromotion() != null) {
+            brand.setAllowThirdPartyPromotion(req.getAllowThirdPartyPromotion());
+        }
         brand.setMainBusiness(req.getMainBusiness());
         brand.setCoreProducts(req.getCoreProducts());
         brand.setBrandPositioning(req.getBrandPositioning());
@@ -379,6 +387,8 @@ public class BrandService {
         snapshot.put("companyId", brand.getCompanyId());
         snapshot.put("industry", brand.getIndustry());
         snapshot.put("complianceIndustryCode", brand.getComplianceIndustryCode());
+        snapshot.put("coverableIndustries", parseJsonArray(brand.getCoverableIndustries()));
+        snapshot.put("allowThirdPartyPromotion", brand.getAllowThirdPartyPromotion());
         snapshot.put("brandName", brand.getBrandName());
         snapshot.put("brandShortName", brand.getBrandShortName());
         snapshot.put("brandSlug", brand.getBrandSlug());
@@ -486,6 +496,21 @@ public class BrandService {
         return normalized;
     }
 
+    private String normalizeCoverableIndustries(List<String> values) {
+        if (values == null) {
+            return null;
+        }
+        List<String> normalized = values.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (normalized.stream().anyMatch("__ALL__"::equalsIgnoreCase)) {
+            return JSONUtil.toJsonStr(List.of("__ALL__"));
+        }
+        return JSONUtil.toJsonStr(normalized);
+    }
+
     private String normalizeForbiddenPhrases(String raw) {
         if (!StringUtils.hasText(raw)) {
             return null;
@@ -514,6 +539,23 @@ public class BrandService {
             return null;
         }
         return JSONUtil.toJsonStr(normalized);
+    }
+
+    private List<String> parseJsonArray(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return List.of();
+        }
+        try {
+            List<String> result = new ArrayList<>();
+            JSONUtil.parseArray(raw).forEach(item -> {
+                if (item != null && StringUtils.hasText(String.valueOf(item))) {
+                    result.add(String.valueOf(item).trim());
+                }
+            });
+            return result;
+        } catch (Exception ex) {
+            return List.of(raw.trim());
+        }
     }
 
     private Set<String> parseCompanyIndustryTags(String raw) {

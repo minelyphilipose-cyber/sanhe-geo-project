@@ -130,6 +130,8 @@ export interface Brand {
   companyId: number
   industry: string
   complianceIndustryCode?: string | null
+  coverableIndustries?: string[] | string | null
+  allowThirdPartyPromotion?: boolean | null
   brandName: string
   brandShortName?: string | null
   brandSlug: string
@@ -1310,6 +1312,9 @@ export interface SelfMediaPublishSchedule {
   failureLabel?: string | null
   failureRetryable?: boolean | null
   failureActionHint?: string | null
+  failureActionKey?: string | null
+  failureActionLabel?: string | null
+  failureActionKind?: string | null
   failureMessage?: string | null
   diagnosticsJson?: string | null
   activeAlerts?: SelfMediaPublishScheduleAlert[]
@@ -1332,6 +1337,67 @@ export interface SelfMediaPublishScheduleAlert {
   firstSeenAt?: string | null
   lastSeenAt?: string | null
   resolvedAt?: string | null
+}
+
+export interface SelfMediaAutomationOverview {
+  generatedAt?: string | null
+  queue: {
+    activeTotal: number
+    dueScheduleExecution: number
+    duePublishCheck: number
+    runningTotal: number
+    lockedRunning: number
+    failedTotal: number
+    manualRequired: number
+    publishUnknown: number
+  }
+  localExecution: {
+    onlineAgents: number
+    activeSessions: number
+    assumedCapacityPerAgent: number
+    estimatedCapacity: number
+    runningLoad: number
+    waitingForLocalAgent: number
+    capacityStatus: 'healthy' | 'pressure' | 'saturated' | 'blocked' | string
+    message?: string | null
+  }
+  statusCounts: Array<{ status: string; count: number }>
+  platformCounts: Array<{ platform: string; activeCount: number; failedCount: number; dueCount: number }>
+  failureCodeCounts: Array<{
+    code: string
+    label?: string | null
+    retryable?: boolean | null
+    actionKey?: string | null
+    actionLabel?: string | null
+    actionKind?: string | null
+    count: number
+  }>
+  platformCapabilities: Array<{
+    platform: string
+    displayName?: string | null
+    publishChannel?: string | null
+    strategy?: string | null
+    scheduleReady: boolean
+    readinessCode?: string | null
+    readinessMessage?: string | null
+    requiresLocalAgent: boolean
+  }>
+  thirdPartySubjectPool?: {
+    sourceTotal: number
+    readySourceTotal: number
+    missingCoverageTotal: number
+    emptyCandidateTotal: number
+    sources: Array<{
+      sourceBrandId: number
+      sourceBrandName: string
+      coverableIndustries: string[]
+      candidateCount: number
+      excludedCount: number
+      nextCandidateBrandName?: string | null
+      status: 'ready' | 'missing_coverage' | 'empty_candidate' | string
+      message?: string | null
+    }>
+  } | null
 }
 
 export interface SelfMediaPublishScheduleRejectedItem {

@@ -16,6 +16,9 @@ public class ArticleDraft {
     private Long id;
     private Long batchId;
     private Long projectId;
+    private Long sourceBrandId;
+    private Long subjectBrandId;
+    private Long subjectProjectId;
     private String targetChannel;
     private String periodType;
     private String periodKey;

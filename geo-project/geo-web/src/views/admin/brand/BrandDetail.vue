@@ -152,9 +152,14 @@
             <span>指纹浏览器环境</span>
             <el-tag type="info">AdsPower</el-tag>
           </div>
-          <el-button v-if="canUpdateBrand" type="primary" link @click="openBrowserEnvironmentPrimaryAction">
-            {{ browserEnvironments.length ? '编辑环境' : '配置环境' }}
-          </el-button>
+          <div v-if="canUpdateBrand" class="flex items-center gap-2">
+            <el-button type="primary" link :loading="adspowerProfilesLoading" @click="openAdspowerProfileImport">
+              从本机 AdsPower 导入
+            </el-button>
+            <el-button type="primary" link @click="openBrowserEnvironmentPrimaryAction">
+              {{ browserEnvironments.length ? '编辑环境' : '配置环境' }}
+            </el-button>
+          </div>
         </div>
       </template>
       <el-alert
@@ -164,6 +169,55 @@
         :closable="false"
         title="同一品牌默认使用一个 AdsPower 浏览器环境。新增头条、百家号、知乎、小红书账号时会自动绑定当前启用环境；AdsPower API Key 在「个人中心 > 本地助手」配置。"
       />
+      <div class="automation-readiness" v-loading="automationReadinessLoading">
+        <div class="automation-readiness__head">
+          <div>
+            <div class="automation-readiness__title">自动化就绪状态</div>
+            <div class="automation-readiness__desc">{{ automationReadinessSummary }}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <el-tag :type="automationReadinessTagType" round>{{ automationReadinessStatusText }}</el-tag>
+            <el-button link type="primary" :loading="automationReadinessLoading" @click="loadAutomationReadiness">刷新</el-button>
+          </div>
+        </div>
+        <div class="automation-readiness__checks">
+          <div class="automation-check" :class="{ 'is-ok': automationReadiness?.localAgent.online }">
+            <span>本地助手</span>
+            <strong>{{ automationReadiness?.localAgent.online ? '在线' : automationReadiness?.localAgent.bound ? '已绑定未在线' : '未绑定' }}</strong>
+          </div>
+          <div class="automation-check" :class="{ 'is-ok': automationReadiness?.browserEnvironment.active }">
+            <span>AdsPower 环境</span>
+            <strong>{{ automationReadiness?.browserEnvironment.active ? '已启用' : automationReadiness?.browserEnvironment.configured ? '未启用' : '未配置' }}</strong>
+          </div>
+          <div class="automation-check" :class="{ 'is-ok': automationReadiness?.extensionBinding.online }">
+            <span>环境扩展</span>
+            <strong>{{ adspowerExtensionStatusText }}</strong>
+            <small v-if="adspowerExtensionDetailText">{{ adspowerExtensionDetailText }}</small>
+          </div>
+          <div class="automation-check" :class="{ 'is-ok': automationAccountReadyCount === automationAccountTotal && automationAccountTotal > 0 }">
+            <span>平台账号</span>
+            <strong>{{ automationAccountReadyCount }}/{{ automationAccountTotal }} 就绪</strong>
+          </div>
+        </div>
+        <div v-if="automationReadiness?.issues?.length" class="automation-readiness__issues">
+          <div v-for="issue in automationReadiness.issues.slice(0, 4)" :key="`${issue.code}-${issue.title}`" class="automation-issue">
+            <el-tag size="small" :type="issue.level === 'error' ? 'danger' : 'warning'">
+              {{ issue.level === 'error' ? '阻塞' : '提醒' }}
+            </el-tag>
+            <span>{{ issue.title }}</span>
+            <em>{{ issue.action }}</em>
+            <el-button
+              v-if="issue.actionKey && canUpdateBrand"
+              link
+              type="primary"
+              :loading="automationIssueActionLoading === issue.actionKey"
+              @click="handleAutomationIssueAction(issue)"
+            >
+              继续处理
+            </el-button>
+          </div>
+        </div>
+      </div>
       <el-table v-loading="browserEnvironmentsLoading" :data="browserEnvironments" border empty-text="暂无指纹浏览器环境">
         <el-table-column prop="name" label="环境名称" min-width="160">
           <template #default="{ row }">{{ row.name || row.environmentKey }}</template>
@@ -192,7 +246,7 @@
             <p>用于 AdsPower 环境内 GEO 扩展绑定当前品牌后台；出现异常时可吊销旧会话后重新绑定。</p>
           </div>
           <div class="flex items-center gap-2">
-            <el-button :loading="extensionSessionsLoading" @click="loadExtensionSessions">刷新状态</el-button>
+            <el-button :loading="extensionSessionsLoading" @click="refreshExtensionBindingStatus">刷新状态</el-button>
             <el-button type="primary" :loading="extensionBindCodeLoading" @click="generateBrandExtensionBindCode">
               生成绑定码
             </el-button>
@@ -203,9 +257,14 @@
           <div>
             <span>扩展绑定码</span>
             <strong>{{ extensionBindCode.code }}</strong>
-            <small>{{ extensionBindCode.expiresInSeconds }} 秒内有效，请在 AdsPower 环境扩展弹窗中绑定后台。</small>
+            <small>{{ extensionBindCode.expiresInSeconds }} 秒内有效；请复制后在 AdsPower 环境扩展弹窗中绑定。</small>
           </div>
-          <el-button type="primary" plain @click="copyBrandExtensionBindCode">复制绑定码</el-button>
+          <div class="flex items-center gap-2">
+            <el-button plain :disabled="!defaultBrowserEnvironment" :loading="extensionEnvironmentOpening" @click="openDefaultEnvironmentForExtensionBinding">
+              打开并自动绑定
+            </el-button>
+            <el-button type="primary" plain @click="copyBrandExtensionBindCode">复制绑定码</el-button>
+          </div>
         </div>
 
         <el-table
@@ -217,6 +276,12 @@
           <el-table-column prop="id" label="Session ID" width="110" />
           <el-table-column prop="extensionVersion" label="版本" width="110">
             <template #default="{ row }">{{ row.extensionVersion || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="environmentKey" label="环境代号" min-width="150">
+            <template #default="{ row }">{{ row.environmentKey || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="providerProfileId" label="浏览器编号" min-width="160">
+            <template #default="{ row }">{{ row.providerProfileId || '-' }}</template>
           </el-table-column>
           <el-table-column prop="installId" label="安装标识" min-width="180">
             <template #default="{ row }">{{ row.installId || '-' }}</template>
@@ -387,6 +452,91 @@
       </el-table>
     </el-card>
 
+    <el-card v-if="brand && hasThirdPartySelfMediaPerspective" v-loading="subjectPoolLoading" class="admin-table-card">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span>第三方主体池预览</span>
+            <el-tag :type="subjectPool?.validSource ? 'success' : 'warning'">
+              {{ subjectPool?.validSource ? `可候选 ${subjectPool.candidateCount}` : '待配置覆盖行业' }}
+            </el-tag>
+          </div>
+          <el-button link type="primary" :loading="subjectPoolLoading" @click="loadSubjectPool">刷新</el-button>
+        </div>
+      </template>
+      <div v-if="subjectPool" class="subject-pool-wrap">
+        <div class="subject-pool-summary">
+          <div>
+            <span>信源可覆盖行业</span>
+            <strong>{{ subjectPoolCoverageText }}</strong>
+          </div>
+          <div>
+            <span>候选主体</span>
+            <strong>{{ subjectPool.candidateCount }}</strong>
+          </div>
+          <div>
+            <span>排除品牌</span>
+            <strong>{{ subjectPool.excludedCount }}</strong>
+          </div>
+        </div>
+        <el-alert
+          v-if="!subjectPool.validSource"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="当前品牌已启用第三方自媒体视角，但还没有配置可覆盖行业。"
+        >
+          <div class="subject-pool-warning">
+            <span>请在编辑品牌中选择“信源覆盖行业”，否则不会进入主体轮换。</span>
+            <el-button v-if="canUpdateBrand" link type="primary" @click="openCoverableIndustryConfig">
+              去配置覆盖行业
+            </el-button>
+          </div>
+        </el-alert>
+        <el-table :data="subjectPool.candidates" border empty-text="暂无可轮换主体">
+          <el-table-column label="候选品牌" min-width="180">
+            <template #default="{ row }">
+              <div class="detail-task-cell">
+                <span>{{ row.brandName || row.brandId }}</span>
+                <small>{{ row.companyName || '-' }}</small>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="行业" width="140">
+            <template #default="{ row }">{{ industryLabel(row.industry) }}</template>
+          </el-table-column>
+          <el-table-column label="主体项目" width="120">
+            <template #default="{ row }">{{ row.subjectProjectId || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="最近选中" width="180">
+            <template #default="{ row }">{{ row.lastSelectedAt || '从未选中' }}</template>
+          </el-table-column>
+        </el-table>
+        <div v-if="subjectPool.candidateDisplayCount < subjectPool.candidateCount" class="subject-pool-limit-note">
+          候选主体较多，当前仅展示前 {{ subjectPool.candidateDisplayCount }} / {{ subjectPool.candidateCount }} 条。
+        </div>
+        <el-collapse v-if="subjectPool.excluded.length" class="subject-pool-excluded">
+          <el-collapse-item :title="`查看排除项 ${subjectPool.excludedDisplayCount}/${subjectPool.excludedCount}`" name="excluded">
+            <div v-if="subjectPool.excludedDisplayCount < subjectPool.excludedCount" class="subject-pool-limit-note">
+              排除项较多，当前仅展示前 {{ subjectPool.excludedDisplayCount }} / {{ subjectPool.excludedCount }} 条。
+            </div>
+            <el-table :data="subjectPool.excluded" border>
+              <el-table-column label="品牌" min-width="180">
+                <template #default="{ row }">{{ row.brandName || row.brandId }}</template>
+              </el-table-column>
+              <el-table-column label="行业" width="140">
+                <template #default="{ row }">{{ industryLabel(row.industry) }}</template>
+              </el-table-column>
+              <el-table-column label="排除原因" min-width="240">
+                <template #default="{ row }">{{ row.reason || row.reasonCode || '-' }}</template>
+              </el-table-column>
+            </el-table>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+      <el-empty v-else description="暂无主体池数据" />
+    </el-card>
+
     <el-card class="admin-rich-card">
       <template #header><span>扩展入口</span></template>
       <div class="flex flex-wrap gap-3">
@@ -423,6 +573,70 @@
         <el-button @click="browserEnvironmentVisible = false">取消</el-button>
         <el-button type="primary" :loading="browserEnvironmentSaving" @click="submitBrowserEnvironment">
           保存
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="adspowerProfileImportVisible" title="从本机 AdsPower 导入环境" width="760px">
+      <div class="adspower-import">
+        <el-alert
+          type="info"
+          show-icon
+          :closable="false"
+          title="列表来自当前电脑的本地助手，不会上传 AdsPower API Key。选择一个环境后会写入当前品牌，并自动补齐未绑定的自媒体账号。"
+        />
+        <div class="adspower-import__toolbar">
+          <el-input
+            v-model="adspowerProfileSearch"
+            clearable
+            placeholder="按环境名称或编号搜索"
+            @keyup.enter="loadAdspowerProfiles"
+          />
+          <el-button :loading="adspowerProfilesLoading" @click="loadAdspowerProfiles">刷新</el-button>
+        </div>
+        <el-table
+          v-loading="adspowerProfilesLoading"
+          :data="adspowerProfiles"
+          border
+          highlight-current-row
+          empty-text="未读取到 AdsPower 环境"
+          @current-change="selectAdspowerProfile"
+        >
+          <el-table-column width="52">
+            <template #default="{ row }">
+              <el-radio
+                :model-value="selectedAdspowerProfileId"
+                :value="row.providerProfileId"
+                @change="selectedAdspowerProfileId = row.providerProfileId"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="环境名称" min-width="180">
+            <template #default="{ row }">
+              <div>{{ row.name || row.providerProfileId }}</div>
+              <div v-if="row.groupName || row.remark" class="table-subtext">
+                {{ [row.groupName, row.remark].filter(Boolean).join(' / ') }}
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="providerProfileId" label="浏览器编号" min-width="170" />
+          <el-table-column prop="serialNumber" label="序号" width="100">
+            <template #default="{ row }">{{ row.serialNumber || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">{{ row.status || '-' }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="adspowerProfileImportVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :disabled="!selectedAdspowerProfileId"
+          :loading="adspowerProfileImportSaving"
+          @click="importSelectedAdspowerProfile"
+        >
+          导入并启用
         </el-button>
       </template>
     </el-dialog>
@@ -505,6 +719,24 @@
                 :value="item.dictKey"
               />
             </el-select>
+          </el-form-item>
+          <el-form-item
+            v-if="hasThirdPartySelfMediaPerspective"
+            ref="coverableIndustriesFieldRef"
+            label="信源覆盖行业"
+          >
+            <el-select v-model="brandForm.coverableIndustries" multiple clearable filterable placeholder="不选择则不作为第三方信源" style="width: 100%">
+              <el-option label="全部行业" value="__ALL__" />
+              <el-option
+                v-for="tag in availableBrandIndustries"
+                :key="tag"
+                :label="industryLabel(tag)"
+                :value="tag"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="hasThirdPartySelfMediaPerspective" label="允许第三方主体">
+            <el-switch v-model="brandForm.allowThirdPartyPromotion" active-text="允许" inactive-text="不允许" />
           </el-form-item>
           <el-form-item label="状态" prop="status" required>
             <el-select v-model="brandForm.status" style="width: 100%">
@@ -794,6 +1026,14 @@
             />
           </el-select>
         </el-form-item>
+        <el-alert
+          v-if="selectedThirdPartyPerspectiveInDialog"
+          class="mb-3"
+          type="info"
+          show-icon
+          :closable="false"
+          title="保存并启用该视角后，品牌详情会展示第三方主体池预览、信源覆盖行业和第三方主体推广配置。"
+        />
         <el-form-item label="状态" prop="enabled" required>
           <el-switch v-model="perspectiveConfigForm.enabled" active-text="启用" inactive-text="停用" />
         </el-form-item>
@@ -807,7 +1047,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
@@ -826,10 +1066,12 @@ import {
   deleteBrandOffering,
   getBrandDetail,
   getBrandOfferings,
+  getThirdPartySubjectPool,
   updateBrand,
   deleteBrand,
   getCompanyDetail,
   updateBrandOffering,
+  type ThirdPartySubjectPoolPreview,
 } from '@/api/customer'
 import {
   createBrowserEnvironment,
@@ -837,11 +1079,14 @@ import {
   deleteBrowserEnvironment,
   deleteBrowserEnvironmentAccount,
   getBrowserEnvironmentAccountBySelfMedia,
+  getSelfMediaAutomationReadiness,
   listBrowserEnvironments,
   resetBrowserEnvironmentAccountLoginIdentity,
   updateBrowserEnvironment,
   type BrowserEnvironment,
   type BrowserEnvironmentAccount,
+  type SelfMediaAutomationReadinessIssue,
+  type SelfMediaAutomationReadiness,
 } from '@/api/browserEnvironment'
 import {
   createExtensionBindCode,
@@ -850,6 +1095,15 @@ import {
   type ExtensionBindCode,
   type ExtensionSession,
 } from '@/api/extension'
+import {
+  createLocalHelperExtensionBindIntent,
+  getLocalHelperHealth,
+  inspectLocalHelperAdspowerExtension,
+  listLocalHelperAdspowerProfiles,
+  openLocalHelperEnvironment,
+  type LocalHelperAdspowerProfile,
+  type LocalHelperExtensionStatus,
+} from '@/api/localHelper'
 import { getPublishSites } from '@/api/publishSite'
 import type { Brand, BrandOffering, PublishSite, SelfMediaAccount, SelfMediaAccountPlatformOption } from '@/types'
 import { useUserStore } from '@/stores/user'
@@ -894,6 +1148,9 @@ const perspectiveConfigLoading = ref(false)
 const perspectiveConfigSaving = ref(false)
 const perspectiveConfigVisible = ref(false)
 const brand = ref<Brand | null>(null)
+const subjectPool = ref<ThirdPartySubjectPoolPreview | null>(null)
+const subjectPoolLoading = ref(false)
+const coverableIndustriesFieldRef = ref<any>(null)
 const selfMediaAccounts = ref<SemiAutoSelfMediaAccount[]>([])
 const browserEnvironments = ref<BrowserEnvironment[]>([])
 const browserEnvironmentsLoading = ref(false)
@@ -901,10 +1158,21 @@ const browserEnvironmentVisible = ref(false)
 const browserEnvironmentSaving = ref(false)
 const editingBrowserEnvironment = ref<BrowserEnvironment | null>(null)
 const browserEnvironmentAccounts = ref<Record<number, BrowserEnvironmentAccount | null>>({})
+const automationReadiness = ref<SelfMediaAutomationReadiness | null>(null)
+const automationReadinessLoading = ref(false)
+const automationIssueActionLoading = ref<string | null>(null)
+const adspowerProfileImportVisible = ref(false)
+const adspowerProfilesLoading = ref(false)
+const adspowerProfileImportSaving = ref(false)
+const adspowerProfileSearch = ref('')
+const adspowerProfiles = ref<LocalHelperAdspowerProfile[]>([])
+const selectedAdspowerProfileId = ref('')
 const extensionSessions = ref<ExtensionSession[]>([])
 const extensionSessionsLoading = ref(false)
+const adspowerExtensionStatus = ref<LocalHelperExtensionStatus | null>(null)
 const extensionBindCode = ref<ExtensionBindCode | null>(null)
 const extensionBindCodeLoading = ref(false)
+const extensionEnvironmentOpening = ref(false)
 const environmentBindingVisible = ref(false)
 const environmentBindingSaving = ref(false)
 const environmentBindingTargetAccount = ref<SemiAutoSelfMediaAccount | null>(null)
@@ -912,6 +1180,9 @@ const perspectiveConfigs = ref<BrandChannelTemplatePerspective[]>([])
 const templatePerspectives = ref<TemplatePerspective[]>([])
 const publishSites = ref<PublishSite[]>([])
 const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
+const LOCAL_HELPER_BASE = 'http://127.0.0.1:17891'
+const EXTENSION_BIND_POLL_ATTEMPTS = 6
+const EXTENSION_BIND_POLL_INTERVAL_MS = 2_000
 const editingSelfMediaAccount = ref<SemiAutoSelfMediaAccount | null>(null)
 const companyName = ref('')
 const companyIndustryTags = ref<string[]>([])
@@ -926,6 +1197,8 @@ const brandForm = reactive({
   brandSlug: '',
   industry: '',
   complianceIndustryCode: 'none',
+  coverableIndustries: [] as string[],
+  allowThirdPartyPromotion: true,
   mainBusiness: '',
   coreProducts: '',
   brandPositioning: '',
@@ -1125,8 +1398,75 @@ const defaultBrowserEnvironment = computed(() => activeBrowserEnvironments.value
 const hasUnboundSemiAutoAccounts = computed(() =>
   semiAutoSelfMediaAccounts.value.some((account) => !browserEnvironmentAccountOf(account)),
 )
+const automationAccountTotal = computed(() => automationReadiness.value?.accounts?.length || 0)
+const automationAccountReadyCount = computed(() =>
+  automationReadiness.value?.accounts?.filter((item) => item.bindingConfigured && item.loginReady).length || 0,
+)
+const automationReadinessTagType = computed(() => {
+  if (!automationReadiness.value) return 'info'
+  if (automationReadiness.value.status === 'ready') return 'success'
+  if (automationReadiness.value.status === 'warning') return 'warning'
+  return 'danger'
+})
+const automationReadinessStatusText = computed(() => {
+  if (!automationReadiness.value) return '待检测'
+  if (automationReadiness.value.status === 'ready') return '已就绪'
+  if (automationReadiness.value.status === 'warning') return '可运行，有提醒'
+  return '未就绪'
+})
+const automationReadinessSummary = computed(() => {
+  if (!automationReadiness.value) return '检测本地助手、AdsPower 环境、扩展绑定与平台账号登录状态。'
+  if (automationReadiness.value.status === 'ready') return '当前品牌自媒体自动化链路已具备自动填充与回查条件。'
+  if (automationReadiness.value.status === 'warning') return '自动化链路可运行，但仍有账号登录或会话活跃状态需要确认。'
+  return '存在阻塞项，按下方动作处理后再创建自动排期。'
+})
+const adspowerExtensionStatusText = computed(() => {
+  if (automationReadiness.value?.extensionBinding.bound
+    && automationReadiness.value.extensionBinding.versionSupported === false) {
+    return '版本偏旧'
+  }
+  if (automationReadiness.value?.extensionBinding.online) return '在线'
+  if (automationReadiness.value?.extensionBinding.bound) return '已绑定未活跃'
+  if (adspowerExtensionStatus.value?.installed) {
+    return adspowerExtensionStatus.value.version
+      ? `已检测 v${adspowerExtensionStatus.value.version}`
+      : '已检测未绑定'
+  }
+  if (adspowerExtensionStatus.value?.status === 'not_detected') return '未检测到'
+  return '未绑定'
+})
+const adspowerExtensionDetailText = computed(() => {
+  const binding = automationReadiness.value?.extensionBinding
+  if (binding?.extensionVersion) {
+    const expected = binding.expectedVersion ? `，期望 ≥ ${binding.expectedVersion}` : ''
+    return `绑定版本 ${binding.extensionVersion}${expected}`
+  }
+  if (adspowerExtensionStatus.value?.version) {
+    return `本机探测版本 ${adspowerExtensionStatus.value.version}`
+  }
+  if (adspowerExtensionStatus.value?.status === 'not_detected') {
+    return '当前 AdsPower 环境未检测到 GEO 自媒体助手扩展运行'
+  }
+  return ''
+})
 
 const enabledPerspectives = computed(() => templatePerspectives.value.filter((item) => item.enabled))
+const thirdPartySubjectPerspectiveCodes = computed(() =>
+  new Set(templatePerspectives.value
+    .filter((item) => item.thirdPartySubjectEnabled)
+    .map((item) => item.code)),
+)
+const hasThirdPartySelfMediaPerspective = computed(() =>
+  perspectiveConfigs.value.some((item) =>
+    item.enabled
+    && item.channelGroupCode === 'self_media'
+    && isThirdPartyPerspectiveCode(item.perspectiveCode),
+  ),
+)
+const selectedThirdPartyPerspectiveInDialog = computed(() =>
+  perspectiveConfigForm.channelGroupCode === 'self_media'
+  && isThirdPartyPerspectiveCode(perspectiveConfigForm.perspectiveCode),
+)
 
 const regionText = computed(() => {
   if (!brand.value) return '-'
@@ -1150,18 +1490,29 @@ const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
   && site.integrationMethod !== 'discuz_http'
   && site.siteCode !== 'agent_official_site',
 ))
-const brandCoreInfoItems = computed(() => [
-  { label: '品牌名称', value: brand.value?.brandName || '-' },
-  { label: '品牌简称', value: brand.value?.brandShortName || '-' },
-  { label: '状态', value: dictStore.label('brand_status', brand.value?.status) || '-' },
-  { label: '所属客户', value: companyName.value || '-' },
-  { label: '品牌行业', value: industryLabel(brand.value?.industry) },
-  { label: '行业合规类型', value: complianceIndustryLabel(brand.value?.complianceIndustryCode) },
-  { label: '主营业务', value: brand.value?.mainBusiness || '-' },
-  { label: '核心产品', value: brand.value?.coreProducts || '-' },
-  { label: '品牌定位', value: brand.value?.brandPositioning || '-' },
-  { label: '所在地区', value: regionText.value },
-])
+const brandCoreInfoItems = computed(() => {
+  const items = [
+    { label: '品牌名称', value: brand.value?.brandName || '-' },
+    { label: '品牌简称', value: brand.value?.brandShortName || '-' },
+    { label: '状态', value: dictStore.label('brand_status', brand.value?.status) || '-' },
+    { label: '所属客户', value: companyName.value || '-' },
+    { label: '品牌行业', value: industryLabel(brand.value?.industry) },
+    { label: '行业合规类型', value: complianceIndustryLabel(brand.value?.complianceIndustryCode) },
+  ]
+  if (hasThirdPartySelfMediaPerspective.value) {
+    items.push(
+      { label: '信源覆盖行业', value: coverableIndustryLabels(brand.value?.coverableIndustries) },
+      { label: '允许第三方主体', value: brand.value?.allowThirdPartyPromotion === false ? '不允许' : '允许' },
+    )
+  }
+  items.push(
+    { label: '主营业务', value: brand.value?.mainBusiness || '-' },
+    { label: '核心产品', value: brand.value?.coreProducts || '-' },
+    { label: '品牌定位', value: brand.value?.brandPositioning || '-' },
+    { label: '所在地区', value: regionText.value },
+  )
+  return items
+})
 
 const brandContactInfoItems = computed(() => [
   { label: '官网', value: brand.value?.website || '-' },
@@ -1181,9 +1532,33 @@ const brandTextInfoItems = computed(() => [
   { label: '禁用词', value: brand.value?.forbiddenPhrases || '-' },
 ])
 
+const subjectPoolCoverageText = computed(() => coverableIndustryLabels(subjectPool.value?.coverableIndustries || []))
+
 function industryLabel(value?: string | null) {
   if (!value) return '-'
   return dictStore.label('industry_tag', value) || value
+}
+
+function parseCoverableIndustries(value?: string[] | string | null) {
+  if (Array.isArray(value)) return value
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function coverableIndustryLabels(values?: string[] | string | null) {
+  const list = parseCoverableIndustries(values)
+  if (!list.length) return '-'
+  if (list.includes('__ALL__')) return '全部行业'
+  return list.map((item) => industryLabel(item)).join('、')
+}
+
+function isThirdPartyPerspectiveCode(code?: string | null) {
+  return thirdPartySubjectPerspectiveCodes.value.has(code || '')
 }
 
 function complianceIndustryLabel(value?: string | null) {
@@ -1269,6 +1644,89 @@ function openBrowserEnvironmentEdit(environment: BrowserEnvironment) {
   browserEnvironmentVisible.value = true
 }
 
+async function openAdspowerProfileImport() {
+  adspowerProfileImportVisible.value = true
+  if (!adspowerProfiles.value.length) {
+    await loadAdspowerProfiles()
+  }
+}
+
+async function loadAdspowerProfiles() {
+  adspowerProfilesLoading.value = true
+  try {
+    const response = await listLocalHelperAdspowerProfiles(
+      {
+        helperBase: LOCAL_HELPER_BASE,
+        localAgentSessionId: automationReadiness.value?.localAgent.sessionId || null,
+      },
+      {
+        page: 1,
+        pageSize: 50,
+        search: adspowerProfileSearch.value,
+      },
+    )
+    adspowerProfiles.value = response.list || []
+    if (selectedAdspowerProfileId.value && !adspowerProfiles.value.some((item) => item.providerProfileId === selectedAdspowerProfileId.value)) {
+      selectedAdspowerProfileId.value = ''
+    }
+  } catch (error) {
+    adspowerProfiles.value = []
+    ElMessage.error(error instanceof Error ? error.message : '读取本机 AdsPower 环境失败')
+  } finally {
+    adspowerProfilesLoading.value = false
+  }
+}
+
+function selectAdspowerProfile(profile?: LocalHelperAdspowerProfile | null) {
+  selectedAdspowerProfileId.value = profile?.providerProfileId || ''
+}
+
+function generatedBrowserEnvironmentKey() {
+  return `brand_${brandId}_adspower`
+}
+
+async function importSelectedAdspowerProfile() {
+  const profile = adspowerProfiles.value.find((item) => item.providerProfileId === selectedAdspowerProfileId.value)
+  if (!profile) {
+    ElMessage.warning('请选择要导入的 AdsPower 环境')
+    return
+  }
+  const target = defaultBrowserEnvironment.value || browserEnvironments.value[0] || null
+  const name = profile.name || profile.providerProfileId
+  adspowerProfileImportSaving.value = true
+  try {
+    if (target) {
+      await updateBrowserEnvironment(target.id, {
+        providerProfileId: profile.providerProfileId,
+        name,
+        status: 'active',
+      })
+    } else {
+      await createBrowserEnvironment({
+        brandId,
+        provider: 'adspower',
+        environmentKey: generatedBrowserEnvironmentKey(),
+        providerProfileId: profile.providerProfileId,
+        name,
+      })
+    }
+    ElMessage.success('AdsPower 浏览器环境已导入并启用')
+    adspowerProfileImportVisible.value = false
+    await loadBrowserEnvironments()
+    if (hasUnboundSemiAutoAccounts.value) {
+      await bindAllUnboundSemiAutoAccounts()
+    }
+    await loadAutomationReadiness()
+    if (!automationReadiness.value?.extensionBinding.online) {
+      await openDefaultEnvironmentForExtensionBinding({ autoTriggered: true })
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '导入 AdsPower 浏览器环境失败')
+  } finally {
+    adspowerProfileImportSaving.value = false
+  }
+}
+
 async function submitBrowserEnvironment() {
   const environmentKey = browserEnvironmentForm.environmentKey.trim()
   const providerProfileId = browserEnvironmentForm.providerProfileId.trim()
@@ -1299,6 +1757,10 @@ async function submitBrowserEnvironment() {
     if (!editingBrowserEnvironment.value) {
       await bindAllUnboundSemiAutoAccounts()
     }
+    await loadAutomationReadiness()
+    if (!automationReadiness.value?.extensionBinding.online) {
+      await openDefaultEnvironmentForExtensionBinding({ autoTriggered: true })
+    }
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存 AdsPower 浏览器环境失败')
   } finally {
@@ -1320,6 +1782,7 @@ async function removeBrowserEnvironment(environment: BrowserEnvironment) {
     await deleteBrowserEnvironment(environment.id)
     ElMessage.success('AdsPower 浏览器环境已删除')
     await loadBrowserEnvironments()
+    await loadAutomationReadiness()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(err instanceof Error ? err.message : '删除 AdsPower 浏览器环境失败')
@@ -1369,6 +1832,7 @@ async function submitEnvironmentBinding() {
     environmentBindingTargetAccount.value = null
     environmentBindingForm.browserEnvironmentId = null
     await loadSelfMediaAccounts()
+    await loadAutomationReadiness()
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '创建浏览器环境绑定失败')
   } finally {
@@ -1394,6 +1858,7 @@ async function bindAllUnboundSemiAutoAccounts() {
     }
     ElMessage.success(`已为 ${count} 个账号绑定默认浏览器环境`)
     await loadSelfMediaAccounts()
+    await loadAutomationReadiness()
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '补齐环境绑定失败')
   } finally {
@@ -1420,6 +1885,7 @@ async function resetEnvironmentAccountIdentity(account: SemiAutoSelfMediaAccount
       [account.id]: data.data,
     }
     ElMessage.success('账号校验已重置')
+    await loadAutomationReadiness()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(err instanceof Error ? err.message : '重置账号校验失败')
@@ -1445,6 +1911,7 @@ async function unbindEnvironmentAccount(account: SemiAutoSelfMediaAccount) {
       [account.id]: null,
     }
     ElMessage.success('环境绑定已解除')
+    await loadAutomationReadiness()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(err instanceof Error ? err.message : '解除环境绑定失败')
@@ -1512,6 +1979,8 @@ function fillForm(data: Brand) {
   brandForm.brandSlug = data.brandSlug
   brandForm.industry = data.industry || availableBrandIndustries.value[0] || ''
   brandForm.complianceIndustryCode = data.complianceIndustryCode || 'none'
+  brandForm.coverableIndustries = parseCoverableIndustries(data.coverableIndustries)
+  brandForm.allowThirdPartyPromotion = data.allowThirdPartyPromotion !== false
   brandForm.mainBusiness = data.mainBusiness || ''
   brandForm.coreProducts = data.coreProducts || ''
   brandForm.brandPositioning = data.brandPositioning || ''
@@ -1574,6 +2043,8 @@ async function load() {
       loadSelfMediaAccountContext(),
       loadPerspectiveConfigs(),
       loadExtensionSessions(),
+      loadAutomationReadiness(),
+      loadSubjectPool(),
     ])
   } catch {
     brand.value = null
@@ -1584,8 +2055,31 @@ async function load() {
     browserEnvironments.value = []
     browserEnvironmentAccounts.value = {}
     extensionSessions.value = []
+    automationReadiness.value = null
+    subjectPool.value = null
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSubjectPool() {
+  if (!hasValidId) return
+  subjectPoolLoading.value = true
+  try {
+    const { data } = await getThirdPartySubjectPool(brandId)
+    subjectPool.value = data.data || null
+  } catch {
+    subjectPool.value = null
+  } finally {
+    subjectPoolLoading.value = false
+  }
+}
+
+async function refreshSubjectPoolForPerspective() {
+  if (hasThirdPartySelfMediaPerspective.value) {
+    await loadSubjectPool()
+  } else {
+    subjectPool.value = null
   }
 }
 
@@ -1609,17 +2103,85 @@ async function loadBrowserEnvironments() {
   }
 }
 
-async function loadExtensionSessions() {
+async function loadAutomationReadiness(options: { silent?: boolean } = {}) {
+  if (!hasValidId) return
+  if (!options.silent) automationReadinessLoading.value = true
+  try {
+    const { data } = await getSelfMediaAutomationReadiness(brandId)
+    automationReadiness.value = data.data
+  } catch (error) {
+    automationReadiness.value = null
+    if (!options.silent) {
+      ElMessage.error(error instanceof Error ? error.message : '加载自动化就绪状态失败')
+    }
+  } finally {
+    if (!options.silent) automationReadinessLoading.value = false
+  }
+}
+
+async function loadExtensionSessions(options: { silent?: boolean } = {}) {
   if (!hasValidId || !canUpdateBrand.value) return
-  extensionSessionsLoading.value = true
+  if (!options.silent) extensionSessionsLoading.value = true
   try {
     const { data } = await listBrandExtensionSessions(brandId)
     extensionSessions.value = data.data || []
   } catch (error) {
     extensionSessions.value = []
-    ElMessage.error(error instanceof Error ? error.message : '加载扩展绑定状态失败')
+    if (!options.silent) {
+      ElMessage.error(error instanceof Error ? error.message : '加载扩展绑定状态失败')
+    }
+  } finally {
+    if (!options.silent) extensionSessionsLoading.value = false
+  }
+}
+
+async function refreshExtensionBindingStatus() {
+  extensionSessionsLoading.value = true
+  try {
+    await Promise.all([
+      loadExtensionSessions({ silent: true }),
+      loadAutomationReadiness({ silent: true }),
+      inspectDefaultEnvironmentExtension({ silent: true }),
+    ])
+  } catch {
+    // Individual loaders already normalize their own error state.
   } finally {
     extensionSessionsLoading.value = false
+  }
+}
+
+async function handleAutomationIssueAction(issue: SelfMediaAutomationReadinessIssue) {
+  const actionKey = issue.actionKey
+  if (!actionKey) return
+  automationIssueActionLoading.value = actionKey
+  try {
+    switch (actionKey) {
+      case 'OPEN_LOCAL_HELPER_SETUP':
+        await router.push(userStore.isPartner ? '/partner/profile' : '/admin/profile')
+        return
+      case 'IMPORT_ADSPOWER_ENVIRONMENT':
+        await openAdspowerProfileImport()
+        return
+      case 'EDIT_BROWSER_ENVIRONMENT':
+        openBrowserEnvironmentPrimaryAction()
+        return
+      case 'OPEN_AND_BIND_EXTENSION':
+        await openDefaultEnvironmentForExtensionBinding({ autoTriggered: true })
+        return
+      case 'BIND_UNBOUND_ACCOUNTS':
+        await bindAllUnboundSemiAutoAccounts()
+        return
+      case 'OPEN_ADSPOWER_ENVIRONMENT':
+        await openDefaultBrowserEnvironment()
+        return
+      case 'CREATE_SELF_MEDIA_ACCOUNT':
+        openSelfMediaAccountCreate()
+        return
+      default:
+        ElMessage.info(issue.action || '请按提示继续处理')
+    }
+  } finally {
+    automationIssueActionLoading.value = null
   }
 }
 
@@ -1630,11 +2192,145 @@ async function generateBrandExtensionBindCode() {
     const { data } = await createExtensionBindCode(brandId)
     extensionBindCode.value = data.data
     ElMessage.success('扩展绑定码已生成')
+    await loadAutomationReadiness()
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '生成扩展绑定码失败')
   } finally {
     extensionBindCodeLoading.value = false
   }
+}
+
+function localHelperClientConfig() {
+  return {
+    helperBase: LOCAL_HELPER_BASE,
+    localAgentSessionId: automationReadiness.value?.localAgent.sessionId || null,
+  }
+}
+
+async function inspectDefaultEnvironmentExtension(options: { silent?: boolean } = {}) {
+  const environment = defaultBrowserEnvironment.value
+  if (!environment?.environmentKey || !environment.providerProfileId) return null
+  try {
+    const response = await inspectLocalHelperAdspowerExtension(localHelperClientConfig(), {
+      environmentKey: environment.environmentKey,
+      providerProfileId: environment.providerProfileId,
+      environmentName: environment.name || environment.environmentKey,
+    })
+    adspowerExtensionStatus.value = response?.extensionStatus || null
+    return adspowerExtensionStatus.value
+  } catch (error) {
+    adspowerExtensionStatus.value = {
+      installed: false,
+      detected: false,
+      status: 'unknown',
+      reason: error instanceof Error ? error.message : String(error),
+    }
+    if (!options.silent) {
+      ElMessage.warning(error instanceof Error ? error.message : '未能探测 AdsPower 环境扩展状态')
+    }
+    return adspowerExtensionStatus.value
+  }
+}
+
+async function openDefaultBrowserEnvironment() {
+  const environment = defaultBrowserEnvironment.value
+  if (!environment?.environmentKey || !environment.providerProfileId) {
+    ElMessage.warning('请先配置并启用 AdsPower 浏览器环境')
+    return
+  }
+  await openLocalHelperEnvironment(localHelperClientConfig(), {
+    environmentKey: environment.environmentKey,
+    providerProfileId: environment.providerProfileId,
+    environmentName: environment.name || environment.environmentKey,
+  })
+  ElMessage.success('已打开 AdsPower 环境，请完成平台登录后等待扩展自动上报')
+  await refreshExtensionBindingStatus()
+}
+
+async function openDefaultEnvironmentForExtensionBinding(options: { autoTriggered?: boolean } = {}) {
+  const environment = defaultBrowserEnvironment.value
+  if (!environment?.environmentKey || !environment.providerProfileId) {
+    ElMessage.warning('请先配置并启用 AdsPower 浏览器环境')
+    return
+  }
+  extensionEnvironmentOpening.value = true
+  try {
+    const existingSessionIds = new Set(extensionSessions.value.map((item) => item.id))
+    await inspectDefaultEnvironmentExtension({ silent: true })
+    const { data } = await createExtensionBindCode(brandId)
+    extensionBindCode.value = data.data
+    const helperConfig = localHelperClientConfig()
+    const helperHealth = await getLocalHelperHealth(LOCAL_HELPER_BASE).catch(() => null)
+    const apiBase = helperHealth?.config?.trustedBackendBase || helperHealth?.config?.backendBase || window.location.origin
+    const intent = await createLocalHelperExtensionBindIntent(helperConfig, {
+      bindCode: data.data.code,
+      brandId,
+      apiBase,
+      helperBase: LOCAL_HELPER_BASE,
+      environmentKey: environment.environmentKey,
+      providerProfileId: environment.providerProfileId,
+      environmentName: environment.name || environment.environmentKey,
+      expiresInSeconds: Math.min(data.data.expiresInSeconds || 120, 120),
+    })
+    const bindUrl = extensionAutoBindUrl(intent.intentToken)
+    const openResult = await openLocalHelperEnvironment(
+      helperConfig,
+      {
+        environmentKey: environment.environmentKey,
+        providerProfileId: environment.providerProfileId,
+        environmentName: environment.name || environment.environmentKey,
+        url: bindUrl,
+      },
+    )
+    adspowerExtensionStatus.value = openResult?.extensionStatus || adspowerExtensionStatus.value
+    ElMessage.success(options.autoTriggered
+      ? 'AdsPower 环境已导入，正在自动打开环境并绑定扩展'
+      : '已打开 AdsPower 环境，环境扩展会自动尝试绑定当前品牌')
+    const bound = await waitForExtensionBindingStatus(existingSessionIds)
+    if (bound) {
+      ElMessage.success('已检测到环境扩展完成绑定')
+    } else if (adspowerExtensionStatus.value?.status === 'not_detected') {
+      ElMessage.warning('未检测到 GEO 自媒体助手扩展运行；请确认该 AdsPower 环境已安装并启用 geo-env-extension 后再重试')
+    } else {
+      ElMessage.warning('暂未检测到扩展绑定结果；如未自动完成，请打开环境扩展弹窗重试或复制绑定码手动绑定')
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '打开并绑定 AdsPower 环境失败')
+  } finally {
+    extensionEnvironmentOpening.value = false
+  }
+}
+
+function extensionAutoBindUrl(intentToken: string) {
+  const url = new URL(window.location.href)
+  const environment = defaultBrowserEnvironment.value
+  url.searchParams.set('geoEnvBindIntent', intentToken)
+  url.searchParams.set('geoEnvHelperBase', LOCAL_HELPER_BASE)
+  if (environment?.environmentKey) url.searchParams.set('geoEnvEnvironmentKey', environment.environmentKey)
+  if (environment?.providerProfileId) url.searchParams.set('geoEnvProviderProfileId', environment.providerProfileId)
+  url.searchParams.set('geoEnvAutoBind', '1')
+  return url.toString()
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function waitForExtensionBindingStatus(existingSessionIds = new Set<number>()) {
+  for (let attempt = 0; attempt < EXTENSION_BIND_POLL_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      await delay(EXTENSION_BIND_POLL_INTERVAL_MS)
+    }
+    await Promise.all([
+      loadExtensionSessions({ silent: true }),
+      loadAutomationReadiness({ silent: true }),
+    ])
+    const hasNewSession = extensionSessions.value.some((item) => !existingSessionIds.has(item.id))
+    if (automationReadiness.value?.extensionBinding.online || hasNewSession) {
+      return true
+    }
+  }
+  return false
 }
 
 async function copyBrandExtensionBindCode() {
@@ -1657,6 +2353,7 @@ async function revokeBrandExtension(session: ExtensionSession) {
     await revokeBrandExtensionSession(brandId, session.id)
     ElMessage.success('扩展会话已解绑')
     await loadExtensionSessions()
+    await loadAutomationReadiness()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(err instanceof Error ? err.message : '扩展解绑失败')
@@ -1930,6 +2627,7 @@ async function submitPerspectiveConfig() {
     ElMessage.success('文章视角配置已保存')
     perspectiveConfigVisible.value = false
     await loadPerspectiveConfigs()
+    await refreshSubjectPoolForPerspective()
   } finally {
     perspectiveConfigSaving.value = false
   }
@@ -1949,6 +2647,7 @@ async function removePerspectiveConfig(config: BrandChannelTemplatePerspective) 
     await deleteBrandTemplatePerspectiveConfig(config.id)
     ElMessage.success('文章视角配置已删除')
     await loadPerspectiveConfigs()
+    await refreshSubjectPoolForPerspective()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
   }
@@ -1958,6 +2657,16 @@ function openEdit() {
   if (!brand.value) return
   fillForm(brand.value)
   editVisible.value = true
+}
+
+async function openCoverableIndustryConfig() {
+  openEdit()
+  await nextTick()
+  await nextTick()
+  const field = coverableIndustriesFieldRef.value?.$el as HTMLElement | undefined
+  field?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const input = field?.querySelector('input') as HTMLInputElement | null
+  input?.focus()
 }
 
 async function submitBrand() {
@@ -1973,6 +2682,8 @@ async function submitBrand() {
       brandSlug: brandForm.brandSlug,
       industry: brandForm.industry,
       complianceIndustryCode: brandForm.complianceIndustryCode === 'none' ? null : brandForm.complianceIndustryCode,
+      coverableIndustries: brandForm.coverableIndustries,
+      allowThirdPartyPromotion: brandForm.allowThirdPartyPromotion,
       mainBusiness: nullableText(brandForm.mainBusiness),
       coreProducts: nullableText(brandForm.coreProducts),
       brandPositioning: nullableText(brandForm.brandPositioning),
@@ -2210,6 +2921,180 @@ onMounted(async () => {
   line-height: 1.35;
 }
 
+.subject-pool-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.subject-pool-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.subject-pool-summary > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.subject-pool-summary span {
+  display: block;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.subject-pool-summary strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.subject-pool-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.subject-pool-warning span {
+  color: #92400e;
+  line-height: 1.5;
+}
+
+.subject-pool-limit-note {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.subject-pool-excluded {
+  margin-top: 2px;
+}
+
+.automation-readiness {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.automation-readiness__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.automation-readiness__title {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.automation-readiness__desc {
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.automation-readiness__checks {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.automation-check {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.automation-check.is-ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.automation-check span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.automation-check strong {
+  display: block;
+  margin-top: 5px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.automation-check small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.automation-readiness__issues {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.automation-issue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #334155;
+  font-size: 13px;
+}
+
+.automation-issue span {
+  font-weight: 800;
+}
+
+.automation-issue em {
+  min-width: 0;
+  flex: 1;
+  color: #64748b;
+  font-style: normal;
+}
+
+.automation-issue .el-button {
+  flex: none;
+}
+
+.adspower-import {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.adspower-import__toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
 .extension-binding-panel {
   margin-top: 18px;
   padding: 16px;
@@ -2292,9 +3177,22 @@ onMounted(async () => {
   }
 
   .extension-binding-head,
-  .extension-bind-code-box {
+  .extension-bind-code-box,
+  .automation-readiness__head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .automation-readiness__checks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .subject-pool-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .adspower-import__toolbar {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -4,12 +4,16 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class BrandUpdateRequest {
     @NotBlank
     private String industry;
     @Size(max = 32)
     private String complianceIndustryCode;
+    private List<String> coverableIndustries;
+    private Boolean allowThirdPartyPromotion;
     @NotBlank
     private String brandName;
     @Size(max = 128)

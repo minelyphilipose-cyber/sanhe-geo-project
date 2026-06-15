@@ -18,6 +18,9 @@ public class Brand {
     private String industry;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String complianceIndustryCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String coverableIndustries;
+    private Boolean allowThirdPartyPromotion;
     private String brandName;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String brandShortName;

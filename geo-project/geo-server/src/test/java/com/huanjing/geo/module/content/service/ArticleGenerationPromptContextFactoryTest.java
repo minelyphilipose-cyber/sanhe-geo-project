@@ -166,6 +166,38 @@ class ArticleGenerationPromptContextFactoryTest {
     }
 
     @Test
+    void thirdPartyBatchMergesSourceAndSubjectForbiddenPhrases() {
+        Project sourceProject = project();
+        sourceProject.setExtraForbiddenPhrases("[\"源项目禁词\"]");
+        Brand sourceBrand = brand();
+        sourceBrand.setForbiddenPhrases("[\"源品牌禁词\"]");
+        Project subjectProject = project();
+        subjectProject.setId(11L);
+        subjectProject.setBrandId(21L);
+        subjectProject.setExtraForbiddenPhrases("[\"主体项目禁词\"]");
+        Brand subjectBrand = brand();
+        subjectBrand.setId(21L);
+        subjectBrand.setBrandName("主体品牌");
+        subjectBrand.setForbiddenPhrases("[\"主体品牌禁词\", \"源品牌禁词\"]");
+        when(projectMapper.selectById(10L)).thenReturn(sourceProject);
+        when(projectMapper.selectById(11L)).thenReturn(subjectProject);
+        when(brandMapper.selectById(20L)).thenReturn(sourceBrand);
+        when(brandMapper.selectById(21L)).thenReturn(subjectBrand);
+
+        BatchArticleGenerationTask task = task();
+        task.setSubjectProjectId(11L);
+        task.setSubjectBrandId(21L);
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result =
+                factory.buildForBatch(batch(), task);
+
+        assertThat(result.forbiddenPhrases())
+                .containsExactly("源品牌禁词", "源项目禁词", "主体品牌禁词", "主体项目禁词");
+        assertThat(result.promptInput().sourceBrandId()).isEqualTo(20L);
+        assertThat(result.promptInput().subjectBrandId()).isEqualTo(21L);
+    }
+
+    @Test
     void selfMediaTemplateGenerationDoesNotInjectContentAngle() {
         when(promptTemplateMapper.selectById(101L)).thenReturn(selfMediaTemplate());
         when(promptTemplateVersionMapper.selectById(201L)).thenReturn(selfMediaVersion());

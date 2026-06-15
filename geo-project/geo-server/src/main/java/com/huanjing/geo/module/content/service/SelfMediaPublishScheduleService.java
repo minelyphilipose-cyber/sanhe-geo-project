@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
+import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
 import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.distribution.TargetContext;
@@ -24,14 +25,17 @@ import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMap
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
+import com.huanjing.geo.module.content.vo.SelfMediaAutomationOverviewVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleRejectedItemVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
+import com.huanjing.geo.module.content.vo.SelfMediaScheduleCapabilityVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -63,8 +67,13 @@ public class SelfMediaPublishScheduleService {
     private static final int DEFAULT_INTERVAL_MINUTES = 30;
     private static final int QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES = 3;
     private static final int QUICK_SCHEDULE_SLOT_LOOKAHEAD_HOURS = 12;
+    private static final int QUICK_DISPATCH_MANUAL_START_DELAY_MINUTES = 2;
     private static final int REQUEST_TTL_HOURS = 24;
     private static final int DEFAULT_CLAIM_LIMIT = 10;
+    private static final int LOCAL_AGENT_ONLINE_WINDOW_MINUTES = 5;
+    private static final int LOCAL_AGENT_ASSUMED_CAPACITY = 1;
+    private static final int THIRD_PARTY_SOURCE_OVERVIEW_LIMIT = 20;
+    private static final int QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES = 10;
     private static final int PUBLISH_CHECK_TOTAL_ATTEMPTS = 4;
     private static final int[] PUBLISH_CHECK_RETRY_DELAYS_MINUTES = {5, 15};
     private static final int[] SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES = {3, 8};
@@ -147,7 +156,9 @@ public class SelfMediaPublishScheduleService {
     private final CompanyChannelQuotaService companyChannelQuotaService;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
+    private final LocalAgentSessionMapper localAgentSessionMapper;
     private final BusinessCalendarService businessCalendarService;
+    private final ThirdPartySubjectRotationService thirdPartySubjectRotationService;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -215,6 +226,75 @@ public class SelfMediaPublishScheduleService {
         response.setMessage(created.getCreatedSchedules().isEmpty()
                 ? firstRejectedMessage(created)
                 : "已创建平台快速排期，系统将按品牌安全间隔自动打开 AdsPower 环境处理");
+        response.setCreateResponse(created);
+        return response;
+    }
+
+    @Transactional
+    public SelfMediaPlatformQuickScheduleResponse dispatchPlatformQuickSchedule(SelfMediaPlatformQuickScheduleRequest request,
+                                                                               String idempotencyKeyHeader) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        QuickSchedulePlan plan = buildQuickSchedulePlan(request, operator.getId());
+        if (!List.of("ready", "replace_required").contains(plan.response().getAction())) {
+            return plan.response();
+        }
+
+        SelfMediaPublishSchedule replaced = null;
+        LocalDateTime now = LocalDateTime.now();
+        PeriodWindow replacementMonth = currentMonth(now);
+        if ("replace_required".equals(plan.response().getAction())) {
+            SelfMediaPublishSchedule replaceable = scheduleMapper.selectSafeReplaceablePendingByBrandPlatformAndPeriod(
+                    plan.response().getBrandId(),
+                    plan.response().getPlatform(),
+                    replacementMonth.start(),
+                    replacementMonth.end(),
+                    now,
+                    now.plusMinutes(QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES)
+            );
+            replaced = cancelSafeReplaceableSchedule(
+                    replaceable == null ? null : replaceable.getId(),
+                    plan.response().getBrandId(),
+                    plan.response().getPlatform(),
+                    replacementMonth,
+                    now
+            );
+            plan = buildQuickSchedulePlan(request, operator.getId(), true);
+            if (!"ready".equals(plan.response().getAction())) {
+                return plan.response();
+            }
+        } else {
+            SelfMediaPublishSchedule replaceable = scheduleMapper.selectSafeReplaceablePendingByBrandPlatformAndPeriod(
+                    plan.response().getBrandId(),
+                    plan.response().getPlatform(),
+                    replacementMonth.start(),
+                    replacementMonth.end(),
+                    now,
+                    now.plusMinutes(QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES)
+            );
+            if (replaceable != null) {
+                replaced = cancelSafeReplaceableSchedule(
+                        replaceable.getId(),
+                        plan.response().getBrandId(),
+                        plan.response().getPlatform(),
+                        replacementMonth,
+                        now
+                );
+                plan = buildQuickSchedulePlan(request, operator.getId(), true);
+                if (!"ready".equals(plan.response().getAction())) {
+                    return plan.response();
+                }
+            }
+        }
+
+        plan = withQuickDispatchTiming(plan, now);
+        SelfMediaPublishScheduleCreateResponse created = createQuickSchedule(plan, operator.getId(), idempotencyKeyHeader);
+        SelfMediaPlatformQuickScheduleResponse response = plan.response();
+        response.setAction(created.getCreatedSchedules().isEmpty() ? "rejected" : "created");
+        response.setCode(created.getCreatedSchedules().isEmpty() ? "QUICK_DISPATCH_NOT_CREATED" : "QUICK_DISPATCH_CREATED");
+        response.setMessage(created.getCreatedSchedules().isEmpty()
+                ? firstRejectedMessage(created)
+                : quickDispatchCreatedMessage(response, replaced));
+        response.setReplaceScheduleId(replaced == null ? null : replaced.getId());
         response.setCreateResponse(created);
         return response;
     }
@@ -400,7 +480,7 @@ public class SelfMediaPublishScheduleService {
         LocalDateTime plannedPublishAt = plannedPublishAtForQuickSchedule(platform, strategy, nextAttemptAt, now);
         return quickResponse("ready", "READY", "可以创建" + platformLabel(platform) + "平台快速排期",
                 article.getId(), brandId, platform, account.getId(), null, plannedPublishAt, nextAttemptAt)
-                .withPlan(new QuickScheduleData(candidate, strategy, plannedPublishAt));
+                .withPlan(new QuickScheduleData(candidate, strategy, plannedPublishAt, nextAttemptAt));
     }
 
     private SelfMediaPublishScheduleCreateResponse createQuickSchedule(QuickSchedulePlan plan,
@@ -431,7 +511,7 @@ public class SelfMediaPublishScheduleService {
         response.setRequestId(requestRow.getId());
         response.setRequestIdempotencyKey(requestKey);
         SelfMediaPublishSchedule inserted = createScheduleRow(requestRow, operatorId, data.candidate(),
-                data.plannedPublishAt(), null, data.strategy());
+                data.plannedPublishAt(), data.nextAttemptAt(), data.strategy(), true);
         if (inserted == null) {
             response.getRejectedItems().add(rejected(plan.response().getArticleId(), plan.response().getSelfMediaAccountId(),
                     plan.response().getPlatform(), "ACTIVE_SCHEDULE_EXISTS", "同一文章、账号和计划时间已存在活跃排期", null));
@@ -445,9 +525,58 @@ public class SelfMediaPublishScheduleService {
         return response;
     }
 
+    private SelfMediaPublishSchedule cancelSafeReplaceableSchedule(Long scheduleId,
+                                                                   Long brandId,
+                                                                   String platform,
+                                                                   PeriodWindow replacementMonth,
+                                                                   LocalDateTime now) {
+        if (scheduleId == null) {
+            fail("REPLACE_TARGET_NOT_AVAILABLE", "没有可安全替换的排期；即将开始或已进入处理的排期不会被替换");
+        }
+        SelfMediaPublishSchedule replaceTarget = scheduleMapper.selectById(scheduleId);
+        if (replaceTarget == null) {
+            fail("REPLACE_TARGET_NOT_AVAILABLE", "可替换排期已开始执行或不存在，请刷新后重试");
+        }
+        int replaced = scheduleMapper.cancelSafeReplaceablePendingSchedule(
+                scheduleId,
+                brandId,
+                platform,
+                replacementMonth.start(),
+                replacementMonth.end(),
+                now,
+                now.plusMinutes(QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES)
+        );
+        if (replaced <= 0) {
+            fail("REPLACE_TARGET_NOT_AVAILABLE", "可替换排期已进入保护窗口或开始处理，请稍后再试");
+        }
+        refundScheduleQuotaIfPresent(replaceTarget);
+        return replaceTarget;
+    }
+
+    private QuickSchedulePlan withQuickDispatchTiming(QuickSchedulePlan plan, LocalDateTime now) {
+        QuickScheduleData data = plan.data();
+        LocalDateTime nextAttemptAt = nextBrandProtectedImmediateAttemptAt(plan.response().getBrandId(), now);
+        LocalDateTime plannedPublishAt = plannedPublishAtForQuickSchedule(
+                plan.response().getPlatform(),
+                data.strategy(),
+                nextAttemptAt,
+                now
+        );
+        plan.response().setNextAttemptAt(nextAttemptAt);
+        plan.response().setPlannedPublishAt(plannedPublishAt);
+        return plan.withPlan(new QuickScheduleData(data.candidate(), data.strategy(), plannedPublishAt, nextAttemptAt));
+    }
+
+    private String quickDispatchCreatedMessage(SelfMediaPlatformQuickScheduleResponse response,
+                                               SelfMediaPublishSchedule replaced) {
+        String prefix = replaced == null ? "已创建平台快速分发排期" : "已安全替换最近一条尚未开始的同平台排期，并创建新的快速分发排期";
+        return prefix + "，预计系统处理时间 " + response.getNextAttemptAt() + "，预计发布时间 " + response.getPlannedPublishAt();
+    }
+
     public Page<SelfMediaPublishScheduleVO> pageSchedules(Long brandId,
                                                           String platform,
                                                           String status,
+                                                          String failureCode,
                                                           Long articleId,
                                                           Long selfMediaAccountId,
                                                           Long current,
@@ -480,6 +609,9 @@ public class SelfMediaPublishScheduleService {
         if (StringUtils.hasText(status)) {
             wrapper.eq(SelfMediaPublishSchedule::getStatus, status.trim());
         }
+        if (StringUtils.hasText(failureCode)) {
+            wrapper.eq(SelfMediaPublishSchedule::getFailureCode, failureCode.trim());
+        }
         if (articleId != null) {
             wrapper.eq(SelfMediaPublishSchedule::getArticleId, articleId);
         }
@@ -496,11 +628,214 @@ public class SelfMediaPublishScheduleService {
         return result;
     }
 
+    public SelfMediaAutomationOverviewVO automationOverview() {
+        currentUserService.requireCurrentUser();
+        LocalDateTime now = LocalDateTime.now();
+        List<String> activeStatuses = new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES);
+        long activeTotal = scheduleMapper.countByStatuses(activeStatuses);
+        long dueScheduleExecution = scheduleMapper.countDueByQueue(
+                SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION,
+                List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING),
+                now
+        );
+        long duePublishCheck = scheduleMapper.countDueByQueue(
+                SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK,
+                List.of(
+                        SelfMediaPublishScheduleConstants.STATUS_SCHEDULED,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
+                ),
+                now
+        );
+        long runningTotal = scheduleMapper.countByStatuses(LOCAL_AGENT_RUNNING_STATUSES);
+        long lockedRunning = scheduleMapper.countLockedByStatuses(LOCAL_AGENT_RUNNING_STATUSES, now);
+        long failedTotal = scheduleMapper.countByStatuses(List.of(
+                SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
+                SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED
+        ));
+        long manualRequired = scheduleMapper.countByStatuses(List.of(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED));
+        long publishUnknown = scheduleMapper.countByStatuses(List.of(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN));
+
+        long activeSessions = localAgentSessionMapper.countActiveSessions(now);
+        long onlineAgents = localAgentSessionMapper.countOnlineSessions(now, now.minusMinutes(LOCAL_AGENT_ONLINE_WINDOW_MINUTES));
+        long estimatedCapacity = onlineAgents * LOCAL_AGENT_ASSUMED_CAPACITY;
+        long waitingForLocalAgent = dueScheduleExecution + duePublishCheck;
+
+        return SelfMediaAutomationOverviewVO.builder()
+                .generatedAt(now)
+                .queue(SelfMediaAutomationOverviewVO.QueueOverview.builder()
+                        .activeTotal(activeTotal)
+                        .dueScheduleExecution(dueScheduleExecution)
+                        .duePublishCheck(duePublishCheck)
+                        .runningTotal(runningTotal)
+                        .lockedRunning(lockedRunning)
+                        .failedTotal(failedTotal)
+                        .manualRequired(manualRequired)
+                        .publishUnknown(publishUnknown)
+                        .build())
+                .localExecution(SelfMediaAutomationOverviewVO.LocalExecutionOverview.builder()
+                        .onlineAgents(onlineAgents)
+                        .activeSessions(activeSessions)
+                        .assumedCapacityPerAgent(LOCAL_AGENT_ASSUMED_CAPACITY)
+                        .estimatedCapacity(estimatedCapacity)
+                        .runningLoad(runningTotal)
+                        .waitingForLocalAgent(waitingForLocalAgent)
+                        .capacityStatus(capacityStatus(onlineAgents, estimatedCapacity, runningTotal, waitingForLocalAgent))
+                        .message(capacityMessage(onlineAgents, estimatedCapacity, runningTotal, waitingForLocalAgent))
+                        .build())
+                .statusCounts(statusCounts())
+                .platformCounts(platformCounts(now, activeStatuses))
+                .failureCodeCounts(failureCodeCounts())
+                .platformCapabilities(platformCapabilities())
+                .thirdPartySubjectPool(thirdPartySubjectPoolOverview())
+                .build();
+    }
+
     public SelfMediaPublishScheduleVO detail(Long id) {
         SelfMediaPublishScheduleVO vo = SelfMediaPublishScheduleVO.from(requireScheduleWithAccess(id));
         enrichDisplayNames(List.of(vo));
         enrichAlerts(List.of(vo));
         return vo;
+    }
+
+    private List<SelfMediaAutomationOverviewVO.StatusCount> statusCounts() {
+        return scheduleMapper.countGroupedByStatus().stream()
+                .map(row -> SelfMediaAutomationOverviewVO.StatusCount.builder()
+                        .status(textValue(row.get("name")))
+                        .count(longValue(row.get("total")))
+                        .build())
+                .toList();
+    }
+
+    private List<SelfMediaAutomationOverviewVO.PlatformCount> platformCounts(LocalDateTime now, List<String> activeStatuses) {
+        return scheduleMapper.countGroupedByPlatform(activeStatuses, now).stream()
+                .map(row -> SelfMediaAutomationOverviewVO.PlatformCount.builder()
+                        .platform(textValue(row.get("name")))
+                        .activeCount(longValue(row.get("active_total")))
+                        .failedCount(longValue(row.get("failed_total")))
+                        .dueCount(longValue(row.get("due_total")))
+                        .build())
+                .toList();
+    }
+
+    private List<SelfMediaAutomationOverviewVO.FailureCodeCount> failureCodeCounts() {
+        return scheduleMapper.countGroupedByFailureCode(12).stream()
+                .map(row -> {
+                    String code = textValue(row.get("name"));
+                    return SelfMediaAutomationOverviewVO.FailureCodeCount.builder()
+                            .code(code)
+                            .label(SelfMediaPublishFailureCodes.label(code))
+                            .retryable(SelfMediaPublishFailureCodes.retryable(code))
+                            .actionKey(SelfMediaPublishFailureCodes.actionKey(code))
+                            .actionLabel(SelfMediaPublishFailureCodes.actionLabel(code))
+                            .actionKind(SelfMediaPublishFailureCodes.actionKind(code))
+                            .count(longValue(row.get("total")))
+                            .build();
+                })
+                .toList();
+    }
+
+    private List<SelfMediaAutomationOverviewVO.PlatformCapability> platformCapabilities() {
+        return scheduleCapabilityService.list().stream()
+                .map(item -> {
+                    SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
+                            scheduleCapabilityService.readiness(item.getPlatform(), item.getV1Strategy());
+                    boolean requiresLocalAgent = item.getPublishChannel() != null
+                            && !"OFFICIAL_API".equalsIgnoreCase(item.getPublishChannel());
+                    return SelfMediaAutomationOverviewVO.PlatformCapability.builder()
+                            .platform(item.getPlatform())
+                            .displayName(firstText(item.getDisplayName(), item.getPlatform()))
+                            .publishChannel(item.getPublishChannel())
+                            .strategy(item.getV1Strategy())
+                            .scheduleReady(readiness.ready())
+                            .readinessCode(readiness.code())
+                            .readinessMessage(readiness.message())
+                            .requiresLocalAgent(requiresLocalAgent)
+                            .build();
+                })
+                .toList();
+    }
+
+    private SelfMediaAutomationOverviewVO.ThirdPartySubjectPoolOverview thirdPartySubjectPoolOverview() {
+        List<Brand> sources = defaultList(brandMapper.selectThirdPartySourceBrands());
+        List<SelfMediaAutomationOverviewVO.ThirdPartySubjectPoolSource> rows = sources.stream()
+                .map(this::thirdPartySubjectPoolSource)
+                .toList();
+        return SelfMediaAutomationOverviewVO.ThirdPartySubjectPoolOverview.builder()
+                .sourceTotal(rows.size())
+                .readySourceTotal(rows.stream().filter(row -> "ready".equals(row.getStatus())).count())
+                .missingCoverageTotal(rows.stream().filter(row -> "missing_coverage".equals(row.getStatus())).count())
+                .emptyCandidateTotal(rows.stream().filter(row -> "empty_candidate".equals(row.getStatus())).count())
+                .sources(rows.stream().limit(THIRD_PARTY_SOURCE_OVERVIEW_LIMIT).toList())
+                .build();
+    }
+
+    private SelfMediaAutomationOverviewVO.ThirdPartySubjectPoolSource thirdPartySubjectPoolSource(Brand source) {
+        ThirdPartySubjectPoolPreviewResponse preview = thirdPartySubjectRotationService.previewPool(source.getId(), 1, 0);
+        String status = "ready";
+        String message = "可轮换";
+        if (preview.coverableIndustries().isEmpty()) {
+            status = "missing_coverage";
+            message = "信源未配置覆盖行业";
+        } else if (preview.candidateCount() <= 0) {
+            status = "empty_candidate";
+            message = "暂无可轮换主体";
+        }
+        String nextCandidate = preview.candidates().isEmpty() ? null : preview.candidates().get(0).brandName();
+        return SelfMediaAutomationOverviewVO.ThirdPartySubjectPoolSource.builder()
+                .sourceBrandId(source.getId())
+                .sourceBrandName(firstText(source.getBrandName(), source.getBrandShortName(), String.valueOf(source.getId())))
+                .coverableIndustries(preview.coverableIndustries())
+                .candidateCount(preview.candidateCount())
+                .excludedCount(preview.excludedCount())
+                .nextCandidateBrandName(nextCandidate)
+                .status(status)
+                .message(message)
+                .build();
+    }
+
+    private String capacityStatus(long onlineAgents, long estimatedCapacity, long runningLoad, long waitingForLocalAgent) {
+        if (onlineAgents <= 0 && waitingForLocalAgent > 0) {
+            return "blocked";
+        }
+        if (estimatedCapacity <= runningLoad && waitingForLocalAgent > 0) {
+            return "saturated";
+        }
+        if (waitingForLocalAgent > estimatedCapacity * 2) {
+            return "pressure";
+        }
+        return "healthy";
+    }
+
+    private String capacityMessage(long onlineAgents, long estimatedCapacity, long runningLoad, long waitingForLocalAgent) {
+        if (onlineAgents <= 0 && waitingForLocalAgent > 0) {
+            return "当前没有在线本地助手，但存在待领取任务";
+        }
+        if (estimatedCapacity <= runningLoad && waitingForLocalAgent > 0) {
+            return "本地助手执行容量已被占满，待领取任务会排队";
+        }
+        if (waitingForLocalAgent > estimatedCapacity * 2) {
+            return "待领取任务明显高于当前本地执行容量";
+        }
+        return "本地执行容量与待处理任务基本匹配";
+    }
+
+    private long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
+    }
+
+    private String textValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     @Transactional
@@ -597,6 +932,9 @@ public class SelfMediaPublishScheduleService {
         if (normalizedPlatform != null && !allowedPlatforms.contains(normalize(normalizedPlatform))) {
             return null;
         }
+        if (!hasAvailableLocalAgentCapacity(operatorId)) {
+            return null;
+        }
         SelfMediaPublishSchedule claimed = claimNextRow(
                 SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION,
                 lockMinutes,
@@ -649,6 +987,9 @@ public class SelfMediaPublishScheduleService {
         }
         String normalizedPlatform = trimToNull(platform);
         if (normalizedPlatform != null && !allowedPlatforms.contains(normalize(normalizedPlatform))) {
+            return null;
+        }
+        if (!hasAvailableLocalAgentCapacity(operatorId)) {
             return null;
         }
         SelfMediaPublishSchedule claimed = claimNextRow(
@@ -829,6 +1170,21 @@ public class SelfMediaPublishScheduleService {
         return null;
     }
 
+    private boolean hasAvailableLocalAgentCapacity(Long operatorId) {
+        LocalDateTime now = LocalDateTime.now();
+        long onlineSessions = localAgentSessionMapper.countOnlineSessionsByOperator(
+                operatorId,
+                now,
+                now.minusMinutes(LOCAL_AGENT_ONLINE_WINDOW_MINUTES)
+        );
+        long estimatedCapacity = onlineSessions * LOCAL_AGENT_ASSUMED_CAPACITY;
+        if (estimatedCapacity <= 0) {
+            return false;
+        }
+        long runningLoad = scheduleMapper.countLockedByOperatorAndStatuses(operatorId, LOCAL_AGENT_RUNNING_STATUSES, now);
+        return runningLoad < estimatedCapacity;
+    }
+
     private SelfMediaPublishSchedule claimNextRow(String queueKind,
                                                   int lockMinutes,
                                                   Long operatorId,
@@ -902,6 +1258,9 @@ public class SelfMediaPublishScheduleService {
     }
 
     private boolean postponeLocalAgentClaimOutsideBusinessWindow(SelfMediaPublishSchedule row, LocalDateTime now) {
+        if (isManualQuickDispatchSchedule(row)) {
+            return false;
+        }
         LocalDateTime nextWindow = clampToBusinessAttemptWindow(now);
         if (nextWindow == null || !nextWindow.isAfter(now.withSecond(0).withNano(0))) {
             return false;
@@ -911,6 +1270,12 @@ public class SelfMediaPublishScheduleService {
         row.setUpdatedAt(now);
         scheduleMapper.updateById(row);
         return true;
+    }
+
+    private boolean isManualQuickDispatchSchedule(SelfMediaPublishSchedule row) {
+        return row != null
+                && StringUtils.hasText(row.getRequestIdempotencyKey())
+                && row.getRequestIdempotencyKey().startsWith("platform-quick-dispatch-");
     }
 
     private boolean recoverTimedOutLocalAgentSchedule(SelfMediaPublishSchedule row, LocalDateTime now) {
@@ -1183,6 +1548,10 @@ public class SelfMediaPublishScheduleService {
             }
         }
         return null;
+    }
+
+    private <T> List<T> defaultList(List<T> values) {
+        return values == null ? List.of() : values;
     }
 
     private record PlatformScheduleVerification(
@@ -1732,6 +2101,16 @@ public class SelfMediaPublishScheduleService {
                                                        LocalDateTime plannedAt,
                                                        LocalDateTime executionAt,
                                                        String strategy) {
+        return createScheduleRow(requestRow, operatorId, candidate, plannedAt, executionAt, strategy, false);
+    }
+
+    private SelfMediaPublishSchedule createScheduleRow(SelfMediaPublishScheduleRequest requestRow,
+                                                       Long operatorId,
+                                                       Candidate candidate,
+                                                       LocalDateTime plannedAt,
+                                                       LocalDateTime executionAt,
+                                                       String strategy,
+                                                       boolean useExactExecutionAt) {
         String baseKey = baseIdempotencyKey(candidate.article().getId(), candidate.account().getId(), plannedAt, strategy);
         SelfMediaPublishSchedule active = scheduleMapper.selectActiveByBaseIdempotencyKey(
                 baseKey, new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES));
@@ -1768,7 +2147,8 @@ public class SelfMediaPublishScheduleService {
                 plannedAt,
                 executionAt,
                 candidate.account().getPlatform(),
-                strategy
+                strategy,
+                useExactExecutionAt
         ));
         row.setCreatedBy(operatorId);
         row.setUpdatedBy(operatorId);
@@ -1818,6 +2198,18 @@ public class SelfMediaPublishScheduleService {
                                                               LocalDateTime executionAt,
                                                               String platform,
                                                               String strategy) {
+        return resolveScheduleExecutionAttemptTime(brandId, plannedAt, executionAt, platform, strategy, false);
+    }
+
+    private LocalDateTime resolveScheduleExecutionAttemptTime(Long brandId,
+                                                              LocalDateTime plannedAt,
+                                                              LocalDateTime executionAt,
+                                                              String platform,
+                                                              String strategy,
+                                                              boolean useExactExecutionAt) {
+        if (useExactExecutionAt && executionAt != null) {
+            return executionAt;
+        }
         if (executionAt != null) {
             return nextBrandSafeAttemptAt(brandId, executionAt, null);
         }
@@ -2285,6 +2677,36 @@ public class SelfMediaPublishScheduleService {
         return nextBrandSafeAttemptAt(brandId, now.plusSeconds(10).withNano(0), null);
     }
 
+    private LocalDateTime nextBrandProtectedImmediateAttemptAt(Long brandId, LocalDateTime now) {
+        LocalDateTime cursor = now.plusMinutes(QUICK_DISPATCH_MANUAL_START_DELAY_MINUTES).withSecond(0).withNano(0);
+        if (brandId == null) {
+            return cursor;
+        }
+        LocalDateTime protectionStart = now.minusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES);
+        LocalDateTime protectionEnd = now.plusMinutes(QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES);
+        List<SelfMediaPublishSchedule> protectedSlots = scheduleMapper.selectBrandActiveScheduleSlots(
+                brandId,
+                protectionStart,
+                protectionEnd.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES),
+                new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
+        );
+        boolean moved;
+        do {
+            moved = false;
+            for (SelfMediaPublishSchedule slot : protectedSlots == null ? List.<SelfMediaPublishSchedule>of() : protectedSlots) {
+                LocalDateTime occupied = slot.getNextAttemptAt() != null ? slot.getNextAttemptAt() : slot.getPlannedPublishAt();
+                if (occupied == null || occupied.isBefore(protectionStart) || occupied.isAfter(protectionEnd)) {
+                    continue;
+                }
+                if (!cursor.isAfter(occupied.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES))) {
+                    cursor = occupied.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES).plusSeconds(10).withNano(0);
+                    moved = true;
+                }
+            }
+        } while (moved);
+        return cursor;
+    }
+
     private LocalDateTime nextBrandSafeAttemptAt(Long brandId, LocalDateTime candidate, Long excludedScheduleId) {
         LocalDateTime cursor = clampToBusinessAttemptWindow(candidate);
         if (brandId == null || cursor == null) {
@@ -2595,7 +3017,8 @@ public class SelfMediaPublishScheduleService {
 
     private record QuickScheduleData(Candidate candidate,
                                      String strategy,
-                                     LocalDateTime plannedPublishAt) {
+                                     LocalDateTime plannedPublishAt,
+                                     LocalDateTime nextAttemptAt) {
     }
 
     private record QuickSchedulePlan(SelfMediaPlatformQuickScheduleResponse response,

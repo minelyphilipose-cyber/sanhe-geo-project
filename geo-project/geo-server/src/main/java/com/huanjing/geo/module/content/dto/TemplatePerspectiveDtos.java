@@ -17,7 +17,8 @@ public final class TemplatePerspectiveDtos {
             String name,
             String description,
             Boolean enabled,
-            Integer sortOrder
+            Integer sortOrder,
+            Boolean thirdPartySubjectEnabled
     ) {
     }
 

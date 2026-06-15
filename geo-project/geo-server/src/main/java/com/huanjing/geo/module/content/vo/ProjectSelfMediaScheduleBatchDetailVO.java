@@ -15,6 +15,11 @@ public class ProjectSelfMediaScheduleBatchDetailVO {
     public static class Item {
         private Long generationBatchId;
         private Long generationTaskId;
+        private Long sourceBrandId;
+        private String sourceBrandName;
+        private Long subjectBrandId;
+        private String subjectBrandName;
+        private Long subjectProjectId;
         private String generationStatus;
         private String generationErrorMessage;
         private String generationTopic;

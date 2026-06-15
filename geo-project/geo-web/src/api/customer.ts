@@ -122,6 +122,39 @@ export function getBrandDetail(id: number) {
   return request.get<R<Brand>>(`/brands/${id}`)
 }
 
+export interface ThirdPartySubjectPoolItem {
+  brandId: number
+  brandName?: string | null
+  industry?: string | null
+  companyId?: number | null
+  companyName?: string | null
+  subjectProjectId?: number | null
+  lastSelectedAt?: string | null
+  reasonCode?: string | null
+  reason?: string | null
+}
+
+export interface ThirdPartySubjectPoolPreview {
+  sourceBrandId: number
+  sourceBrandName?: string | null
+  coverableIndustries: string[]
+  includeAllIndustries: boolean
+  validSource: boolean
+  candidateCount: number
+  excludedCount: number
+  candidateDisplayCount: number
+  excludedDisplayCount: number
+  candidates: ThirdPartySubjectPoolItem[]
+  excluded: ThirdPartySubjectPoolItem[]
+}
+
+export function getThirdPartySubjectPool(
+  brandId: number,
+  params?: { candidateLimit?: number; excludedLimit?: number },
+) {
+  return request.get<R<ThirdPartySubjectPoolPreview>>(`/brands/${brandId}/third-party-subject-pool`, { params })
+}
+
 export function createBrand(data: Record<string, any>) {
   return request.post<R<Brand>>('/brands', data)
 }

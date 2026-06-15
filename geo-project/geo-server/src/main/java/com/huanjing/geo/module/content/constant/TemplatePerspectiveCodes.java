@@ -24,6 +24,11 @@ public final class TemplatePerspectiveCodes {
         return !CUSTOMER.equals(normalized);
     }
 
+    public static boolean isThirdParty(String code) {
+        String normalized = normalize(code);
+        return INDUSTRY_NEUTRAL.equals(normalized) || REVIEW_RECOMMEND.equals(normalized);
+    }
+
     public static boolean isBuiltin(String code) {
         return BUILTIN_CODES.contains(normalize(code));
     }

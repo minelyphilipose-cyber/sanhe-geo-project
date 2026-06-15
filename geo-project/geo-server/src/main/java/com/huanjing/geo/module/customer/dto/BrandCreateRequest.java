@@ -5,6 +5,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class BrandCreateRequest {
     @NotNull
@@ -13,6 +15,8 @@ public class BrandCreateRequest {
     private String industry;
     @Size(max = 32)
     private String complianceIndustryCode;
+    private List<String> coverableIndustries;
+    private Boolean allowThirdPartyPromotion;
     @NotBlank
     private String brandName;
     @Size(max = 128)

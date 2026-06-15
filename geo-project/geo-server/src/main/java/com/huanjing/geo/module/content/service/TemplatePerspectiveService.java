@@ -216,7 +216,14 @@ public class TemplatePerspectiveService {
     }
 
     private PerspectiveVO toPerspectiveVO(ContentTemplatePerspective row) {
-        return new PerspectiveVO(row.getCode(), row.getName(), row.getDescription(), row.getEnabled(), row.getSortOrder());
+        return new PerspectiveVO(
+                row.getCode(),
+                row.getName(),
+                row.getDescription(),
+                row.getEnabled(),
+                row.getSortOrder(),
+                TemplatePerspectiveCodes.isThirdParty(row.getCode())
+        );
     }
 
     private BrandChannelPerspectiveVO toConfigVO(BrandChannelTemplatePerspective row,

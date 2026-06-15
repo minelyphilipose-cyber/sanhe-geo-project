@@ -10,6 +10,7 @@ import type {
   R,
   SelfMediaAccount,
   SelfMediaAccountPlatformOption,
+  SelfMediaAutomationOverview,
   SelfMediaCookieStatusBatchResponse,
   SelfMediaScheduleCapability,
   SelfMediaPublishSchedule,
@@ -466,6 +467,11 @@ export function createBatchContentArticles(data: BatchArticleGenerateRequest) {
 export interface BatchArticleGenerationTask {
   taskId: number
   articleId?: number | null
+  sourceBrandId?: number | null
+  sourceBrandName?: string | null
+  subjectBrandId?: number | null
+  subjectBrandName?: string | null
+  subjectProjectId?: number | null
   rowNo: number
   articleIndexInBatch: number
   articleType?: string | null
@@ -740,6 +746,7 @@ export interface TemplatePerspective {
   description?: string | null
   enabled: boolean
   sortOrder: number
+  thirdPartySubjectEnabled?: boolean | null
 }
 
 export interface BrandChannelTemplatePerspective {
@@ -1370,12 +1377,17 @@ export function getSelfMediaPublishSchedules(params?: {
   brandId?: number
   platform?: string
   status?: string
+  failureCode?: string
   articleId?: number
   selfMediaAccountId?: number
   current?: number
   size?: number
 }) {
   return request.get<R<PageResult<SelfMediaPublishSchedule>>>('/content/self-media-schedules', { params })
+}
+
+export function getSelfMediaAutomationOverview() {
+  return request.get<R<SelfMediaAutomationOverview>>('/content/self-media-automation/overview')
 }
 
 export function createSelfMediaPublishSchedules(data: {
@@ -1409,6 +1421,17 @@ export function createSelfMediaPlatformQuickSchedule(data: {
   return request.post<R<SelfMediaPlatformQuickScheduleResponse>>('/content/self-media-schedules/platform-quick-create', data, {
     headers: {
       'Idempotency-Key': `platform-quick-schedule-${data.articleId}-${data.platform}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    },
+  })
+}
+
+export function dispatchSelfMediaPlatformQuickSchedule(data: {
+  articleId: number
+  platform: string
+}) {
+  return request.post<R<SelfMediaPlatformQuickScheduleResponse>>('/content/self-media-schedules/platform-quick-dispatch', data, {
+    headers: {
+      'Idempotency-Key': `platform-quick-dispatch-${data.articleId}-${data.platform}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     },
   })
 }

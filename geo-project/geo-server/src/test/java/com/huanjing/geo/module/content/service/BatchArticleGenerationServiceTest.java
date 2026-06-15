@@ -12,6 +12,8 @@ import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
+import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
+import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationBatch;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
@@ -76,6 +78,8 @@ class BatchArticleGenerationServiceTest {
     private BatchArticleQualityChecker qualityChecker;
     private ArticleTemplateAllocationService allocationService;
     private TemplatePerspectiveService perspectiveService;
+    private ThirdPartySubjectRotationService subjectRotationService;
+    private ArticleGenerationReadinessService readinessService;
     private BatchArticleGenerationService service;
 
     @BeforeEach
@@ -98,6 +102,9 @@ class BatchArticleGenerationServiceTest {
         qualityChecker = mock(BatchArticleQualityChecker.class);
         allocationService = mock(ArticleTemplateAllocationService.class);
         perspectiveService = mock(TemplatePerspectiveService.class);
+        subjectRotationService = mock(ThirdPartySubjectRotationService.class);
+        readinessService = mock(ArticleGenerationReadinessService.class);
+        when(readinessService.detectTaskReadinessWarningCodes(any(), any(), any())).thenReturn(List.of());
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service = new BatchArticleGenerationService(
@@ -132,7 +139,8 @@ class BatchArticleGenerationServiceTest {
                 allocationService,
                 perspectiveService,
                 new QuestionScenePlatformSuggestionService(),
-                mock(ArticleGenerationReadinessService.class),
+                readinessService,
+                subjectRotationService,
                 new ObjectMapper(),
                 transactionManager,
                 (Executor) Runnable::run
@@ -328,6 +336,72 @@ class BatchArticleGenerationServiceTest {
         assertEquals("partial_success", updated.getStatus());
         assertEquals(1, updated.getSuccessCount());
         assertEquals(1, updated.getFailedCount());
+    }
+
+    @Test
+    void createSystemBatchFreezesThirdPartySubjectContextOnTask() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+
+        Project project = new Project();
+        project.setId(10L);
+        project.setCompanyId(20L);
+        project.setBrandId(30L);
+        project.setStatus("active");
+        project.setProjectName("Source project");
+        Brand sourceBrand = new Brand();
+        sourceBrand.setId(30L);
+        sourceBrand.setBrandName("Source brand");
+        when(projectMapper.selectById(10L)).thenReturn(project);
+        when(brandMapper.selectById(30L)).thenReturn(sourceBrand);
+        when(perspectiveService.resolve(30L, "self_media", "wechat"))
+                .thenReturn(new TemplatePerspectiveService.ResolvedPerspective(
+                        TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
+                        TemplatePerspectiveService.MATCH_SCOPE_EXACT,
+                        31L
+                ));
+        when(subjectRotationService.resolve(project, sourceBrand, "self_media", TemplatePerspectiveCodes.INDUSTRY_NEUTRAL))
+                .thenReturn(new ThirdPartySubjectRotationService.RotationResult(30L, 10L, 300L, 3000L, true));
+
+        ArticlePromptTemplate template = template(101L, "self_media", "wechat", "industry_article",
+                TemplatePerspectiveCodes.INDUSTRY_NEUTRAL);
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(201L);
+        version.setTemplateId(101L);
+        when(allocationService.activeTemplates("self_media", "wechat", null,
+                TemplatePerspectiveCodes.INDUSTRY_NEUTRAL))
+                .thenReturn(List.of(new ArticleTemplateAllocationService.TemplateWithVersion(template, version)));
+        when(allocationService.allocate("self_media", "wechat", null,
+                TemplatePerspectiveCodes.INDUSTRY_NEUTRAL, 1))
+                .thenReturn(List.of(new ArticleTemplateAllocationService.AllocatedTemplate(template, version, 1)));
+        when(batchMapper.insert(any(BatchArticleGenerationBatch.class))).thenAnswer(invocation -> {
+            BatchArticleGenerationBatch batch = invocation.getArgument(0);
+            batch.setId(500L);
+            return 1;
+        });
+
+        BatchArticleGenerateRequest req = new BatchArticleGenerateRequest();
+        req.setProjectId(10L);
+        req.setTopicSource("manual");
+        BatchArticleGenerateRequest.TopicConfig topic = new BatchArticleGenerateRequest.TopicConfig();
+        topic.setTopic("行业观察");
+        topic.setPlatforms(List.of(platform("self_media", "wechat", 1)));
+        req.setTopics(List.of(topic));
+
+        BatchArticleGenerateResponse response = service.createSystemBatch(req, null);
+
+        assertEquals(500L, response.batchId());
+        assertThat(executor.commands).hasSize(1);
+        ArgumentCaptor<BatchArticleGenerationTask> taskCaptor = forClass(BatchArticleGenerationTask.class);
+        verify(taskMapper).insert(taskCaptor.capture());
+        BatchArticleGenerationTask task = taskCaptor.getValue();
+        assertEquals(500L, task.getBatchId());
+        assertEquals(10L, task.getProjectId());
+        assertEquals(30L, task.getSourceBrandId());
+        assertEquals(300L, task.getSubjectBrandId());
+        assertEquals(3000L, task.getSubjectProjectId());
+        assertEquals(TemplatePerspectiveCodes.INDUSTRY_NEUTRAL, task.getPerspectiveCode());
+        assertEquals(31L, task.getPerspectiveMatchedConfigId());
     }
 
     @Test
@@ -540,6 +614,24 @@ class BatchArticleGenerationServiceTest {
         platform.setAllocationMode("auto");
         platform.setCount(count);
         return platform;
+    }
+
+    private ArticlePromptTemplate template(Long id,
+                                           String channelGroupCode,
+                                           String channelSubCode,
+                                           String articleTypeCode,
+                                           String perspectiveCode) {
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(id);
+        template.setName("template-" + id);
+        template.setChannelGroupCode(channelGroupCode);
+        template.setChannelSubCode(channelSubCode);
+        template.setArticleTypeCode(articleTypeCode);
+        template.setQuestionSceneCode("problem_solution");
+        template.setPerspectiveCode(perspectiveCode);
+        template.setWeight(10);
+        template.setContactDisclosureMode("brand_only");
+        return template;
     }
 
     private ArticleAutoImageInsertionService passThroughAutoImageInsertionService() {

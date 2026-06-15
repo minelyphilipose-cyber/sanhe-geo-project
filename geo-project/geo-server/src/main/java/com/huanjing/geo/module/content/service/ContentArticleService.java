@@ -918,6 +918,15 @@ public class ContentArticleService {
     }
 
     private void fillArticleFromGenerationTask(ArticleDraft article, BatchArticleGenerationTask task) {
+        if (article.getSourceBrandId() == null) {
+            article.setSourceBrandId(task.getSourceBrandId());
+        }
+        if (article.getSubjectBrandId() == null) {
+            article.setSubjectBrandId(task.getSubjectBrandId());
+        }
+        if (article.getSubjectProjectId() == null) {
+            article.setSubjectProjectId(task.getSubjectProjectId());
+        }
         if (!StringUtils.hasText(article.getTopic())) {
             article.setTopic(task.getTopic());
         }
@@ -1120,7 +1129,10 @@ public class ContentArticleService {
         }
         List<ArticleDraft> candidates = articleDraftMapper.selectList(
                 new LambdaQueryWrapper<ArticleDraft>()
-                        .eq(ArticleDraft::getProjectId, article.getProjectId())
+                        .eq(article.getSourceBrandId() == null || article.getSubjectBrandId() == null,
+                                ArticleDraft::getProjectId, article.getProjectId())
+                        .eq(article.getSourceBrandId() != null, ArticleDraft::getSourceBrandId, article.getSourceBrandId())
+                        .eq(article.getSubjectBrandId() != null, ArticleDraft::getSubjectBrandId, article.getSubjectBrandId())
                         .eq(ArticleDraft::getArticleType, article.getArticleType())
                         .ge(ArticleDraft::getCreatedAt, LocalDateTime.now().minusDays(30))
                         .ne(article.getId() != null, ArticleDraft::getId, article.getId())

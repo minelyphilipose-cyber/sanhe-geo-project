@@ -48,6 +48,9 @@ public class SelfMediaPublishScheduleVO {
     private String failureLabel;
     private Boolean failureRetryable;
     private String failureActionHint;
+    private String failureActionKey;
+    private String failureActionLabel;
+    private String failureActionKind;
     private String failureMessage;
     private String diagnosticsJson;
     private List<SelfMediaPublishScheduleAlertVO> activeAlerts = new ArrayList<>();
@@ -98,6 +101,9 @@ public class SelfMediaPublishScheduleVO {
         vo.setFailureLabel(SelfMediaPublishFailureCodes.label(row.getFailureCode()));
         vo.setFailureRetryable(SelfMediaPublishFailureCodes.retryable(row.getFailureCode()));
         vo.setFailureActionHint(SelfMediaPublishFailureCodes.actionHint(row.getFailureCode()));
+        vo.setFailureActionKey(SelfMediaPublishFailureCodes.actionKey(row.getFailureCode()));
+        vo.setFailureActionLabel(SelfMediaPublishFailureCodes.actionLabel(row.getFailureCode()));
+        vo.setFailureActionKind(SelfMediaPublishFailureCodes.actionKind(row.getFailureCode()));
         vo.setFailureMessage(row.getFailureMessage());
         vo.setDiagnosticsJson(row.getDiagnosticsJson());
         vo.setCreatedAt(row.getCreatedAt());

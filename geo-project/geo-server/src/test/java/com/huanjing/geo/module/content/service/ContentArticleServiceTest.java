@@ -39,6 +39,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 
@@ -178,6 +179,30 @@ class ContentArticleServiceTest {
         assertNull(draftCaptor.getValue().getCoverImageUrl());
         verify(coverSelectionService, never()).requireManualCoverUrl(any(), any());
         verify(coverSelectionService, never()).selectRandomCoverUrl(any());
+    }
+
+    @Test
+    void duplicateCheckScopesThirdPartyTitlesBySourceAndSubjectBrand() throws Exception {
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+
+        ArticleDraft draft = new ArticleDraft();
+        draft.setId(99L);
+        draft.setProjectId(10L);
+        draft.setSourceBrandId(100L);
+        draft.setSubjectBrandId(200L);
+        draft.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+
+        Method method = ContentArticleService.class.getDeclaredMethod("checkDuplicate", ArticleDraft.class, String.class);
+        method.setAccessible(true);
+        method.invoke(service, draft, "手机怎么选");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Wrapper<ArticleDraft>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(articleDraftMapper).selectList(wrapperCaptor.capture());
+        String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
+        assertTrue(sqlSegment.contains("source_brand_id"));
+        assertTrue(sqlSegment.contains("subject_brand_id"));
+        assertFalse(sqlSegment.contains("project_id"));
     }
 
     @Test

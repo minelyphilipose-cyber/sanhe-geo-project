@@ -82,7 +82,7 @@ public class ArticleGenerationPromptContextFactory {
                 task.getFocus(),
                 task.getArticleIndexInBatch()
         );
-        return build(request, true);
+        return build(request, true, task);
     }
 
     public PromptContextResult buildStrict(PromptContextRequest request) {
@@ -90,10 +90,25 @@ public class ArticleGenerationPromptContextFactory {
     }
 
     private PromptContextResult build(PromptContextRequest request, boolean allowDefaultPromptFallback) {
-        Project project = requireProject(request.projectId());
-        Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
+        return build(request, allowDefaultPromptFallback, null);
+    }
+
+    private PromptContextResult build(PromptContextRequest request,
+                                      boolean allowDefaultPromptFallback,
+                                      BatchArticleGenerationTask task) {
+        Project sourceProject = requireProject(request.projectId());
+        Brand sourceBrand = sourceProject.getBrandId() == null ? null : brandMapper.selectById(sourceProject.getBrandId());
+        Project project = task != null && task.getSubjectProjectId() != null
+                ? requireProject(task.getSubjectProjectId())
+                : sourceProject;
+        Brand brand = task != null && task.getSubjectBrandId() != null
+                ? brandMapper.selectById(task.getSubjectBrandId())
+                : (project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId()));
+        if (brand == null && project.getBrandId() != null) {
+            brand = brandMapper.selectById(project.getBrandId());
+        }
         ChannelRef channel = resolveChannel(request.channelGroupCode(), request.channelSubCode());
-        TemplatePerspectiveService.ResolvedPerspective perspective = resolvePerspective(project, request, channel);
+        TemplatePerspectiveService.ResolvedPerspective perspective = resolvePerspective(sourceProject, request, channel);
         String articleType = normalizeArticleType(request.articleType());
         int articleIndexInBatch = request.articleIndexInBatch();
         BatchArticleGenerateRequest.TopicConfig medicalSelection = medicalSelection(request);
@@ -104,10 +119,11 @@ public class ArticleGenerationPromptContextFactory {
         String topicAsQuestion = StringUtils.hasText(request.topicAsQuestion())
                 ? request.topicAsQuestion().trim()
                 : promptBuilder.topicAsQuestion(topic, articleType, articleIndexInBatch, channel.contentStyle());
-        KeywordGroup keywordGroup = validateKeywordGroup(project.getId(), request.keywordGroupId());
+        Long requestedKeywordGroupId = Objects.equals(sourceProject.getId(), project.getId()) ? request.keywordGroupId() : null;
+        KeywordGroup keywordGroup = validateKeywordGroup(project.getId(), requestedKeywordGroupId);
         Long keywordGroupId = keywordGroup == null ? null : keywordGroup.getId();
-        String keywordGroupName = keywordGroup == null ? trimToNull(request.keywordGroupName()) : keywordGroup.getName();
-        List<String> forbiddenPhrases = forbiddenPhrases(project, brand);
+        String keywordGroupName = keywordGroup == null && requestedKeywordGroupId != null ? trimToNull(request.keywordGroupName()) : keywordGroup == null ? null : keywordGroup.getName();
+        List<String> forbiddenPhrases = forbiddenPhrases(sourceProject, sourceBrand, project, brand);
         BrandOfferingPromptSelector.SelectionResult selectedOfferings = offeringPromptSelector.select(
                 project.getBrandId(),
                 topic,
@@ -140,7 +156,11 @@ public class ArticleGenerationPromptContextFactory {
                 perspective.perspectiveCode(),
                 perspective.matchedScope(),
                 perspective.matchedConfigId(),
-                selectedOfferings.offerings()
+                selectedOfferings.offerings(),
+                sourceProject.getId(),
+                sourceBrand == null ? sourceProject.getBrandId() : sourceBrand.getId(),
+                project.getId(),
+                brand == null ? project.getBrandId() : brand.getId()
         );
 
         TemplateResolution resolution = resolveTemplate(request, channel, articleType, perspective, allowDefaultPromptFallback);
@@ -494,12 +514,20 @@ public class ArticleGenerationPromptContextFactory {
         return project.getProjectName();
     }
 
-    private List<String> forbiddenPhrases(Project project, Brand brand) {
+    private List<String> forbiddenPhrases(Project sourceProject, Brand sourceBrand, Project project, Brand brand) {
         List<String> result = new ArrayList<>();
+        if (sourceBrand != null) {
+            result.addAll(parseJsonArray(sourceBrand.getForbiddenPhrases()));
+        }
+        if (sourceProject != null) {
+            result.addAll(parseJsonArray(sourceProject.getExtraForbiddenPhrases()));
+        }
         if (brand != null) {
             result.addAll(parseJsonArray(brand.getForbiddenPhrases()));
         }
-        result.addAll(parseJsonArray(project.getExtraForbiddenPhrases()));
+        if (project != null) {
+            result.addAll(parseJsonArray(project.getExtraForbiddenPhrases()));
+        }
         return result.stream().filter(StringUtils::hasText).map(String::trim).distinct().toList();
     }
 

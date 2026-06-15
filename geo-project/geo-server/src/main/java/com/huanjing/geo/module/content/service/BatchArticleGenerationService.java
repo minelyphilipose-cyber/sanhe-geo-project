@@ -145,6 +145,7 @@ public class BatchArticleGenerationService {
     private final TemplatePerspectiveService perspectiveService;
     private final QuestionScenePlatformSuggestionService suggestionService;
     private final ArticleGenerationReadinessService readinessService;
+    private final ThirdPartySubjectRotationService subjectRotationService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final Executor articleAiDraftExecutor;
@@ -181,6 +182,7 @@ public class BatchArticleGenerationService {
                                          TemplatePerspectiveService perspectiveService,
                                          QuestionScenePlatformSuggestionService suggestionService,
                                          ArticleGenerationReadinessService readinessService,
+                                         ThirdPartySubjectRotationService subjectRotationService,
                                          ObjectMapper objectMapper,
                                          PlatformTransactionManager transactionManager,
                                          @Qualifier("articleAiDraftExecutor") Executor articleAiDraftExecutor) {
@@ -216,6 +218,7 @@ public class BatchArticleGenerationService {
         this.perspectiveService = perspectiveService;
         this.suggestionService = suggestionService;
         this.readinessService = readinessService;
+        this.subjectRotationService = subjectRotationService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.articleAiDraftExecutor = articleAiDraftExecutor;
@@ -293,8 +296,13 @@ public class BatchArticleGenerationService {
                 for (ValidatedPlatform platform : topic.platforms()) {
                     for (int articleIndexInPlatform = 1; articleIndexInPlatform <= platform.count(); articleIndexInPlatform++) {
                         BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+                        ThirdPartySubjectRotationService.RotationResult subjectContext =
+                                subjectRotationService.resolve(project, brand, platform.channelGroupCode(), platform.perspectiveCode());
                         task.setBatchId(batch.getId());
                         task.setProjectId(project.getId());
+                        task.setSourceBrandId(subjectContext.sourceBrandId());
+                        task.setSubjectBrandId(subjectContext.subjectBrandId());
+                        task.setSubjectProjectId(subjectContext.subjectProjectId());
                         task.setRowNo(topicIndex + 1);
                         task.setArticleIndexInRow(articleIndexInTopic);
                         task.setArticleIndexInBatch(articleIndexInBatch);
@@ -360,10 +368,23 @@ public class BatchArticleGenerationService {
                         .eq(BatchArticleGenerationTask::getBatchId, batchId)
                         .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
         );
+        Set<Long> brandIds = tasks.stream()
+                .flatMap(task -> java.util.stream.Stream.of(task.getSourceBrandId(), task.getSubjectBrandId()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> brandNameMap = brandIds.isEmpty()
+                ? Map.of()
+                : brandMapper.selectBatchIds(brandIds).stream()
+                .collect(Collectors.toMap(Brand::getId, Brand::getBrandName, (first, ignored) -> first));
         List<BatchArticleGenerationDetailResponse.Task> taskItems = tasks.stream()
                 .map(task -> new BatchArticleGenerationDetailResponse.Task(
                         task.getId(),
                         task.getArticleId(),
+                        task.getSourceBrandId(),
+                        brandNameMap.get(task.getSourceBrandId()),
+                        task.getSubjectBrandId(),
+                        brandNameMap.get(task.getSubjectBrandId()),
+                        task.getSubjectProjectId(),
                         task.getRowNo(),
                         task.getArticleIndexInBatch(),
                         task.getArticleType(),
@@ -587,6 +608,8 @@ public class BatchArticleGenerationService {
             }
             ArticleGenerationPromptContextFactory.PromptContextResult promptContext =
                     promptContextFactory.buildForBatch(batch, task);
+            Project contentProject = promptContext.project();
+            Brand contentBrand = promptContext.brand();
             applyMedicalContext(batch, task, promptContext.medicalContext());
             task.setTopicAsQuestion(promptContext.topicAsQuestion());
             if (promptContext.fallbackToDefaultPrompt()) {
@@ -609,8 +632,8 @@ public class BatchArticleGenerationService {
             for (int attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
                 generated = articleGenerationEngine.generate(
                         new ArticleGenerationEngine.GenerateInput(
-                                project,
-                                brand,
+                                contentProject,
+                                contentBrand,
                                 attemptPrompt.systemPrompt(),
                                 attemptPrompt.userPrompt(),
                                 selectedModel.platformCode(),
@@ -624,13 +647,13 @@ public class BatchArticleGenerationService {
                 complianceResult = medicalComplianceChecker.check(new MedicalArticleComplianceChecker.CheckInput(
                         batch.getId(),
                         task.getId(),
-                        project.getId(),
-                        project.getBrandId(),
+                        contentProject.getId(),
+                        contentProject.getBrandId(),
                         task.getChannelGroupCode(),
                         task.getChannelSubCode(),
                         generated.title(),
                         generated.content(),
-                        brand,
+                        contentBrand,
                         promptContext.medicalContext()
                 ));
                 if (complianceResult.passed()) {
@@ -639,13 +662,13 @@ public class BatchArticleGenerationService {
                 medicalComplianceChecker.logHits(new MedicalArticleComplianceChecker.CheckInput(
                                 batch.getId(),
                                 task.getId(),
-                                project.getId(),
-                                project.getBrandId(),
+                                contentProject.getId(),
+                                contentProject.getBrandId(),
                                 task.getChannelGroupCode(),
                                 task.getChannelSubCode(),
                                 generated.title(),
                                 generated.content(),
-                                brand,
+                                contentBrand,
                                 promptContext.medicalContext()
                         ),
                         complianceResult,
@@ -660,14 +683,14 @@ public class BatchArticleGenerationService {
                 Long discardedArticleId = persistDiscardedArticle(project, task, generated, prompt, selectedModel, complianceResult,
                         promptContext.medicalContext());
                 markTaskComplianceDiscarded(task, discardedArticleId, prompt, selectedModel, generated, complianceResult, retryCount);
-                specialIndustryComplianceAlertService.notifyComplianceDiscarded(project, brand, task, discardedArticleId, complianceResult);
+                specialIndustryComplianceAlertService.notifyComplianceDiscarded(contentProject, contentBrand, task, discardedArticleId, complianceResult);
                 return;
             }
 
             Long articleId = persistArticle(project, task, generated.title(), generated.content(), prompt, generated.model(), generated.result(),
                     promptContext.medicalContext(), MedicalArticleConstants.COMPLIANCE_PASSED);
-            medicalArticleGenerationService.recordHistory(project, brand, promptContext.medicalContext(), articleId);
-            specialIndustryComplianceAlertService.notifyPublishReviewPending(project, brand, task, articleId, promptContext.medicalContext());
+            medicalArticleGenerationService.recordHistory(contentProject, contentBrand, promptContext.medicalContext(), articleId);
+            specialIndustryComplianceAlertService.notifyPublishReviewPending(contentProject, contentBrand, task, articleId, promptContext.medicalContext());
             markTaskSuccess(task, articleId, prompt, generated.model(), generated.result(), generated.quality(), retryCount);
         } catch (Exception ex) {
             log.warn("Batch article generation task failed batchId={} taskId={}", batch.getId(), task.getId(), ex);
@@ -688,6 +711,9 @@ public class BatchArticleGenerationService {
             ArticleDraft draft = new ArticleDraft();
             draft.setBatchId(null);
             draft.setProjectId(project.getId());
+            draft.setSourceBrandId(task.getSourceBrandId() == null ? project.getBrandId() : task.getSourceBrandId());
+            draft.setSubjectBrandId(task.getSubjectBrandId() == null ? project.getBrandId() : task.getSubjectBrandId());
+            draft.setSubjectProjectId(task.getSubjectProjectId() == null ? project.getId() : task.getSubjectProjectId());
             draft.setArticleType(task.getArticleType());
             draft.setContentStyle(task.getContentStyle());
             draft.setChannelGroupCode(task.getChannelGroupCode());
@@ -748,6 +774,9 @@ public class BatchArticleGenerationService {
             ArticleDraft draft = new ArticleDraft();
             draft.setBatchId(null);
             draft.setProjectId(project.getId());
+            draft.setSourceBrandId(task.getSourceBrandId() == null ? project.getBrandId() : task.getSourceBrandId());
+            draft.setSubjectBrandId(task.getSubjectBrandId() == null ? project.getBrandId() : task.getSubjectBrandId());
+            draft.setSubjectProjectId(task.getSubjectProjectId() == null ? project.getId() : task.getSubjectProjectId());
             draft.setArticleType(task.getArticleType());
             draft.setContentStyle(task.getContentStyle());
             draft.setChannelGroupCode(task.getChannelGroupCode());
@@ -1176,7 +1205,7 @@ public class BatchArticleGenerationService {
         TemplatePerspectiveService.ResolvedPerspective perspective = resolvePerspective(brandId, channel, perspectiveMemo);
         AutoTemplateAllocation allocation = allocateAutoTemplates(unitKey, channel, questionSceneCode, perspective, count, smartSelections);
         if (allocation.templates().isEmpty()) {
-            if (TemplatePerspectiveCodes.isSpecial(perspective.perspectiveCode())) {
+            if (TemplatePerspectiveCodes.isThirdParty(perspective.perspectiveCode())) {
                 throw missingTemplateException(topic, channel, questionSceneCode, perspective.perspectiveCode());
             }
             addSkippedNotice(notices, topic, channel, null, null, count, "未配置启用模板");
@@ -1237,7 +1266,7 @@ public class BatchArticleGenerationService {
                     templateCount.getTemplateId(), templateCount.getTemplateVersionId(), perspective.perspectiveCode()
             );
             if (resolved == null) {
-                if (TemplatePerspectiveCodes.isSpecial(perspective.perspectiveCode())) {
+                if (TemplatePerspectiveCodes.isThirdParty(perspective.perspectiveCode())) {
                     throw missingTemplateException(topic, requestedChannel, null, perspective.perspectiveCode());
                 }
                 addSkippedNotice(notices, topic, requestedChannel, templateCount.getTemplateId(), null, count, "模板已失效");

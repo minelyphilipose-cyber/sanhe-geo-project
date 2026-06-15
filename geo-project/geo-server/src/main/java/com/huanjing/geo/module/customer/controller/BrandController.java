@@ -14,6 +14,8 @@ import com.huanjing.geo.module.customer.dto.BrandUpdateRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.entity.BrandProfileVersion;
+import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
+import com.huanjing.geo.module.content.service.ThirdPartySubjectRotationService;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.customer.service.BrandService;
@@ -49,6 +51,7 @@ public class BrandController {
     private final BrandProfileService brandProfileService;
     private final BrandStatementService brandStatementService;
     private final BrandStatementDispatchService brandStatementDispatchService;
+    private final ThirdPartySubjectRotationService thirdPartySubjectRotationService;
 
     @GetMapping
     public R<Page<Brand>> page(
@@ -63,6 +66,14 @@ public class BrandController {
     @GetMapping("/{id}")
     public R<Brand> detail(@PathVariable Long id) {
         return R.ok(brandService.detail(id));
+    }
+
+    @GetMapping("/{id}/third-party-subject-pool")
+    public R<ThirdPartySubjectPoolPreviewResponse> thirdPartySubjectPool(@PathVariable Long id,
+                                                                         @RequestParam(required = false) Integer candidateLimit,
+                                                                         @RequestParam(required = false) Integer excludedLimit) {
+        brandService.detail(id);
+        return R.ok(thirdPartySubjectRotationService.previewPool(id, candidateLimit, excludedLimit));
     }
 
     @PostMapping
