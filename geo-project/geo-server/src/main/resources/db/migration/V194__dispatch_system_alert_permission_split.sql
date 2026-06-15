@@ -74,8 +74,8 @@ DROP PROCEDURE IF EXISTS v194_assert_role_permission;
 
 DELIMITER $$
 CREATE PROCEDURE v194_assert_role_permission(
-    IN role_key_value VARCHAR(64),
-    IN perm_key_value VARCHAR(128),
+    IN role_key_value VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+    IN perm_key_value VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
     IN should_have TINYINT
 )
 BEGIN

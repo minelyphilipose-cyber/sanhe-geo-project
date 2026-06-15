@@ -40,6 +40,38 @@ public interface LocalAgentSessionMapper extends BaseMapper<LocalAgentSession> {
             """)
     List<LocalAgentSession> selectActiveByOperatorId(@Param("operatorId") Long operatorId);
 
+    @Select("""
+            SELECT COUNT(1)
+            FROM local_agent_session
+            WHERE status = 'active'
+              AND expires_at > #{now}
+            """)
+    long countActiveSessions(@Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT COUNT(1)
+            FROM local_agent_session
+            WHERE status = 'active'
+              AND expires_at > #{now}
+              AND last_seen_at IS NOT NULL
+              AND last_seen_at >= #{onlineSince}
+            """)
+    long countOnlineSessions(@Param("now") LocalDateTime now,
+                             @Param("onlineSince") LocalDateTime onlineSince);
+
+    @Select("""
+            SELECT COUNT(1)
+            FROM local_agent_session
+            WHERE operator_id = #{operatorId}
+              AND status = 'active'
+              AND expires_at > #{now}
+              AND last_seen_at IS NOT NULL
+              AND last_seen_at >= #{onlineSince}
+            """)
+    long countOnlineSessionsByOperator(@Param("operatorId") Long operatorId,
+                                       @Param("now") LocalDateTime now,
+                                       @Param("onlineSince") LocalDateTime onlineSince);
+
     @Update("""
             UPDATE local_agent_session
             SET status = 'revoked',

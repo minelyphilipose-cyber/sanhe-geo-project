@@ -13,6 +13,8 @@ export interface ExtensionSession {
   brandId?: number | null
   operatorId: number
   installId: string
+  environmentKey?: string | null
+  providerProfileId?: string | null
   extensionVersion?: string | null
   userAgent?: string | null
   status: string

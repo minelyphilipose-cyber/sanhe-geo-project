@@ -6,6 +6,8 @@ public record ExtensionBindRequest(
         @NotBlank String bindCode,
         Long brandId,
         @NotBlank String installId,
+        String environmentKey,
+        String providerProfileId,
         String deviceFingerprint,
         String extensionVersion
 ) {

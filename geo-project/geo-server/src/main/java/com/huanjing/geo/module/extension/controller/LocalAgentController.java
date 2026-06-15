@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.result.R;
-import com.huanjing.geo.module.content.constant.PlatformAccountIdentityPolicy;
 import com.huanjing.geo.module.content.entity.BrowserEnvironment;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.DistributionTask;
@@ -142,7 +141,7 @@ public class LocalAgentController {
                         defaultPublishUrl(taskPlatform),
                         task.getSelfMediaAccountId(),
                         task.getBrowserEnvironmentAccountId(),
-                        comparablePlatformAccountId(taskPlatform, account == null ? null : account.getPlatformAccountId()),
+                        null,
                         account == null ? null : account.getAccountName(),
                         task.getEnvironmentKey(),
                         task.getEnvironmentKey(),
@@ -188,12 +187,7 @@ public class LocalAgentController {
                         defaultWorksListUrl(taskPlatform, account),
                         schedule.getSelfMediaAccountId(),
                         schedule.getBrowserEnvironmentAccountId(),
-                        firstText(
-                                comparablePlatformAccountId(taskPlatform,
-                                        environmentAccount == null ? null : environmentAccount.getExpectedPlatformAccountId()),
-                                comparablePlatformAccountId(taskPlatform,
-                                        account == null ? null : account.getPlatformAccountId())
-                        ),
+                        null,
                         firstText(
                                 environmentAccount == null ? null : environmentAccount.getExpectedAccountName(),
                                 account == null ? null : account.getAccountName()
@@ -428,10 +422,6 @@ public class LocalAgentController {
 
     private boolean isValidBaijiahaoAppId(String value) {
         return StringUtils.hasText(value) && value.trim().matches("\\d{6,}");
-    }
-
-    private String comparablePlatformAccountId(String platform, String platformAccountId) {
-        return PlatformAccountIdentityPolicy.comparablePlatformAccountId(platform, platformAccountId);
     }
 
     private String firstText(String... values) {

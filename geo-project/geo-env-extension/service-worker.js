@@ -5,6 +5,7 @@ const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
 const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 'baijiahao'])
 const autoLoginReportAtByKey = new Map()
+const bindIntentInFlight = new Set()
 const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
 
 function normalizeBaseUrl(value) {
@@ -221,6 +222,8 @@ async function bindExtension(bindCode) {
       bindCode: normalizedBindCode,
       brandId: config.brandId || undefined,
       installId,
+      environmentKey: config.environmentKey || undefined,
+      providerProfileId: config.providerProfileId || undefined,
       extensionVersion: EXTENSION_VERSION,
       deviceFingerprint: `env:${config.environmentKey}`,
     }),
@@ -243,6 +246,123 @@ async function bindExtension(bindCode) {
     error: error.message,
   }))
   return session
+}
+
+function bindIntentFromUrl(value) {
+  try {
+    const url = new URL(value || '')
+    const intentToken = url.searchParams.get('geoEnvBindIntent') || ''
+    if (!intentToken) return null
+    return {
+      intentToken,
+      helperBase: normalizeBaseUrl(url.searchParams.get('geoEnvHelperBase') || 'http://127.0.0.1:17891'),
+      environmentKey: url.searchParams.get('geoEnvEnvironmentKey') || '',
+      providerProfileId: url.searchParams.get('geoEnvProviderProfileId') || '',
+    }
+  } catch {
+    return null
+  }
+}
+
+function removeBindIntentParams(value) {
+  try {
+    const url = new URL(value || '')
+    url.searchParams.delete('geoEnvBindIntent')
+    url.searchParams.delete('geoEnvHelperBase')
+    url.searchParams.delete('geoEnvEnvironmentKey')
+    url.searchParams.delete('geoEnvProviderProfileId')
+    url.searchParams.delete('geoEnvAutoBind')
+    return url.toString()
+  } catch {
+    return ''
+  }
+}
+
+async function consumeLocalBindIntent(helperBase, intent) {
+  const response = await fetch(`${normalizeBaseUrl(helperBase)}/v1/extension/bind-intents/consume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      intentToken: intent.intentToken,
+      environmentKey: intent.environmentKey || undefined,
+      providerProfileId: intent.providerProfileId || undefined,
+    }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || body.ok === false) {
+    throw new Error(body.error || `本地助手绑定意图领取失败：${response.status}`)
+  }
+  return body
+}
+
+async function bindFromLocalIntent(intent, source = {}) {
+  const intentToken = String(intent?.intentToken || '').trim()
+  const helperBase = normalizeBaseUrl(intent?.helperBase || 'http://127.0.0.1:17891')
+  if (!intentToken) throw new Error('缺少扩展绑定意图')
+  if (bindIntentInFlight.has(intentToken)) return { skipped: true, reason: 'in_flight' }
+  bindIntentInFlight.add(intentToken)
+  try {
+    const payload = await consumeLocalBindIntent(helperBase, intent)
+    const stored = await storageGet(['geoEnvConfig'])
+    const nextConfig = {
+      ...(stored.geoEnvConfig || {}),
+      apiBase: normalizeBaseUrl(payload.apiBase || stored.geoEnvConfig?.apiBase || 'http://119.45.154.127'),
+      helperBase: normalizeBaseUrl(payload.helperBase || helperBase),
+      brandId: payload.brandId || stored.geoEnvConfig?.brandId || null,
+      environmentKey: payload.environmentKey || stored.geoEnvConfig?.environmentKey || '',
+      providerProfileId: payload.providerProfileId || stored.geoEnvConfig?.providerProfileId || '',
+      platform: stored.geoEnvConfig?.platform || '',
+      autoRun: stored.geoEnvConfig?.autoRun !== false,
+    }
+    await storageSet({ geoEnvConfig: nextConfig })
+    const session = await bindExtension(payload.bindCode)
+    await appendEventLog({
+      type: 'bind_intent',
+      ok: true,
+      source: source.reason || 'unknown',
+      environmentKey: nextConfig.environmentKey,
+      brandId: nextConfig.brandId,
+    })
+    return { ok: true, session, config: nextConfig }
+  } catch (error) {
+    await appendEventLog({
+      type: 'bind_intent',
+      ok: false,
+      source: source.reason || 'unknown',
+      error: error.message,
+    })
+    throw error
+  } finally {
+    bindIntentInFlight.delete(intentToken)
+  }
+}
+
+async function bindFromActiveTabIntent() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+  const tab = tabs[0]
+  const intent = bindIntentFromUrl(tab?.url || '')
+  if (!intent) return { ok: false, skipped: true, reason: 'no_bind_intent' }
+  const result = await bindFromLocalIntent(intent, { reason: 'popup' })
+  const cleanUrl = removeBindIntentParams(tab.url)
+  if (cleanUrl && cleanUrl !== tab.url && tab.id) {
+    await chrome.tabs.update(tab.id, { url: cleanUrl }).catch(() => {})
+  }
+  return result
+}
+
+async function bindFromTabUrl(tabId, url) {
+  const intent = bindIntentFromUrl(url)
+  if (!intent) return
+  try {
+    await bindFromLocalIntent(intent, { reason: 'tab_url' })
+    const cleanUrl = removeBindIntentParams(url)
+    if (cleanUrl && cleanUrl !== url && tabId) {
+      await chrome.tabs.update(tabId, { url: cleanUrl }).catch(() => {})
+    }
+    await setBadge('OK')
+  } catch (error) {
+    await setBadge('ERR')
+  }
 }
 
 async function pollOnce(options = {}) {
@@ -616,8 +736,7 @@ async function listHelperTasks(config, session) {
 
 async function handleTask(config, session, task, options = {}) {
   const taskApiConfig = task.backendBase ? { ...config, apiBase: task.backendBase } : config
-  const identityTabId = await ensureTaskIdentityTab(taskApiConfig, session, task, options.identityTabId)
-  const precheckedIdentity = await verifyTaskIdentityOnTab(identityTabId, task)
+  const precheckedIdentity = await verifyTaskIdentityOnTab(options.identityTabId || null, task)
   await reportTaskLoginStatus(taskApiConfig, session, task, precheckedIdentity).catch(() => {})
   const issued = getPreissuedFillToken(task)
   if (!issued) {
@@ -640,7 +759,6 @@ async function handleTask(config, session, task, options = {}) {
   payload.platform = task.platform
   payload.taskId = task.taskId
   payload.environmentKey = task.environmentKey || config.environmentKey || null
-  payload.expectedPlatformAccountId = task.expectedPlatformAccountId || payload.expectedPlatformAccountId || null
   payload.expectedAccountName = task.expectedAccountName || payload.expectedAccountName || null
   assertExpectedIdentityPresent(payload)
   payload.precheckedIdentity = precheckedIdentity || null
@@ -1179,14 +1297,17 @@ function normalizeZhihuTitleText(value) {
 
 async function reportTaskLoginStatus(config, session, task, identityCheck) {
   if (!task.browserEnvironmentAccountId || !task.selfMediaAccountId || !task.platform || !identityCheck) return null
+  const accountIds = identityCheck.currentAccountIds || []
+  const accountNames = identityCheck.currentAccountNames || []
+  if (!accountIds.length && !accountNames.length) return null
   return reportLoginStatus(config, session, {
     environmentAccountId: task.browserEnvironmentAccountId,
     environmentKey: task.environmentKey,
     selfMediaAccountId: task.selfMediaAccountId,
     platform: task.platform,
     identity: {
-      accountIds: identityCheck.currentAccountIds || [],
-      accountNames: identityCheck.currentAccountNames || [],
+      accountIds,
+      accountNames,
       diagnostics: identityCheck.message || '',
     },
   })
@@ -1286,9 +1407,6 @@ async function reportLoginStatus(config, session, report) {
     method: 'POST',
     body: JSON.stringify(body),
   }, session.extensionToken)
-  if (String(backendStatus?.loginStatus || '').toLowerCase() === 'mismatch') {
-    throw new Error(`LOGIN_STATUS_MISMATCH：后台判定账号不一致；期望=${backendStatus.expectedAccountName || backendStatus.expectedPlatformAccountId || '-'}；实际=${accountNames[0] || accountIds[0] || '-'}`)
-  }
   return backendStatus
 }
 
@@ -1349,14 +1467,26 @@ async function verifyTaskIdentityOnTab(tabId, task) {
   const identityTabId = await resolveIdentityPrecheckTabId(tabId, task.platform, requiresPrecheck)
   if (!identityTabId) {
     if (requiresPrecheck) {
-      throw new Error(`账号身份预检失败：${task.platform} 任务需要先打开稳定账号身份页`)
+      return {
+        method: 'accountNameWarning',
+        warning: true,
+        message: `账号名称未预检：未找到 ${platformReportPageHint(task.platform)}，将继续填充`,
+        currentAccountIds: [],
+        currentAccountNames: [],
+      }
     }
     return null
   }
   const tab = await chrome.tabs.get(identityTabId).catch(() => null)
   if (!tab?.url || !isAllowedLoginReportUrl(task.platform, tab.url)) {
     if (requiresPrecheck) {
-      throw new Error(`账号身份预检失败：当前页面不是 ${platformReportPageHint(task.platform)}`)
+      return {
+        method: 'accountNameWarning',
+        warning: true,
+        message: `账号名称未预检：当前页面不是 ${platformReportPageHint(task.platform)}，将继续填充`,
+        currentAccountIds: [],
+        currentAccountNames: [],
+      }
     }
     return null
   }
@@ -1367,14 +1497,19 @@ async function verifyTaskIdentityOnTab(tabId, task) {
       type: 'GEO_ENV_CHECK_IDENTITY',
       payload: {
         platform: task.platform,
-        expectedPlatformAccountId: task.expectedPlatformAccountId || null,
         expectedAccountName: task.expectedAccountName || null,
       },
     })
     if (!response?.ok) throw new Error(response?.error || '账号身份校验失败')
     return response.result
   } catch (error) {
-    throw error
+    return {
+      method: 'accountNameWarning',
+      warning: true,
+      message: `账号名称未确认：${error?.message || String(error || '读取失败')}，将继续填充`,
+      currentAccountIds: [],
+      currentAccountNames: [],
+    }
   }
 }
 
@@ -1394,16 +1529,15 @@ async function resolveIdentityPrecheckTabId(candidateTabId, platform, requiresPr
 
 function requiresIdentityPrecheck(task) {
   if (!IDENTITY_PRECHECK_PLATFORMS.has(task.platform)) return false
-  return Boolean(task.expectedPlatformAccountId || task.expectedAccountName)
+  return Boolean(task.expectedAccountName)
 }
 
 function assertExpectedIdentityPresent(payload) {
   const platform = normalizePlatform(payload.platform)
   if (!IDENTITY_PRECHECK_PLATFORMS.has(platform)) return
-  if (payload.expectedPlatformAccountId || payload.expectedAccountName) return
-  const error = new Error('IDENTITY_EXPECTATION_MISSING：多账号平台任务缺少 expectedPlatformAccountId/expectedAccountName，已拒绝填充')
-  error.code = 'IDENTITY_EXPECTATION_MISSING'
-  throw error
+  if (!payload.expectedAccountName) {
+    console.warn('IDENTITY_EXPECTATION_MISSING：任务缺少 expectedAccountName，将跳过账号名称提示校验')
+  }
 }
 
 async function runSelfTest() {
@@ -1544,6 +1678,7 @@ function isAllowedLoginReportUrl(platform, urlValue) {
     }
     if (normalizedPlatform === 'baijiahao') {
       return url.hostname === 'baijiahao.baidu.com'
+        && !url.pathname.includes('/builder/rc/edit')
     }
     return false
   } catch {
@@ -2049,6 +2184,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const session = await bindExtension(message.bindCode)
       return { ok: true, session }
     }
+    if (message?.type === 'GEO_ENV_BIND_FROM_INTENT') {
+      return bindFromActiveTabIntent()
+    }
     if (message?.type === 'GEO_ENV_POLL_ONCE') {
       return pollOnce()
     }
@@ -2092,4 +2230,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .then((result) => sendResponse(result))
     .catch((error) => sendResponse({ ok: false, error: error.message }))
   return true
+})
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const url = changeInfo.url || tab?.url || ''
+  if (!url || !url.includes('geoEnvBindIntent=')) return
+  bindFromTabUrl(tabId, url)
 })

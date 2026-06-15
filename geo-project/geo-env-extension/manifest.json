@@ -16,7 +16,7 @@
     "scripting"
   ],
   "host_permissions": [
-    "http://119.45.154.127/*",
+    "https://www.huanjingaigeo.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*",
     "https://mp.toutiao.com/*",

@@ -75,7 +75,7 @@ const sidebarGroups: MenuGroup[] = [
       { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
       { path: '/admin/layered-keyword-groups', name: 'LayeredKeywordGroupManage', title: '拓词管理', icon: 'Collection', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['keyword_group.read'] },
       { path: '/admin/content/execution', name: 'ContentExecution', title: '内容与执行', icon: 'Memo', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['content.read'] },
-      { path: '/admin/content/special-industry-compliance', name: 'SpecialIndustryComplianceWorkbench', title: '特殊行业合规', icon: 'Files', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['content.read'] },
+      { path: '/admin/content/special-industry-compliance', name: 'SpecialIndustryComplianceWorkbench', title: '行业专项', icon: 'Files', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['content.read'] },
     ],
   },
   {
@@ -83,6 +83,7 @@ const sidebarGroups: MenuGroup[] = [
     title: '监控中心',
     menus: [
       { path: '/admin/monitoring/tasks', name: 'MonitoringTasks', title: '调度监控', icon: 'Monitor', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'dispatch.task.replay.dead_letter'] },
+      { path: '/admin/monitoring/self-media-automation', name: 'SelfMediaAutomationOverview', title: '自媒体自动化', icon: 'DataLine', permissions: ['content.read'] },
       { path: '/admin/monitoring/platforms', name: 'PlatformHealth', title: '平台健康', icon: 'Cpu', permissions: ['content.read', 'delivery.overview.read', 'user.manage'] },
       { path: '/admin/alerts', name: 'AlertCenter', title: '告警中心', icon: 'Bell', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'system.alert.resolve'], badgeCount: 0 },
       { path: '/admin/activity-logs', name: 'ActivityLogs', title: '操作日志', icon: 'Document', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['user.manage'] },

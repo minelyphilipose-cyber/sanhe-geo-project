@@ -35,6 +35,8 @@ import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleRejectedItemVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
@@ -67,6 +69,7 @@ public class ProjectSelfMediaScheduleService {
     public static final String TRIGGER_JOB = "job";
 
     private final ProjectMapper projectMapper;
+    private final BrandMapper brandMapper;
     private final ProjectSelfMediaScheduleConfigMapper configMapper;
     private final ProjectSelfMediaScheduleBatchMapper batchMapper;
     private final ArticleDraftMapper articleDraftMapper;
@@ -745,6 +748,11 @@ public class ProjectSelfMediaScheduleService {
 
         BatchArticleGenerationTask task = generationTaskMapper.selectById(plan.generationTaskId());
         if (task != null) {
+            item.setSourceBrandId(task.getSourceBrandId());
+            item.setSubjectBrandId(task.getSubjectBrandId());
+            item.setSubjectProjectId(task.getSubjectProjectId());
+            item.setSourceBrandName(resolveBrandName(task.getSourceBrandId()));
+            item.setSubjectBrandName(resolveBrandName(task.getSubjectBrandId()));
             item.setGenerationStatus(task.getStatus());
             item.setGenerationErrorMessage(task.getErrorMessage());
             item.setGenerationTopic(task.getTopicAsQuestion());
@@ -787,6 +795,14 @@ public class ProjectSelfMediaScheduleService {
             }
         }
         return item;
+    }
+
+    private String resolveBrandName(Long brandId) {
+        if (brandId == null) {
+            return null;
+        }
+        Brand brand = brandMapper.selectById(brandId);
+        return brand == null ? null : brand.getBrandName();
     }
 
     private Map<ScheduleRejectedKey, SelfMediaPublishScheduleRejectedItemVO> readScheduleRejectedItems(String value) {

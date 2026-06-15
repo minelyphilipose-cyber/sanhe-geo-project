@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
-import com.huanjing.geo.module.content.constant.PlatformAccountIdentityPolicy;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountCreateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountUpdateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest;
@@ -19,9 +18,16 @@ import com.huanjing.geo.module.content.mapper.BrowserEnvironmentMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.vo.BrowserEnvironmentAccountVO;
 import com.huanjing.geo.module.content.vo.BrowserEnvironmentVO;
+import com.huanjing.geo.module.content.vo.SelfMediaAutomationReadinessVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.dto.ExtensionRuntimeConfigResponse;
+import com.huanjing.geo.module.extension.config.ExtensionProperties;
+import com.huanjing.geo.module.extension.entity.ExtensionSession;
+import com.huanjing.geo.module.extension.entity.LocalAgentSession;
+import com.huanjing.geo.module.extension.mapper.ExtensionSessionMapper;
+import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
+import com.huanjing.geo.module.extension.service.SemverComparator;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -31,9 +37,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -43,8 +51,12 @@ public class BrowserEnvironmentService {
     private final BrowserEnvironmentMapper environmentMapper;
     private final BrowserEnvironmentAccountMapper environmentAccountMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
+    private final LocalAgentSessionMapper localAgentSessionMapper;
+    private final ExtensionSessionMapper extensionSessionMapper;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
+    private final ExtensionProperties extensionProperties;
+    private static final Set<String> SEMI_AUTO_PLATFORMS = Set.of("toutiao", "baijiahao", "zhihu", "xiaohongshu");
 
     public List<BrowserEnvironmentVO> listEnvironments(Long brandId) {
         SysUser operator = currentUserService.requireCurrentUser();
@@ -55,6 +67,226 @@ public class BrowserEnvironmentService {
                 .stream()
                 .map(BrowserEnvironmentVO::from)
                 .toList();
+    }
+
+    public SelfMediaAutomationReadinessVO selfMediaAutomationReadiness(Long brandId) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.READ);
+        LocalDateTime now = LocalDateTime.now();
+        List<SelfMediaAutomationReadinessVO.Issue> issues = new ArrayList<>();
+
+        LocalAgentSession localAgent = localAgentSessionMapper.selectActiveByOperatorId(operator.getId()).stream()
+                .filter(item -> item.getExpiresAt() != null && item.getExpiresAt().isAfter(now))
+                .findFirst()
+                .orElse(null);
+        SelfMediaAutomationReadinessVO.LocalAgent localAgentStatus = new SelfMediaAutomationReadinessVO.LocalAgent(
+                localAgent != null,
+                localAgent != null && localAgent.getLastSeenAt() != null && localAgent.getLastSeenAt().isAfter(now.minusMinutes(5)),
+                localAgent == null ? null : localAgent.getId(),
+                localAgent == null ? null : localAgent.getHelperName(),
+                localAgent == null ? null : localAgent.getLastSeenAt(),
+                localAgent == null ? null : localAgent.getExpiresAt()
+        );
+        if (!localAgentStatus.bound()) {
+            issues.add(issue("LOCAL_AGENT_NOT_BOUND", "error", "本地助手未绑定", "到个人中心绑定本机助手"));
+        } else if (!localAgentStatus.online()) {
+            issues.add(issue("LOCAL_AGENT_OFFLINE", "warning", "本地助手不在线", "启动本地助手并刷新状态"));
+        }
+
+        BrowserEnvironment defaultEnvironment = environmentMapper.selectList(new LambdaQueryWrapper<BrowserEnvironment>()
+                        .eq(BrowserEnvironment::getBrandId, brandId)
+                        .eq(BrowserEnvironment::getProvider, BrowserEnvironmentConstants.PROVIDER_ADSPOWER)
+                        .isNull(BrowserEnvironment::getDeletedAt)
+                        .orderByDesc(BrowserEnvironment::getUpdatedAt))
+                .stream()
+                .findFirst()
+                .orElse(null);
+        SelfMediaAutomationReadinessVO.BrowserEnvironment environmentStatus =
+                new SelfMediaAutomationReadinessVO.BrowserEnvironment(
+                        defaultEnvironment != null,
+                        defaultEnvironment != null && BrowserEnvironmentConstants.ENV_STATUS_ACTIVE.equals(defaultEnvironment.getStatus()),
+                        defaultEnvironment == null ? null : defaultEnvironment.getId(),
+                        defaultEnvironment == null ? null : defaultEnvironment.getEnvironmentKey(),
+                        defaultEnvironment == null ? null : defaultEnvironment.getProviderProfileId(),
+                        defaultEnvironment == null ? null : defaultEnvironment.getName()
+                );
+        if (!environmentStatus.configured()) {
+            issues.add(issue("ADSPOWER_ENVIRONMENT_NOT_CONFIGURED", "error", "未配置品牌 AdsPower 环境", "在品牌详情配置 AdsPower 浏览器环境"));
+        } else if (!environmentStatus.active()) {
+            issues.add(issue("ADSPOWER_ENVIRONMENT_DISABLED", "error", "品牌 AdsPower 环境未启用", "启用品牌默认 AdsPower 环境"));
+        }
+
+        List<ExtensionSession> activeExtensionSessions = extensionSessionMapper.selectActiveByBrandId(brandId).stream()
+                .filter(item -> item.getExpiresAt() != null && item.getExpiresAt().isAfter(now))
+                .toList();
+        ExtensionSession extensionSession = activeExtensionSessions.stream()
+                .filter(item -> extensionSessionMatchesEnvironment(item, defaultEnvironment))
+                .findFirst()
+                .orElseGet(() -> activeExtensionSessions.stream()
+                        .filter(item -> !StringUtils.hasText(item.getEnvironmentKey())
+                                && !StringUtils.hasText(item.getProviderProfileId()))
+                        .findFirst()
+                        .orElse(null));
+        String expectedExtensionVersion = expectedGeoEnvExtensionVersion();
+        SelfMediaAutomationReadinessVO.ExtensionBinding extensionStatus =
+                new SelfMediaAutomationReadinessVO.ExtensionBinding(
+                        extensionSession != null,
+                        extensionSession != null && extensionSession.getLastSeenAt() != null
+                                && extensionSession.getLastSeenAt().isAfter(now.minusMinutes(10)),
+                        extensionSession == null ? null : extensionSession.getId(),
+                        extensionSession == null ? null : extensionSession.getEnvironmentKey(),
+                        extensionSession == null ? null : extensionSession.getProviderProfileId(),
+                        extensionSession == null ? null : extensionSession.getExtensionVersion(),
+                        expectedExtensionVersion,
+                        extensionVersionSupportedForReadiness(
+                                extensionSession == null ? null : extensionSession.getExtensionVersion(),
+                                expectedExtensionVersion
+                        ),
+                        extensionSession == null ? null : extensionSession.getLastSeenAt(),
+                        extensionSession == null ? null : extensionSession.getExpiresAt()
+                );
+        if (!extensionStatus.bound()) {
+            issues.add(issue("EXTENSION_NOT_BOUND", "error", "AdsPower 环境扩展未绑定", "生成绑定码并在 AdsPower 环境扩展中绑定后台"));
+        } else {
+            if (!extensionStatus.online()) {
+                issues.add(issue("EXTENSION_OFFLINE", "warning", "扩展最近未活跃", "打开 AdsPower 环境确认扩展已加载"));
+            }
+            if (!extensionStatus.versionSupported()) {
+                issues.add(issue("EXTENSION_VERSION_OUTDATED", "warning", "环境扩展版本偏旧", "更新 AdsPower 环境中的 geo-env-extension 后重新打开环境"));
+            }
+        }
+
+        List<SelfMediaAccount> accounts = selfMediaAccountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getBrandId, brandId)
+                .eq(SelfMediaAccount::getStatus, "active")
+                .isNull(SelfMediaAccount::getDeletedAt)
+                .in(SelfMediaAccount::getPlatform, SEMI_AUTO_PLATFORMS)
+                .orderByAsc(SelfMediaAccount::getPlatform)
+                .orderByDesc(SelfMediaAccount::getUpdatedAt));
+        List<SelfMediaAutomationReadinessVO.AccountReadiness> accountStatuses = accounts.stream()
+                .map(account -> accountReadiness(account, issues))
+                .toList();
+        if (accountStatuses.isEmpty()) {
+            issues.add(issue("SELF_MEDIA_ACCOUNT_NOT_CONFIGURED", "warning", "未配置自媒体账号", "新增头条、百家号、知乎或小红书账号"));
+        }
+
+        boolean ready = issues.stream().noneMatch(item -> "error".equals(item.level()));
+        String status = ready
+                ? issues.isEmpty() ? "ready" : "warning"
+                : "blocked";
+        return new SelfMediaAutomationReadinessVO(
+                brandId,
+                status,
+                ready,
+                localAgentStatus,
+                environmentStatus,
+                extensionStatus,
+                accountStatuses,
+                issues
+        );
+    }
+
+    private SelfMediaAutomationReadinessVO.AccountReadiness accountReadiness(SelfMediaAccount account,
+                                                                             List<SelfMediaAutomationReadinessVO.Issue> issues) {
+        BrowserEnvironmentAccount binding = environmentAccountMapper.selectActiveBySelfMediaAccountId(account.getId());
+        if (binding == null) {
+            issues.add(issue("ACCOUNT_ENVIRONMENT_NOT_BOUND", "error",
+                    platformDisplayName(account.getPlatform()) + "账号未绑定浏览器环境",
+                    "为账号「" + account.getAccountName() + "」绑定品牌默认 AdsPower 环境"));
+            return new SelfMediaAutomationReadinessVO.AccountReadiness(
+                    account.getId(),
+                    account.getPlatform(),
+                    account.getAccountName(),
+                    false,
+                    null,
+                    null,
+                    false,
+                    "ACCOUNT_ENVIRONMENT_NOT_BOUND",
+                    "账号未绑定浏览器环境"
+            );
+        }
+        String loginStatus = StringUtils.hasText(binding.getLoginStatus())
+                ? binding.getLoginStatus()
+                : BrowserEnvironmentConstants.LOGIN_UNKNOWN;
+        boolean loginReady = BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(loginStatus);
+        String issueCode = null;
+        String issueMessage = null;
+        if (!loginReady) {
+            issueCode = switch (loginStatus) {
+                case BrowserEnvironmentConstants.LOGIN_MISMATCH -> "ACCOUNT_LOGIN_MISMATCH";
+                case BrowserEnvironmentConstants.LOGIN_EXPIRED -> "ACCOUNT_LOGIN_EXPIRED";
+                case BrowserEnvironmentConstants.LOGIN_REQUIRED -> "ACCOUNT_LOGIN_REQUIRED";
+                case BrowserEnvironmentConstants.LOGIN_ERROR -> "ACCOUNT_LOGIN_ERROR";
+                default -> "ACCOUNT_LOGIN_UNKNOWN";
+            };
+            issueMessage = switch (loginStatus) {
+                case BrowserEnvironmentConstants.LOGIN_MISMATCH -> "环境内登录账号与绑定账号不一致";
+                case BrowserEnvironmentConstants.LOGIN_EXPIRED -> "平台登录已过期";
+                case BrowserEnvironmentConstants.LOGIN_REQUIRED -> "平台账号需要登录";
+                case BrowserEnvironmentConstants.LOGIN_ERROR -> "平台登录状态检测异常";
+                default -> "平台登录状态待确认";
+            };
+            issues.add(issue(issueCode, "warning",
+                    platformDisplayName(account.getPlatform()) + "账号未就绪",
+                    "打开 AdsPower 环境完成登录并等待扩展自动上报"));
+        }
+        return new SelfMediaAutomationReadinessVO.AccountReadiness(
+                account.getId(),
+                account.getPlatform(),
+                account.getAccountName(),
+                true,
+                binding.getId(),
+                loginStatus,
+                loginReady,
+                issueCode,
+                issueMessage
+        );
+    }
+
+    private SelfMediaAutomationReadinessVO.Issue issue(String code, String level, String title, String action) {
+        return new SelfMediaAutomationReadinessVO.Issue(code, level, title, action, issueActionKey(code));
+    }
+
+    private String issueActionKey(String code) {
+        return switch (code) {
+            case "LOCAL_AGENT_NOT_BOUND", "LOCAL_AGENT_OFFLINE" -> "OPEN_LOCAL_HELPER_SETUP";
+            case "ADSPOWER_ENVIRONMENT_NOT_CONFIGURED" -> "IMPORT_ADSPOWER_ENVIRONMENT";
+            case "ADSPOWER_ENVIRONMENT_DISABLED" -> "EDIT_BROWSER_ENVIRONMENT";
+            case "EXTENSION_NOT_BOUND", "EXTENSION_OFFLINE", "EXTENSION_VERSION_OUTDATED" -> "OPEN_AND_BIND_EXTENSION";
+            case "ACCOUNT_ENVIRONMENT_NOT_BOUND" -> "BIND_UNBOUND_ACCOUNTS";
+            case "ACCOUNT_LOGIN_MISMATCH", "ACCOUNT_LOGIN_EXPIRED", "ACCOUNT_LOGIN_REQUIRED",
+                    "ACCOUNT_LOGIN_ERROR", "ACCOUNT_LOGIN_UNKNOWN" -> "OPEN_ADSPOWER_ENVIRONMENT";
+            case "SELF_MEDIA_ACCOUNT_NOT_CONFIGURED" -> "CREATE_SELF_MEDIA_ACCOUNT";
+            default -> null;
+        };
+    }
+
+    private boolean extensionSessionMatchesEnvironment(ExtensionSession session, BrowserEnvironment environment) {
+        if (session == null || environment == null) return false;
+        if (StringUtils.hasText(session.getEnvironmentKey())
+                && !Objects.equals(session.getEnvironmentKey(), environment.getEnvironmentKey())) {
+            return false;
+        }
+        if (StringUtils.hasText(session.getProviderProfileId())
+                && !Objects.equals(session.getProviderProfileId(), environment.getProviderProfileId())) {
+            return false;
+        }
+        return StringUtils.hasText(session.getEnvironmentKey()) || StringUtils.hasText(session.getProviderProfileId());
+    }
+
+    private String expectedGeoEnvExtensionVersion() {
+        if (extensionProperties == null || extensionProperties.getEnv() == null) return null;
+        String expectedVersion = extensionProperties.getEnv().getExpectedVersion();
+        return StringUtils.hasText(expectedVersion) ? expectedVersion.trim() : null;
+    }
+
+    private boolean extensionVersionSupportedForReadiness(String currentVersion, String expectedVersion) {
+        if (!StringUtils.hasText(expectedVersion) || !StringUtils.hasText(currentVersion)) return true;
+        try {
+            return SemverComparator.compare(currentVersion, expectedVersion) >= 0;
+        } catch (IllegalArgumentException ignored) {
+            return true;
+        }
     }
 
     @Transactional
@@ -157,11 +389,8 @@ public class BrowserEnvironmentService {
         row.setBrowserEnvironmentId(environment.getId());
         row.setSelfMediaAccountId(account.getId());
         row.setPlatform(account.getPlatform());
-        row.setExpectedPlatformAccountId(PlatformAccountIdentityPolicy.comparablePlatformAccountId(
-                account.getPlatform(), request.expectedPlatformAccountId()));
         row.setExpectedAccountName(trimToNull(request.expectedAccountName()));
-        ensureExpectedIdentityNotClaimed(null, account.getBrandId(), account.getPlatform(),
-                row.getExpectedPlatformAccountId(), row.getExpectedAccountName());
+        ensureExpectedIdentityNotClaimed(null, account.getBrandId(), account.getPlatform(), row.getExpectedAccountName());
         row.setLoginStatus(BrowserEnvironmentConstants.LOGIN_UNKNOWN);
         row.setCreatedBy(operator.getId());
         row.setUpdatedBy(operator.getId());
@@ -185,15 +414,10 @@ public class BrowserEnvironmentService {
         SysUser operator = currentUserService.requireCurrentUser();
         BrowserEnvironmentAccount row = requireEnvironmentAccount(id);
         brandAccessService.requireBrandAccess(row.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
-        if (request.expectedPlatformAccountId() != null) {
-            row.setExpectedPlatformAccountId(PlatformAccountIdentityPolicy.comparablePlatformAccountId(
-                    row.getPlatform(), request.expectedPlatformAccountId()));
-        }
         if (request.expectedAccountName() != null) {
             row.setExpectedAccountName(trimToNull(request.expectedAccountName()));
         }
-        ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(),
-                row.getExpectedPlatformAccountId(), row.getExpectedAccountName());
+        ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(), row.getExpectedAccountName());
         if (StringUtils.hasText(request.loginStatus())) {
             String target = normalizeLoginStatus(request.loginStatus());
             assertTransitionAllowed(row.getLoginStatus(), target);
@@ -352,7 +576,6 @@ public class BrowserEnvironmentService {
     private BrowserEnvironmentAccount resolveBrandPlatformReportTarget(Long brandId,
                                                                        String platform,
                                                                        BrowserEnvironmentBrandLoginStatusRequest request) {
-        String actualId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(platform, request.actualPlatformAccountId());
         String actualName = trimToNull(request.actualAccountName());
         List<BrowserEnvironmentAccount> rows =
                 environmentAccountMapper.selectAllActiveByBrandIdAndPlatform(brandId, platform);
@@ -363,7 +586,7 @@ public class BrowserEnvironmentService {
             return rows.get(0);
         }
         List<BrowserEnvironmentAccount> matched = rows.stream()
-                .filter(row -> reportIdentityMatches(row, actualId, actualName))
+                .filter(row -> reportIdentityMatches(row, actualName))
                 .toList();
         if (matched.size() == 1) {
             return matched.get(0);
@@ -375,14 +598,7 @@ public class BrowserEnvironmentService {
         return null;
     }
 
-    private boolean reportIdentityMatches(BrowserEnvironmentAccount row, String actualId, String actualName) {
-        if (StringUtils.hasText(actualId)) {
-            String expectedId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(
-                    row.getPlatform(), row.getExpectedPlatformAccountId());
-            if (StringUtils.hasText(expectedId) && expectedId.equals(actualId)) {
-                return true;
-            }
-        }
+    private boolean reportIdentityMatches(BrowserEnvironmentAccount row, String actualName) {
         if (accountNameMatches(row.getPlatform(), row.getExpectedAccountName(), actualName)) {
             return true;
         }
@@ -473,32 +689,18 @@ public class BrowserEnvironmentService {
         if (!BrowserEnvironmentConstants.ENV_STATUS_ACTIVE.equalsIgnoreCase(environment.getStatus())) {
             fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_DISABLED, "指纹浏览器环境已停用");
         }
-        if (!StringUtils.hasText(binding.getExpectedPlatformAccountId())
-                && !StringUtils.hasText(binding.getExpectedAccountName())) {
+        if (!StringUtils.hasText(binding.getExpectedAccountName())) {
             applyAccountIdentityExpectation(binding, account);
-        } else if (!StringUtils.hasText(binding.getExpectedAccountName())
-                && StringUtils.hasText(account.getAccountName())) {
-            applyAccountNameExpectation(binding, account);
-        }
-        if (requireLoggedIn && BrowserEnvironmentConstants.LOGIN_MISMATCH.equals(binding.getLoginStatus())) {
-            fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_ACCOUNT_MISMATCH, "环境内登录账号与绑定账号不一致");
-        }
-        if (requireLoggedIn && !BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(binding.getLoginStatus())) {
-            fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_LOGIN_REQUIRED, "指纹浏览器环境账号未登录或需重新验证");
         }
         return binding;
     }
 
     private void applyAccountIdentityExpectation(BrowserEnvironmentAccount binding, SelfMediaAccount account) {
-        String expectedPlatformAccountId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(
-                account.getPlatform(), account.getPlatformAccountId());
         String expectedAccountName = trimToNull(account.getAccountName());
-        if (!StringUtils.hasText(expectedPlatformAccountId) && !StringUtils.hasText(expectedAccountName)) {
-            fail(BrowserEnvironmentConstants.ERR_IDENTITY_EXPECTATION_MISSING, "自媒体账号缺少环境账号身份预期值");
+        if (!StringUtils.hasText(expectedAccountName)) {
+            fail(BrowserEnvironmentConstants.ERR_IDENTITY_EXPECTATION_MISSING, "自媒体账号缺少账号名称");
         }
-        ensureExpectedIdentityNotClaimed(binding.getId(), binding.getBrandId(), binding.getPlatform(),
-                expectedPlatformAccountId, expectedAccountName);
-        binding.setExpectedPlatformAccountId(expectedPlatformAccountId);
+        ensureExpectedIdentityNotClaimed(binding.getId(), binding.getBrandId(), binding.getPlatform(), expectedAccountName);
         binding.setExpectedAccountName(expectedAccountName);
         binding.setUpdatedAt(LocalDateTime.now());
         environmentAccountMapper.updateById(binding);
@@ -509,8 +711,7 @@ public class BrowserEnvironmentService {
         if (!StringUtils.hasText(expectedAccountName)) {
             return;
         }
-        ensureExpectedIdentityNotClaimed(binding.getId(), binding.getBrandId(), binding.getPlatform(),
-                null, expectedAccountName);
+        ensureExpectedIdentityNotClaimed(binding.getId(), binding.getBrandId(), binding.getPlatform(), expectedAccountName);
         binding.setExpectedAccountName(expectedAccountName);
         binding.setUpdatedAt(LocalDateTime.now());
         environmentAccountMapper.updateById(binding);
@@ -523,30 +724,24 @@ public class BrowserEnvironmentService {
         if (!BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(incoming)) {
             return incoming;
         }
-        String actualId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(
-                row.getPlatform(), request.actualPlatformAccountId());
         String actualName = trimToNull(request.actualAccountName());
-        if (!StringUtils.hasText(row.getExpectedPlatformAccountId())
-                && !StringUtils.hasText(row.getExpectedAccountName())) {
-            if (!StringUtils.hasText(actualId) && !StringUtils.hasText(actualName)) {
+        if (!StringUtils.hasText(row.getExpectedAccountName())) {
+            if (!StringUtils.hasText(actualName)) {
                 fail(BrowserEnvironmentConstants.ERR_IDENTITY_EXPECTATION_MISSING, "首次登记缺少平台账号身份");
             }
-            ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(), actualId, actualName);
-            row.setExpectedPlatformAccountId(actualId);
+            ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(), actualName);
             row.setExpectedAccountName(actualName);
             return BrowserEnvironmentConstants.LOGIN_LOGGED_IN;
         }
-        boolean idMatches = StringUtils.hasText(row.getExpectedPlatformAccountId())
-                && row.getExpectedPlatformAccountId().equals(actualId);
         boolean nameMatches = accountNameMatches(row.getPlatform(), row.getExpectedAccountName(), actualName);
         if (!nameMatches
                 && !StringUtils.hasText(row.getExpectedAccountName())
                 && accountNameMatches(row.getPlatform(), account.getAccountName(), actualName)) {
-            ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(), null, actualName);
+            ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(), actualName);
             row.setExpectedAccountName(actualName);
             nameMatches = true;
         }
-        if (idMatches || nameMatches) {
+        if (nameMatches) {
             return BrowserEnvironmentConstants.LOGIN_LOGGED_IN;
         }
         return BrowserEnvironmentConstants.LOGIN_MISMATCH;
@@ -589,7 +784,6 @@ public class BrowserEnvironmentService {
     private void ensureExpectedIdentityNotClaimed(Long currentId,
                                                   Long brandId,
                                                   String platform,
-                                                  String expectedPlatformAccountId,
                                                   String expectedAccountName) {
         LambdaQueryWrapper<BrowserEnvironmentAccount> wrapper = new LambdaQueryWrapper<BrowserEnvironmentAccount>()
                 .eq(BrowserEnvironmentAccount::getBrandId, brandId)
@@ -598,9 +792,7 @@ public class BrowserEnvironmentService {
         if (currentId != null) {
             wrapper.ne(BrowserEnvironmentAccount::getId, currentId);
         }
-        if (StringUtils.hasText(expectedPlatformAccountId)) {
-            wrapper.eq(BrowserEnvironmentAccount::getExpectedPlatformAccountId, expectedPlatformAccountId);
-        } else if (StringUtils.hasText(expectedAccountName)) {
+        if (StringUtils.hasText(expectedAccountName)) {
             wrapper.eq(BrowserEnvironmentAccount::getExpectedAccountName, expectedAccountName);
         } else {
             return;

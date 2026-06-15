@@ -85,6 +85,8 @@ public class ExtensionController {
                 payload.brandId(),
                 payload.operatorId(),
                 request.installId(),
+                request.environmentKey(),
+                request.providerProfileId(),
                 request.deviceFingerprint(),
                 request.extensionVersion(),
                 servletRequest.getHeader("User-Agent")

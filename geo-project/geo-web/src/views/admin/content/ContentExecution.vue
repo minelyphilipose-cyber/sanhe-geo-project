@@ -88,7 +88,7 @@
                   <el-dropdown-item command="jobs">批量任务列表</el-dropdown-item>
                   <el-dropdown-item v-if="canViewSelfMediaSchedules" command="schedules">发布排期</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePromptTemplates" command="templates">文章提示词模板</el-dropdown-item>
-                  <el-dropdown-item v-if="canManagePromptTemplates" command="special-compliance">特殊行业合规</el-dropdown-item>
+                  <el-dropdown-item v-if="canManagePromptTemplates" command="special-compliance">行业专项</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="platforms">发布平台管理</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="schedule-capabilities">排期能力管理</el-dropdown-item>
                 </el-dropdown-menu>
@@ -589,6 +589,8 @@
     <SelfMediaScheduleDrawer
       v-model="scheduleDrawerVisible"
       :can-publish="canPublish"
+      :initial-failure-code="scheduleInitialFailureCode"
+      :initial-status="scheduleInitialStatus"
       @open-article="openDetail"
     />
 
@@ -596,7 +598,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowUp, Calendar, Refresh, Search } from '@element-plus/icons-vue'
@@ -677,6 +679,8 @@ const blockedCount = computed(() => rows.value.filter((row) =>
   || row.publishReviewStatus === 'rejected',
 ).length)
 const scheduleDrawerVisible = ref(false)
+const scheduleInitialFailureCode = ref('')
+const scheduleInitialStatus = ref('')
 
 const {
   detailVisible,
@@ -1459,6 +1463,11 @@ onMounted(async () => {
   await handleManualCreateResult()
   await load()
   await openCreatedArticleDetail()
+  openScheduleDrawerFromRoute()
+})
+
+watch(() => [route.query.scheduleFailureCode, route.query.scheduleStatus], () => {
+  openScheduleDrawerFromRoute()
 })
 
 async function handleManualCreateResult() {
@@ -1482,6 +1491,15 @@ async function openCreatedArticleDetail() {
   if (articleId > 0) {
     await openDetail(articleId)
   }
+}
+
+function openScheduleDrawerFromRoute() {
+  const failureCode = String(route.query.scheduleFailureCode || '').trim()
+  const status = String(route.query.scheduleStatus || '').trim()
+  if (!failureCode && !status) return
+  scheduleInitialFailureCode.value = failureCode
+  scheduleInitialStatus.value = status
+  scheduleDrawerVisible.value = true
 }
 
 function handleWechatAuthResult() {

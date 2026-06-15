@@ -19,6 +19,8 @@ public class ExtensionSession {
     private String tokenHashAlg;
     private String tokenSalt;
     private String installId;
+    private String environmentKey;
+    private String providerProfileId;
     private String deviceFingerprintHash;
     private String deviceFingerprintHashAlg;
     private String extensionVersion;

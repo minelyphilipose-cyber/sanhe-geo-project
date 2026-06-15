@@ -7,7 +7,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.module.content.constant.PlatformAccountIdentityPolicy;
 import com.huanjing.geo.module.audit.ActorType;
 import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
@@ -73,6 +72,13 @@ public class ContentDistributionService {
     private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
     private static final Set<String> LOCKED_ARTICLE_STATUS = Set.of("published", "distributed");
+    private static final List<String> ACTIVE_DISTRIBUTION_TASK_STATUS = List.of(
+            "pending",
+            "token_issued",
+            "filling",
+            "filled",
+            "submitting"
+    );
     private static final Set<String> DISTRIBUTE_ALLOWED_ROLES = Set.of("super_admin", "delivery_manager", "operator");
     private static final Set<String> LEGACY_PROJECT_WRITE_ROLES =
             Set.of("operator", "delivery_manager", "partner", "partner_staff");
@@ -715,7 +721,8 @@ public class ContentDistributionService {
         requireDistributionAccess(operator, account.getBrandId());
         DistributionTask reusable = findReusableSemiAutoTask(article.getId(), account.getId());
         if (reusable == null) {
-            throw new BizException(400, "Article is already distributing and no reusable semi-auto task was found");
+            recoverOrphanDistributingArticle(article);
+            return distributeToSelfMedia(article, project, operator, mpTarget);
         }
         BrowserEnvironmentAccount environmentBinding = browserEnvironmentService.validateForTaskCreation(account);
         if (environmentBinding != null || AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
@@ -734,6 +741,22 @@ public class ContentDistributionService {
                         .orderByDesc(DistributionTask::getId)
                         .last("LIMIT 1")
         );
+    }
+
+    private void recoverOrphanDistributingArticle(ArticleDraft article) {
+        if (article == null || article.getId() == null) {
+            throw new BizException(404, "article not found");
+        }
+        Long activeTaskCount = distributionTaskMapper.selectCount(
+                new LambdaQueryWrapper<DistributionTask>()
+                        .eq(DistributionTask::getArticleId, article.getId())
+                        .in(DistributionTask::getStatus, ACTIVE_DISTRIBUTION_TASK_STATUS)
+        );
+        if (activeTaskCount != null && activeTaskCount > 0) {
+            throw new BizException(400, "Article is already distributing and no reusable semi-auto task was found");
+        }
+        restoreArticleApprovedIfDistributing(article.getId());
+        article.setStatus("approved");
     }
 
     private boolean isScheduleTarget(TargetContext.SelfMediaTarget target) {
@@ -1542,11 +1565,6 @@ public class ContentDistributionService {
             appendTargetPlatformOptions(payloadNode, platformOptions);
             appendBrandSelfMediaPublishOptions(payloadNode, project);
             if (environmentBinding != null) {
-                String expectedPlatformAccountId = PlatformAccountIdentityPolicy.comparablePlatformAccountId(
-                        environmentBinding.getPlatform(), environmentBinding.getExpectedPlatformAccountId());
-                if (StringUtils.hasText(expectedPlatformAccountId)) {
-                    payloadNode.put("expectedPlatformAccountId", expectedPlatformAccountId);
-                }
                 if (StringUtils.hasText(environmentBinding.getExpectedAccountName())) {
                     payloadNode.put("expectedAccountName", environmentBinding.getExpectedAccountName());
                 }

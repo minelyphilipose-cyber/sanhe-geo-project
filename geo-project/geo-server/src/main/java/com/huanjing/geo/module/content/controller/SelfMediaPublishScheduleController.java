@@ -9,6 +9,7 @@ import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleManualResultRequest;
 import com.huanjing.geo.module.content.service.SelfMediaPublishAutoScheduleService;
 import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
+import com.huanjing.geo.module.content.vo.SelfMediaAutomationOverviewVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
@@ -53,6 +54,13 @@ public class SelfMediaPublishScheduleController {
         return R.ok(scheduleService.createPlatformQuickSchedule(request, idempotencyKey));
     }
 
+    @PostMapping("/self-media-schedules/platform-quick-dispatch")
+    public R<SelfMediaPlatformQuickScheduleResponse> dispatchPlatformQuickSchedule(
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody SelfMediaPlatformQuickScheduleRequest request) {
+        return R.ok(scheduleService.dispatchPlatformQuickSchedule(request, idempotencyKey));
+    }
+
     @PostMapping("/self-media-schedules/auto-preview")
     public R<SelfMediaPublishAutoScheduleResponse> previewAutoSchedules(
             @Valid @RequestBody SelfMediaPublishAutoScheduleRequest request) {
@@ -69,11 +77,17 @@ public class SelfMediaPublishScheduleController {
     public R<Page<SelfMediaPublishScheduleVO>> pageSchedules(@RequestParam(required = false) Long brandId,
                                                              @RequestParam(required = false) String platform,
                                                              @RequestParam(required = false) String status,
+                                                             @RequestParam(required = false) String failureCode,
                                                              @RequestParam(required = false) Long articleId,
                                                              @RequestParam(required = false) Long selfMediaAccountId,
                                                              @RequestParam(defaultValue = "1") Long current,
                                                              @RequestParam(defaultValue = "20") Long size) {
-        return R.ok(scheduleService.pageSchedules(brandId, platform, status, articleId, selfMediaAccountId, current, size));
+        return R.ok(scheduleService.pageSchedules(brandId, platform, status, failureCode, articleId, selfMediaAccountId, current, size));
+    }
+
+    @GetMapping("/self-media-automation/overview")
+    public R<SelfMediaAutomationOverviewVO> automationOverview() {
+        return R.ok(scheduleService.automationOverview());
     }
 
     @GetMapping("/self-media-schedules/{id}")

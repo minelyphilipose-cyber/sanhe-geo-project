@@ -64,7 +64,7 @@ class ExtensionSessionServiceTest {
 
     @Test
     void createBoundSessionStoresOnlyHashes() {
-        ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "fp", "1.2.3", "ua");
+        ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "geo_b", "profile-1", "fp", "1.2.3", "ua");
 
         ArgumentCaptor<ExtensionSession> captor = ArgumentCaptor.forClass(ExtensionSession.class);
         verify(sessionMapper).insert(captor.capture());
@@ -74,11 +74,13 @@ class ExtensionSessionServiceTest {
         assertNotEquals(response.token(), inserted.getTokenHash());
         assertFalse(inserted.getTokenHash().contains(response.token()));
         assertEquals("SHA-256", inserted.getTokenHashAlg());
+        assertEquals("geo_b", inserted.getEnvironmentKey());
+        assertEquals("profile-1", inserted.getProviderProfileId());
     }
 
     @Test
     void createBoundSessionAuditsAsyncSoDbLockDoesNotBlockBindResponse() {
-        ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "fp", "1.2.3", "ua");
+        ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "geo_b", "profile-1", "fp", "1.2.3", "ua");
 
         verify(auditSupport).record(
                 eq("EXTENSION_BIND"),
@@ -113,7 +115,7 @@ class ExtensionSessionServiceTest {
 
     @Test
     void slidingRenewOnlyWhenNearExpiry() {
-        ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", null, "1.2.3", "ua");
+        ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "geo_b", "profile-1", null, "1.2.3", "ua");
         ExtensionSession session = sessionFromInsert(response.token());
         session.setExpiresAt(LocalDateTime.now().plusDays(3));
         when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
@@ -127,7 +129,7 @@ class ExtensionSessionServiceTest {
 
     @Test
     void slidingRenewRotatesTokenWhenNearExpiry() {
-        ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", null, "1.2.3", "ua");
+        ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "geo_b", "profile-1", null, "1.2.3", "ua");
         ExtensionSession session = sessionFromInsert(response.token());
         session.setId(1L);
         session.setExpiresAt(LocalDateTime.now().plusHours(12));

@@ -8,6 +8,8 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.*;
 import com.huanjing.geo.common.llm.pool.LlmPermitScope;
 import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
+import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
+import com.huanjing.geo.common.llm.router.LlmRouteResult;
 import com.huanjing.geo.module.audit.*;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
@@ -46,6 +48,7 @@ class ArticleAiDraftServiceTest {
     private CurrentUserService currentUserService;
     private BrandAccessService brandAccessService;
     private LlmInvoker llmInvoker;
+    private LlmPlatformRouter llmPlatformRouter;
     private ArticleAiDraftRateLimiter rateLimiter;
     private AuditService auditService;
     private ArticleGenerationPromptContextFactory promptContextFactory;
@@ -67,6 +70,7 @@ class ArticleAiDraftServiceTest {
         brandAccessService = mock(BrandAccessService.class);
         PlatformCredentialService credentialService = mock(PlatformCredentialService.class);
         llmInvoker = mock(LlmInvoker.class);
+        llmPlatformRouter = mock(LlmPlatformRouter.class);
         ArticleAiDraftPromptFilter promptFilter = mock(ArticleAiDraftPromptFilter.class);
         offeringPromptSelector = mock(BrandOfferingPromptSelector.class);
         rateLimiter = mock(ArticleAiDraftRateLimiter.class);
@@ -92,7 +96,7 @@ class ArticleAiDraftServiceTest {
         ArticleGenerationEngine generationEngine = new ArticleGenerationEngine(
                 llmInvoker,
                 modelResolver,
-                mock(com.huanjing.geo.common.llm.router.LlmPlatformRouter.class),
+                llmPlatformRouter,
                 mock(MarkdownImageReferenceValidator.class),
                 promptFilter,
                 mock(BatchArticleQualityChecker.class)
@@ -204,6 +208,34 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
+    void templatePreviewUsesModelIdAsNameWhenRouterSelectionHasNoConfig() throws Exception {
+        ArticleTemplatePreviewRequest request = templateRequest();
+        request.setModelPlatformCode(null);
+        request.setModelId(null);
+        when(promptContextFactory.buildStrict(any(PromptContextRequest.class))).thenReturn(templateContext());
+        LlmInvokeResult routedResult = llmResult();
+        when(llmPlatformRouter.invoke(any())).thenReturn(new LlmRouteResult(
+                "openai",
+                "OpenAI",
+                "primary",
+                "gpt-test",
+                "GPT Test",
+                routedResult.responseText(),
+                routedResult.durationMs(),
+                1,
+                routedResult
+        ));
+
+        ArticleTemplatePreviewResponse response = service.templatePreview(request).get();
+
+        assertEquals("openai", response.modelPlatformCode());
+        assertEquals("gpt-test", response.modelId());
+        assertEquals("gpt-test", response.modelName());
+        verify(llmInvoker, never()).invoke(any(), any(LlmModelConfig.class));
+        verifyAudit(AuditResult.SUCCESS, "template_preview_generated");
+    }
+
+    @Test
     void previewUsesAtLeastOneHundredTwentySecondModelTimeout() throws Exception {
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
         ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
@@ -287,6 +319,7 @@ class ArticleAiDraftServiceTest {
         ExecutionException ex = assertThrows(ExecutionException.class, () -> service.generate(request()).get());
 
         assertEquals(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, ((BizException) ex.getCause()).getCode());
+        assertEquals("AI 草稿生成失败：boom", ex.getCause().getMessage());
         verify(articleMapper, never()).insert(any());
         verify(versionMapper, never()).insert(any());
         verifyAudit(AuditResult.FAILURE, "generation_failed");

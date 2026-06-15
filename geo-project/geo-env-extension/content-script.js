@@ -2528,12 +2528,7 @@ function findToutiaoAssistantPanel(node) {
 
 function resolveFillIdentityCheck(payload) {
   if (payload.precheckedIdentity) return payload.precheckedIdentity
-  if (requiresIdentityExpectation(payload.platform) && !payload.expectedPlatformAccountId && !payload.expectedAccountName) {
-    throw new Error('IDENTITY_EXPECTATION_MISSING：多账号平台任务缺少 expectedPlatformAccountId/expectedAccountName，已拒绝填充')
-  }
-  if (payload.expectedPlatformAccountId || payload.expectedAccountName) {
-    throw new Error('账号身份预检结果缺失，请先在平台账号身份页上报登录状态后重试')
-  }
+  if (payload.expectedAccountName) return checkIdentityPayload(payload)
   return checkIdentityPayload(payload)
 }
 
@@ -2801,9 +2796,8 @@ function baijiahaoEditorSelectors() {
 }
 
 function verifyExpectedPlatformIdentity(payload, platform) {
-  const expected = normalizeAccountId(payload.expectedPlatformAccountId)
   const expectedName = normalizeAccountName(payload.expectedAccountName)
-  if (!expected && !expectedName) return { method: 'skipped', message: '' }
+  if (!expectedName) return { method: 'skipped', message: '' }
 
   const identity = readPlatformIdentity(platform)
   if (!identity.implemented) {
@@ -2814,46 +2808,24 @@ function verifyExpectedPlatformIdentity(payload, platform) {
       currentAccountNames: [],
     }
   }
-  if (expected && identity.accountIds.includes(expected)) {
-    return {
-      method: 'platformAccountId',
-      message: `账号校验通过(ID=${expected})`,
-      currentAccountIds: identity.accountIds,
-      currentAccountNames: identity.accountNames,
-    }
-  }
-
-  if (!expected && expectedName && identity.accountNames.length > 1) {
-    throw new Error(`账号一致性校验失败：读取到多个候选账号名称=${identity.accountNames.join(',')}，期望名称=${payload.expectedAccountName}；${identity.diagnostics}`)
-  }
 
   if (expectedName && identity.accountNames.includes(expectedName)) {
-    const currentIdText = identity.accountIds.length ? `，当前ID=${identity.accountIds.join(',')}` : ''
     return {
-      method: expected ? 'accountNameFallbackAfterIdMismatch' : 'accountNameFallback',
-      message: `账号校验通过(名称=${payload.expectedAccountName}${currentIdText})`,
+      method: 'accountName',
+      message: `账号校验通过(名称=${payload.expectedAccountName})`,
       currentAccountIds: identity.accountIds,
       currentAccountNames: identity.accountNames,
     }
   }
 
-  if (platform === 'xiaohongshu' && expectedName) {
-    throw new Error(`账号一致性校验失败：当前小红书账号名称=${identity.accountNames.join(',') || '未读取到'}，期望名称=${payload.expectedAccountName}`)
+  const currentName = identity.accountNames.join(',') || '未读取到'
+  return {
+    method: 'accountNameWarning',
+    warning: true,
+    message: `账号名称未确认：当前名称=${currentName}，期望名称=${payload.expectedAccountName}`,
+    currentAccountIds: identity.accountIds,
+    currentAccountNames: identity.accountNames,
   }
-  if (platform === 'zhihu' && expectedName) {
-    const currentIds = identity.accountIds.length ? `，当前标识=${identity.accountIds.join(',')}` : ''
-    throw new Error(`账号一致性校验失败：当前知乎账号名称=${identity.accountNames.join(',') || '未读取到'}${currentIds}，期望名称=${payload.expectedAccountName}`)
-  }
-
-  if (expected && !identity.accountIds.length) {
-    throw new Error(`账号一致性校验失败：未读取到当前${platform || '平台'}账号 ID，期望=${expected}；${identity.diagnostics}`)
-  }
-  if (expected) {
-    const nameText = expectedName ? `，期望名称=${payload.expectedAccountName}，当前名称=${identity.accountNames.join(',') || '未读取到'}` : ''
-    throw new Error(`账号一致性校验失败：当前账号=${identity.accountIds.join(',')}，期望=${expected}${nameText}`)
-  }
-
-  throw new Error(`账号一致性校验失败：当前名称=${identity.accountNames.join(',') || '未读取到'}，期望名称=${payload.expectedAccountName}`)
 }
 
 function inferPlatformFromLocation() {

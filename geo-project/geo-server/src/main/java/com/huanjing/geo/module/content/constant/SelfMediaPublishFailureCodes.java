@@ -36,18 +36,18 @@ public final class SelfMediaPublishFailureCodes {
     );
 
     private static final Map<String, FailureMetadata> METADATA = Map.ofEntries(
-            entry("DISTRIBUTION_QUOTA_EXHAUSTED", "分发额度已用尽", false, "补充分发额度后重新创建排期。"),
-            entry("CHANNEL_QUOTA_EXHAUSTED", "渠道额度已用完", false, "补充该平台渠道额度后重新创建排期。"),
-            entry("CHANNEL_QUOTA_UNAVAILABLE", "渠道额度配置不可用", false, "检查品牌或平台渠道额度配置。"),
-            entry("ARTICLE_ALREADY_PUBLISHED", "文章已发布，不能重复分发", false, "已发布或已分发文章不能再次创建自媒体排期。"),
-            entry("ARTICLE_NOT_READY", "文章状态不允许排期", false, "仅已就绪或未发布文章可创建自动排期。"),
-            entry("NO_AVAILABLE_ACCOUNT", "没有可用自媒体账号", false, "启用账号、补充账号绑定或更换平台后重新创建排期。"),
-            entry("PLATFORM_CAPABILITY_DISABLED", "平台排期能力未启用", false, "在排期能力管理中启用并验证该平台后重新创建排期。"),
-            entry("BACKEND_CLAIM_BLOCKED", "后台领取被阻塞", true, "检查本地助手领取状态和后台日志，等待自动重试。"),
-            entry("LOCAL_AGENT_OFFLINE", "本地助手离线", true, "确认本地助手和浏览器扩展在线后等待自动重试。"),
-            entry("LOCAL_AGENT_HEARTBEAT_TIMEOUT", "本地助手执行心跳超时", true, "确认本地助手和 AdsPower 正常运行，系统会自动重试。"),
-            entry("LOCAL_HELPER_TEMPORARY_ERROR", "本地助手临时异常", true, "检查助手运行状态，等待自动重试。"),
-            entry("PAGE_LOAD_TIMEOUT", "页面加载或执行超时", true, "检查平台页面是否可访问，等待自动重试。"),
+            entry("DISTRIBUTION_QUOTA_EXHAUSTED", "分发额度已用尽", false, "补充分发额度后重新创建排期。", "OPEN_PACKAGE_QUOTA", "查看套餐额度", "navigate"),
+            entry("CHANNEL_QUOTA_EXHAUSTED", "渠道额度已用完", false, "补充该平台渠道额度后重新创建排期。", "OPEN_PACKAGE_QUOTA", "查看渠道额度", "navigate"),
+            entry("CHANNEL_QUOTA_UNAVAILABLE", "渠道额度配置不可用", false, "检查品牌或平台渠道额度配置。", "OPEN_PACKAGE_QUOTA", "检查额度配置", "navigate"),
+            entry("ARTICLE_ALREADY_PUBLISHED", "文章已发布，不能重复分发", false, "已发布或已分发文章不能再次创建自媒体排期。", "OPEN_ARTICLE", "查看文章", "navigate"),
+            entry("ARTICLE_NOT_READY", "文章状态不允许排期", false, "仅已就绪或未发布文章可创建自动排期。", "OPEN_ARTICLE", "查看文章状态", "navigate"),
+            entry("NO_AVAILABLE_ACCOUNT", "没有可用自媒体账号", false, "启用账号、补充账号绑定或更换平台后重新创建排期。", "OPEN_BRAND_SELF_MEDIA_ACCOUNTS", "配置自媒体账号", "navigate"),
+            entry("PLATFORM_CAPABILITY_DISABLED", "平台排期能力未启用", false, "在排期能力管理中启用并验证该平台后重新创建排期。", "OPEN_SCHEDULE_CAPABILITY", "打开排期能力", "navigate"),
+            entry("BACKEND_CLAIM_BLOCKED", "后台领取被阻塞", true, "检查本地助手领取状态和后台日志，等待自动重试。", "RETRY_NOW", "立即重试", "api"),
+            entry("LOCAL_AGENT_OFFLINE", "本地助手离线", true, "确认本地助手和浏览器扩展在线后等待自动重试。", "OPEN_LOCAL_HELPER", "打开本地助手", "local"),
+            entry("LOCAL_AGENT_HEARTBEAT_TIMEOUT", "本地助手执行心跳超时", true, "确认本地助手和 AdsPower 正常运行，系统会自动重试。", "RETRY_NOW", "立即重试", "api"),
+            entry("LOCAL_HELPER_TEMPORARY_ERROR", "本地助手临时异常", true, "检查助手运行状态，等待自动重试。", "RETRY_NOW", "立即重试", "api"),
+            entry("PAGE_LOAD_TIMEOUT", "页面加载或执行超时", true, "检查平台页面是否可访问，等待自动重试。", "RETRY_NOW", "立即重试", "api"),
             entry("SCHEDULE_DIALOG_NOT_READY", "定时发布弹窗未就绪", true, "等待页面稳定后自动重试。"),
             entry("SCHEDULE_TIME_OR_SELECTOR_FAILED", "定时时间或选择器失败", true, "检查平台时间控件，等待自动重试；若持续失败需更新适配器。"),
             entry("PREVIEW_PAGE_NOT_READY", "预览或回查页面未就绪", true, "等待平台页面稳定后自动重试。"),
@@ -56,6 +56,8 @@ public final class SelfMediaPublishFailureCodes {
             entry("EDITOR_NOT_FOUND", "编辑器未找到", true, "检查页面是否进入正确编辑页，等待自动重试。"),
             entry("LOGIN_REQUIRED", "平台账号未登录", false, "打开绑定环境完成平台登录后重新创建排期。"),
             entry("FILL_FAILED", "页面填充失败", false, "查看扩展诊断信息后修复页面适配或人工处理。"),
+            entry("MATERIAL_IMAGE_UNAVAILABLE", "素材图片不可用", false, "打开文章检查封面和正文图片，替换已删除或无法访问的素材后点击立即重试。", "OPEN_ARTICLE_MATERIALS", "处理素材", "navigate"),
+            entry("PUBLIC_MATERIAL_NOT_FOUND", "素材公开链接失效", false, "素材已删除或公开链接已失效。打开文章替换封面/正文图片后点击立即重试。", "OPEN_ARTICLE_MATERIALS", "处理素材", "navigate"),
             entry("FILL_TOKEN_USED_OR_EXPIRED", "填充令牌已使用或过期", false, "重新领取任务或重新创建排期。"),
             entry("ACCOUNT_MISMATCH", "平台账号不一致", false, "切换到排期绑定的自媒体账号后重新创建排期。"),
             entry("IDENTITY_EXPECTATION_MISSING", "缺少账号校验信息", false, "补全自媒体账号的平台账号标识后重新创建排期。"),
@@ -126,6 +128,36 @@ public final class SelfMediaPublishFailureCodes {
         return metadata == null ? "" : metadata.actionHint();
     }
 
+    public static String actionKey(String code) {
+        FailureMetadata metadata = metadata(code);
+        if (metadata != null && StringUtils.hasText(metadata.actionKey())) {
+            return metadata.actionKey();
+        }
+        if (Boolean.TRUE.equals(retryable(code))) {
+            return "RETRY_NOW";
+        }
+        return "OPEN_DIAGNOSTICS";
+    }
+
+    public static String actionLabel(String code) {
+        FailureMetadata metadata = metadata(code);
+        if (metadata != null && StringUtils.hasText(metadata.actionLabel())) {
+            return metadata.actionLabel();
+        }
+        if (Boolean.TRUE.equals(retryable(code))) {
+            return "立即重试";
+        }
+        return "查看诊断";
+    }
+
+    public static String actionKind(String code) {
+        FailureMetadata metadata = metadata(code);
+        if (metadata != null && StringUtils.hasText(metadata.actionKind())) {
+            return metadata.actionKind();
+        }
+        return Boolean.TRUE.equals(retryable(code)) ? "api" : "diagnostics";
+    }
+
     public static String classifyByMessage(String message) {
         String text = message == null ? "" : message;
         Matcher matcher = EXPLICIT_CODE_PATTERN.matcher(text);
@@ -157,6 +189,12 @@ public final class SelfMediaPublishFailureCodes {
             if (containsAny(text, "触发过快", "点击速度太快")) return BAIJIAHAO_PLATFORM_RATE_LIMITED;
             if (text.contains("发布后未检测到成功状态")) return "BAIJIAHAO_PUBLISH_NOT_CONFIRMED";
         }
+        if (containsAny(text, "Material not found", "素材不存在", "素材已删除")) {
+            return "PUBLIC_MATERIAL_NOT_FOUND";
+        }
+        if (containsAny(text, "image content-type is not supported", "content-type is not supported", "/api/public/brand-materials/")) {
+            return "MATERIAL_IMAGE_UNAVAILABLE";
+        }
         if (containsAny(text, "定时发布时间", "定时发布")) {
             return "SCHEDULE_TIME_OR_SELECTOR_FAILED";
         }
@@ -180,7 +218,17 @@ public final class SelfMediaPublishFailureCodes {
     }
 
     private static Map.Entry<String, FailureMetadata> entry(String code, String label, boolean retryable, String actionHint) {
-        return Map.entry(code, new FailureMetadata(label, retryable, actionHint));
+        return entry(code, label, retryable, actionHint, null, null, null);
+    }
+
+    private static Map.Entry<String, FailureMetadata> entry(String code,
+                                                            String label,
+                                                            boolean retryable,
+                                                            String actionHint,
+                                                            String actionKey,
+                                                            String actionLabel,
+                                                            String actionKind) {
+        return Map.entry(code, new FailureMetadata(label, retryable, actionHint, actionKey, actionLabel, actionKind));
     }
 
     private static String readableFailureCode(String code) {
@@ -202,6 +250,11 @@ public final class SelfMediaPublishFailureCodes {
         return false;
     }
 
-    private record FailureMetadata(String label, boolean retryable, String actionHint) {
+    private record FailureMetadata(String label,
+                                   boolean retryable,
+                                   String actionHint,
+                                   String actionKey,
+                                   String actionLabel,
+                                   String actionKind) {
     }
 }

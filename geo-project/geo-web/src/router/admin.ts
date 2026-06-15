@@ -144,6 +144,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '调度监控', icon: 'Monitor', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'dispatch.task.replay.dead_letter'] },
     },
     {
+      path: 'monitoring/self-media-automation',
+      name: 'SelfMediaAutomationOverview',
+      component: () => import('@/views/admin/content/SelfMediaAutomationOverview.vue'),
+      meta: { title: '自媒体自动化态势', icon: 'DataLine', permissions: ['content.read'] },
+    },
+    {
       path: 'content/execution',
       name: 'ContentExecution',
       component: () => import('@/views/admin/content/ContentExecution.vue'),
@@ -153,7 +159,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'content/special-industry-compliance',
       name: 'SpecialIndustryComplianceWorkbench',
       component: () => import('@/views/admin/content/SpecialIndustryComplianceWorkbench.vue'),
-      meta: { title: '特殊行业合规工作台', icon: 'Files', permissions: ['content.read'] },
+      meta: { title: '行业专项工作台', icon: 'Files', permissions: ['content.read'] },
     },
     {
       path: 'content/articles/manual-create',

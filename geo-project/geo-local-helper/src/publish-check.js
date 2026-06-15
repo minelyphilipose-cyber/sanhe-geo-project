@@ -60,15 +60,17 @@ export function evaluateBaijiahaoPublishSignals(target = {}, pageState = {}, opt
   const hasWithdrawnSignal = /已撤回|已删除|已下线|已撤销/.test(text)
   const hasReviewSignal = /审核中|待审核|提交成功|已提交/.test(text)
   const hasScheduledSignal = /预计\d{4}[-年]\d{1,2}[-月]\d{1,2}|预计\s*\d{4}|定时发布|发布时间|待发布|将于/.test(text)
-  const hasPublishedSignal = /已发布|已推荐|发布成功/.test(text)
+  const titleIndex = titleProbe ? normalizedText.indexOf(titleProbe) : -1
+  const targetTextWindow = titleIndex >= 0 ? normalizedText.slice(titleIndex, titleIndex + 240) : ''
+  const hasPublishedNearTitle = /已发布|已推荐|发布成功/.test(targetTextWindow)
+  const hasPublishedSignal = hasPublishedNearTitle || /已发布|已推荐|发布成功/.test(text)
   const platformScheduledText = extractBaijiahaoScheduledText(text)
 
   const pendingScheduled = hasTitle && isBeforeScheduledAt && (hasScheduleTime || hasScheduledSignal || hasReviewSignal)
   const failed = hasTitle && (hasRejectedSignal || hasWithdrawnSignal)
   const reviewing = hasTitle && hasReviewSignal && !hasPublishedSignal && !failed
   const scheduled = hasTitle && hasScheduledSignal && !hasPublishedSignal && !failed
-  const found = hasTitle && !isBeforeScheduledAt && hasPublishedSignal
-    && (hasScheduleTime || hasReviewSignal || !target.platformScheduledAt)
+  const found = hasTitle && !isBeforeScheduledAt && hasPublishedNearTitle
   const platformStatus = failed
     ? (hasRejectedSignal ? 'rejected' : 'withdrawn')
     : hasPublishedSignal
@@ -105,6 +107,7 @@ export function evaluateBaijiahaoPublishSignals(target = {}, pageState = {}, opt
     hasScheduleTime,
     hasScheduledSignal,
     hasPublishedSignal,
+    hasPublishedNearTitle,
     hasReviewSignal,
     hasRejectedSignal,
     hasWithdrawnSignal,

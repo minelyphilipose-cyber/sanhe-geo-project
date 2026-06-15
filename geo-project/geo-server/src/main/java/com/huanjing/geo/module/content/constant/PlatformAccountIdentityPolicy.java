@@ -10,10 +10,15 @@ public final class PlatformAccountIdentityPolicy {
 
     public static String comparablePlatformAccountId(String platform, String platformAccountId) {
         String id = trimToNull(platformAccountId);
-        if (!StringUtils.hasText(id) || isSyntheticPlatformAccountId(platform, id)) {
+        if (!StringUtils.hasText(id) || platformAccountIdNotReadableByExtension(platform) || isSyntheticPlatformAccountId(platform, id)) {
             return null;
         }
         return id;
+    }
+
+    private static boolean platformAccountIdNotReadableByExtension(String platform) {
+        String normalizedPlatform = trimToNull(platform);
+        return "baijiahao".equalsIgnoreCase(normalizedPlatform);
     }
 
     public static boolean isSyntheticPlatformAccountId(String platform, String platformAccountId) {

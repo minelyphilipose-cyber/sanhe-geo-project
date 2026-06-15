@@ -37,8 +37,8 @@ DELIMITER $$
 
 DROP PROCEDURE IF EXISTS v198_assert_role_permission $$
 CREATE PROCEDURE v198_assert_role_permission(
-    IN in_role_key VARCHAR(64),
-    IN in_perm_key VARCHAR(128),
+    IN in_role_key VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+    IN in_perm_key VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
     IN expected INT
 )
 BEGIN

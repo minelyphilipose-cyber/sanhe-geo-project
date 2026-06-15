@@ -1,16 +1,14 @@
 {
   "host": "127.0.0.1",
   "port": 17891,
-  "trustedBackendBase": "http://119.45.154.127",
+  "trustedBackendBase": "https://www.huanjingaigeo.com",
   "enableLegacyBackendTokenRoutes": false,
   "enableStaticHelperToken": false,
   "helperToken": "",
   "allowedOrigins": [
     "http://127.0.0.1:17891",
     "http://localhost:17891",
-    "http://127.0.0.1:5173",
-    "http://localhost:5173",
-    "http://119.45.154.127"
+    "https://www.huanjingaigeo.com"
   ],
   "adspower": {
     "apiBase": "http://localhost:50325"

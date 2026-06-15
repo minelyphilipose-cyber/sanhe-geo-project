@@ -135,7 +135,7 @@ class SelfMediaScheduleCapabilityServiceTest {
     }
 
     @Test
-    void readinessRejectsBackendDelayedUntilExecutorIsImplemented() {
+    void readinessAcceptsOfficialApiBackendDelayedWhenContractSupportsIt() {
         when(mapper.selectByPlatform("douyin"))
                 .thenReturn(capability("douyin", "verified", true, "backend_delayed_publish"));
         when(adapterRouter.contract("douyin")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
@@ -152,8 +152,8 @@ class SelfMediaScheduleCapabilityServiceTest {
 
         SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness = service.readiness("douyin");
 
-        assertFalse(readiness.ready());
-        assertEquals("PLATFORM_BACKEND_DELAYED_EXECUTOR_MISSING", readiness.code());
+        assertTrue(readiness.ready());
+        assertEquals("抖音图文", readiness.contract().displayName());
     }
 
     @Test

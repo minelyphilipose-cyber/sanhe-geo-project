@@ -16,7 +16,7 @@ import {
   abandonSemiAutoDistribution,
   checkSelfMediaAccountAuth,
   confirmSemiAutoDistribution,
-  createSelfMediaPlatformQuickSchedule,
+  dispatchSelfMediaPlatformQuickSchedule,
   distributeContentArticleToSelfMediaAccount,
   getArticleDistribution,
   getContentArticleDetail,
@@ -25,7 +25,6 @@ import {
   getSelfMediaAccountsByBrand,
   getWechatMpAuthUrl,
   getWechatMpCapability,
-  previewSelfMediaPlatformQuickSchedule,
   refreshDistributionTaskReviewStatus,
 } from '@/api/content'
 import { getBrandImageFolders, getBrandMaterialPreviewUrl, getCompanyDistributionQuotas } from '@/api/customer'
@@ -734,35 +733,10 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     }
     selfMediaSubmitting.value = true
     try {
-      const preview = (await previewSelfMediaPlatformQuickSchedule({
+      const created = (await dispatchSelfMediaPlatformQuickSchedule({
         articleId: mediaDistributeArticleId.value,
         platform,
       })).data.data
-      let replaceNextScheduled = false
-      if (preview.action === 'replace_required') {
-        await ElMessageBox.confirm(
-          preview.message || '该平台本月文章已做排期处理，若继续发布将替换已排期文章，是否继续？',
-          '确认替换排期',
-          {
-            type: 'warning',
-            confirmButtonText: '是，继续',
-            cancelButtonText: '否',
-          },
-        )
-        replaceNextScheduled = true
-      } else if (preview.action !== 'ready') {
-        ElMessage.warning(preview.message || `${semiAutoPlatformLabel(platform)}当前无法创建排期`)
-        return
-      }
-      const created = (await createSelfMediaPlatformQuickSchedule({
-        articleId: mediaDistributeArticleId.value,
-        platform,
-        replaceNextScheduled,
-      })).data.data
-      if (created.action === 'replace_required') {
-        ElMessage.warning(created.message || '需要确认替换后才能继续创建排期')
-        return
-      }
       if (created.action !== 'created') {
         ElMessage.warning(created.message || `${semiAutoPlatformLabel(platform)}排期未创建`)
         return

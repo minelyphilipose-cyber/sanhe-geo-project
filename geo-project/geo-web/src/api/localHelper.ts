@@ -40,6 +40,59 @@ export interface LocalHelperOpenEnvironmentPayload {
   url?: string | null
 }
 
+export interface LocalHelperExtensionStatus {
+  installed: boolean
+  detected: boolean
+  status: 'installed' | 'not_detected' | 'unknown' | string
+  extensionId?: string | null
+  name?: string | null
+  version?: string | null
+  targetType?: string | null
+  targetUrl?: string | null
+  reason?: string | null
+  inspectedExtensionTargets?: number | null
+}
+
+export interface LocalHelperOpenEnvironmentResponse {
+  ok: boolean
+  environmentKey?: string | null
+  environmentName?: string | null
+  providerProfileId?: string | null
+  openResult?: unknown
+  extensionStatus?: LocalHelperExtensionStatus | null
+  error?: string
+}
+
+export interface LocalHelperExtensionStatusResponse {
+  ok: boolean
+  environmentKey?: string | null
+  environmentName?: string | null
+  providerProfileId?: string | null
+  extensionStatus?: LocalHelperExtensionStatus | null
+  error?: string
+}
+
+export interface LocalHelperExtensionBindIntentPayload {
+  bindCode: string
+  brandId?: number | null
+  apiBase?: string | null
+  helperBase?: string | null
+  environmentKey: string
+  providerProfileId: string
+  environmentName?: string | null
+  expiresInSeconds?: number | null
+}
+
+export interface LocalHelperExtensionBindIntentResponse {
+  ok: boolean
+  intentToken: string
+  expiresAt?: string | null
+  environmentKey?: string | null
+  providerProfileId?: string | null
+  environmentName?: string | null
+  error?: string
+}
+
 export interface LocalHelperHealthResponse {
   ok: boolean
   service?: string | null
@@ -84,6 +137,24 @@ export interface LocalHelperAdspowerSettings {
   apiBase?: string | null
   apiKeyConfigured?: boolean
   apiKeyPreview?: string | null
+}
+
+export interface LocalHelperAdspowerProfile {
+  providerProfileId: string
+  name?: string | null
+  serialNumber?: string | null
+  groupName?: string | null
+  remark?: string | null
+  status?: string | null
+}
+
+export interface LocalHelperAdspowerProfileListResponse {
+  ok: boolean
+  list: LocalHelperAdspowerProfile[]
+  page?: number | null
+  pageSize?: number | null
+  total?: number | null
+  error?: string
 }
 
 function normalizeBaseUrl(base: string) {
@@ -191,6 +262,27 @@ export async function updateLocalHelperAdspowerSettings(
   return body?.adspower || null
 }
 
+export async function listLocalHelperAdspowerProfiles(
+  config: LocalHelperClientConfig,
+  params: { page?: number; pageSize?: number; search?: string } = {},
+) {
+  const base = normalizeBaseUrl(config.helperBase)
+  const query = new URLSearchParams()
+  query.set('page', String(params.page || 1))
+  query.set('pageSize', String(params.pageSize || 50))
+  if (params.search?.trim()) query.set('search', params.search.trim())
+  const path = `/v1/adspower/profiles?${query.toString()}`
+  const response = await fetchLocalHelper(`${base}${path}`, {
+    method: 'GET',
+    headers: await buildAuthHeaders(config, 'GET', path, ''),
+  })
+  const body = await readJsonResponse(response) as LocalHelperAdspowerProfileListResponse | null
+  if (!response.ok || body?.ok === false) {
+    throw new Error(normalizeLocalAgentErrorMessage(body?.error, `本地助手 AdsPower 环境列表读取失败：${response.status}`))
+  }
+  return body || { ok: true, list: [] }
+}
+
 export async function openLocalHelperEnvironment(
   config: LocalHelperClientConfig,
   payload: LocalHelperOpenEnvironmentPayload,
@@ -206,6 +298,44 @@ export async function openLocalHelperEnvironment(
   const body = await readJsonResponse(response) as { ok?: boolean; error?: string } | null
   if (!response.ok || body?.ok === false) {
     throw new Error(normalizeLocalAgentErrorMessage(body?.error, `本地助手请求失败：${response.status}`))
+  }
+  return body as LocalHelperOpenEnvironmentResponse | null
+}
+
+export async function inspectLocalHelperAdspowerExtension(
+  config: LocalHelperClientConfig,
+  payload: Omit<LocalHelperOpenEnvironmentPayload, 'url'>,
+) {
+  const base = normalizeBaseUrl(config.helperBase)
+  const path = '/v1/adspower/extension-status'
+  const bodyText = JSON.stringify(payload)
+  const response = await fetchLocalHelper(`${base}${path}`, {
+    method: 'POST',
+    headers: await buildAuthHeaders(config, 'POST', path, bodyText),
+    body: bodyText,
+  })
+  const body = await readJsonResponse(response) as LocalHelperExtensionStatusResponse | null
+  if (!response.ok || body?.ok === false) {
+    throw new Error(normalizeLocalAgentErrorMessage(body?.error, `本地助手扩展状态探测失败：${response.status}`))
+  }
+  return body
+}
+
+export async function createLocalHelperExtensionBindIntent(
+  config: LocalHelperClientConfig,
+  payload: LocalHelperExtensionBindIntentPayload,
+) {
+  const base = normalizeBaseUrl(config.helperBase)
+  const path = '/v1/extension/bind-intents'
+  const bodyText = JSON.stringify(payload)
+  const response = await fetchLocalHelper(`${base}${path}`, {
+    method: 'POST',
+    headers: await buildAuthHeaders(config, 'POST', path, bodyText),
+    body: bodyText,
+  })
+  const body = await readJsonResponse(response) as LocalHelperExtensionBindIntentResponse | null
+  if (!response.ok || body?.ok === false || !body?.intentToken) {
+    throw new Error(normalizeLocalAgentErrorMessage(body?.error, `本地助手扩展绑定意图创建失败：${response.status}`))
   }
   return body
 }

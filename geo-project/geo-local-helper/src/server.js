@@ -18,6 +18,7 @@ const NONCES_PATH = new URL('nonces.json', RUNTIME_DIR)
 const SETTINGS_PATH = new URL('settings.json', RUNTIME_DIR)
 const TEMP_FILES_DIR = new URL('temp-files/', RUNTIME_DIR)
 const tasksById = new Map()
+const extensionBindIntentsByHash = new Map()
 const CLAIM_TIMEOUT_MS = 30_000
 const CLAIMABLE_STATUSES = new Set(['pending', 'requeued'])
 const SIGNATURE_MAX_SKEW_SECONDS = 300
@@ -31,6 +32,8 @@ const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
 const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
 const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
 const SELF_MEDIA_SCHEDULE_PLATFORMS_CACHE_MS = 60_000
+const EXTENSION_BIND_INTENT_TTL_MS = 2 * 60 * 1000
+const GEO_ENV_EXTENSION_NAME = 'GEO 自媒体助手'
 const EXIT_CODE_PORT_IN_USE = 2
 const STARTED_AT = new Date().toISOString()
 const nonceCache = new Map()
@@ -258,6 +261,10 @@ async function saveRuntimeTasks() {
   await fs.writeFile(TASKS_PATH, JSON.stringify(listTasks(), null, 2), 'utf8')
 }
 
+function cleanupRuntimeExtensionBindIntents() {
+  pruneExtensionBindIntents()
+}
+
 async function loadRuntimeNonces() {
   try {
     const raw = await fs.readFile(NONCES_PATH, 'utf8')
@@ -323,6 +330,15 @@ function normalizePersistedTask(task) {
     cancelledAt: task.cancelledAt || null,
     claimOwner: task.claimOwner || null,
     lastError: task.lastError || null,
+  }
+}
+
+function pruneExtensionBindIntents() {
+  const now = Date.now()
+  for (const [hash, intent] of extensionBindIntentsByHash.entries()) {
+    if (intent.consumedAt || Date.parse(intent.expiresAt) <= now) {
+      extensionBindIntentsByHash.delete(hash)
+    }
   }
 }
 
@@ -616,6 +632,162 @@ async function adspowerGet(config, path) {
   return body.data
 }
 
+function normalizeAdspowerProfile(row) {
+  if (!row || typeof row !== 'object') return null
+  const providerProfileId = firstScalarText(row.user_id, row.userId, row.id, row.profile_id, row.profileId)
+  if (!providerProfileId) return null
+  return {
+    providerProfileId,
+    name: firstScalarText(row.name, row.user_name, row.username, row.profile_name, row.serial_number, providerProfileId),
+    serialNumber: firstScalarText(row.serial_number, row.serialNumber),
+    groupName: firstScalarText(row.group_name, row.groupName),
+    remark: firstScalarText(row.remark, row.remarks),
+    status: firstScalarText(row.status, row.state),
+  }
+}
+
+function firstScalarText(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  }
+  return ''
+}
+
+async function listAdspowerProfiles(config, query = {}) {
+  const page = Number(query.page || 1)
+  const pageSize = Number(query.pageSize || query.page_size || 50)
+  const search = firstText(query.search, query.keyword, query.q)
+  const path = new URL('/api/v1/user/list', 'http://adspower.local')
+  path.searchParams.set('page', String(Number.isFinite(page) && page > 0 ? Math.floor(page) : 1))
+  path.searchParams.set('page_size', String(Number.isFinite(pageSize) && pageSize > 0 ? Math.min(Math.floor(pageSize), 100) : 50))
+  if (search) path.searchParams.set('search', search)
+  const data = await adspowerGet(config, `${path.pathname}${path.search}`)
+  const rawList = Array.isArray(data?.list)
+    ? data.list
+    : Array.isArray(data?.data?.list)
+      ? data.data.list
+      : Array.isArray(data)
+        ? data
+        : []
+  return {
+    list: rawList.map(normalizeAdspowerProfile).filter(Boolean),
+    page: Number(data?.page || page || 1),
+    pageSize: Number(data?.page_size || data?.pageSize || pageSize || 50),
+    total: Number(data?.total || data?.count || rawList.length),
+  }
+}
+
+async function handleAdspowerProfiles(req, res, config, url) {
+  await requireHelperAccess(req, config)
+  const result = await listAdspowerProfiles(config, {
+    page: url.searchParams.get('page'),
+    pageSize: url.searchParams.get('pageSize') || url.searchParams.get('page_size'),
+    search: url.searchParams.get('search') || url.searchParams.get('keyword') || url.searchParams.get('q'),
+  })
+  sendJson(req, res, config, 200, { ok: true, ...result })
+}
+
+function normalizeExtensionBindIntentPayload(config, body) {
+  const bindCode = String(body.bindCode || '').replace(/[\s-]/g, '').toUpperCase()
+  if (bindCode.length < 6) {
+    const error = new Error('bindCode is required')
+    error.statusCode = 400
+    throw error
+  }
+  const environment = normalizeProviderEnvironment(
+    config,
+    body.environmentKey,
+    body.providerProfileId,
+    body.environmentName,
+  )
+  const ttlMs = Math.min(
+    EXTENSION_BIND_INTENT_TTL_MS,
+    Math.max(30_000, Number(body.expiresInSeconds || 120) * 1000),
+  )
+  const expiresAt = new Date(Date.now() + ttlMs).toISOString()
+  return {
+    bindCode,
+    brandId: Number.isFinite(Number(body.brandId)) ? Number(body.brandId) : null,
+    apiBase: String(body.apiBase || config.trustedBackendBase || config.backendBase || '').replace(/\/+$/, ''),
+    helperBase: String(body.helperBase || `http://${config.host || '127.0.0.1'}:${config.port || 17891}`).replace(/\/+$/, ''),
+    environmentKey: environment.environmentKey,
+    providerProfileId: environment.providerProfileId,
+    environmentName: environment.name || environment.environmentKey,
+    expiresAt,
+  }
+}
+
+async function handleCreateExtensionBindIntent(req, res, config) {
+  const body = await readJson(req)
+  await requireHelperAccess(req, config)
+  const payload = normalizeExtensionBindIntentPayload(config, body)
+  const intentToken = crypto.randomBytes(32).toString('base64url')
+  const intent = {
+    ...payload,
+    intentTokenHash: sha256Hex(intentToken),
+    createdAt: nowIso(),
+    consumedAt: null,
+  }
+  extensionBindIntentsByHash.set(intent.intentTokenHash, intent)
+  cleanupRuntimeExtensionBindIntents()
+  sendJson(req, res, config, 200, {
+    ok: true,
+    intentToken,
+    expiresAt: intent.expiresAt,
+    environmentKey: intent.environmentKey,
+    providerProfileId: intent.providerProfileId,
+    environmentName: intent.environmentName,
+  })
+}
+
+async function handleConsumeExtensionBindIntent(req, res, config) {
+  const body = await readJson(req)
+  pruneExtensionBindIntents()
+  const intentToken = String(body.intentToken || '').trim()
+  if (intentToken.length < 32) {
+    const error = new Error('intentToken is required')
+    error.statusCode = 400
+    throw error
+  }
+  const hash = sha256Hex(intentToken)
+  const intent = extensionBindIntentsByHash.get(hash)
+  if (!intent) {
+    const error = new Error('extension bind intent not found or expired')
+    error.statusCode = 404
+    throw error
+  }
+  const expectedEnvironmentKey = String(body.environmentKey || '').trim()
+  const expectedProviderProfileId = String(body.providerProfileId || '').trim()
+  if (expectedEnvironmentKey && expectedEnvironmentKey !== intent.environmentKey) {
+    extensionBindIntentsByHash.delete(hash)
+    cleanupRuntimeExtensionBindIntents()
+    const error = new Error('extension bind intent environment mismatch')
+    error.statusCode = 409
+    throw error
+  }
+  if (expectedProviderProfileId && expectedProviderProfileId !== intent.providerProfileId) {
+    extensionBindIntentsByHash.delete(hash)
+    cleanupRuntimeExtensionBindIntents()
+    const error = new Error('extension bind intent profile mismatch')
+    error.statusCode = 409
+    throw error
+  }
+  extensionBindIntentsByHash.delete(hash)
+  cleanupRuntimeExtensionBindIntents()
+  sendJson(req, res, config, 200, {
+    ok: true,
+    bindCode: intent.bindCode,
+    brandId: intent.brandId,
+    apiBase: intent.apiBase || config.trustedBackendBase || config.backendBase || '',
+    helperBase: intent.helperBase || `http://${config.host || '127.0.0.1'}:${config.port || 17891}`,
+    environmentKey: intent.environmentKey,
+    providerProfileId: intent.providerProfileId,
+    environmentName: intent.environmentName,
+    expiresAt: intent.expiresAt,
+  })
+}
+
 async function handleAdspowerSettings(req, res, config) {
   if (req.method === 'GET') {
     sendJson(req, res, config, 200, {
@@ -731,6 +903,82 @@ async function openUrlWithPuppeteer(wsEndpoint, targetUrl) {
   }
 }
 
+function extensionIdFromTargetUrl(value) {
+  const match = String(value || '').match(/^chrome-extension:\/\/([^/]+)\//)
+  return match ? match[1] : ''
+}
+
+async function inspectGeoEnvExtensionTarget(target) {
+  const url = target.url()
+  const extensionId = extensionIdFromTargetUrl(url)
+  if (!extensionId) return null
+  const result = {
+    extensionId,
+    targetType: target.type(),
+    targetUrl: url,
+    name: '',
+    version: '',
+  }
+  if (target.type() === 'service_worker') {
+    const worker = await target.worker().catch(() => null)
+    if (worker) {
+      const manifest = await worker.evaluate(() => chrome.runtime.getManifest()).catch(() => null)
+      result.name = String(manifest?.name || '')
+      result.version = String(manifest?.version || '')
+    }
+  }
+  return result
+}
+
+function isGeoEnvExtensionTarget(info) {
+  if (!info?.extensionId) return false
+  return info.name === GEO_ENV_EXTENSION_NAME
+}
+
+async function inspectGeoEnvExtension(wsEndpoint) {
+  if (!wsEndpoint) {
+    return {
+      installed: false,
+      detected: false,
+      status: 'unknown',
+      reason: 'missing_puppeteer_ws',
+    }
+  }
+  const { default: puppeteer } = await import('puppeteer-core')
+  const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint, protocolTimeout: 30_000 })
+  try {
+    const targets = browser.targets()
+    const inspected = []
+    for (const target of targets) {
+      if (!String(target.url() || '').startsWith('chrome-extension://')) continue
+      const info = await inspectGeoEnvExtensionTarget(target).catch(() => null)
+      if (info) inspected.push(info)
+    }
+    const matched = inspected.find(isGeoEnvExtensionTarget) || null
+    if (matched) {
+      return {
+        installed: true,
+        detected: true,
+        status: 'installed',
+        extensionId: matched.extensionId,
+        name: matched.name || GEO_ENV_EXTENSION_NAME,
+        version: matched.version || null,
+        targetType: matched.targetType,
+        targetUrl: matched.targetUrl,
+      }
+    }
+    return {
+      installed: false,
+      detected: false,
+      status: 'not_detected',
+      reason: 'geo_env_extension_target_not_found',
+      inspectedExtensionTargets: inspected.length,
+    }
+  } finally {
+    await browser.disconnect()
+  }
+}
+
 function normalizeLaunchTask(body, environment, data) {
   const taskId = Number(body.taskId)
   if (!Number.isFinite(taskId) || taskId <= 0) {
@@ -808,39 +1056,59 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
   if (isReusableActiveTask(existing)) {
     return { ok: true, claimed: true, reused: true, task: existing, schedule: claim.schedule }
   }
-  const environment = normalizeProviderEnvironment(
-    config,
-    claim.launch.environmentKey,
-    claim.launch.providerProfileId,
-    claim.launch.environmentName,
-  )
-  const profileId = encodeURIComponent(environment.providerProfileId)
-  const data = await adspowerGet(
-    config,
-    `/api/v1/browser/start?user_id=${profileId}&open_tabs=1&ip_tab=0`,
-  )
-  const task = normalizeLaunchTask({
-    taskId,
-    platform: claim.launch.platform || claim.task.platform,
-    backendBase: config.trustedBackendBase,
-    backendTask: claim.task,
-    url: claim.launch.url || defaultPublishUrlForPlatform(claim.launch.platform || claim.task.platform),
-    selfMediaAccountId: claim.launch.selfMediaAccountId || claim.task.selfMediaAccountId,
-    browserEnvironmentAccountId: claim.launch.browserEnvironmentAccountId || claim.task.browserEnvironmentAccountId,
-    expectedPlatformAccountId: claim.launch.expectedPlatformAccountId,
-    expectedAccountName: claim.launch.expectedAccountName,
-    environmentKey: claim.launch.environmentKey || claim.task.environmentKey,
-    providerProfileId: claim.launch.providerProfileId || claim.task.providerProfileId,
-    environmentName: claim.launch.environmentName || claim.launch.environmentKey || claim.task.environmentKey,
-  }, environment, data)
-  task.schedule = claim.schedule || null
-  task.platformScheduledAt = claim.schedule?.platformScheduledAt || null
-  upsertTask(task)
-  await saveRuntimeTasks()
-  task.openResult = await openUrlWithPuppeteer(data?.ws?.puppeteer, task.url)
-  upsertTask(task)
-  await saveRuntimeTasks()
-  return { ok: true, claimed: true, task, schedule: claim.schedule }
+  try {
+    const environment = normalizeProviderEnvironment(
+      config,
+      claim.launch.environmentKey,
+      claim.launch.providerProfileId,
+      claim.launch.environmentName,
+    )
+    const profileId = encodeURIComponent(environment.providerProfileId)
+    const data = await adspowerGet(
+      config,
+      `/api/v1/browser/start?user_id=${profileId}&open_tabs=1&ip_tab=0`,
+    )
+    const task = normalizeLaunchTask({
+      taskId,
+      platform: claim.launch.platform || claim.task.platform,
+      backendBase: config.trustedBackendBase,
+      backendTask: claim.task,
+      url: claim.launch.url || defaultPublishUrlForPlatform(claim.launch.platform || claim.task.platform),
+      selfMediaAccountId: claim.launch.selfMediaAccountId || claim.task.selfMediaAccountId,
+      browserEnvironmentAccountId: claim.launch.browserEnvironmentAccountId || claim.task.browserEnvironmentAccountId,
+      expectedPlatformAccountId: claim.launch.expectedPlatformAccountId,
+      expectedAccountName: claim.launch.expectedAccountName,
+      environmentKey: claim.launch.environmentKey || claim.task.environmentKey,
+      providerProfileId: claim.launch.providerProfileId || claim.task.providerProfileId,
+      environmentName: claim.launch.environmentName || claim.launch.environmentKey || claim.task.environmentKey,
+    }, environment, data)
+    task.schedule = claim.schedule || null
+    task.platformScheduledAt = claim.schedule?.platformScheduledAt || null
+    upsertTask(task)
+    await saveRuntimeTasks()
+    task.openResult = await openUrlWithPuppeteer(data?.ws?.puppeteer, task.url)
+    upsertTask(task)
+    await saveRuntimeTasks()
+    return { ok: true, claimed: true, task, schedule: claim.schedule }
+  } catch (error) {
+    const failureTask = {
+      taskId,
+      platform: claim.launch.platform || claim.task.platform,
+      backendTask: claim.task,
+      schedule: claim.schedule || null,
+      lastError: {
+        code: 'LOCAL_HELPER_LAUNCH_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+      },
+    }
+    await reportScheduleExecutionFailed(config, failureTask, {
+      failureCode: 'LOCAL_HELPER_LAUNCH_FAILED',
+      failureMessage: failureTask.lastError.message,
+    }).catch((reportError) => {
+      console.error('Failed to report schedule launch failure:', formatBackendError(reportError))
+    })
+    throw error
+  }
 }
 
 async function claimAndCheckPublishResult(config, platform = 'toutiao') {
@@ -906,7 +1174,6 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
   const { default: puppeteer } = await import('puppeteer-core')
   const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint, protocolTimeout: 30_000 })
   try {
-    const page = await browser.newPage()
     let effectiveTargetUrl = targetUrl
     const platform = String(schedule?.platform || '').trim().toLowerCase()
     if (platform === 'baijiahao' && !baijiahaoWorksListHasAppId(effectiveTargetUrl)) {
@@ -918,6 +1185,7 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
         throw new Error('baijiahao publish check requires app_id from self media account platformAccountId')
       }
     }
+    const { page } = await reuseOrCreatePublishCheckPage(browser, platform, effectiveTargetUrl)
     await page.goto(effectiveTargetUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
     await delay(3_000)
     const deadline = Date.now() + 20_000
@@ -936,6 +1204,46 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
   } finally {
     await browser.disconnect()
   }
+}
+
+async function reuseOrCreatePublishCheckPage(browser, platform, targetUrl) {
+  const pages = await browser.pages()
+  const reusablePage = pages.find((page) => isReusablePublishCheckPage(platform, page.url(), targetUrl))
+  if (reusablePage) {
+    await reusablePage.bringToFront().catch(() => {})
+    return { page: reusablePage, created: false }
+  }
+  return { page: await browser.newPage(), created: true }
+}
+
+function isReusablePublishCheckPage(platform, currentUrl, targetUrl) {
+  const normalized = String(platform || '').trim().toLowerCase()
+  let current
+  let target
+  try {
+    current = new URL(currentUrl)
+    target = new URL(targetUrl)
+  } catch (_) {
+    return false
+  }
+  if (current.hostname !== target.hostname) return false
+  if (normalized === 'baijiahao') {
+    return current.hostname.includes('baijiahao.baidu.com')
+      && current.pathname === '/builder/rc/content'
+  }
+  if (normalized === 'zhihu') {
+    return current.hostname.includes('zhihu.com')
+      && current.pathname.includes('/creator/manage/creation/article')
+  }
+  if (normalized === 'xiaohongshu') {
+    return current.hostname.includes('xiaohongshu.com')
+      && current.pathname.includes('/new/note-manager')
+  }
+  if (normalized === 'toutiao') {
+    return current.hostname.includes('toutiao.com')
+      && current.pathname.includes('/profile_v4/manage/content')
+  }
+  return current.pathname === target.pathname
 }
 
 async function evaluatePublishResult(page, schedule) {
@@ -1379,16 +1687,47 @@ async function handleOpenEnvironment(req, res, config) {
     `/api/v1/browser/start?user_id=${profileId}&open_tabs=1&ip_tab=0`,
   )
   const openResult = await openUrlWithPuppeteer(data?.ws?.puppeteer, body.url)
+  const extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer).catch((error) => ({
+    installed: false,
+    detected: false,
+    status: 'unknown',
+    reason: error instanceof Error ? error.message : String(error),
+  }))
   sendJson(req, res, config, 200, {
     ok: true,
     environmentKey: body.environmentKey,
     environmentName: environment.name || body.environmentKey,
     providerProfileId: environment.providerProfileId,
     openResult,
+    extensionStatus,
     adspower: {
       puppeteerWs: data?.ws?.puppeteer || null,
       selenium: data?.ws?.selenium || null,
     },
+  })
+}
+
+async function handleAdspowerExtensionStatus(req, res, config) {
+  const body = await readJson(req)
+  await requireHelperAccess(req, config)
+  const environment = normalizeProviderEnvironment(
+    config,
+    body.environmentKey,
+    body.providerProfileId,
+    body.environmentName,
+  )
+  const profileId = encodeURIComponent(environment.providerProfileId)
+  const data = await adspowerGet(
+    config,
+    `/api/v1/browser/start?user_id=${profileId}&open_tabs=1&ip_tab=0`,
+  )
+  const extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer)
+  sendJson(req, res, config, 200, {
+    ok: true,
+    environmentKey: environment.environmentKey,
+    environmentName: environment.name || environment.environmentKey,
+    providerProfileId: environment.providerProfileId,
+    extensionStatus,
   })
 }
 
@@ -1711,6 +2050,12 @@ function classifyFailureStatus(error) {
   if (explicitCode) return explicitCode
   if (message.includes('触发过快') || message.includes('点击速度太快') || message.includes('操作频繁') || message.includes('稍后再试')) {
     return 'BAIJIAHAO_PLATFORM_RATE_LIMITED'
+  }
+  if (message.includes('Material not found') || message.includes('素材不存在') || message.includes('素材已删除')) {
+    return 'PUBLIC_MATERIAL_NOT_FOUND'
+  }
+  if (message.includes('image content-type is not supported') || message.includes('content-type is not supported') || message.includes('/api/public/brand-materials/')) {
+    return 'MATERIAL_IMAGE_UNAVAILABLE'
   }
   if (message.includes('fill token used or expired')) return 'token_expired'
   if (message.includes('平台账号未登录') || message.includes('需登录')) return 'login_required'
@@ -2242,6 +2587,10 @@ async function route(req, res, config) {
   if ((req.method === 'GET' || req.method === 'POST') && url.pathname === '/v1/settings/adspower') {
     return handleAdspowerSettings(req, res, config)
   }
+  if (req.method === 'GET' && url.pathname === '/v1/adspower/profiles') return handleAdspowerProfiles(req, res, config, url)
+  if (req.method === 'POST' && url.pathname === '/v1/adspower/extension-status') return handleAdspowerExtensionStatus(req, res, config)
+  if (req.method === 'POST' && url.pathname === '/v1/extension/bind-intents') return handleCreateExtensionBindIntent(req, res, config)
+  if (req.method === 'POST' && url.pathname === '/v1/extension/bind-intents/consume') return handleConsumeExtensionBindIntent(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/c2/pairing-code') return handlePairingCode(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/c2/pairing-status') return handlePairingStatus(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/poc/launch') return handleLaunch(req, res, config)

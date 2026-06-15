@@ -144,6 +144,35 @@ test('baijiahao publish check confirms published article on works list', () => {
   assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content/detail?id=abc')
 })
 
+test('baijiahao publish check confirms published article when list omits scheduled time', () => {
+  const result = evaluateBaijiahaoPublishSignals(
+    {
+      title: '「讨论」在阜阳一聊“全屋智能哪家好” 就被问预算？不如先把这四笔成本结构拆透再挑店',
+      platformScheduledAt: '2026-06-13T20:24:00',
+    },
+    {
+      url: 'https://baijiahao.baidu.com/builder/rc/content?currentPage=1&pageSize=10&app_id=1867055852901021',
+      text: '作品管理\n全部 图文 视频 小视频 动态 直播 合集 图集\n「讨论」在阜阳一聊“全屋智能哪家好” 就被问预算？不如先把这四笔成本结构拆透再挑店\n已发布\n0 0 0 0',
+      anchors: [
+        {
+          text: '「讨论」在阜阳一聊“全屋智能哪家好” 就被问预算？不如先把这四笔成本结构拆透再挑店',
+          href: 'https://baijiahao.baidu.com/builder/rc/content/detail?id=published',
+        },
+      ],
+    },
+    {
+      nowMs: new Date(2026, 5, 15, 9, 55, 0).getTime(),
+    },
+  )
+
+  assert.equal(result.found, true)
+  assert.equal(result.pendingScheduled, false)
+  assert.equal(result.hasScheduleTime, false)
+  assert.equal(result.hasPublishedNearTitle, true)
+  assert.equal(result.platformStatus, 'published')
+  assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content/detail?id=published')
+})
+
 test('baijiahao publish check reports rejected article as failed', () => {
   const result = evaluateBaijiahaoPublishSignals(
     {

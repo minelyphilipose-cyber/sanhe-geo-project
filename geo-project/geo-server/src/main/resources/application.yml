@@ -70,6 +70,20 @@ audit:
     max-pool-size: ${AUDIT_THREADPOOL_MAX_SIZE:4}
     queue-capacity: ${AUDIT_THREADPOOL_QUEUE_CAPACITY:1000}
 
+article:
+  ai-draft:
+    threadpool:
+      core-pool-size: ${ARTICLE_AI_DRAFT_CORE_POOL_SIZE:4}
+      max-pool-size: ${ARTICLE_AI_DRAFT_MAX_POOL_SIZE:4}
+      queue-capacity: ${ARTICLE_AI_DRAFT_QUEUE_CAPACITY:100}
+      keep-alive-seconds: ${ARTICLE_AI_DRAFT_KEEP_ALIVE_SECONDS:60}
+      await-termination-seconds: ${ARTICLE_AI_DRAFT_AWAIT_TERMINATION_SECONDS:30}
+    recovery:
+      enabled: ${ARTICLE_AI_DRAFT_RECOVERY_ENABLED:true}
+      fixed-delay-ms: ${ARTICLE_AI_DRAFT_RECOVERY_FIXED_DELAY_MS:60000}
+      stale-minutes: ${ARTICLE_AI_DRAFT_RECOVERY_STALE_MINUTES:15}
+      limit: ${ARTICLE_AI_DRAFT_RECOVERY_LIMIT:20}
+
 semi-auto:
   platforms:
     profiles:
@@ -191,11 +205,11 @@ geo:
     migration:
       execute-enabled: ${GEO_STORAGE_MIGRATION_EXECUTE_ENABLED:false}
     cos:
-      region: ${COS_REGION:}
-      bucket: ${COS_BUCKET:}
-      endpoint: ${COS_INTERNAL_ENDPOINT:}
-      secret-id: ${COS_SECRET_ID:}
-      secret-key: ${COS_SECRET_KEY:}
+      region: ${COS_REGION:ap-nanjing}
+      bucket: ${COS_BUCKET:geo-files-1422803602}
+      endpoint: ${COS_INTERNAL_ENDPOINT:cos.ap-nanjing.myqcloud.com}
+      secret-id: ${COS_SECRET_ID:AKIDUDrTnyymOo1OZZM2Zu20pfKm3A8xc8Tc}
+      secret-key: ${COS_SECRET_KEY:0pUzIRqmjgR8uZ1IMEuOgleUErxypV0L}
   security:
     init-admin-password:
       enabled: ${GEO_INIT_ADMIN_PASSWORD_ENABLED:false}
@@ -349,6 +363,9 @@ geo:
       ip-rate-limit-per-5min: ${EXTENSION_BIND_CODE_IP_LIMIT_PER_5MIN:20}
     version:
       allow-prerelease: ${EXTENSION_VERSION_ALLOW_PRERELEASE:false}
+    env:
+      # Readiness prompt only. Keep empty to disable outdated-version warnings.
+      expected-version: ${GEO_ENV_EXTENSION_EXPECTED_VERSION:}
 
 presale:
   prompt:
@@ -366,8 +383,8 @@ presale:
       keep-alive-seconds: ${PRESALE_GENERATE_THREADPOOL_KEEP_ALIVE_SECONDS:60}
       await-termination-seconds: ${PRESALE_GENERATE_THREADPOOL_AWAIT_TERMINATION_SECONDS:30}
       generate:
-        core-pool-size: ${PRESALE_GENERATE_CORE_POOL_SIZE:10}
-        max-pool-size: ${PRESALE_GENERATE_MAX_POOL_SIZE:12}
+        core-pool-size: ${PRESALE_GENERATE_CORE_POOL_SIZE:11}
+        max-pool-size: ${PRESALE_GENERATE_MAX_POOL_SIZE:13}
         queue-capacity: ${PRESALE_GENERATE_QUEUE_CAPACITY:200}
       platform:
         core-pool-size: ${PRESALE_PLATFORM_CORE_POOL_SIZE:6}
