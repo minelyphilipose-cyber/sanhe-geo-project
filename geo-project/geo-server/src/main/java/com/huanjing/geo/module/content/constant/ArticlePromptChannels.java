@@ -155,4 +155,15 @@ public final class ArticlePromptChannels {
         String canonical = canonicalSubCode(SELF_MEDIA, platform.trim().toLowerCase(Locale.ROOT));
         return SELF_MEDIA_SUBS.contains(canonical) ? canonical : null;
     }
+
+    public static String canonicalSelfMediaPublishPlatform(String platform) {
+        String quotaPlatform = canonicalSelfMediaQuotaPlatform(platform);
+        if (quotaPlatform == null) {
+            return null;
+        }
+        return switch (quotaPlatform) {
+            case "wechat" -> "wechat_mp";
+            default -> quotaPlatform;
+        };
+    }
 }

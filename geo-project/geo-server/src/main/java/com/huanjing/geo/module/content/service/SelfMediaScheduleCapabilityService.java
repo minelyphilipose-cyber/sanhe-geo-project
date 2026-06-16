@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.dto.SelfMediaScheduleCapabilityUpsertRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
 import com.huanjing.geo.module.content.mapper.SelfMediaScheduleCapabilityMapper;
@@ -256,7 +257,9 @@ public class SelfMediaScheduleCapabilityService {
         if (!StringUtils.hasText(platform)) {
             fail("INVALID_PLATFORM", "platform must not be blank");
         }
-        return platform.trim().toLowerCase(Locale.ROOT);
+        String normalized = platform.trim().toLowerCase(Locale.ROOT);
+        String publishPlatform = ArticlePromptChannels.canonicalSelfMediaPublishPlatform(normalized);
+        return StringUtils.hasText(publishPlatform) ? publishPlatform : normalized;
     }
 
     private String normalize(String value) {

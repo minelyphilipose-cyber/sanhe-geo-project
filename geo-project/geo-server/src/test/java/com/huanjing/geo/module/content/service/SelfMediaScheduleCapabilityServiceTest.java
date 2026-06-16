@@ -157,6 +157,50 @@ class SelfMediaScheduleCapabilityServiceTest {
     }
 
     @Test
+    void readinessNormalizesWechatQuotaPlatformToWechatMpScheduleCapability() {
+        when(mapper.selectByPlatform("wechat_mp"))
+                .thenReturn(capability("wechat_mp", "verified", true, "backend_delayed_publish"));
+        when(adapterRouter.contract("wechat_mp")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "wechat_mp",
+                "微信公众号",
+                SelfMediaPlatformPublishChannel.OFFICIAL_API,
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+
+        SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness = service.readiness("wechat");
+
+        assertTrue(readiness.ready());
+        assertEquals("微信公众号", readiness.contract().displayName());
+    }
+
+    @Test
+    void readinessNormalizesLegacyDouyinImageTextPlatformToDouyinScheduleCapability() {
+        when(mapper.selectByPlatform("douyin"))
+                .thenReturn(capability("douyin", "verified", true, "backend_delayed_publish"));
+        when(adapterRouter.contract("douyin")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "douyin",
+                "抖音图文",
+                SelfMediaPlatformPublishChannel.OFFICIAL_API,
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+
+        SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness = service.readiness("douyin_image_text");
+
+        assertTrue(readiness.ready());
+        assertEquals("抖音图文", readiness.contract().displayName());
+    }
+
+    @Test
     void readinessRejectsUnverifiedPlatform() {
         when(mapper.selectByPlatform("xiaohongshu"))
                 .thenReturn(capability("xiaohongshu", "unverified", false, "pending"));
