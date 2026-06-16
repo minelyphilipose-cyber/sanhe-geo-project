@@ -1414,7 +1414,6 @@ function findToutiaoScheduledWorkMatch(value, context = {}) {
     const text = normalizeText(row.textContent || '')
     if (!text.includes('定时发布中') && !text.includes('将于')) continue
     if (titleNeedle && !normalizeArticleText(row.textContent || '').includes(titleNeedle)) continue
-    if (locationName && !text.includes(locationName)) continue
     if (!isToutiaoWorksRowScheduledAtMatched(text, value)) continue
     return {
       title: extractToutiaoWorksTitle(row, context.title),
@@ -1443,12 +1442,19 @@ function isToutiaoWorksRowScheduledAtMatched(text, value) {
   const full = normalizeText(value.full)
   const compactFull = full.replace(/[-:]/g, '')
   const monthDay = normalizeText(value.monthDay)
+  const shortDate = buildToutiaoWorksShortDate(value)
   const hourMinute = `${Number(value.hour)}:${String(Number(value.minute)).padStart(2, '0')}`
   const compactHourMinute = `${Number(value.hour)}时${Number(value.minute)}分`
   return text.includes(full)
     || text.includes(compactFull)
     || (text.includes(monthDay) && (text.includes(hourMinute) || text.includes(compactHourMinute)))
-    || text.includes(value.time)
+    || (shortDate && text.includes(shortDate) && text.includes(hourMinute))
+}
+
+function buildToutiaoWorksShortDate(value) {
+  const date = String(value.date || value.full || '').match(/(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (!date) return ''
+  return `${String(Number(date[2])).padStart(2, '0')}-${String(Number(date[3])).padStart(2, '0')}`
 }
 
 function extractToutiaoWorksTitle(row, fallbackTitle) {
