@@ -963,6 +963,7 @@ async function inspectToutiaoWorksListTab(tabId, context, refreshAttempt) {
           time: `${Number(hour)}:${String(Number(minute)).padStart(2, '0')}`,
           hour: Number(hour),
           minute: Number(minute),
+          shortDate: `${String(Number(month)).padStart(2, '0')}-${String(Number(day)).padStart(2, '0')}`,
         }
       }
       const isVisible = (el) => {
@@ -1001,7 +1002,7 @@ async function inspectToutiaoWorksListTab(tabId, context, refreshAttempt) {
         return text.includes(full)
           || text.includes(compactFull)
           || (schedule.monthDay && text.includes(schedule.monthDay) && (text.includes(schedule.time) || text.includes(compactHourMinute)))
-          || (schedule.time && text.includes(schedule.time))
+          || (schedule.shortDate && schedule.time && text.includes(schedule.shortDate) && text.includes(schedule.time))
       }
       const extractTitle = (row) => {
         const fallback = String(context.title || '').trim()
@@ -1025,7 +1026,6 @@ async function inspectToutiaoWorksListTab(tabId, context, refreshAttempt) {
         const text = normalizeText(row.textContent || '')
         if (!text.includes('定时发布中') && !text.includes('将于')) continue
         if (titleNeedle && !normalizeArticleText(row.textContent || '').includes(titleNeedle)) continue
-        if (locationName && !text.includes(locationName)) continue
         if (!scheduleMatched(text)) continue
         return {
           verified: true,
