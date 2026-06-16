@@ -48,9 +48,9 @@ BEGIN
       FROM sys_role r
       JOIN sys_role_permission rp ON rp.role_id = r.id
       JOIN sys_permission p ON p.id = rp.permission_id
-     WHERE r.role_key = in_role_key
-       AND p.perm_key = in_perm_key
-       AND p.status IN ('active', 'deprecated');
+     WHERE CONVERT(r.role_key USING utf8mb4) COLLATE utf8mb4_unicode_ci = in_role_key
+       AND CONVERT(p.perm_key USING utf8mb4) COLLATE utf8mb4_unicode_ci = in_perm_key
+       AND CONVERT(p.status USING utf8mb4) COLLATE utf8mb4_unicode_ci IN ('active', 'deprecated');
     IF actual <> expected THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'V198 role permission assertion failed';

@@ -107,9 +107,9 @@ BEGIN
     FROM sys_role_permission rp
     JOIN sys_role r ON r.id = rp.role_id
     JOIN sys_permission p ON p.id = rp.permission_id
-    WHERE r.role_key = role_key_value
-      AND p.perm_key = perm_key_value
-      AND p.status IN ('active', 'deprecated');
+    WHERE CONVERT(r.role_key USING utf8mb4) COLLATE utf8mb4_unicode_ci = role_key_value
+      AND CONVERT(p.perm_key USING utf8mb4) COLLATE utf8mb4_unicode_ci = perm_key_value
+      AND CONVERT(p.status USING utf8mb4) COLLATE utf8mb4_unicode_ci IN ('active', 'deprecated');
 
     IF should_have = 1 AND actual_count = 0 THEN
         SET error_message = CONCAT('V193 ASSERT FAILED: ', role_key_value, ' should have ', perm_key_value);
