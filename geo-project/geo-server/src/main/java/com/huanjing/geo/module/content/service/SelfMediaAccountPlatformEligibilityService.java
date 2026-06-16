@@ -59,7 +59,7 @@ public class SelfMediaAccountPlatformEligibilityService {
                                                         CompanyPackageBinding binding,
                                                         ChannelQuotaSnapshotItem quota) {
         SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
-                scheduleCapabilityService.readiness(platform);
+                scheduleCapabilityService.readiness(scheduleCapabilityPlatform(platform));
         boolean quotaEnabled = quota != null && quota.isEnabled() && quota.getQuotaLimit() > 0;
         boolean scheduleReady = readiness.ready();
 
@@ -137,5 +137,10 @@ public class SelfMediaAccountPlatformEligibilityService {
             throw new BizException(400, "unsupported self-media platform");
         }
         return canonical.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String scheduleCapabilityPlatform(String platform) {
+        String publishPlatform = ArticlePromptChannels.canonicalSelfMediaPublishPlatform(platform);
+        return StringUtils.hasText(publishPlatform) ? publishPlatform : normalizePlatform(platform);
     }
 }

@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.content.service.adapter;
 
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -58,6 +59,11 @@ public class SelfMediaPlatformScheduleAdapterRouter {
     }
 
     private static String normalize(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        String publishPlatform = ArticlePromptChannels.canonicalSelfMediaPublishPlatform(normalized);
+        return StringUtils.hasText(publishPlatform) ? publishPlatform : normalized;
     }
 }

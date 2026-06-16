@@ -27,8 +27,18 @@ class ArticlePromptChannelsTest {
     @Test
     void canonicalSelfMediaQuotaPlatform_normalizesAndRejectsUnsupportedPlatform() {
         assertEquals("douyin", ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(" DOUYIN_IMAGE_TEXT "));
+        assertEquals("wechat", ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(" WECHAT_MP "));
         assertEquals("xiaohongshu", ArticlePromptChannels.canonicalSelfMediaQuotaPlatform("xiaohongshu"));
         assertNull(ArticlePromptChannels.canonicalSelfMediaQuotaPlatform("unknown"));
+    }
+
+    @Test
+    void canonicalSelfMediaPublishPlatform_mapsQuotaAndLegacyAliasesToAdapterPlatforms() {
+        assertEquals("wechat_mp", ArticlePromptChannels.canonicalSelfMediaPublishPlatform("wechat"));
+        assertEquals("wechat_mp", ArticlePromptChannels.canonicalSelfMediaPublishPlatform("WECHAT_MP"));
+        assertEquals("douyin", ArticlePromptChannels.canonicalSelfMediaPublishPlatform("douyin_image_text"));
+        assertEquals("toutiao", ArticlePromptChannels.canonicalSelfMediaPublishPlatform("toutiao"));
+        assertNull(ArticlePromptChannels.canonicalSelfMediaPublishPlatform("unknown"));
     }
 
     @Test

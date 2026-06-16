@@ -63,6 +63,32 @@ class SelfMediaAccountPlatformEligibilityServiceTest {
     }
 
     @Test
+    void mapsWechatQuotaPlatformToWechatMpScheduleCapability() {
+        CompanyPackageBinding binding = activeBinding("""
+                [
+                  {"channelCode":"self_media:wechat","periodType":"week","quotaLimit":2,"enabled":true},
+                  {"channelCode":"self_media:douyin","periodType":"week","quotaLimit":2,"enabled":true}
+                ]
+                """);
+        when(bindingService.activeBinding(20L)).thenReturn(binding);
+        when(scheduleCapabilityService.readiness(anyString()))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(false, "PLATFORM_CAPABILITY_UNVERIFIED", "平台定时发布能力尚未完成验证", null));
+        when(scheduleCapabilityService.readiness("wechat_mp"))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(scheduleCapabilityService.readiness("douyin"))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+
+        var options = service.listByBrand(10L);
+
+        var wechat = options.stream().filter(item -> "wechat".equals(item.getPlatform())).findFirst().orElseThrow();
+        var douyin = options.stream().filter(item -> "douyin".equals(item.getPlatform())).findFirst().orElseThrow();
+        assertTrue(wechat.getEligible());
+        assertTrue(wechat.getScheduleReady());
+        assertTrue(douyin.getEligible());
+        assertTrue(douyin.getScheduleReady());
+    }
+
+    @Test
     void requireEligibleRejectsPlatformOutsideIntersection() {
         CompanyPackageBinding binding = activeBinding("""
                 [{"channelCode":"self_media:baijiahao","periodType":"week","quotaLimit":2,"enabled":true}]

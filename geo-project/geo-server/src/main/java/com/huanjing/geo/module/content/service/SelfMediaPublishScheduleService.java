@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
@@ -928,8 +929,8 @@ public class SelfMediaPublishScheduleService {
         if (allowedPlatforms.isEmpty()) {
             return null;
         }
-        String normalizedPlatform = trimToNull(platform);
-        if (normalizedPlatform != null && !allowedPlatforms.contains(normalize(normalizedPlatform))) {
+        String normalizedPlatform = normalizePublishPlatform(platform);
+        if (normalizedPlatform != null && !allowedPlatforms.contains(normalizedPlatform)) {
             return null;
         }
         if (!hasAvailableLocalAgentCapacity(operatorId)) {
@@ -985,8 +986,8 @@ public class SelfMediaPublishScheduleService {
         if (allowedPlatforms.isEmpty()) {
             return null;
         }
-        String normalizedPlatform = trimToNull(platform);
-        if (normalizedPlatform != null && !allowedPlatforms.contains(normalize(normalizedPlatform))) {
+        String normalizedPlatform = normalizePublishPlatform(platform);
+        if (normalizedPlatform != null && !allowedPlatforms.contains(normalizedPlatform)) {
             return null;
         }
         if (!hasAvailableLocalAgentCapacity(operatorId)) {
@@ -2628,9 +2629,13 @@ public class SelfMediaPublishScheduleService {
     }
 
     private SelfMediaAccount selectActivePlatformAccount(Long brandId, String platform) {
+        String accountPlatform = normalizePublishPlatform(platform);
+        if (!StringUtils.hasText(accountPlatform)) {
+            accountPlatform = normalize(platform);
+        }
         return selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
                 .eq(SelfMediaAccount::getBrandId, brandId)
-                .eq(SelfMediaAccount::getPlatform, platform)
+                .eq(SelfMediaAccount::getPlatform, accountPlatform)
                 .eq(SelfMediaAccount::getStatus, "active")
                 .isNull(SelfMediaAccount::getDeletedAt)
                 .orderByDesc(SelfMediaAccount::getUpdatedAt)
@@ -2784,12 +2789,24 @@ public class SelfMediaPublishScheduleService {
         }
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         for (String platform : platforms) {
-            String value = normalize(platform);
+            String value = normalizePublishPlatform(platform);
+            if (!StringUtils.hasText(value)) {
+                value = normalize(platform);
+            }
             if (StringUtils.hasText(value)) {
                 normalized.add(value);
             }
         }
         return normalized;
+    }
+
+    private String normalizePublishPlatform(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        String publishPlatform = ArticlePromptChannels.canonicalSelfMediaPublishPlatform(normalized);
+        return StringUtils.hasText(publishPlatform) ? publishPlatform : normalized;
     }
 
     private String normalize(String value) {
