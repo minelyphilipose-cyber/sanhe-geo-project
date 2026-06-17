@@ -85,6 +85,59 @@
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
+            <span>官方 API 自媒体授权</span>
+            <el-tag type="success">微信公众号</el-tag>
+          </div>
+          <el-button
+            v-if="canUpdateBrand"
+            type="primary"
+            link
+            :loading="wechatAuthorizing"
+            @click="authorizeWechatMp"
+          >
+            {{ wechatOfficialAccounts.length ? '重新授权公众号' : '授权公众号' }}
+          </el-button>
+        </div>
+      </template>
+      <el-alert
+        class="mb-3"
+        type="info"
+        show-icon
+        :closable="false"
+        title="微信公众号通过微信第三方平台官方授权保存账号凭证，不需要配置浏览器环境。授权后文章会直接发送到当前客户绑定的公众号账号。"
+      />
+      <el-table v-loading="selfMediaAccountsLoading" :data="wechatOfficialAccounts" border empty-text="当前客户尚未授权微信公众号">
+        <el-table-column prop="accountName" label="账号名称" min-width="180" />
+        <el-table-column prop="status" label="授权状态" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="officialAccountStatusTag(row)">
+              {{ officialAccountStatusLabel(row) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="lastAuthCheckedAt" label="最近检测" min-width="180">
+          <template #default="{ row }">{{ row.lastAuthCheckedAt || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="异常原因" min-width="240">
+          <template #default="{ row }">{{ row.lastAuthError || '-' }}</template>
+        </el-table-column>
+        <el-table-column v-if="canUpdateBrand" label="操作" width="190" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" :loading="wechatAuthorizing" @click="authorizeWechatMp">
+              重新授权
+            </el-button>
+            <el-button link type="danger" @click="deleteSelfMediaAccountRecord(row)">
+              删除记录
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card class="admin-table-card">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
             <span>产品信息</span>
             <el-tag type="info">产品 / 服务项目 / 特色业务项</el-tag>
           </div>
@@ -306,7 +359,7 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span>自媒体账号</span>
-            <el-tag type="info">头条 / 百家号 / 知乎 / 小红书</el-tag>
+            <el-tag type="info">公众号 / 抖音图文 / 头条 / 百家号 / 知乎 / 小红书</el-tag>
           </div>
           <div class="flex items-center gap-2">
             <el-button
@@ -382,7 +435,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="canUpdateBrand" label="操作" width="250" fixed="right">
+        <el-table-column v-if="canUpdateBrand" label="操作" width="320" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openSelfMediaAccountEdit(row)">编辑</el-button>
             <el-button
@@ -408,6 +461,14 @@
               @click="unbindEnvironmentAccount(row)"
             >
               解绑
+            </el-button>
+            <el-button
+              v-if="!browserEnvironmentAccountOf(row)"
+              link
+              type="danger"
+              @click="deleteSelfMediaAccountRecord(row)"
+            >
+              删除记录
             </el-button>
           </template>
         </el-table-column>
@@ -1052,11 +1113,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
   deleteBrandTemplatePerspectiveConfig,
+  deleteSelfMediaAccount,
   getBrandTemplatePerspectiveConfigs,
   createSelfMediaAccount,
   getSelfMediaAccountPlatformOptions,
   saveBrandTemplatePerspectiveConfig,
   getSelfMediaAccountsByBrand,
+  getWechatMpAuthUrl,
   updateSelfMediaAccount,
   type BrandChannelTemplatePerspective,
   type TemplatePerspective,
@@ -1138,6 +1201,7 @@ const editVisible = ref(false)
 const selfMediaAccountsLoading = ref(false)
 const selfMediaAccountSaving = ref(false)
 const selfMediaAccountVisible = ref(false)
+const wechatAuthorizing = ref(false)
 const selfMediaAccountPlatformOptions = ref<SelfMediaAccountPlatformOption[]>([])
 const offerings = ref<BrandOffering[]>([])
 const offeringsLoading = ref(false)
@@ -1342,6 +1406,9 @@ const subOptions: Record<string, Array<{ label: string; value: string }>> = {
 
 const semiAutoSelfMediaAccounts = computed(() =>
   selfMediaAccounts.value.filter((item) => isSemiAutoPlatform(item.platform)),
+)
+const wechatOfficialAccounts = computed(() =>
+  selfMediaAccounts.value.filter((item) => item.platform === 'wechat_mp' || item.platform === 'wechat'),
 )
 const eligibleSelfMediaPlatformOptions = computed(() =>
   selfMediaAccountPlatformOptions.value.filter((item) => item.eligible),
@@ -1571,7 +1638,26 @@ function selfMediaPlatformLabel(value?: string | null) {
   if (value === 'baijiahao') return '百家号'
   if (value === 'zhihu') return '知乎'
   if (value === 'xiaohongshu') return '小红书'
+  if (value === 'wechat_mp' || value === 'wechat') return '微信公众号'
+  if (value === 'douyin') return '抖音图文'
   return value || '-'
+}
+
+function officialAccountStatusLabel(account: SelfMediaAccount) {
+  const map: Record<string, string> = {
+    active: '授权有效',
+    expired: '授权过期',
+    revoked: '已取消授权',
+    disabled: '权限不足',
+  }
+  return map[account.status] || account.status || '-'
+}
+
+function officialAccountStatusTag(account: SelfMediaAccount): 'success' | 'warning' | 'danger' | 'info' {
+  if (account.status === 'active') return 'success'
+  if (account.status === 'expired') return 'warning'
+  if (account.status === 'revoked' || account.status === 'disabled') return 'danger'
+  return 'info'
 }
 
 function optionLabel(option: SelfMediaAccountPlatformOption) {
@@ -1583,11 +1669,11 @@ function offeringAliasesText(row: BrandOffering) {
   return row.offeringAliases?.filter(Boolean).join('、') || '-'
 }
 
-function browserEnvironmentAccountOf(account: SemiAutoSelfMediaAccount) {
+function browserEnvironmentAccountOf(account: SelfMediaAccount) {
   return browserEnvironmentAccounts.value[account.id] || null
 }
 
-function browserEnvironmentLoginStatusLabel(account: SemiAutoSelfMediaAccount) {
+function browserEnvironmentLoginStatusLabel(account: SelfMediaAccount) {
   const binding = browserEnvironmentAccountOf(account)
   if (!binding) return '未绑定环境'
   if (binding.loginStatus === 'logged_in') return '环境已登录'
@@ -1599,7 +1685,7 @@ function browserEnvironmentLoginStatusLabel(account: SemiAutoSelfMediaAccount) {
   return binding.loginStatus || '未知'
 }
 
-function browserEnvironmentLoginStatusTagType(account: SemiAutoSelfMediaAccount) {
+function browserEnvironmentLoginStatusTagType(account: SelfMediaAccount) {
   const status = browserEnvironmentAccountOf(account)?.loginStatus
   if (status === 'logged_in') return 'success'
   if (status === 'mismatch' || status === 'expired' || status === 'error') return 'danger'
@@ -1607,7 +1693,7 @@ function browserEnvironmentLoginStatusTagType(account: SemiAutoSelfMediaAccount)
   return 'info'
 }
 
-function browserEnvironmentLastReportTime(account: SemiAutoSelfMediaAccount) {
+function browserEnvironmentLastReportTime(account: SelfMediaAccount) {
   const binding = browserEnvironmentAccountOf(account)
   return binding?.lastVerifiedAt || binding?.lastLoginSeenAt || '-'
 }
@@ -1915,6 +2001,31 @@ async function unbindEnvironmentAccount(account: SemiAutoSelfMediaAccount) {
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(err instanceof Error ? err.message : '解除环境绑定失败')
+  }
+}
+
+async function deleteSelfMediaAccountRecord(account: SelfMediaAccount) {
+  if (browserEnvironmentAccountOf(account)) {
+    ElMessage.warning('请先解绑浏览器环境后再删除账号记录')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除「${account.accountName}」的${selfMediaPlatformLabel(account.platform)}账号记录？删除后如需继续分发，需要重新配置或授权。`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
+    await deleteSelfMediaAccount(account.id)
+    ElMessage.success('自媒体账号记录已删除')
+    await loadSelfMediaAccounts()
+    await loadAutomationReadiness()
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '删除自媒体账号记录失败')
   }
 }
 
@@ -2399,6 +2510,20 @@ async function loadSelfMediaAccountPlatformOptions() {
     selfMediaAccountPlatformOptions.value = data.data || []
   } catch {
     selfMediaAccountPlatformOptions.value = []
+  }
+}
+
+async function authorizeWechatMp() {
+  if (!brand.value?.id) {
+    ElMessage.warning('请先保存客户信息后再授权公众号')
+    return
+  }
+  wechatAuthorizing.value = true
+  try {
+    const { data } = await getWechatMpAuthUrl({ brandId: brand.value.id })
+    window.location.href = data.data.authUrl
+  } finally {
+    wechatAuthorizing.value = false
   }
 }
 

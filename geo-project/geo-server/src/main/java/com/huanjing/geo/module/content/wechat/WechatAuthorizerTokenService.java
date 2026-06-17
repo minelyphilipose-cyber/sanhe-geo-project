@@ -71,7 +71,12 @@ public class WechatAuthorizerTokenService {
             if (StringUtils.hasText(cached)) {
                 return cached;
             }
-            String refreshToken = cipherService.decrypt(account.getRefreshTokenCipher());
+            String refreshTokenCipher = account.getRefreshTokenCipher();
+            if (!StringUtils.hasText(refreshTokenCipher)) {
+                markAccountExpired(account, tokenKey, "微信公众号授权信息缺失，请重新授权");
+                throw new BizException(401, "微信公众号授权信息缺失，请重新授权");
+            }
+            String refreshToken = cipherService.decrypt(refreshTokenCipher);
             String componentToken = componentAccessTokenService.getAccessToken();
             WechatOpenPlatformClient.AuthorizerTokenResult result;
             try {
@@ -83,7 +88,7 @@ public class WechatAuthorizerTokenService {
                 );
             } catch (BizException ex) {
                 if (ex.getCode() == REFRESH_TOKEN_EXPIRED_CODE) {
-                    markAccountExpired(account, tokenKey);
+                    markAccountExpired(account, tokenKey, "wechat refresh token expired, reauthorization required");
                 }
                 throw ex;
             }
@@ -105,11 +110,11 @@ public class WechatAuthorizerTokenService {
         }
     }
 
-    private void markAccountExpired(SelfMediaAccount account, String tokenKey) {
+    private void markAccountExpired(SelfMediaAccount account, String tokenKey, String message) {
         redisTemplate.delete(tokenKey);
         account.setStatus("expired");
         account.setLastAuthCheckedAt(LocalDateTime.now());
-        account.setLastAuthError("wechat refresh token expired, reauthorization required");
+        account.setLastAuthError(message);
         selfMediaAccountMapper.updateById(account);
     }
 

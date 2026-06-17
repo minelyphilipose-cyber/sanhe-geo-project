@@ -20,7 +20,7 @@
       <div class="media-grid">
         <button
           class="media-platform"
-          :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: !wechatQuickScheduleAvailable }"
+          :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: !wechatDistributionAvailable }"
           type="button"
           @click="actions.handleWechatPlatformClick()"
         >

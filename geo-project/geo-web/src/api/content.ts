@@ -1357,6 +1357,10 @@ export function checkSelfMediaAccountAuth(id: number) {
   return request.post<R<SelfMediaAccount>>(`/content/self-media-accounts/${id}/check-auth`)
 }
 
+export function deleteSelfMediaAccount(id: number) {
+  return request.delete<R<void>>(`/content/self-media-accounts/${id}`)
+}
+
 export function destroySelfMediaCookieCredential(id: number) {
   return request.delete<R<SelfMediaAccount>>(`/content/self-media-accounts/${id}/cookie-credential`)
 }

@@ -88,4 +88,10 @@ public class SelfMediaAccountController {
     public R<SelfMediaAccountVO> destroyCookieCredential(@PathVariable Long id) {
         return R.ok(selfMediaAccountService.destroyCookieCredential(id));
     }
+
+    @DeleteMapping("/self-media-accounts/{id}")
+    public R<Void> deleteAccount(@PathVariable Long id) {
+        selfMediaAccountService.deleteAccount(id);
+        return R.ok();
+    }
 }
