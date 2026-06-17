@@ -1,8 +1,14 @@
 package com.huanjing.geo.module.project.service;
 
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
+import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
 import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
@@ -25,11 +31,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -40,6 +49,8 @@ class ProjectServiceStatusTest {
 
     @Mock
     private ProjectMapper projectMapper;
+    @Mock
+    private BrandMapper brandMapper;
     @Mock
     private CompanyPackageBindingService companyPackageBindingService;
     @Mock
@@ -71,6 +82,41 @@ class ProjectServiceStatusTest {
 
     @InjectMocks
     private ProjectService projectService;
+
+    @Test
+    void pageExcludesThirdPartySourceBrandsWhenRequested() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Project.class);
+
+        SysUser operator = new SysUser();
+        operator.setId(10L);
+        operator.setRole("manager");
+        Brand sourceBrand = new Brand();
+        sourceBrand.setId(30L);
+        Project project = new Project();
+        project.setId(20L);
+        project.setBrandId(40L);
+        project.setStatus("active");
+        Page<Project> selected = new Page<>(1, 10);
+        selected.setRecords(List.of(project));
+
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(brandMapper.selectThirdPartySourceBrands()).thenReturn(List.of(sourceBrand));
+        when(projectMapper.selectPage(any(), any())).thenReturn(selected);
+        when(projectCustomerRequirementMapper.selectList(any())).thenReturn(List.of());
+        when(projectKeywordGroupRelMapper.selectList(any())).thenReturn(List.of());
+        when(keywordGroupService.calcSavedCountsByGroupIds(any())).thenReturn(Map.of());
+        when(keywordGroupService.calcSavedTierCountsByGroupIds(any())).thenReturn(Map.of());
+
+        Page<Project> page = projectService.page(1, 10, null, "active", null, null, null, true);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Wrapper<Project>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(projectMapper).selectPage(any(), wrapperCaptor.capture());
+        String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
+        assertTrue(sqlSegment.contains("brand_id"));
+        assertTrue(sqlSegment.contains("NOT IN"));
+        assertFalse(Boolean.TRUE.equals(page.getRecords().get(0).getThirdPartySource()));
+    }
 
     @Test
     void updateStatus_paidPausedProject_movesActiveWithoutDeductingAgain() {

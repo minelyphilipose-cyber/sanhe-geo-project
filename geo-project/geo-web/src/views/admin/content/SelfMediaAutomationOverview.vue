@@ -130,6 +130,7 @@
               <el-tag size="small" type="success">可轮换 {{ thirdPartySubjectPool?.readySourceTotal || 0 }}</el-tag>
               <el-tag size="small" type="warning">待配置 {{ thirdPartySubjectPool?.missingCoverageTotal || 0 }}</el-tag>
               <el-tag size="small" type="danger">候选为 0 {{ thirdPartySubjectPool?.emptyCandidateTotal || 0 }}</el-tag>
+              <el-tag size="small" type="danger">模板缺失 {{ thirdPartySubjectPool?.templateMissingTotal || 0 }}</el-tag>
             </div>
           </div>
           <el-empty
@@ -162,6 +163,9 @@
             </el-table-column>
             <el-table-column label="说明" min-width="170" show-overflow-tooltip>
               <template #default="{ row }">{{ row.message || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="阻塞原因" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">{{ blockingReasonText(row.blockingReasons) }}</template>
             </el-table-column>
             <el-table-column label="操作" width="120" fixed="right">
               <template #default="{ row }">
@@ -294,6 +298,7 @@ function subjectPoolStatusLabel(status?: string | null) {
     ready: '可轮换',
     missing_coverage: '待配置覆盖行业',
     empty_candidate: '候选为 0',
+    template_missing: '模板缺失',
   }
   return status ? map[status] || status : '-'
 }
@@ -301,8 +306,12 @@ function subjectPoolStatusLabel(status?: string | null) {
 function subjectPoolStatusTone(status?: string | null) {
   if (status === 'ready') return 'success'
   if (status === 'missing_coverage') return 'warning'
-  if (status === 'empty_candidate') return 'danger'
+  if (status === 'empty_candidate' || status === 'template_missing') return 'danger'
   return 'info'
+}
+
+function blockingReasonText(reasons?: string[] | null) {
+  return reasons?.length ? reasons.join('；') : '-'
 }
 </script>
 

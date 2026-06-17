@@ -9,6 +9,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
 import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
@@ -160,6 +161,8 @@ public class SelfMediaPublishScheduleService {
     private final LocalAgentSessionMapper localAgentSessionMapper;
     private final BusinessCalendarService businessCalendarService;
     private final ThirdPartySubjectRotationService thirdPartySubjectRotationService;
+    private final ArticleTemplateAllocationService templateAllocationService;
+    private final TemplatePerspectiveService perspectiveService;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -770,20 +773,30 @@ public class SelfMediaPublishScheduleService {
                 .readySourceTotal(rows.stream().filter(row -> "ready".equals(row.getStatus())).count())
                 .missingCoverageTotal(rows.stream().filter(row -> "missing_coverage".equals(row.getStatus())).count())
                 .emptyCandidateTotal(rows.stream().filter(row -> "empty_candidate".equals(row.getStatus())).count())
+                .templateMissingTotal(rows.stream().filter(row -> "template_missing".equals(row.getStatus())).count())
                 .sources(rows.stream().limit(THIRD_PARTY_SOURCE_OVERVIEW_LIMIT).toList())
                 .build();
     }
 
     private SelfMediaAutomationOverviewVO.ThirdPartySubjectPoolSource thirdPartySubjectPoolSource(Brand source) {
         ThirdPartySubjectPoolPreviewResponse preview = thirdPartySubjectRotationService.previewPool(source.getId(), 1, 0);
+        List<String> blockingReasons = new ArrayList<>();
         String status = "ready";
         String message = "可轮换";
         if (preview.coverableIndustries().isEmpty()) {
             status = "missing_coverage";
             message = "信源未配置覆盖行业";
+            blockingReasons.add(message);
         } else if (preview.candidateCount() <= 0) {
             status = "empty_candidate";
             message = "暂无可轮换主体";
+            blockingReasons.add(message);
+        }
+        List<String> missingTemplates = missingThirdPartyTemplates(source.getId());
+        blockingReasons.addAll(missingTemplates);
+        if ("ready".equals(status) && !missingTemplates.isEmpty()) {
+            status = "template_missing";
+            message = missingTemplates.get(0);
         }
         String nextCandidate = preview.candidates().isEmpty() ? null : preview.candidates().get(0).brandName();
         return SelfMediaAutomationOverviewVO.ThirdPartySubjectPoolSource.builder()
@@ -795,7 +808,33 @@ public class SelfMediaPublishScheduleService {
                 .nextCandidateBrandName(nextCandidate)
                 .status(status)
                 .message(message)
+                .blockingReasons(blockingReasons)
                 .build();
+    }
+
+    private List<String> missingThirdPartyTemplates(Long sourceBrandId) {
+        List<String> missing = new ArrayList<>();
+        for (String platform : ArticlePromptChannels.SELF_MEDIA_SUB_CODES) {
+            TemplatePerspectiveService.ResolvedPerspective perspective = perspectiveService.resolve(
+                    sourceBrandId,
+                    ArticlePromptChannels.SELF_MEDIA,
+                    platform
+            );
+            if (perspective == null || !TemplatePerspectiveCodes.isThirdParty(perspective.perspectiveCode())) {
+                continue;
+            }
+            List<ArticleTemplateAllocationService.TemplateWithVersion> templates = templateAllocationService.activeTemplates(
+                    ArticlePromptChannels.SELF_MEDIA,
+                    platform,
+                    null,
+                    perspective.perspectiveCode()
+            );
+            if (templates.isEmpty()) {
+                missing.add("缺少启用模板：" + ArticlePromptChannels.channelName(ArticlePromptChannels.SELF_MEDIA, platform)
+                        + " / " + perspective.perspectiveCode());
+            }
+        }
+        return missing;
     }
 
     private String capacityStatus(long onlineAgents, long estimatedCapacity, long runningLoad, long waitingForLocalAgent) {

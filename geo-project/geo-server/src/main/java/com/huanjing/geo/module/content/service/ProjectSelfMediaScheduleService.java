@@ -726,12 +726,16 @@ public class ProjectSelfMediaScheduleService {
         if (article == null || StringUtils.hasText(article.getCoverImageUrl())) {
             return;
         }
-        String coverUrl = coverSelectionService.selectRandomCoverUrl(brandId);
+        String coverUrl = coverSelectionService.selectRandomCoverUrl(coverBrandId(brandId, article));
         if (!StringUtils.hasText(coverUrl)) {
             return;
         }
         article.setCoverImageUrl(coverUrl);
         articleDraftMapper.updateById(article);
+    }
+
+    private Long coverBrandId(Long sourceBrandId, ArticleDraft article) {
+        return article != null && article.getSubjectBrandId() != null ? article.getSubjectBrandId() : sourceBrandId;
     }
 
     private List<AccountPublishPlan> buildAccountPublishPlans(Project project, String targetMonth, List<Long> accountIds) {

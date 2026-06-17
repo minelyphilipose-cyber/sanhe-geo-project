@@ -23,6 +23,7 @@ import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateVersionMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationBatchMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
+import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
@@ -30,6 +31,7 @@ import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,6 +82,9 @@ class BatchArticleGenerationServiceTest {
     private TemplatePerspectiveService perspectiveService;
     private ThirdPartySubjectRotationService subjectRotationService;
     private ArticleGenerationReadinessService readinessService;
+    private CurrentUserService currentUserService;
+    private BrandAccessService brandAccessService;
+    private ArticleCoverSelectionService coverSelectionService;
     private BatchArticleGenerationService service;
 
     @BeforeEach
@@ -104,6 +109,9 @@ class BatchArticleGenerationServiceTest {
         perspectiveService = mock(TemplatePerspectiveService.class);
         subjectRotationService = mock(ThirdPartySubjectRotationService.class);
         readinessService = mock(ArticleGenerationReadinessService.class);
+        currentUserService = mock(CurrentUserService.class);
+        brandAccessService = mock(BrandAccessService.class);
+        coverSelectionService = mock(ArticleCoverSelectionService.class);
         when(readinessService.detectTaskReadinessWarningCodes(any(), any(), any())).thenReturn(List.of());
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
@@ -120,8 +128,8 @@ class BatchArticleGenerationServiceTest {
                 promptTemplateVersionMapper,
                 batchMapper,
                 taskMapper,
-                mock(CurrentUserService.class),
-                mock(com.huanjing.geo.module.customer.access.BrandAccessService.class),
+                currentUserService,
+                brandAccessService,
                 mock(PlatformCredentialService.class),
                 mock(LlmInvoker.class),
                 mock(MarkdownImageReferenceValidator.class),
@@ -129,7 +137,7 @@ class BatchArticleGenerationServiceTest {
                 articleGenerationEngine,
                 articleModelResolver,
                 passThroughAutoImageInsertionService(),
-                mock(ArticleCoverSelectionService.class),
+                coverSelectionService,
                 promptBuilder,
                 promptContextFactory,
                 medicalArticleGenerationService,
@@ -402,6 +410,83 @@ class BatchArticleGenerationServiceTest {
         assertEquals(3000L, task.getSubjectProjectId());
         assertEquals(TemplatePerspectiveCodes.INDUSTRY_NEUTRAL, task.getPerspectiveCode());
         assertEquals(31L, task.getPerspectiveMatchedConfigId());
+    }
+
+    @Test
+    void createRejectsManualGenerationForThirdPartySourceProject() {
+        SysUser operator = new SysUser();
+        operator.setId(9L);
+        Project project = new Project();
+        project.setId(10L);
+        project.setCompanyId(20L);
+        project.setBrandId(30L);
+        project.setPartnerId(40L);
+        project.setStatus("active");
+        Brand sourceBrand = new Brand();
+        sourceBrand.setId(30L);
+
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(projectMapper.selectById(10L)).thenReturn(project);
+        when(brandMapper.selectById(30L)).thenReturn(sourceBrand);
+        when(brandMapper.selectThirdPartySourceBrands()).thenReturn(List.of(sourceBrand));
+
+        BatchArticleGenerateRequest req = new BatchArticleGenerateRequest();
+        req.setProjectId(10L);
+
+        BizException ex = assertThrows(BizException.class, () -> service.create(req));
+
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
+        assertThat(ex.getMessage()).contains("第三方信源项目");
+        verify(batchMapper, never()).insert(any());
+        verify(taskMapper, never()).insert(any());
+    }
+
+    @Test
+    void persistArticleSelectsSelfMediaCoverFromSubjectBrand() {
+        Project project = new Project();
+        project.setId(10L);
+        project.setBrandId(20L);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(101L);
+        task.setProjectId(10L);
+        task.setSourceBrandId(20L);
+        task.setSubjectBrandId(30L);
+        task.setSubjectProjectId(300L);
+        task.setArticleType("industry_article");
+        task.setChannelGroupCode("self_media");
+        task.setChannelSubCode("toutiao");
+        task.setContentStyle("toutiao");
+        task.setArticleTypeCode("industry_article");
+        task.setPerspectiveCode(TemplatePerspectiveCodes.INDUSTRY_NEUTRAL);
+        task.setTopic("topic");
+        task.setTopicAsQuestion("question");
+        when(coverSelectionService.selectRandomCoverUrl(30L)).thenReturn("https://example.com/subject-cover.jpg");
+        when(articleDraftMapper.insert(any())).thenAnswer(invocation -> {
+            ArticleDraft draft = invocation.getArgument(0);
+            draft.setId(901L);
+            return 1;
+        });
+
+        Long articleId = ReflectionTestUtils.invokeMethod(
+                service,
+                "persistArticle",
+                project,
+                task,
+                "标题",
+                "正文",
+                promptResult(),
+                new ArticleModelResolver.ModelSelection("mock", "mock-model", null),
+                generatedArticle().result(),
+                null,
+                MedicalArticleConstants.COMPLIANCE_PASSED
+        );
+
+        assertEquals(901L, articleId);
+        ArgumentCaptor<ArticleDraft> draftCaptor = forClass(ArticleDraft.class);
+        verify(articleDraftMapper).insert(draftCaptor.capture());
+        assertEquals(30L, draftCaptor.getValue().getSubjectBrandId());
+        assertEquals("https://example.com/subject-cover.jpg", draftCaptor.getValue().getCoverImageUrl());
+        verify(coverSelectionService).selectRandomCoverUrl(30L);
     }
 
     @Test

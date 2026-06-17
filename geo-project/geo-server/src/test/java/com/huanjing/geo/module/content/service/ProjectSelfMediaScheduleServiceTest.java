@@ -392,9 +392,10 @@ class ProjectSelfMediaScheduleServiceTest {
         ArticleDraft article = new ArticleDraft();
         article.setId(66L);
         article.setProjectId(7L);
+        article.setSubjectBrandId(18L);
         article.setTitle("测试文章");
         when(articleDraftMapper.selectById(66L)).thenReturn(article);
-        when(coverSelectionService.selectRandomCoverUrl(8L)).thenReturn("https://example.com/cover.jpg");
+        when(coverSelectionService.selectRandomCoverUrl(18L)).thenReturn("https://example.com/cover.jpg");
 
         SelfMediaPublishScheduleCreateResponse created = new SelfMediaPublishScheduleCreateResponse();
         SelfMediaPublishScheduleVO createdSchedule = new SelfMediaPublishScheduleVO();
@@ -412,6 +413,7 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals(LocalDateTime.of(2026, 6, 11, 10, 10), requestCaptor.getValue().getWindowStart());
         assertEquals(LocalDateTime.of(2026, 6, 11, 10, 10), requestCaptor.getValue().getWindowEnd());
         assertEquals(3, requestCaptor.getValue().getMinIntervalMinutes());
+        verify(coverSelectionService).selectRandomCoverUrl(18L);
         verify(articleDraftMapper).updateById(article);
         verify(scheduleService).createSystemSchedules(any(), eq("project-auto-33-55"), eq(99L));
     }
