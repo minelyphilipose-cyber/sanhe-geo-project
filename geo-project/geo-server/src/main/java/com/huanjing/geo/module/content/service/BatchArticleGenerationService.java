@@ -246,6 +246,9 @@ public class BatchArticleGenerationService {
         if (checkAccess && project.getBrandId() != null) {
             brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
         }
+        if (checkAccess && isThirdPartySourceBrand(project.getBrandId())) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "第三方信源项目只能通过自媒体自动排期生成文章");
+        }
 
         String topicSource = StringUtils.hasText(req.getTopicSource()) ? req.getTopicSource().trim() : "manual";
         List<BatchArticleGenerateResponse.Notice> notices = new ArrayList<>();
@@ -356,6 +359,16 @@ public class BatchArticleGenerationService {
         boolean allocationChanged = notices.stream().anyMatch(notice -> "auto_allocation_changed".equals(notice.type()));
         boolean customSkipped = notices.stream().anyMatch(notice -> "custom_template_skipped".equals(notice.type()));
         return new BatchArticleGenerateResponse(batchId, totalCount, STATUS_PENDING, allocationChanged, customSkipped, notices);
+    }
+
+    private boolean isThirdPartySourceBrand(Long brandId) {
+        if (brandId == null) {
+            return false;
+        }
+        return brandMapper.selectThirdPartySourceBrands().stream()
+                .map(Brand::getId)
+                .filter(Objects::nonNull)
+                .anyMatch(brandId::equals);
     }
 
     public BatchArticleGenerationDetailResponse detail(Long batchId) {
@@ -730,7 +743,7 @@ public class BatchArticleGenerationService {
             draft.setTitle(title);
             applyMedicalDraftFields(draft, medicalContext, complianceStatus);
             if (ArticlePromptChannels.SELF_MEDIA.equals(task.getChannelGroupCode())) {
-                draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(project.getBrandId()));
+                draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(coverBrandId(project, task)));
             }
             draft.setStatus("approved");
             draft.setCurrentVersionNo(1);
@@ -761,6 +774,13 @@ public class BatchArticleGenerationService {
             articleGenerationLogMapper.insert(logRow);
             return draft.getId();
         }));
+    }
+
+    private Long coverBrandId(Project project, BatchArticleGenerationTask task) {
+        if (task != null && task.getSubjectBrandId() != null) {
+            return task.getSubjectBrandId();
+        }
+        return project == null ? null : project.getBrandId();
     }
 
     private Long persistDiscardedArticle(Project project,

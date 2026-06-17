@@ -141,6 +141,8 @@ class SelfMediaPublishScheduleServiceTest {
                 localAgentSessionMapper,
                 businessCalendarService,
                 thirdPartySubjectRotationService,
+                mock(ArticleTemplateAllocationService.class),
+                mock(TemplatePerspectiveService.class),
                 new ObjectMapper()
         );
     }

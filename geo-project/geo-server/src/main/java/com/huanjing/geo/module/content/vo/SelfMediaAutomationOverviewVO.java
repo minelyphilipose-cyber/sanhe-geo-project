@@ -92,6 +92,7 @@ public class SelfMediaAutomationOverviewVO {
         private long readySourceTotal;
         private long missingCoverageTotal;
         private long emptyCandidateTotal;
+        private long templateMissingTotal;
         private List<ThirdPartySubjectPoolSource> sources;
     }
 
@@ -106,5 +107,6 @@ public class SelfMediaAutomationOverviewVO {
         private String nextCandidateBrandName;
         private String status;
         private String message;
+        private List<String> blockingReasons;
     }
 }

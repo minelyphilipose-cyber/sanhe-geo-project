@@ -1411,6 +1411,7 @@ export interface SelfMediaAutomationOverview {
     readySourceTotal: number
     missingCoverageTotal: number
     emptyCandidateTotal: number
+    templateMissingTotal?: number
     sources: Array<{
       sourceBrandId: number
       sourceBrandName: string
@@ -1418,8 +1419,9 @@ export interface SelfMediaAutomationOverview {
       candidateCount: number
       excludedCount: number
       nextCandidateBrandName?: string | null
-      status: 'ready' | 'missing_coverage' | 'empty_candidate' | string
+      status: 'ready' | 'missing_coverage' | 'empty_candidate' | 'template_missing' | string
       message?: string | null
+      blockingReasons?: string[]
     }>
   } | null
 }
