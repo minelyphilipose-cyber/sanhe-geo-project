@@ -11,6 +11,7 @@ import com.huanjing.geo.module.content.credential.service.CredentialVaultService
 import com.huanjing.geo.module.content.dto.SelfMediaAccountManageRequest;
 import com.huanjing.geo.module.content.dto.WechatMpDevSeedRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.vo.SelfMediaAccountVO;
 import com.huanjing.geo.module.content.vo.WechatMpCapabilityVO;
@@ -46,6 +47,7 @@ public class SelfMediaAccountService {
     private final WechatAuthorizerTokenService authorizerTokenService;
     private final WechatComponentTicketService componentTicketService;
     private final CredentialVaultService credentialVaultService;
+    private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
     private final SelfMediaAccountPlatformEligibilityService platformEligibilityService;
@@ -244,6 +246,20 @@ public class SelfMediaAccountService {
         account.setUpdatedAt(LocalDateTime.now());
         selfMediaAccountMapper.updateById(account);
         return toVoWithCredentialStatus(account);
+    }
+
+    @Transactional
+    public void deleteAccount(Long id) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        SelfMediaAccount account = requireAccount(id);
+        brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
+        if (browserEnvironmentAccountMapper.selectActiveBySelfMediaAccountId(account.getId()) != null) {
+            throw new BizException(400, "请先解绑浏览器环境后再删除自媒体账号");
+        }
+        account.setDeletedBy(operator.getId());
+        account.setUpdatedAt(LocalDateTime.now());
+        selfMediaAccountMapper.updateById(account);
+        selfMediaAccountMapper.deleteById(account.getId());
     }
 
     private void checkMaterialCount(SelfMediaAccount account) {

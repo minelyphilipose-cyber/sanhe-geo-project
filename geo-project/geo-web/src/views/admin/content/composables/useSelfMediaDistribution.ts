@@ -412,10 +412,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       ElMessage.info(wechatCapability.value?.description || '微信公众号能力审核中，暂未开放授权')
       return
     }
-    if (!wechatQuickScheduleAvailable.value) {
-      ElMessage.info(wechatCapability.value?.description || '微信公众号自动发布未开启，暂不可创建快速排期')
-      return
-    }
     if (!wechatActive.value) {
       if (!mediaDistributeBrandId.value) {
         ElMessage.error('当前文章未绑定品牌，无法授权公众号')
@@ -426,6 +422,10 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
         redirectArticleId: mediaDistributeArticleId.value || undefined,
       })
       window.location.href = data.data.authUrl
+      return
+    }
+    if (!wechatQuickScheduleAvailable.value) {
+      ElMessage.info(wechatCapability.value?.description || '微信公众号自动发布未开启，暂不可创建快速排期')
       return
     }
     await submitPlatformQuickSchedule('wechat_mp')

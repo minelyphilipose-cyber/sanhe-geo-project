@@ -96,6 +96,21 @@ class WechatAuthorizerTokenServiceTest {
     }
 
     @Test
+    void getAccessToken_missingRefreshToken_marksAccountExpired() {
+        SelfMediaAccount account = account();
+        account.setRefreshTokenCipher(null);
+
+        BizException ex = assertThrows(BizException.class, () -> service.getAccessToken(account));
+
+        assertEquals(401, ex.getCode());
+        assertEquals("微信公众号授权信息缺失，请重新授权", ex.getMessage());
+        assertEquals("expired", account.getStatus());
+        assertEquals("微信公众号授权信息缺失，请重新授权", account.getLastAuthError());
+        assertNotNull(account.getLastAuthCheckedAt());
+        verify(accountMapper).updateById(account);
+    }
+
+    @Test
     void getAccessToken_concurrentCalls_refreshesOnlyOnce() throws Exception {
         SelfMediaAccount account = account();
         when(openPlatformClient.refreshAuthorizerToken("component-token", "component-appid", APPID, "refresh-token"))

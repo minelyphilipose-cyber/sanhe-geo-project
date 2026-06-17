@@ -5,7 +5,9 @@ import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.credential.dto.CookieCredentialMeta;
 import com.huanjing.geo.module.content.credential.service.CredentialVaultService;
 import com.huanjing.geo.module.content.dto.SelfMediaAccountManageRequest;
+import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.vo.WechatMpCapabilityVO;
 import com.huanjing.geo.module.content.wechat.WechatAuthorizerTokenService;
@@ -36,6 +38,7 @@ import static org.mockito.Mockito.when;
 class SelfMediaAccountServiceTest {
 
     private SelfMediaAccountMapper selfMediaAccountMapper;
+    private BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private CredentialVaultService credentialVaultService;
     private BrandAccessService brandAccessService;
     private CurrentUserService currentUserService;
@@ -45,6 +48,7 @@ class SelfMediaAccountServiceTest {
     @BeforeEach
     void setUp() {
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
+        browserEnvironmentAccountMapper = mock(BrowserEnvironmentAccountMapper.class);
         credentialVaultService = mock(CredentialVaultService.class);
         brandAccessService = mock(BrandAccessService.class);
         currentUserService = mock(CurrentUserService.class);
@@ -59,6 +63,7 @@ class SelfMediaAccountServiceTest {
                 mock(WechatAuthorizerTokenService.class),
                 mock(WechatComponentTicketService.class),
                 credentialVaultService,
+                browserEnvironmentAccountMapper,
                 brandAccessService,
                 currentUserService,
                 platformEligibilityService
@@ -163,6 +168,7 @@ class SelfMediaAccountServiceTest {
                 mock(WechatAuthorizerTokenService.class),
                 ticketService,
                 mock(CredentialVaultService.class),
+                mock(BrowserEnvironmentAccountMapper.class),
                 brandAccessService,
                 currentUserService,
                 mock(SelfMediaAccountPlatformEligibilityService.class)
@@ -199,6 +205,39 @@ class SelfMediaAccountServiceTest {
         verify(selfMediaAccountMapper).updateById(captor.capture());
         assertEquals("active", captor.getValue().getStatus());
         assertEquals("cookie credential cleared by operator", captor.getValue().getLastAuthError());
+    }
+
+    @Test
+    void deleteAccountRejectsWhenBrowserEnvironmentStillBound() {
+        SelfMediaAccount existing = new SelfMediaAccount();
+        existing.setId(20L);
+        existing.setBrandId(10L);
+        existing.setPlatform("toutiao");
+        existing.setAccountName("头条账号");
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(existing);
+        when(browserEnvironmentAccountMapper.selectActiveBySelfMediaAccountId(20L))
+                .thenReturn(new BrowserEnvironmentAccount());
+
+        var ex = assertThrows(com.huanjing.geo.common.exception.BizException.class, () -> service.deleteAccount(20L));
+
+        assertEquals("请先解绑浏览器环境后再删除自媒体账号", ex.getMessage());
+    }
+
+    @Test
+    void deleteAccountSoftDeletesWhenUnbound() {
+        SelfMediaAccount existing = new SelfMediaAccount();
+        existing.setId(20L);
+        existing.setBrandId(10L);
+        existing.setPlatform("toutiao");
+        existing.setAccountName("头条账号");
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(existing);
+
+        service.deleteAccount(20L);
+
+        verify(brandAccessService).requireBrandAccess(10L, 99L, BrandAccessAction.MANAGE);
+        verify(selfMediaAccountMapper).updateById(existing);
+        verify(selfMediaAccountMapper).deleteById(20L);
+        assertEquals(99L, existing.getDeletedBy());
     }
 
     @Test
