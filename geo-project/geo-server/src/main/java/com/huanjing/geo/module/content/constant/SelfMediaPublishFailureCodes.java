@@ -42,6 +42,9 @@ public final class SelfMediaPublishFailureCodes {
             entry("ARTICLE_ALREADY_PUBLISHED", "文章已发布，不能重复分发", false, "已发布或已分发文章不能再次创建自媒体排期。", "OPEN_ARTICLE", "查看文章", "navigate"),
             entry("ARTICLE_NOT_READY", "文章状态不允许排期", false, "仅已就绪或未发布文章可创建自动排期。", "OPEN_ARTICLE", "查看文章状态", "navigate"),
             entry("NO_AVAILABLE_ACCOUNT", "没有可用自媒体账号", false, "启用账号、补充账号绑定或更换平台后重新创建排期。", "OPEN_BRAND_SELF_MEDIA_ACCOUNTS", "配置自媒体账号", "navigate"),
+            entry("AUTH_EXPIRED", "平台授权已过期", false, "在品牌详情重新授权对应平台账号后重新创建排期。", "OPEN_BRAND_SELF_MEDIA_ACCOUNTS", "重新授权", "navigate"),
+            entry("CLIENT_ERROR", "平台账号或内容异常", false, "检查平台账号授权、文章内容和平台返回信息后重新创建排期。", "OPEN_DIAGNOSTICS", "查看诊断", "diagnostics"),
+            entry("WECHAT_API_UNAUTHORIZED", "微信公众号发布权限不足", false, "当前公众号缺少发布所需授权。请在品牌详情重新授权公众号，并确认授权时已勾选素材、草稿和发布相关权限。", "OPEN_BRAND_SELF_MEDIA_ACCOUNTS", "重新授权公众号", "navigate"),
             entry("PLATFORM_CAPABILITY_DISABLED", "平台排期能力未启用", false, "在排期能力管理中启用并验证该平台后重新创建排期。", "OPEN_SCHEDULE_CAPABILITY", "打开排期能力", "navigate"),
             entry("BACKEND_CLAIM_BLOCKED", "后台领取被阻塞", true, "检查本地助手领取状态和后台日志，等待自动重试。", "RETRY_NOW", "立即重试", "api"),
             entry("LOCAL_AGENT_OFFLINE", "本地助手离线", true, "确认本地助手和浏览器扩展在线后等待自动重试。", "OPEN_LOCAL_HELPER", "打开本地助手", "local"),
@@ -169,6 +172,9 @@ public final class SelfMediaPublishFailureCodes {
         }
         if (containsAny(text, "没有可用账号", "暂无可用账号")) {
             return "NO_AVAILABLE_ACCOUNT";
+        }
+        if (containsAny(text, "api unauthorized", "48001")) {
+            return "WECHAT_API_UNAUTHORIZED";
         }
         if (containsAny(text, "平台能力", "能力未启用")) {
             return "PLATFORM_CAPABILITY_DISABLED";

@@ -30,6 +30,8 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     public static final String PLATFORM = "wechat_mp";
+    private static final int WECHAT_API_UNAUTHORIZED_CODE = 48001;
+    private static final String WECHAT_API_UNAUTHORIZED = "WECHAT_API_UNAUTHORIZED";
 
     private final WechatArticleRenderService articleRenderService;
     private final WechatHtmlRewriter htmlRewriter;
@@ -136,7 +138,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
             submitResult.setReviewStatus(ReviewStatusResult.ReviewStatus.NOT_APPLICABLE);
             return submitResult;
         } catch (BizException ex) {
-            return SubmitResult.failure(ex.getCode(), requestPayload, null, ex.getMessage(), failureKind(ex.getCode()), retryable(ex.getCode()));
+            return SubmitResult.failure(ex.getCode(), requestPayload, null, ex.getMessage(), failureKind(ex.getCode(), ex.getMessage()), retryable(ex.getCode()));
         } catch (Exception ex) {
             return SubmitResult.failure(500, requestPayload, null, safeMessage(ex), FailureKind.UNKNOWN, false);
         }
@@ -242,7 +244,10 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
         return true;
     }
 
-    private String failureKind(int code) {
+    private String failureKind(int code, String message) {
+        if (code == WECHAT_API_UNAUTHORIZED_CODE || containsIgnoreCase(message, "api unauthorized")) {
+            return WECHAT_API_UNAUTHORIZED;
+        }
         if (code == 40001 || code == 42001) {
             return FailureKind.AUTH_EXPIRED;
         }
@@ -256,7 +261,16 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     }
 
     private boolean retryable(int code) {
+        if (code == WECHAT_API_UNAUTHORIZED_CODE) {
+            return false;
+        }
         return code == 40001 || code == 42001 || code == 45009 || code == 45011 || code == 429 || code >= 500;
+    }
+
+    private boolean containsIgnoreCase(String value, String needle) {
+        return StringUtils.hasText(value)
+                && StringUtils.hasText(needle)
+                && value.toLowerCase(java.util.Locale.ROOT).contains(needle.toLowerCase(java.util.Locale.ROOT));
     }
 
     private String firstText(String first, String second) {
