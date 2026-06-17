@@ -46,9 +46,10 @@ public class ProjectController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String stage,
             @RequestParam(required = false) Long partnerId,
-            @RequestParam(required = false) Long brandId
+            @RequestParam(required = false) Long brandId,
+            @RequestParam(defaultValue = "false") boolean excludeThirdPartySource
     ) {
-        return R.ok(projectService.page(current, size, keyword, status, stage, partnerId, brandId));
+        return R.ok(projectService.page(current, size, keyword, status, stage, partnerId, brandId, excludeThirdPartySource));
     }
 
     @GetMapping("/channel-allocation-quota")

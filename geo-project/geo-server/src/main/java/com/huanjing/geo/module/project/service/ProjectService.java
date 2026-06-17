@@ -82,11 +82,13 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -135,9 +137,14 @@ public class ProjectService {
     private final KeywordTypeConfigService keywordTypeConfigService;
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
+        return page(current, size, keyword, status, stage, partnerId, brandId, false);
+    }
+
+    public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId, boolean excludeThirdPartySource) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         expireOverdueProjects();
+        List<Long> thirdPartySourceBrandIds = excludeThirdPartySource ? thirdPartySourceBrandIds() : List.of();
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<Project>()
                 .isNull(Project::getDeletedAt)
                 .orderByDesc(Project::getCreatedAt);
@@ -157,6 +164,9 @@ public class ProjectService {
         }
         if (brandId != null) {
             wrapper.eq(Project::getBrandId, brandId);
+        }
+        if (!thirdPartySourceBrandIds.isEmpty()) {
+            wrapper.notIn(Project::getBrandId, thirdPartySourceBrandIds);
         }
 
         Long scopePartnerId = currentUserService.resolvePartnerQueryScope(user, partnerId);
@@ -181,6 +191,7 @@ public class ProjectService {
 
         Page<Project> page = projectMapper.selectPage(new Page<>(current, size), wrapper);
         page.getRecords().forEach(this::refreshProjectExpiration);
+        attachThirdPartySourceFlag(page.getRecords(), thirdPartySourceBrandIds);
         attachPlatformSelections(page.getRecords());
         attachCustomerRequirements(page.getRecords());
         attachKeywordGroupSelections(page.getRecords());
@@ -195,11 +206,36 @@ public class ProjectService {
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
         internalScopeService.ensureProjectAccess(user, project, "project");
         ensureSalesProjectAccess(user, project);
+        attachThirdPartySourceFlag(Collections.singletonList(project), List.of());
         attachPlatformSelections(Collections.singletonList(project));
         attachCustomerRequirements(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
         channelAllocationService.attachAllocations(Collections.singletonList(project));
         return project;
+    }
+
+    private void attachThirdPartySourceFlag(List<Project> projects, List<Long> knownThirdPartySourceBrandIds) {
+        if (projects == null || projects.isEmpty()) {
+            return;
+        }
+        List<Long> sourceBrandIds = knownThirdPartySourceBrandIds == null || knownThirdPartySourceBrandIds.isEmpty()
+                ? thirdPartySourceBrandIds()
+                : knownThirdPartySourceBrandIds;
+        if (sourceBrandIds.isEmpty()) {
+            projects.forEach(project -> project.setThirdPartySource(false));
+            return;
+        }
+        Set<Long> sourceBrandIdSet = new HashSet<>(sourceBrandIds);
+        projects.forEach(project -> project.setThirdPartySource(project.getBrandId() != null
+                && sourceBrandIdSet.contains(project.getBrandId())));
+    }
+
+    private List<Long> thirdPartySourceBrandIds() {
+        return brandMapper.selectThirdPartySourceBrands().stream()
+                .map(Brand::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
     }
 
     @Transactional

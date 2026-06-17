@@ -34,6 +34,8 @@ public class Project {
     private BigDecimal packagePrice;
     @TableField(exist = false)
     private Integer serviceMonths;
+    @TableField(exist = false)
+    private Boolean thirdPartySource;
     private Integer planKeywordGroupLimit;
     private Integer planKeywordGroupLimitA;
     private Integer planKeywordGroupLimitB;
