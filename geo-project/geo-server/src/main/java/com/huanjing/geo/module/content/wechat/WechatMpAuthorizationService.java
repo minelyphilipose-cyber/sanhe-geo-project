@@ -44,12 +44,16 @@ public class WechatMpAuthorizationService {
                 openPlatformClient.createPreAuthCode(componentToken, componentAppid);
         String callback = require(properties.getBackendAuthCallbackUrl(), "wechat backend auth callback url missing");
         String state = createState(brandId, redirectArticleId);
+        String callbackWithState = UriComponentsBuilder.fromUriString(callback)
+                .queryParam("state", state)
+                .build()
+                .encode()
+                .toUriString();
         String authUrl = UriComponentsBuilder.fromUriString(AUTH_PAGE)
                 .queryParam("component_appid", componentAppid)
                 .queryParam("pre_auth_code", preAuth.preAuthCode())
-                .queryParam("redirect_uri", callback)
+                .queryParam("redirect_uri", callbackWithState)
                 .queryParam("auth_type", properties.getAuthType())
-                .queryParam("state", state)
                 .build()
                 .encode()
                 .toUriString();

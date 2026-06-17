@@ -996,6 +996,9 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       const requestId = createRequestId(`env_${account.platform}`)
       const taskResult = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
         selfMediaAccountId: account.id,
+        platformOptions: account.platform === 'wechat_mp' || account.platform === 'wechat'
+          ? { publishAction: 'publish' }
+          : undefined,
         requestId,
       })
       const backendTask = taskResult.data.data

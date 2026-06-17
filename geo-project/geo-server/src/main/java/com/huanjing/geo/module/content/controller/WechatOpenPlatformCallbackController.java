@@ -27,7 +27,7 @@ public class WechatOpenPlatformCallbackController {
 
     @GetMapping("/auth/callback")
     public ResponseEntity<Void> authCallback(@RequestParam(name = "auth_code") String authCode,
-                                             @RequestParam String state) {
+                                             @RequestParam(required = false) String state) {
         String location;
         try {
             location = authorizationService.handleCallback(authCode, state);
