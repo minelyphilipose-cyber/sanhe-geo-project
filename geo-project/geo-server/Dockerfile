@@ -68,6 +68,9 @@ FROM eclipse-temurin:17-jre-jammy
 
 ENV TZ=Asia/Shanghai
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+# Browsers are installed during image build. Do not try to download them again
+# at runtime, where the container may not have network access.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # Chromium runs as a non-root user in containers; keep sandboxing disabled unless the host grants extra capabilities.
 ENV PLAYWRIGHT_CHROMIUM_LAUNCH_ARGS="--no-sandbox --disable-dev-shm-usage"
 
@@ -129,10 +132,10 @@ RUN set -eux; \
 WORKDIR /app
 
 # 从 builder 阶段拷贝预装好的 Playwright 浏览器和应用产物
-COPY --from=builder /opt/playwright-browsers /opt/playwright-browsers
-COPY --from=builder /build/target/geo-server.jar /app/geo-server.jar
-
-RUN chown -R appuser:appuser /app /opt/playwright-browsers
+COPY --from=builder --chown=appuser:appuser /opt/playwright-browsers /opt/playwright-browsers
+COPY --from=builder --chown=appuser:appuser /build/target/geo-server.jar /app/geo-server.jar
+RUN set -eux; \
+    chown -R appuser:appuser /opt/playwright-browsers /app/data/presale-exports /app/logs
 
 EXPOSE 8080
 

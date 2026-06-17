@@ -93,7 +93,7 @@ public class PresaleReportExportWorker {
             }
 
             Path workDir = Path.of(properties.getStorage().getLocalRoot(), String.valueOf(exportId));
-            Files.createDirectories(workDir);
+            prepareWorkDir(exportId, workDir);
             Path pdfPath = workDir.resolve("report.pdf");
             debugDir = workDir.resolve("debug");
             String renderUrl = buildRenderUrl(token.token());
@@ -137,8 +137,10 @@ public class PresaleReportExportWorker {
         } catch (ExportRenderConcurrencyException ex) {
             requeue(exportId, ex.getMessage());
         } catch (Exception ex) {
-            String debugKey = debugPackageService.retainFailureDebugPackage(exportId, debugDir, ex.getMessage());
-            markFailed(exportId, "RENDER_FAILED", ex.getMessage(), debugKey, readMetricsJson(debugDir));
+            String failureMessage = failureMessage(ex);
+            log.error("Presale export render failed: exportId={}, error={}", exportId, failureMessage, ex);
+            String debugKey = debugPackageService.retainFailureDebugPackage(exportId, debugDir, failureMessage);
+            markFailed(exportId, "RENDER_FAILED", failureMessage, debugKey, readMetricsJson(debugDir));
         } finally {
             heartbeat.shutdownNow();
             if (token != null) {
@@ -160,6 +162,45 @@ public class PresaleReportExportWorker {
         task.setRenderTokenId(token.tokenId());
         exportMapper.updateById(task);
         return token;
+    }
+
+    private void prepareWorkDir(Long exportId, Path workDir) throws Exception {
+        Path parent = workDir.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        if (Files.exists(workDir) && !Files.isDirectory(workDir)) {
+            log.warn("Presale export work path is a file, deleting before retry: exportId={}, path={}",
+                    exportId, workDir);
+            Files.delete(workDir);
+        }
+        Files.createDirectories(workDir);
+    }
+
+    private String failureMessage(Throwable ex) {
+        if (ex == null) {
+            return "Render failed";
+        }
+        StringBuilder message = new StringBuilder(ex.getClass().getSimpleName());
+        if (ex.getMessage() != null && !ex.getMessage().isBlank()) {
+            message.append(": ").append(ex.getMessage());
+        }
+        Throwable root = rootCause(ex);
+        if (root != ex) {
+            message.append("; rootCause=").append(root.getClass().getSimpleName());
+            if (root.getMessage() != null && !root.getMessage().isBlank()) {
+                message.append(": ").append(root.getMessage());
+            }
+        }
+        return message.toString();
+    }
+
+    private Throwable rootCause(Throwable ex) {
+        Throwable current = ex;
+        for (int i = 0; i < 12 && current.getCause() != null; i++) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private void markSuccess(Long exportId, String pdfKey, ExportRenderResult result, long fileSize) {
