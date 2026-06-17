@@ -22,6 +22,7 @@ export function getProjectList(params: {
   stage?: string
   partnerId?: number
   brandId?: number
+  excludeThirdPartySource?: boolean
 }) {
   return request.get<R<PageResult<Project>>>('/projects', { params })
 }

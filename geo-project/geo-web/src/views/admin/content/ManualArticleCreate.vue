@@ -1072,8 +1072,9 @@ async function loadProjectOptions() {
       current: 1,
       size: 500,
       status: 'active',
+      excludeThirdPartySource: true,
     })
-    projectOptions.value = mergeProjects(projectOptions.value, data.data.records || [])
+    projectOptions.value = mergeProjects(projectOptions.value, filterManualSelectableProjects(data.data.records || []))
   } catch (err) {
     console.error(err)
     projectOptions.value = []
@@ -1105,6 +1106,11 @@ async function ensureSelectedProjectDetail() {
   if (project?.selectedKeywordGroups !== undefined && project.coreKeywords !== undefined) return
   try {
     const { data } = await getProjectDetail(projectId)
+    if (isThirdPartySourceProject(data.data)) {
+      manualForm.projectId = undefined
+      ElMessage.warning('第三方信源项目不支持手动生成文章，请通过自媒体自动排期触发')
+      return
+    }
     projectOptions.value = mergeProjects([data.data], projectOptions.value)
   } catch (err) {
     console.error(err)
@@ -1231,6 +1237,10 @@ function templateMetadataText(key: string) {
 async function loadInheritedProject(projectId: number) {
   try {
     const { data } = await getProjectDetail(projectId)
+    if (isThirdPartySourceProject(data.data)) {
+      ElMessage.warning('第三方信源项目不支持手动生成文章，请重新选择客户项目')
+      return
+    }
     projectOptions.value = mergeProjects([data.data], projectOptions.value)
     manualForm.projectId = data.data.id
   } catch (err) {
@@ -1241,10 +1251,18 @@ async function loadInheritedProject(projectId: number) {
 
 function mergeProjects(primary: Project[], secondary: Project[]) {
   const map = new Map<number, Project>()
-  for (const item of [...secondary, ...primary]) {
+  for (const item of filterManualSelectableProjects([...secondary, ...primary])) {
     map.set(item.id, item)
   }
   return Array.from(map.values())
+}
+
+function filterManualSelectableProjects(projects: Project[]) {
+  return projects.filter((project) => !isThirdPartySourceProject(project))
+}
+
+function isThirdPartySourceProject(project?: Project | null) {
+  return project?.thirdPartySource === true
 }
 
 interface ProjectCascadeNode {
@@ -1405,6 +1423,11 @@ async function loadQuestionPicker() {
     let project = selectedProject.value
     if (!project?.selectedKeywordGroups?.length) {
       const { data } = await getProjectDetail(projectId)
+      if (isThirdPartySourceProject(data.data)) {
+        manualForm.projectId = undefined
+        ElMessage.warning('第三方信源项目不支持手动生成文章，请重新选择客户项目')
+        return
+      }
       projectOptions.value = mergeProjects([data.data], projectOptions.value)
       project = data.data
     }

@@ -310,6 +310,7 @@ export interface Project {
   selectedKeywordGroups?: KeywordGroup[]
   channelAllocations?: ProjectChannelAllocationItem[]
   allocationVersion?: number
+  thirdPartySource?: boolean | null
   // 鍏宠仈灞曠ず瀛楁
   brandName?: string
   companyName?: string

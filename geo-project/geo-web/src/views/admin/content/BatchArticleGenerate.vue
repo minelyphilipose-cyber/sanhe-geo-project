@@ -771,6 +771,10 @@ function applySuggestedPlatformDefaults(topic: SelectedTopic) {
 }
 
 async function handleBatchProjectChange() {
+  if (isThirdPartySourceProject(selectedBatchProject.value)) {
+    batchForm.projectId = undefined
+    ElMessage.warning('第三方信源项目不支持手动批量生成文章，请通过自媒体自动排期触发')
+  }
   selectedTopics.value = []
   selectedQuestionRows.value = []
   batchQuestionRows.value = []
@@ -1015,8 +1019,8 @@ function agentSiteModuleText(value?: string | null) {
 async function loadProjectOptions() {
   projectLoading.value = true
   try {
-    const { data } = await getProjectList({ current: 1, size: 500, status: 'active' })
-    projectOptions.value = mergeProjects(projectOptions.value, data.data.records || [])
+    const { data } = await getProjectList({ current: 1, size: 500, status: 'active', excludeThirdPartySource: true })
+    projectOptions.value = mergeProjects(projectOptions.value, filterBatchSelectableProjects(data.data.records || []))
   } catch (err) {
     console.error(err)
     projectOptions.value = []
@@ -1231,10 +1235,18 @@ function openPlatformTemplates(platform: ContentStyleOption) {
 
 function mergeProjects(primary: Project[], secondary: Project[]) {
   const map = new Map<number, Project>()
-  for (const item of [...primary, ...secondary]) {
+  for (const item of filterBatchSelectableProjects([...primary, ...secondary])) {
     map.set(item.id, item)
   }
   return Array.from(map.values())
+}
+
+function filterBatchSelectableProjects(projects: Project[]) {
+  return projects.filter((project) => !isThirdPartySourceProject(project))
+}
+
+function isThirdPartySourceProject(project?: Project | null) {
+  return project?.thirdPartySource === true
 }
 
 function buildProjectCascadeOptions(projects: Project[]): ProjectCascadeNode[] {
@@ -1308,6 +1320,11 @@ async function loadBatchQuestionPicker() {
     let project = selectedBatchProject.value
     if (!project?.selectedKeywordGroups?.length) {
       const { data } = await getProjectDetail(projectId)
+      if (isThirdPartySourceProject(data.data)) {
+        batchForm.projectId = undefined
+        ElMessage.warning('第三方信源项目不支持手动批量生成文章，请通过自媒体自动排期触发')
+        return
+      }
       projectOptions.value = mergeProjects([data.data], projectOptions.value)
       project = data.data
     }
@@ -1417,6 +1434,10 @@ function questionSourceTypeLabel(row: ArticleQuestionOption) {
 }
 
 async function submitBatchGeneration() {
+  if (isThirdPartySourceProject(selectedBatchProject.value)) {
+    ElMessage.warning('第三方信源项目不支持手动批量生成文章，请通过自媒体自动排期触发')
+    return
+  }
   if (isBatchCountExceeded.value) {
     ElMessage.warning(`单次批量生成最多 ${MAX_BATCH_ARTICLE_COUNT} 篇文章，请减少生成条数`)
     return
