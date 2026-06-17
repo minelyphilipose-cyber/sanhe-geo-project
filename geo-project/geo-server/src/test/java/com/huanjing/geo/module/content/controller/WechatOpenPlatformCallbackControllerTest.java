@@ -18,6 +18,7 @@ class WechatOpenPlatformCallbackControllerTest {
     private WechatOpenPlatformEventService eventService;
     private WechatOpenPlatformMessageService messageService;
     private WechatMessageCryptoService cryptoService;
+    private WechatMpAuthorizationService authorizationService;
     private WechatOpenPlatformCallbackController controller;
 
     @BeforeEach
@@ -25,12 +26,28 @@ class WechatOpenPlatformCallbackControllerTest {
         eventService = mock(WechatOpenPlatformEventService.class);
         messageService = mock(WechatOpenPlatformMessageService.class);
         cryptoService = mock(WechatMessageCryptoService.class);
+        authorizationService = mock(WechatMpAuthorizationService.class);
         controller = new WechatOpenPlatformCallbackController(
                 eventService,
                 messageService,
                 cryptoService,
-                mock(WechatMpAuthorizationService.class)
+                authorizationService
         );
+    }
+
+    @Test
+    void authCallbackMissingStateRedirectsToFailurePage() {
+        when(authorizationService.handleCallback("auth-code", null))
+                .thenThrow(new BizException(400, "wechat auth state missing"));
+        when(authorizationService.errorRedirect("callback_failed"))
+                .thenReturn("https://front.example/admin/content/execution?wechatAuth=callback_failed");
+
+        var response = controller.authCallback("auth-code", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(302);
+        assertThat(response.getHeaders().getLocation().toString())
+                .isEqualTo("https://front.example/admin/content/execution?wechatAuth=callback_failed");
+        verify(authorizationService).handleCallback("auth-code", null);
     }
 
     @Test

@@ -85,59 +85,6 @@
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span>官方 API 自媒体授权</span>
-            <el-tag type="success">微信公众号</el-tag>
-          </div>
-          <el-button
-            v-if="canUpdateBrand"
-            type="primary"
-            link
-            :loading="wechatAuthorizing"
-            @click="authorizeWechatMp"
-          >
-            {{ wechatOfficialAccounts.length ? '重新授权公众号' : '授权公众号' }}
-          </el-button>
-        </div>
-      </template>
-      <el-alert
-        class="mb-3"
-        type="info"
-        show-icon
-        :closable="false"
-        title="微信公众号通过微信第三方平台官方授权保存账号凭证，不需要配置浏览器环境。授权后文章会直接发送到当前客户绑定的公众号账号。"
-      />
-      <el-table v-loading="selfMediaAccountsLoading" :data="wechatOfficialAccounts" border empty-text="当前客户尚未授权微信公众号">
-        <el-table-column prop="accountName" label="账号名称" min-width="180" />
-        <el-table-column prop="status" label="授权状态" width="120">
-          <template #default="{ row }">
-            <el-tag size="small" :type="officialAccountStatusTag(row)">
-              {{ officialAccountStatusLabel(row) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="lastAuthCheckedAt" label="最近检测" min-width="180">
-          <template #default="{ row }">{{ row.lastAuthCheckedAt || '-' }}</template>
-        </el-table-column>
-        <el-table-column label="异常原因" min-width="240">
-          <template #default="{ row }">{{ row.lastAuthError || '-' }}</template>
-        </el-table-column>
-        <el-table-column v-if="canUpdateBrand" label="操作" width="190" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" :loading="wechatAuthorizing" @click="authorizeWechatMp">
-              重新授权
-            </el-button>
-            <el-button link type="danger" @click="deleteSelfMediaAccountRecord(row)">
-              删除记录
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <el-card class="admin-table-card">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
             <span>产品信息</span>
             <el-tag type="info">产品 / 服务项目 / 特色业务项</el-tag>
           </div>
@@ -358,8 +305,74 @@
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span>自媒体账号</span>
-            <el-tag type="info">公众号 / 抖音图文 / 头条 / 百家号 / 知乎 / 小红书</el-tag>
+            <span>官方 API 自媒体账号</span>
+            <el-tag type="success">公众号 / 抖音图文</el-tag>
+          </div>
+          <div class="flex items-center gap-2">
+            <el-button
+              v-if="canUpdateBrand"
+              type="primary"
+              link
+              :loading="wechatAuthorizing"
+              @click="authorizeWechatMp"
+            >
+              {{ hasWechatSelfMediaAccount ? '重新授权公众号' : '授权公众号' }}
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <el-alert
+        class="mb-3"
+        type="info"
+        show-icon
+        :closable="false"
+        title="官方 API 账号通过平台授权保存凭证，不需要绑定指纹浏览器环境；授权有效时文章可直接发送到客户对应平台账号。"
+      />
+      <el-table v-loading="selfMediaAccountsLoading" :data="officialApiSelfMediaAccounts" border empty-text="当前客户尚未授权官方 API 自媒体账号">
+        <el-table-column prop="platform" label="平台" width="120">
+          <template #default="{ row }">{{ selfMediaPlatformLabel(row.platform) }}</template>
+        </el-table-column>
+        <el-table-column prop="accountName" label="账号名称" min-width="180" />
+        <el-table-column prop="status" label="授权状态" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="officialAccountStatusTag(row)">
+              {{ officialAccountStatusLabel(row) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="lastAuthCheckedAt" label="最近检测" min-width="180">
+          <template #default="{ row }">{{ row.lastAuthCheckedAt || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="异常原因" min-width="240">
+          <template #default="{ row }">
+            <span :class="{ 'table-error-text': row.lastAuthError }">{{ row.lastAuthError || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="canUpdateBrand" label="操作" width="190" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.platform === 'wechat_mp' || row.platform === 'wechat'"
+              link
+              type="primary"
+              :loading="wechatAuthorizing"
+              @click="authorizeWechatMp"
+            >
+              重新授权
+            </el-button>
+            <el-button link type="danger" @click="deleteSelfMediaAccountRecord(row)">
+              删除记录
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card class="admin-table-card">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span>指纹浏览器自媒体账号</span>
+            <el-tag type="info">头条 / 百家号 / 知乎 / 小红书</el-tag>
           </div>
           <div class="flex items-center gap-2">
             <el-button
@@ -401,7 +414,7 @@
           ? `当前默认环境：${browserEnvironmentOptionLabel(defaultBrowserEnvironment)}。新增账号将自动绑定该环境，绑定后需在对应平台完成登录，环境内扩展会自动上报登录状态。`
           : '请先配置并启用品牌 AdsPower 浏览器环境；新增账号后需要绑定环境并完成平台登录，扩展自动上报登录状态后才能分发。'"
       />
-      <el-table v-loading="selfMediaAccountsLoading" :data="semiAutoSelfMediaAccounts" border>
+      <el-table v-loading="selfMediaAccountsLoading" :data="environmentSelfMediaAccounts" border empty-text="当前客户尚未配置需要指纹浏览器登录的自媒体账号">
         <el-table-column prop="platform" label="平台" width="110">
           <template #default="{ row }">{{ selfMediaPlatformLabel(row.platform) }}</template>
         </el-table-column>
@@ -415,8 +428,8 @@
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
-              {{ row.status === 'active' ? '启用' : '停用' }}
+            <el-tag size="small" :type="selfMediaAccountStatusTag(row)">
+              {{ selfMediaAccountStatusLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -1407,8 +1420,14 @@ const subOptions: Record<string, Array<{ label: string; value: string }>> = {
 const semiAutoSelfMediaAccounts = computed(() =>
   selfMediaAccounts.value.filter((item) => isSemiAutoPlatform(item.platform)),
 )
-const wechatOfficialAccounts = computed(() =>
-  selfMediaAccounts.value.filter((item) => item.platform === 'wechat_mp' || item.platform === 'wechat'),
+const officialApiSelfMediaAccounts = computed(() =>
+  selfMediaAccounts.value.filter((item) => isOfficialApiSelfMediaPlatform(item.platform)),
+)
+const environmentSelfMediaAccounts = computed(() =>
+  semiAutoSelfMediaAccounts.value.filter((item) => !isOfficialApiSelfMediaPlatform(item.platform)),
+)
+const hasWechatSelfMediaAccount = computed(() =>
+  selfMediaAccounts.value.some((item) => isOfficialApiSelfMediaPlatform(item.platform)),
 )
 const eligibleSelfMediaPlatformOptions = computed(() =>
   selfMediaAccountPlatformOptions.value.filter((item) => item.eligible),
@@ -1463,7 +1482,7 @@ const selfMediaAccountRequirement = computed(() => {
 const activeBrowserEnvironments = computed(() => browserEnvironments.value.filter((item) => item.status === 'active'))
 const defaultBrowserEnvironment = computed(() => activeBrowserEnvironments.value[0] || null)
 const hasUnboundSemiAutoAccounts = computed(() =>
-  semiAutoSelfMediaAccounts.value.some((account) => !browserEnvironmentAccountOf(account)),
+  environmentSelfMediaAccounts.value.some((account) => !browserEnvironmentAccountOf(account)),
 )
 const automationAccountTotal = computed(() => automationReadiness.value?.accounts?.length || 0)
 const automationAccountReadyCount = computed(() =>
@@ -1643,6 +1662,10 @@ function selfMediaPlatformLabel(value?: string | null) {
   return value || '-'
 }
 
+function isOfficialApiSelfMediaPlatform(value?: string | null) {
+  return value === 'wechat_mp' || value === 'wechat' || value === 'douyin'
+}
+
 function officialAccountStatusLabel(account: SelfMediaAccount) {
   const map: Record<string, string> = {
     active: '授权有效',
@@ -1658,6 +1681,20 @@ function officialAccountStatusTag(account: SelfMediaAccount): 'success' | 'warni
   if (account.status === 'expired') return 'warning'
   if (account.status === 'revoked' || account.status === 'disabled') return 'danger'
   return 'info'
+}
+
+function selfMediaAccountStatusLabel(account: SelfMediaAccount) {
+  if (isOfficialApiSelfMediaPlatform(account.platform)) {
+    return officialAccountStatusLabel(account)
+  }
+  return account.status === 'active' ? '启用' : '停用'
+}
+
+function selfMediaAccountStatusTag(account: SelfMediaAccount): 'success' | 'warning' | 'danger' | 'info' {
+  if (isOfficialApiSelfMediaPlatform(account.platform)) {
+    return officialAccountStatusTag(account)
+  }
+  return account.status === 'active' ? 'success' : 'info'
 }
 
 function optionLabel(option: SelfMediaAccountPlatformOption) {
@@ -1931,7 +1968,7 @@ async function bindAllUnboundSemiAutoAccounts() {
     ElMessage.warning('请先配置并启用品牌 AdsPower 浏览器环境')
     return
   }
-  const targets = semiAutoSelfMediaAccounts.value.filter((account) => !browserEnvironmentAccountOf(account))
+  const targets = environmentSelfMediaAccounts.value.filter((account) => !browserEnvironmentAccountOf(account))
   if (!targets.length) {
     ElMessage.success('所有头条/百家号/知乎/小红书账号均已绑定浏览器环境')
     return
@@ -2528,7 +2565,7 @@ async function authorizeWechatMp() {
 }
 
 async function loadBrowserEnvironmentAccounts(accounts: SemiAutoSelfMediaAccount[]) {
-  const targets = accounts.filter((item) => isSemiAutoPlatform(item.platform))
+  const targets = accounts.filter((item) => isSemiAutoPlatform(item.platform) && !isOfficialApiSelfMediaPlatform(item.platform))
   if (!targets.length) {
     browserEnvironmentAccounts.value = {}
     return
@@ -3044,6 +3081,14 @@ onMounted(async () => {
   color: #64748b;
   font-size: 12px;
   line-height: 1.35;
+}
+
+.table-subtext.is-error {
+  color: #ef4444;
+}
+
+.table-error-text {
+  color: #ef4444;
 }
 
 .subject-pool-wrap {
