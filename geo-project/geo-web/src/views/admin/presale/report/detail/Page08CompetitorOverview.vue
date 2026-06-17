@@ -46,18 +46,26 @@
           <div class="p08-empty-copy">下方仍保留竞品提及与点名比较结果，便于判断整体竞争位置。</div>
         </div>
 
-        <div v-if="showScoreboard" class="p08-count-section" :class="`p08-count-${layoutMode}`">
-          <div class="p08-section-title">{{ barSectionTitle }}</div>
-          <div v-if="barRows.length" class="p08-bars">
-            <div v-for="row in barRows" :key="row.name" class="p08-bar-row" :class="{ 'is-self': row.isSelf }">
-              <div class="p08-bar-name">{{ row.name }}</div>
-              <div class="p08-bar-track">
-                <div class="p08-bar-fill" :style="{ width: `${row.width}%` }"></div>
+        <div v-if="showCompetitorBenchmark" class="p08-count-section" :class="`p08-count-${layoutMode}`">
+          <div class="p08-section-title">AI 推荐答案里的竞品对标</div>
+          <div class="p08-benchmark-list">
+            <div v-for="row in competitorBenchmarkRows" :key="row.name" class="p08-benchmark-row">
+              <div class="p08-benchmark-main">
+                <div class="p08-bar-name">{{ row.name }}</div>
+                <div class="p08-bar-track">
+                  <div class="p08-bar-fill" :style="{ width: `${row.width}%` }"></div>
+                </div>
+                <div class="p08-bar-value">
+                  <span>{{ row.primaryCount }}</span>
+                  <small>推荐提及</small>
+                </div>
               </div>
-              <div class="p08-bar-value">{{ row.value }}平台</div>
+              <div class="p08-benchmark-meta">
+                <span>{{ row.recommendationLabel }}</span>
+                <span>{{ row.comparisonLabel }}</span>
+              </div>
             </div>
           </div>
-          <div v-else class="p08-empty-copy">暂无可展示的平台累计点名次数。</div>
         </div>
 
         <div v-if="showHeroSelfBlock" class="p08-self-block">
@@ -67,7 +75,7 @@
           </div>
           <div class="p08-self-count">
             <span>{{ selfPlatformPresenceCount }}</span>
-            <small> 平台</small>
+            <small> 推荐提及</small>
           </div>
         </div>
 
@@ -170,11 +178,12 @@ const platformPresenceRows = computed(() =>
       name: item.name,
       value: platformPresenceByCompetitor.value[item.name] || 0
     }))
-    .filter((item) => item.value > 0)
     .sort((a, b) => b.value - a.value)
 )
 
-const displayCompetitorCount = computed(() => platformPresenceRows.value.length)
+const displayCompetitorCount = computed(() =>
+  platformPresenceRows.value.filter((item) => item.value > 0).length
+)
 const displayPlatformTotal = computed(() =>
   platformPresenceRows.value.reduce((sum, item) => sum + item.value, 0)
 )
@@ -197,29 +206,65 @@ const layoutMode = computed<Page08LayoutMode>(() => {
 })
 
 const showEvidenceCard = computed(() => layoutMode.value === 'full' || layoutMode.value === 'compact')
-const showScoreboard = computed(() => layoutMode.value === 'full' || layoutMode.value === 'compact')
+const showCompetitorBenchmark = computed(() => competitorBenchmarkRows.value.length > 0)
 const showHeroSelfBlock = computed(() => layoutMode.value === 'full')
 
-const barRows = computed(() => {
-  const competitorRows = platformPresenceRows.value.slice(0, 3)
-  const rows = [
-    ...competitorRows.map((row) => ({ ...row, isSelf: false })),
-    { name: `${brandName.value}（你）`, value: selfPlatformPresenceCount.value, isSelf: true }
-  ]
-  const max = Math.max(1, ...rows.map((row) => row.value))
-
-  return rows.map((row) => ({
-    ...row,
-    width: row.value <= 0 ? 0 : Math.round((row.value / max) * 100)
-  }))
+const recommendationPresenceByCompetitor = computed<Record<string, number>>(() => {
+  const counts: Record<string, number> = {}
+  const scenes = pressure.value?.items || []
+  scenes.forEach(item => {
+    item.competitors?.forEach(competitor => {
+      if (!competitor.name || !competitorNameSet.value.has(competitor.name)) return
+      if ((competitor.mentioned_platform_count || 0) <= 0) return
+      counts[competitor.name] = (counts[competitor.name] || 0) + (competitor.mentioned_platform_count || 0)
+    })
+  })
+  return counts
 })
 
-const barSectionTitle = computed(() => '在你缺席的推荐场景中，被 AI 点名的平台次数')
+const competitorBenchmarkRows = computed(() => {
+  const rows = sortedCompetitors.value
+    .map((row) => ({
+      row,
+      recommendationCount: recommendationPresenceByCompetitor.value[row.name] || 0,
+      absentCount: platformPresenceByCompetitor.value[row.name] || 0
+    }))
+    .sort((a, b) => {
+      const recommendationDiff = b.recommendationCount - a.recommendationCount
+      if (recommendationDiff !== 0) return recommendationDiff
+      return (b.row.mention_count || 0) - (a.row.mention_count || 0)
+    })
+    .slice(0, 3)
+  const maxRecommendation = Math.max(1, ...rows.map((item) => item.recommendationCount))
+  return rows.map((row) => {
+    const recommendationCount = row.recommendationCount
+    return {
+      name: row.row.name,
+      primaryCount: recommendationCount,
+      width: recommendationCount <= 0 ? 8 : Math.max(12, Math.round((recommendationCount / maxRecommendation) * 100)),
+      recommendationLabel: recommendationCount > 0
+        ? `推荐场景被提到 ${recommendationCount} 次`
+        : '推荐场景未形成稳定出现',
+      comparisonLabel: formatComparisonLabel(row.row, row.absentCount),
+    }
+  })
+})
+
+function formatComparisonLabel(row: MergedCompetitor, absentCount: number): string {
+  const target = row.target_preferred_count || 0
+  const competitor = row.competitor_preferred_count || 0
+  const total = target + competitor + (row.tie_count || 0) + (row.unclear_count || 0)
+  if (competitor > target) return `比较时更常偏向它(${competitor}次)`
+  if (target > competitor) return `比较时更常偏向你(${target}次)`
+  if (total > 0) return `比较时双方基本持平`
+  if (absentCount > 0) return `你缺席时被提到 ${absentCount} 次`
+  return `整体提及 ${row.mention_count || 0} 次`
+}
 
 const selfBlockCopy = computed(() => {
   return selfPlatformPresenceCount.value > 0
     ? '在这些推荐场景里，你也有被 AI 主动提起，但还没有形成明显优势。'
-    : '在这些推荐场景里，你的名字还没有被 AI 主动提起。'
+    : '在上方推荐型场景里，你的名字还没有被 AI 主动提起。'
 })
 
 const representativeDisplayScene = computed<SceneCompetitorPressureItem | undefined>(() => {
@@ -255,7 +300,7 @@ const topComparisonCompetitor = computed(() => {
 const comparisonCallout = computed(() => {
   const item = topComparisonCompetitor.value
   if (!item?.name) return ''
-  return `AI 在 ${item.name} 和你之间的判断是：偏向对手 ${item.competitor_preferred_count || 0} 次，偏向你 ${item.target_preferred_count || 0} 次。`
+  return `另在点名比较类问题中，AI 对 ${item.name} 的判断更多：偏向对手 ${item.competitor_preferred_count || 0} 次，偏向你 ${item.target_preferred_count || 0} 次。`
 })
 </script>
 
@@ -397,6 +442,43 @@ const comparisonCallout = computed(() => {
   gap: 9px;
 }
 
+.p08-benchmark-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.p08-benchmark-row {
+  padding: 2px 0 0;
+}
+
+.p08-benchmark-main {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) 78px;
+  align-items: center;
+  gap: 10px;
+}
+
+.p08-benchmark-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 6px 0 0 170px;
+  color: #8a7461;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.p08-benchmark-meta span {
+  min-width: 0;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: #f7f0e4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .p08-bar-row {
   display: grid;
   grid-template-columns: 160px minmax(0, 1fr) 64px;
@@ -428,12 +510,25 @@ const comparisonCallout = computed(() => {
 }
 
 .p08-bar-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
   color: #0f1d3a;
-  font-size: 16px;
   line-height: 1;
-  font-weight: 700;
   text-align: right;
   white-space: nowrap;
+}
+
+.p08-bar-value span {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.p08-bar-value small {
+  color: #8a7461;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .p08-bar-row.is-self .p08-bar-name {
@@ -459,8 +554,9 @@ const comparisonCallout = computed(() => {
   gap: 20px;
   padding: 16px 20px;
   border-radius: 8px;
-  background: #0f1d3a;
-  color: #f7f4ec;
+  background: #fff;
+  color: #0f1d3a;
+  border: 1px solid #e3ddcd;
 }
 
 .p08-self-name {
@@ -470,14 +566,14 @@ const comparisonCallout = computed(() => {
 
 .p08-self-block p {
   margin: 3px 0 0;
-  color: #b9c2d4;
+  color: #6b6456;
   font-size: 12px;
   line-height: 1.5;
 }
 
 .p08-self-count {
   flex: 0 0 auto;
-  color: #b9c2d4;
+  color: #8a7461;
   text-align: right;
 }
 
@@ -489,7 +585,7 @@ const comparisonCallout = computed(() => {
 }
 
 .p08-self-count small {
-  color: #b9c2d4;
+  color: #8a7461;
   font-size: 13px;
   font-weight: 500;
 }
