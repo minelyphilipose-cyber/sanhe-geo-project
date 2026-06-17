@@ -318,6 +318,15 @@
             >
               {{ hasWechatSelfMediaAccount ? '重新授权公众号' : '授权公众号' }}
             </el-button>
+            <el-button
+              v-if="canUpdateBrand"
+              type="primary"
+              link
+              :loading="douyinAuthorizing"
+              @click="authorizeDouyin"
+            >
+              {{ hasDouyinSelfMediaAccount ? '重新授权抖音图文' : '授权抖音图文' }}
+            </el-button>
           </div>
         </div>
       </template>
@@ -356,6 +365,15 @@
               type="primary"
               :loading="wechatAuthorizing"
               @click="authorizeWechatMp"
+            >
+              重新授权
+            </el-button>
+            <el-button
+              v-if="row.platform === 'douyin'"
+              link
+              type="primary"
+              :loading="douyinAuthorizing"
+              @click="authorizeDouyin"
             >
               重新授权
             </el-button>
@@ -1131,6 +1149,7 @@ import {
   createSelfMediaAccount,
   getSelfMediaAccountPlatformOptions,
   saveBrandTemplatePerspectiveConfig,
+  getDouyinAuthUrl,
   getSelfMediaAccountsByBrand,
   getWechatMpAuthUrl,
   updateSelfMediaAccount,
@@ -1215,6 +1234,7 @@ const selfMediaAccountsLoading = ref(false)
 const selfMediaAccountSaving = ref(false)
 const selfMediaAccountVisible = ref(false)
 const wechatAuthorizing = ref(false)
+const douyinAuthorizing = ref(false)
 const selfMediaAccountPlatformOptions = ref<SelfMediaAccountPlatformOption[]>([])
 const offerings = ref<BrandOffering[]>([])
 const offeringsLoading = ref(false)
@@ -1427,7 +1447,10 @@ const environmentSelfMediaAccounts = computed(() =>
   semiAutoSelfMediaAccounts.value.filter((item) => !isOfficialApiSelfMediaPlatform(item.platform)),
 )
 const hasWechatSelfMediaAccount = computed(() =>
-  selfMediaAccounts.value.some((item) => isOfficialApiSelfMediaPlatform(item.platform)),
+  selfMediaAccounts.value.some((item) => item.platform === 'wechat_mp' || item.platform === 'wechat'),
+)
+const hasDouyinSelfMediaAccount = computed(() =>
+  selfMediaAccounts.value.some((item) => item.platform === 'douyin'),
 )
 const eligibleSelfMediaPlatformOptions = computed(() =>
   selfMediaAccountPlatformOptions.value.filter((item) => item.eligible),
@@ -2561,6 +2584,20 @@ async function authorizeWechatMp() {
     window.location.href = data.data.authUrl
   } finally {
     wechatAuthorizing.value = false
+  }
+}
+
+async function authorizeDouyin() {
+  if (!brand.value?.id) {
+    ElMessage.warning('请先保存客户信息后再授权抖音图文')
+    return
+  }
+  douyinAuthorizing.value = true
+  try {
+    const { data } = await getDouyinAuthUrl({ brandId: brand.value.id })
+    window.location.href = data.data.authUrl
+  } finally {
+    douyinAuthorizing.value = false
   }
 }
 

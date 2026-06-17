@@ -7,11 +7,13 @@ import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformSchedule
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -23,6 +25,17 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SelfMediaPublishScheduleWorkerTest {
+
+    @Test
+    void workerJobIsEnabledByDefault() {
+        ConditionalOnProperty condition = SelfMediaPublishScheduleWorkerJob.class.getAnnotation(ConditionalOnProperty.class);
+
+        assertNotNull(condition);
+        assertEquals("geo.self-media-schedule.worker", condition.prefix());
+        assertEquals("enabled", condition.name()[0]);
+        assertEquals("true", condition.havingValue());
+        assertTrue(condition.matchIfMissing());
+    }
 
     @Test
     void runOnceProcessesPublishCheckBeforeScheduleExecution() {

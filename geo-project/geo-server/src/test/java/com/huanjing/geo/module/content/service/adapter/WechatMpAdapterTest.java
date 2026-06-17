@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.service.adapter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
@@ -142,6 +143,23 @@ class WechatMpAdapterTest {
         assertFalse(result.isSuccess());
         assertEquals(403, result.getStatusCode());
         assertEquals("微信公众号自动发布未开启，当前仅允许保存草稿", result.getErrorMessage());
+        verify(fixture.wechatMpClient, never()).submitPublish(any(), any());
+    }
+
+    @Test
+    void submitToTarget_mapsWechatApiUnauthorizedToActionableFailure() {
+        Fixture fixture = fixture(true);
+        TargetContext.SelfMediaTarget target = target(fixture.account, Map.of("publishAction", "publish"));
+        when(fixture.wechatMpClient.addDraft(eq("access-token"), any()))
+                .thenThrow(new BizException(48001, "api unauthorized rid: rid-from-wechat"));
+
+        SubmitResult result = fixture.adapter.submitToTarget(article(), "markdown body", target);
+
+        assertFalse(result.isSuccess());
+        assertEquals(48001, result.getStatusCode());
+        assertEquals("WECHAT_API_UNAUTHORIZED", result.getFailureKind());
+        assertEquals("api unauthorized rid: rid-from-wechat", result.getErrorMessage());
+        assertFalse(result.isRetryable());
         verify(fixture.wechatMpClient, never()).submitPublish(any(), any());
     }
 

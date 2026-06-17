@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "geo.self-media-schedule.worker", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "geo.self-media-schedule.worker", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SelfMediaPublishScheduleWorkerJob {
     private final SelfMediaPublishScheduleWorker worker;
 

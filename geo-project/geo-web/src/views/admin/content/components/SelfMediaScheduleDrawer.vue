@@ -244,7 +244,7 @@ const query = reactive({
 })
 
 const scheduleStatusOptions = [
-  { label: '待领取', value: 'pending' },
+  { label: '待执行', value: 'pending' },
   { label: '助手填充中', value: 'filling' },
   { label: '填充已核验', value: 'filled_verified' },
   { label: '平台定时中', value: 'scheduling' },
@@ -297,7 +297,7 @@ const scheduleHealthCards = computed(() => {
     { label: '失败', value: 'failed' as ScheduleHealth, count: counts.failed, hint: '执行或发布失败', tone: 'danger' },
     { label: '人工', value: 'manual' as ScheduleHealth, count: counts.manual, hint: '需人工介入', tone: 'danger' },
     { label: '超时', value: 'overdue' as ScheduleHealth, count: counts.overdue, hint: '已到处理时间', tone: 'warning' },
-    { label: '执行中', value: 'running' as ScheduleHealth, count: counts.running, hint: '助手或平台处理中', tone: 'primary' },
+    { label: '执行中', value: 'running' as ScheduleHealth, count: counts.running, hint: '系统或平台处理中', tone: 'primary' },
     { label: '待执行', value: 'waiting' as ScheduleHealth, count: counts.waiting, hint: '等待下次轮询', tone: 'info' },
     { label: '已定时', value: 'scheduled' as ScheduleHealth, count: counts.scheduled, hint: '等待平台发布', tone: 'success' },
     { label: '待确认', value: 'checking' as ScheduleHealth, count: counts.checking, hint: '到点后核验发布', tone: 'warning' },
@@ -557,6 +557,26 @@ function stageLabel(row: SelfMediaPublishSchedule) {
     cancel_pending_platform: '等待平台取消确认',
     cancelled: '后台已取消',
   }
+  if (isOfficialApiPlatform(row.platform)) {
+    const officialApiMap: Record<string, string> = {
+      pending: '等待系统处理',
+      filling: '正在提交平台',
+      filled_verified: '内容已校验',
+      scheduling: '正在提交平台',
+      scheduled: '已提交平台',
+      publish_due: '待确认发布结果',
+      checking_publish_result: '发布结果核验中',
+      publish_unknown: '等待最终发布确认',
+      published_confirmed: '发布已确认',
+      schedule_failed: '提交平台失败',
+      publish_failed: '发布结果失败',
+      manual_required: '需要人工处理',
+      routed_to_semi_auto: '已转半自动',
+      cancel_pending_platform: '等待平台取消确认',
+      cancelled: '后台已取消',
+    }
+    return officialApiMap[row.status] || row.status || '-'
+  }
   if (isBackendDelayedPlatform(row.platform)) {
     const backendDelayedMap: Record<string, string> = {
       pending: '等待助手领取',
@@ -584,7 +604,14 @@ function isBackendDelayedPlatform(platform?: string | null) {
   return platform === 'zhihu'
 }
 
+function isOfficialApiPlatform(platform?: string | null) {
+  return platform === 'wechat_mp' || platform === 'wechat' || platform === 'douyin'
+}
+
 function platformTimeLine(row: SelfMediaPublishSchedule) {
+  if (isOfficialApiPlatform(row.platform)) {
+    return `触发 ${timeText(row.nextAttemptAt || row.plannedPublishAt)}`
+  }
   if (isBackendDelayedPlatform(row.platform)) {
     return `触发 ${timeText(row.nextAttemptAt || row.plannedPublishAt)}`
   }
@@ -592,15 +619,18 @@ function platformTimeLine(row: SelfMediaPublishSchedule) {
 }
 
 function platformTimeFieldLabel(row: SelfMediaPublishSchedule) {
+  if (isOfficialApiPlatform(row.platform)) return '后台触发时间'
   return isBackendDelayedPlatform(row.platform) ? '后台触发时间' : '平台定时时间'
 }
 
 function platformTimeFieldValue(row: SelfMediaPublishSchedule) {
+  if (isOfficialApiPlatform(row.platform)) return timeText(row.nextAttemptAt || row.plannedPublishAt)
   if (isBackendDelayedPlatform(row.platform)) return timeText(row.plannedPublishAt)
   return timeText(row.platformScheduledAt)
 }
 
 function platformScheduleIdFieldValue(row: SelfMediaPublishSchedule) {
+  if (isOfficialApiPlatform(row.platform)) return row.platformScheduleId || '不适用'
   if (isBackendDelayedPlatform(row.platform)) return '不适用'
   return row.platformScheduleId || '-'
 }
@@ -687,6 +717,9 @@ function failureCodeLabel(code?: string | null) {
     FILL_TOKEN_USED_OR_EXPIRED: '填充令牌已使用或过期',
     FILL_TOKEN_OPERATOR_MISMATCH: '填充令牌操作员不匹配',
     FILL_TOKEN_BINDING_MISMATCH: '填充令牌账号绑定不匹配',
+    WECHAT_API_UNAUTHORIZED: '微信公众号发布权限不足',
+    AUTH_EXPIRED: '授权已过期',
+    CLIENT_ERROR: '平台账号或内容异常',
     token_expired: '填充令牌已使用或过期',
     login_required: '平台登录失效',
     account_mismatch: '平台账号不一致',
@@ -1005,6 +1038,13 @@ function recommendationText(row: SelfMediaPublishSchedule) {
   if (isMaterialFailure(row)) return '素材公开链接返回 404 或非图片内容。请点击“处理素材”打开文章，替换失效的封面/正文图片并保存，然后点击“立即重试”。'
   if (row.failureActionHint) return row.failureActionHint
   if (row.failureCode === 'LOCAL_AGENT_HEARTBEAT_TIMEOUT') return '本地助手执行心跳超时；确认本地助手、AdsPower 和平台页面正常后，可点击“立即重试”。'
+  if (isOfficialApiPlatform(row.platform)) {
+    if (row.failureCode === 'WECHAT_API_UNAUTHORIZED') return '当前公众号缺少发布所需授权。请在品牌详情重新授权公众号，并确认授权时已勾选素材、草稿和发布相关权限。'
+    if (row.status === 'pending') return '等待系统到计划时间后自动提交到平台；不需要本地助手领取。'
+    if (row.status === 'filling' || row.status === 'scheduling') return '系统正在向平台提交内容；若长时间不变化，请联系管理员查看后台执行记录。'
+    if (row.status === 'published_confirmed') return '已确认发布，无需处理。'
+    if (row.status === 'manual_required') return '请根据异常信息处理账号授权、平台权限或文章内容问题；修复后可点击“立即重试”或重新创建排期。'
+  }
   if (isBackendDelayedPlatform(row.platform)) {
     if (row.status === 'pending') return '等待本地助手到点领取；该平台不支持平台内定时，计划时间即后台触发发布时间。'
     if (row.status === 'filling') return '本地助手正在填充并提交发布；若长时间不变化，请检查 AdsPower 页面和扩展日志。'
