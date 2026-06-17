@@ -419,7 +419,10 @@ public class SelfMediaPublishScheduleService {
         if (request == null || request.getArticleId() == null || request.getArticleId() <= 0) {
             fail("INVALID_ARTICLE", "articleId must be a positive number");
         }
-        String platform = normalize(request.getPlatform());
+        String platform = normalizePublishPlatform(request.getPlatform());
+        if (!StringUtils.hasText(platform)) {
+            platform = normalize(request.getPlatform());
+        }
         if (!StringUtils.hasText(platform)) {
             fail("INVALID_PLATFORM", "platform must not be blank");
         }
@@ -2687,8 +2690,8 @@ public class SelfMediaPublishScheduleService {
         if (joined.contains("toutiao") || joined.contains("头条")) return "toutiao";
         if (joined.contains("baijiahao") || joined.contains("百家号")) return "baijiahao";
         if (joined.contains("zhihu") || joined.contains("知乎")) return "zhihu";
-        if (joined.contains("douyin") || joined.contains("抖音")) return "douyin";
-        if (joined.contains("wechat") || joined.contains("公众号")) return "wechat";
+        if (joined.contains("douyin") || joined.contains("抖音")) return normalizePublishPlatform("douyin");
+        if (joined.contains("wechat") || joined.contains("公众号")) return normalizePublishPlatform("wechat");
         return null;
     }
 

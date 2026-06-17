@@ -529,6 +529,40 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void previewPlatformQuickScheduleAllowsWechatArticleForWechatMpAlias() {
+        ArticleDraft article = article();
+        article.setChannelGroupCode("self_media");
+        article.setChannelSubCode("wechat");
+        article.setContentStyle("wechat");
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+
+        SelfMediaPlatformQuickScheduleResponse response = service.previewPlatformQuickSchedule(quickRequest("wechat_mp", false));
+
+        assertEquals("account_or_environment_not_ready", response.getAction());
+        assertEquals("SELF_MEDIA_ACCOUNT_NOT_FOUND", response.getCode());
+        assertEquals("wechat_mp", response.getPlatform());
+        verify(accountMapper).selectOne(any());
+    }
+
+    @Test
+    void previewPlatformQuickScheduleNormalizesSelfMediaPlatformAliases() {
+        ArticleDraft article = article();
+        article.setChannelGroupCode("self_media");
+        article.setChannelSubCode("douyin_image_text");
+        article.setContentStyle("douyin_image_text");
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+
+        SelfMediaPlatformQuickScheduleResponse response = service.previewPlatformQuickSchedule(quickRequest("douyin_image_text", false));
+
+        assertEquals("account_or_environment_not_ready", response.getAction());
+        assertEquals("SELF_MEDIA_ACCOUNT_NOT_FOUND", response.getCode());
+        assertEquals("douyin", response.getPlatform());
+        verify(accountMapper).selectOne(any());
+    }
+
+    @Test
     void previewPlatformQuickScheduleRequiresReplacementWhenMonthlyQuotaAlreadyPlanned() {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());

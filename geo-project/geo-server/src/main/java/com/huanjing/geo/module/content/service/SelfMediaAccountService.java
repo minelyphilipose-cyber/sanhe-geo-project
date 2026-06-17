@@ -33,6 +33,8 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -253,13 +255,22 @@ public class SelfMediaAccountService {
         SysUser operator = currentUserService.requireCurrentUser();
         SelfMediaAccount account = requireAccount(id);
         brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
-        if (browserEnvironmentAccountMapper.selectActiveBySelfMediaAccountId(account.getId()) != null) {
+        if (requiresBrowserEnvironmentBeforeDelete(account.getPlatform())
+                && browserEnvironmentAccountMapper.selectActiveBySelfMediaAccountId(account.getId()) != null) {
             throw new BizException(400, "请先解绑浏览器环境后再删除自媒体账号");
         }
         account.setDeletedBy(operator.getId());
         account.setUpdatedAt(LocalDateTime.now());
         selfMediaAccountMapper.updateById(account);
         selfMediaAccountMapper.deleteById(account.getId());
+    }
+
+    private boolean requiresBrowserEnvironmentBeforeDelete(String platform) {
+        if (!StringUtils.hasText(platform)) {
+            return true;
+        }
+        String normalized = platform.trim().toLowerCase(Locale.ROOT);
+        return !Set.of("wechat_mp", "wechat", "douyin").contains(normalized);
     }
 
     private void checkMaterialCount(SelfMediaAccount account) {
