@@ -32,7 +32,10 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -278,8 +281,7 @@ public class DispatchMonitorService {
         SysUser user = ensureMonitorAccess();
         DispatchDateRange range = resolveDateRange(rangeType, startDate, endDate);
 
-        Page<DispatchAlert> page = dispatchAlertMapper.selectPage(
-                new Page<>(current, size),
+        List<DispatchAlert> alerts = dispatchAlertMapper.selectList(
                 applyDispatchAlertScope(new LambdaQueryWrapper<DispatchAlert>()
                         .eq(StringUtils.hasText(severity), DispatchAlert::getSeverity, severity)
                         .eq(StringUtils.hasText(status), DispatchAlert::getStatus, status)
@@ -287,39 +289,294 @@ public class DispatchMonitorService {
                         .lt(DispatchAlert::getCreatedAt, range.getEndAtExclusive())
                         .orderByDesc(DispatchAlert::getCreatedAt), user)
         );
+        Map<Long, DispatchTask> taskMap = dispatchTaskMap(alerts.stream().map(DispatchAlert::getTaskId).toList());
+        Map<String, List<DispatchAlert>> grouped = new LinkedHashMap<>();
+        for (DispatchAlert alert : alerts) {
+            grouped.computeIfAbsent(alertGroupKey(alert, taskMap.get(alert.getTaskId())), key -> new ArrayList<>()).add(alert);
+        }
+        List<List<DispatchAlert>> groups = new ArrayList<>(grouped.values());
+        long total = groups.size();
+        int from = (int) Math.min(Math.max(current - 1, 0) * Math.max(size, 1), total);
+        int to = (int) Math.min(from + Math.max(size, 1), total);
+        List<List<DispatchAlert>> pageGroups = from >= to ? List.of() : groups.subList(from, to);
 
-        Map<Long, String> projectNameMap = projectNameMap(page.getRecords().stream()
+        Map<Long, String> projectNameMap = projectNameMap(pageGroups.stream()
+                .flatMap(List::stream)
                 .map(DispatchAlert::getProjectId)
                 .filter(id -> id != null && id > 0)
                 .toList());
 
-        Page<DispatchAlertVO> result = new Page<>(current, size, page.getTotal());
-        result.setRecords(page.getRecords().stream().map(alert -> {
-            DispatchAlertVO vo = new DispatchAlertVO();
-            vo.setId(alert.getId());
-            vo.setAlertCode(alert.getAlertCode());
-            vo.setTaskId(alert.getTaskId());
-            vo.setProjectId(alert.getProjectId());
-            vo.setProjectName(projectNameMap.getOrDefault(alert.getProjectId(), "-"));
-            vo.setSeverity(alert.getSeverity());
-            vo.setStatus(alert.getStatus());
-            vo.setTitle(alert.getTitle());
-            vo.setContent(alert.getContent());
-            vo.setRetryCount(alert.getRetryCount());
-            vo.setContextJson(alert.getContextJson());
-            vo.setResolvedAt(alert.getResolvedAt());
-            vo.setResolvedBy(alert.getResolvedBy());
-            vo.setCreatedAt(alert.getCreatedAt());
-            return vo;
-        }).toList());
+        Page<DispatchAlertVO> result = new Page<>(current, size, total);
+        result.setRecords(pageGroups.stream()
+                .map(group -> toAlertGroupVO(group, projectNameMap))
+                .toList());
         return result;
+    }
+
+    public DispatchAlertVO alertDetail(Long id) {
+        SysUser user = ensureMonitorAccess();
+        DispatchAlert alert = dispatchAlertMapper.selectById(id);
+        if (alert == null) {
+            throw new BizException(404, "Alert not found");
+        }
+        ensureProjectVisible(user, alert.getProjectId());
+        DispatchTask task = alert.getTaskId() == null ? null : dispatchTaskMapper.selectById(alert.getTaskId());
+        String groupKey = alertGroupKey(alert, task);
+        DispatchDateRange range = new DispatchDateRange(
+                alert.getCreatedAt().toLocalDate(),
+                alert.getCreatedAt().toLocalDate(),
+                alert.getCreatedAt().toLocalDate().atStartOfDay(),
+                alert.getCreatedAt().toLocalDate().plusDays(1).atStartOfDay()
+        );
+        List<DispatchAlert> sameDayAlerts = dispatchAlertMapper.selectList(
+                applyDispatchAlertScope(new LambdaQueryWrapper<DispatchAlert>()
+                        .eq(alert.getProjectId() != null, DispatchAlert::getProjectId, alert.getProjectId())
+                        .ge(DispatchAlert::getCreatedAt, range.getStartAt())
+                        .lt(DispatchAlert::getCreatedAt, range.getEndAtExclusive())
+                        .orderByDesc(DispatchAlert::getCreatedAt), user)
+        );
+        Map<Long, DispatchTask> taskMap = dispatchTaskMap(sameDayAlerts.stream().map(DispatchAlert::getTaskId).toList());
+        List<DispatchAlert> group = sameDayAlerts.stream()
+                .filter(item -> groupKey.equals(alertGroupKey(item, taskMap.get(item.getTaskId()))))
+                .toList();
+        Map<Long, String> projectNameMap = projectNameMap(group.stream().map(DispatchAlert::getProjectId).toList());
+        DispatchAlertVO vo = toAlertGroupVO(group.isEmpty() ? List.of(alert) : group, projectNameMap);
+        vo.setDetailAlerts((group.isEmpty() ? List.of(alert) : group).stream()
+                .map(item -> toAlertVO(item, projectNameMap, false))
+                .toList());
+        return vo;
     }
 
     public void resolveAlert(Long id, String note) {
         currentUserService.ensurePermission("dispatch.alert.resolve");
         var user = currentUserService.requireCurrentUser();
         Long userId = user.getId();
-        dispatchAlertService.resolveAlert(id, userId, note);
+        DispatchAlert alert = dispatchAlertMapper.selectById(id);
+        if (alert == null) {
+            throw new BizException(404, "Alert not found");
+        }
+        ensureProjectVisible(user, alert.getProjectId());
+        DispatchTask task = alert.getTaskId() == null ? null : dispatchTaskMapper.selectById(alert.getTaskId());
+        String groupKey = alertGroupKey(alert, task);
+        LocalDate alertDate = alert.getCreatedAt().toLocalDate();
+        List<DispatchAlert> sameDayAlerts = dispatchAlertMapper.selectList(
+                applyDispatchAlertScope(new LambdaQueryWrapper<DispatchAlert>()
+                        .eq(alert.getProjectId() != null, DispatchAlert::getProjectId, alert.getProjectId())
+                        .eq(DispatchAlert::getStatus, "open")
+                        .ge(DispatchAlert::getCreatedAt, alertDate.atStartOfDay())
+                        .lt(DispatchAlert::getCreatedAt, alertDate.plusDays(1).atStartOfDay()), user)
+        );
+        Map<Long, DispatchTask> taskMap = dispatchTaskMap(sameDayAlerts.stream().map(DispatchAlert::getTaskId).toList());
+        for (DispatchAlert item : sameDayAlerts) {
+            if (groupKey.equals(alertGroupKey(item, taskMap.get(item.getTaskId())))) {
+                dispatchAlertService.resolveAlert(item.getId(), userId, note);
+            }
+        }
+    }
+
+    private DispatchAlertVO toAlertGroupVO(List<DispatchAlert> group, Map<Long, String> projectNameMap) {
+        DispatchAlert representative = group.stream()
+                .max(Comparator.comparing(DispatchAlert::getCreatedAt))
+                .orElseThrow();
+        DispatchAlertVO vo = toAlertVO(representative, projectNameMap, true);
+        int openCount = (int) group.stream().filter(item -> "open".equals(item.getStatus())).count();
+        vo.setGroupCount(group.size());
+        vo.setOpenGroupCount(openCount);
+        vo.setStatus(openCount > 0 ? "open" : "resolved");
+        vo.setRetryCount(group.stream().mapToInt(item -> item.getRetryCount() == null ? 0 : item.getRetryCount()).sum());
+        vo.setSeverity(maxSeverity(group));
+        if (group.size() > 1) {
+            vo.setTitle(representative.getTitle() + "（" + group.size() + "条）");
+        }
+        vo.setPlatformFailures(aggregatePlatformFailures(group));
+        return vo;
+    }
+
+    private DispatchAlertVO toAlertVO(DispatchAlert alert, Map<Long, String> projectNameMap, boolean includePlatformFailures) {
+        DispatchAlertVO vo = new DispatchAlertVO();
+        vo.setId(alert.getId());
+        vo.setAlertCode(alert.getAlertCode());
+        vo.setTaskId(alert.getTaskId());
+        vo.setProjectId(alert.getProjectId());
+        vo.setProjectName(projectNameMap.getOrDefault(alert.getProjectId(), "-"));
+        vo.setDedupeKey(alert.getDedupeKey());
+        vo.setSeverity(alert.getSeverity());
+        vo.setStatus(alert.getStatus());
+        vo.setTitle(alert.getTitle());
+        vo.setContent(alert.getContent());
+        vo.setRetryCount(alert.getRetryCount());
+        vo.setContextJson(alert.getContextJson());
+        vo.setGroupCount(1);
+        vo.setOpenGroupCount("open".equals(alert.getStatus()) ? 1 : 0);
+        if (includePlatformFailures) {
+            vo.setPlatformFailures(aggregatePlatformFailures(List.of(alert)));
+        }
+        vo.setResolvedAt(alert.getResolvedAt());
+        vo.setResolvedBy(alert.getResolvedBy());
+        vo.setCreatedAt(alert.getCreatedAt());
+        return vo;
+    }
+
+    private List<DispatchAlertVO.PlatformFailureSummary> aggregatePlatformFailures(List<DispatchAlert> alerts) {
+        Map<String, DispatchAlertVO.PlatformFailureSummary> platformMap = new LinkedHashMap<>();
+        for (DispatchAlert alert : alerts) {
+            Map<String, Object> context = parsePayload(alert.getContextJson());
+            Object raw = context.get("platformFailures");
+            if (!(raw instanceof Iterable<?> iterable)) {
+                continue;
+            }
+            for (Object item : iterable) {
+                if (!(item instanceof Map<?, ?> map)) {
+                    continue;
+                }
+                String platformCode = stringValue(map.get("platformCode"));
+                String key = StringUtils.hasText(platformCode) ? platformCode : stringValue(map.get("platformId"));
+                if (!StringUtils.hasText(key)) {
+                    continue;
+                }
+                DispatchAlertVO.PlatformFailureSummary summary = platformMap.computeIfAbsent(key, ignored -> {
+                    DispatchAlertVO.PlatformFailureSummary created = new DispatchAlertVO.PlatformFailureSummary();
+                    created.setPlatformId(longValue(map.get("platformId")));
+                    created.setPlatformCode(platformCode);
+                    created.setPlatformName(stringValue(map.get("platformName")));
+                    created.setExpectedCount(0);
+                    created.setCompletedCount(0);
+                    created.setFailedCount(0);
+                    created.setRequestCount(0);
+                    created.setReasons(new ArrayList<>());
+                    return created;
+                });
+                summary.setExpectedCount(value(summary.getExpectedCount()) + intValue(map.get("expectedCount")));
+                summary.setCompletedCount(value(summary.getCompletedCount()) + intValue(map.get("completedCount")));
+                summary.setFailedCount(value(summary.getFailedCount()) + intValue(map.get("failedCount")));
+                summary.setRequestCount(value(summary.getRequestCount()) + intValue(map.get("requestCount")));
+                mergeReasons(summary, map.get("reasons"));
+                summary.setFailureRate(summary.getExpectedCount() == null || summary.getExpectedCount() <= 0
+                        ? 0D
+                        : Math.round(summary.getFailedCount() * 10000D / summary.getExpectedCount()) / 100D);
+            }
+        }
+        return platformMap.values().stream()
+                .sorted(Comparator.comparing(DispatchAlertVO.PlatformFailureSummary::getFailedCount, Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
+    }
+
+    private void mergeReasons(DispatchAlertVO.PlatformFailureSummary summary, Object rawReasons) {
+        if (!(rawReasons instanceof Iterable<?> iterable)) {
+            return;
+        }
+        Map<String, DispatchAlertVO.FailureReasonSummary> reasonMap = summary.getReasons().stream()
+                .collect(Collectors.toMap(
+                        item -> item.getErrorCode() + "\n" + item.getErrorMessage(),
+                        item -> item,
+                        (a, b) -> a,
+                        LinkedHashMap::new
+                ));
+        for (Object rawReason : iterable) {
+            if (!(rawReason instanceof Map<?, ?> map)) {
+                continue;
+            }
+            String errorCode = stringValue(map.get("errorCode"));
+            String errorMessage = stringValue(map.get("errorMessage"));
+            String key = errorCode + "\n" + errorMessage;
+            DispatchAlertVO.FailureReasonSummary reason = reasonMap.get(key);
+            if (reason == null) {
+                reason = new DispatchAlertVO.FailureReasonSummary();
+                reason.setErrorCode(errorCode);
+                reason.setErrorMessage(errorMessage);
+                reason.setCount(0);
+                reasonMap.put(key, reason);
+                summary.getReasons().add(reason);
+            }
+            reason.setCount(value(reason.getCount()) + intValue(map.get("count")));
+        }
+    }
+
+    private String maxSeverity(List<DispatchAlert> group) {
+        return group.stream()
+                .map(DispatchAlert::getSeverity)
+                .max(Comparator.comparingInt(this::severityRank))
+                .orElse("info");
+    }
+
+    private int severityRank(String severity) {
+        return switch (severity == null ? "" : severity) {
+            case "critical" -> 4;
+            case "error" -> 3;
+            case "warn" -> 2;
+            default -> 1;
+        };
+    }
+
+    private String alertGroupKey(DispatchAlert alert, DispatchTask task) {
+        Map<String, Object> context = parsePayload(alert.getContextJson());
+        if ("question_poll_daily_summary".equals(stringValue(context.get("alertType")))
+                && alert.getProjectId() != null
+                && StringUtils.hasText(stringValue(context.get("batchDate")))) {
+            return "question_poll_daily:" + alert.getProjectId() + ":" + stringValue(context.get("batchDate"));
+        }
+        if (task != null && DispatchTaskType.BI_DAILY_POLL.name().equalsIgnoreCase(task.getTaskType())
+                && alert.getProjectId() != null) {
+            Map<String, Object> payload = parsePayload(task.getPayloadJson());
+            String batchDate = stringValue(payload.get("batchDate"));
+            if (!StringUtils.hasText(batchDate) && task.getWindowEnd() != null) {
+                batchDate = task.getWindowEnd().toString();
+            }
+            if (!StringUtils.hasText(batchDate) && alert.getCreatedAt() != null) {
+                batchDate = alert.getCreatedAt().toLocalDate().toString();
+            }
+            return "question_poll_daily:" + alert.getProjectId() + ":" + batchDate;
+        }
+        if (StringUtils.hasText(alert.getDedupeKey())) {
+            return alert.getDedupeKey();
+        }
+        return "alert:" + alert.getId();
+    }
+
+    private Map<Long, DispatchTask> dispatchTaskMap(List<Long> taskIds) {
+        List<Long> ids = taskIds.stream().filter(id -> id != null && id > 0).distinct().toList();
+        if (ids.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return dispatchTaskMapper.selectList(new LambdaQueryWrapper<DispatchTask>().in(DispatchTask::getId, ids))
+                .stream()
+                .collect(Collectors.toMap(DispatchTask::getId, item -> item, (a, b) -> a, HashMap::new));
+    }
+
+    private int intValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return 0;
+        }
+    }
+
+    private long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return 0L;
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private int value(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private SysUser ensureMonitorAccess() {

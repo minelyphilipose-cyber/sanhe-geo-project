@@ -15,6 +15,7 @@ public class DispatchAlert {
     private String alertCode;
     private Long taskId;
     private Long projectId;
+    private String dedupeKey;
     private String severity;
     private String status;
     private String title;

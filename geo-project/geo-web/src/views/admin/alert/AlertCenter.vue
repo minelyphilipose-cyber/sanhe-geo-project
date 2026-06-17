@@ -118,7 +118,12 @@
                 </div>
                 <div class="min-w-0">
                   <div class="admin-entity-main">{{ scope.row.projectName || '未关联项目' }}</div>
-                  <div class="admin-entity-sub">{{ scope.row.alertCode || `告警 #${scope.row.id}` }}</div>
+                  <div class="admin-entity-sub">
+                    <span>{{ scope.row.alertCode || `告警 #${scope.row.id}` }}</span>
+                    <el-tag v-if="Number(scope.row.groupCount || 0) > 1" size="small" type="warning" effect="plain">
+                      {{ scope.row.groupCount }} 条
+                    </el-tag>
+                  </div>
                 </div>
               </div>
             </template>
@@ -144,16 +149,9 @@
           <el-table-column prop="retryCount" label="重试次数" width="100" />
           <el-table-column label="详情" min-width="280">
             <template #default="scope">
-              <el-popover trigger="click" width="560" placement="top">
-                <template #reference>
-                  <el-button link type="primary">{{ shortText(scope.row.content || '-') }}</el-button>
-                </template>
-                <div class="detail-wrap">
-                  <div><strong>content:</strong> {{ scope.row.content || '-' }}</div>
-                  <div class="mt-2"><strong>context:</strong></div>
-                  <pre>{{ scope.row.contextJson || '-' }}</pre>
-                </div>
-              </el-popover>
+              <el-button link type="primary" :loading="detailLoading && detailRow?.id === scope.row.id" @click="openDispatchDetail(scope.row)">
+                {{ dispatchDetailPreview(scope.row) }}
+              </el-button>
             </template>
           </el-table-column>
           <el-table-column label="处理" width="120" fixed="right">
@@ -281,6 +279,136 @@
         />
       </div>
     </el-card>
+
+    <el-dialog
+      v-model="detailVisible"
+      title="告警详情"
+      width="860px"
+      class="dispatch-alert-dialog"
+      append-to-body
+      destroy-on-close
+    >
+      <DataState :loading="detailLoading" :empty="!detailLoading && !detailRow" empty-text="暂无告警详情">
+        <div v-if="detailRow" class="dispatch-detail">
+          <section class="detail-hero" :class="severityClass(detailRow.severity)">
+            <div class="detail-hero-main">
+              <div class="detail-eyebrow">调度告警 · {{ severityLabel(detailRow.severity) }}</div>
+              <h2>{{ detailTitle(detailRow) }}</h2>
+              <p>{{ detailRow.content || '暂无告警说明' }}</p>
+              <div class="detail-meta">
+                <span>{{ detailRow.projectName || '未关联项目' }}</span>
+                <span>{{ formatDateTime(detailRow.createdAt) }}</span>
+                <span>{{ statusLabel(detailRow.status) }}</span>
+                <span>组内 {{ detailRow.groupCount || 1 }} 条</span>
+              </div>
+            </div>
+            <div class="detail-hero-stat">
+              <span>失败率</span>
+              <strong>{{ formatPercent(detailFailureRate(detailRow)) }}</strong>
+              <em>{{ detailFailedTotal(detailRow) }} / {{ detailExpectedTotal(detailRow) || '-' }}</em>
+            </div>
+          </section>
+
+          <section class="detail-kpi-grid">
+            <div class="detail-kpi-card">
+              <span>涉及平台</span>
+              <strong>{{ detailPlatformCount(detailRow) }}</strong>
+              <em>出现失败的平台数量</em>
+            </div>
+            <div class="detail-kpi-card">
+              <span>失败次数</span>
+              <strong>{{ detailFailedTotal(detailRow) }}</strong>
+              <em>问题轮询失败结果数</em>
+            </div>
+            <div class="detail-kpi-card">
+              <span>原始告警</span>
+              <strong>{{ detailRow.detailAlerts?.length || detailRow.groupCount || 1 }}</strong>
+              <em>同客户同日已聚合</em>
+            </div>
+          </section>
+
+          <section class="detail-panel">
+            <div class="detail-panel-header">
+              <div>
+                <div class="detail-title">平台失败统计</div>
+                <div class="detail-subtitle">按平台汇总失败次数、比例和主要原因。</div>
+              </div>
+              <span class="detail-panel-badge">{{ detailPlatformCount(detailRow) }} 个平台</span>
+            </div>
+            <div v-if="(detailRow.platformFailures || []).length" class="platform-failure-list">
+              <article
+                v-for="platform in detailRow.platformFailures || []"
+                :key="`${platform.platformCode || 'platform'}-${platform.platformId ?? 'unknown'}`"
+                class="platform-failure-card"
+              >
+                <div class="platform-card-head">
+                  <div>
+                    <div class="platform-name">{{ platform.platformName || platform.platformCode || '-' }}</div>
+                    <div class="platform-code">{{ platform.platformCode || '-' }}</div>
+                  </div>
+                  <div class="platform-rate">
+                    <strong>{{ formatPercent(platform.failureRate) }}</strong>
+                    <span>{{ platform.failedCount || 0 }} / {{ platform.expectedCount || 0 }}</span>
+                  </div>
+                </div>
+                <div class="reason-list">
+                  <div v-for="reason in platform.reasons || []" :key="`${reason.errorCode}-${reason.errorMessage}`" class="reason-item">
+                    <div class="reason-code">{{ reason.errorCode || 'UNKNOWN' }}</div>
+                    <div class="reason-message">{{ reason.errorMessage || '-' }}</div>
+                    <div class="reason-count">{{ reason.count || 0 }} 次</div>
+                  </div>
+                </div>
+              </article>
+            </div>
+            <div v-else class="detail-empty-state">
+              <strong>暂无平台失败</strong>
+              <span>当前告警没有附带平台维度失败统计，建议查看组内告警上下文。</span>
+            </div>
+          </section>
+
+          <section class="detail-panel">
+            <div class="detail-panel-header">
+              <div>
+                <div class="detail-title">组内告警</div>
+                <div class="detail-subtitle">同一客户当天的跑批异常已合并展示，以下为原始告警明细。</div>
+              </div>
+              <span class="detail-panel-badge">共 {{ detailAlertTotal }} 条</span>
+            </div>
+            <div class="detail-timeline">
+              <article v-for="item in pagedDetailAlerts" :key="item.id" class="detail-alert-item">
+                <div class="timeline-dot" :class="severityClass(item.severity)" />
+                <div class="timeline-content">
+                  <div class="timeline-head">
+                    <strong>{{ item.title }}</strong>
+                    <span>{{ formatDateTime(item.createdAt) }}</span>
+                  </div>
+                  <div class="timeline-tags">
+                    <span>{{ severityLabel(item.severity) }}</span>
+                    <span>{{ statusLabel(item.status) }}</span>
+                    <span>{{ item.alertCode || `#${item.id}` }}</span>
+                  </div>
+                  <p>{{ item.content || '-' }}</p>
+                  <details>
+                    <summary>查看上下文</summary>
+                    <pre>{{ formatJsonText(item.contextJson) }}</pre>
+                  </details>
+                </div>
+              </article>
+            </div>
+            <div v-if="detailAlertTotal > detailAlertPageSize" class="detail-pagination">
+              <el-pagination
+                v-model:current-page="detailAlertPage"
+                :page-size="detailAlertPageSize"
+                :total="detailAlertTotal"
+                background
+                layout="prev, pager, next, jumper"
+                small
+              />
+            </div>
+          </section>
+        </div>
+      </DataState>
+    </el-dialog>
   </div>
 </template>
 
@@ -289,7 +417,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
-import { getDispatchAlerts, resolveDispatchAlert, type DispatchAlertQuery } from '@/api/dispatch'
+import { getDispatchAlert, getDispatchAlerts, resolveDispatchAlert, type DispatchAlertQuery } from '@/api/dispatch'
 import { getMySystemAlertTodos, resolveSystemAlert } from '@/api/systemAlert'
 import type { DispatchAlertItem, SystemAlertTodoItem } from '@/types'
 import { useUserStore } from '@/stores/user'
@@ -307,6 +435,11 @@ const rows = ref<DispatchAlertItem[]>([])
 const page = reactive({ current: 1, size: 20, total: 0 })
 const systemRows = ref<SystemAlertTodoItem[]>([])
 const systemPage = reactive({ current: 1, size: 20, total: 0 })
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detailRow = ref<DispatchAlertItem | null>(null)
+const detailAlertPage = ref(1)
+const detailAlertPageSize = 3
 
 const filters = reactive({
   rangeType: 'today' as 'today' | 'last7' | 'last30' | 'custom',
@@ -334,6 +467,12 @@ const priorityMessage = computed(() => {
     return { title: `${openCount.value} 条待处理`, desc: '当前仍有未闭环告警，建议按项目影响面逐条确认。' }
   }
   return { title: '暂无高风险告警', desc: '当前筛选结果未发现待处理严重告警，可保持自动观察。' }
+})
+const detailAlertTotal = computed(() => detailRow.value?.detailAlerts?.length || 0)
+const pagedDetailAlerts = computed(() => {
+  const alerts = detailRow.value?.detailAlerts || []
+  const start = (detailAlertPage.value - 1) * detailAlertPageSize
+  return alerts.slice(start, start + detailAlertPageSize)
 })
 
 function buildParams(): DispatchAlertQuery {
@@ -401,6 +540,67 @@ function formatDateTime(value?: string | null) {
   const mi = `${date.getMinutes()}`.padStart(2, '0')
   const ss = `${date.getSeconds()}`.padStart(2, '0')
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`
+}
+
+function formatPercent(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-'
+  return `${Number(value).toFixed(2)}%`
+}
+
+function detailTitle(row: DispatchAlertItem) {
+  return String(row.title || '').replace(/（\d+条）$/, '')
+}
+
+function detailPlatformCount(row?: DispatchAlertItem | null) {
+  return row?.platformFailures?.length || 0
+}
+
+function detailFailedTotal(row?: DispatchAlertItem | null) {
+  return (row?.platformFailures || []).reduce((sum, item) => sum + Number(item.failedCount || 0), 0)
+}
+
+function detailExpectedTotal(row?: DispatchAlertItem | null) {
+  return (row?.platformFailures || []).reduce((sum, item) => sum + Number(item.expectedCount || 0), 0)
+}
+
+function detailFailureRate(row?: DispatchAlertItem | null) {
+  const expected = detailExpectedTotal(row)
+  if (!expected) return null
+  return Math.round((detailFailedTotal(row) * 10000) / expected) / 100
+}
+
+function formatJsonText(value?: string | null) {
+  if (!value) return '-'
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2)
+  } catch {
+    return value
+  }
+}
+
+function dispatchDetailPreview(row: DispatchAlertItem) {
+  const failures = row.platformFailures || []
+  if (failures.length > 0) {
+    const failed = failures.reduce((sum, item) => sum + Number(item.failedCount || 0), 0)
+    const platforms = failures.map((item) => item.platformName || item.platformCode).filter(Boolean).slice(0, 2).join('、')
+    return shortText(`${platforms || '平台'}失败 ${failed} 次`)
+  }
+  if (Number(row.groupCount || 0) > 1) return shortText(`${row.groupCount} 条告警，点击查看明细`)
+  return shortText(row.content || '-')
+}
+
+async function openDispatchDetail(row: DispatchAlertItem) {
+  detailVisible.value = true
+  detailLoading.value = true
+  detailAlertPage.value = 1
+  detailRow.value = row
+  try {
+    const { data } = await getDispatchAlert(row.id)
+    detailRow.value = data.data
+    detailAlertPage.value = 1
+  } finally {
+    detailLoading.value = false
+  }
 }
 
 async function loadAlerts() {
@@ -819,6 +1019,413 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
+.dispatch-detail {
+  display: grid;
+  gap: 18px;
+}
+
+.detail-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 18px;
+  align-items: stretch;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.94)),
+    linear-gradient(135deg, #eff6ff, #fff7ed);
+  padding: 18px;
+}
+
+.detail-hero.is-danger {
+  border-color: #fecaca;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 247, 247, 0.95)),
+    linear-gradient(135deg, #fff1f2, #fff7ed);
+}
+
+.detail-hero-main {
+  min-width: 0;
+}
+
+.detail-eyebrow {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.detail-hero h2 {
+  margin: 8px 0 0;
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.detail-hero p {
+  margin: 10px 0 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.detail-hero-stat {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  border-radius: 10px;
+  background: #fff;
+  padding: 14px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.detail-hero-stat span,
+.detail-hero-stat em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.detail-hero-stat strong {
+  margin: 6px 0;
+  color: #dc2626;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.detail-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-kpi-card {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px;
+}
+
+.detail-kpi-card span,
+.detail-kpi-card em {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.detail-kpi-card strong {
+  display: block;
+  margin: 6px 0;
+  color: #0f172a;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.detail-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.detail-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.detail-title {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.detail-subtitle {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.detail-panel-badge {
+  flex: none;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-meta span {
+  border-radius: 14px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.platform-failure-list {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.platform-failure-card {
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 12px;
+}
+
+.platform-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.platform-name {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.platform-code {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.platform-rate {
+  flex: none;
+  text-align: right;
+}
+
+.platform-rate strong,
+.platform-rate span {
+  display: block;
+}
+
+.platform-rate strong {
+  color: #dc2626;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.platform-rate span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.reason-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.reason-item {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.35fr) minmax(0, 1fr) 52px;
+  gap: 10px;
+  align-items: start;
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px 10px;
+}
+
+.reason-code {
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 900;
+  word-break: break-word;
+}
+
+.reason-message {
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.reason-count {
+  justify-self: end;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.detail-empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 30px 16px;
+  color: #64748b;
+}
+
+.detail-empty-state strong {
+  color: #334155;
+  font-size: 14px;
+}
+
+.detail-empty-state span {
+  font-size: 12px;
+}
+
+.detail-timeline {
+  display: grid;
+  gap: 0;
+  padding: 8px 14px 14px;
+}
+
+.detail-alert-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  position: relative;
+  padding: 10px 0;
+}
+
+.detail-alert-item + .detail-alert-item {
+  border-top: 1px solid #edf2f7;
+}
+
+.timeline-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #10b981;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.12);
+}
+
+.timeline-dot.is-danger {
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
+}
+
+.timeline-dot.is-warning {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14);
+}
+
+.timeline-content {
+  min-width: 0;
+}
+
+.timeline-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.timeline-head strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.timeline-head span {
+  flex: none;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.timeline-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.timeline-tags span {
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detail-alert-item p {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.detail-alert-item details {
+  margin-top: 8px;
+}
+
+.detail-alert-item summary {
+  cursor: pointer;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-alert-item pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.detail-pagination {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid #edf2f7;
+  padding: 12px 14px 14px;
+}
+
+:deep(.dispatch-alert-dialog .el-dialog__body) {
+  max-height: min(72vh, 720px);
+  overflow: auto;
+  padding-top: 8px;
+}
+
+:deep(.dispatch-alert-dialog .el-dialog) {
+  border-radius: 14px;
+}
+
+:deep(.dispatch-alert-dialog .el-dialog__header) {
+  padding: 18px 22px 8px;
+}
+
+:deep(.dispatch-alert-dialog .el-dialog__title) {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 900;
+}
+
 @media (max-width: 900px) {
   .alert-header,
   .alert-toolbar {
@@ -832,6 +1439,19 @@ onBeforeUnmount(() => {
 
   .alert-filters {
     align-items: stretch;
+  }
+
+  .detail-hero,
+  .detail-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reason-item {
+    grid-template-columns: 1fr;
+  }
+
+  .reason-count {
+    justify-self: start;
   }
 }
 </style>

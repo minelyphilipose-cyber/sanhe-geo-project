@@ -52,6 +52,10 @@ export function getDispatchAlerts(params?: DispatchAlertQuery) {
   return request.get<R<PageResult<DispatchAlertItem>>>('/dispatch/monitor/alerts', { params })
 }
 
+export function getDispatchAlert(id: number) {
+  return request.get<R<DispatchAlertItem>>(`/dispatch/monitor/alerts/${id}`)
+}
+
 export function resolveDispatchAlert(id: number, note?: string) {
   return request.post<R<void>>(`/dispatch/monitor/alerts/${id}/resolve`, { note })
 }
