@@ -9,10 +9,10 @@
       <div class="p09-body">
         <!-- 顶部标题 -->
         <div class="p09-header">
-          <div class="mono p09-subtitle">RECOMMENDATION PRESSURE · 推荐型高价值场景</div>
-          <h3 class="chinese-serif p09-title">求推荐时,竞品在场而您缺席的场景</h3>
+          <div class="mono p09-subtitle">RECOMMENDATION BENCHMARK · 推荐型高价值场景</div>
+          <h3 class="chinese-serif p09-title">{{ detailTitle }}</h3>
           <div class="p09-title-note">
-            本页只看"推荐型高价值"切片;覆盖度页的"高价值"为全部高价值意图,包含推荐与已点名对比。
+            本页只看"推荐型高价值"切片;您列标注品牌状态,竞品列标注该场景里哪些对手被 AI 提到。
           </div>
         </div>
 
@@ -46,8 +46,8 @@
             </div>
             <div class="p09-query-text">"{{ row.prompt_content }}"</div>
             <div class="p09-col-center p09-intent-text">{{ row.category }}</div>
-            <!-- 您:展示集定义下目标品牌缺席 -->
-            <div class="p09-col-center cross">✗</div>
+            <!-- 您:缺席或弱于竞品时进入展示集 -->
+            <div class="p09-col-center" :class="row.targetClass">{{ row.targetText }}</div>
             <!-- 每个竞品:该场景真实出现则 ✓,否则 ✗ -->
             <div
               v-for="c in competitorNames"
@@ -62,29 +62,28 @@
 
         <!-- 无缺口兜底:极罕见情况,但逻辑上可能(100% 覆盖) -->
         <div v-else class="p09-empty">
-          未发现满足"竞品在场且您缺席"的推荐型高价值场景。
+          未发现品牌缺席或弱于竞品的推荐型高价值场景。
         </div>
 
         <div v-if="hiddenMissingCount > 0" class="p09-limit-note">
-          本页按商业价值优先展示 {{ visibleMissingRows.length }} 条代表性缺口；其余
-          {{ hiddenMissingCount }} 条已计入下方缺口总数。
+          本页展示 {{ visibleMissingRows.length }} 条代表场景，其余 {{ hiddenMissingCount }} 条计入下方总数。
         </div>
 
         <!-- 3 张卡片:各价值层的缺口数/总数 -->
         <div class="p09-gap-cards">
           <div class="p09-gap-card p09-gap-high">
-            <div class="mono p09-gap-label p09-gap-label-high">RECO HIGH VALUE GAP</div>
+            <div class="p09-gap-label p09-gap-label-high">推荐高价值缺口</div>
             <div class="metric-hero p09-gap-number">
               {{ highGapCount
               }}<span class="p09-gap-denominator">/{{ pressure.hv_reco_total }}</span>
             </div>
-            <div class="p09-gap-desc">推荐型高价值 · 竞品在场 · 您缺席</div>
+            <div class="p09-gap-desc">{{ highGapDesc }}</div>
             <div class="p09-gap-context">
               全部高价值已覆盖 {{ highValueCovered }}/{{ highValueTotal }};本卡只取其中推荐型切片。
             </div>
           </div>
           <div class="p09-gap-card p09-gap-mid">
-            <div class="mono p09-gap-label p09-gap-label-mid">MID VALUE GAP</div>
+            <div class="p09-gap-label p09-gap-label-mid">中价值覆盖缺口</div>
             <div class="metric-hero p09-gap-number">
               {{ midGapCount
               }}<span class="p09-gap-denominator">/{{ mergedView.scene_coverage.mid_value.total }}</span>
@@ -93,7 +92,7 @@
             <div class="p09-gap-context">缺口 = 总数 - 已覆盖;已覆盖 {{ midCovered }}。</div>
           </div>
           <div class="p09-gap-card p09-gap-low">
-            <div class="mono p09-gap-label p09-gap-label-low">LOW VALUE GAP</div>
+            <div class="p09-gap-label p09-gap-label-low">低价值覆盖缺口</div>
             <div class="metric-hero p09-gap-number">
               {{ lowGapCount
               }}<span class="p09-gap-denominator">/{{ mergedView.scene_coverage.low_value.total }}</span>
@@ -128,17 +127,17 @@ import type { SceneCompetitorPressureItem } from '@/types/presale/computed'
  * Page09 竞品场景差异。
  *
  * 数据映射:
- *   - 场景表:scene_coverage.{high_value, mid_value, low_value}.missing_queries[]
- *     每行 = 一条 missing query
+ *   - 场景表:scene_competitor_pressure.items[]
+ *     每行 = 一条 target absent 或 weak query
  *       价值 badge = 所在分组(high/mid/low)
- *       您列 = ✗(固定,因为在 missing 列表里)
+ *       您列 = ✗ / 弱(展示品牌在该推荐场景里的状态)
  *       竞品列 = top_competitor_coverage 是否含该竞品名
- *       仅展示至少一个竞品被推荐的缺口,避免混入双方都未推荐的场景
+ *       展示推荐型高价值下品牌缺席或弱于竞品的场景,避免只保留强压制样本
  *   - 3 张卡片:每组竞品差异缺口数 / group.total
  *   - 底部引用:竞品组对比模式优先取 group_scene_advantages;否则回退 Top1 竞品 scene_advantages
  *
  * 不做:
- *   - 不展示 covered_queries(主题是"gap",覆盖的不显示)
+ *   - 不展示 target 已稳定覆盖且不弱于竞品的推荐场景
  */
 
 const { mergedView: mergedViewRef } = useMergedView()
@@ -160,10 +159,6 @@ const sortedCompetitors = computed(() =>
   })
 )
 
-const competitorNameSet = computed(() =>
-  new Set(competitorNames.value.filter(Boolean))
-)
-
 // 长名字截断(表头空间有限,保留可识别性)
 function shortenCompetitorName(name: string): string {
   // 中文超过 3 字取前 2 字 + 省略号;英文超 6 字符同理
@@ -178,13 +173,15 @@ interface MissingRow {
   category: string
   priorityClass: 'high' | 'mid' | 'low'
   priorityLabel: '高' | '中' | '低'
+  targetText: '✗' | '弱'
+  targetClass: 'cross' | 'weak'
   /** 以竞品名为 key,是否覆盖。 */
   coverageByCompetitor: Record<string, boolean>
 }
 
 const missingRows = computed<MissingRow[]>(() => {
   return (pressure.value.items ?? [])
-    .filter((scene) => isDisplayPressureScene(scene))
+    .filter((scene) => isDisplayDetailScene(scene))
     .map((scene) => {
       const map: Record<string, boolean> = {}
       for (const cname of competitorNames.value) {
@@ -196,6 +193,8 @@ const missingRows = computed<MissingRow[]>(() => {
         category: '推荐型',
         priorityClass: 'high',
         priorityLabel: '高',
+        targetText: isTargetAbsentScene(scene) ? '✗' : '弱',
+        targetClass: isTargetAbsentScene(scene) ? 'cross' : 'weak',
         coverageByCompetitor: map
       }
     })
@@ -203,13 +202,28 @@ const missingRows = computed<MissingRow[]>(() => {
 
 const visibleMissingRows = computed(() => missingRows.value.slice(0, MAX_VISIBLE_MISSING_ROWS))
 const hiddenMissingCount = computed(() => Math.max(0, missingRows.value.length - visibleMissingRows.value.length))
+const hasWeakRows = computed(() => missingRows.value.some((row) => row.targetClass === 'weak'))
+const detailTitle = computed(() =>
+  hasWeakRows.value ? '求推荐时,品牌缺席或弱势的场景' : '求推荐时,品牌缺席的场景'
+)
+const highGapDesc = computed(() =>
+  hasWeakRows.value ? '推荐型高价值 · 缺席或弱势' : '推荐型高价值 · 品牌缺席'
+)
 
-// ─── 3 张卡片计数 ──────────────────────────────────────
-function isDisplayPressureScene(scene: SceneCompetitorPressureItem): boolean {
-  return (scene.target_mentioned_platform_count ?? 0) <= DISPLAY_TARGET_THRESHOLD &&
-    (scene.competitors ?? []).some((item) =>
-      competitorNameSet.value.has(item.name) && (item.mentioned_platform_count ?? 0) > 0
-    )
+function isTargetAbsentScene(scene: SceneCompetitorPressureItem): boolean {
+  return (scene.target_mentioned_platform_count ?? 0) <= DISPLAY_TARGET_THRESHOLD
+}
+
+function isDisplayDetailScene(scene: SceneCompetitorPressureItem): boolean {
+  return isTargetAbsentScene(scene) || isWeakerThanCompetitor(scene)
+}
+
+function isWeakerThanCompetitor(scene: SceneCompetitorPressureItem): boolean {
+  const targetCount = scene.target_mentioned_platform_count ?? 0
+  return (scene.competitors ?? []).some((item) =>
+    competitorNames.value.includes(item.name) &&
+    (item.mentioned_platform_count ?? 0) > targetCount
+  )
 }
 
 function isCoveredByCompetitor(
@@ -225,7 +239,9 @@ function coverageGapCount(group: typeof mergedView.value.scene_coverage.high_val
   return group.missing_queries?.length ?? 0
 }
 
-const highGapCount = computed(() => missingRows.value.length)
+const highGapCount = computed(() =>
+  (pressure.value.items ?? []).filter((scene) => isDisplayDetailScene(scene)).length
+)
 const highValueTotal = computed(() => mergedView.value.scene_coverage.high_value.total)
 const highValueCovered = computed(() => mergedView.value.scene_coverage.high_value.covered)
 const midCovered = computed(() => mergedView.value.scene_coverage.mid_value.covered)
@@ -324,6 +340,11 @@ const showRawTag = computed(() =>
   color: #6b6456;
 }
 
+.weak {
+  color: #d97706;
+  font-weight: 700;
+}
+
 /* 空态 */
 .p09-empty {
   padding: 48px 0;
@@ -362,8 +383,9 @@ const showRawTag = computed(() =>
   border-top: 2px solid #6b6456;
 }
 .p09-gap-label {
-  font-size: 10px;
-  letter-spacing: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
   margin-bottom: 8px;
 }
 .p09-gap-label-high {
