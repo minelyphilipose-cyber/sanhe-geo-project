@@ -224,6 +224,25 @@ class SelfMediaAccountServiceTest {
     }
 
     @Test
+    void deleteOfficialApiAccountDoesNotRequireBrowserEnvironmentUnbound() {
+        SelfMediaAccount existing = new SelfMediaAccount();
+        existing.setId(20L);
+        existing.setBrandId(10L);
+        existing.setPlatform("wechat_mp");
+        existing.setAccountName("公众号账号");
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(existing);
+        when(browserEnvironmentAccountMapper.selectActiveBySelfMediaAccountId(20L))
+                .thenReturn(new BrowserEnvironmentAccount());
+
+        service.deleteAccount(20L);
+
+        verify(brandAccessService).requireBrandAccess(10L, 99L, BrandAccessAction.MANAGE);
+        verify(selfMediaAccountMapper).updateById(existing);
+        verify(selfMediaAccountMapper).deleteById(20L);
+        assertEquals(99L, existing.getDeletedBy());
+    }
+
+    @Test
     void deleteAccountSoftDeletesWhenUnbound() {
         SelfMediaAccount existing = new SelfMediaAccount();
         existing.setId(20L);
