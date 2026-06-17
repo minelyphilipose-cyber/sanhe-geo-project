@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaAutoScheduleRequest;
@@ -58,6 +59,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -81,6 +83,8 @@ public class ProjectSelfMediaScheduleService {
     private final SelfMediaPublishAutoScheduleService autoScheduleService;
     private final SelfMediaPublishScheduleService scheduleService;
     private final BatchArticleGenerationService generationService;
+    private final TemplatePerspectiveService perspectiveService;
+    private final ArticleTemplateAllocationService templateAllocationService;
     private final ArticleCoverSelectionService coverSelectionService;
     private final BusinessCalendarService businessCalendarService;
     private final CompanyChannelQuotaService companyChannelQuotaService;
@@ -376,9 +380,6 @@ public class ProjectSelfMediaScheduleService {
                                                          List<AccountPublishPlan> plans,
                                                          Long operatorId) {
         List<KeywordGroupResult> questions = keywordGroupResultMapper.selectProjectQuestionsByTiers(project.getId(), "'A'");
-        if (questions.isEmpty()) {
-            throw new BizException(ERROR_CODE, "项目缺少 A 级问题，无法生成自媒体排期文章");
-        }
         List<GenerationPlan> generationPlans = new ArrayList<>();
         for (int start = 0; start < plans.size(); start += GENERATION_BATCH_LIMIT) {
             List<AccountPublishPlan> chunk = plans.subList(start, Math.min(plans.size(), start + GENERATION_BATCH_LIMIT));
@@ -414,13 +415,14 @@ public class ProjectSelfMediaScheduleService {
         request.setProjectId(project.getId());
         request.setTopicSource("manual");
         List<BatchArticleGenerateRequest.TopicConfig> topics = new ArrayList<>();
+        Map<String, CompatibleQuestionScenes> sceneCache = new LinkedHashMap<>();
         for (int i = 0; i < plans.size(); i++) {
             AccountPublishPlan plan = plans.get(i);
-            KeywordGroupResult question = questions.get((offset + i) % questions.size());
+            TopicSeed question = selectTopicForPlan(project, plan, questions, offset + i, sceneCache);
             BatchArticleGenerateRequest.TopicConfig topic = new BatchArticleGenerateRequest.TopicConfig();
-            topic.setTopic(question.getKeywordText());
-            topic.setTopicAsQuestion(question.getKeywordText());
-            topic.setQuestionSceneCode(question.getSceneCode());
+            topic.setTopic(question.topic());
+            topic.setTopicAsQuestion(question.topicAsQuestion());
+            topic.setQuestionSceneCode(question.sceneCode());
             BatchArticleGenerateRequest.PlatformCount platform = new BatchArticleGenerateRequest.PlatformCount();
             platform.setChannelGroupCode(ArticlePromptChannels.SELF_MEDIA);
             platform.setChannelSubCode(plan.platform());
@@ -432,6 +434,82 @@ public class ProjectSelfMediaScheduleService {
         }
         request.setTopics(topics);
         return request;
+    }
+
+    private TopicSeed selectTopicForPlan(Project project,
+                                         AccountPublishPlan plan,
+                                         List<KeywordGroupResult> questions,
+                                         int startIndex,
+                                         Map<String, CompatibleQuestionScenes> sceneCache) {
+        TemplatePerspectiveService.ResolvedPerspective perspective = perspectiveService.resolve(
+                project.getBrandId(),
+                ArticlePromptChannels.SELF_MEDIA,
+                plan.platform()
+        );
+        if (!TemplatePerspectiveCodes.isThirdParty(perspective.perspectiveCode())) {
+            if (questions.isEmpty()) {
+                throw new BizException(ERROR_CODE, "项目缺少 A 级问题，无法生成自媒体排期文章");
+            }
+            KeywordGroupResult question = questions.get(startIndex % questions.size());
+            return new TopicSeed(question.getKeywordText(), question.getKeywordText(), question.getSceneCode());
+        }
+        String cacheKey = plan.platform() + "|" + perspective.perspectiveCode();
+        CompatibleQuestionScenes scenes = sceneCache.computeIfAbsent(cacheKey,
+                ignored -> compatibleQuestionScenes(plan.platform(), perspective.perspectiveCode()));
+        String sceneCode = scenes.preferredScene(startIndex);
+        return thirdPartyTopicSeed(sceneCode, perspective.perspectiveCode());
+    }
+
+    private CompatibleQuestionScenes compatibleQuestionScenes(String platform, String perspectiveCode) {
+        List<ArticleTemplateAllocationService.TemplateWithVersion> templates = templateAllocationService.activeTemplates(
+                ArticlePromptChannels.SELF_MEDIA,
+                platform,
+                null,
+                perspectiveCode
+        );
+        if (templates.isEmpty()) {
+            throw new BizException(ERROR_CODE, "特殊视角缺少启用模板: channelGroup="
+                    + ArticlePromptChannels.SELF_MEDIA
+                    + ", channelSub=" + platform
+                    + ", perspective=" + perspectiveCode);
+        }
+        boolean acceptsAny = templates.stream()
+                .anyMatch(item -> !StringUtils.hasText(item.template().getQuestionSceneCode()));
+        Set<String> sceneCodes = templates.stream()
+                .map(item -> trimToNull(item.template().getQuestionSceneCode()))
+                .filter(StringUtils::hasText)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        return new CompatibleQuestionScenes(acceptsAny, sceneCodes);
+    }
+
+    private TopicSeed thirdPartyTopicSeed(String sceneCode, String perspectiveCode) {
+        String scene = trimToNull(sceneCode);
+        String topic = switch (scene == null ? "" : scene) {
+            case "brand" -> TemplatePerspectiveCodes.REVIEW_RECOMMEND.equals(perspectiveCode)
+                    ? "这个品牌是否适合当前需求"
+                    : "这个品牌在行业里是什么角色";
+            case "decision" -> "这类服务应该怎么选";
+            case "compare" -> "这类方案应该怎么比较";
+            case "qa" -> "这个行业常见问题有哪些";
+            case "function" -> "这类服务能解决什么问题";
+            default -> TemplatePerspectiveCodes.REVIEW_RECOMMEND.equals(perspectiveCode)
+                    ? "当前行业里哪些选择更值得关注"
+                    : "当前行业趋势和选择逻辑是什么";
+        };
+        return new TopicSeed(topic, topic, scene);
+    }
+
+    private record CompatibleQuestionScenes(boolean acceptsAny, Set<String> sceneCodes) {
+        String preferredScene(int index) {
+            if (sceneCodes.isEmpty()) {
+                return null;
+            }
+            List<String> scenes = List.copyOf(sceneCodes);
+            return scenes.get(Math.floorMod(index, scenes.size()));
+        }
+    }
+
+    private record TopicSeed(String topic, String topicAsQuestion, String sceneCode) {
     }
 
     private boolean progressProcessingBatch(ProjectSelfMediaScheduleBatch batch) {
@@ -1045,7 +1123,7 @@ public class ProjectSelfMediaScheduleService {
         return null;
     }
 
-    private String trimToNull(String value) {
+    private static String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 

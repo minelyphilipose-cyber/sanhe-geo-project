@@ -46,6 +46,7 @@ import {
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'baijiahao' | 'toutiao' | 'zhihu' | 'xiaohongshu' | 'netease' | 'sohu'
 type SemiAutoPlatform = 'toutiao' | 'baijiahao' | 'zhihu' | 'xiaohongshu'
+type PlatformQuickSchedulePlatform = SemiAutoPlatform | 'douyin' | 'wechat_mp'
 
 type UseSelfMediaDistributionOptions = {
   rows: Ref<ArticleDraft[]>
@@ -149,6 +150,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   const wechatDistributionAvailable = computed(() =>
     !!wechatCapability.value?.draftDistributionEnabled || !!wechatCapability.value?.autoPublishEnabled,
   )
+  const wechatQuickScheduleAvailable = computed(() => !!wechatCapability.value?.autoPublishEnabled)
   const wechatStatusLabel = computed(() => {
     if (!wechatDistributionAvailable.value) return '审核中'
     if (wechatActive.value) return '已登录'
@@ -402,8 +404,16 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   async function handleWechatPlatformClick() {
+    selectedMediaPlatform.value = 'wechat_mp'
+    selectedSelfMediaAccountId.value = null
+    selectedCoverMaterialId.value = null
+    selectedDouyinImageMaterialIds.value = []
     if (!wechatDistributionAvailable.value) {
       ElMessage.info(wechatCapability.value?.description || '微信公众号能力审核中，暂未开放授权')
+      return
+    }
+    if (!wechatQuickScheduleAvailable.value) {
+      ElMessage.info(wechatCapability.value?.description || '微信公众号自动发布未开启，暂不可创建快速排期')
       return
     }
     if (!wechatActive.value) {
@@ -418,17 +428,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       window.location.href = data.data.authUrl
       return
     }
-    const account = wechatAccounts.value.find((item) => item.status === 'active')
-    if (account) {
-      startWechatDraft(account)
-    }
-  }
-
-  function startWechatDraft(account: SelfMediaAccount) {
-    selectedMediaPlatform.value = 'wechat_mp'
-    selectedSelfMediaAccountId.value = account.id
-    ensureSelectedImageFolder()
-    selectedCoverMaterialId.value = imageMaterials.value[0]?.id || null
+    await submitPlatformQuickSchedule('wechat_mp')
   }
 
   async function handleDouyinPlatformClick() {
@@ -455,16 +455,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       window.location.href = data.data.authUrl
       return
     }
-    const account = douyinAccounts.value.find((item) => item.status === 'active')
-    if (account) {
-      startDouyinImageText(account)
-    }
-  }
-
-  function startDouyinImageText(account: SelfMediaAccount) {
-    selectedMediaPlatform.value = 'douyin'
-    selectedSelfMediaAccountId.value = account.id
-    ensureSelectedImageFolder()
+    await submitPlatformQuickSchedule('douyin')
   }
 
   function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatform {
@@ -482,6 +473,8 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   function semiAutoPlatformLabel(platform: string) {
+    if (platform === 'wechat_mp' || platform === 'wechat') return '微信公众号'
+    if (platform === 'douyin') return '抖音图文'
     if (platform === 'toutiao') return '头条'
     if (platform === 'baijiahao') return '百家号'
     if (platform === 'zhihu') return '知乎'
@@ -611,12 +604,15 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     })
   }
 
-  function showSelfMediaAccountSetupPrompt(platform: SemiAutoPlatform, issue: string) {
+  function showSelfMediaAccountSetupPrompt(platform: PlatformQuickSchedulePlatform, issue: string) {
+    const action = isSemiAutoPlatform(platform)
+      ? `新增或启用${semiAutoPlatformLabel(platform)}账号后，确认该账号已绑定品牌的 AdsPower 浏览器环境。`
+      : `新增或启用${semiAutoPlatformLabel(platform)}账号，并完成该平台官方授权后再创建排期。`
     return showSetupPrompt({
       title: `${semiAutoPlatformLabel(platform)}账号未就绪`,
       issue,
       location: '品牌详情 > 自媒体账号',
-      action: `新增或启用${semiAutoPlatformLabel(platform)}账号后，确认该账号已绑定品牌的 AdsPower 浏览器环境。`,
+      action,
       target: 'selfMediaAccounts',
     })
   }
@@ -712,7 +708,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     await submitPlatformQuickSchedule(platform)
   }
 
-  async function submitPlatformQuickSchedule(platform: SemiAutoPlatform) {
+  async function submitPlatformQuickSchedule(platform: PlatformQuickSchedulePlatform) {
     if (!mediaDistributeArticleId.value) {
       ElMessage.warning('请选择要分发的文章')
       return
@@ -720,13 +716,13 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     if (!mediaDistributeBrandId.value) {
       await showSetupPrompt({
         title: '文章品牌缺失',
-        issue: '当前文章未绑定品牌，系统无法判断要使用哪个品牌的自媒体账号和 AdsPower 浏览器环境。',
+        issue: '当前文章未绑定品牌，系统无法判断要使用哪个品牌的自媒体账号。',
         location: '内容管理 > 文章详情',
         action: '先为文章选择所属品牌，再回到自媒体分发继续操作。',
       })
       return
     }
-    const accounts = semiAutoAccountsByPlatform(platform)
+    const accounts = quickScheduleAccountsByPlatform(platform)
     if (!accounts.length) {
       await showSelfMediaAccountSetupPrompt(platform, `当前品牌暂无${semiAutoPlatformLabel(platform)}账号，无法创建分发任务。`)
       return
@@ -757,7 +753,9 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     }
   }
 
-  function semiAutoAccountsByPlatform(platform: SemiAutoPlatform) {
+  function quickScheduleAccountsByPlatform(platform: PlatformQuickSchedulePlatform) {
+    if (platform === 'wechat_mp') return wechatAccounts.value
+    if (platform === 'douyin') return douyinAccounts.value
     if (platform === 'toutiao') return toutiaoAccounts.value
     if (platform === 'baijiahao') return baijiahaoAccounts.value
     if (platform === 'zhihu') return zhihuAccounts.value
@@ -851,31 +849,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     const [item] = next.splice(index, 1)
     next.splice(nextIndex, 0, item)
     selectedDouyinImageMaterialIds.value = next
-  }
-
-  async function submitWechatDraft() {
-    if (!mediaDistributeArticleId.value || !selectedSelfMediaAccountId.value || !selectedCoverMaterialId.value) {
-      ElMessage.warning('请选择公众号和封面图片')
-      return
-    }
-    selfMediaSubmitting.value = true
-    try {
-      const result = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
-        selfMediaAccountId: selectedSelfMediaAccountId.value,
-        coverMaterialId: selectedCoverMaterialId.value,
-        requestId: createRequestId(),
-      })
-      const task = result.data.data
-      if (task.status === 'submitted') {
-        mediaDistributeVisible.value = false
-        ElMessage.success('已保存至公众号草稿箱')
-        await options.load()
-        return
-      }
-      ElMessage.error(task.errorMessage || '保存公众号草稿失败')
-    } finally {
-      selfMediaSubmitting.value = false
-    }
   }
 
   async function submitDouyinImageText() {
@@ -1313,8 +1286,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     environmentAccountTagType,
     environmentAccountLabel,
     checkWechatAccount,
-    startWechatDraft,
-    startDouyinImageText,
     environmentAccountOf,
     canSubmitSemiAutoEnvironmentTask,
     openSemiAutoEnvironmentForLogin,
@@ -1338,7 +1309,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     canOperateSemiAutoDistributionTask,
     confirmSemiAutoPublished,
     abandonSemiAutoPublished,
-    submitWechatDraft,
     submitDouyinImageText,
   }
 
@@ -1369,6 +1339,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     environmentAccountResettingId,
     selfMediaSubmitting,
     wechatDistributionAvailable,
+    wechatQuickScheduleAvailable,
     wechatStatusLabel,
     wechatStatusTagType,
     douyinDistributionAvailable,

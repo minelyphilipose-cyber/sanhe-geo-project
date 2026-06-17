@@ -1,6 +1,27 @@
 import request from './request'
 import type { R, SystemAlertTodoItem } from '@/types'
 
+export interface WorkbenchTodo {
+  id: number
+  sourceType: string
+  alertType?: string | null
+  severity?: string | null
+  message?: string | null
+  customerName?: string | null
+  brandName?: string | null
+  route?: string | null
+  createdAt?: string | null
+}
+
+export interface WorkbenchRiskGroup {
+  customerName?: string | null
+  brandName?: string | null
+  riskCount: number
+  highSeverityCount: number
+  latestMessage?: string | null
+  todos: WorkbenchTodo[]
+}
+
 export interface OperatorWorkbenchOverview {
   customerCount: number
   brandCount: number
@@ -14,6 +35,10 @@ export interface OperatorWorkbenchOverview {
   semiAutoTaskCount: number
   inFlightExtensionTaskCount: number
   completedDistributionTaskCount: number
+  openTodoCount: number
+  highSeverityTodoCount: number
+  priorityTodos: WorkbenchTodo[]
+  customerRiskGroups: WorkbenchRiskGroup[]
 }
 
 export interface ManagerWorkbenchOverview {
@@ -25,6 +50,8 @@ export interface ManagerWorkbenchOverview {
   openSystemAlertCount: number
   highSeveritySystemAlertCount: number
   latestSystemAlerts: SystemAlertTodoItem[]
+  priorityTodos: WorkbenchTodo[]
+  customerRiskGroups: WorkbenchRiskGroup[]
 }
 
 export interface SalesWorkbenchOverview {
@@ -36,6 +63,10 @@ export interface SalesWorkbenchOverview {
   generatingReportCount: number
   doneReportCount: number
   failedReportCount: number
+  openTodoCount: number
+  highSeverityTodoCount: number
+  priorityTodos: WorkbenchTodo[]
+  customerRiskGroups: WorkbenchRiskGroup[]
 }
 
 export interface SuperAdminWorkbenchOverview {

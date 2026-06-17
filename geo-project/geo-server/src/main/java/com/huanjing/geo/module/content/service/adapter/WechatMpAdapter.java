@@ -56,6 +56,20 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     }
 
     @Override
+    public void preflightCredential(SelfMediaAccount account) {
+        if (account == null || !PLATFORM.equals(account.getPlatform())) {
+            throw new BizException(400, "not wechat_mp account");
+        }
+        if (!"active".equals(account.getStatus())) {
+            throw new BizException(401, "wechat_mp account not active, please re-authorize");
+        }
+        tokenAwareExecutor.execute(account, accessToken -> {
+            wechatMpClient.getMaterialCount(accessToken);
+            return true;
+        });
+    }
+
+    @Override
     public ValidationResult validate(ArticleDraft article, String contentMarkdown, PublishSite site) {
         return ValidationResult.pass();
     }

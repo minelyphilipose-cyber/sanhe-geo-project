@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.schedule;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
@@ -45,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -152,6 +154,64 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
         verify(scheduleMapper).updateById(ArgumentMatchers.argThat(schedule ->
                 Long.valueOf(99L).equals(schedule.getDistributionTaskId())
         ));
+    }
+
+    @Test
+    void schedulePreflightCredentialFailureDoesNotCreateDistributionTask() {
+        adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
+                platformRouter,
+                List.of(new PreflightFailingAdapter(new BizException(401, "credential expired"))),
+                scheduleMapper,
+                distributionTaskMapper,
+                articleDraftMapper,
+                articleDraftVersionMapper,
+                selfMediaAccountMapper,
+                projectMapper,
+                imagePublicUrlRewriter,
+                materialSelectionService,
+                capabilityService,
+                new ObjectMapper()
+        );
+        SelfMediaPublishSchedule row = scheduleRow();
+        when(scheduleMapper.selectById(10L)).thenReturn(row);
+        when(distributionTaskMapper.selectOne(any())).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(40L)).thenReturn(account());
+
+        ScheduleExecutionResult result = adapter.schedule(SelfMediaPublishScheduleVO.from(row));
+
+        assertEquals(false, result.success());
+        assertEquals("OFFICIAL_API_CREDENTIAL_EXPIRED", result.failureCode());
+        verify(distributionTaskMapper, never()).insert(any());
+        verify(articleDraftMapper, never()).selectById(any());
+    }
+
+    @Test
+    void schedulePreflightCredentialRefreshingReturnsRetry() {
+        adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
+                platformRouter,
+                List.of(new PreflightFailingAdapter(new BizException(429, "token refreshing"))),
+                scheduleMapper,
+                distributionTaskMapper,
+                articleDraftMapper,
+                articleDraftVersionMapper,
+                selfMediaAccountMapper,
+                projectMapper,
+                imagePublicUrlRewriter,
+                materialSelectionService,
+                capabilityService,
+                new ObjectMapper()
+        );
+        SelfMediaPublishSchedule row = scheduleRow();
+        when(scheduleMapper.selectById(10L)).thenReturn(row);
+        when(distributionTaskMapper.selectOne(any())).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(40L)).thenReturn(account());
+
+        ScheduleExecutionResult result = adapter.schedule(SelfMediaPublishScheduleVO.from(row));
+
+        assertEquals(false, result.success());
+        assertEquals("OFFICIAL_API_CREDENTIAL_REFRESHING", result.failureCode());
+        assertTrue(result.nextAttemptAt() != null);
+        verify(distributionTaskMapper, never()).insert(any());
     }
 
     @Test
@@ -318,6 +378,19 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
         @Override
         public ReviewStatusResult refreshReviewStatus(DistributionTask task, SelfMediaAccount account) {
             throw new IllegalStateException("api unavailable");
+        }
+    }
+
+    private static class PreflightFailingAdapter extends FakeOfficialApiAdapter {
+        private final BizException exception;
+
+        private PreflightFailingAdapter(BizException exception) {
+            this.exception = exception;
+        }
+
+        @Override
+        public void preflightCredential(SelfMediaAccount account) {
+            throw exception;
         }
     }
 

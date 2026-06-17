@@ -2,7 +2,10 @@ package com.huanjing.geo.module.content.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
+import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
+import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaAutoScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
@@ -72,6 +75,8 @@ class ProjectSelfMediaScheduleServiceTest {
     private SelfMediaPublishAutoScheduleService autoScheduleService;
     private SelfMediaPublishScheduleService scheduleService;
     private BatchArticleGenerationService generationService;
+    private TemplatePerspectiveService perspectiveService;
+    private ArticleTemplateAllocationService templateAllocationService;
     private ArticleCoverSelectionService coverSelectionService;
     private BusinessCalendarService businessCalendarService;
     private BrandAccessService brandAccessService;
@@ -94,6 +99,8 @@ class ProjectSelfMediaScheduleServiceTest {
         autoScheduleService = mock(SelfMediaPublishAutoScheduleService.class);
         scheduleService = mock(SelfMediaPublishScheduleService.class);
         generationService = mock(BatchArticleGenerationService.class);
+        perspectiveService = mock(TemplatePerspectiveService.class);
+        templateAllocationService = mock(ArticleTemplateAllocationService.class);
         coverSelectionService = mock(ArticleCoverSelectionService.class);
         businessCalendarService = mock(BusinessCalendarService.class);
         brandAccessService = mock(BrandAccessService.class);
@@ -103,6 +110,8 @@ class ProjectSelfMediaScheduleServiceTest {
         user.setId(99L);
         when(currentUserService.requireCurrentUser()).thenReturn(user);
         when(projectMapper.selectById(7L)).thenReturn(project());
+        when(perspectiveService.resolve(any(), anyString(), anyString()))
+                .thenReturn(TemplatePerspectiveService.ResolvedPerspective.customer());
 
         service = new ProjectSelfMediaScheduleService(
                 projectMapper,
@@ -118,6 +127,8 @@ class ProjectSelfMediaScheduleServiceTest {
                 autoScheduleService,
                 scheduleService,
                 generationService,
+                perspectiveService,
+                templateAllocationService,
                 coverSelectionService,
                 businessCalendarService,
                 companyChannelQuotaService,
@@ -186,6 +197,73 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals(1, updated.getPlannedCount());
         assertEquals(0, updated.getCreatedCount());
         assertEquals(0, updated.getRejectedCount());
+    }
+
+    @Test
+    void createForProjectUsesTemplateSceneTopicForThirdPartyPerspective() {
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 1));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        KeywordGroupResult brandQuestion = new KeywordGroupResult();
+        brandQuestion.setKeywordText("现在的行业趋势到底怎么样");
+        brandQuestion.setSceneCode("brand");
+        KeywordGroupResult decisionQuestion = new KeywordGroupResult();
+        decisionQuestion.setKeywordText("这类服务应该怎么选");
+        decisionQuestion.setSceneCode("decision");
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'"))
+                .thenReturn(List.of(brandQuestion, decisionQuestion));
+        when(perspectiveService.resolve(8L, "self_media", "toutiao"))
+                .thenReturn(new TemplatePerspectiveService.ResolvedPerspective("review_recommend", "channel", 99L));
+        when(templateAllocationService.activeTemplates("self_media", "toutiao", null, "review_recommend"))
+                .thenReturn(List.of(templateWithScene("decision")));
+        BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(44L, 1, "pending", false, false, List.of());
+        when(generationService.createSystemBatch(any(), eq(99L))).thenReturn(generation);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(55L);
+        task.setBatchId(44L);
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
+
+        service.createForProject(7L, request(), "manual");
+
+        ArgumentCaptor<BatchArticleGenerateRequest> captor = ArgumentCaptor.forClass(BatchArticleGenerateRequest.class);
+        verify(generationService).createSystemBatch(captor.capture(), eq(99L));
+        assertEquals("decision", captor.getValue().getTopics().get(0).getQuestionSceneCode());
+        assertEquals("这类服务应该怎么选", captor.getValue().getTopics().get(0).getTopic());
+    }
+
+    @Test
+    void createForProjectDoesNotRequireSourceQuestionsForThirdPartyPerspective() {
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 1));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'")).thenReturn(List.of());
+        when(perspectiveService.resolve(8L, "self_media", "toutiao"))
+                .thenReturn(new TemplatePerspectiveService.ResolvedPerspective("review_recommend", "channel", 99L));
+        when(templateAllocationService.activeTemplates("self_media", "toutiao", null, "review_recommend"))
+                .thenReturn(List.of(templateWithScene("brand")));
+        BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(44L, 1, "pending", false, false, List.of());
+        when(generationService.createSystemBatch(any(), eq(99L))).thenReturn(generation);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(55L);
+        task.setBatchId(44L);
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
+
+        service.createForProject(7L, request(), "manual");
+
+        ArgumentCaptor<BatchArticleGenerateRequest> captor = ArgumentCaptor.forClass(BatchArticleGenerateRequest.class);
+        verify(generationService).createSystemBatch(captor.capture(), eq(99L));
+        assertEquals("brand", captor.getValue().getTopics().get(0).getQuestionSceneCode());
+        assertEquals("这个品牌是否适合当前需求", captor.getValue().getTopics().get(0).getTopic());
     }
 
     @Test
@@ -667,6 +745,13 @@ class ProjectSelfMediaScheduleServiceTest {
         task.setStatus("failed");
         task.setErrorMessage(message);
         return task;
+    }
+
+    private ArticleTemplateAllocationService.TemplateWithVersion templateWithScene(String sceneCode) {
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setQuestionSceneCode(sceneCode);
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        return new ArticleTemplateAllocationService.TemplateWithVersion(template, version);
     }
 
     private BusinessCalendarService.PublishSlot slot(int day, int hour) {

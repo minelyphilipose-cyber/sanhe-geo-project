@@ -29,17 +29,21 @@
       <div class="workbench-panel workbench-panel--large">
         <div class="panel-heading">
           <div>
-            <h2>诊断报告</h2>
-            <p>本人创建的 AI 可见度诊断报告进展。</p>
+            <h2>报告待办</h2>
+            <p>本人创建且需要处理的诊断报告事项。</p>
           </div>
           <el-tag :type="reportPressureType">{{ reportPressureLabel }}</el-tag>
         </div>
 
-        <div class="signal-grid">
-          <div v-for="item in reportMetrics" :key="item.key" class="signal-card">
-            <span class="signal-card__label">{{ item.label }}</span>
-            <strong>{{ displayNumber(item.value) }}</strong>
-            <small>{{ item.hint }}</small>
+        <div v-if="priorityTodos.length === 0" class="empty-state">暂无需要优先处理的报告待办</div>
+        <div v-else class="todo-list">
+          <div v-for="todo in priorityTodos" :key="todoKey(todo)" class="todo-item">
+            <span class="todo-item__dot" :class="todoDotClass(todo.severity)"></span>
+            <div class="todo-item__body">
+              <strong>{{ todo.message || '待处理事项' }}</strong>
+              <p>{{ todoMeta(todo) }}</p>
+            </div>
+            <el-button v-if="todo.route" link type="primary" @click="router.push(todo.route)">处理</el-button>
           </div>
         </div>
       </div>
@@ -47,8 +51,15 @@
       <div class="workbench-panel">
         <div class="panel-heading">
           <div>
-            <h2>快捷入口</h2>
-            <p>销售日常跟进路径。</p>
+            <h2>诊断报告</h2>
+            <p>本人创建的 AI 可见度诊断报告进展。</p>
+          </div>
+        </div>
+        <div class="signal-grid signal-grid--compact">
+          <div v-for="item in reportMetrics" :key="item.key" class="signal-card">
+            <span class="signal-card__label">{{ item.label }}</span>
+            <strong>{{ displayNumber(item.value) }}</strong>
+            <small>{{ item.hint }}</small>
           </div>
         </div>
         <div class="quick-actions">
@@ -88,6 +99,7 @@ const reportMetrics = computed(() => [
 const reportPressure = computed(() => Number(overview.value?.failedReportCount || 0))
 const reportPressureType = computed(() => (reportPressure.value > 0 ? 'warning' : 'success'))
 const reportPressureLabel = computed(() => (reportPressure.value > 0 ? `${reportPressure.value} 份异常` : '运行平稳'))
+const priorityTodos = computed(() => overview.value?.priorityTodos || [])
 
 async function load() {
   loading.value = true
@@ -103,6 +115,25 @@ async function load() {
 
 function displayNumber(value?: number | null) {
   return value == null ? '--' : value.toLocaleString()
+}
+
+function todoDotClass(severity?: string | null) {
+  if (severity === 'critical' || severity === 'high' || severity === 'error') return 'todo-item__dot--high'
+  if (severity === 'warn' || severity === 'warning') return 'todo-item__dot--medium'
+  return 'todo-item__dot--normal'
+}
+
+function todoMeta(todo: { brandName?: string | null; severity?: string | null }) {
+  return `${todo.brandName || '未归属品牌'} · ${severityLabel(todo.severity)}`
+}
+
+function severityLabel(value?: string | null) {
+  const map: Record<string, string> = { critical: '严重', high: '高优先级', error: '错误', warn: '提醒', warning: '提醒', info: '信息' }
+  return value ? map[value] || value : '信息'
+}
+
+function todoKey(todo: { sourceType?: string | null; id?: number | null }) {
+  return `${todo.sourceType || 'todo'}-${todo.id || 'new'}`
 }
 
 onMounted(load)

@@ -9,6 +9,7 @@ import com.huanjing.geo.module.system.entity.SystemAlert;
 import com.huanjing.geo.module.system.mapper.SystemAlertMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -46,24 +47,67 @@ public class SystemAlertService {
                                      Long recipientUserId,
                                      String recipientRole,
                                      String dedupeKey) {
+        String normalizedDedupeKey = StringUtils.hasText(dedupeKey) ? dedupeKey.trim() : null;
         if (StringUtils.hasText(dedupeKey)) {
-            Long existing = systemAlertMapper.selectCount(new LambdaQueryWrapper<SystemAlert>()
-                    .eq(SystemAlert::getDedupeKey, dedupeKey.trim()));
-            if (existing != null && existing > 0) {
+            SystemAlert existing = systemAlertMapper.selectOne(new LambdaQueryWrapper<SystemAlert>()
+                    .eq(SystemAlert::getDedupeKey, normalizedDedupeKey)
+                    .last("LIMIT 1"));
+            if (existing != null && !Boolean.TRUE.equals(existing.getIsResolved())) {
+                return;
+            }
+            if (existing != null) {
+                populateRecipientAlert(
+                        existing,
+                        alertType,
+                        severity,
+                        source,
+                        message,
+                        context,
+                        recipientUserId,
+                        recipientRole,
+                        normalizedDedupeKey
+                );
+                systemAlertMapper.updateById(existing);
                 return;
             }
         }
         SystemAlert alert = new SystemAlert();
-        alert.setAlertType(alertType);
-        alert.setSeverity(StringUtils.hasText(severity) ? severity : "warn");
-        alert.setSource(StringUtils.hasText(source) ? source : "system");
-        alert.setMessage(StringUtils.hasText(message) ? message : "unknown");
-        alert.setContextJson(context == null ? null : JSONUtil.toJsonStr(context));
-        alert.setRecipientUserId(recipientUserId);
-        alert.setRecipientRole(StringUtils.hasText(recipientRole) ? recipientRole.trim() : null);
-        alert.setDedupeKey(StringUtils.hasText(dedupeKey) ? dedupeKey.trim() : null);
-        alert.setIsResolved(false);
-        systemAlertMapper.insert(alert);
+        populateRecipientAlert(
+                alert,
+                alertType,
+                severity,
+                source,
+                message,
+                context,
+                recipientUserId,
+                recipientRole,
+                normalizedDedupeKey
+        );
+        try {
+            systemAlertMapper.insert(alert);
+        } catch (DuplicateKeyException duplicate) {
+            if (!StringUtils.hasText(normalizedDedupeKey)) {
+                throw duplicate;
+            }
+            SystemAlert existing = systemAlertMapper.selectOne(new LambdaQueryWrapper<SystemAlert>()
+                    .eq(SystemAlert::getDedupeKey, normalizedDedupeKey)
+                    .last("LIMIT 1"));
+            if (existing == null || !Boolean.TRUE.equals(existing.getIsResolved())) {
+                return;
+            }
+            populateRecipientAlert(
+                    existing,
+                    alertType,
+                    severity,
+                    source,
+                    message,
+                    context,
+                    recipientUserId,
+                    recipientRole,
+                    normalizedDedupeKey
+            );
+            systemAlertMapper.updateById(existing);
+        }
     }
 
     public Page<SystemAlertTodoVO> myTodos(long current, long size) {
@@ -130,6 +174,28 @@ public class SystemAlertService {
                 .and(wrapper -> wrapper.eq(SystemAlert::getRecipientUserId, user.getId())
                         .or()
                         .eq(SystemAlert::getRecipientRole, user.getRole()));
+    }
+
+    private void populateRecipientAlert(SystemAlert alert,
+                                        String alertType,
+                                        String severity,
+                                        String source,
+                                        String message,
+                                        Map<String, Object> context,
+                                        Long recipientUserId,
+                                        String recipientRole,
+                                        String dedupeKey) {
+        alert.setAlertType(alertType);
+        alert.setSeverity(StringUtils.hasText(severity) ? severity : "warn");
+        alert.setSource(StringUtils.hasText(source) ? source : "system");
+        alert.setMessage(StringUtils.hasText(message) ? message : "unknown");
+        alert.setContextJson(context == null ? null : JSONUtil.toJsonStr(context));
+        alert.setRecipientUserId(recipientUserId);
+        alert.setRecipientRole(StringUtils.hasText(recipientRole) ? recipientRole.trim() : null);
+        alert.setDedupeKey(StringUtils.hasText(dedupeKey) ? dedupeKey.trim() : null);
+        alert.setIsResolved(false);
+        alert.setResolvedBy(null);
+        alert.setResolvedAt(null);
     }
 
     private SystemAlertTodoVO toTodoVO(SystemAlert alert) {
