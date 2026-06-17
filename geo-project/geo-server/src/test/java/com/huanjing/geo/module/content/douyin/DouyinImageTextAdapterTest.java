@@ -104,6 +104,27 @@ class DouyinImageTextAdapterTest {
     }
 
     @Test
+    void preflightCredential_activeAccountRefreshesAccessToken() {
+        SelfMediaAccount account = account();
+        when(douyinTokenService.getAccessToken(account)).thenReturn("access-token");
+
+        adapter.preflightCredential(account);
+
+        verify(douyinTokenService).getAccessToken(account);
+    }
+
+    @Test
+    void preflightCredential_inactiveAccountRejectsBeforeTokenRefresh() {
+        SelfMediaAccount account = account("douyin", "expired");
+
+        BizException ex = assertThrows(BizException.class, () -> adapter.preflightCredential(account));
+
+        assertEquals(401, ex.getCode());
+        assertEquals("douyin account not active, please re-authorize", ex.getMessage());
+        verify(douyinTokenService, never()).getAccessToken(any(SelfMediaAccount.class));
+    }
+
+    @Test
     void validate_emptyImagesThrows400() {
         TargetContext.SelfMediaTarget target = target(account(), List.of(), Map.of("text", "ok"));
 

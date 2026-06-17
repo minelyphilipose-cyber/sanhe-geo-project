@@ -103,6 +103,8 @@ class SelfMediaPublishScheduleServiceTest {
         when(scheduleAdapterRouter.contract(anyString())).thenReturn(Optional.empty());
         when(scheduleAdapterRouter.platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION))
                 .thenReturn(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"));
+        when(scheduleAdapterRouter.platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API))
+                .thenReturn(Set.of("douyin", "wechat_mp"));
         alertService = mock(SelfMediaPublishScheduleAlertService.class);
         when(alertService.listOpenAlertsByScheduleIds(any())).thenReturn(Map.of());
         environmentLockService = mock(SelfMediaPublishScheduleEnvironmentLockService.class);
@@ -399,6 +401,19 @@ class SelfMediaPublishScheduleServiceTest {
         SelfMediaPublishScheduleCreateRequest request = validRequest();
         LocalDateTime executionAt = LocalDateTime.now().plusDays(3).withHour(9).withMinute(15).withSecond(0).withNano(0);
         LocalDateTime plannedAt = executionAt.plusMinutes(130);
+        doReturn(List.of(new BusinessCalendarService.BusinessDay(
+                executionAt.toLocalDate(),
+                0,
+                "测试工作日",
+                1,
+                false,
+                List.of(new BusinessCalendarService.PublishWindow(
+                        "test",
+                        LocalTime.of(9, 15),
+                        LocalTime.of(11, 30),
+                        LocalTime.of(9, 15)
+                ))
+        ))).when(businessCalendarService).publishDays(any(), eq(false));
         request.setWindowStart(plannedAt);
         request.setWindowEnd(plannedAt);
         request.setExecutionWindowStart(executionAt);
@@ -632,6 +647,98 @@ class SelfMediaPublishScheduleServiceTest {
         assertTrue(!response.getNextAttemptAt().isBefore(earliestBufferedAttempt));
         assertTrue(response.getNextAttemptAt().isBefore(clickedAt.plusMinutes(3)));
         verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(73L));
+    }
+
+    @Test
+    void dispatchPlatformQuickScheduleCreatesDouyinOfficialApiScheduleWithoutBrowserEnvironment() {
+        ArticleDraft article = article();
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+        when(brandMapper.selectById(8L)).thenReturn(brand());
+        SelfMediaAccount douyinAccount = account();
+        douyinAccount.setId(21L);
+        douyinAccount.setPlatform("douyin");
+        when(accountMapper.selectOne(any())).thenReturn(douyinAccount);
+        when(accountMapper.selectById(21L)).thenReturn(douyinAccount);
+        when(scheduleCapabilityService.readiness("douyin", SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "douyin"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:douyin", "month", "2026-06", 0, 100));
+        when(scheduleAdapterRouter.contract("douyin")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "douyin",
+                "抖音图文",
+                SelfMediaPlatformPublishChannel.OFFICIAL_API,
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of());
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(74L);
+            assertEquals("douyin", row.getPlatform());
+            assertNull(row.getBrowserEnvironmentId());
+            assertNull(row.getBrowserEnvironmentAccountId());
+            return 1;
+        });
+
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("douyin", false), "dispatch-douyin-key");
+
+        assertEquals("created", response.getAction());
+        assertEquals("QUICK_DISPATCH_CREATED", response.getCode());
+        assertEquals(21L, response.getSelfMediaAccountId());
+        verify(browserEnvironmentService, never()).validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean());
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("douyin"), eq(74L));
+    }
+
+    @Test
+    void dispatchPlatformQuickScheduleCreatesWechatOfficialApiScheduleWithoutBrowserEnvironment() {
+        ArticleDraft article = article();
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+        when(brandMapper.selectById(8L)).thenReturn(brand());
+        SelfMediaAccount wechatAccount = account();
+        wechatAccount.setId(22L);
+        wechatAccount.setPlatform("wechat_mp");
+        when(accountMapper.selectOne(any())).thenReturn(wechatAccount);
+        when(accountMapper.selectById(22L)).thenReturn(wechatAccount);
+        when(scheduleCapabilityService.readiness("wechat_mp", SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "wechat_mp"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:wechat_mp", "month", "2026-06", 0, 100));
+        when(scheduleAdapterRouter.contract("wechat_mp")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "wechat_mp",
+                "微信公众号",
+                SelfMediaPlatformPublishChannel.OFFICIAL_API,
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of());
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(75L);
+            assertEquals("wechat_mp", row.getPlatform());
+            assertNull(row.getBrowserEnvironmentId());
+            assertNull(row.getBrowserEnvironmentAccountId());
+            return 1;
+        });
+
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("wechat_mp", false), "dispatch-wechat-key");
+
+        assertEquals("created", response.getAction());
+        assertEquals("QUICK_DISPATCH_CREATED", response.getCode());
+        assertEquals(22L, response.getSelfMediaAccountId());
+        verify(browserEnvironmentService, never()).validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean());
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("wechat_mp"), eq(75L));
     }
 
     @Test

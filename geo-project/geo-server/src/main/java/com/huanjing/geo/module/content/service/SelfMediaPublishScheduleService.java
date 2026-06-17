@@ -435,9 +435,9 @@ public class SelfMediaPublishScheduleService {
         }
         Long brandId = project.getBrandId();
         brandAccessService.requireBrandAccess(brandId, operatorId, BrandAccessAction.OPERATE);
-        if (!platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION).contains(platform)) {
-            return quickResponse("rejected", "PLATFORM_NOT_AUTOMATED",
-                    platformLabel(platform) + "当前不支持 AdsPower 自动排期，请使用该平台已有分发方式",
+        if (!quickSchedulePlatforms().contains(platform)) {
+            return quickResponse("rejected", "PLATFORM_NOT_QUICK_SCHEDULED",
+                    platformLabel(platform) + "当前不支持平台快速排期，请使用该平台已有分发方式",
                     article.getId(), brandId, platform, null, null, null, null);
         }
         String incompatibleMessage = articlePlatformIncompatibleMessage(article, platform);
@@ -1238,9 +1238,13 @@ public class SelfMediaPublishScheduleService {
                 markExpiredPlatformScheduleExecution(candidate, now);
                 continue;
             }
-            if (!environmentLockService.tryAcquire(candidate.getBrowserEnvironmentId(),
-                    candidate.getId(), lockedUntil, now)) {
-                continue;
+            boolean environmentLockAcquired = false;
+            if (requiresEnvironmentLock(candidate)) {
+                if (!environmentLockService.tryAcquire(candidate.getBrowserEnvironmentId(),
+                        candidate.getId(), lockedUntil, now)) {
+                    continue;
+                }
+                environmentLockAcquired = true;
             }
             int updated = scheduleMapper.claimQueueSchedule(
                     candidate.getId(),
@@ -1253,9 +1257,15 @@ public class SelfMediaPublishScheduleService {
             if (updated > 0) {
                 return scheduleMapper.selectById(candidate.getId());
             }
-            environmentLockService.release(candidate.getId());
+            if (environmentLockAcquired) {
+                environmentLockService.release(candidate.getId());
+            }
         }
         return null;
+    }
+
+    private boolean requiresEnvironmentLock(SelfMediaPublishSchedule row) {
+        return row != null && row.getBrowserEnvironmentId() != null;
     }
 
     private boolean postponeLocalAgentClaimOutsideBusinessWindow(SelfMediaPublishSchedule row, LocalDateTime now) {
@@ -2082,16 +2092,18 @@ public class SelfMediaPublishScheduleService {
             return Candidate.rejected(rejected(articleId, accountId, platform,
                     "ARTICLE_COVER_REQUIRED", "该平台发布需要文章封面，请先为文章选择封面", "文章详情 > 文章封面"));
         }
-        BrowserEnvironmentAccount binding;
-        try {
-            binding = browserEnvironmentService.validateForTaskCreation(account, false);
-        } catch (BizException ex) {
-            return Candidate.rejected(rejected(articleId, accountId, platform,
-                    errorCodeFrom(ex), ex.getMessage(), SETTING_PATH_BROWSER_ENV));
-        }
-        if (binding == null) {
-            return Candidate.rejected(rejected(articleId, accountId, platform,
-                    "ENVIRONMENT_ACCOUNT_BINDING_NOT_FOUND", "该自媒体账号未绑定指纹浏览器环境", SETTING_PATH_BROWSER_ENV));
+        BrowserEnvironmentAccount binding = null;
+        if (requiresBrowserEnvironment(platform)) {
+            try {
+                binding = browserEnvironmentService.validateForTaskCreation(account, false);
+            } catch (BizException ex) {
+                return Candidate.rejected(rejected(articleId, accountId, platform,
+                        errorCodeFrom(ex), ex.getMessage(), SETTING_PATH_BROWSER_ENV));
+            }
+            if (binding == null) {
+                return Candidate.rejected(rejected(articleId, accountId, platform,
+                        "ENVIRONMENT_ACCOUNT_BINDING_NOT_FOUND", "该自媒体账号未绑定指纹浏览器环境", SETTING_PATH_BROWSER_ENV));
+            }
         }
         return new Candidate(article, account, binding, null);
     }
@@ -2125,8 +2137,10 @@ public class SelfMediaPublishScheduleService {
         row.setArticleId(candidate.article().getId());
         row.setBrandId(requestRow.getBrandId());
         row.setSelfMediaAccountId(candidate.account().getId());
-        row.setBrowserEnvironmentId(candidate.binding().getBrowserEnvironmentId());
-        row.setBrowserEnvironmentAccountId(candidate.binding().getId());
+        if (candidate.binding() != null) {
+            row.setBrowserEnvironmentId(candidate.binding().getBrowserEnvironmentId());
+            row.setBrowserEnvironmentAccountId(candidate.binding().getId());
+        }
         row.setPlatform(candidate.account().getPlatform());
         row.setScheduleStrategy(strategy);
         row.setPlannedPublishAt(plannedAt);
@@ -2781,6 +2795,19 @@ public class SelfMediaPublishScheduleService {
     private Set<String> platformsByChannel(SelfMediaPlatformPublishChannel channel) {
         Set<String> platforms = scheduleAdapterRouter.platformsByChannel(channel);
         return normalizePlatforms(platforms);
+    }
+
+    private Set<String> quickSchedulePlatforms() {
+        Set<String> platforms = new LinkedHashSet<>();
+        platforms.addAll(platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION));
+        platforms.addAll(platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API));
+        return Set.copyOf(platforms);
+    }
+
+    private boolean requiresBrowserEnvironment(String platform) {
+        return scheduleAdapterRouter.contract(platform)
+                .map(contract -> SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION.equals(contract.publishChannel()))
+                .orElse(true);
     }
 
     private Set<String> normalizePlatforms(Set<String> platforms) {

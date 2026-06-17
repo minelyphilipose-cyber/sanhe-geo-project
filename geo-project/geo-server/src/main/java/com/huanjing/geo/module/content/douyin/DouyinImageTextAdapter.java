@@ -53,6 +53,18 @@ public class DouyinImageTextAdapter implements AutoSelfMediaAdapter {
     }
 
     @Override
+    public void preflightCredential(SelfMediaAccount account) {
+        requireEnabled();
+        if (account == null || !PLATFORM.equals(account.getPlatform())) {
+            throw new BizException(400, "not douyin account");
+        }
+        if (!"active".equals(account.getStatus())) {
+            throw new BizException(401, "douyin account not active, please re-authorize");
+        }
+        douyinTokenService.getAccessToken(account);
+    }
+
+    @Override
     public ValidationResult validate(ArticleDraft article,
                                      String contentMarkdown,
                                      TargetContext.SelfMediaTarget target) {

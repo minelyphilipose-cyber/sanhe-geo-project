@@ -83,10 +83,15 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
             );
         }
 
-        ArticleDraft article = requireArticle(row.getArticleId());
-        Project project = requireProject(article.getProjectId());
         SelfMediaAccount account = requireAccount(row.getSelfMediaAccountId(), row.getPlatform());
         AutoSelfMediaAdapter adapter = requireAdapter(row.getPlatform());
+        ScheduleExecutionResult preflight = preflightCredential(row, account, adapter);
+        if (preflight != null) {
+            return preflight;
+        }
+
+        ArticleDraft article = requireArticle(row.getArticleId());
+        Project project = requireProject(article.getProjectId());
         String originalContent = requireLatestContent(article.getId());
         TargetContext.SelfMediaTarget target = buildTarget(row, article, project, account, originalContent);
         String content = articleImagePublicUrlRewriter.rewrite(project, originalContent);
@@ -179,6 +184,71 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
             throw new BizException(400, "官方 API 自媒体适配器未接入：" + platform);
         }
         return adapter;
+    }
+
+    private ScheduleExecutionResult preflightCredential(SelfMediaPublishSchedule row,
+                                                        SelfMediaAccount account,
+                                                        AutoSelfMediaAdapter adapter) {
+        try {
+            adapter.preflightCredential(account);
+            return null;
+        } catch (BizException ex) {
+            String diagnostics = diagnostics("official_api_credential_preflight_failed", row, null,
+                    SubmitResult.failure(ex.getCode(), null, null, ex.getMessage(), preflightFailureKind(ex), preflightRetryable(ex)),
+                    null);
+            if (preflightRetryable(ex)) {
+                return ScheduleExecutionResult.retryable(
+                        preflightFailureCode(ex),
+                        firstText(ex.getMessage(), "官方 API 凭证预检暂时失败，等待重试"),
+                        diagnostics,
+                        LocalDateTime.now().plusMinutes(5)
+                );
+            }
+            return ScheduleExecutionResult.failed(
+                    preflightFailureCode(ex),
+                    firstText(ex.getMessage(), "官方 API 凭证预检失败，请重新授权"),
+                    diagnostics
+            );
+        }
+    }
+
+    private boolean preflightRetryable(BizException ex) {
+        int code = ex == null ? 0 : ex.getCode();
+        return code == 429 || code >= 500;
+    }
+
+    private String preflightFailureCode(BizException ex) {
+        int code = ex == null ? 0 : ex.getCode();
+        if (code == 429) {
+            return "OFFICIAL_API_CREDENTIAL_REFRESHING";
+        }
+        if (code == 401 || code == 40001 || code == 42001 || code == 61023) {
+            return "OFFICIAL_API_CREDENTIAL_EXPIRED";
+        }
+        if (code == 403 || code == 48001) {
+            return "OFFICIAL_API_PERMISSION_MISSING";
+        }
+        if (code >= 500) {
+            return "OFFICIAL_API_CREDENTIAL_PRECHECK_RETRY";
+        }
+        return "OFFICIAL_API_CREDENTIAL_PRECHECK_FAILED";
+    }
+
+    private String preflightFailureKind(BizException ex) {
+        int code = ex == null ? 0 : ex.getCode();
+        if (code == 401 || code == 40001 || code == 42001 || code == 61023) {
+            return FailureKind.AUTH_EXPIRED;
+        }
+        if (code == 403 || code == 48001) {
+            return FailureKind.PERMISSION;
+        }
+        if (code == 429) {
+            return FailureKind.RATE_LIMIT;
+        }
+        if (code >= 500) {
+            return FailureKind.SERVER_ERROR;
+        }
+        return FailureKind.AUTH;
     }
 
     private TargetContext.SelfMediaTarget buildTarget(SelfMediaPublishSchedule row,

@@ -66,6 +66,28 @@ class WechatMpAdapterTest {
     }
 
     @Test
+    void preflightCredential_activeAccountChecksMaterialCount() {
+        Fixture fixture = fixture(false);
+
+        fixture.adapter.preflightCredential(fixture.account);
+
+        verify(fixture.wechatMpClient).getMaterialCount("access-token");
+    }
+
+    @Test
+    void preflightCredential_inactiveAccountRejectsBeforePlatformCall() {
+        Fixture fixture = fixture(false);
+        fixture.account.setStatus("expired");
+
+        var ex = assertThrows(com.huanjing.geo.common.exception.BizException.class,
+                () -> fixture.adapter.preflightCredential(fixture.account));
+
+        assertEquals(401, ex.getCode());
+        assertEquals("wechat_mp account not active, please re-authorize", ex.getMessage());
+        verify(fixture.wechatMpClient, never()).getMaterialCount(any());
+    }
+
+    @Test
     void submitToTarget_savesDraftByDefaultAndBuildsSanitizedPayload() {
         Fixture fixture = fixture(false);
         TargetContext.SelfMediaTarget target = target(fixture.account, Map.of());

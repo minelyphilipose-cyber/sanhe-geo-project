@@ -20,7 +20,7 @@
       <div class="media-grid">
         <button
           class="media-platform"
-          :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: !wechatDistributionAvailable }"
+          :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: !wechatQuickScheduleAvailable }"
           type="button"
           @click="actions.handleWechatPlatformClick()"
         >
@@ -127,22 +127,6 @@
             检测登录
           </el-button>
           <el-button
-            v-if="selectedMediaPlatform === 'wechat_mp' && account.status === 'active'"
-            size="small"
-            type="primary"
-            @click="actions.startWechatDraft(account)"
-          >
-            保存草稿
-          </el-button>
-          <el-button
-            v-if="selectedMediaPlatform === 'douyin' && account.status === 'active'"
-            size="small"
-            type="primary"
-            @click="actions.startDouyinImageText(account)"
-          >
-            选择账号
-          </el-button>
-          <el-button
             v-if="actions.isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
             size="small"
             :disabled="!!actions.environmentAccountOf(account)"
@@ -184,47 +168,6 @@
         v-else-if="actions.isSemiAutoPlatform(selectedMediaPlatform)"
         :description="`当前品牌暂无可用的${actions.semiAutoPlatformLabel(selectedMediaPlatform)}账号`"
       />
-
-      <div v-if="selectedMediaPlatform === 'wechat_mp' && selectedSelfMediaAccountId" class="cover-picker">
-        <div class="cover-picker-header">
-          <span>选择公众号封面</span>
-          <el-tag size="small" type="info">{{ imageMaterials.length }} 张图片</el-tag>
-        </div>
-        <div class="folder-toolbar">
-          <el-radio-group v-model="folderScope" size="small" @change="actions.handleFolderScopeChange">
-            <el-radio-button label="project">项目关联</el-radio-button>
-            <el-radio-button label="all">品牌全部</el-radio-button>
-          </el-radio-group>
-        </div>
-        <div v-if="displayImageFolders.length" class="folder-list">
-          <button
-            v-for="folder in displayImageFolders"
-            :key="folder.id"
-            type="button"
-            class="folder-item"
-            :class="{ selected: selectedImageFolderId === folder.id }"
-            @click="actions.selectImageFolder(folder.id)"
-          >
-            <span>{{ folder.folderName }}</span>
-            <el-tag v-if="folder.projectRelated" size="small" type="success">项目</el-tag>
-            <el-tag size="small" type="info">{{ folder.materialCount || folder.materials.length }}</el-tag>
-          </button>
-        </div>
-        <el-empty v-if="!imageMaterials.length" description="当前品牌暂无可用图片素材" />
-        <div v-else class="cover-grid">
-          <button
-            v-for="material in imageMaterials"
-            :key="material.id"
-            type="button"
-            class="cover-item"
-            :class="{ selected: selectedCoverMaterialId === material.id }"
-            @click="selectedCover = material.id"
-          >
-            <img :src="actions.materialThumbUrl(material)" :alt="material.fileName" loading="lazy" />
-            <span>{{ material.fileName }}</span>
-          </button>
-        </div>
-      </div>
 
       <div v-if="selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId" class="cover-picker">
         <div class="cover-picker-header">
@@ -369,15 +312,6 @@
     <template #footer>
       <el-button @click="visible = false">关闭</el-button>
       <el-button
-        v-if="selectedMediaPlatform === 'wechat_mp' && selectedSelfMediaAccountId"
-        type="primary"
-        :loading="selfMediaSubmitting"
-        :disabled="!selectedCoverMaterialId"
-        @click="actions.submitWechatDraft()"
-      >
-        保存至公众号草稿箱
-      </el-button>
-      <el-button
         v-if="selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId"
         type="primary"
         :loading="selfMediaSubmitting"
@@ -405,6 +339,7 @@ const props = defineProps<{
   localHelperHealth: LocalHelperHealthResponse | null
   wechatCapability: WechatMpCapability | null
   wechatDistributionAvailable: boolean
+  wechatQuickScheduleAvailable: boolean
   wechatStatusTagType: TagType
   wechatStatusLabel: string
   douyinCapability: DouyinCapability | null
@@ -456,11 +391,6 @@ const visible = computed({
 const folderScope = computed({
   get: () => props.imageFolderScope,
   set: (value) => emit('update:imageFolderScope', value),
-})
-
-const selectedCover = computed({
-  get: () => props.selectedCoverMaterialId,
-  set: (value) => emit('update:selectedCoverMaterialId', value),
 })
 
 const douyinTextValue = computed({

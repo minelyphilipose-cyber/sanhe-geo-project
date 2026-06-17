@@ -553,6 +553,7 @@
       :local-helper-health="lastLocalHelperHealth"
       :wechat-capability="wechatCapability"
       :wechat-distribution-available="wechatDistributionAvailable"
+      :wechat-quick-schedule-available="wechatQuickScheduleAvailable"
       :wechat-status-tag-type="wechatStatusTagType"
       :wechat-status-label="wechatStatusLabel"
       :douyin-capability="douyinCapability"
@@ -726,6 +727,7 @@ const {
   environmentAccountResettingId,
   selfMediaSubmitting,
   wechatDistributionAvailable,
+  wechatQuickScheduleAvailable,
   wechatStatusLabel,
   wechatStatusTagType,
   douyinDistributionAvailable,

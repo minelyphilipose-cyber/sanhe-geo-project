@@ -7,6 +7,9 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 
 public interface AutoSelfMediaAdapter extends SelfMediaAdapter {
 
+    default void preflightCredential(SelfMediaAccount account) {
+    }
+
     ValidationResult validate(ArticleDraft article,
                               String contentMarkdown,
                               TargetContext.SelfMediaTarget target);

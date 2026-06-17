@@ -15,4 +15,6 @@ public class ManagerWorkbenchOverviewVO {
     private Long openSystemAlertCount;
     private Long highSeveritySystemAlertCount;
     private List<SystemAlertTodoVO> latestSystemAlerts;
+    private List<WorkbenchTodoVO> priorityTodos;
+    private List<WorkbenchRiskGroupVO> customerRiskGroups;
 }

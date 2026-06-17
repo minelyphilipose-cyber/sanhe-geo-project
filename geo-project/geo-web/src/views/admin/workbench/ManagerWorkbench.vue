@@ -35,13 +35,13 @@
           <el-tag :type="systemAlertType">{{ systemAlertLabel }}</el-tag>
         </div>
 
-        <div v-if="latestAlerts.length === 0" class="empty-state">暂无待处理系统告警</div>
+        <div v-if="priorityTodos.length === 0" class="empty-state">暂无待处理系统告警</div>
         <div v-else class="alert-list">
-          <div v-for="alert in latestAlerts" :key="alert.id" class="alert-item">
-            <span class="alert-item__severity" :class="severityClass(alert.severity)"></span>
+          <div v-for="todo in priorityTodos" :key="todoKey(todo)" class="alert-item">
+            <span class="alert-item__severity" :class="severityClass(todo.severity)"></span>
             <div>
-              <strong>{{ alert.message || alert.alertType }}</strong>
-              <p>{{ alert.source || 'system' }} · {{ severityLabel(alert.severity) }}</p>
+              <strong>{{ todo.message || todo.alertType }}</strong>
+              <p>{{ todoMeta(todo) }}</p>
             </div>
           </div>
         </div>
@@ -50,10 +50,18 @@
       <div class="workbench-panel">
         <div class="panel-heading">
           <div>
-            <h2>配置入口</h2>
-            <p>系统管理员日常维护。</p>
+            <h2>客户风险</h2>
+            <p>从告警中按客户和品牌聚合。</p>
           </div>
         </div>
+        <div v-if="customerRiskGroups.length" class="risk-list">
+          <div v-for="group in customerRiskGroups" :key="riskGroupKey(group)" class="risk-item">
+            <strong>{{ riskGroupTitle(group) }}</strong>
+            <p>{{ group.riskCount }} 项待处理 · 高优先级 {{ group.highSeverityCount }}</p>
+            <small>{{ group.latestMessage }}</small>
+          </div>
+        </div>
+        <div v-else class="empty-state empty-state--compact">暂无客户风险</div>
         <div class="quick-actions">
           <el-button @click="router.push('/admin/settings/users')">用户与权限</el-button>
           <el-button @click="router.push('/admin/settings/platforms')">AI 平台配置</el-button>
@@ -71,7 +79,6 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
 import { getManagerWorkbenchOverview, type ManagerWorkbenchOverview } from '@/api/workbench'
-import type { SystemAlertTodoItem } from '@/types'
 
 const router = useRouter()
 const loading = ref(false)
@@ -84,7 +91,8 @@ const metrics = computed(() => [
   { key: 'permissions', label: '有效权限', value: overview.value?.permissionCount, hint: '含历史兼容权限', icon: 'Key', color: '#7c3aed', bg: '#ede9fe' },
 ])
 
-const latestAlerts = computed<SystemAlertTodoItem[]>(() => overview.value?.latestSystemAlerts || [])
+const priorityTodos = computed(() => overview.value?.priorityTodos || [])
+const customerRiskGroups = computed(() => overview.value?.customerRiskGroups || [])
 const systemAlertType = computed(() => Number(overview.value?.openSystemAlertCount || 0) > 0 ? 'warning' : 'success')
 const systemAlertLabel = computed(() => Number(overview.value?.openSystemAlertCount || 0) > 0 ? `${overview.value?.openSystemAlertCount} 条待处理` : '运行平稳')
 
@@ -111,8 +119,25 @@ function severityClass(value?: string | null) {
 }
 
 function severityLabel(value?: string | null) {
-  const map: Record<string, string> = { critical: '严重', error: '错误', warn: '警告', info: '信息' }
+  const map: Record<string, string> = { critical: '严重', high: '高优先级', error: '错误', warn: '提醒', warning: '提醒', info: '信息' }
   return value ? map[value] || value : '信息'
+}
+
+function todoMeta(todo: { customerName?: string | null; brandName?: string | null; severity?: string | null; source?: string | null }) {
+  const owner = [todo.customerName, todo.brandName].filter(Boolean).join(' / ')
+  return `${owner || todo.source || 'system'} · ${severityLabel(todo.severity)}`
+}
+
+function todoKey(todo: { sourceType?: string | null; id?: number | null }) {
+  return `${todo.sourceType || 'todo'}-${todo.id || 'new'}`
+}
+
+function riskGroupKey(group: { customerName?: string | null; brandName?: string | null }) {
+  return `${group.customerName || 'unknown'}-${group.brandName || 'unknown'}`
+}
+
+function riskGroupTitle(group: { customerName?: string | null; brandName?: string | null }) {
+  return [group.customerName || '未知客户', group.brandName].filter(Boolean).join(' / ')
 }
 
 onMounted(load)

@@ -12,6 +12,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -96,6 +97,38 @@ class SystemAlertServiceTest {
 
         verify(systemAlertMapper, never()).selectOne(any());
         verify(systemAlertMapper, never()).updateById(any());
+    }
+
+    @Test
+    void createRecipientAlertReopensResolvedDedupeKey() {
+        SystemAlert existing = new SystemAlert();
+        existing.setId(12L);
+        existing.setDedupeKey("self_media_auth:1:EXPIRED");
+        existing.setIsResolved(true);
+        existing.setResolvedBy(7L);
+        existing.setResolvedAt(LocalDateTime.now().minusDays(1));
+        when(systemAlertMapper.selectOne(any())).thenReturn(existing);
+
+        systemAlertService.createRecipientAlert(
+                "SELF_MEDIA_ACCOUNT_AUTH_HEALTH",
+                "high",
+                "self_media_account_health",
+                "账号授权已过期",
+                Map.of("issueCode", "EXPIRED"),
+                99L,
+                null,
+                "self_media_auth:1:EXPIRED"
+        );
+
+        ArgumentCaptor<SystemAlert> captor = ArgumentCaptor.forClass(SystemAlert.class);
+        verify(systemAlertMapper).updateById(captor.capture());
+        SystemAlert updated = captor.getValue();
+        assertEquals(12L, updated.getId());
+        assertEquals(false, updated.getIsResolved());
+        assertEquals(null, updated.getResolvedBy());
+        assertEquals(null, updated.getResolvedAt());
+        assertEquals(99L, updated.getRecipientUserId());
+        assertEquals("账号授权已过期", updated.getMessage());
     }
 
     private SysUser user() {
