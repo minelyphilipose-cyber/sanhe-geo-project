@@ -87,6 +87,11 @@ public class DispatchMonitorController {
         return R.ok(dispatchMonitorService.alertPage(current, size, rangeType, startDate, endDate, severity, status));
     }
 
+    @GetMapping("/alerts/{id}")
+    public R<DispatchAlertVO> alertDetail(@PathVariable Long id) {
+        return R.ok(dispatchMonitorService.alertDetail(id));
+    }
+
     @PostMapping("/alerts/{id}/resolve")
     public R<Void> resolveAlert(@PathVariable Long id, @Valid @RequestBody(required = false) DispatchAlertResolveRequest req) {
         dispatchMonitorService.resolveAlert(id, req == null ? null : req.getNote());

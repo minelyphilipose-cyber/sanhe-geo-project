@@ -1,10 +1,13 @@
 package com.huanjing.geo.module.dispatch.service;
 
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.dispatch.entity.PollBatch;
 import com.huanjing.geo.module.dispatch.entity.PollBatchShard;
 import com.huanjing.geo.module.dispatch.entity.PollDailyStat;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
+import com.huanjing.geo.module.dispatch.enums.DispatchAlertSeverity;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
@@ -48,6 +51,7 @@ public class DispatchPollAggregationService {
     private final StringRedisTemplate redisTemplate;
     private final ProjectMapper projectMapper;
     private final PollSummaryRecomputeService pollSummaryRecomputeService;
+    private final DispatchAlertService dispatchAlertService;
 
     public void tryAggregateBatch(Long batchId) {
         if (batchId == null) {
@@ -200,10 +204,126 @@ public class DispatchPollAggregationService {
                 ? BigDecimal.ZERO
                 : BigDecimal.valueOf(totalHit).divide(BigDecimal.valueOf(totalCompleted), 4, RoundingMode.HALF_UP));
         batch.setCompletedShardCount((int) terminalShardCount);
-        batch.setStatus(hasFailedShard || finalFailedCount > 0 ? BATCH_STATUS_FINISHED_WITH_FAILURES : BATCH_STATUS_FINISHED);
+        batch.setStatus(hasFailedShard ? BATCH_STATUS_FINISHED_WITH_FAILURES : BATCH_STATUS_FINISHED);
         batch.setFinishedAt(LocalDateTime.now());
         pollBatchMapper.updateById(batch);
+        publishFailureAlertIfNeeded(batch, projectName, aggByPlatform, results, expectedResultCount, finalFailedCount, hasFailedShard);
         recomputeSummaryAfterCommit(batch.getProjectId(), batch.getBatchDate(), batch.getQuestionTier());
+    }
+
+    private void publishFailureAlertIfNeeded(PollBatch batch,
+                                             String projectName,
+                                             Map<Long, PlatformAgg> aggByPlatform,
+                                             List<PollResult> results,
+                                             int expectedResultCount,
+                                             int finalFailedCount,
+                                             boolean hasFailedShard) {
+        if (finalFailedCount <= 0 && !hasFailedShard) {
+            return;
+        }
+        Map<Long, PlatformFailureDetail> details = buildFailureDetails(aggByPlatform, results);
+        List<Map<String, Object>> platformFailures = details.values().stream()
+                .filter(detail -> detail.failedCount > 0)
+                .map(PlatformFailureDetail::toPayload)
+                .toList();
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("alertType", "question_poll_daily_summary");
+        context.put("batchId", batch.getId());
+        context.put("projectId", batch.getProjectId());
+        context.put("projectName", projectName);
+        context.put("batchDate", batch.getBatchDate() == null ? null : batch.getBatchDate().toString());
+        context.put("batchNo", batch.getBatchNo());
+        context.put("questionTier", batch.getQuestionTier());
+        context.put("expectedResultCount", expectedResultCount);
+        context.put("completedCount", defaultInt(batch.getCompletedCount()));
+        context.put("failedCount", finalFailedCount);
+        context.put("failureRate", failureRate(finalFailedCount, expectedResultCount));
+        context.put("hasFailedShard", hasFailedShard);
+        context.put("platformFailures", platformFailures);
+
+        String dedupeKey = "question_poll_batch:" + batch.getProjectId() + ":" + batch.getBatchDate()
+                + ":" + batch.getBatchNo() + ":" + batch.getQuestionTier();
+        String content = "问题轮询跑批完成，存在 " + finalFailedCount + " 条失败结果，失败率 "
+                + failureRate(finalFailedCount, expectedResultCount) + "%";
+        dispatchAlertService.createOrRefreshAlert(
+                batch.getDispatchTaskId(),
+                batch.getProjectId(),
+                dedupeKey,
+                hasFailedShard ? DispatchAlertSeverity.ERROR : DispatchAlertSeverity.WARN,
+                "Question poll daily batch completed with failures",
+                content,
+                0,
+                JSONUtil.toJsonStr(context)
+        );
+    }
+
+    private Map<Long, PlatformFailureDetail> buildFailureDetails(Map<Long, PlatformAgg> aggByPlatform, List<PollResult> results) {
+        Map<Long, PlatformFailureDetail> details = new LinkedHashMap<>();
+        for (PlatformAgg agg : aggByPlatform.values()) {
+            PlatformFailureDetail detail = new PlatformFailureDetail();
+            detail.platformId = agg.platformId;
+            detail.platformCode = agg.platformCode;
+            detail.platformName = agg.platformName;
+            detail.expectedCount = agg.expectedCount;
+            detail.completedCount = agg.completedCount;
+            detail.failedCount = agg.failedCount;
+            detail.requestCount = agg.requestCount;
+            details.put(agg.platformId, detail);
+        }
+        for (PollResult result : results) {
+            if (!"failed".equals(result.getStatus())) {
+                continue;
+            }
+            PlatformFailureDetail detail = details.get(result.getPlatformId());
+            if (detail == null) {
+                continue;
+            }
+            FailureReason reason = extractFailureReason(result);
+            FailureReason existing = detail.reasons.get(reason.key());
+            if (existing == null) {
+                detail.reasons.put(reason.key(), reason);
+            } else {
+                existing.count += reason.count;
+            }
+        }
+        return details;
+    }
+
+    private FailureReason extractFailureReason(PollResult result) {
+        String errorCode = "UNKNOWN";
+        String errorMessage = "unknown failure";
+        if (result.getDetailJson() != null && JSONUtil.isTypeJSONObject(result.getDetailJson())) {
+            try {
+                JSONObject detail = JSONUtil.parseObj(result.getDetailJson());
+                JSONObject payload = detail.getJSONObject("error_payload");
+                if (payload != null) {
+                    String code = payload.getStr("error_code");
+                    String message = payload.getStr("error_message");
+                    if (code != null && !code.isBlank()) {
+                        errorCode = code;
+                    }
+                    if (message != null && !message.isBlank()) {
+                        errorMessage = message.length() <= 300 ? message : message.substring(0, 300);
+                    }
+                }
+            } catch (Exception ignore) {
+                // Keep the fallback reason when historical detail_json is malformed.
+            }
+        }
+        FailureReason reason = new FailureReason();
+        reason.errorCode = errorCode;
+        reason.errorMessage = errorMessage;
+        reason.count = 1;
+        return reason;
+    }
+
+    private double failureRate(int failedCount, int totalCount) {
+        if (totalCount <= 0) {
+            return failedCount > 0 ? 100D : 0D;
+        }
+        return BigDecimal.valueOf(failedCount * 100D)
+                .divide(BigDecimal.valueOf(totalCount), 2, RoundingMode.HALF_UP)
+                .doubleValue();
     }
 
     private void recomputeSummaryAfterCommit(Long projectId, LocalDate batchDate, String questionTier) {
@@ -274,6 +394,52 @@ public class DispatchPollAggregationService {
             this.platformId = shard.getPlatformId();
             this.platformCode = shard.getPlatformCode();
             this.platformName = shard.getPlatformName();
+        }
+    }
+
+    private static final class PlatformFailureDetail {
+        private Long platformId;
+        private String platformCode;
+        private String platformName;
+        private int expectedCount;
+        private int completedCount;
+        private int failedCount;
+        private int requestCount;
+        private final Map<String, FailureReason> reasons = new LinkedHashMap<>();
+
+        private Map<String, Object> toPayload() {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("platformId", platformId);
+            payload.put("platformCode", platformCode);
+            payload.put("platformName", platformName);
+            payload.put("expectedCount", expectedCount);
+            payload.put("completedCount", completedCount);
+            payload.put("failedCount", failedCount);
+            payload.put("failureRate", expectedCount <= 0 ? 0D
+                    : BigDecimal.valueOf(failedCount * 100D)
+                    .divide(BigDecimal.valueOf(expectedCount), 2, RoundingMode.HALF_UP)
+                    .doubleValue());
+            payload.put("requestCount", requestCount);
+            payload.put("reasons", reasons.values().stream().map(FailureReason::toPayload).toList());
+            return payload;
+        }
+    }
+
+    private static final class FailureReason {
+        private String errorCode;
+        private String errorMessage;
+        private int count;
+
+        private String key() {
+            return errorCode + "\n" + errorMessage;
+        }
+
+        private Map<String, Object> toPayload() {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("errorCode", errorCode);
+            payload.put("errorMessage", errorMessage);
+            payload.put("count", count);
+            return payload;
         }
     }
 }

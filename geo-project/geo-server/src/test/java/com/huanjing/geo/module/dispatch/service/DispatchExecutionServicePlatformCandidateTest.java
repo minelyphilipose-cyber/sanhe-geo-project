@@ -11,6 +11,7 @@ import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.customer.service.BrandStatementService;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
+import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
@@ -28,11 +29,13 @@ import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -76,6 +79,48 @@ class DispatchExecutionServicePlatformCandidateTest {
         assertEquals(List.of(qwen), candidates);
     }
 
+    @Test
+    void monitoringRequestTimeoutIsCappedBelowShardBudget() throws Exception {
+        DispatchProperties properties = new DispatchProperties();
+        properties.setModelRequestTimeoutMs(180_000);
+        DispatchExecutionService service = service(mock(AiPlatformConfigMapper.class), properties);
+        AiPlatformConfig platform = platform(3L, "qwen", "P1");
+        platform.setTimeoutMs(180_000);
+        DispatchTask task = new DispatchTask();
+        task.setTimeoutAt(LocalDateTime.now().plusMinutes(61));
+
+        Integer timeoutMs = resolveMonitoringRequestTimeoutMs(service, platform, task, 20);
+
+        assertEquals(60_000, timeoutMs);
+    }
+
+    @Test
+    void monitoringRequestTimeoutShrinksWithRemainingTaskBudget() throws Exception {
+        DispatchProperties properties = new DispatchProperties();
+        properties.setModelRequestTimeoutMs(180_000);
+        DispatchExecutionService service = service(mock(AiPlatformConfigMapper.class), properties);
+        AiPlatformConfig platform = platform(3L, "qwen", "P1");
+        platform.setTimeoutMs(180_000);
+        DispatchTask task = new DispatchTask();
+        task.setTimeoutAt(LocalDateTime.now().plusMinutes(15));
+
+        Integer timeoutMs = resolveMonitoringRequestTimeoutMs(service, platform, task, 20);
+
+        org.junit.jupiter.api.Assertions.assertTrue(timeoutMs <= 43_000 && timeoutMs >= 40_000);
+    }
+
+    @Test
+    void monitoringRequestTimeoutReturnsNullWhenTaskBudgetIsExhausted() throws Exception {
+        DispatchExecutionService service = service(mock(AiPlatformConfigMapper.class));
+        AiPlatformConfig platform = platform(3L, "qwen", "P1");
+        DispatchTask task = new DispatchTask();
+        task.setTimeoutAt(LocalDateTime.now().plusSeconds(30));
+
+        Integer timeoutMs = resolveMonitoringRequestTimeoutMs(service, platform, task, 1);
+
+        assertNull(timeoutMs);
+    }
+
     @SuppressWarnings("unchecked")
     private static List<AiPlatformConfig> resolvePlatformCandidates(DispatchExecutionService service,
                                                                     Long projectId,
@@ -99,7 +144,25 @@ class DispatchExecutionServicePlatformCandidateTest {
         return config;
     }
 
+    private static Integer resolveMonitoringRequestTimeoutMs(DispatchExecutionService service,
+                                                             AiPlatformConfig platform,
+                                                             DispatchTask task,
+                                                             int remainingItems) throws Exception {
+        Method method = DispatchExecutionService.class.getDeclaredMethod(
+                "resolveMonitoringRequestTimeoutMs",
+                AiPlatformConfig.class,
+                DispatchTask.class,
+                int.class
+        );
+        method.setAccessible(true);
+        return (Integer) method.invoke(service, platform, task, remainingItems);
+    }
+
     private static DispatchExecutionService service(AiPlatformConfigMapper platformMapper) {
+        return service(platformMapper, new DispatchProperties());
+    }
+
+    private static DispatchExecutionService service(AiPlatformConfigMapper platformMapper, DispatchProperties dispatchProperties) {
         return new DispatchExecutionService(
                 platformMapper,
                 mock(PlatformCredentialService.class),
@@ -122,7 +185,7 @@ class DispatchExecutionServicePlatformCandidateTest {
                 mock(CompanyPackageBindingService.class),
                 mock(BrandStatementService.class),
                 mock(SysDictItemMapper.class),
-                new DispatchProperties(),
+                dispatchProperties,
                 mock(DispatchQuestionPollPlanningService.class),
                 mock(DispatchPollShardPersistenceService.class),
                 mock(DispatchPollAggregationService.class)

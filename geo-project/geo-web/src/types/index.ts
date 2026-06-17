@@ -966,15 +966,38 @@ export interface DispatchAlertItem {
   taskId?: number | null
   projectId?: number | null
   projectName?: string
+  dedupeKey?: string | null
   severity: AlertSeverity
   status: 'open' | 'resolved'
   title: string
   content?: string | null
   retryCount: number
   contextJson?: string | null
+  groupCount?: number | null
+  openGroupCount?: number | null
+  detailAlerts?: DispatchAlertItem[] | null
+  platformFailures?: DispatchPlatformFailureSummary[] | null
   resolvedAt?: string | null
   resolvedBy?: number | null
   createdAt: string
+}
+
+export interface DispatchPlatformFailureSummary {
+  platformId?: number | null
+  platformCode?: string | null
+  platformName?: string | null
+  expectedCount?: number | null
+  completedCount?: number | null
+  failedCount?: number | null
+  failureRate?: number | null
+  requestCount?: number | null
+  reasons?: DispatchFailureReasonSummary[] | null
+}
+
+export interface DispatchFailureReasonSummary {
+  errorCode?: string | null
+  errorMessage?: string | null
+  count?: number | null
 }
 
 export interface ArticleDraft {

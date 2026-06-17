@@ -7,6 +7,7 @@ import com.huanjing.geo.module.dispatch.enums.DispatchAlertSeverity;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskStatus;
 import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,12 +18,15 @@ import java.util.List;
 import java.util.Map;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class DispatchTaskStateService {
 
     private final DispatchTaskMapper dispatchTaskMapper;
     private final DispatchQueueService dispatchQueueService;
     private final DispatchAlertService dispatchAlertService;
+    private final DispatchPollShardPersistenceService pollShardPersistenceService;
+    private final DispatchPollAggregationService pollAggregationService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public DispatchTask markRunning(Long taskId, int timeoutMinutes) {
@@ -202,6 +206,36 @@ public class DispatchTaskStateService {
                 task.getRetryCount() == null ? 0 : task.getRetryCount(),
                 task.getPayloadJson()
         );
+        markPollShardFailedIfPresent(task, reason);
+    }
+
+    private void markPollShardFailedIfPresent(DispatchTask task, String reason) {
+        Long shardId = resolveShardId(task);
+        if (shardId == null) {
+            return;
+        }
+        try {
+            Long batchId = pollShardPersistenceService.markShardFailed(shardId, reason);
+            pollAggregationService.tryAggregateBatch(batchId);
+        } catch (Exception ex) {
+            log.warn("Failed to sync timed-out dispatch task to poll shard, taskId={}, shardId={}",
+                    task.getId(), shardId, ex);
+        }
+    }
+
+    private Long resolveShardId(DispatchTask task) {
+        if (task == null || task.getPayloadJson() == null || task.getPayloadJson().isBlank()) {
+            return null;
+        }
+        try {
+            Object value = JSONUtil.parseObj(task.getPayloadJson()).get("shardId");
+            if (value == null || String.valueOf(value).isBlank()) {
+                return null;
+            }
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception ignore) {
+            return null;
+        }
     }
 
     private Map<String, Object> buildErrorContext(String error,

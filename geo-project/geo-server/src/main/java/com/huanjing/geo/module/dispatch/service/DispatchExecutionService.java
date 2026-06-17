@@ -82,6 +82,9 @@ public class DispatchExecutionService {
     private static final Pattern TOKEN_PATTERN = Pattern.compile("(?i)(api[_-]?key|token)\\s*[:=]\\s*([^\\s,;]+)");
     private static final Pattern PHONE_TEXT_PATTERN = Pattern.compile("(\\+?\\d[\\d\\-\\s()]{5,}\\d)");
     private static final int DB_TRANSIENT_RETRY_DELAY_MS = 200;
+    private static final int QUESTION_POLL_REQUEST_TIMEOUT_CAP_MS = 60_000;
+    private static final int QUESTION_POLL_MIN_REQUEST_TIMEOUT_MS = 5_000;
+    private static final int QUESTION_POLL_TASK_TIMEOUT_SAFETY_MS = 60_000;
     private static final Set<String> QUESTION_TIERS = Set.of("A", "B", "C");
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
@@ -201,12 +204,25 @@ public class DispatchExecutionService {
         Set<String> normalizedPhones = resolvePhones(project);
         Set<String> contactTerms = resolveContactTerms(project);
         try {
-            for (PollBatchShardItem item : items) {
+            for (int i = 0; i < items.size(); i++) {
+                PollBatchShardItem item = items.get(i);
                 if ("completed".equals(item.getStatus())) {
                     continue;
                 }
+                int remainingItems = countRemainingPollItems(items, i);
                 PollKeywordCandidate keyword = new PollKeywordCandidate(item.getKeywordResultId(), item.getKeywordTextSnapshot());
-                InvocationResult invokeResult = invokeMonitoringWithRouter(platform, task, keyword.keywordText());
+                InvocationResult invokeResult;
+                Integer requestTimeoutMs = resolveMonitoringRequestTimeoutMs(platform, task, remainingItems);
+                if (requestTimeoutMs == null) {
+                    invokeResult = InvocationResult.failure(
+                            "QUESTION_POLL_BUDGET_EXHAUSTED",
+                            "Question poll shard budget exhausted before model invocation",
+                            0,
+                            null
+                    );
+                } else {
+                    invokeResult = invokeMonitoringWithRouter(platform, task, keyword.keywordText(), requestTimeoutMs);
+                }
                 PollResult detail = buildPollResult(batch, task, project, platform, keyword, invokeResult,
                         projectNames, judgeBrandNames, brand, siteDomains, normalizedPhones, contactTerms);
                 pollShardPersistenceService.upsertPollResultAndMarkItem(detail, item);
@@ -216,7 +232,43 @@ public class DispatchExecutionService {
         } catch (DispatchResourceBusyException ex) {
             pollShardPersistenceService.markShardResourceWaiting(shardId, ex.getMessage());
             throw ex;
+        } catch (Exception ex) {
+            Long batchId = pollShardPersistenceService.markShardFailed(shardId, ex.getMessage());
+            pollAggregationService.tryAggregateBatch(batchId);
+            throw ex;
         }
+    }
+
+    private int countRemainingPollItems(List<PollBatchShardItem> items, int currentIndex) {
+        int remaining = 0;
+        for (int i = currentIndex; i < items.size(); i++) {
+            PollBatchShardItem item = items.get(i);
+            if (!"completed".equals(item.getStatus())) {
+                remaining++;
+            }
+        }
+        return Math.max(remaining, 1);
+    }
+
+    private Integer resolveMonitoringRequestTimeoutMs(AiPlatformConfig platform,
+                                                      DispatchTask task,
+                                                      int remainingItems) {
+        int configuredTimeoutMs = dispatchProperties.getModelRequestTimeoutMs();
+        if (platform != null && platform.getTimeoutMs() != null && platform.getTimeoutMs() > 0) {
+            configuredTimeoutMs = Math.min(configuredTimeoutMs, platform.getTimeoutMs());
+        }
+        configuredTimeoutMs = Math.min(configuredTimeoutMs, QUESTION_POLL_REQUEST_TIMEOUT_CAP_MS);
+
+        if (task == null || task.getTimeoutAt() == null) {
+            return Math.max(configuredTimeoutMs, QUESTION_POLL_MIN_REQUEST_TIMEOUT_MS);
+        }
+        long remainingMs = java.time.Duration.between(LocalDateTime.now(), task.getTimeoutAt()).toMillis()
+                - QUESTION_POLL_TASK_TIMEOUT_SAFETY_MS;
+        if (remainingMs < QUESTION_POLL_MIN_REQUEST_TIMEOUT_MS) {
+            return null;
+        }
+        int budgetedTimeoutMs = (int) Math.max(QUESTION_POLL_MIN_REQUEST_TIMEOUT_MS, remainingMs / Math.max(remainingItems, 1));
+        return Math.min(configuredTimeoutMs, budgetedTimeoutMs);
     }
 
     private PollResult buildPollResult(PollBatch batch,
@@ -520,7 +572,8 @@ public class DispatchExecutionService {
 
     private InvocationResult invokeMonitoringWithRouter(AiPlatformConfig platform,
                                                         DispatchTask task,
-                                                        String questionText) {
+                                                        String questionText,
+                                                        int requestTimeoutMs) {
         try {
             LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
                     LlmFeature.MONITORING,
@@ -528,7 +581,7 @@ public class DispatchExecutionService {
                     questionText,
                     0D,
                     dispatchProperties.getModelConnectTimeoutMs(),
-                    dispatchProperties.getModelRequestTimeoutMs(),
+                    requestTimeoutMs,
                     LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
                     null,
                     null,
