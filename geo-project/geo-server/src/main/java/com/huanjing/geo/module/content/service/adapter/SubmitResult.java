@@ -16,6 +16,7 @@ public class SubmitResult {
     private String reviewStatus;
     private String reviewFeedback;
     private String failureKind;
+    private String operationStage;
     private boolean retryable;
 
     public static SubmitResult success(Integer statusCode, String requestPayload, String responseBody, String publishedUrl) {

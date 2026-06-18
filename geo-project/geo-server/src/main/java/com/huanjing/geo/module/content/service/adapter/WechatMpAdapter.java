@@ -32,6 +32,10 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     public static final String PLATFORM = "wechat_mp";
     private static final int WECHAT_API_UNAUTHORIZED_CODE = 48001;
     private static final String WECHAT_API_UNAUTHORIZED = "WECHAT_API_UNAUTHORIZED";
+    private static final String STAGE_PREPARE_COVER_MATERIAL = "WECHAT_PREPARE_COVER_MATERIAL";
+    private static final String STAGE_RENDER_CONTENT = "WECHAT_RENDER_CONTENT";
+    private static final String STAGE_ADD_DRAFT = "WECHAT_ADD_DRAFT";
+    private static final String STAGE_SUBMIT_PUBLISH = "WECHAT_SUBMIT_PUBLISH";
 
     private final WechatArticleRenderService articleRenderService;
     private final WechatHtmlRewriter htmlRewriter;
@@ -108,16 +112,21 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
                                        TargetContext.SelfMediaTarget mpTarget) {
         SelfMediaAccount account = mpTarget.account();
         String requestPayload = null;
+        String operationStage = STAGE_PREPARE_COVER_MATERIAL;
         try {
             Brand brand = brandService.requireExistingBrand(account.getBrandId());
+            operationStage = STAGE_PREPARE_COVER_MATERIAL;
             String thumbMediaId = mediaService.ensureThumbMediaId(account, account.getBrandId(), mpTarget.coverMaterialId());
+            operationStage = STAGE_RENDER_CONTENT;
             String html = articleRenderService.renderOrFallbackForPublish(article, contentMarkdown);
             String wechatHtml = htmlRewriter.rewrite(html, src -> mediaService.ensureContentImageUrl(account, src));
             WechatMpClient.DraftArticle draftArticle = buildDraftArticle(article, brand, account, wechatHtml, thumbMediaId);
             requestPayload = buildRequestPayload(account, mpTarget.coverMaterialId(), draftArticle);
+            operationStage = STAGE_ADD_DRAFT;
             WechatMpClient.DraftResult result =
                     tokenAwareExecutor.execute(account, accessToken -> wechatMpClient.addDraft(accessToken, draftArticle));
             if (shouldSubmitPublish(mpTarget)) {
+                operationStage = STAGE_SUBMIT_PUBLISH;
                 WechatMpClient.PublishResult publishResult =
                         tokenAwareExecutor.execute(account, accessToken -> wechatMpClient.submitPublish(accessToken, result.mediaId()));
                 ObjectNode response = objectMapper.createObjectNode();
@@ -125,6 +134,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
                 response.put("publish_id", publishResult.publishId());
                 response.put("message", "submitted_to_wechat_freepublish");
                 SubmitResult submitResult = SubmitResult.success(200, requestPayload, objectMapper.writeValueAsString(response), null);
+                submitResult.setOperationStage(STAGE_SUBMIT_PUBLISH);
                 submitResult.setPlatformPublishId(publishResult.publishId());
                 submitResult.setExternalStatus("submitted_to_publish");
                 submitResult.setReviewStatus(ReviewStatusResult.ReviewStatus.UNDER_REVIEW);
@@ -134,13 +144,24 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
             response.put("media_id", result.mediaId());
             response.put("message", "saved_to_wechat_draft");
             SubmitResult submitResult = SubmitResult.success(200, requestPayload, objectMapper.writeValueAsString(response), null, result.mediaId());
+            submitResult.setOperationStage(STAGE_ADD_DRAFT);
             submitResult.setExternalStatus("saved_to_draft");
             submitResult.setReviewStatus(ReviewStatusResult.ReviewStatus.NOT_APPLICABLE);
             return submitResult;
         } catch (BizException ex) {
-            return SubmitResult.failure(ex.getCode(), requestPayload, null, ex.getMessage(), failureKind(ex.getCode(), ex.getMessage()), retryable(ex.getCode()));
+            SubmitResult result = SubmitResult.failure(
+                    ex.getCode(),
+                    requestPayload,
+                    ex.getMessage(),
+                    userFacingErrorMessage(ex, operationStage),
+                    failureKind(ex.getCode(), ex.getMessage()),
+                    retryable(ex.getCode()));
+            result.setOperationStage(operationStage);
+            return result;
         } catch (Exception ex) {
-            return SubmitResult.failure(500, requestPayload, null, safeMessage(ex), FailureKind.UNKNOWN, false);
+            SubmitResult result = SubmitResult.failure(500, requestPayload, null, safeMessage(ex), FailureKind.UNKNOWN, false);
+            result.setOperationStage(operationStage);
+            return result;
         }
     }
 
@@ -265,6 +286,25 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
             return false;
         }
         return code == 40001 || code == 42001 || code == 45009 || code == 45011 || code == 429 || code >= 500;
+    }
+
+    private String userFacingErrorMessage(BizException ex, String operationStage) {
+        if (ex == null) {
+            return "";
+        }
+        if (WECHAT_API_UNAUTHORIZED.equals(failureKind(ex.getCode(), ex.getMessage()))) {
+            return switch (operationStage) {
+                case STAGE_PREPARE_COVER_MATERIAL, STAGE_RENDER_CONTENT ->
+                        "当前公众号缺少素材上传或图片处理权限。请确认客户公众号具备素材管理权限，并重新授权公众号。";
+                case STAGE_ADD_DRAFT ->
+                        "当前公众号缺少新增草稿权限。请确认客户公众号具备草稿箱/文章管理能力，并重新授权公众号。";
+                case STAGE_SUBMIT_PUBLISH ->
+                        "当前公众号缺少提交发布权限。请确认客户公众号具备发布/群发与通知能力，并重新授权公众号。";
+                default ->
+                        "当前公众号缺少发布所需授权。请在品牌详情重新授权公众号，并确认授权时已勾选素材、草稿和发布相关权限。";
+            };
+        }
+        return ex.getMessage();
     }
 
     private boolean containsIgnoreCase(String value, String needle) {
