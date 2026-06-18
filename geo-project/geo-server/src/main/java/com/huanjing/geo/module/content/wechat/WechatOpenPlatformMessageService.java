@@ -44,6 +44,7 @@ public class WechatOpenPlatformMessageService {
             if (StringUtils.hasText(content) && content.startsWith(QUERY_AUTH_CODE_PREFIX)) {
                 queryAuthCodeAsyncService.handle(authorizerAppid, xml.get("FromUserName"),
                         content.substring(QUERY_AUTH_CODE_PREFIX.length()), startedAt);
+                response = "";
                 return response;
             }
             if ("text".equals(msgType) && content != null) {

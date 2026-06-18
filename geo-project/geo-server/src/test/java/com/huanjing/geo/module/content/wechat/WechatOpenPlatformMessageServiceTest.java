@@ -76,13 +76,13 @@ class WechatOpenPlatformMessageServiceTest {
     }
 
     @Test
-    void queryAuthCodeReturnsSuccessImmediatelyAndDelegatesAsyncHandling() {
+    void queryAuthCodeReturnsEmptyImmediatelyAndDelegatesAsyncHandling() {
         long startedAt = System.currentTimeMillis();
 
         String response = service.handleAuthorizerMessage("wx-authorizer",
                 textMessage("QUERY_AUTH_CODE:queryauthcode@@@12345678"));
 
-        assertThat(response).isEqualTo("success");
+        assertThat(response).isEmpty();
         assertThat(System.currentTimeMillis() - startedAt).isLessThan(500);
         verify(queryAuthCodeAsyncService).handle(
                 eq("wx-authorizer"),
