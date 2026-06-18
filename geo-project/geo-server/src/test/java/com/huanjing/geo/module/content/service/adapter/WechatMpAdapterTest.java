@@ -158,9 +158,30 @@ class WechatMpAdapterTest {
         assertFalse(result.isSuccess());
         assertEquals(48001, result.getStatusCode());
         assertEquals("WECHAT_API_UNAUTHORIZED", result.getFailureKind());
-        assertEquals("api unauthorized rid: rid-from-wechat", result.getErrorMessage());
+        assertEquals("WECHAT_ADD_DRAFT", result.getOperationStage());
+        assertEquals("当前公众号缺少新增草稿权限。请确认客户公众号具备草稿箱/文章管理能力，并重新授权公众号。",
+                result.getErrorMessage());
+        assertEquals("api unauthorized rid: rid-from-wechat", result.getResponseBody());
         assertFalse(result.isRetryable());
         verify(fixture.wechatMpClient, never()).submitPublish(any(), any());
+    }
+
+    @Test
+    void submitToTarget_mapsPublishApiUnauthorizedToPublishStageFailure() {
+        Fixture fixture = fixture(true);
+        TargetContext.SelfMediaTarget target = target(fixture.account, Map.of("publishAction", "publish"));
+        when(fixture.wechatMpClient.submitPublish(eq("access-token"), eq("draft_media_id")))
+                .thenThrow(new BizException(48001, "api unauthorized rid: publish-rid"));
+
+        SubmitResult result = fixture.adapter.submitToTarget(article(), "markdown body", target);
+
+        assertFalse(result.isSuccess());
+        assertEquals("WECHAT_API_UNAUTHORIZED", result.getFailureKind());
+        assertEquals("WECHAT_SUBMIT_PUBLISH", result.getOperationStage());
+        assertEquals("当前公众号缺少提交发布权限。请确认客户公众号具备发布/群发与通知能力，并重新授权公众号。",
+                result.getErrorMessage());
+        assertEquals("api unauthorized rid: publish-rid", result.getResponseBody());
+        assertFalse(result.isRetryable());
     }
 
     @Test

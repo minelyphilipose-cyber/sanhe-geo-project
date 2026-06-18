@@ -491,8 +491,13 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         }
         if (submitResult != null) {
             root.put("submitSuccess", submitResult.isSuccess());
+            root.put("operationStage", firstText(submitResult.getOperationStage(), ""));
+            root.put("operationStageLabel", operationStageLabel(submitResult.getOperationStage()));
             root.put("failureKind", firstText(submitResult.getFailureKind(), ""));
             root.put("errorMessage", firstText(submitResult.getErrorMessage(), ""));
+            if (StringUtils.hasText(submitResult.getResponseBody())) {
+                root.put("platformRawError", submitResult.getResponseBody());
+            }
         }
         if (reviewStatus != null) {
             root.put("reviewOutcome", reviewStatus.status().name().toLowerCase(Locale.ROOT));
@@ -504,6 +509,19 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         } catch (JsonProcessingException ignored) {
             return "{\"adapter\":\"official_api_self_media\"}";
         }
+    }
+
+    private String operationStageLabel(String operationStage) {
+        if (!StringUtils.hasText(operationStage)) {
+            return "";
+        }
+        return switch (operationStage) {
+            case "WECHAT_PREPARE_COVER_MATERIAL" -> "准备公众号封面素材";
+            case "WECHAT_RENDER_CONTENT" -> "转换公众号正文与图片";
+            case "WECHAT_ADD_DRAFT" -> "新增公众号草稿";
+            case "WECHAT_SUBMIT_PUBLISH" -> "提交公众号发布";
+            default -> operationStage;
+        };
     }
 
     private String requestId(SelfMediaPublishSchedule row) {

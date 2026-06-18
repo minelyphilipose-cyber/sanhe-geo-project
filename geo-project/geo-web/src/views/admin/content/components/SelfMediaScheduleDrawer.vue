@@ -334,6 +334,7 @@ const diagnosticsFields = computed(() => {
     { label: '下次处理', value: timeText(row.nextAttemptAt) },
     { label: '锁定至', value: timeText(row.lockedUntil) },
     { label: '尝试次数', value: attemptText(row) },
+    { label: '失败环节', value: failureStageText(row) || '-' },
     { label: '异常', value: failureText(row) },
   ]
 })
@@ -363,6 +364,7 @@ const platformDiagnosticsFields = computed(() => {
   add('页面标题', payload.pageTitle)
   add('目标标题', payload.expectedTitle || payload.targetTitle)
   add('计划时间', payload.scheduledAtText || payload.platformScheduledAt || payload.scheduleProbe)
+  add('失败环节', operationStageLabel(payload.operationStage, payload.operationStageLabel))
   add('平台状态', platformPublishStatusLabel(payload.platformStatus))
   add('回查原因', payload.reason)
   add('回查失败码', failureCodeLabel(payload.failureCode) || payload.failureLabel)
@@ -651,9 +653,52 @@ function attemptText(row: SelfMediaPublishSchedule) {
 
 function failureText(row: SelfMediaPublishSchedule) {
   const code = row.failureLabel || failureCodeLabel(row.failureCode)
+  const message = displayFailureMessage(row)
+  const stage = failureStageText(row)
   const drift = scheduleDriftReasonLabel(row.scheduleDriftReason)
-  if (code && row.failureMessage) return `${code}：${row.failureMessage}`
-  return row.failureMessage || code || drift || '-'
+  if (stage && code && message) return `${code}（${stage}）：${message}`
+  if (stage && code) return `${code}（${stage}）`
+  if (stage && message) return `${stage}：${message}`
+  if (code && message) return `${code}：${message}`
+  return message || code || drift || '-'
+}
+
+function failureStageText(row: SelfMediaPublishSchedule) {
+  const payload = parseDiagnostics(row.diagnosticsJson)
+  if (!payload) return ''
+  return operationStageLabel(payload.operationStage, payload.operationStageLabel)
+}
+
+function displayFailureMessage(row: SelfMediaPublishSchedule) {
+  if (row.failureCode === 'WECHAT_API_UNAUTHORIZED') {
+    const stage = failureStageText(row)
+    if (stage.includes('草稿')) return '当前公众号缺少新增草稿权限。请确认客户公众号具备草稿箱/文章管理能力，并重新授权公众号。'
+    if (stage.includes('提交') || stage.includes('发布')) return '当前公众号缺少提交发布权限。请确认客户公众号具备发布/群发与通知能力，并重新授权公众号。'
+    if (stage.includes('素材') || stage.includes('图片')) return '当前公众号缺少素材上传或图片处理权限。请确认客户公众号具备素材管理权限，并重新授权公众号。'
+    return '当前公众号缺少发布所需授权。请确认客户公众号具备素材、草稿和发布相关权限，并重新授权公众号。'
+  }
+  return row.failureMessage || ''
+}
+
+function parseDiagnostics(value?: string | null): Record<string, any> | null {
+  if (!value) return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function operationStageLabel(stage?: string | null, fallback?: string | null) {
+  if (fallback) return fallback
+  const labels: Record<string, string> = {
+    WECHAT_PREPARE_COVER_MATERIAL: '准备公众号封面素材',
+    WECHAT_RENDER_CONTENT: '转换公众号正文与图片',
+    WECHAT_ADD_DRAFT: '新增公众号草稿',
+    WECHAT_SUBMIT_PUBLISH: '提交公众号发布',
+  }
+  return stage ? labels[stage] || stage : ''
 }
 
 function articleDisplay(row: SelfMediaPublishSchedule) {

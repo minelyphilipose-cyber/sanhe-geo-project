@@ -262,6 +262,45 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
     }
 
     @Test
+    void scheduleFailureDiagnosticsIncludeOperationStage() {
+        adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
+                platformRouter,
+                List.of(new SubmitFailingAdapter()),
+                scheduleMapper,
+                distributionTaskMapper,
+                articleDraftMapper,
+                articleDraftVersionMapper,
+                selfMediaAccountMapper,
+                projectMapper,
+                imagePublicUrlRewriter,
+                materialSelectionService,
+                capabilityService,
+                new ObjectMapper()
+        );
+        SelfMediaPublishSchedule row = scheduleRow();
+        when(scheduleMapper.selectById(10L)).thenReturn(row);
+        when(distributionTaskMapper.selectOne(any())).thenReturn(null);
+        when(articleDraftMapper.selectById(20L)).thenReturn(article());
+        when(projectMapper.selectById(30L)).thenReturn(project());
+        when(selfMediaAccountMapper.selectById(40L)).thenReturn(account());
+        ArticleDraftVersion version = new ArticleDraftVersion();
+        version.setContentMarkdown("content");
+        when(articleDraftVersionMapper.selectOne(any())).thenReturn(version);
+        when(materialSelectionService.select(any(), any(), eq("content")))
+                .thenReturn(new SelfMediaPublishMaterialSelectionService.Selection(88L, List.of()));
+        when(imagePublicUrlRewriter.rewrite(any(), eq("content"))).thenReturn("content");
+        when(capabilityService.automationOptions("wechat_mp")).thenReturn(Map.of());
+
+        ScheduleExecutionResult result = adapter.schedule(SelfMediaPublishScheduleVO.from(row));
+
+        assertEquals(false, result.success());
+        assertEquals("WECHAT_API_UNAUTHORIZED", result.failureCode());
+        assertTrue(result.diagnosticsJson().contains("\"operationStage\":\"WECHAT_ADD_DRAFT\""));
+        assertTrue(result.diagnosticsJson().contains("\"operationStageLabel\":\"新增公众号草稿\""));
+        assertTrue(result.diagnosticsJson().contains("\"platformRawError\":\"api unauthorized rid: draft-rid\""));
+    }
+
+    @Test
     void checkPublishResultReturnsRetryWhenReviewApiFails() {
         adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
                 platformRouter,
@@ -402,6 +441,21 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
             assertEquals(Boolean.TRUE, target.platformOptions().get("coverMaterialAutoSelected"));
             assertEquals(Boolean.TRUE, target.platformOptions().get("imageMaterialAutoSelected"));
             return super.submitToTarget(article, contentMarkdown, target);
+        }
+    }
+
+    private static class SubmitFailingAdapter extends FakeOfficialApiAdapter {
+        @Override
+        public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext.SelfMediaTarget target) {
+            SubmitResult result = SubmitResult.failure(
+                    48001,
+                    "{}",
+                    "api unauthorized rid: draft-rid",
+                    "当前公众号缺少新增草稿权限",
+                    "WECHAT_API_UNAUTHORIZED",
+                    false);
+            result.setOperationStage("WECHAT_ADD_DRAFT");
+            return result;
         }
     }
 }
