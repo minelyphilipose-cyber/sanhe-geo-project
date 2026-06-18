@@ -93,6 +93,7 @@
                     :value="opt.value"
                   />
                 </el-select>
+                <span class="form-tip inline-tip">自定义行业请使用短名称；地区 + 行业需控制在 {{ REPORT_MARKET_LABEL_PAIR_MAX_LENGTH }} 字内。</span>
               </el-form-item>
 
               <el-form-item class="form-item span-full" prop="industryRole">
@@ -124,9 +125,10 @@
                 <el-input
                   v-model="form.region"
                   placeholder="如:全国"
-                  maxlength="50"
+                  :maxlength="REPORT_MARKET_LABEL_PAIR_MAX_LENGTH"
                   show-word-limit
                 />
+                <span class="form-tip inline-tip">建议填写城市或区域短名，如“阜阳”“华东”。</span>
               </el-form-item>
 
               <el-form-item class="form-item span-full" prop="userType">
@@ -591,6 +593,8 @@ const MAX_LLM_TOTAL_COUNT = 60
 const MAX_LLM_CATEGORY_COUNT = 30
 const MIN_LLM_COGNITIVE_COUNT = 3
 const MAX_LLM_EXISTING_QUESTIONS = 80
+const REPORT_MARKET_INDUSTRY_LABEL_MAX_LENGTH = 9
+const REPORT_MARKET_LABEL_PAIR_MAX_LENGTH = 11
 
 const router = useRouter()
 const route = useRoute()
@@ -684,12 +688,73 @@ function validateBrandFormerNames(_: unknown, value: string[] | undefined, callb
   callback()
 }
 
+function marketIndustryLabel(value: string | undefined) {
+  const key = (value || '').trim().toLowerCase()
+  switch (key) {
+    case 'medical_beauty':
+    case 'medical_beauty_hospital':
+    case '医美':
+    case '医疗美容':
+      return '医美'
+    case 'dental':
+    case '口腔':
+      return '口腔'
+    case 'hair_transplant':
+    case '植发':
+      return '植发'
+    case 'home_decoration':
+    case 'decoration':
+    case '家装':
+    case '装修':
+      return '家装'
+    case 'education':
+    case '教培':
+    case '教育':
+      return '教培'
+    case 'local_food':
+    case 'restaurant':
+    case '餐饮':
+    case '本地餐饮':
+      return '餐饮'
+    case 'auto_service':
+    case '汽车服务':
+      return '汽车服务'
+    default:
+      return (value || '').trim()
+  }
+}
+
+function validateMarketIndustry(_: unknown, value: string | undefined, callback: (error?: Error) => void) {
+  const industryLabel = marketIndustryLabel(value)
+  if (industryLabel.length > REPORT_MARKET_INDUSTRY_LABEL_MAX_LENGTH) {
+    callback(new Error(`行业名称过长，请控制在 ${REPORT_MARKET_INDUSTRY_LABEL_MAX_LENGTH} 字以内`))
+    return
+  }
+  validateMarketLabelPair(_, value, callback)
+}
+
+function validateMarketLabelPair(_: unknown, __: string | undefined, callback: (error?: Error) => void) {
+  const region = form.region.trim()
+  const industryLabel = marketIndustryLabel(form.industry)
+  if (region && industryLabel && region.length + industryLabel.length > REPORT_MARKET_LABEL_PAIR_MAX_LENGTH) {
+    callback(new Error(`地区与行业合计最多 ${REPORT_MARKET_LABEL_PAIR_MAX_LENGTH} 字，请使用短名称`))
+    return
+  }
+  callback()
+}
+
 const rules: FormRules = {
   brandName: [{ required: true, message: '品牌名不能为空', trigger: 'blur' }],
   brandFormerNames: [{ validator: validateBrandFormerNames, trigger: 'blur' }],
-  industry: [{ required: true, message: '请选择行业', trigger: 'change' }],
+  industry: [
+    { required: true, message: '请选择行业', trigger: 'change' },
+    { validator: validateMarketIndustry, trigger: 'change' }
+  ],
   industryRole: [{ required: true, message: '请选择身份', trigger: 'change' }],
-  region: [{ required: true, message: '请输入地区', trigger: 'blur' }],
+  region: [
+    { required: true, message: '请输入地区', trigger: 'blur' },
+    { validator: validateMarketLabelPair, trigger: 'blur' }
+  ],
   userType: [{ max: 50, message: '目标用户最多 50 字', trigger: 'blur' }],
   userDemand: [{ max: 500, message: '客户诉求最多 500 字', trigger: 'blur' }],
   specifiedCompetitors: [{ validator: validateSpecifiedCompetitors, trigger: 'blur' }]
@@ -998,6 +1063,7 @@ function applyRegenerateDraft(draft: RegenerateDraftVO) {
 
 function onIndustryChange() {
   form.industryRole = ''
+  formRef.value?.validateField(['industry', 'region'])
 }
 
 function togglePromptPanel() {
