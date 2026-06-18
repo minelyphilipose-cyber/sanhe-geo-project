@@ -325,6 +325,7 @@ geo:
     model-connect-timeout-ms: 10000
     model-request-timeout-ms: 180000
     question-poll-shard-size: ${DISPATCH_QUESTION_POLL_SHARD_SIZE:20}
+    question-poll-max-shard-size: ${DISPATCH_QUESTION_POLL_MAX_SHARD_SIZE:20}
     resource-busy-retry-min-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MIN_SECONDS:30}
     resource-busy-retry-jitter-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_JITTER_SECONDS:30}
     resource-busy-max-attempts: ${DISPATCH_RESOURCE_BUSY_MAX_ATTEMPTS:60}
@@ -346,7 +347,7 @@ geo:
       feature-concurrency:
         monitoring: ${GEO_LLM_POOL_FEATURE_MONITORING:8}
         article: ${GEO_LLM_POOL_FEATURE_ARTICLE:4}
-        presale: ${GEO_LLM_POOL_FEATURE_PRESALE:8}
+        presale: ${GEO_LLM_POOL_FEATURE_PRESALE:12}
         draft: ${GEO_LLM_POOL_FEATURE_DRAFT:4}
         generic: ${GEO_LLM_POOL_FEATURE_GENERIC:4}
   extension:
@@ -387,10 +388,10 @@ presale:
         max-pool-size: ${PRESALE_GENERATE_MAX_POOL_SIZE:13}
         queue-capacity: ${PRESALE_GENERATE_QUEUE_CAPACITY:200}
       platform:
-        core-pool-size: ${PRESALE_PLATFORM_CORE_POOL_SIZE:6}
-        max-pool-size: ${PRESALE_PLATFORM_MAX_POOL_SIZE:8}
+        core-pool-size: ${PRESALE_PLATFORM_CORE_POOL_SIZE:8}
+        max-pool-size: ${PRESALE_PLATFORM_MAX_POOL_SIZE:12}
         queue-capacity: ${PRESALE_PLATFORM_QUEUE_CAPACITY:50}
-    prompt-max-concurrency-per-report: ${PRESALE_PROMPT_MAX_CONCURRENCY_PER_REPORT:4}
+    prompt-max-concurrency-per-report: ${PRESALE_PROMPT_MAX_CONCURRENCY_PER_REPORT:6}
     db-write-max-concurrency: ${PRESALE_DB_WRITE_MAX_CONCURRENCY:6}
     max-concurrent-reports: ${PRESALE_MAX_CONCURRENT_REPORTS:2}
     queue-dispatch:

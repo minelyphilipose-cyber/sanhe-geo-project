@@ -22,6 +22,7 @@ public class DispatchProperties {
     private int modelConnectTimeoutMs = 10000;
     private int modelRequestTimeoutMs = 45000;
     private int questionPollShardSize = 20;
+    private int questionPollMaxShardSize = 20;
     private int resourceBusyRetryMinSeconds = 30;
     private int resourceBusyRetryJitterSeconds = 30;
     private int resourceBusyMaxAttempts = 60;
@@ -29,6 +30,10 @@ public class DispatchProperties {
 
     public void setQuestionPollShardSize(int questionPollShardSize) {
         this.questionPollShardSize = Math.max(1, questionPollShardSize);
+    }
+
+    public void setQuestionPollMaxShardSize(int questionPollMaxShardSize) {
+        this.questionPollMaxShardSize = Math.max(1, questionPollMaxShardSize);
     }
 
     public void setResourceBusyRetryMinSeconds(int resourceBusyRetryMinSeconds) {

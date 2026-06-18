@@ -108,7 +108,7 @@ public class DispatchTaskService {
         task.setRetryCount(0);
         task.setResourceWaitCount(0);
         task.setMaxRetry(3);
-        task.setTimeoutAt(dueTime.plusMinutes(dispatchProperties.getTaskTimeoutMinutes()));
+        task.setTimeoutAt(null);
 
         try {
             dispatchTaskMapper.insert(task);
@@ -141,7 +141,7 @@ public class DispatchTaskService {
                     existing.setFinishedAt(null);
                     existing.setLastError(null);
                     existing.setErrorContext(null);
-                    existing.setTimeoutAt(dueTime.plusMinutes(dispatchProperties.getTaskTimeoutMinutes()));
+                    existing.setTimeoutAt(null);
                     dispatchTaskMapper.updateById(existing);
                     if (enqueue) {
                         safeEnqueue(existing);
@@ -203,12 +203,6 @@ public class DispatchTaskService {
             return;
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        if (task.getTimeoutAt() != null && now.isAfter(task.getTimeoutAt())) {
-            markDeadLetter(task, "task execution timeout");
-            return;
-        }
-
         task = dispatchTaskStateService.markRunning(taskId, dispatchProperties.getTaskTimeoutMinutes());
         if (task == null) {
             return;
@@ -261,7 +255,7 @@ public class DispatchTaskService {
         task.setResourceWaitCount(0);
         task.setFirstStartedAt(null);
         task.setLastStartedAt(null);
-        task.setTimeoutAt(now.plusMinutes(dispatchProperties.getTaskTimeoutMinutes()));
+        task.setTimeoutAt(null);
         task.setNextRetryAt(null);
         task.setFinishedAt(null);
         task.setLastError(null);

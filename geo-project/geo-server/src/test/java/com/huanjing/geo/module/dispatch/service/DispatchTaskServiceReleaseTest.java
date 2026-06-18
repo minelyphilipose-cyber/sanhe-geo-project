@@ -13,9 +13,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -25,6 +28,8 @@ class DispatchTaskServiceReleaseTest {
 
     private DispatchTaskMapper dispatchTaskMapper;
     private DispatchQueueService dispatchQueueService;
+    private DispatchExecutionService dispatchExecutionService;
+    private DispatchTaskStateService dispatchTaskStateService;
     private CurrentUserService currentUserService;
     private ActivityLogService activityLogService;
     private DispatchTaskService service;
@@ -33,6 +38,8 @@ class DispatchTaskServiceReleaseTest {
     void setUp() {
         dispatchTaskMapper = mock(DispatchTaskMapper.class);
         dispatchQueueService = mock(DispatchQueueService.class);
+        dispatchExecutionService = mock(DispatchExecutionService.class);
+        dispatchTaskStateService = mock(DispatchTaskStateService.class);
         currentUserService = mock(CurrentUserService.class);
         activityLogService = mock(ActivityLogService.class);
 
@@ -43,14 +50,29 @@ class DispatchTaskServiceReleaseTest {
         service = new DispatchTaskService(
                 dispatchTaskMapper,
                 dispatchQueueService,
-                mock(DispatchExecutionService.class),
+                dispatchExecutionService,
                 new DispatchProperties(),
-                mock(DispatchTaskStateService.class),
+                dispatchTaskStateService,
                 currentUserService,
                 activityLogService,
                 mock(DispatchPollShardPersistenceService.class),
                 mock(DispatchPollAggregationService.class)
         );
+    }
+
+    @Test
+    void processTaskDoesNotDeadLetterPendingTaskBeforeItStarts() {
+        DispatchTask task = contentTask(21L, DispatchTaskStatus.PENDING.value(), "content:official_site:2");
+        task.setTimeoutAt(LocalDateTime.now().minusMinutes(1));
+        when(dispatchTaskMapper.selectById(21L)).thenReturn(task);
+        when(dispatchTaskStateService.markRunning(eq(21L), anyInt())).thenReturn(task);
+
+        service.processTask(21L);
+
+        verify(dispatchTaskStateService).markRunning(eq(21L), anyInt());
+        verify(dispatchExecutionService).execute(task);
+        verify(dispatchTaskStateService).markCompleted(21L);
+        verify(dispatchQueueService, never()).clearQueueMark(21L);
     }
 
     @Test

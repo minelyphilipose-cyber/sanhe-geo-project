@@ -86,7 +86,7 @@ public class DispatchQuestionPollPlanningService {
         int planCap = resolveTierPollLimit(project, questionTier);
         int takeCount = planCap > 0 ? Math.min(planCap, allKeywords.size()) : allKeywords.size();
         List<PollKeywordCandidate> selected = selectRotatedKeywords(project.getId(), questionTier, allKeywords, takeCount);
-        int shardSize = Math.max(1, dispatchProperties.getQuestionPollShardSize());
+        int shardSize = resolveEffectiveShardSize();
         int shardCountPerPlatform = (int) Math.ceil(selected.size() / (double) shardSize);
         int totalShardCount = shardCountPerPlatform * platforms.size();
 
@@ -130,6 +130,17 @@ public class DispatchQuestionPollPlanningService {
     public PollBatch planFromLegacyTask(DispatchTask task, Project project, LocalDate batchDate, int batchNo, String questionTier) {
         return planProjectTierPoll(project, batchDate,
                 task == null || task.getWindowStart() == null ? batchDate : task.getWindowStart(), questionTier, batchNo);
+    }
+
+    int resolveEffectiveShardSize() {
+        int configured = Math.max(1, dispatchProperties.getQuestionPollShardSize());
+        int maxAllowed = Math.max(1, dispatchProperties.getQuestionPollMaxShardSize());
+        int effective = Math.min(configured, maxAllowed);
+        if (configured != effective) {
+            log.warn("Question poll shard size capped, configured={}, maxAllowed={}, effective={}",
+                    configured, maxAllowed, effective);
+        }
+        return effective;
     }
 
     private List<DispatchTask> createShardsAndTasks(PollBatch batch,
