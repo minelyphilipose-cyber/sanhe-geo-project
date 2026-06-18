@@ -1,6 +1,5 @@
 package com.huanjing.geo.module.content.wechat;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
@@ -34,6 +33,7 @@ public class WechatMpAuthorizationService {
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final MpCredentialCipherService cipherService;
     private final WechatFuncInfoValidator funcInfoValidator;
+    private final WechatAuthorizerTokenService authorizerTokenService;
     private final StringRedisTemplate redisTemplate;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
@@ -86,10 +86,8 @@ public class WechatMpAuthorizationService {
     private SelfMediaAccount saveAccount(Long brandId,
                                          WechatOpenPlatformClient.QueryAuthResult queryAuth,
                                          WechatOpenPlatformClient.AuthorizerInfoResult info) {
-        SelfMediaAccount account = selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
-                .eq(SelfMediaAccount::getPlatform, "wechat_mp")
-                .eq(SelfMediaAccount::getPlatformAccountId, queryAuth.authorizerAppid())
-                .last("LIMIT 1"));
+        SelfMediaAccount account = selfMediaAccountMapper.selectByPlatformAccountIncludingDeleted(
+                "wechat_mp", queryAuth.authorizerAppid());
         LocalDateTime now = LocalDateTime.now();
         if (account == null) {
             account = new SelfMediaAccount();
@@ -120,9 +118,12 @@ public class WechatMpAuthorizationService {
         account.setUpdatedAt(now);
         if (account.getId() == null) {
             selfMediaAccountMapper.insert(account);
+        } else if (account.getDeletedAt() != null) {
+            selfMediaAccountMapper.restoreWechatAuthorization(account, now);
         } else {
             selfMediaAccountMapper.updateById(account);
         }
+        authorizerTokenService.evictAccessToken(account);
         return account;
     }
 
