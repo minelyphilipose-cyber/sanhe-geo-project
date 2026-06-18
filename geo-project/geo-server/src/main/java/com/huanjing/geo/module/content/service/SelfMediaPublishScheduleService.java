@@ -78,6 +78,7 @@ public class SelfMediaPublishScheduleService {
     private static final int QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES = 10;
     private static final int PUBLISH_CHECK_TOTAL_ATTEMPTS = 4;
     private static final int[] PUBLISH_CHECK_RETRY_DELAYS_MINUTES = {5, 15};
+    private static final int FAILURE_MESSAGE_MAX_LENGTH = 512;
     private static final int[] SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES = {3, 8};
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
     private static final Set<String> LOCKED_ARTICLE_STATUS = Set.of("published", "distributed");
@@ -1307,7 +1308,12 @@ public class SelfMediaPublishScheduleService {
     }
 
     private boolean requiresEnvironmentLock(SelfMediaPublishSchedule row) {
-        return row != null && row.getBrowserEnvironmentId() != null;
+        if (row == null || row.getBrowserEnvironmentId() == null) {
+            return false;
+        }
+        return scheduleAdapterRouter.contract(row.getPlatform())
+                .map(contract -> SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION.equals(contract.publishChannel()))
+                .orElse(true);
     }
 
     private boolean postponeLocalAgentClaimOutsideBusinessWindow(SelfMediaPublishSchedule row, LocalDateTime now) {
@@ -1455,7 +1461,7 @@ public class SelfMediaPublishScheduleService {
                 || SelfMediaPublishScheduleConstants.STATUS_SCHEDULING.equals(status)) {
             row.setLockedUntil(null);
             row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "SCHEDULE_EXECUTION_FAILED");
-            row.setFailureMessage(trimToNull(failureMessage));
+            row.setFailureMessage(trimFailureMessage(failureMessage));
             row.setDiagnosticsJson(trimToNull(diagnosticsJson));
             if (canRetry(row, nextAttemptAt)) {
                 row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
@@ -1738,7 +1744,7 @@ public class SelfMediaPublishScheduleService {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED);
         row.setLockedUntil(null);
         row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "PUBLISH_RESULT_CHECK_FAILED");
-        row.setFailureMessage(trimToNull(failureMessage));
+        row.setFailureMessage(trimFailureMessage(failureMessage));
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
         releaseArticleIfNoActiveSchedule(row);
@@ -1761,7 +1767,7 @@ public class SelfMediaPublishScheduleService {
         }
         row.setLockedUntil(null);
         row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "SCHEDULE_EXECUTION_FAILED");
-        row.setFailureMessage(trimToNull(failureMessage));
+        row.setFailureMessage(trimFailureMessage(failureMessage));
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         if (canRetry(row, nextAttemptAt)) {
             row.setStatus(statusBeforeClaim(expectedRunningStatus));
@@ -1815,7 +1821,7 @@ public class SelfMediaPublishScheduleService {
             fail("SCHEDULE_STATUS_NOT_CANCELLABLE", "当前排期状态不允许取消");
         }
         row.setFailureCode("CANCELLED_BY_OPERATOR");
-        row.setFailureMessage(trimToNull(reason));
+        row.setFailureMessage(trimFailureMessage(reason));
         if (PLATFORM_SUBMITTED_STATUSES.contains(status)) {
             row.setStatus(SelfMediaPublishScheduleConstants.STATUS_CANCEL_PENDING_PLATFORM);
             row.setCancelRequestedAt(row.getCancelRequestedAt() == null ? now : row.getCancelRequestedAt());
@@ -1847,7 +1853,7 @@ public class SelfMediaPublishScheduleService {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_CANCELLED);
         row.setCancelledAt(LocalDateTime.now());
         row.setFailureCode("PLATFORM_CANCEL_CONFIRMED");
-        row.setFailureMessage(trimToNull(reason));
+        row.setFailureMessage(trimFailureMessage(reason));
         touch(row);
         scheduleMapper.updateById(row);
         releaseArticleIfNoActiveSchedule(row);
@@ -1884,7 +1890,7 @@ public class SelfMediaPublishScheduleService {
         }
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED);
         row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "PUBLISH_RESULT_MANUAL_FAILED");
-        row.setFailureMessage(trimToNull(failureMessage));
+        row.setFailureMessage(trimFailureMessage(failureMessage));
         touch(row);
         scheduleMapper.updateById(row);
         releaseArticleIfNoActiveSchedule(row);
@@ -1949,7 +1955,7 @@ public class SelfMediaPublishScheduleService {
         row.setLockedUntil(null);
         row.setNextAttemptAt(null);
         row.setFailureCode("MANUAL_REQUIRED_BY_OPERATOR");
-        row.setFailureMessage(trimToNull(reason));
+        row.setFailureMessage(trimFailureMessage(reason));
         touch(row);
         scheduleMapper.updateById(row);
         environmentLockService.release(row.getId());
@@ -2887,11 +2893,15 @@ public class SelfMediaPublishScheduleService {
     }
 
     private String trimError(String value) {
+        return trimFailureMessage(value);
+    }
+
+    private String trimFailureMessage(String value) {
         String text = trimToNull(value);
         if (text == null) {
             return null;
         }
-        return text.length() <= 512 ? text : text.substring(0, 512);
+        return truncate(text, FAILURE_MESSAGE_MAX_LENGTH);
     }
 
     private String truncate(String value, int maxLength) {

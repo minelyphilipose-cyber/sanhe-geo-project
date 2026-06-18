@@ -1012,6 +1012,51 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void claimNext_doesNotAcquireEnvironmentLockForOfficialApiPlatform() {
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(120L);
+        candidate.setPlatform("wechat_mp");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        SelfMediaPublishSchedule claimed = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        claimed.setId(120L);
+        claimed.setPlatform("wechat_mp");
+        claimed.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        when(scheduleAdapterRouter.contract("wechat_mp")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "wechat_mp",
+                "微信公众号",
+                SelfMediaPlatformPublishChannel.OFFICIAL_API,
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+        when(scheduleMapper.selectDueQueueCandidates(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10)
+        )).thenReturn(List.of(candidate));
+        when(scheduleMapper.claimQueueSchedule(
+                eq(120L),
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                eq(SelfMediaPublishScheduleConstants.STATUS_FILLING),
+                any(),
+                any()
+        )).thenReturn(1);
+        when(scheduleMapper.selectById(120L)).thenReturn(claimed);
+
+        SelfMediaPublishScheduleVO response = service.claimNext(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION, 10);
+
+        assertEquals(120L, response.getId());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_FILLING, response.getStatus());
+        verify(environmentLockService, never()).tryAcquire(anyLong(), anyLong(), any(), any());
+        verify(environmentLockService, never()).release(120L);
+    }
+
+    @Test
     void claimNextTaskForLocalAgentPersistsQuotaFailureWhenDistributionTaskPrepareFails() {
         stubCurrentTimeInsideBusinessWindow();
         SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
@@ -1860,6 +1905,35 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED, response.getStatus());
         assertEquals("SCHEDULE_EXECUTION_FAILED", response.getFailureCode());
         verify(environmentLockService).release(99L);
+    }
+
+    @Test
+    void markClaimFailedTruncatesLongFailureMessageForPersistence() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        row.setId(101L);
+        row.setAttemptCount(2);
+        row.setMaxAttempts(2);
+        when(scheduleMapper.selectById(101L)).thenReturn(row);
+        String longFailureMessage = "微信公众号发布权限不足：" + "错误详情".repeat(200);
+        String diagnosticsJson = "{\"wechatError\":\"full details\"}";
+
+        SelfMediaPublishScheduleVO response = service.markClaimFailed(
+                101L,
+                SelfMediaPublishScheduleConstants.STATUS_FILLING,
+                "WECHAT_API_UNAUTHORIZED",
+                longFailureMessage,
+                diagnosticsJson,
+                LocalDateTime.of(2026, 6, 1, 11, 0)
+        );
+
+        ArgumentCaptor<SelfMediaPublishSchedule> captor = ArgumentCaptor.forClass(SelfMediaPublishSchedule.class);
+        verify(scheduleMapper).updateById(captor.capture());
+        SelfMediaPublishSchedule updated = captor.getValue();
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED, response.getStatus());
+        assertEquals(512, updated.getFailureMessage().length());
+        assertTrue(longFailureMessage.startsWith(updated.getFailureMessage().substring(0, 12)));
+        assertEquals(diagnosticsJson, updated.getDiagnosticsJson());
+        verify(environmentLockService).release(101L);
     }
 
     @Test

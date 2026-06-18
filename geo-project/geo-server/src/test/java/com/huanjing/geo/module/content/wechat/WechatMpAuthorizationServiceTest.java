@@ -11,10 +11,12 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -27,6 +29,7 @@ class WechatMpAuthorizationServiceTest {
     private final SelfMediaAccountMapper accountMapper = mock(SelfMediaAccountMapper.class);
     private final MpCredentialCipherService cipherService = mock(MpCredentialCipherService.class);
     private final WechatFuncInfoValidator funcInfoValidator = mock(WechatFuncInfoValidator.class);
+    private final WechatAuthorizerTokenService authorizerTokenService = mock(WechatAuthorizerTokenService.class);
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     private final ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -51,6 +54,7 @@ class WechatMpAuthorizationServiceTest {
                 accountMapper,
                 cipherService,
                 funcInfoValidator,
+                authorizerTokenService,
                 redisTemplate,
                 objectMapper
         );
@@ -81,6 +85,7 @@ class WechatMpAuthorizationServiceTest {
         assertThat(account.getRefreshTokenCipher()).isEqualTo("refresh-cipher");
         assertThat(account.getStatus()).isEqualTo("active");
         verify(accountMapper).insert(account);
+        verify(authorizerTokenService).evictAccessToken(account);
     }
 
     @Test
@@ -91,7 +96,8 @@ class WechatMpAuthorizationServiceTest {
         existing.setPlatform("wechat_mp");
         existing.setPlatformAccountId("wx-authorizer");
         existing.setRefreshTokenCipher("old-refresh-cipher");
-        when(accountMapper.selectOne(any())).thenReturn(existing);
+        when(accountMapper.selectByPlatformAccountIncludingDeleted("wechat_mp", "wx-authorizer"))
+                .thenReturn(existing);
         queryAuth("new-auth-code", "refresh-token-2");
         authorizerInfo("[]");
 
@@ -101,6 +107,32 @@ class WechatMpAuthorizationServiceTest {
         assertThat(account.getBrandId()).isEqualTo(7L);
         assertThat(account.getRefreshTokenCipher()).isEqualTo("refresh-cipher-2");
         verify(accountMapper).updateById(account);
+        verify(authorizerTokenService).evictAccessToken(account);
+    }
+
+    @Test
+    void saveOrUpdateAuthorizationRestoresDeletedAuthorizerForBrand() {
+        SelfMediaAccount existing = new SelfMediaAccount();
+        existing.setId(99L);
+        existing.setBrandId(7L);
+        existing.setPlatform("wechat_mp");
+        existing.setPlatformAccountId("wx-authorizer");
+        existing.setRefreshTokenCipher("old-refresh-cipher");
+        existing.setDeletedAt(LocalDateTime.now().minusDays(1));
+        existing.setDeletedBy(100L);
+        when(accountMapper.selectByPlatformAccountIncludingDeleted("wechat_mp", "wx-authorizer"))
+                .thenReturn(existing);
+        queryAuth("new-auth-code", "refresh-token-2");
+        authorizerInfo("[]");
+
+        SelfMediaAccount account = service.saveOrUpdateAuthorization(5L, "component-appid", "new-auth-code");
+
+        assertThat(account.getId()).isEqualTo(99L);
+        assertThat(account.getBrandId()).isEqualTo(5L);
+        assertThat(account.getRefreshTokenCipher()).isEqualTo("refresh-cipher-2");
+        assertThat(account.getStatus()).isEqualTo("active");
+        verify(accountMapper).restoreWechatAuthorization(eq(account), any(LocalDateTime.class));
+        verify(authorizerTokenService).evictAccessToken(account);
     }
 
     private void queryAuth(String authCode, String refreshToken) {
