@@ -58,7 +58,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GeoQuestionService {
     private static final int BATCH_LIMIT = 50;
-    private static final int QUESTION_GENERATION_TIMEOUT_MS = 180_000;
+    private static final int QUESTION_GENERATION_TIMEOUT_MS = 600_000;
     private static final int MAX_GENERATION_RETRY = 2;
     private static final List<String> SCENES = List.of("brand", "decision", "deal", "compare", "qa", "function");
     private static final Set<String> STRONG_DEAL_WORDS = Set.of(
@@ -424,8 +424,8 @@ public class GeoQuestionService {
                 .eq(AiPlatformConfig::getEnabled, true)
                 .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
                 .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
-                .isNotNull(AiPlatformConfig::getLowModelId)
-                .apply("TRIM(low_model_id) <> ''")
+                .isNotNull(AiPlatformConfig::getModelId)
+                .apply("TRIM(model_id) <> ''")
                 .orderByAsc(AiPlatformConfig::getPlatformCode)).stream().map(cfg -> {
             ProviderVO vo = new ProviderVO();
             vo.setId(cfg.getId());
@@ -1008,12 +1008,12 @@ public class GeoQuestionService {
                     "你是 GEO（生成式引擎优化）服务的分层问题池生成助手，必须只输出 JSON。",
                     batch.getTemperature() == null ? 0.7D : batch.getTemperature().doubleValue(),
                     llmProperties.getConnectTimeoutMs(),
-                    config.getTimeoutMs() == null ? llmProperties.getRequestTimeoutMs() : config.getTimeoutMs(),
+                    QUESTION_GENERATION_TIMEOUT_MS,
                     Math.max(0, n(config.getMaxRetry())),
                     Math.max(1, n(config.getRateLimitQps()) == 0 ? 1 : n(config.getRateLimitQps())),
                     null,
                     true,
-                    LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
+                    QUESTION_GENERATION_TIMEOUT_MS,
                     "geo_question",
                     config.getConcurrencyLimit()
             ));
@@ -1110,7 +1110,7 @@ public class GeoQuestionService {
                 Math.max(1, n(config.getRateLimitQps()) == 0 ? 1 : n(config.getRateLimitQps())),
                 null,
                 true,
-                LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
+                QUESTION_GENERATION_TIMEOUT_MS,
                 "geo_question",
                 config.getConcurrencyLimit()
         ));
@@ -1131,8 +1131,8 @@ public class GeoQuestionService {
                 .eq(AiPlatformConfig::getEnabled, true)
                 .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
                 .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
-                .isNotNull(AiPlatformConfig::getLowModelId)
-                .apply("TRIM(low_model_id) <> ''")
+                .isNotNull(AiPlatformConfig::getModelId)
+                .apply("TRIM(model_id) <> ''")
                 .last("LIMIT 1");
         if (StringUtils.hasText(batch.getModelProvider())) {
             wrapper.eq(AiPlatformConfig::getPlatformCode, batch.getModelProvider());
@@ -1149,8 +1149,8 @@ public class GeoQuestionService {
                 .eq(AiPlatformConfig::getEnabled, true)
                 .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
                 .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
-                .isNotNull(AiPlatformConfig::getLowModelId)
-                .apply("TRIM(low_model_id) <> ''")
+                .isNotNull(AiPlatformConfig::getModelId)
+                .apply("TRIM(model_id) <> ''")
                 .last("LIMIT 1");
         if (req.getModelConfigId() != null) {
             wrapper.eq(AiPlatformConfig::getId, req.getModelConfigId());
@@ -1168,7 +1168,7 @@ public class GeoQuestionService {
         if (config == null) {
             return null;
         }
-        return defaultText(config.getLowModelId(), null);
+        return defaultText(config.getModelId(), null);
     }
 
     private String generationModelName(AiPlatformConfig config, String modelId) {

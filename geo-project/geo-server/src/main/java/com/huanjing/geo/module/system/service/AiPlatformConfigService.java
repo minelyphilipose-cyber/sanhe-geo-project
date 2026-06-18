@@ -300,9 +300,6 @@ public class AiPlatformConfigService {
             if (!Boolean.TRUE.equals(enabled)) {
                 throw new BizException(400, "platform must be enabled when enabling GEO question generation");
             }
-            if (!StringUtils.hasText(lowModelId)) {
-                throw new BizException(400, "low_model_id is required when enabling GEO question generation");
-            }
         }
         if (Boolean.TRUE.equals(enabledForQuestionPoll) && !Boolean.TRUE.equals(enabled)) {
             throw new BizException(400, "platform must be enabled when enabling question poll");
