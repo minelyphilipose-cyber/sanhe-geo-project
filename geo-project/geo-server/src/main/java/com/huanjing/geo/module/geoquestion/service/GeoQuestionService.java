@@ -853,8 +853,11 @@ public class GeoQuestionService {
     public GeoQuestionVersion commit(Long workorderId, CommitRequest req) {
         GeoQuestionWorkorder workorder = workorderMapper.selectById(workorderId);
         if (workorder == null) throw new BizException(404, "Workorder not found");
-        if (!List.of("draft", "paused").contains(workorder.getStatus())) {
+        if (!List.of("draft", "paused", "committed").contains(workorder.getStatus())) {
             throw new BizException(400, "当前工单已入库，不能重复提交");
+        }
+        if ("committed".equals(workorder.getStatus())) {
+            validateCommittedWorkorderCanRecommit(workorder);
         }
         QuotaSnapshot snapshot = quotaSnapshot(workorder);
         if (!Objects.equals(snapshot.getWorkorderCountA(), snapshot.getQuotaA() - snapshot.getActiveUsedA())
@@ -864,6 +867,7 @@ public class GeoQuestionService {
         }
         List<GeoQuestionItem> questions = allQuestions(workorderId);
         validateNoDuplicateQuestions(questions);
+        boolean recommit = "committed".equals(workorder.getStatus());
         GeoQuestionVersion version = new GeoQuestionVersion();
         version.setWorkorderId(workorderId);
         version.setCompanyId(workorder.getCompanyId());
@@ -883,6 +887,36 @@ public class GeoQuestionService {
         version.setUpdatedAt(LocalDateTime.now());
         versionMapper.insert(version);
 
+        KeywordGroup group = recommit ? requireCommittedKeywordGroup(workorder) : createCommittedKeywordGroup(workorder);
+
+        bindKeywordGroupToProject(workorder.getProjectId(), group.getId());
+        if (recommit) {
+            refreshKeywordGroupResults(group.getId(), workorderId, version.getId(), questions);
+        } else {
+            insertKeywordGroupResults(group.getId(), workorderId, version.getId(), questions);
+        }
+
+        version.setLegacyKeywordGroupId(group.getId());
+        versionMapper.updateById(version);
+        workorder.setStatus("committed");
+        workorder.setCommittedVersionId(version.getId());
+        workorder.setLegacyKeywordGroupId(group.getId());
+        workorder.setUpdatedAt(LocalDateTime.now());
+        workorderMapper.updateById(workorder);
+        return version;
+    }
+
+    private void validateCommittedWorkorderCanRecommit(GeoQuestionWorkorder workorder) {
+        if (workorder.getProjectId() == null) {
+            return;
+        }
+        Project project = requireProject(workorder.getProjectId());
+        if (!"paused".equals(project.getStatus())) {
+            throw new BizException(400, "项目暂停后才能重新入库正式版本");
+        }
+    }
+
+    private KeywordGroup createCommittedKeywordGroup(GeoQuestionWorkorder workorder) {
         KeywordGroup group = new KeywordGroup();
         group.setCompanyId(workorder.getCompanyId());
         group.setProjectId(workorder.getProjectId());
@@ -894,40 +928,86 @@ public class GeoQuestionService {
         group.setCreatedAt(LocalDateTime.now());
         group.setUpdatedAt(LocalDateTime.now());
         keywordGroupMapper.insert(group);
+        return group;
+    }
 
-        bindKeywordGroupToProject(workorder.getProjectId(), group.getId());
+    private KeywordGroup requireCommittedKeywordGroup(GeoQuestionWorkorder workorder) {
+        if (workorder.getLegacyKeywordGroupId() == null) {
+            throw new BizException(400, "当前工单缺少正式拓词组，不能重新入库");
+        }
+        KeywordGroup group = keywordGroupMapper.selectById(workorder.getLegacyKeywordGroupId());
+        if (group == null || Boolean.TRUE.equals(group.getDeleted())) {
+            throw new BizException(400, "当前工单正式拓词组不存在，不能重新入库");
+        }
+        group.setCompanyId(workorder.getCompanyId());
+        group.setProjectId(workorder.getProjectId());
+        group.setName(committedKeywordGroupName(workorder));
+        group.setType("imported");
+        group.setAreaEnabled(false);
+        group.setRemark("由拓词管理重新入库更新");
+        group.setUpdatedAt(LocalDateTime.now());
+        keywordGroupMapper.updateById(group);
+        return group;
+    }
 
+    private void refreshKeywordGroupResults(Long groupId, Long workorderId, Long versionId, List<GeoQuestionItem> questions) {
+        List<KeywordGroupResult> existing = keywordGroupResultMapper.selectList(new LambdaQueryWrapper<KeywordGroupResult>()
+                .eq(KeywordGroupResult::getGroupId, groupId)
+                .eq(KeywordGroupResult::getSourceWorkorderId, workorderId)
+                .orderByAsc(KeywordGroupResult::getQuestionTier)
+                .orderByAsc(KeywordGroupResult::getSortOrder)
+                .orderByAsc(KeywordGroupResult::getId));
+        for (int i = 0; i < questions.size(); i++) {
+            if (i < existing.size()) {
+                applyQuestionToKeywordGroupResult(existing.get(i), workorderId, versionId, questions.get(i), i + 1);
+                keywordGroupResultMapper.updateById(existing.get(i));
+            } else {
+                keywordGroupResultMapper.insert(keywordGroupResult(groupId, workorderId, versionId, questions.get(i), i + 1));
+            }
+        }
+    }
+
+    private void insertKeywordGroupResults(Long groupId, Long workorderId, Long versionId, List<GeoQuestionItem> questions) {
         int sort = 1;
         for (GeoQuestionItem q : questions) {
-            KeywordGroupResult result = new KeywordGroupResult();
-            result.setGroupId(group.getId());
-            result.setKeywordText(q.getQuestionText());
-            result.setSourceType("geo_question_pool");
-            result.setSeedText(q.getRelatedNeedText());
-            result.setQuestionTier(q.getTier());
-            result.setSourceWorkorderId(workorderId);
-            result.setSourceBatchId(q.getBatchId());
-            result.setSourceQuestionId(q.getId());
-            result.setSourceVersionId(version.getId());
-            result.setSceneCode(q.getSceneCode());
-            result.setPriority(q.getPriority());
-            result.setMonitorFrequency(q.getMonitorFrequency());
-            result.setTotalScore(q.getTotalScore());
-            result.setRelatedNeed(q.getRelatedNeedText());
-            result.setDesignReason(q.getDesignReason());
-            result.setSortOrder(sort++);
-            result.setCreatedAt(LocalDateTime.now());
-            result.setUpdatedAt(LocalDateTime.now());
-            keywordGroupResultMapper.insert(result);
+            keywordGroupResultMapper.insert(keywordGroupResult(groupId, workorderId, versionId, q, sort++));
         }
-        version.setLegacyKeywordGroupId(group.getId());
-        versionMapper.updateById(version);
-        workorder.setStatus("committed");
-        workorder.setCommittedVersionId(version.getId());
-        workorder.setLegacyKeywordGroupId(group.getId());
-        workorder.setUpdatedAt(LocalDateTime.now());
-        workorderMapper.updateById(workorder);
-        return version;
+    }
+
+    private KeywordGroupResult keywordGroupResult(Long groupId, Long workorderId, Long versionId, GeoQuestionItem question, int sort) {
+        KeywordGroupResult result = new KeywordGroupResult();
+        result.setGroupId(groupId);
+        result.setCreatedAt(LocalDateTime.now());
+        applyQuestionToKeywordGroupResult(result, workorderId, versionId, question, sort);
+        return result;
+    }
+
+    private void applyQuestionToKeywordGroupResult(KeywordGroupResult result,
+                                                   Long workorderId,
+                                                   Long versionId,
+                                                   GeoQuestionItem question,
+                                                   int sort) {
+        result.setKeywordText(question.getQuestionText());
+        result.setSourceType("geo_question_pool");
+        result.setSeedText(question.getRelatedNeedText());
+        result.setQuestionTier(question.getTier());
+        result.setSourceWorkorderId(workorderId);
+        result.setSourceBatchId(question.getBatchId());
+        result.setSourceQuestionId(question.getId());
+        result.setSourceVersionId(versionId);
+        result.setSceneCode(question.getSceneCode());
+        result.setPriority(question.getPriority());
+        result.setMonitorFrequency(question.getMonitorFrequency());
+        result.setScoreRelevance(question.getScoreRelevance());
+        result.setScoreIntent(question.getScoreIntent());
+        result.setScoreCompetition(question.getScoreCompetition());
+        result.setScoreConversion(question.getScoreConversion());
+        result.setScoreCoverage(question.getScoreCoverage());
+        result.setTotalScore(question.getTotalScore());
+        result.setRelatedNeed(question.getRelatedNeedText());
+        result.setDesignReason(question.getDesignReason());
+        result.setSortOrder(sort);
+        result.setUpdatedAt(LocalDateTime.now());
     }
 
     private String committedKeywordGroupName(GeoQuestionWorkorder workorder) {
