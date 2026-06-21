@@ -556,11 +556,104 @@ class BatchArticleGenerationServiceTest {
         BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
         batch.setId(77L);
         BatchArticleGenerationTask first = generationTask(101L, 77L);
+        first.setStatus("pending");
         BatchArticleGenerationTask second = generationTask(102L, 77L);
+        second.setStatus("pending");
+        when(taskMapper.claimPendingForRun(any(), any(), any())).thenReturn(1);
 
         ReflectionTestUtils.invokeMethod(service, "submitBatchTasks", batch, List.of(first, second));
 
         assertThat(executor.commands).hasSize(2);
+        assertEquals("running", first.getStatus());
+        assertEquals("running", second.getStatus());
+    }
+
+    @Test
+    void submitBatchTasksRespectsTaskSubmitLimit() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        ReflectionTestUtils.setField(service, "taskSubmitLimit", 2);
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        batch.setStatus("running");
+        BatchArticleGenerationTask first = generationTask(101L, 77L);
+        first.setStatus("pending");
+        BatchArticleGenerationTask second = generationTask(102L, 77L);
+        second.setStatus("pending");
+        BatchArticleGenerationTask third = generationTask(103L, 77L);
+        third.setStatus("pending");
+        when(taskMapper.selectList(any())).thenReturn(List.of(first, second, third));
+        when(batchMapper.selectById(77L)).thenReturn(batch);
+        when(taskMapper.claimPendingForRun(any(), any(), any())).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(service, "submitBatchTasks", batch, List.of(first, second, third));
+
+        assertThat(executor.commands).hasSize(2);
+        assertEquals("running", first.getStatus());
+        assertEquals("running", second.getStatus());
+        assertEquals("pending", third.getStatus());
+        verify(batchMapper, atLeast(1)).updateById(batch);
+    }
+
+    @Test
+    void submitBatchTaskReleasesClaimWhenExecutorRejects() {
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", new RejectingExecutor());
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        batch.setStatus("running");
+        BatchArticleGenerationTask task = generationTask(101L, 77L);
+        task.setStatus("pending");
+        when(taskMapper.selectList(any())).thenReturn(List.of(task));
+        when(batchMapper.selectById(77L)).thenReturn(batch);
+        when(taskMapper.claimPendingForRun(any(), any(), any())).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(service, "submitBatchTasks", batch, List.of(task));
+
+        assertEquals("pending", task.getStatus());
+        verify(taskMapper).releaseRunningClaim(any(), any(), any());
+        verify(batchMapper, atLeast(1)).updateById(batch);
+    }
+
+    @Test
+    void submitBatchTasksSkipsTaskWhenDbClaimIsLost() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        BatchArticleGenerationTask first = generationTask(101L, 77L);
+        first.setStatus("pending");
+        BatchArticleGenerationTask second = generationTask(102L, 77L);
+        second.setStatus("pending");
+        when(taskMapper.claimPendingForRun(any(), any(), any())).thenReturn(0, 1);
+
+        ReflectionTestUtils.invokeMethod(service, "submitBatchTasks", batch, List.of(first, second));
+
+        assertThat(executor.commands).hasSize(1);
+        assertEquals("pending", first.getStatus());
+        assertEquals("running", second.getStatus());
+    }
+
+    @Test
+    void submittedTaskSkipsExecutionWhenClaimOwnershipChanged() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        BatchArticleGenerationTask task = generationTask(101L, 77L);
+        task.setStatus("pending");
+        when(taskMapper.claimPendingForRun(any(), any(), any())).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(service, "submitBatchTasks", batch, List.of(task));
+
+        assertThat(executor.commands).hasSize(1);
+        BatchArticleGenerationTask current = generationTask(101L, 77L);
+        current.setStatus("running");
+        current.setStartedAt(task.getStartedAt().plusSeconds(1));
+        when(taskMapper.selectById(101L)).thenReturn(current);
+
+        executor.commands.get(0).run();
+
+        verify(promptContextFactory, never()).buildForBatch(any(), any());
     }
 
     @Test
@@ -604,6 +697,43 @@ class BatchArticleGenerationServiceTest {
         assertEquals("pending", task.getStatus());
         assertThat(executor.commands).hasSize(1);
         verify(taskMapper).updateById(task);
+    }
+
+    @Test
+    void recoverStalledBatchRespectsResubmitLimit() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        ReflectionTestUtils.setField(service, "recoveryResubmitLimit", 2);
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        batch.setStatus("running");
+        batch.setUpdatedAt(LocalDateTime.now().minusMinutes(30));
+        BatchArticleGenerationTask first = generationTask(101L, 77L);
+        first.setStatus("running");
+        first.setUpdatedAt(LocalDateTime.now().minusMinutes(30));
+        BatchArticleGenerationTask second = generationTask(102L, 77L);
+        second.setStatus("running");
+        second.setUpdatedAt(LocalDateTime.now().minusMinutes(30));
+        BatchArticleGenerationTask third = generationTask(103L, 77L);
+        third.setStatus("running");
+        third.setUpdatedAt(LocalDateTime.now().minusMinutes(30));
+        when(taskMapper.selectList(any())).thenReturn(List.of(first, second, third));
+
+        Boolean recovered = ReflectionTestUtils.invokeMethod(
+                service,
+                "recoverStalledBatch",
+                batch,
+                LocalDateTime.now().minusMinutes(15)
+        );
+
+        assertEquals(Boolean.TRUE, recovered);
+        assertEquals("pending", first.getStatus());
+        assertEquals("pending", second.getStatus());
+        assertEquals("running", third.getStatus());
+        assertThat(executor.commands).hasSize(1);
+        verify(taskMapper).updateById(first);
+        verify(taskMapper).updateById(second);
+        verify(taskMapper, never()).updateById(third);
     }
 
     private BatchArticlePromptBuilder.PromptBuildInput promptInput() {
@@ -738,6 +868,13 @@ class BatchArticleGenerationServiceTest {
         @Override
         public void execute(Runnable command) {
             commands.add(command);
+        }
+    }
+
+    private static class RejectingExecutor implements Executor {
+        @Override
+        public void execute(Runnable command) {
+            throw new RuntimeException("executor saturated");
         }
     }
 }

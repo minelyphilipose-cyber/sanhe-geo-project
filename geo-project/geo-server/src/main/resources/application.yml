@@ -83,6 +83,9 @@ article:
       fixed-delay-ms: ${ARTICLE_AI_DRAFT_RECOVERY_FIXED_DELAY_MS:60000}
       stale-minutes: ${ARTICLE_AI_DRAFT_RECOVERY_STALE_MINUTES:15}
       limit: ${ARTICLE_AI_DRAFT_RECOVERY_LIMIT:20}
+      resubmit-limit: ${ARTICLE_AI_DRAFT_RECOVERY_RESUBMIT_LIMIT:5}
+    dispatch:
+      task-submit-limit: ${ARTICLE_AI_DRAFT_DISPATCH_TASK_SUBMIT_LIMIT:5}
 
 semi-auto:
   platforms:
