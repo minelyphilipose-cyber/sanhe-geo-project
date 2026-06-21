@@ -9,14 +9,6 @@
         show-icon
         :title="wechatCapability.description || '微信公众号能力审核中'"
       />
-      <el-alert
-        v-if="douyinCapability && (!douyinCapability.enabled || douyinCapability.liveVerificationBlocked)"
-        class="media-capability-alert"
-        type="warning"
-        :closable="false"
-        show-icon
-        :title="douyinCapability.liveVerificationBlocked ? (douyinCapability.description || '抖音图文暂不可联调') : `抖音图文未开启：${douyinCapability.disabledReason || 'feature flag disabled'}`"
-      />
       <div class="media-grid">
         <button
           class="media-platform"

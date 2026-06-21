@@ -17,6 +17,7 @@
   ],
   "host_permissions": [
     "https://www.huanjingaigeo.com/*",
+    "http://192.168.112.189:8080/*",
     "http://localhost/*",
     "http://127.0.0.1/*",
     "https://mp.toutiao.com/*",
@@ -25,7 +26,8 @@
     "https://www.zhihu.com/*",
     "https://creator.xiaohongshu.com/*",
     "https://www.xiaohongshu.com/*",
-    "https://baijiahao.baidu.com/*"
+    "https://baijiahao.baidu.com/*",
+    "https://creator.douyin.com/*"
   ],
   "content_scripts": [
     {
@@ -36,11 +38,13 @@
         "https://www.zhihu.com/*",
         "https://creator.xiaohongshu.com/*",
         "https://www.xiaohongshu.com/*",
-        "https://baijiahao.baidu.com/*"
+        "https://baijiahao.baidu.com/*",
+        "https://creator.douyin.com/*"
       ],
       "js": [
         "fill-result.js",
         "platform-baijiahao.js",
+        "platform-douyin.js",
         "platform-xiaohongshu.js",
         "platform-zhihu.js",
         "content-script.js"

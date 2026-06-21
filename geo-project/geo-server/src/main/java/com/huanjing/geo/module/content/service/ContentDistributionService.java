@@ -1562,6 +1562,7 @@ public class ContentDistributionService {
         try {
             ObjectNode payloadNode = objectMapper.valueToTree(fillTask);
             rewriteFillPayloadCoverImageUrl(payloadNode, project, article);
+            appendDouyinHeadImageUrl(payloadNode, project);
             appendTargetPlatformOptions(payloadNode, platformOptions);
             appendBrandSelfMediaPublishOptions(payloadNode, project);
             if (environmentBinding != null) {
@@ -1617,6 +1618,20 @@ public class ContentDistributionService {
         }
         article.setCoverImageUrl(fallbackCover);
         articleDraftMapper.updateById(article);
+    }
+
+    private void appendDouyinHeadImageUrl(ObjectNode payloadNode, Project project) {
+        if (payloadNode == null || project == null || project.getBrandId() == null) {
+            return;
+        }
+        if (!"douyin".equalsIgnoreCase(payloadNode.path("platform").asText(""))) {
+            return;
+        }
+        String coverImageUrl = payloadNode.path("coverImageUrl").asText(null);
+        String headImageUrl = articleCoverSelectionService.selectRandomCoverUrlExcluding(project.getBrandId(), coverImageUrl);
+        if (StringUtils.hasText(headImageUrl)) {
+            payloadNode.put("headImageUrl", headImageUrl);
+        }
     }
 
     private void appendBrandSelfMediaPublishOptions(ObjectNode payloadNode, Project project) {

@@ -306,7 +306,7 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span>官方 API 自媒体账号</span>
-            <el-tag type="success">公众号 / 抖音图文</el-tag>
+            <el-tag type="success">公众号</el-tag>
           </div>
           <div class="flex items-center gap-2">
             <el-button
@@ -317,15 +317,6 @@
               @click="authorizeWechatMp"
             >
               {{ hasWechatSelfMediaAccount ? '重新授权公众号' : '授权公众号' }}
-            </el-button>
-            <el-button
-              v-if="canUpdateBrand"
-              type="primary"
-              link
-              :loading="douyinAuthorizing"
-              @click="authorizeDouyin"
-            >
-              {{ hasDouyinSelfMediaAccount ? '重新授权抖音图文' : '授权抖音图文' }}
             </el-button>
           </div>
         </div>
@@ -368,15 +359,6 @@
             >
               重新授权
             </el-button>
-            <el-button
-              v-if="row.platform === 'douyin'"
-              link
-              type="primary"
-              :loading="douyinAuthorizing"
-              @click="authorizeDouyin"
-            >
-              重新授权
-            </el-button>
             <el-button link type="danger" @click="deleteSelfMediaAccountRecord(row)">
               删除记录
             </el-button>
@@ -390,7 +372,7 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span>指纹浏览器自媒体账号</span>
-            <el-tag type="info">头条 / 百家号 / 知乎 / 小红书</el-tag>
+            <el-tag type="info">头条 / 百家号 / 知乎 / 小红书 / 抖音图文</el-tag>
           </div>
           <div class="flex items-center gap-2">
             <el-button
@@ -1149,7 +1131,6 @@ import {
   createSelfMediaAccount,
   getSelfMediaAccountPlatformOptions,
   saveBrandTemplatePerspectiveConfig,
-  getDouyinAuthUrl,
   getSelfMediaAccountsByBrand,
   getWechatMpAuthUrl,
   updateSelfMediaAccount,
@@ -1234,7 +1215,6 @@ const selfMediaAccountsLoading = ref(false)
 const selfMediaAccountSaving = ref(false)
 const selfMediaAccountVisible = ref(false)
 const wechatAuthorizing = ref(false)
-const douyinAuthorizing = ref(false)
 const selfMediaAccountPlatformOptions = ref<SelfMediaAccountPlatformOption[]>([])
 const offerings = ref<BrandOffering[]>([])
 const offeringsLoading = ref(false)
@@ -1449,9 +1429,6 @@ const environmentSelfMediaAccounts = computed(() =>
 const hasWechatSelfMediaAccount = computed(() =>
   selfMediaAccounts.value.some((item) => item.platform === 'wechat_mp' || item.platform === 'wechat'),
 )
-const hasDouyinSelfMediaAccount = computed(() =>
-  selfMediaAccounts.value.some((item) => item.platform === 'douyin'),
-)
 const eligibleSelfMediaPlatformOptions = computed(() =>
   selfMediaAccountPlatformOptions.value.filter((item) => item.eligible),
 )
@@ -1493,7 +1470,7 @@ const selfMediaAccountRequirement = computed(() => {
       description: '发布结果回查会拼接 app_id 进入百家号作品管理页。请从百家号个人中心 > 账号信息 > 百家号 ID 复制填写。',
     }
   }
-  if (['toutiao', 'zhihu', 'xiaohongshu'].includes(selfMediaAccountForm.platform)) {
+  if (['toutiao', 'zhihu', 'xiaohongshu', 'douyin'].includes(selfMediaAccountForm.platform)) {
     return {
       title: '建议填写平台账号标识',
       description: '平台账号 ID 或账号主页标识可用于环境登录校验和发布结果诊断；没有明确 ID 时可先填写账号名称。',
@@ -1686,7 +1663,7 @@ function selfMediaPlatformLabel(value?: string | null) {
 }
 
 function isOfficialApiSelfMediaPlatform(value?: string | null) {
-  return value === 'wechat_mp' || value === 'wechat' || value === 'douyin'
+  return value === 'wechat_mp' || value === 'wechat'
 }
 
 function officialAccountStatusLabel(account: SelfMediaAccount) {
@@ -2587,20 +2564,6 @@ async function authorizeWechatMp() {
   }
 }
 
-async function authorizeDouyin() {
-  if (!brand.value?.id) {
-    ElMessage.warning('请先保存客户信息后再授权抖音图文')
-    return
-  }
-  douyinAuthorizing.value = true
-  try {
-    const { data } = await getDouyinAuthUrl({ brandId: brand.value.id })
-    window.location.href = data.data.authUrl
-  } finally {
-    douyinAuthorizing.value = false
-  }
-}
-
 async function loadBrowserEnvironmentAccounts(accounts: SemiAutoSelfMediaAccount[]) {
   const targets = accounts.filter((item) => isSemiAutoPlatform(item.platform) && !isOfficialApiSelfMediaPlatform(item.platform))
   if (!targets.length) {
@@ -2758,7 +2721,11 @@ function isSemiAutoPlatform(platform?: string | null): platform is SemiAutoPlatf
   if (selfMediaAccountPlatformOptions.value.some((item) => item.platform === normalized && (item.eligible || item.scheduleReady))) {
     return true
   }
-  return normalized === 'toutiao' || normalized === 'baijiahao' || normalized === 'zhihu' || normalized === 'xiaohongshu'
+  return normalized === 'toutiao'
+    || normalized === 'baijiahao'
+    || normalized === 'zhihu'
+    || normalized === 'xiaohongshu'
+    || normalized === 'douyin'
 }
 
 async function submitSelfMediaAccount() {

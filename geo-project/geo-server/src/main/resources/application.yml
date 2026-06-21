@@ -200,6 +200,34 @@ semi-auto:
           - blockquote
           - a
           - img
+      douyin:
+        publish-url: ${SEMI_AUTO_DOUYIN_PUBLISH_URL:https://creator.douyin.com/creator-micro/content/upload}
+        cookie-domains:
+          - ".douyin.com"
+          - ".bytedance.com"
+          - ".snssdk.com"
+        required-cookie-names:
+          - sessionid
+          - sid_guard
+        editor-selectors:
+          title: "input[placeholder*='文章标题'], textarea[placeholder*='文章标题'], input[placeholder*='标题'], textarea[placeholder*='标题']"
+          content: "[contenteditable='true'], textarea[placeholder*='正文'], textarea[placeholder*='内容']"
+          cover: "input[type='file']"
+        allowed-html-tags:
+          - p
+          - br
+          - strong
+          - em
+          - u
+          - h1
+          - h2
+          - h3
+          - ul
+          - ol
+          - li
+          - blockquote
+          - a
+          - img
 
 geo:
   storage:
