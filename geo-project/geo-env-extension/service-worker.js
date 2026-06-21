@@ -1,9 +1,9 @@
-importScripts('fill-result.js', 'platform-baijiahao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
+importScripts('fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
 const EXTENSION_VERSION = '0.1.0'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
-const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 'baijiahao'])
+const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 'baijiahao', 'douyin'])
 const autoLoginReportAtByKey = new Map()
 const bindIntentInFlight = new Set()
 const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
@@ -1655,6 +1655,9 @@ function isAutoPollReadyUrl(urlValue) {
     if (platform === 'baijiahao') {
       return url.hostname === 'baijiahao.baidu.com' && url.pathname.includes('/builder/rc/edit')
     }
+    if (platform === 'douyin') {
+      return url.hostname === 'creator.douyin.com' && url.pathname.includes('/creator-micro/content/upload')
+    }
     return false
   } catch {
     return false
@@ -1680,6 +1683,10 @@ function isAllowedLoginReportUrl(platform, urlValue) {
       return url.hostname === 'baijiahao.baidu.com'
         && !url.pathname.includes('/builder/rc/edit')
     }
+    if (normalizedPlatform === 'douyin') {
+      return url.hostname === 'creator.douyin.com'
+        && !url.pathname.includes('/creator-micro/content/upload')
+    }
     return false
   } catch {
     return false
@@ -1702,6 +1709,7 @@ function inferPlatformFromUrl(urlValue) {
     if (url.hostname === 'www.zhihu.com' || url.hostname === 'zhihu.com' || url.hostname === 'zhuanlan.zhihu.com') return 'zhihu'
     if (url.hostname === 'creator.xiaohongshu.com' || url.hostname === 'www.xiaohongshu.com') return 'xiaohongshu'
     if (url.hostname === 'baijiahao.baidu.com') return 'baijiahao'
+    if (url.hostname === 'creator.douyin.com') return 'douyin'
     return ''
   } catch {
     return ''
@@ -1715,6 +1723,7 @@ function platformReportPageHint(platform) {
     zhihu: '知乎创作中心(www.zhihu.com/creator/manage/creation/article)',
     xiaohongshu: '小红书创作服务平台(creator.xiaohongshu.com)',
     baijiahao: '百家号后台页(baijiahao.baidu.com)',
+    douyin: '抖音创作者中心(creator.douyin.com)',
   }
   return hints[normalizedPlatform] || `${platform || '对应平台'}后台页`
 }
@@ -1726,6 +1735,7 @@ function platformDisplayName(platform) {
     zhihu: '知乎',
     xiaohongshu: '小红书',
     baijiahao: '百家号',
+    douyin: '抖音',
   }
   return names[normalizedPlatform] || '平台'
 }
@@ -1736,6 +1746,7 @@ function defaultLoginReportUrl(platform) {
   if (normalizedPlatform === 'zhihu') return globalThis.__GEO_ZHIHU_PLATFORM__?.CREATOR_CENTER_URL || 'https://www.zhihu.com/creator/manage/creation/article'
   if (normalizedPlatform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/'
   if (normalizedPlatform === 'baijiahao') return 'https://baijiahao.baidu.com/'
+  if (normalizedPlatform === 'douyin') return 'https://creator.douyin.com/creator-micro/content/manage'
   return null
 }
 
@@ -1746,6 +1757,7 @@ function isAllowedPlatformHost(platform, host) {
     zhihu: ['zhuanlan.zhihu.com', 'www.zhihu.com', 'zhihu.com'],
     xiaohongshu: ['creator.xiaohongshu.com', 'www.xiaohongshu.com'],
     baijiahao: ['baijiahao.baidu.com'],
+    douyin: ['creator.douyin.com'],
   }
   const hosts = allowed[normalizedPlatform] || []
   return hosts.includes(host)
@@ -1764,6 +1776,8 @@ function normalizePlatform(value) {
     'xhs': 'xiaohongshu',
     '百家号': 'baijiahao',
     'baijiahao': 'baijiahao',
+    '抖音': 'douyin',
+    'douyin': 'douyin',
   }
   return aliases[text] || text
 }

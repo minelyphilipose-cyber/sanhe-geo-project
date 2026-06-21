@@ -47,13 +47,23 @@ class SelfMediaPlatformCapabilityContractTest {
     }
 
     @Test
-    void officialApiPlatformsUseBackendDelayedContractUntilExecutorsAreImplemented() {
+    void douyinSupportsAdspowerNativeScheduleAndCover() {
         SelfMediaPlatformCapabilityContract douyin = new DouyinPlatformScheduleAdapter().capabilityContract();
+
+        assertTrue(douyin.supportsPlatformSchedule());
+        assertTrue(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION.equals(douyin.publishChannel()));
+        assertTrue(douyin.requiresCoverUpload());
+        assertTrue(douyin.supportsPublishCheck());
+        assertTrue(douyin.scheduleRules().minRemainingMinutes() >= 120);
+        assertTrue(douyin.scheduleRules().fillLeadMinutes() >= douyin.scheduleRules().minRemainingMinutes());
+        assertTrue(douyin.scheduleRules().maxRemainingMinutes() >= 14 * 24 * 60);
+    }
+
+    @Test
+    void wechatOfficialApiUsesBackendDelayedContract() {
         SelfMediaPlatformCapabilityContract wechat = new WechatMpPlatformScheduleAdapter().capabilityContract();
 
-        assertTrue(douyin.supportsBackendDelayedPublish());
         assertTrue(wechat.supportsBackendDelayedPublish());
-        assertFalse(douyin.requiresCoverUpload());
         assertFalse(wechat.requiresCoverUpload());
     }
 }

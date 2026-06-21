@@ -20,7 +20,6 @@ import {
   distributeContentArticleToSelfMediaAccount,
   getArticleDistribution,
   getContentArticleDetail,
-  getDouyinAuthUrl,
   getDouyinCapability,
   getSelfMediaAccountsByBrand,
   getWechatMpAuthUrl,
@@ -45,8 +44,8 @@ import {
 } from '@/constants/selfMediaPlatforms'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'baijiahao' | 'toutiao' | 'zhihu' | 'xiaohongshu' | 'netease' | 'sohu'
-type SemiAutoPlatform = 'toutiao' | 'baijiahao' | 'zhihu' | 'xiaohongshu'
-type PlatformQuickSchedulePlatform = SemiAutoPlatform | 'douyin' | 'wechat_mp'
+type SemiAutoPlatform = 'toutiao' | 'baijiahao' | 'zhihu' | 'xiaohongshu' | 'douyin'
+type PlatformQuickSchedulePlatform = SemiAutoPlatform | 'wechat_mp'
 
 type UseSelfMediaDistributionOptions = {
   rows: Ref<ArticleDraft[]>
@@ -161,22 +160,18 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     return wechatActive.value ? 'success' : 'info'
   })
   const douyinActive = computed(() => douyinAccounts.value.some((account) => account.status === 'active'))
-  const douyinLiveVerificationBlocked = computed(() => !!douyinCapability.value?.liveVerificationBlocked)
-  const douyinDistributionAvailable = computed(() =>
-    !!douyinCapability.value?.enabled && !douyinLiveVerificationBlocked.value,
-  )
+  const douyinLiveVerificationBlocked = computed(() => false)
+  const douyinDistributionAvailable = computed(() => true)
   const douyinStatusLabel = computed(() => {
-    if (!douyinCapability.value?.enabled) return '未开启'
-    if (douyinLiveVerificationBlocked.value) return '待联调'
-    if (douyinActive.value) return '已登录'
-    return '未登录'
+    if (!douyinAccounts.value.length) return '未配置'
+    return douyinActive.value ? '可打开环境' : '不可用'
   })
   const douyinStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
-    if (!douyinCapability.value?.enabled || douyinLiveVerificationBlocked.value) return 'warning'
-    return douyinActive.value ? 'success' : 'info'
+    if (!douyinAccounts.value.length) return 'info'
+    return douyinActive.value ? 'success' : 'warning'
   })
   const douyinSubmitButtonText = computed(() =>
-    douyinLiveVerificationBlocked.value ? '抖音图文待联调' : '发布抖音图文',
+    '发布抖音图文',
   )
   const currentPlatformAccounts = computed(() => {
     switch (selectedMediaPlatform.value) {
@@ -432,34 +427,11 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   async function handleDouyinPlatformClick() {
-    selectedMediaPlatform.value = 'douyin'
-    selectedSelfMediaAccountId.value = null
-    selectedCoverMaterialId.value = null
-    if (!douyinCapability.value?.enabled) {
-      ElMessage.info(douyinCapability.value?.disabledReason || '抖音图文暂未开启')
-      return
-    }
-    if (douyinLiveVerificationBlocked.value) {
-      ElMessage.info(douyinCapability.value?.description || '当前域名备案及开放平台审核未完成，暂不可真实联调抖音图文')
-      return
-    }
-    if (!douyinActive.value) {
-      if (!mediaDistributeBrandId.value) {
-        ElMessage.error('当前文章未绑定品牌，无法授权抖音')
-        return
-      }
-      const { data } = await getDouyinAuthUrl({
-        brandId: mediaDistributeBrandId.value,
-        redirectArticleId: mediaDistributeArticleId.value || undefined,
-      })
-      window.location.href = data.data.authUrl
-      return
-    }
-    await submitPlatformQuickSchedule('douyin')
+    await handleSemiAutoPlatformClick('douyin')
   }
 
   function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatform {
-    return platform === 'toutiao' || platform === 'baijiahao' || platform === 'zhihu' || platform === 'xiaohongshu'
+    return platform === 'toutiao' || platform === 'baijiahao' || platform === 'zhihu' || platform === 'xiaohongshu' || platform === 'douyin'
   }
 
   function distributionQuotaPeriodLabel(value?: string | null) {
@@ -892,6 +864,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     if (platform === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1'
     if (platform === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
     if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish'
+    if (platform === 'douyin') return 'https://creator.douyin.com/creator-micro/content/upload'
     return undefined
   }
 
@@ -900,6 +873,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     if (platform === 'baijiahao') return 'https://baijiahao.baidu.com/'
     if (platform === 'zhihu') return 'https://www.zhihu.com/'
     if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/'
+    if (platform === 'douyin') return 'https://creator.douyin.com/creator-micro/content/manage'
     return defaultSemiAutoPublishUrl(platform)
   }
 

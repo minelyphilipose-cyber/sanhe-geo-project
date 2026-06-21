@@ -47,15 +47,28 @@ public class ArticleCoverSelectionService {
         if (brandId == null) {
             return null;
         }
-        List<BrandMaterial> coverFolderImages = coverFolderImages(brandId);
-        if (!coverFolderImages.isEmpty()) {
-            return publicUrlService.buildPublicStreamUrl(randomOne(coverFolderImages));
-        }
-        List<BrandMaterial> allImages = brandImages(brandId, null);
-        if (allImages.isEmpty()) {
+        return selectRandomCoverUrl(brandId, null);
+    }
+
+    public String selectRandomCoverUrlExcluding(Long brandId, String excludedUrl) {
+        if (brandId == null) {
             return null;
         }
-        return publicUrlService.buildPublicStreamUrl(randomOne(allImages));
+        return selectRandomCoverUrl(brandId, normalizeUrl(excludedUrl));
+    }
+
+    private String selectRandomCoverUrl(Long brandId, String excludedUrl) {
+        List<BrandMaterial> coverFolderImages = coverFolderImages(brandId);
+        List<BrandMaterial> candidates = excludeUrl(coverFolderImages, excludedUrl);
+        if (!candidates.isEmpty()) {
+            return publicUrlService.buildPublicStreamUrl(randomOne(candidates));
+        }
+        List<BrandMaterial> allImages = brandImages(brandId, null);
+        candidates = excludeUrl(allImages, excludedUrl);
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        return publicUrlService.buildPublicStreamUrl(randomOne(candidates));
     }
 
     private List<BrandMaterial> coverFolderImages(Long brandId) {
@@ -96,7 +109,20 @@ public class ArticleCoverSelectionService {
         return shuffled.get(0);
     }
 
+    private List<BrandMaterial> excludeUrl(List<BrandMaterial> materials, String excludedUrl) {
+        if (!StringUtils.hasText(excludedUrl)) {
+            return materials;
+        }
+        return materials.stream()
+                .filter(material -> !normalizeUrl(publicUrlService.buildPublicStreamUrl(material)).equals(excludedUrl))
+                .toList();
+    }
+
     private String normalizeType(String fileType) {
         return StringUtils.hasText(fileType) ? fileType.trim().toLowerCase(Locale.ROOT) : "";
+    }
+
+    private String normalizeUrl(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "";
     }
 }

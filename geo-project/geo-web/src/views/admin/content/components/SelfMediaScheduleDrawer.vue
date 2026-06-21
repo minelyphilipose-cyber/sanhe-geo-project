@@ -9,6 +9,7 @@
         <el-option label="百家号" value="baijiahao" />
         <el-option label="知乎" value="zhihu" />
         <el-option label="小红书" value="xiaohongshu" />
+        <el-option label="抖音图文" value="douyin" />
       </el-select>
       <el-select v-model="query.status" class="schedule-filter" clearable placeholder="状态">
         <el-option v-for="item in scheduleStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -607,7 +608,7 @@ function isBackendDelayedPlatform(platform?: string | null) {
 }
 
 function isOfficialApiPlatform(platform?: string | null) {
-  return platform === 'wechat_mp' || platform === 'wechat' || platform === 'douyin'
+  return platform === 'wechat_mp' || platform === 'wechat'
 }
 
 function platformTimeLine(row: SelfMediaPublishSchedule) {
@@ -1097,7 +1098,7 @@ function recommendationText(row: SelfMediaPublishSchedule) {
     if (row.status === 'manual_required') return '按异常信息处理页面或配置问题；处理后重新创建排期。'
   }
   if (row.status === 'publish_unknown') return '等待自动复查；若长时间未变化，可点击“重新校验”或人工确认发布。'
-  if (row.status === 'publish_failed') return '检查本地助手、AdsPower 浏览器和头条作品管理页；修复后点击“重新校验”。'
+  if (row.status === 'publish_failed') return `检查本地助手、AdsPower 浏览器和${platformLabel(row.platform)}作品管理页；修复后点击“重新校验”。`
   if (row.status === 'manual_required') return '按异常信息处理配置或页面问题；处理后可点击“重新校验”或重新创建排期。'
   if (row.status === 'checking_publish_result') return '本地助手正在校验作品管理页；若锁定超时仍无变化，可重新校验。'
   if (row.status === 'scheduled') return '等待平台发布时间，到点后本地助手会自动校验发布结果。'

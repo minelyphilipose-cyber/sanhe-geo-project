@@ -195,6 +195,7 @@ function resolvePublishOptionsAdapter(platform) {
   if (normalized === 'zhihu') return ZHIHU_PUBLISH_OPTIONS_ADAPTER
   if (normalized === 'xiaohongshu') return XIAOHONGSHU_PUBLISH_OPTIONS_ADAPTER
   if (normalized === 'baijiahao') return BAIJIAHAO_PUBLISH_OPTIONS_ADAPTER
+  if (normalized === 'douyin') return DOUYIN_PUBLISH_OPTIONS_ADAPTER
   if (normalized === 'toutiao') return TOUTIAO_PUBLISH_OPTIONS_ADAPTER
   return null
 }
@@ -239,6 +240,24 @@ var BAIJIAHAO_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_BAIJIAHAO_PLATFORM__?.c
   platform: 'baijiahao',
   fillPublishOptions: async () => {
     throw new Error('BAIJIAHAO_ADAPTER_NOT_LOADED：百家号平台适配器未加载，请重新加载扩展')
+  },
+}
+
+var DOUYIN_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_DOUYIN_PLATFORM__?.createPublishOptionsAdapter?.({
+  waitForCondition,
+  uploadCoverImageFromLocalHelper,
+  delay,
+  clickTrustedActionOnce,
+  requestTrustedClickAt,
+  findVisibleTextElement,
+  nearestLargeContainer,
+  normalizeText,
+  isVisibleElement,
+  collectVisibleActionElements,
+}) || {
+  platform: 'douyin',
+  fillPublishOptions: async () => {
+    throw new Error('DOUYIN_ADAPTER_NOT_LOADED：抖音平台适配器未加载，请重新加载扩展')
   },
 }
 
@@ -352,6 +371,8 @@ function normalizePlatform(value) {
     'xhs': 'xiaohongshu',
     '百家号': 'baijiahao',
     'baijiahao': 'baijiahao',
+    '抖音': 'douyin',
+    'douyin': 'douyin',
   }
   return aliases[text] || text
 }
@@ -2220,7 +2241,7 @@ async function uploadCoverImageFromLocalHelper(imageUrl, platform, platformName)
 }
 
 function supportsLocalHelperUploadPlatform(platform) {
-  return ['toutiao', 'zhihu', 'baijiahao'].includes(normalizePlatform(platform))
+  return ['toutiao', 'zhihu', 'baijiahao', 'douyin'].includes(normalizePlatform(platform))
 }
 
 function platformDisplayName(platform) {
@@ -2228,6 +2249,7 @@ function platformDisplayName(platform) {
   if (normalized === 'zhihu') return '知乎'
   if (normalized === 'toutiao') return '头条'
   if (normalized === 'baijiahao') return '百家号'
+  if (normalized === 'douyin') return '抖音'
   return normalized || '平台'
 }
 
@@ -2722,6 +2744,9 @@ function defaultTitleSelectors(platform) {
   if (platform === 'baijiahao') {
     return baijiahaoEditorSelectors().title.concat(common)
   }
+  if (platform === 'douyin') {
+    return douyinEditorSelectors().title.concat(common)
+  }
   return [
     '.byte-editor-title textarea',
     '.byte-editor-title input',
@@ -2752,6 +2777,9 @@ function defaultContentSelectors(platform) {
   if (platform === 'baijiahao') {
     return baijiahaoEditorSelectors().content.concat(common)
   }
+  if (platform === 'douyin') {
+    return douyinEditorSelectors().content.concat(common)
+  }
   if (platform === 'toutiao') {
     return [
       '.ProseMirror[contenteditable="true"]',
@@ -2778,6 +2806,9 @@ function defaultTagSelectors(platform) {
   if (platform === 'baijiahao') {
     return baijiahaoEditorSelectors().tags
   }
+  if (platform === 'douyin') {
+    return douyinEditorSelectors().tags
+  }
   return [
     '[data-geo-fill="tags"]',
     'input[placeholder*="标签"]',
@@ -2797,6 +2828,14 @@ function baijiahaoEditorSelectors() {
   const selectors = globalThis.__GEO_BAIJIAHAO_PLATFORM__?.editorSelectors?.()
   if (!selectors) {
     throw new Error('BAIJIAHAO_ADAPTER_NOT_LOADED：百家号平台选择器适配器未加载，请重新加载扩展')
+  }
+  return selectors
+}
+
+function douyinEditorSelectors() {
+  const selectors = globalThis.__GEO_DOUYIN_PLATFORM__?.editorSelectors?.()
+  if (!selectors) {
+    throw new Error('DOUYIN_ADAPTER_NOT_LOADED：抖音平台选择器适配器未加载，请重新加载扩展')
   }
   return selectors
 }
@@ -2839,6 +2878,7 @@ function inferPlatformFromLocation() {
   if (location.hostname.endsWith('zhihu.com')) return 'zhihu'
   if (location.hostname.endsWith('xiaohongshu.com')) return 'xiaohongshu'
   if (location.hostname === 'baijiahao.baidu.com') return 'baijiahao'
+  if (location.hostname === 'creator.douyin.com') return 'douyin'
   return null
 }
 
@@ -2847,12 +2887,67 @@ function readPlatformIdentity(platform) {
   if (platform === 'zhihu') return readZhihuIdentity()
   if (platform === 'xiaohongshu') return readXiaohongshuIdentity()
   if (platform === 'baijiahao') return readBaijiahaoIdentity()
+  if (platform === 'douyin') return readDouyinIdentity()
   return {
     implemented: false,
     accountIds: [],
     accountNames: [],
     diagnostics: `暂未实现 ${platform || 'unknown'} 账号读取`,
   }
+}
+
+function readDouyinIdentity() {
+  const accountNames = new Set()
+  collectDouyinAccountNamesFromDom(accountNames)
+  collectDouyinAccountNamesFromText(collectStorageAndScriptIdentityText(), accountNames)
+  return {
+    implemented: true,
+    accountIds: [],
+    accountNames: Array.from(accountNames),
+    diagnostics: `href=${location.href}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
+  }
+}
+
+function collectDouyinAccountNamesFromDom(accountNames) {
+  const selectors = [
+    '[class*="avatar"] + *',
+    '[class*="Avatar"] + *',
+    '[class*="user"] [class*="name"]',
+    '[class*="User"] [class*="Name"]',
+    '[class*="account"] [class*="name"]',
+    '[class*="Account"] [class*="Name"]',
+  ]
+  for (const selector of selectors) {
+    for (const el of Array.from(document.querySelectorAll(selector))) {
+      if (!isVisibleElement(el) && !hasVisibleAncestor(el)) continue
+      const text = normalizeAccountName(el.textContent || el.getAttribute('aria-label') || '')
+      if (isLikelyDouyinAccountName(text)) accountNames.add(text)
+    }
+  }
+}
+
+function collectDouyinAccountNamesFromText(text, accountNames) {
+  const patterns = [
+    /"nickname"\s*:\s*"([^"]{2,80})"/g,
+    /"nickName"\s*:\s*"([^"]{2,80})"/g,
+    /"userName"\s*:\s*"([^"]{2,80})"/g,
+    /"screenName"\s*:\s*"([^"]{2,80})"/g,
+    /"accountName"\s*:\s*"([^"]{2,80})"/g,
+  ]
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const value = normalizeAccountName(match[1])
+      if (isLikelyDouyinAccountName(value)) accountNames.add(value)
+    }
+  }
+}
+
+function isLikelyDouyinAccountName(value) {
+  const text = normalizeAccountName(value)
+  if (text.length < 2 || text.length > 40) return false
+  if (/^(首页|发布|发布视频|发布图文|发布文章|作品管理|合集管理|共创中心|原创保护中心|互动管理|变现中心|创作中心|通知|网址|抖音|登录|更新|设置|删除作品|作品置顶|公开|定时发布|立即发布|暂存离开)$/.test(text)) return false
+  if (/^https?:\/\//i.test(text)) return false
+  return /[\u4e00-\u9fa5A-Za-z0-9_-]/.test(text) && !/[，。！？、]/.test(text)
 }
 
 function readBaijiahaoIdentity() {
@@ -3165,6 +3260,7 @@ function normalizeAccountName(value) {
 
 function normalizeTitleForPlatform(title, fillProfile = null) {
   const text = String(title || '').trim()
+  if (normalizePlatform(fillProfile?.platform) === 'douyin') return text.slice(0, 30)
   if (normalizePlatform(fillProfile?.platform) !== 'toutiao') return text
   return normalizeToutiaoTitle(text)
 }
@@ -3512,7 +3608,7 @@ async function ensureEditorVisible(fillProfile) {
 
 async function waitUntilEditorReady(fillProfile, timeoutMs) {
   const deadline = Date.now() + timeoutMs
-  let nextOpenAttemptAt = fillProfile.platform === 'xiaohongshu' ? 0 : Number.POSITIVE_INFINITY
+  let nextOpenAttemptAt = ['xiaohongshu', 'douyin'].includes(fillProfile.platform) ? 0 : Number.POSITIVE_INFINITY
   while (Date.now() < deadline) {
     const titleElement = findTitleElement(fillProfile)
     if (titleElement && findContentElement(titleElement, fillProfile)) return
@@ -3543,6 +3639,9 @@ function detectLoginState(fillProfile) {
   }
   if (fillProfile.platform === 'xiaohongshu' && xiaohongshuEntryNavigator().isCreatorShellVisible()) {
     return { requiresLogin: false, reason: 'xiaohongshu_creator_shell' }
+  }
+  if (fillProfile.platform === 'douyin' && location.hostname === 'creator.douyin.com') {
+    return { requiresLogin: false, reason: 'douyin_creator_shell' }
   }
   if (findTitleElement(fillProfile) || findContentElement(null, fillProfile)) {
     return { requiresLogin: false, reason: 'editor_ready' }
@@ -3577,10 +3676,28 @@ async function maybeOpenPlatformEditor(fillProfile) {
     if (location.hostname.endsWith('xiaohongshu.com') && location.pathname.includes('/publish/publish')) return
   }
 
+  if (fillProfile.platform === 'douyin') {
+    if (location.hostname !== 'creator.douyin.com' || !location.pathname.includes('/creator-micro/content/upload')) {
+      showStatus('抖音当前不在发布入口，切换到创作者中心发布页', 'info')
+      location.href = 'https://creator.douyin.com/creator-micro/content/upload'
+      await delay(2200)
+      return
+    }
+    await globalThis.__GEO_DOUYIN_PLATFORM__?.maybeSelectArticleEditor?.({
+      waitForCondition,
+      clickTrustedActionOnce,
+      normalizeText,
+      findVisibleTextElement,
+      isVisibleElement,
+    })
+    if (findTitleElement(fillProfile) && findContentElement(null, fillProfile)) return
+  }
+
   const keywords = {
     toutiao: ['发布文章', '写文章', '发文章', '新建文章', '创作文章', '图文', '发头条'],
     zhihu: ['写文章', '发布文章', '创作', '开始写作'],
     xiaohongshu: ['发布笔记', '上传图文', '发布图文', '图文发布', '创建笔记'],
+    douyin: ['发布文章', '我要发文'],
   }[fillProfile.platform] || []
   const clickable = findClickableByText(keywords)
   if (clickable) {
