@@ -46,6 +46,7 @@ import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -87,6 +88,8 @@ public class BatchArticleGenerationService {
     private static final String TEMPLATE_SOURCE_WEIGHTED = "weighted";
     private static final String TEMPLATE_SOURCE_CUSTOM = "custom";
     private static final String TEMPLATE_SOURCE_FALLBACK_DEFAULT_PROMPT = "fallback_default_prompt";
+    private static final int DEFAULT_TASK_SUBMIT_LIMIT = 5;
+    private static final int DEFAULT_RECOVERY_RESUBMIT_LIMIT = 5;
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String SMART_TEMPLATE_MATCH_SYSTEM_PROMPT = """
             你是文章提示词模板匹配器。你的任务是根据文章主题、渠道和可用模板摘要，选择最适合生成该主题文章的模板。
@@ -149,6 +152,12 @@ public class BatchArticleGenerationService {
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final Executor articleAiDraftExecutor;
+
+    @Value("${article.ai-draft.recovery.resubmit-limit:5}")
+    private int recoveryResubmitLimit = DEFAULT_RECOVERY_RESUBMIT_LIMIT;
+
+    @Value("${article.ai-draft.dispatch.task-submit-limit:5}")
+    private int taskSubmitLimit = DEFAULT_TASK_SUBMIT_LIMIT;
 
     public BatchArticleGenerationService(ProjectMapper projectMapper,
                                          BrandMapper brandMapper,
@@ -355,7 +364,7 @@ public class BatchArticleGenerationService {
             return batch.getId();
         }));
 
-        articleAiDraftExecutor.execute(() -> runBatch(batchId));
+        submitBatchRunner(batchId);
         boolean allocationChanged = notices.stream().anyMatch(notice -> "auto_allocation_changed".equals(notice.type()));
         boolean customSkipped = notices.stream().anyMatch(notice -> "custom_template_skipped".equals(notice.type()));
         return new BatchArticleGenerateResponse(batchId, totalCount, STATUS_PENDING, allocationChanged, customSkipped, notices);
@@ -482,7 +491,7 @@ public class BatchArticleGenerationService {
             taskMapper.updateById(task);
         }
         refreshBatchProgress(batchId, false);
-        articleAiDraftExecutor.execute(() -> runBatchTasks(batchId, failedTasks.stream().map(BatchArticleGenerationTask::getId).toList()));
+        submitBatchTaskRunner(batchId, failedTasks.stream().map(BatchArticleGenerationTask::getId).toList());
         return detail(batchId);
     }
 
@@ -544,37 +553,135 @@ public class BatchArticleGenerationService {
         submitBatchTasks(batch, tasks);
     }
 
+    private boolean submitBatchRunner(Long batchId) {
+        try {
+            articleAiDraftExecutor.execute(() -> runBatch(batchId));
+            return true;
+        } catch (RuntimeException ex) {
+            log.warn("batch article generation runner deferred batchId={} error={}", batchId, ex.getMessage());
+            return false;
+        }
+    }
+
+    private boolean submitBatchTaskRunner(Long batchId, List<Long> taskIds) {
+        try {
+            articleAiDraftExecutor.execute(() -> runBatchTasks(batchId, taskIds));
+            return true;
+        } catch (RuntimeException ex) {
+            log.warn("batch article generation task runner deferred batchId={} taskCount={} error={}",
+                    batchId, taskIds == null ? 0 : taskIds.size(), ex.getMessage());
+            return false;
+        }
+    }
+
     private void submitBatchTasks(BatchArticleGenerationBatch batch, List<BatchArticleGenerationTask> tasks) {
         if (tasks == null || tasks.isEmpty()) {
             completeBatch(batch.getId());
             return;
         }
+        int submitted = 0;
+        int submitLimit = taskSubmitLimit();
         for (BatchArticleGenerationTask task : tasks) {
-            submitBatchTask(batch, task);
+            if (submitted >= submitLimit) {
+                break;
+            }
+            if (!STATUS_PENDING.equals(task.getStatus())) {
+                continue;
+            }
+            if (!claimTaskForSubmission(batch, task)) {
+                continue;
+            }
+            if (!submitBatchTask(batch, task)) {
+                break;
+            }
+            submitted++;
+        }
+        long deferred = tasks.stream().filter(task -> STATUS_PENDING.equals(task.getStatus())).count();
+        if (deferred > 0) {
+            log.info("batch article generation deferred pending tasks batchId={} submitted={} deferred={}",
+                    batch.getId(), submitted, deferred);
+            refreshBatchProgress(batch.getId(), false);
+        }
+        if (submitted == 0 && deferred <= 0) {
+            completeBatch(batch.getId());
         }
     }
 
-    private void submitBatchTask(BatchArticleGenerationBatch batch, BatchArticleGenerationTask task) {
+    private boolean claimTaskForSubmission(BatchArticleGenerationBatch batch, BatchArticleGenerationTask task) {
+        if (batch == null || batch.getId() == null || task == null || task.getId() == null) {
+            return false;
+        }
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        int updated = taskMapper.claimPendingForRun(task.getId(), batch.getId(), now);
+        if (updated <= 0) {
+            log.debug("batch article generation task claim skipped batchId={} taskId={}", batch.getId(), task.getId());
+            return false;
+        }
+        task.setStatus(STATUS_RUNNING);
+        task.setStartedAt(now);
+        task.setFinishedAt(null);
+        task.setErrorMessage(null);
+        refreshBatchProgress(batch.getId(), false);
+        return true;
+    }
+
+    private boolean submitBatchTask(BatchArticleGenerationBatch batch, BatchArticleGenerationTask task) {
         try {
             articleAiDraftExecutor.execute(() -> {
                 try {
-                    runTask(batch, task);
+                    if (isTaskClaimStillOwned(task)) {
+                        runTask(batch, task);
+                    }
                 } finally {
                     completeBatch(task.getBatchId());
                 }
             });
+            return true;
         } catch (RuntimeException ex) {
-            log.warn("batch article generation task rejected batchId={} taskId={} error={}",
+            log.warn("batch article generation task deferred batchId={} taskId={} error={}",
                     task.getBatchId(), task.getId(), ex.getMessage());
-            markTaskFailed(task, ex);
+            releaseClaimedTask(task);
+            refreshBatchProgress(task.getBatchId(), false);
             completeBatch(task.getBatchId());
+            return false;
         }
+    }
+
+    private void releaseClaimedTask(BatchArticleGenerationTask task) {
+        if (task == null || task.getId() == null || task.getBatchId() == null) {
+            return;
+        }
+        taskMapper.releaseRunningClaim(task.getId(), task.getBatchId(), LocalDateTime.now().withNano(0));
+        task.setStatus(STATUS_PENDING);
+        task.setStartedAt(null);
+        task.setFinishedAt(null);
+        task.setErrorMessage(null);
+    }
+
+    private boolean isTaskClaimStillOwned(BatchArticleGenerationTask task) {
+        if (task == null || task.getId() == null || task.getBatchId() == null) {
+            return false;
+        }
+        BatchArticleGenerationTask current = taskMapper.selectById(task.getId());
+        boolean owned = current != null
+                && Objects.equals(current.getBatchId(), task.getBatchId())
+                && STATUS_RUNNING.equals(current.getStatus())
+                && Objects.equals(current.getStartedAt(), task.getStartedAt());
+        if (!owned) {
+            log.info("batch article generation task claim expired batchId={} taskId={}",
+                    task.getBatchId(), task.getId());
+        }
+        return owned;
     }
 
     private boolean recoverStalledBatch(BatchArticleGenerationBatch batch, LocalDateTime cutoff) {
         List<BatchArticleGenerationTask> tasks = selectBatchTasks(batch.getId());
         List<Long> resumableTaskIds = new ArrayList<>();
+        int resubmitLimit = recoveryResubmitLimit();
         for (BatchArticleGenerationTask task : tasks) {
+            if (resumableTaskIds.size() >= resubmitLimit) {
+                break;
+            }
             if (STATUS_PENDING.equals(task.getStatus())) {
                 resumableTaskIds.add(task.getId());
                 continue;
@@ -589,13 +696,15 @@ public class BatchArticleGenerationService {
             return false;
         }
         log.info("recover stalled batch article generation batchId={} taskCount={}", batch.getId(), resumableTaskIds.size());
-        try {
-            articleAiDraftExecutor.execute(() -> runBatchTasks(batch.getId(), resumableTaskIds));
-            return true;
-        } catch (RuntimeException ex) {
-            log.warn("recover stalled batch article generation rejected batchId={} error={}", batch.getId(), ex.getMessage());
-            return false;
-        }
+        return submitBatchTaskRunner(batch.getId(), resumableTaskIds);
+    }
+
+    private int recoveryResubmitLimit() {
+        return Math.max(1, recoveryResubmitLimit);
+    }
+
+    private int taskSubmitLimit() {
+        return Math.max(1, taskSubmitLimit);
     }
 
     private boolean isTaskStalled(BatchArticleGenerationTask task, LocalDateTime cutoff) {
@@ -991,6 +1100,10 @@ public class BatchArticleGenerationService {
     }
 
     private void markTaskRunning(BatchArticleGenerationTask task) {
+        if (STATUS_RUNNING.equals(task.getStatus())) {
+            refreshBatchProgress(task.getBatchId(), false);
+            return;
+        }
         task.setStatus(STATUS_RUNNING);
         task.setStartedAt(LocalDateTime.now());
         taskMapper.updateById(task);
