@@ -39,6 +39,14 @@
           </div>
           <div class="space-x-2">
             <el-button v-if="brand?.companyId" link @click="goCompanyDetail">查看客户</el-button>
+            <el-button
+              v-if="brand?.geoSiteDomain"
+              link
+              :loading="geoSiteTesting"
+              @click="testCurrentGeoSite"
+            >
+              测试 Agent 官网
+            </el-button>
             <el-button v-if="canCreateProject" type="primary" link @click="goCreateProject">基于该品牌建项目</el-button>
             <el-button v-if="canUpdateBrand" type="primary" link @click="openEdit">编辑</el-button>
             <el-button v-if="canDeleteBrand" type="danger" link @click="removeCurrentBrand">删除品牌</el-button>
@@ -842,22 +850,11 @@
           <el-form-item label="默认发布位置">
             <el-input v-model="brandForm.selfMediaPublishLocationName" maxlength="64" placeholder="用于头条等自媒体发布页添加位置" />
           </el-form-item>
-          <el-form-item label="Agent 官网">
-            <el-select
-              v-model="brandForm.geoSiteCode"
-              clearable
-              filterable
-              placeholder="选择 Agent 官网，自动带出站点标识"
-              style="width: 100%"
-              @change="handleAgentSiteChange"
-            >
-              <el-option
-                v-for="site in agentSiteOptions"
-                :key="site.siteCode || site.id"
-                :label="site.siteName"
-                :value="site.siteCode"
-              />
-            </el-select>
+          <el-form-item label="Agent 官网名称">
+            <el-input v-model="brandForm.geoSiteName" placeholder="如：品牌 Agent 官网" />
+          </el-form-item>
+          <el-form-item label="Agent 官网域名">
+            <el-input v-model="brandForm.geoSiteDomain" placeholder="如：www.example.com" />
           </el-form-item>
           <el-form-item label="行业资讯站">
             <el-select
@@ -1143,6 +1140,7 @@ import {
   getBrandDetail,
   getBrandOfferings,
   getThirdPartySubjectPool,
+  testBrandGeoSite,
   updateBrand,
   deleteBrand,
   getCompanyDetail,
@@ -1210,6 +1208,7 @@ type SemiAutoSelfMediaAccount = SelfMediaAccount & {
 
 const loading = ref(false)
 const saving = ref(false)
+const geoSiteTesting = ref(false)
 const editVisible = ref(false)
 const selfMediaAccountsLoading = ref(false)
 const selfMediaAccountSaving = ref(false)
@@ -1256,7 +1255,6 @@ const environmentBindingTargetAccount = ref<SemiAutoSelfMediaAccount | null>(nul
 const perspectiveConfigs = ref<BrandChannelTemplatePerspective[]>([])
 const templatePerspectives = ref<TemplatePerspective[]>([])
 const publishSites = ref<PublishSite[]>([])
-const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 const LOCAL_HELPER_BASE = 'http://127.0.0.1:17891'
 const EXTENSION_BIND_POLL_ATTEMPTS = 6
 const EXTENSION_BIND_POLL_INTERVAL_MS = 2_000
@@ -1297,7 +1295,8 @@ const brandForm = reactive({
   practitionerInfoPublic: '',
   medicalAdReviewNo: '',
   complianceNotesMedical: '',
-  geoSiteCode: '',
+  geoSiteName: '',
+  geoSiteDomain: '',
   geoSiteStatus: '',
   industrySiteName: '',
   industrySiteCode: '',
@@ -1566,10 +1565,6 @@ const isMedicalComplianceIndustry = computed(() =>
 const hasEnabledMedicalProject = computed(() =>
   offerings.value.some((item) => item.status === 'active' && item.medicalProjectEnabled),
 )
-const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
-  isValidGeoSiteCode(site.siteCode)
-  && (site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'),
-))
 const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
   site.integrationMethod !== 'brand_geo_site'
   && site.integrationMethod !== 'forum_playwright'
@@ -1607,7 +1602,8 @@ const brandContactInfoItems = computed(() => [
   { label: '对外公开地址', value: brand.value?.publicAddress || '-' },
   { label: '自媒体默认发布位置', value: brand.value?.selfMediaPublishLocationName || '-' },
   { label: '微信', value: brand.value?.wechat || '-' },
-  { label: 'Agent 官网', value: agentSiteLabel(brand.value?.geoSiteCode) },
+  { label: 'Agent 官网名称', value: brand.value?.geoSiteName || '-' },
+  { label: 'Agent 官网域名', value: brand.value?.geoSiteDomain || '-' },
   { label: '行业资讯站', value: brand.value?.industrySiteName || '-' },
 ])
 
@@ -2085,26 +2081,6 @@ function perspectiveLabel(code?: string | null) {
   return templatePerspectives.value.find((item) => item.code === code)?.name || code
 }
 
-function agentSiteLabel(code?: string | null) {
-  if (!code) return '-'
-  return agentSiteOptions.value.find((item) => item.siteCode === code)?.siteName || code
-}
-
-function normalizeGeoSiteCode(code?: string | null) {
-  const normalized = code?.trim().toLowerCase() || ''
-  return GEO_SITE_CODE_PATTERN.test(normalized) ? normalized : ''
-}
-
-function isValidGeoSiteCode(code?: string | null) {
-  return !!normalizeGeoSiteCode(code)
-}
-
-function handleAgentSiteChange(value: string) {
-  brandForm.geoSiteCode = normalizeGeoSiteCode(value)
-  const site = agentSiteOptions.value.find((item) => item.siteCode === brandForm.geoSiteCode)
-  brandForm.geoSiteStatus = site ? 'active' : ''
-}
-
 function handleIndustrySiteChange(value: string) {
   const site = industrySiteOptions.value.find((item) => item.siteCode === value)
   brandForm.industrySiteName = site?.siteName || ''
@@ -2152,7 +2128,8 @@ function fillForm(data: Brand) {
   brandForm.practitionerInfoPublic = data.practitionerInfoPublic || ''
   brandForm.medicalAdReviewNo = data.medicalAdReviewNo || ''
   brandForm.complianceNotesMedical = data.complianceNotesMedical || ''
-  brandForm.geoSiteCode = data.geoSiteCode || ''
+  brandForm.geoSiteName = data.geoSiteName || ''
+  brandForm.geoSiteDomain = data.geoSiteDomain || ''
   brandForm.geoSiteStatus = data.geoSiteStatus || ''
   brandForm.industrySiteName = data.industrySiteName || ''
   brandForm.industrySiteCode = data.industrySiteCode || ''
@@ -2825,6 +2802,24 @@ function openEdit() {
   editVisible.value = true
 }
 
+async function testCurrentGeoSite() {
+  if (!brand.value?.id) return
+  geoSiteTesting.value = true
+  try {
+    const { data } = await testBrandGeoSite(brand.value.id)
+    const result = data.data
+    const detail = result.statusCode ? `（HTTP ${result.statusCode}）` : ''
+    const endpoint = result.endpoint ? `：${result.endpoint}` : ''
+    if (result.passed) {
+      ElMessage.success(`${result.message}${detail}${endpoint}`)
+    } else {
+      ElMessage.warning(`${result.message}${detail}${endpoint}`)
+    }
+  } finally {
+    geoSiteTesting.value = false
+  }
+}
+
 async function openCoverableIndustryConfig() {
   openEdit()
   await nextTick()
@@ -2881,8 +2876,9 @@ async function submitBrand() {
       practitionerInfoPublic: isMedicalComplianceIndustry.value ? nullableText(brandForm.practitionerInfoPublic) : null,
       medicalAdReviewNo: isMedicalComplianceIndustry.value ? nullableText(brandForm.medicalAdReviewNo) : null,
       complianceNotesMedical: isMedicalComplianceIndustry.value ? nullableText(brandForm.complianceNotesMedical) : null,
-      geoSiteCode: normalizeGeoSiteCode(brandForm.geoSiteCode) || null,
-      geoSiteStatus: normalizeGeoSiteCode(brandForm.geoSiteCode) ? brandForm.geoSiteStatus || 'active' : null,
+      geoSiteName: nullableText(brandForm.geoSiteName),
+      geoSiteDomain: nullableText(brandForm.geoSiteDomain),
+      geoSiteStatus: nullableText(brandForm.geoSiteDomain) ? brandForm.geoSiteStatus || 'active' : null,
       industrySiteName: nullableText(brandForm.industrySiteName),
       industrySiteCode: nullableText(brandForm.industrySiteCode),
     })

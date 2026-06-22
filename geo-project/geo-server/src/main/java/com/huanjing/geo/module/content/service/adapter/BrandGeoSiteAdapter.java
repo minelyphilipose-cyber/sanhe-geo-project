@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -23,7 +24,7 @@ import java.util.Map;
 public class BrandGeoSiteAdapter implements SiteAdapter {
 
     public static final String PLATFORM = "brand_geo_site";
-    private static final String URL_TEMPLATE = "https://www.%s.com/%s/detail/%d";
+    private static final String ADMIN_CONTENT_PATH = "/api/v1/admin/content";
 
     private final ObjectMapper objectMapper;
     private final BrandGeoSiteProperties properties;
@@ -57,49 +58,56 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
     @Override
     public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext target) {
         TargetContext.BrandGeoSiteTarget geoTarget = requireTarget(target);
-        String mappedType = mapArticleType(article == null ? null : article.getArticleType());
+        String contentType = mapContentType(article);
+        String endpoint;
+        String domain;
+        try {
+            endpoint = buildEndpoint(geoTarget.domain());
+            domain = extractHost(endpoint);
+        } catch (Exception ex) {
+            return SubmitResult.failure(400, null, null,
+                    "Agent 官网域名配置无效：" + safeMessage(ex), FailureKind.CLIENT_ERROR, false);
+        }
         String requestPayload;
         try {
-            requestPayload = buildRequestPayload(geoTarget.siteCode(), mappedType, article, contentMarkdown);
+            requestPayload = buildRequestPayload(domain, contentType, article, contentMarkdown);
         } catch (Exception ex) {
             return SubmitResult.failure(500, null, null, safeMessage(ex), FailureKind.UNKNOWN, false);
         }
 
-        if (!StringUtils.hasText(properties.getEndpoint())) {
-            return SubmitResult.failure(500, requestPayload, null, "Agent 官网发布接口未配置",
-                    FailureKind.SERVER_ERROR, true);
-        }
-
         try {
-            log.info("brand_geo_site outbound request articleId={} siteCode={} endpoint={} payloadBytes={}",
+            log.info("brand_geo_site outbound request articleId={} siteName={} domain={} endpoint={} payloadBytes={}",
                     article == null ? null : article.getId(),
-                    geoTarget.siteCode(),
-                    properties.getEndpoint(),
+                    geoTarget.siteName(),
+                    domain,
+                    endpoint,
                     requestPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
             HttpClientUtil.HttpResult response = postJson(
-                    properties.getEndpoint(),
+                    endpoint,
                     jsonHeaders(),
                     requestPayload,
                     properties.getConnectTimeoutMs(),
                     properties.getReadTimeoutMs()
             );
-            log.info("brand_geo_site outbound response articleId={} siteCode={} endpoint={} statusCode={} responseBytes={}",
+            log.info("brand_geo_site outbound response articleId={} siteName={} domain={} endpoint={} statusCode={} responseBytes={}",
                     article == null ? null : article.getId(),
-                    geoTarget.siteCode(),
-                    properties.getEndpoint(),
+                    geoTarget.siteName(),
+                    domain,
+                    endpoint,
                     response.statusCode(),
                     response.body() == null ? 0 : response.body().getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
-            return toSubmitResult(response, requestPayload, mappedType, geoTarget.siteCode());
+            return toSubmitResult(response, requestPayload, endpoint, contentType);
         } catch (Exception ex) {
-            log.warn("brand_geo_site outbound exception articleId={} siteCode={} endpoint={} error={}",
+            log.warn("brand_geo_site outbound exception articleId={} siteName={} domain={} endpoint={} error={}",
                     article == null ? null : article.getId(),
-                    geoTarget.siteCode(),
-                    properties.getEndpoint(),
+                    geoTarget.siteName(),
+                    domain,
+                    endpoint,
                     safeMessage(ex),
                     ex);
             return SubmitResult.failure(500, requestPayload, null,
                     "Agent 官网发布请求失败：" + safeMessage(ex),
-                    FailureKind.SERVER_ERROR, true);
+                    FailureKind.NETWORK_ERROR, true);
         }
     }
 
@@ -118,32 +126,35 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
         return geoTarget;
     }
 
-    private String buildRequestPayload(String siteCode,
-                                       String mappedType,
+    private String buildRequestPayload(String domain,
+                                       String contentType,
                                        ArticleDraft article,
                                        String contentMarkdown) throws Exception {
         ObjectNode root = objectMapper.createObjectNode();
-        root.put("siteCode", siteCode);
-        root.put("articleType", mappedType);
-        root.put("title", article == null ? "" : nullToEmpty(article.getTitle()));
-        String contentHtml = markdownRenderer.render(contentMarkdown);
-        root.put("content", contentHtml);
-        root.put("contentMarkdown", nullToEmpty(contentMarkdown));
-        root.put("contentHtml", contentHtml);
+        root.put("domain", domain);
+        root.put("contentType", contentType);
+        root.put("contentMarkdown", ensureMarkdownTitle(article, contentMarkdown));
+        root.put("sort", 0);
         return objectMapper.writeValueAsString(root);
     }
 
     private SubmitResult toSubmitResult(HttpClientUtil.HttpResult response,
                                         String requestPayload,
-                                        String mappedType,
-                                        String siteCode) {
+                                        String endpoint,
+                                        String contentType) {
         int httpCode = response.statusCode();
         String body = response.body();
         if (httpCode == 429) {
-            return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网发布接口请求过于频繁", FailureKind.SERVER_ERROR, true);
+            return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网发布接口请求过于频繁", FailureKind.RATE_LIMIT, true);
         }
         if (httpCode == 401 || httpCode == 403) {
             return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网登录认证信息已过期，请更新", FailureKind.AUTH_EXPIRED, false);
+        }
+        if (httpCode == 404) {
+            return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网发布接口不存在，请检查域名", FailureKind.CLIENT_ERROR, false);
+        }
+        if (httpCode == 409 || containsDuplicateSignal(body)) {
+            return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网已存在相同文章，请检查标题或栏目", FailureKind.VALIDATION, false);
         }
         if (httpCode >= 400 && httpCode < 500) {
             return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网发布请求参数异常，状态码：" + httpCode, FailureKind.CLIENT_ERROR, false);
@@ -160,7 +171,7 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
         }
 
         int bizCode = root.path("code").asInt(-1);
-        if (bizCode != 200) {
+        if (bizCode != 0 && bizCode != 200) {
             String message = root.path("message").asText("业务处理失败");
             return SubmitResult.failure(httpCode, requestPayload, body, "body code " + bizCode + ": " + message,
                     classifyBusinessFailure(message), false);
@@ -173,18 +184,100 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
         }
 
         long platformId = idNode.asLong();
-        String publishedUrl = URL_TEMPLATE.formatted(siteCode, mappedType, platformId);
+        String publishedUrl = firstText(root.path("data"), "url", "publishedUrl", "articleUrl", "link", "permalink");
+        if (!StringUtils.hasText(publishedUrl)) {
+            publishedUrl = publicBaseUrl(endpoint);
+        }
         return SubmitResult.success(httpCode, requestPayload, body, publishedUrl, String.valueOf(platformId));
     }
 
     private Map<String, String> jsonHeaders() {
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Content-Type", "application/json");
+        headers.put("Accept", "application/json");
         return headers;
     }
 
-    private String mapArticleType(String localType) {
-        return "FAQ".equalsIgnoreCase(localType) ? "question" : "knowledge";
+    private String mapContentType(ArticleDraft article) {
+        String module = article == null ? null : article.getAgentSiteModule();
+        if ("product".equalsIgnoreCase(module)) {
+            return "PRODUCT";
+        }
+        if ("faq".equalsIgnoreCase(module)) {
+            return "FAQ";
+        }
+        String articleType = article == null ? null : article.getArticleType();
+        if ("FAQ".equalsIgnoreCase(articleType)) {
+            return "FAQ";
+        }
+        if ("scenario_content".equalsIgnoreCase(articleType)) {
+            return "PRODUCT";
+        }
+        return "KNOWLEDGE";
+    }
+
+    private String ensureMarkdownTitle(ArticleDraft article, String contentMarkdown) {
+        String markdown = nullToEmpty(contentMarkdown).trim();
+        if (markdown.matches("(?s)^#\\s+.+")) {
+            return markdown;
+        }
+        String title = article == null ? null : article.getTitle();
+        if (!StringUtils.hasText(title)) {
+            return markdown;
+        }
+        return "# " + title.trim() + (markdown.isEmpty() ? "" : "\n\n" + markdown);
+    }
+
+    private String buildEndpoint(String domain) {
+        String base = normalizeBaseUrl(domain);
+        return base + ADMIN_CONTENT_PATH;
+    }
+
+    private String normalizeBaseUrl(String domain) {
+        if (!StringUtils.hasText(domain)) {
+            throw new IllegalArgumentException("domain is required");
+        }
+        String value = domain.trim();
+        if (!value.contains("://")) {
+            value = "https://" + value;
+        }
+        URI uri = URI.create(value);
+        if (!StringUtils.hasText(uri.getHost())) {
+            throw new IllegalArgumentException("domain host is required");
+        }
+        StringBuilder base = new StringBuilder();
+        base.append(StringUtils.hasText(uri.getScheme()) ? uri.getScheme() : "https")
+                .append("://")
+                .append(uri.getHost());
+        if (uri.getPort() > 0) {
+            base.append(":").append(uri.getPort());
+        }
+        return base.toString();
+    }
+
+    private String extractHost(String endpoint) {
+        URI uri = URI.create(endpoint);
+        if (!StringUtils.hasText(uri.getHost())) {
+            throw new IllegalArgumentException("domain host is required");
+        }
+        return uri.getHost();
+    }
+
+    private String publicBaseUrl(String endpoint) {
+        return normalizeBaseUrl(endpoint);
+    }
+
+    private String firstText(JsonNode node, String... names) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        for (String name : names) {
+            JsonNode value = node.path(name);
+            if (value.isValueNode() && StringUtils.hasText(value.asText())) {
+                return value.asText();
+            }
+        }
+        return null;
     }
 
     private String nullToEmpty(String value) {
@@ -201,6 +294,22 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
                 || lowered.contains("认证") || lowered.contains("登录") || lowered.contains("未授权")) {
             return FailureKind.AUTH_EXPIRED;
         }
+        if (lowered.contains("duplicate") || lowered.contains("exists") || lowered.contains("conflict")
+                || lowered.contains("重复") || lowered.contains("已存在")) {
+            return FailureKind.VALIDATION;
+        }
         return FailureKind.CLIENT_ERROR;
+    }
+
+    private boolean containsDuplicateSignal(String body) {
+        if (!StringUtils.hasText(body)) {
+            return false;
+        }
+        String lowered = body.toLowerCase();
+        return lowered.contains("duplicate")
+                || lowered.contains("already exists")
+                || lowered.contains("conflict")
+                || lowered.contains("重复")
+                || lowered.contains("已存在");
     }
 }

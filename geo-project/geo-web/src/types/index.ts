@@ -179,6 +179,8 @@ export interface Brand {
   complianceNotesMedical?: string | null
   geoSiteCode?: string | null
   geoSiteStatus?: 'active' | 'disabled' | string | null
+  geoSiteName?: string | null
+  geoSiteDomain?: string | null
   industrySiteName?: string | null
   industrySiteCode?: string | null
   status?: string
@@ -1405,6 +1407,10 @@ export interface SelfMediaAutomationOverview {
     readinessCode?: string | null
     readinessMessage?: string | null
     requiresLocalAgent: boolean
+    fillLeadMinutes?: number | null
+    minRemainingMinutes?: number | null
+    maxAttempts?: number | null
+    maxRemainingMinutes?: number | null
   }>
   thirdPartySubjectPool?: {
     sourceTotal: number
@@ -1481,6 +1487,10 @@ export interface SelfMediaScheduleCapability {
   contractSupportsLocation?: boolean | null
   contractSupportsOneClickFormat?: boolean | null
   contractSupportsPublishCheck?: boolean | null
+  fillLeadMinutes?: number | null
+  minRemainingMinutes?: number | null
+  maxAttempts?: number | null
+  maxRemainingMinutes?: number | null
   verifiedAt?: string | null
   verifiedBy?: number | null
   createdAt?: string | null
@@ -1545,6 +1555,8 @@ export interface PublishSite {
   credentialRef?: string | null
   apiCredential?: string | null
   apiCredentialEncrypted?: string | null
+  credentialConfigured?: boolean | null
+  credentialStatus?: 'configured' | 'missing' | 'expired_or_failed' | string | null
   requestHeaderTemplate?: string | null
   requestBodyTemplate?: string | null
   responseUrlPath?: string | null

@@ -4,6 +4,7 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.util.HttpClientUtil;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.dto.BrandCreateRequest;
 import com.huanjing.geo.module.customer.dto.BrandUpdateRequest;
@@ -35,6 +36,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Locale;
 import java.util.UUID;
+import java.net.URI;
 import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 
@@ -44,9 +46,8 @@ public class BrandService {
 
     private static final Set<String> BRAND_STATUS = Set.of("draft", "active", "archived");
     private static final Set<String> GEO_SITE_STATUS = Set.of("active", "disabled");
+    private static final String GEO_SITE_ADMIN_CONTENT_PATH = "/api/v1/admin/content";
     private static final String DICT_TYPE_COMPLIANCE_INDUSTRY = "compliance_industry";
-    private static final Pattern GEO_SITE_CODE_PATTERN =
-            Pattern.compile("^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$");
 
     private final BrandMapper brandMapper;
     private final BrandMaterialMapper brandMaterialMapper;
@@ -106,6 +107,54 @@ public class BrandService {
         return brand;
     }
 
+    public Map<String, Object> testGeoSite(Long id) {
+        Brand brand = requireBrandWithAccess(id, false);
+        String domain = normalizeGeoSiteDomain(brand.getGeoSiteDomain());
+        if (!StringUtils.hasText(domain)) {
+            return Map.of(
+                    "passed", false,
+                    "status", "missing",
+                    "message", "当前品牌未配置 Agent 官网域名"
+            );
+        }
+        if (!"active".equalsIgnoreCase(brand.getGeoSiteStatus())) {
+            return Map.of(
+                    "passed", false,
+                    "status", "disabled",
+                    "domain", domain,
+                    "message", "当前品牌 Agent 官网未启用"
+            );
+        }
+
+        String endpoint = geoSiteEndpoint(domain);
+        try {
+            HttpClientUtil.HttpResult result = HttpClientUtil.get(
+                    endpoint,
+                    Map.of("Accept", "application/json"),
+                    5000,
+                    8000
+            );
+            int statusCode = result.statusCode();
+            boolean passed = isGeoSiteProbePassed(statusCode, result.body());
+            return Map.of(
+                    "passed", passed,
+                    "status", passed ? "reachable" : "unreachable",
+                    "domain", domain,
+                    "endpoint", endpoint,
+                    "statusCode", statusCode,
+                    "message", passed ? "Agent 官网发布接口可达" : "Agent 官网发布接口不可用，请检查域名或接口路径"
+            );
+        } catch (Exception ex) {
+            return Map.of(
+                    "passed", false,
+                    "status", "network_error",
+                    "domain", domain,
+                    "endpoint", endpoint,
+                    "message", "Agent 官网发布接口连接失败：" + safeMessage(ex)
+            );
+        }
+    }
+
     public Brand create(BrandCreateRequest req) {
         currentUserService.ensurePermission("brand.create");
         SysUser operator = currentUserService.requireCurrentUser();
@@ -152,7 +201,7 @@ public class BrandService {
         brand.setMedicalAdReviewNo(req.getMedicalAdReviewNo());
         brand.setComplianceNotesMedical(req.getComplianceNotesMedical());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
-        applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), null);
+        applyGeoSiteFields(brand, req.getGeoSiteName(), req.getGeoSiteDomain(), req.getGeoSiteStatus(), null);
         applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
         brand.setStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         brandMapper.insert(brand);
@@ -232,7 +281,7 @@ public class BrandService {
         brand.setMedicalAdReviewNo(req.getMedicalAdReviewNo());
         brand.setComplianceNotesMedical(req.getComplianceNotesMedical());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
-        applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), id);
+        applyGeoSiteFields(brand, req.getGeoSiteName(), req.getGeoSiteDomain(), req.getGeoSiteStatus(), id);
         applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
         brand.setStatus(req.getStatus());
         brandMapper.updateById(brand);
@@ -327,29 +376,33 @@ public class BrandService {
         throw new BizException(500, "Failed to generate brand_slug");
     }
 
-    private void applyGeoSiteFields(Brand brand, String rawCode, String rawStatus, Long selfId) {
-        String code = trimToNull(rawCode);
+    private void applyGeoSiteFields(Brand brand, String rawName, String rawDomain, String rawStatus, Long selfId) {
+        String name = trimToNull(rawName);
+        String domain = normalizeGeoSiteDomain(rawDomain);
         String status = trimToNull(rawStatus);
-        if (code == null) {
+        if (name == null && domain == null) {
             if (status != null) {
-                throw new BizException(400, "geo_site_status requires geo_site_code");
+                throw new BizException(400, "geo_site_status requires geo_site_domain");
             }
             brand.setGeoSiteCode(null);
             brand.setGeoSiteStatus(null);
+            brand.setGeoSiteName(null);
+            brand.setGeoSiteDomain(null);
             return;
         }
-
-        code = code.toLowerCase(Locale.ROOT);
-        if (!GEO_SITE_CODE_PATTERN.matcher(code).matches()) {
-            throw new BizException(400, "Invalid geo_site_code");
+        if (domain == null) {
+            throw new BizException(400, "geo_site_domain is required when Agent official site is configured");
+        }
+        if (name == null) {
+            name = "Agent 官网";
         }
         Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
                 .isNull(Brand::getDeletedAt)
-                .eq(Brand::getGeoSiteCode, code)
+                .eq(Brand::getGeoSiteDomain, domain)
                 .ne(selfId != null, Brand::getId, selfId)
                 .last("LIMIT 1"));
         if (existed != null) {
-            throw new BizException(400, "geo_site_code already exists");
+            throw new BizException(400, "geo_site_domain already exists");
         }
 
         if (status == null) {
@@ -359,8 +412,57 @@ public class BrandService {
         if (!GEO_SITE_STATUS.contains(status)) {
             throw new BizException(400, "Invalid geo_site_status");
         }
-        brand.setGeoSiteCode(code);
+        brand.setGeoSiteCode(null);
         brand.setGeoSiteStatus(status);
+        brand.setGeoSiteName(name);
+        brand.setGeoSiteDomain(domain);
+    }
+
+    private String normalizeGeoSiteDomain(String value) {
+        String raw = trimToNull(value);
+        if (raw == null) {
+            return null;
+        }
+        String normalized = raw.contains("://") ? raw : "https://" + raw;
+        try {
+            URI uri = URI.create(normalized);
+            if (!StringUtils.hasText(uri.getHost())) {
+                throw new IllegalArgumentException("missing host");
+            }
+            StringBuilder host = new StringBuilder(uri.getHost().toLowerCase(Locale.ROOT));
+            if (uri.getPort() > 0) {
+                host.append(":").append(uri.getPort());
+            }
+            return host.toString();
+        } catch (Exception ex) {
+            throw new BizException(400, "Invalid geo_site_domain");
+        }
+    }
+
+    private String geoSiteEndpoint(String domain) {
+        return "https://" + domain + GEO_SITE_ADMIN_CONTENT_PATH;
+    }
+
+    private boolean isGeoSiteProbePassed(int statusCode, String body) {
+        if (statusCode == 405 || statusCode == 400 || statusCode == 401 || statusCode == 403
+                || statusCode == 415 || statusCode == 422) {
+            return true;
+        }
+        return statusCode >= 200 && statusCode < 300 && !looksLikeHtml(body);
+    }
+
+    private boolean looksLikeHtml(String body) {
+        if (!StringUtils.hasText(body)) {
+            return false;
+        }
+        String trimmed = body.trim().toLowerCase(Locale.ROOT);
+        return trimmed.startsWith("<!doctype html")
+                || trimmed.startsWith("<html")
+                || trimmed.contains("<body");
+    }
+
+    private String safeMessage(Exception ex) {
+        return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
     }
 
     private void applyIndustrySiteFields(Brand brand, String rawName, String rawCode) {
@@ -413,6 +515,8 @@ public class BrandService {
         snapshot.put("complianceNotesMedical", brand.getComplianceNotesMedical());
         snapshot.put("geoSiteCode", brand.getGeoSiteCode());
         snapshot.put("geoSiteStatus", brand.getGeoSiteStatus());
+        snapshot.put("geoSiteName", brand.getGeoSiteName());
+        snapshot.put("geoSiteDomain", brand.getGeoSiteDomain());
         snapshot.put("industrySiteName", brand.getIndustrySiteName());
         snapshot.put("industrySiteCode", brand.getIndustrySiteCode());
         snapshot.put("officialAccount", brand.getOfficialAccount());

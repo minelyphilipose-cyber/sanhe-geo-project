@@ -29,6 +29,10 @@ public class PublishSite {
     private String apiCredentialEncrypted;
     @TableField(exist = false)
     private String apiCredential;
+    @TableField(exist = false)
+    private Boolean credentialConfigured;
+    @TableField(exist = false)
+    private String credentialStatus;
     private String requestHeaderTemplate;
     private String requestBodyTemplate;
     private String responseUrlPath;

@@ -265,6 +265,19 @@
               </div>
             </template>
           </el-table-column>
+          <el-table-column label="发布链接" min-width="150" show-overflow-tooltip>
+            <template #default="scope">
+              <el-button
+                v-if="scope.row.publishedUrl"
+                link
+                type="primary"
+                @click="actions.openExternalLink(scope.row.publishedUrl)"
+              >
+                打开链接
+              </el-button>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="210" align="center">
             <template #default="scope">
               <div class="admin-row-actions distribution-actions">

@@ -12,16 +12,20 @@ import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.system.entity.PublishSite;
+import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.text.Normalizer;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 @Component
 @RequiredArgsConstructor
@@ -30,8 +34,35 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
 
     private static final List<String> CATEGORY_SLUGS = List.of("industry", "region", "guide", "service");
     private static final int SUMMARY_MAX_LENGTH = 180;
+    private static final Map<String, String> INDUSTRY_PATH_SLUGS = Map.ofEntries(
+            Map.entry("全屋智能", "whole-house"),
+            Map.entry("智能家居", "smart-home"),
+            Map.entry("家装", "home-decoration"),
+            Map.entry("装修", "home-decoration"),
+            Map.entry("医美", "medical-beauty"),
+            Map.entry("口腔", "oral-care"),
+            Map.entry("餐饮", "restaurant"),
+            Map.entry("教育", "education")
+    );
+    private static final Map<String, String> REGION_SLUGS = Map.ofEntries(
+            Map.entry("安徽省", "anhui"),
+            Map.entry("安徽", "anhui"),
+            Map.entry("阜阳市", "fuyang"),
+            Map.entry("阜阳", "fuyang"),
+            Map.entry("合肥市", "hefei"),
+            Map.entry("合肥", "hefei"),
+            Map.entry("北京市", "beijing"),
+            Map.entry("北京", "beijing"),
+            Map.entry("上海市", "shanghai"),
+            Map.entry("上海", "shanghai"),
+            Map.entry("广州市", "guangzhou"),
+            Map.entry("广州", "guangzhou"),
+            Map.entry("深圳市", "shenzhen"),
+            Map.entry("深圳", "shenzhen")
+    );
 
     private final ObjectMapper objectMapper;
+    private final PlatformCredentialService platformCredentialService;
 
     @Override
     public boolean supports(String integrationMethod) {
@@ -87,7 +118,7 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
         ValidationResult validation = validateIndustrySite(article, contentMarkdown, site, project);
         if (!validation.isPassed()) {
             return SubmitResult.failure(400, null, null, String.join("; ", validation.getErrors()),
-                    FailureKind.CLIENT_ERROR, false);
+                    validationFailureKind(validation.getErrors()), false);
         }
 
         String requestPayload;
@@ -126,7 +157,7 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
                     ex);
             return SubmitResult.failure(500, requestPayload, null,
                     "行业资讯站发布请求失败：" + safeMessage(ex),
-                    FailureKind.SERVER_ERROR, true);
+                    FailureKind.NETWORK_ERROR, true);
         }
     }
 
@@ -137,6 +168,9 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
         java.util.ArrayList<String> errors = new java.util.ArrayList<>();
         if (site == null || !StringUtils.hasText(site.getApiEndpoint())) {
             errors.add("行业资讯站发布接口不能为空");
+        }
+        if (site == null || !StringUtils.hasText(resolveAdminToken(site))) {
+            errors.add("行业资讯站 X-Admin-Token 未配置");
         }
         if (article == null || !StringUtils.hasText(article.getTitle())) {
             errors.add("文章标题不能为空");
@@ -169,7 +203,7 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
             root.put("summary", summary);
         }
         ArrayNode keywords = root.putArray("keywords");
-        parseKeywords(article.getTagsJson()).forEach(keywords::add);
+        collectKeywords(article, project, site).forEach(keywords::add);
         root.put("author", "智装参考编辑部");
         if ("region".equals(categorySlug)) {
             root.put("province", trim(project.getProvinceName()));
@@ -179,11 +213,13 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
         root.put("status", "PUBLISHED");
 
         ObjectNode meta = root.putObject("meta");
+        meta.put("canonicalPath", canonicalPath(article, project, site, categorySlug));
         meta.put("industry", firstIndustry(site));
         meta.put("sourceType", "geo_system_distribution");
         meta.putArray("sourceUrls");
         if (article.getId() != null) {
             meta.put("articleId", article.getId());
+            meta.put("publishQueueId", "article-" + article.getId());
         }
         if (article.getProjectId() != null) {
             meta.put("projectId", article.getProjectId());
@@ -201,7 +237,13 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
             return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站登录认证信息已过期，请更新", FailureKind.AUTH_EXPIRED, false);
         }
         if (httpCode == 429) {
-            return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站发布接口请求过于频繁", FailureKind.SERVER_ERROR, true);
+            return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站发布接口请求过于频繁", FailureKind.RATE_LIMIT, true);
+        }
+        if (httpCode == 404) {
+            return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站发布接口不存在，请检查发布 URL", FailureKind.CLIENT_ERROR, false);
+        }
+        if (httpCode == 409 || containsDuplicateSignal(body)) {
+            return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站已存在相同文章，请检查 canonicalPath 或标题", FailureKind.VALIDATION, false);
         }
         if (httpCode >= 400 && httpCode < 500) {
             return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站发布请求参数异常，状态码：" + httpCode, FailureKind.CLIENT_ERROR, false);
@@ -217,7 +259,9 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
             return SubmitResult.failure(httpCode, requestPayload, body, safeMessage(ex), FailureKind.UNKNOWN, false);
         }
 
-        if (!root.path("success").asBoolean(false)) {
+        boolean success = root.path("success").asBoolean(false)
+                || root.path("code").asInt(Integer.MIN_VALUE) == 0;
+        if (!success) {
             String message = root.path("message").asText("业务处理失败");
             return SubmitResult.failure(httpCode, requestPayload, body, message, classifyBusinessFailure(message), false);
         }
@@ -229,8 +273,9 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
 
     private Map<String, String> requestHeaders(PublishSite site) {
         Map<String, String> headers = new LinkedHashMap<>();
-        headers.put("Content-Type", "application/json");
+        headers.put("Content-Type", "application/json; charset=utf-8");
         if (!StringUtils.hasText(site.getRequestHeaderTemplate())) {
+            putAdminToken(headers, site);
             return headers;
         }
         try {
@@ -238,12 +283,16 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
             for (String key : obj.keySet()) {
                 Object value = obj.get(key);
                 if (StringUtils.hasText(key) && value != null) {
+                    if ("x-admin-token".equalsIgnoreCase(key.trim())) {
+                        continue;
+                    }
                     headers.put(key.trim(), String.valueOf(value));
                 }
             }
         } catch (Exception ignored) {
             // Invalid header JSON is ignored so a bad optional header does not block validation.
         }
+        putAdminToken(headers, site);
         return headers;
     }
 
@@ -256,12 +305,12 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
         if (StringUtils.hasText(articleType)) {
             return switch (articleType.trim().toLowerCase(Locale.ROOT)) {
                 case "industry_article" -> "industry";
-                case "stage_advice", "faq" -> "guide";
+                case "buying_guide", "pitfall_guide", "stage_advice", "faq" -> "guide";
                 case "scenario_content" -> "service";
-                default -> hasRegion(project) ? "region" : "industry";
+                default -> "industry";
             };
         }
-        return hasRegion(project) ? "region" : "industry";
+        return "industry";
     }
 
     private String normalizeCategory(String raw) {
@@ -303,6 +352,27 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
         }
     }
 
+    private List<String> collectKeywords(ArticleDraft article, Project project, PublishSite site) {
+        Set<String> keywords = new LinkedHashSet<>();
+        if (article != null) {
+            keywords.addAll(parseKeywords(article.getTagsJson()));
+            addKeyword(keywords, article.getTopic());
+            addKeyword(keywords, article.getTopicAsQuestion());
+        }
+        addKeyword(keywords, firstIndustry(site));
+        if (project != null) {
+            addKeyword(keywords, project.getCityName());
+            addKeyword(keywords, project.getBrandName());
+        }
+        return keywords.stream().limit(8).toList();
+    }
+
+    private void addKeyword(Set<String> keywords, String value) {
+        if (StringUtils.hasText(value)) {
+            keywords.add(value.trim());
+        }
+    }
+
     private String firstIndustry(PublishSite site) {
         if (site == null || !StringUtils.hasText(site.getIndustryTags())) {
             return "";
@@ -314,17 +384,136 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
         if (!StringUtils.hasText(markdown)) {
             return "";
         }
-        String plain = markdown
+        for (String line : markdown.split("\\R")) {
+            String text = line == null ? "" : line.trim();
+            if (!StringUtils.hasText(text)
+                    || text.startsWith("#")
+                    || text.startsWith("!")
+                    || text.startsWith("|")
+                    || text.matches("^[-*+]\\s+.*")) {
+                continue;
+            }
+            String plainLine = toPlainText(text);
+            if (StringUtils.hasText(plainLine)) {
+                return truncate(plainLine, SUMMARY_MAX_LENGTH);
+            }
+        }
+        return truncate(toPlainText(markdown), SUMMARY_MAX_LENGTH);
+    }
+
+    private String canonicalPath(ArticleDraft article, Project project, PublishSite site, String categorySlug) {
+        String titleSlug = slugText(article == null ? null : article.getTitle());
+        if (!StringUtils.hasText(titleSlug) || titleSlug.length() < 8) {
+            titleSlug = "article-" + (article != null && article.getId() != null ? article.getId() : System.currentTimeMillis());
+        }
+        return switch (categorySlug) {
+            case "region" -> "/" + categorySlug + "/" + regionSlug(project == null ? null : project.getProvinceName(), "province")
+                    + "/" + regionSlug(project == null ? null : project.getCityName(), "city")
+                    + "/" + titleSlug + ".html";
+            case "guide" -> "/guide/" + industrySlug(site) + "/decision/" + titleSlug + ".html";
+            case "service" -> "/service/reference/" + titleSlug + ".html";
+            default -> "/industry/" + industrySlug(site) + "/topic/" + titleSlug + ".html";
+        };
+    }
+
+    private String industrySlug(PublishSite site) {
+        String industry = firstIndustry(site);
+        if (StringUtils.hasText(industry)) {
+            String mapped = INDUSTRY_PATH_SLUGS.get(industry.trim());
+            if (StringUtils.hasText(mapped)) {
+                return mapped;
+            }
+            String slug = slugText(industry);
+            if (StringUtils.hasText(slug)) {
+                return slug;
+            }
+        }
+        return "general";
+    }
+
+    private String regionSlug(String value, String fallback) {
+        if (StringUtils.hasText(value)) {
+            String trimmed = value.trim();
+            String mapped = REGION_SLUGS.get(trimmed);
+            if (StringUtils.hasText(mapped)) {
+                return mapped;
+            }
+            String slug = slugText(trimmed);
+            if (StringUtils.hasText(slug)) {
+                return slug;
+            }
+        }
+        return fallback;
+    }
+
+    private String slugText(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = Normalizer.normalize(value.trim().toLowerCase(Locale.ROOT), Normalizer.Form.NFKD)
+                .replaceAll("\\p{M}", "");
+        String slug = normalized.replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("^-+", "")
+                .replaceAll("-+$", "");
+        return slug.length() <= 96 ? slug : slug.substring(0, 96).replaceAll("-+$", "");
+    }
+
+    private String toPlainText(String markdown) {
+        if (!StringUtils.hasText(markdown)) {
+            return "";
+        }
+        return markdown
                 .replaceAll("(?m)^#{1,6}\\s*", "")
                 .replaceAll("!\\[[^]]*]\\([^)]*\\)", "")
                 .replaceAll("\\[[^]]+]\\([^)]*\\)", "")
                 .replaceAll("[*_`>\\-]+", " ")
                 .replaceAll("\\s+", " ")
                 .trim();
-        if (plain.length() <= SUMMARY_MAX_LENGTH) {
-            return plain;
+    }
+
+    private String truncate(String text, int maxLength) {
+        if (!StringUtils.hasText(text)) {
+            return "";
         }
-        return plain.substring(0, SUMMARY_MAX_LENGTH);
+        String normalized = text.trim();
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
+    }
+
+    private void putAdminToken(Map<String, String> headers, PublishSite site) {
+        String token = resolveAdminToken(site);
+        if (StringUtils.hasText(token)) {
+            headers.put("X-Admin-Token", token);
+        }
+    }
+
+    private String resolveAdminToken(PublishSite site) {
+        if (site == null) {
+            return null;
+        }
+        String credential = platformCredentialService.resolveCredential(site.getCredentialRef(), site.getApiCredentialEncrypted());
+        if (StringUtils.hasText(credential)) {
+            return credential.trim();
+        }
+        if (StringUtils.hasText(site.getApiCredential())) {
+            return site.getApiCredential().trim();
+        }
+        return legacyHeaderToken(site.getRequestHeaderTemplate());
+    }
+
+    private String legacyHeaderToken(String rawHeaders) {
+        if (!StringUtils.hasText(rawHeaders)) {
+            return null;
+        }
+        try {
+            JSONObject obj = JSONUtil.parseObj(rawHeaders);
+            Object value = obj.get("X-Admin-Token");
+            if (value == null) {
+                value = obj.get("x-admin-token");
+            }
+            return value == null ? null : String.valueOf(value).trim();
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private TargetContext.IndustrySiteTarget requireTarget(TargetContext target) {
@@ -361,6 +550,30 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
                 || lowered.contains("认证") || lowered.contains("登录") || lowered.contains("未授权")) {
             return FailureKind.AUTH_EXPIRED;
         }
+        if (lowered.contains("duplicate") || lowered.contains("exists") || lowered.contains("conflict")
+                || lowered.contains("重复") || lowered.contains("已存在")) {
+            return FailureKind.VALIDATION;
+        }
         return FailureKind.CLIENT_ERROR;
+    }
+
+    private String validationFailureKind(List<String> errors) {
+        String message = errors == null ? "" : String.join(";", errors).toLowerCase(Locale.ROOT);
+        if (message.contains("x-admin-token") || message.contains("token")) {
+            return FailureKind.AUTH;
+        }
+        return FailureKind.CLIENT_ERROR;
+    }
+
+    private boolean containsDuplicateSignal(String body) {
+        if (!StringUtils.hasText(body)) {
+            return false;
+        }
+        String lowered = body.toLowerCase(Locale.ROOT);
+        return lowered.contains("duplicate")
+                || lowered.contains("already exists")
+                || lowered.contains("conflict")
+                || lowered.contains("重复")
+                || lowered.contains("已存在");
     }
 }

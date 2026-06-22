@@ -74,6 +74,11 @@ public class BrandController {
         return R.ok(thirdPartySubjectRotationService.previewPool(id, candidateLimit, excludedLimit));
     }
 
+    @PostMapping("/{id}/geo-site/test")
+    public R<Map<String, Object>> testGeoSite(@PathVariable Long id) {
+        return R.ok(brandService.testGeoSite(id));
+    }
+
     @PostMapping
     public R<Brand> create(@Valid @RequestBody BrandCreateRequest req) {
         return R.ok(brandService.create(req));

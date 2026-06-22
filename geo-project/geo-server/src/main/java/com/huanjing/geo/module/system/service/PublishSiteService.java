@@ -4,7 +4,6 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.module.content.config.BrandGeoSiteProperties;
 import com.huanjing.geo.module.system.dto.PublishSiteCreateRequest;
 import com.huanjing.geo.module.system.dto.PublishSiteStatusUpdateRequest;
 import com.huanjing.geo.module.system.dto.PublishSiteUpdateRequest;
@@ -37,7 +36,7 @@ public class PublishSiteService {
     private static final Set<String> TIER_SET = Set.of("S0", "S1", "S2");
     private static final Set<String> STATUS_SET = Set.of("active", "suspended", "maintenance");
     private static final Set<String> HEALTH_SET = Set.of("normal", "slow", "high_failure", "degraded");
-    private static final Set<String> METHOD_SET = Set.of("rest_api", "ftp", "email", "manual", "brand_geo_site", "forum_playwright", "discuz_http");
+    private static final Set<String> METHOD_SET = Set.of("rest_api", "ftp", "email", "manual", "forum_playwright", "discuz_http");
     private static final Set<String> HTTP_METHOD_SET = Set.of("POST", "PUT");
     private static final Set<String> AUTH_SET = Set.of("api_key", "bearer_token", "basic_auth", "oauth2", "cookie", "account_cookie");
 
@@ -45,7 +44,6 @@ public class PublishSiteService {
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final PlatformCredentialService platformCredentialService;
-    private final BrandGeoSiteProperties brandGeoSiteProperties;
 
     public List<PublishSite> list(String tier, String status, String industry) {
         ensureReadRole();
@@ -117,27 +115,9 @@ public class PublishSiteService {
         result.put("siteId", site.getId());
         result.put("siteName", site.getSiteName());
         result.put("domain", site.getDomain());
-        if ("brand_geo_site".equalsIgnoreCase(site.getIntegrationMethod())) {
-            return testBrandGeoSiteEndpoint(result);
-        }
         String host = resolvePingHost(site);
         result.put("host", host);
         result.put("testType", "ping");
-        return pingHost(result, host);
-    }
-
-    private Map<String, Object> testBrandGeoSiteEndpoint(Map<String, Object> result) {
-        String endpoint = brandGeoSiteProperties.getEndpoint();
-        result.put("testType", "endpoint_ping");
-        result.put("endpoint", endpoint);
-        if (!StringUtils.hasText(endpoint)) {
-            result.put("success", false);
-            result.put("reachable", false);
-            result.put("message", "BRAND_GEO_SITE_ENDPOINT is not configured");
-            return result;
-        }
-        String host = resolveHost(endpoint.trim());
-        result.put("host", host);
         return pingHost(result, host);
     }
 
@@ -186,10 +166,24 @@ public class PublishSiteService {
         if (site == null) {
             return null;
         }
+        boolean credentialConfigured = StringUtils.hasText(site.getCredentialRef())
+                || StringUtils.hasText(site.getApiCredentialEncrypted())
+                || headerContainsAdminToken(site.getRequestHeaderTemplate());
+        site.setCredentialConfigured(credentialConfigured);
+        site.setCredentialStatus(credentialConfigured
+                ? ("degraded".equalsIgnoreCase(site.getCurrentHealthStatus()) ? "expired_or_failed" : "configured")
+                : "missing");
         if (isForumSite(site)) {
             site.setApiCredential(platformCredentialService.resolveCredential(site.getCredentialRef(), site.getApiCredentialEncrypted()));
         }
         return site;
+    }
+
+    private boolean headerContainsAdminToken(String requestHeaderTemplate) {
+        if (!StringUtils.hasText(requestHeaderTemplate)) {
+            return false;
+        }
+        return requestHeaderTemplate.toLowerCase(Locale.ROOT).contains("x-admin-token");
     }
 
     private boolean isForumSite(PublishSite site) {
@@ -268,7 +262,7 @@ public class PublishSiteService {
             throw new BizException(400, "status must be active/suspended/maintenance");
         }
         if (!StringUtils.hasText(integrationMethod) || !METHOD_SET.contains(integrationMethod.trim().toLowerCase(Locale.ROOT))) {
-            throw new BizException(400, "integration_method must be rest_api/ftp/email/manual/brand_geo_site/forum_playwright/discuz_http");
+            throw new BizException(400, "integration_method must be rest_api/ftp/email/manual/forum_playwright/discuz_http");
         }
         if (StringUtils.hasText(httpMethod) && !HTTP_METHOD_SET.contains(httpMethod.trim().toUpperCase(Locale.ROOT))) {
             throw new BizException(400, "http_method must be POST/PUT");

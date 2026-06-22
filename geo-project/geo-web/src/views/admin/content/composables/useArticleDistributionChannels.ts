@@ -165,8 +165,14 @@ export function useArticleDistributionChannels(options: UseArticleDistributionCh
     try {
       const result = await distributeContentArticleToIndustrySite(row.id, selectedIndustrySiteId.value)
       const task = result.data.data
-      if (task.status === 'submitted') {
-        ElMessage.success('行业资讯站分发成功')
+      if (isDistributionSuccessStatus(task.status)) {
+        ElMessage.success(task.publishedUrl ? `行业资讯站分发成功：${task.publishedUrl}` : '行业资讯站分发成功')
+        industrySiteVisible.value = false
+        await options.load()
+        return
+      }
+      if (isDistributionActiveStatus(task.status)) {
+        ElMessage.info('行业资讯站已有发布任务正在处理中')
         industrySiteVisible.value = false
         await options.load()
         return
@@ -297,10 +303,18 @@ export function useArticleDistributionChannels(options: UseArticleDistributionCh
     try {
       const brandRes = await getBrandDetail(brandId)
       const brand = brandRes.data.data
+      if (!brand.geoSiteDomain || brand.geoSiteStatus !== 'active') {
+        ElMessage.error('当前品牌未配置可用 Agent 官网域名')
+        return
+      }
       const result = await distributeContentArticleToAgentSite(row.id, brandId)
       const task = result.data.data
-      if (task.status === 'submitted') {
-        ElMessage.success(`已分发到 ${brand.brandName || '品牌'} Agent 官网`)
+      if (isDistributionSuccessStatus(task.status)) {
+        ElMessage.success(task.publishedUrl
+          ? `已分发到 ${brand.brandName || '品牌'} Agent 官网：${task.publishedUrl}`
+          : `已分发到 ${brand.brandName || '品牌'} Agent 官网`)
+      } else if (isDistributionActiveStatus(task.status)) {
+        ElMessage.info(`${brand.brandName || '品牌'} Agent 官网已有发布任务正在处理中`)
       } else {
         ElMessage.error(task.errorMessage || 'Agent 官网分发失败')
       }
@@ -487,4 +501,12 @@ function authorityWeightText(resource: AuthorityMediaResource) {
 function openExternalLink(url?: string | null) {
   if (!url) return
   window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function isDistributionSuccessStatus(status?: string | null) {
+  return ['submitted', 'confirmed', 'published'].includes((status || '').toLowerCase())
+}
+
+function isDistributionActiveStatus(status?: string | null) {
+  return ['pending', 'token_issued', 'filling', 'filled', 'submitting'].includes((status || '').toLowerCase())
 }

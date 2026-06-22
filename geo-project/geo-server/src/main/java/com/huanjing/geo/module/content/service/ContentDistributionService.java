@@ -79,6 +79,16 @@ public class ContentDistributionService {
             "filled",
             "submitting"
     );
+    private static final Set<String> REUSABLE_DISTRIBUTION_TASK_STATUS = Set.of(
+            "pending",
+            "token_issued",
+            "filling",
+            "filled",
+            "submitting",
+            "submitted",
+            "confirmed",
+            "published"
+    );
     private static final Set<String> DISTRIBUTE_ALLOWED_ROLES = Set.of("super_admin", "delivery_manager", "operator");
     private static final Set<String> LEGACY_PROJECT_WRITE_ROLES =
             Set.of("operator", "delivery_manager", "partner", "partner_staff");
@@ -158,6 +168,10 @@ public class ContentDistributionService {
         Project project = requireProject(article.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         requireDistributionAccess(operator, project.getBrandId());
+        DistributionTask reusableTask = findReusableDistributionTask(article, target);
+        if (reusableTask != null) {
+            return reusableTask;
+        }
         if (LOCKED_ARTICLE_STATUS.contains(String.valueOf(article.getStatus()).toLowerCase(Locale.ROOT))) {
             throw new BizException(400, "Article has already been published/distributed and cannot distribute again");
         }
@@ -191,6 +205,37 @@ public class ContentDistributionService {
             return distributeToAuthorityMedia(article, project, operator, authorityMediaTarget);
         }
         throw new IllegalArgumentException("Unsupported TargetContext type: " + target.getClass().getSimpleName());
+    }
+
+    private DistributionTask findReusableDistributionTask(ArticleDraft article, TargetContext target) {
+        if (article == null || article.getId() == null || target == null) {
+            return null;
+        }
+        LambdaQueryWrapper<DistributionTask> wrapper = new LambdaQueryWrapper<DistributionTask>()
+                .eq(DistributionTask::getArticleId, article.getId())
+                .in(DistributionTask::getStatus, REUSABLE_DISTRIBUTION_TASK_STATUS)
+                .orderByDesc(DistributionTask::getId)
+                .last("LIMIT 1");
+
+        if (target instanceof TargetContext.BrandGeoSiteTarget brandGeoTarget) {
+            Long brandId = brandGeoTarget.brandId();
+            if (brandId == null) {
+                return null;
+            }
+            wrapper.eq(DistributionTask::getTargetKind, DistributionTargetKind.BRAND_GEO_SITE)
+                    .eq(DistributionTask::getTargetBrandId, brandId);
+            return distributionTaskMapper.selectOne(wrapper);
+        }
+        if (target instanceof TargetContext.IndustrySiteTarget industrySiteTarget) {
+            PublishSite site = industrySiteTarget.site();
+            if (site == null || site.getId() == null) {
+                return null;
+            }
+            wrapper.eq(DistributionTask::getTargetKind, DistributionTargetKind.INDUSTRY_SITE)
+                    .eq(DistributionTask::getIndustrySiteId, site.getId());
+            return distributionTaskMapper.selectOne(wrapper);
+        }
+        return null;
     }
 
     @Transactional
@@ -560,7 +605,7 @@ public class ContentDistributionService {
                                                       SysUser operator,
                                                       TargetContext.BrandGeoSiteTarget brandGeoTarget) {
         Brand brand = brandAccessService.requireBrandAccess(brandGeoTarget.brandId(), operator.getId(), BrandAccessAction.OPERATE);
-        String siteCode = validateBrandGeoSite(brand);
+        BrandGeoSitePublishTarget publishTarget = resolveBrandGeoSitePublishTarget(brand);
 
         String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         BrandGeoSiteAdapter adapter = resolveBrandGeoSiteAdapter();
@@ -575,7 +620,8 @@ public class ContentDistributionService {
 
         SubmitResult submitResult;
         try {
-            submitResult = adapter.submitToTarget(article, content, new TargetContext.BrandGeoSiteTarget(brand.getId(), siteCode));
+            submitResult = adapter.submitToTarget(article, content,
+                    new TargetContext.BrandGeoSiteTarget(brand.getId(), publishTarget.siteName(), publishTarget.domain()));
         } catch (Exception ex) {
             submitResult = SubmitResult.failure(
                     500,
@@ -1051,22 +1097,24 @@ public class ContentDistributionService {
         distributionTaskMapper.update(null, wrapper);
     }
 
-    private String validateBrandGeoSite(Brand brand) {
-        PublishSite agentSite = publishSiteMapper.selectOne(
-                new LambdaQueryWrapper<PublishSite>()
-                        .eq(PublishSite::getIntegrationMethod, BrandGeoSiteAdapter.PLATFORM)
-                        .eq(PublishSite::getStatus, "active")
-                        .eq(PublishSite::getIsFramework, 0)
-                        .orderByAsc(PublishSite::getId)
-                        .last("limit 1")
-        );
-        if (agentSite != null && StringUtils.hasText(agentSite.getSiteCode())) {
-            return agentSite.getSiteCode().trim();
+    private BrandGeoSitePublishTarget resolveBrandGeoSitePublishTarget(Brand brand) {
+        if (brand == null || !StringUtils.hasText(brand.getGeoSiteDomain())
+                || (StringUtils.hasText(brand.getGeoSiteStatus()) && !"active".equalsIgnoreCase(brand.getGeoSiteStatus()))) {
+            throw new BizException(400, "Agent official site publish target is not configured");
         }
-        if (StringUtils.hasText(brand.getGeoSiteCode()) && "active".equalsIgnoreCase(brand.getGeoSiteStatus())) {
-            return brand.getGeoSiteCode().trim();
+        String siteName = trimToNull(brand.getGeoSiteName());
+        if (!StringUtils.hasText(siteName)) {
+            String brandName = trimToNull(brand.getBrandName());
+            siteName = StringUtils.hasText(brandName) ? brandName + " Agent 官网" : "Agent 官网";
         }
-        throw new BizException(400, "Agent official site publish target is not configured");
+        return new BrandGeoSitePublishTarget(siteName, brand.getGeoSiteDomain().trim());
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private record BrandGeoSitePublishTarget(String siteName, String domain) {
     }
 
     private DistributionTask createAttemptForBrandOfficialSite(ArticleDraft article, BrandOfficialSite site, Long operatorId) {
@@ -1562,7 +1610,6 @@ public class ContentDistributionService {
         try {
             ObjectNode payloadNode = objectMapper.valueToTree(fillTask);
             rewriteFillPayloadCoverImageUrl(payloadNode, project, article);
-            appendDouyinHeadImageUrl(payloadNode, project);
             appendTargetPlatformOptions(payloadNode, platformOptions);
             appendBrandSelfMediaPublishOptions(payloadNode, project);
             if (environmentBinding != null) {
@@ -1618,20 +1665,6 @@ public class ContentDistributionService {
         }
         article.setCoverImageUrl(fallbackCover);
         articleDraftMapper.updateById(article);
-    }
-
-    private void appendDouyinHeadImageUrl(ObjectNode payloadNode, Project project) {
-        if (payloadNode == null || project == null || project.getBrandId() == null) {
-            return;
-        }
-        if (!"douyin".equalsIgnoreCase(payloadNode.path("platform").asText(""))) {
-            return;
-        }
-        String coverImageUrl = payloadNode.path("coverImageUrl").asText(null);
-        String headImageUrl = articleCoverSelectionService.selectRandomCoverUrlExcluding(project.getBrandId(), coverImageUrl);
-        if (StringUtils.hasText(headImageUrl)) {
-            payloadNode.put("headImageUrl", headImageUrl);
-        }
     }
 
     private void appendBrandSelfMediaPublishOptions(ObjectNode payloadNode, Project project) {

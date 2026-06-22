@@ -122,6 +122,19 @@ export function getBrandDetail(id: number) {
   return request.get<R<Brand>>(`/brands/${id}`)
 }
 
+export interface BrandGeoSiteTestResult {
+  passed: boolean
+  status: string
+  domain?: string
+  endpoint?: string
+  statusCode?: number
+  message: string
+}
+
+export function testBrandGeoSite(id: number) {
+  return request.post<R<BrandGeoSiteTestResult>>(`/brands/${id}/geo-site/test`)
+}
+
 export interface ThirdPartySubjectPoolItem {
   brandId: number
   brandName?: string | null

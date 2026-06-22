@@ -18,9 +18,9 @@
             <el-icon><Refresh /></el-icon>
             刷新
           </button>
-          <button class="btn btn-primary" type="button" @click="openDrawer('new')">
+          <button v-if="activeCategory?.canCreate" class="btn btn-primary" type="button" @click="openDrawer(activeCategory.code === 'industry_site' ? 'news-new' : 'new')">
             <el-icon><Plus /></el-icon>
-            新增发布目标
+            {{ activeCategory.createText || '新增发布目标' }}
           </button>
         </div>
       </div>
@@ -160,7 +160,7 @@
               <button v-if="isWechatTarget(target)" class="btn btn-link" type="button" @click="openWechatTemplateManagement">
                 样式模板
               </button>
-              <button class="btn btn-link" type="button" @click="openDrawer(target.drawerType || target.code, target)">编辑</button>
+              <button v-if="target.source !== 'static_info'" class="btn btn-link" type="button" @click="openDrawer(target.drawerType || target.code, target)">编辑</button>
               <button v-if="target.source === 'publish_site'" class="btn btn-link" type="button" @click="testIndustrySite(target)">测试连通</button>
               <button v-if="!target.locked" class="btn btn-danger-link" type="button" @click="toggleTarget(target)">
                 {{ target.enabled ? '停用' : '启用' }}
@@ -242,7 +242,18 @@
           </div>
           <div class="form-row">
             <label>{{ drawerForm.categoryCode === 'forum' ? '发帖页面 URL' : '发布接口 URL' }}</label>
-            <input v-model="drawerForm.apiEndpoint" class="input mono" type="text" :placeholder="drawerForm.categoryCode === 'forum' ? 'https://forum.example.com/post/new' : 'https://example.com/api/article/publish'" />
+            <input v-model="drawerForm.apiEndpoint" class="input mono" type="text" :placeholder="drawerForm.categoryCode === 'forum' ? 'https://forum.example.com/post/new' : 'https://www.zhizhuangcankao.com/api/admin/articles'" />
+          </div>
+          <div v-if="drawerForm.categoryCode === 'industry_site'" class="form-row">
+            <label>Admin Token</label>
+            <input
+              v-model="drawerForm.adminToken"
+              class="input mono"
+              type="password"
+              autocomplete="new-password"
+              placeholder="保存后加密存储，编辑时不回显"
+            />
+            <div class="hint">发布时后端会自动写入 X-Admin-Token，请勿放入请求头信息。</div>
           </div>
           <div class="form-grid-2">
             <div class="form-row">
@@ -259,7 +270,7 @@
               </select>
             </div>
           </div>
-          <div class="form-row">
+          <div v-if="drawerForm.categoryCode === 'forum'" class="form-row">
             <label>请求头信息</label>
             <textarea v-model="drawerForm.headers" class="input textarea mono" placeholder='{"X-Admin-Token":"token"}'></textarea>
             <div class="hint">由原“发布站点配置”迁入，后续保存时会写入行业资讯站点配置。</div>
@@ -437,7 +448,7 @@ interface TargetConfig {
   executor?: string
   drawerType?: string
   disabledActionText?: string
-  source?: 'static' | 'publish_site'
+  source?: 'static' | 'static_info' | 'publish_site'
   publishSite?: PublishSite
   updating?: boolean
   fields: TargetField[]
@@ -590,17 +601,19 @@ const staticTargets = reactive<TargetConfig[]>([
     logoClass: 'agent',
     enabled: true,
     autoPublish: true,
+    locked: true,
     executor: 'agent_site_publisher',
     drawerType: 'agent',
-    source: 'static',
+    source: 'static_info',
+    disabledActionText: '在品牌详情维护',
     fields: [
       { label: '内容风格', value: 'Agent 官网文章' },
-      { label: '站点唯一标识', value: 'agent_official_site', mono: true },
       { label: '状态', value: '启用', badge: 'success' },
       { label: '自动发布', value: '已开启', badge: 'accent' },
       { label: '执行器', value: 'Agent 官网发布器' },
+      { label: '维护入口', value: '品牌详情 / Agent 官网名称与域名' },
+      { label: '接口路径', value: '/api/v1/admin/content', mono: true },
       { label: '默认间隔', value: '20 分钟', mono: true },
-      { label: '并发上限', value: '2', mono: true },
     ],
   },
   {
@@ -663,7 +676,8 @@ const drawerForm = reactive({
   apiEndpoint: '',
   industryTags: '',
   integrationMethod: 'rest_api',
-  headers: '{\n  "X-Admin-Token": ""\n}',
+  headers: '{}',
+  adminToken: '',
   apiCredential: '',
   forumBoards: [] as ForumBoardConfig[],
   remark: '该平台当前仅支持人工发布',
@@ -674,8 +688,6 @@ const activeCategory = computed(() => categories.find((item) => item.code === ac
 const agentFallbackTarget = computed(() => staticTargets.find((item) => item.categoryCode === 'agent_site'))
 
 const agentTargets = computed<TargetConfig[]>(() => {
-  const sites = publishSites.value.filter((item) => item.integrationMethod === 'brand_geo_site' || item.siteCode === 'agent_official_site')
-  if (sites.length) return sites.map((site) => toAgentTarget(site))
   return agentFallbackTarget.value ? [agentFallbackTarget.value] : []
 })
 
@@ -746,7 +758,7 @@ function openWechatTemplateManagement() {
 
 function refreshPage() {
   keyword.value = ''
-  if (activeCategoryCode.value === 'industry_site' || activeCategoryCode.value === 'agent_site' || activeCategoryCode.value === 'forum') {
+  if (activeCategoryCode.value === 'industry_site' || activeCategoryCode.value === 'forum') {
     loadPublishSites()
   }
 }
@@ -800,7 +812,8 @@ function resetSiteConnectionForm() {
   drawerForm.apiEndpoint = ''
   drawerForm.industryTags = ''
   drawerForm.integrationMethod = drawerForm.categoryCode === 'forum' ? 'discuz_http' : 'rest_api'
-  drawerForm.headers = '{\n  "X-Admin-Token": ""\n}'
+  drawerForm.headers = '{}'
+  drawerForm.adminToken = ''
   drawerForm.apiCredential = ''
   originalApiCredential.value = ''
   drawerForm.forumBoards = drawerForm.categoryCode === 'forum' ? [emptyForumBoard(true)] : []
@@ -818,7 +831,8 @@ function fillSiteConnectionForm(target?: TargetConfig) {
   drawerForm.apiEndpoint = site.apiEndpoint || ''
   drawerForm.industryTags = parseIndustryTags(site.industryTags).join(', ')
   drawerForm.integrationMethod = site.integrationMethod || 'rest_api'
-  drawerForm.headers = formatHeaders(site.requestHeaderTemplate)
+  drawerForm.headers = target.categoryCode === 'forum' ? formatHeaders(site.requestHeaderTemplate) : '{}'
+  drawerForm.adminToken = ''
   const credentialText = target.categoryCode === 'forum' ? formatJsonText(site.apiCredential) : ''
   drawerForm.apiCredential = credentialText
   originalApiCredential.value = credentialText
@@ -840,6 +854,9 @@ function toIndustryTarget(site: PublishSite): TargetConfig {
   const enabled = site.status === 'active'
   const autoPublish = enabled && site.integrationMethod === 'rest_api'
   const industryLabel = parseIndustryTags(site.industryTags).join(' / ') || '未配置'
+  const credentialConfigured = site.credentialConfigured ?? Boolean(site.credentialRef || site.apiCredential || site.apiCredentialEncrypted)
+  const credentialStatus = site.credentialStatus || (credentialConfigured ? 'configured' : 'missing')
+  const credentialFailed = credentialStatus === 'expired_or_failed'
   return {
     categoryCode: 'industry_site',
     name: site.siteName,
@@ -856,6 +873,11 @@ function toIndustryTarget(site: PublishSite): TargetConfig {
       { label: '所属行业', value: industryLabel },
       { label: '状态', value: enabled ? '启用' : '已停用', badge: enabled ? 'success' : 'danger' },
       { label: '自动发布', value: autoPublish ? '已开启' : '已关闭', badge: autoPublish ? 'accent' : 'warning' },
+      {
+        label: 'Admin Token',
+        value: credentialConfigured ? (credentialFailed ? '可能失效' : '已配置') : '未配置',
+        badge: credentialConfigured ? (credentialFailed ? 'warning' : 'success') : 'danger',
+      },
       { label: '执行器', value: autoPublish ? '行业资讯站发布器' : '-', mono: !autoPublish },
       { label: '域名', value: site.domain || '-', mono: true },
       { label: '接入方式', value: integrationMethodLabel(site.integrationMethod) },
@@ -885,32 +907,6 @@ function toForumTarget(site: PublishSite): TargetConfig {
   }
 }
 
-function toAgentTarget(site: PublishSite): TargetConfig {
-  const enabled = site.status === 'active'
-  return {
-    categoryCode: 'agent_site',
-    name: site.siteName,
-    code: site.siteCode || 'agent_official_site',
-    logoText: 'A',
-    logoClass: 'agent',
-    enabled,
-    autoPublish: enabled,
-    executor: 'agent_site_publisher',
-    drawerType: 'agent',
-    source: 'publish_site',
-    publishSite: site,
-    fields: [
-      { label: '内容风格', value: 'Agent 官网文章' },
-      { label: '站点唯一标识', value: site.siteCode || '-', mono: true },
-      { label: '状态', value: enabled ? '启用' : '已停用', badge: enabled ? 'success' : 'danger' },
-      { label: '自动发布', value: enabled ? '已开启' : '已关闭', badge: enabled ? 'accent' : 'warning' },
-      { label: '执行器', value: 'Agent 官网发布器' },
-      { label: '默认间隔', value: '20 分钟', mono: true },
-      { label: '并发上限', value: '2', mono: true },
-    ],
-  }
-}
-
 function normalizeSiteCode(site: PublishSite) {
   return (site.domain || site.siteName || `publish_site_${site.id}`)
     .trim()
@@ -936,7 +932,7 @@ function parseIndustryTagsInput(raw: string) {
 }
 
 function formatHeaders(raw?: string | null) {
-  if (!raw) return '{\n  "X-Admin-Token": ""\n}'
+  if (!raw) return '{}'
   try {
     return JSON.stringify(JSON.parse(raw), null, 2)
   } catch {
@@ -1202,6 +1198,9 @@ function validateIndustrySiteForm() {
     ElMessage.warning('请输入站点域名')
     return false
   }
+  if (drawerForm.categoryCode === 'industry_site' && drawerForm.integrationMethod === 'rest_api' && !drawerForm.apiEndpoint.trim() && drawerForm.domain.trim()) {
+    drawerForm.apiEndpoint = defaultIndustryApiEndpoint(drawerForm.domain)
+  }
   if ((drawerForm.integrationMethod === 'rest_api' || drawerForm.integrationMethod === 'forum_playwright' || drawerForm.integrationMethod === 'discuz_http') && !drawerForm.apiEndpoint.trim()) {
     ElMessage.warning(drawerForm.categoryCode === 'forum' ? '请输入发帖页面 URL' : '请输入发布接口 URL')
     return false
@@ -1252,23 +1251,10 @@ function validateIndustrySiteForm() {
   return true
 }
 
-function validateAgentSiteForm() {
-  if (!drawerForm.name.trim()) {
-    ElMessage.warning('请输入平台名称')
-    return false
-  }
-  if (!drawerForm.code.trim()) {
-    ElMessage.warning('请输入站点唯一标识')
-    return false
-  }
-  if (!/^[a-z0-9][a-z0-9_-]{1,127}$/.test(drawerForm.code.trim())) {
-    ElMessage.warning('站点唯一标识需为 2-128 位小写字母、数字、下划线或短横线，并以字母或数字开头')
-    return false
-  }
-  return true
-}
-
 function buildPublishSitePayload() {
+  const apiEndpoint = drawerForm.categoryCode === 'industry_site' && drawerForm.integrationMethod === 'rest_api'
+    ? drawerForm.apiEndpoint.trim() || defaultIndustryApiEndpoint(drawerForm.domain)
+    : drawerForm.apiEndpoint.trim()
   return {
     siteName: drawerForm.name.trim(),
     siteCode: drawerForm.code.trim(),
@@ -1279,12 +1265,12 @@ function buildPublishSitePayload() {
     status: drawerForm.enabled ? 'active' : 'suspended',
     integrationMethod: drawerForm.integrationMethod,
     currentHealthStatus: 'normal',
-    apiEndpoint: drawerForm.apiEndpoint.trim(),
+    apiEndpoint,
     httpMethod: 'POST',
-    requestHeaderTemplate: normalizeHeaders(drawerForm.headers),
+    requestHeaderTemplate: drawerForm.categoryCode === 'forum' ? normalizeHeaders(drawerForm.headers) : undefined,
     requestBodyTemplate: '{"title":"{{title}}","content":"{{content}}","contentMarkdown":"{{contentMarkdown}}","contentHtml":"{{contentHtml}}","author":"{{author}}"}',
-    apiCredential: drawerForm.categoryCode === 'forum' ? normalizeCredential(drawerForm.apiCredential) : undefined,
-    authType: drawerForm.categoryCode === 'forum' ? 'account_cookie' : undefined,
+    apiCredential: drawerForm.categoryCode === 'forum' ? normalizeCredential(drawerForm.apiCredential) : drawerForm.adminToken.trim() || undefined,
+    authType: drawerForm.categoryCode === 'forum' ? 'account_cookie' : 'api_key',
     contentConstraints: drawerForm.categoryCode === 'forum' && drawerForm.integrationMethod === 'discuz_http'
       ? buildForumContentConstraints()
       : undefined,
@@ -1292,37 +1278,15 @@ function buildPublishSitePayload() {
   }
 }
 
-function buildAgentSitePayload() {
-  return {
-    siteName: drawerForm.name.trim() || 'Agent 官网',
-    siteCode: drawerForm.code.trim(),
-    domain: drawerForm.domain.trim() || 'agent-site.local',
-    industryTags: ['general'],
-    tier: 'S0',
-    status: drawerForm.enabled ? 'active' : 'suspended',
-    integrationMethod: 'brand_geo_site',
-    currentHealthStatus: 'normal',
-    remark: drawerForm.remark.trim() || 'Agent 官网自动发布目标',
-  }
+function defaultIndustryApiEndpoint(domain: string) {
+  const value = domain.trim().replace(/\/+$/, '')
+  if (!value) return ''
+  return `${/^https?:\/\//i.test(value) ? value : `https://${value}`}/api/admin/articles`
 }
 
 async function submitDrawer() {
   if (drawerForm.categoryCode === 'agent_site') {
-    if (!validateAgentSiteForm()) return
-    saving.value = true
-    try {
-      const payload = buildAgentSitePayload()
-      if (editingPublishSiteId.value) {
-        await updatePublishSite(editingPublishSiteId.value, payload)
-      } else {
-        await createPublishSite(payload)
-      }
-      ElMessage.success('保存成功')
-      closeDrawer()
-      await loadPublishSites()
-    } finally {
-      saving.value = false
-    }
+    closeDrawer()
     return
   }
   if (drawerForm.categoryCode !== 'industry_site' && drawerForm.categoryCode !== 'forum') {
