@@ -634,6 +634,42 @@ class BatchArticleGenerationServiceTest {
     }
 
     @Test
+    void retryFailedSystemClearsTerminalFieldsWithExplicitSql() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        batch.setStatus("failed");
+        batch.setFinishedAt(LocalDateTime.now().minusHours(1));
+        BatchArticleGenerationTask task = generationTask(101L, 77L);
+        task.setStatus("failed");
+        task.setSourceBrandId(1L);
+        task.setSubjectBrandId(1L);
+        task.setArticleIndexInBatch(1);
+        task.setChannelGroupCode("self_media");
+        task.setChannelSubCode("toutiao");
+        task.setArticleType("industry_article");
+        task.setArticleId(901L);
+        task.setErrorMessage("ExecutorService in active state did not accept task");
+        task.setStartedAt(LocalDateTime.now().minusHours(2));
+        task.setFinishedAt(LocalDateTime.now().minusHours(1));
+        when(batchMapper.selectById(77L)).thenReturn(batch);
+        when(taskMapper.selectList(any())).thenReturn(List.of(task));
+        when(taskMapper.resetFailedForRetry(any(), any(), any())).thenReturn(1);
+
+        service.retryFailedSystem(77L);
+
+        assertEquals("pending", task.getStatus());
+        assertThat(task.getArticleId()).isNull();
+        assertThat(task.getErrorMessage()).isNull();
+        assertThat(task.getStartedAt()).isNull();
+        assertThat(task.getFinishedAt()).isNull();
+        assertThat(executor.commands).hasSize(1);
+        verify(taskMapper).resetFailedForRetry(any(), any(), any());
+        verify(batchMapper).markRunningClearingFinished(any(), any());
+    }
+
+    @Test
     void submittedTaskSkipsExecutionWhenClaimOwnershipChanged() {
         CapturingExecutor executor = new CapturingExecutor();
         ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
@@ -696,7 +732,7 @@ class BatchArticleGenerationServiceTest {
         assertEquals(1, recovered);
         assertEquals("pending", task.getStatus());
         assertThat(executor.commands).hasSize(1);
-        verify(taskMapper).updateById(task);
+        verify(taskMapper).resetRunningForRecovery(any(), any(), any());
     }
 
     @Test
@@ -731,8 +767,7 @@ class BatchArticleGenerationServiceTest {
         assertEquals("pending", second.getStatus());
         assertEquals("running", third.getStatus());
         assertThat(executor.commands).hasSize(1);
-        verify(taskMapper).updateById(first);
-        verify(taskMapper).updateById(second);
+        verify(taskMapper, times(2)).resetRunningForRecovery(any(), any(), any());
         verify(taskMapper, never()).updateById(third);
     }
 

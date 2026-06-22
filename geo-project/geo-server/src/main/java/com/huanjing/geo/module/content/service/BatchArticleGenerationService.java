@@ -482,16 +482,26 @@ public class BatchArticleGenerationService {
         if (failedTasks.isEmpty()) {
             throw new BizException(400, "当前批次没有可重试的失败任务");
         }
+        List<Long> retriedTaskIds = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now().withNano(0);
         for (BatchArticleGenerationTask task : failedTasks) {
+            int updated = taskMapper.resetFailedForRetry(task.getId(), batchId, now);
+            if (updated <= 0) {
+                continue;
+            }
             task.setStatus(STATUS_PENDING);
             task.setArticleId(null);
             task.setErrorMessage(null);
             task.setStartedAt(null);
             task.setFinishedAt(null);
-            taskMapper.updateById(task);
+            retriedTaskIds.add(task.getId());
         }
+        if (retriedTaskIds.isEmpty()) {
+            throw new BizException(400, "当前批次没有可重试的失败任务");
+        }
+        batchMapper.markRunningClearingFinished(batchId, now);
         refreshBatchProgress(batchId, false);
-        submitBatchTaskRunner(batchId, failedTasks.stream().map(BatchArticleGenerationTask::getId).toList());
+        submitBatchTaskRunner(batchId, retriedTaskIds);
         return detail(batchId);
     }
 
@@ -504,7 +514,6 @@ public class BatchArticleGenerationService {
         List<BatchArticleGenerationBatch> batches = batchMapper.selectList(
                 new LambdaQueryWrapper<BatchArticleGenerationBatch>()
                         .in(BatchArticleGenerationBatch::getStatus, List.of(STATUS_PENDING, STATUS_RUNNING))
-                        .isNull(BatchArticleGenerationBatch::getFinishedAt)
                         .le(BatchArticleGenerationBatch::getUpdatedAt, cutoff)
                         .orderByAsc(BatchArticleGenerationBatch::getId)
                         .last("LIMIT " + safeLimit)
@@ -713,11 +722,14 @@ public class BatchArticleGenerationService {
     }
 
     private void resetTaskForRecovery(BatchArticleGenerationTask task) {
+        if (task == null || task.getId() == null || task.getBatchId() == null) {
+            return;
+        }
+        taskMapper.resetRunningForRecovery(task.getId(), task.getBatchId(), LocalDateTime.now().withNano(0));
         task.setStatus(STATUS_PENDING);
         task.setStartedAt(null);
         task.setFinishedAt(null);
         task.setErrorMessage(null);
-        taskMapper.updateById(task);
     }
 
     private void runTask(BatchArticleGenerationBatch batch, BatchArticleGenerationTask task) {
@@ -1052,12 +1064,14 @@ public class BatchArticleGenerationService {
     }
 
     private void markBatchRunning(BatchArticleGenerationBatch batch) {
+        if (batch.getId() != null) {
+            batchMapper.markRunningClearingFinished(batch.getId(), LocalDateTime.now().withNano(0));
+        }
         batch.setStatus(STATUS_RUNNING);
         if (batch.getStartedAt() == null) {
             batch.setStartedAt(LocalDateTime.now());
         }
         batch.setFinishedAt(null);
-        batchMapper.updateById(batch);
     }
 
     private void completeBatch(Long batchId) {

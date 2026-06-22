@@ -60,4 +60,35 @@ public interface BatchArticleGenerationTaskMapper extends BaseMapper<BatchArticl
     int releaseRunningClaim(@Param("taskId") Long taskId,
                             @Param("batchId") Long batchId,
                             @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE batch_article_generation_task
+            SET status = 'pending',
+                article_id = NULL,
+                started_at = NULL,
+                finished_at = NULL,
+                error_message = NULL,
+                updated_at = #{now}
+            WHERE id = #{taskId}
+              AND batch_id = #{batchId}
+              AND status = 'failed'
+            """)
+    int resetFailedForRetry(@Param("taskId") Long taskId,
+                            @Param("batchId") Long batchId,
+                            @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE batch_article_generation_task
+            SET status = 'pending',
+                started_at = NULL,
+                finished_at = NULL,
+                error_message = NULL,
+                updated_at = #{now}
+            WHERE id = #{taskId}
+              AND batch_id = #{batchId}
+              AND status = 'running'
+            """)
+    int resetRunningForRecovery(@Param("taskId") Long taskId,
+                                @Param("batchId") Long batchId,
+                                @Param("now") LocalDateTime now);
 }
