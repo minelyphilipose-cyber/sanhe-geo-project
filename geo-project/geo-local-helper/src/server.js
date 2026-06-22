@@ -34,6 +34,10 @@ const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
 const SELF_MEDIA_SCHEDULE_PLATFORMS_CACHE_MS = 60_000
 const EXTENSION_BIND_INTENT_TTL_MS = 2 * 60 * 1000
 const GEO_ENV_EXTENSION_NAME = 'GEO 自媒体助手'
+const DEFAULT_ALLOWED_WEB_ORIGINS = [
+  'https://www.huanjingaigeo.com',
+  'http://119.45.154.127',
+]
 const EXIT_CODE_PORT_IN_USE = 2
 const STARTED_AT = new Date().toISOString()
 const nonceCache = new Map()
@@ -157,11 +161,18 @@ async function loadConfig() {
   config.trustedBackendBase ||= config.backendBase || ''
   config.enableLegacyBackendTokenRoutes = config.enableLegacyBackendTokenRoutes === true
   config.enableStaticHelperToken = config.enableStaticHelperToken === true
-  const trustedBackendOrigin = safeOrigin(config.trustedBackendBase)
-  if (trustedBackendOrigin && !config.allowedOrigins.includes(trustedBackendOrigin)) {
-    config.allowedOrigins.push(trustedBackendOrigin)
+  for (const origin of DEFAULT_ALLOWED_WEB_ORIGINS) {
+    appendAllowedOrigin(config, origin)
   }
+  const trustedBackendOrigin = safeOrigin(config.trustedBackendBase)
+  appendAllowedOrigin(config, trustedBackendOrigin)
   return config
+}
+
+function appendAllowedOrigin(config, origin) {
+  if (!origin) return
+  config.allowedOrigins ||= []
+  if (!config.allowedOrigins.includes(origin)) config.allowedOrigins.push(origin)
 }
 
 async function loadRuntimeSettings() {
@@ -1584,13 +1595,19 @@ function shortDiagnosticsJson(value) {
     textSample: typeof value?.textSample === 'string' ? value.textSample.slice(0, 800) : value?.textSample,
     checkedAt: nowIso(),
   }
-  return JSON.stringify(normalized).slice(0, 1800)
+  return JSON.stringify(normalized).slice(0, 6000)
 }
 
 async function handleSchedulePollOnce(req, res, config) {
   await requireHelperAccess(req, config)
   const body = req.method === 'POST' ? await readJson(req) : {}
-  const platform = String(body.platform || 'toutiao').trim() || 'toutiao'
+  const queryPlatform = new URL(req.url, 'http://localhost').searchParams.get('platform')
+  const platform = String(body.platform || queryPlatform || '').trim()
+  if (!platform) {
+    const result = await pollSelfMediaSchedules(config)
+    sendJson(req, res, config, 200, result)
+    return
+  }
   const publishCheck = await claimAndCheckPublishResult(config, platform)
   if (publishCheck.claimed) {
     sendJson(req, res, config, 200, { ...publishCheck, kind: 'publish_result_check' })
@@ -1603,6 +1620,7 @@ async function handleSchedulePollOnce(req, res, config) {
 function defaultPublishUrlForPlatform(platform) {
   const normalized = String(platform || '').trim().toLowerCase()
   if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
+  if (normalized === 'douyin') return 'https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page'
   if (normalized === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
   if (normalized === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish'
   if (normalized === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1'
@@ -1612,6 +1630,7 @@ function defaultPublishUrlForPlatform(platform) {
 function defaultWorksListUrlForPlatform(platform) {
   const normalized = String(platform || '').trim().toLowerCase()
   if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/manage/content/all'
+  if (normalized === 'douyin') return 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
   if (normalized === 'xiaohongshu') return 'https://creator.xiaohongshu.com/new/note-manager'
   if (normalized === 'baijiahao') return null
   return defaultPublishUrlForPlatform(platform)
@@ -2167,7 +2186,10 @@ async function uploadImageFileToAdsPowerPage(body, filePath) {
         ? await chooseBaijiahaoCoverImageInputs(inputs)
         : await choosePuppeteerImageInputs(inputs)
     if (!targets.length) {
-      throw new Error(`${platform || 'platform'} image file input not found`)
+      const diagnostic = chooserState?.tried
+        ? `; chooserTried=${JSON.stringify(chooserState.tried).slice(0, 800)}`
+        : ''
+      throw new Error(`${platform || 'platform'} image file input not found${diagnostic}`)
     }
     const states = []
     for (const target of targets) {
@@ -2199,6 +2221,13 @@ function findUploadTargetPage(pages, platform) {
       return pageUrl.includes('mp.toutiao.com') && pageUrl.includes('/graphic/publish')
     }) || pages.find((item) => item.url().includes('mp.toutiao.com'))
   }
+  if (normalized === 'douyin') {
+    return pages.find((item) => {
+      const pageUrl = item.url()
+      return pageUrl.includes('creator.douyin.com')
+        && (pageUrl.includes('/creator-micro/content/upload') || pageUrl.includes('/creator-micro/content/post/article'))
+    }) || pages.find((item) => item.url().includes('creator.douyin.com'))
+  }
   if (normalized === 'baijiahao') {
     return pages.find((item) => {
       const pageUrl = item.url()
@@ -2210,30 +2239,135 @@ function findUploadTargetPage(pages, platform) {
 
 async function acceptPlatformFileChooser(page, filePath, platform) {
   const labels = uploadChooserLabels(platform)
-  const chooserPromise = page.waitForFileChooser({ timeout: 3_000 }).catch(() => null)
-  const clicked = await page.evaluate((inputLabels) => {
-    function visible(el) {
-      const style = window.getComputedStyle(el)
-      const rect = el.getBoundingClientRect()
-      return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
-    }
-    const labels = Array.isArray(inputLabels) ? inputLabels : []
-    const candidates = Array.from(document.querySelectorAll('button, [role="button"], div, span, label'))
-      .filter(visible)
-      .filter((el) => {
-        const text = String(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, '')
-        return labels.some((label) => text === label || text.includes(label))
-      })
-    const target = candidates[0]
-    if (!target) return false
-    const clickable = target.closest('button, label, [role="button"]') || target
-    clickable.click()
-    return true
-  }, labels).catch(() => false)
-  if (!clicked) return null
+  if (String(platform || '').trim().toLowerCase() === 'douyin') {
+    return acceptFileChooserByClickCandidates(page, filePath, labels)
+  }
 
+  const chooserPromise = page.waitForFileChooser({ timeout: 3_000 }).catch(() => null)
+  const clicked = await clickPlatformUploadChooser(page, labels)
+  if (!clicked) return null
   const chooser = await chooserPromise
   if (!chooser) return null
+  return acceptChooserAndReadState(page, chooser, filePath)
+}
+
+async function acceptFileChooserByClickCandidates(page, filePath, labels) {
+  const candidates = await collectUploadClickCandidates(page, labels)
+  const tried = []
+  for (const candidate of candidates.slice(0, 6)) {
+    tried.push({
+      score: candidate.score,
+      text: candidate.text,
+      clickableText: candidate.clickableText,
+      x: Math.round(candidate.x),
+      y: Math.round(candidate.y),
+    })
+    const chooserPromise = page.waitForFileChooser({ timeout: 2_500 }).catch(() => null)
+    await page.mouse.move(candidate.x, candidate.y).catch(() => {})
+    await page.mouse.down().catch(() => {})
+    await delay(40)
+    await page.mouse.up().catch(() => {})
+    const chooser = await chooserPromise
+    if (chooser) return acceptChooserAndReadState(page, chooser, filePath, { tried })
+  }
+  return { accepted: false, noChooser: true, tried }
+}
+
+async function acceptFileChooserByCdpCandidates(page, filePath, candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null
+  const client = await page.target().createCDPSession()
+  const tried = []
+  try {
+    await client.send('Page.setInterceptFileChooserDialog', { enabled: true })
+    for (const candidate of candidates.slice(0, 6)) {
+      tried.push({
+        score: candidate.score,
+        text: candidate.text,
+        clickableText: candidate.clickableText,
+        x: Math.round(candidate.x),
+        y: Math.round(candidate.y),
+      })
+      const chooserPromise = new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          client.off('Page.fileChooserOpened', onChooser)
+          resolve(null)
+        }, 2500)
+        function onChooser(event) {
+          clearTimeout(timer)
+          client.off('Page.fileChooserOpened', onChooser)
+          resolve(event)
+        }
+        client.on('Page.fileChooserOpened', onChooser)
+      })
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: candidate.x,
+        y: candidate.y,
+        button: 'none',
+      }).catch(() => {})
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: candidate.x,
+        y: candidate.y,
+        button: 'left',
+        clickCount: 1,
+      }).catch(() => {})
+      await delay(40)
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: candidate.x,
+        y: candidate.y,
+        button: 'left',
+        clickCount: 1,
+      }).catch(() => {})
+      const chooser = await chooserPromise
+      if (!chooser?.backendNodeId) continue
+      await client.send('DOM.setFileInputFiles', {
+        backendNodeId: chooser.backendNodeId,
+        files: [filePath],
+      })
+      const inputState = await dispatchFileInputEventsByBackendNodeId(client, chooser.backendNodeId)
+      await delay(500)
+      return {
+        accepted: true,
+        via: 'cdp_file_chooser',
+        pageUrl: page.url(),
+        fileInputCount: null,
+        inputState,
+        inputStates: inputState ? [inputState] : [],
+        tried,
+      }
+    }
+    return { accepted: false, noChooser: true, tried }
+  } finally {
+    await client.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => {})
+    await client.detach().catch(() => {})
+  }
+}
+
+async function dispatchFileInputEventsByBackendNodeId(client, backendNodeId) {
+  const resolved = await client.send('DOM.resolveNode', { backendNodeId }).catch(() => null)
+  const objectId = resolved?.object?.objectId
+  if (!objectId) return { filesLength: null }
+  const result = await client.send('Runtime.callFunctionOn', {
+    objectId,
+    returnByValue: true,
+    functionDeclaration: `function() {
+      const events = ['input', 'change'];
+      for (const type of events) {
+        this.dispatchEvent(new Event(type, { bubbles: true }));
+      }
+      return {
+        filesLength: this.files ? this.files.length : null,
+        value: this.value || '',
+        accept: this.getAttribute('accept') || ''
+      };
+    }`,
+  }).catch(() => null)
+  return result?.result?.value || { filesLength: null }
+}
+
+async function acceptChooserAndReadState(page, chooser, filePath, extra = {}) {
   await chooser.accept([filePath])
   await delay(500)
   const inputs = await page.$$('input[type="file"]')
@@ -2247,7 +2381,79 @@ async function acceptPlatformFileChooser(page, filePath, platform) {
     fileInputCount: inputs.length,
     inputState: states.find((state) => state.filesLength > 0) || states[0] || null,
     inputStates: states,
+    ...extra,
   }
+}
+
+async function clickPlatformUploadChooser(page, labels) {
+  const candidates = await collectUploadClickCandidates(page, labels)
+  const chosen = candidates[0]
+  if (!chosen) return false
+  await page.mouse.click(chosen.x, chosen.y, { delay: 30 })
+  return true
+}
+
+async function collectUploadClickCandidates(page, labels) {
+  return page.evaluate((inputLabels) => {
+    function visible(el) {
+      const style = window.getComputedStyle(el)
+      const rect = el.getBoundingClientRect()
+      return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
+    }
+    const labels = Array.isArray(inputLabels) ? inputLabels : []
+    return Array.from(document.querySelectorAll('button, [role="button"], div, span, label'))
+      .filter(visible)
+      .map((el) => {
+      function visible(el) {
+        const style = window.getComputedStyle(el)
+        const rect = el.getBoundingClientRect()
+        return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
+      }
+      if (!visible(el)) return null
+      const text = String(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, '')
+      const score = scoreUploadCandidate(el, text, labels)
+      if (score <= 0) return null
+      const clickable = el.closest('button, label, [role="button"], [class*="mycard"], [class*="content-upload"]') || el
+      const rect = clickable.getBoundingClientRect()
+      const icon = clickable.querySelector('[class*="addIcon"], [class*="addInnerIcon"]')
+      const iconRect = icon?.getBoundingClientRect?.()
+      const point = iconRect && iconRect.width > 0 && iconRect.height > 0
+        ? { x: iconRect.left + iconRect.width / 2, y: iconRect.top + iconRect.height / 2 }
+        : { x: rect.left + Math.min(48, Math.max(12, rect.width * 0.08)), y: rect.top + rect.height / 2 }
+      return {
+        score,
+        text,
+        clickableText: String(clickable.textContent || '').replace(/\s+/g, '').slice(0, 120),
+        x: point.x,
+        y: point.y,
+      }
+
+      function scoreUploadCandidate(el, text, labels) {
+        if (!labels.some((label) => text === label || text.includes(label))) return 0
+        let score = 10
+        if (labels.some((label) => text === label)) score += 100
+        const context = contextText(el)
+        if (context.includes('文章头图')) score += 300
+        if (context.includes('封面设置')) score -= 120
+        if (context.includes('点击上传图片')) score += 80
+        if (context.includes('点击上传封面图')) score -= 60
+        if (String(el.className || '').includes('mycard')) score += 20
+        return score
+      }
+
+      function contextText(el) {
+        const parts = []
+        let current = el
+        for (let depth = 0; current && depth < 6; depth += 1) {
+          parts.push(String(current.textContent || '').replace(/\s+/g, ''))
+          current = current.parentElement
+        }
+        return parts.join('')
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.score - left.score)
+  }, labels).catch(() => [])
 }
 
 function uploadChooserLabels(platform) {
@@ -2257,6 +2463,9 @@ function uploadChooserLabels(platform) {
   }
   if (normalized === 'baijiahao') {
     return ['点击本地上传', '本地上传', '上传图片', '选择图片']
+  }
+  if (normalized === 'douyin') {
+    return ['点击上传图片', '上传图片', '点击上传封面图', '上传封面图', '替换封面']
   }
   return ['本地上传', '上传图片', '选择图片']
 }
@@ -2580,6 +2789,8 @@ async function route(req, res, config) {
         port: config.port,
         backendBase: config.backendBase || null,
         trustedBackendBase: config.trustedBackendBase || null,
+        allowedOrigins: config.allowedOrigins || [],
+        privateNetworkAccess: true,
       },
     })
     return

@@ -1185,9 +1185,16 @@ public class SelfMediaPublishScheduleService {
                 || SelfMediaPublishScheduleConstants.STATUS_SCHEDULING.equals(status)
                 || SelfMediaPublishScheduleConstants.STATUS_SCHEDULED.equals(status)
                 || SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(status)) {
+            PlatformScheduleVerification verification = parsePlatformScheduleVerification(diagnosticsJson);
             row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED);
             row.setPublishedConfirmedAt(LocalDateTime.now());
-            row.setPlatformPublishedUrl(trimToNull(platformPublishedUrl));
+            row.setPlatformPublishedUrl(trimToNull(firstText(platformPublishedUrl, verification.platformPublishedUrl())));
+            if (verification.platformPublishId() != null) {
+                row.setPlatformPublishId(verification.platformPublishId());
+            }
+            if (verification.coverImageUrl() != null) {
+                row.setPublishCheckCoverUrl(verification.coverImageUrl());
+            }
             row.setLockedUntil(null);
             row.setNextAttemptAt(null);
             row.setFailureCode(null);
@@ -1258,9 +1265,16 @@ public class SelfMediaPublishScheduleService {
                 || SelfMediaPublishScheduleConstants.STATUS_SCHEDULED.equals(status)
                 || SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(status)
                 || SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN.equals(status)) {
+            PlatformScheduleVerification verification = parsePlatformScheduleVerification(diagnosticsJson);
             row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED);
             row.setPublishedConfirmedAt(LocalDateTime.now());
-            row.setPlatformPublishedUrl(trimToNull(platformPublishedUrl));
+            row.setPlatformPublishedUrl(trimToNull(firstText(platformPublishedUrl, verification.platformPublishedUrl())));
+            if (verification.platformPublishId() != null) {
+                row.setPlatformPublishId(verification.platformPublishId());
+            }
+            if (verification.coverImageUrl() != null) {
+                row.setPublishCheckCoverUrl(verification.coverImageUrl());
+            }
             row.setLockedUntil(null);
             row.setNextAttemptAt(null);
             row.setFailureCode(null);
@@ -1605,6 +1619,15 @@ public class SelfMediaPublishScheduleService {
         if (verification.platformScheduleId() != null) {
             row.setPlatformScheduleId(verification.platformScheduleId());
         }
+        if (verification.platformPublishId() != null) {
+            row.setPlatformPublishId(verification.platformPublishId());
+        }
+        if (verification.platformPublishedUrl() != null) {
+            row.setPlatformPublishedUrl(verification.platformPublishedUrl());
+        }
+        if (verification.coverImageUrl() != null) {
+            row.setPublishCheckCoverUrl(verification.coverImageUrl());
+        }
         row.setScheduledAt(LocalDateTime.now());
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
         row.setNextAttemptAt(resolvePublishResultCheckAttemptTime(row));
@@ -1622,25 +1645,43 @@ public class SelfMediaPublishScheduleService {
 
     private PlatformScheduleVerification parsePlatformScheduleVerification(String diagnosticsJson) {
         if (!StringUtils.hasText(diagnosticsJson)) {
-            return new PlatformScheduleVerification(null, null);
+            return new PlatformScheduleVerification(null, null, null, null, null);
         }
         try {
             JsonNode root = objectMapper.readTree(diagnosticsJson);
             JsonNode verification = root.path("fillResult").path("publishOptions").path("publishVerification");
             if (verification.isMissingNode()) {
-                return new PlatformScheduleVerification(null, null);
+                return new PlatformScheduleVerification(null, null, null, null, null);
             }
             LocalDateTime platformScheduledAt = parseLocalDateTime(firstText(
                     verification.path("platformScheduledAt").asText(null),
                     verification.path("scheduledAtText").asText(null)
             ));
             String platformScheduleId = trimToNull(firstText(
-                    verification.path("platformScheduleId").asText(null),
+                    verification.path("platformScheduleId").asText(null)
+            ));
+            String platformPublishId = trimToNull(firstText(
                     verification.path("platformPublishId").asText(null)
             ));
-            return new PlatformScheduleVerification(platformScheduledAt, platformScheduleId);
+            String platformPublishedUrl = trimToNull(firstText(
+                    verification.path("platformPublishedUrl").asText(null),
+                    verification.path("publishedUrl").asText(null),
+                    root.path("fillResult").path("publishOptions").path("platformPublishedUrl").asText(null)
+            ));
+            String coverImageUrl = trimToNull(firstText(
+                    verification.path("coverImageUrl").asText(null),
+                    root.path("fillResult").path("publishOptions").path("coverImageUrl").asText(null),
+                    root.path("fillResult").path("coverImageUrl").asText(null)
+            ));
+            return new PlatformScheduleVerification(
+                    platformScheduledAt,
+                    platformScheduleId,
+                    platformPublishId,
+                    platformPublishedUrl,
+                    coverImageUrl
+            );
         } catch (JsonProcessingException ignored) {
-            return new PlatformScheduleVerification(null, null);
+            return new PlatformScheduleVerification(null, null, null, null, null);
         }
     }
 
@@ -1681,7 +1722,10 @@ public class SelfMediaPublishScheduleService {
 
     private record PlatformScheduleVerification(
             LocalDateTime platformScheduledAt,
-            String platformScheduleId
+            String platformScheduleId,
+            String platformPublishId,
+            String platformPublishedUrl,
+            String coverImageUrl
     ) {
     }
 

@@ -479,6 +479,14 @@ public class ExtensionTaskStateService {
         if (!(verification instanceof Map<?, ?> verificationMap)) {
             return null;
         }
+        Object platformPublishedUrl = verificationMap.get("platformPublishedUrl");
+        if (platformPublishedUrl != null && StringUtils.hasText(String.valueOf(platformPublishedUrl))) {
+            return String.valueOf(platformPublishedUrl).trim();
+        }
+        Object publishedUrl = verificationMap.get("publishedUrl");
+        if (publishedUrl != null && StringUtils.hasText(String.valueOf(publishedUrl))) {
+            return String.valueOf(publishedUrl).trim();
+        }
         Object pageUrl = verificationMap.get("pageUrl");
         return pageUrl == null ? null : String.valueOf(pageUrl);
     }

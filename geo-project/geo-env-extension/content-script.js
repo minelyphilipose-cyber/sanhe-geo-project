@@ -1,5 +1,7 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
+var GEO_ENV_CONTENT_SCRIPT_VERSION = globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION || '0.1.1'
+globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
   globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__ = true
@@ -27,7 +29,17 @@ if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const run = async () => {
       if (message?.type === 'GEO_ENV_PING') {
-        return { ok: true, href: location.href }
+        return {
+          ok: true,
+          href: location.href,
+          contentScriptVersion: GEO_ENV_CONTENT_SCRIPT_VERSION,
+          adapters: {
+            douyin: Boolean(globalThis.__GEO_DOUYIN_PLATFORM__?.createPublishOptionsAdapter),
+          },
+        }
+      }
+      if (message?.type === 'GEO_ENV_COLLECT_FAILURE_SNAPSHOT') {
+        return safeCollectFailureSnapshot(message.payload || {})
       }
       if (message?.type === 'GEO_ENV_CHECK_IDENTITY') {
         return checkIdentityPayload(message.payload || {})
@@ -57,7 +69,12 @@ if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
         const errorMessage = error?.message || String(error || '未知错误')
         const failureCode = classifyGeoFillFailureCode(errorMessage, message?.payload?.platform)
         showStatus(`${errorPrefix}：${errorMessage}`, 'error')
-        sendResponse({ ok: false, error: errorMessage, failureCode })
+        sendResponse({
+          ok: false,
+          error: errorMessage,
+          failureCode,
+          diagnostics: safeCollectFailureSnapshot(message?.payload || {}),
+        })
       })
     return true
   })
@@ -71,6 +88,10 @@ function isEditorReadyReportLocation() {
   }
   if (location.hostname === 'creator.xiaohongshu.com') return href.includes('/publish/publish')
   if (location.hostname === 'baijiahao.baidu.com') return href.includes('/builder/rc/edit')
+  if (location.hostname === 'creator.douyin.com') {
+    return href.includes('/creator-micro/content/upload')
+      || href.includes('/creator-micro/content/post/article')
+  }
   return false
 }
 
@@ -90,9 +111,86 @@ function classifyGeoFillFailureCode(message, platform) {
     return globalThis.__GEO_ZHIHU_PLATFORM__?.classifyFailureCode?.(text, 'zhihu')
       || classifyZhihuFailureCode(text)
   }
+  if (normalizePlatform(platform) === 'douyin' || text.includes('抖音')) {
+    return globalThis.__GEO_DOUYIN_PLATFORM__?.classifyFailureCode?.(text, 'douyin')
+      || 'DOUYIN_FILL_FAILED'
+  }
   if (text.includes('账号一致性校验失败')) return 'ACCOUNT_MISMATCH'
   if (text.includes('填充令牌已使用') || text.includes('fill token used or expired')) return 'FILL_TOKEN_USED_OR_EXPIRED'
   return 'FILL_FAILED'
+}
+
+function collectFailureSnapshot(context = {}) {
+  const root = document.body || document.documentElement
+  const platform = normalizePlatform(context.platform || inferPlatformFromLocation())
+  const body = normalizeText(root?.innerText || root?.textContent || '').slice(0, 1200)
+  const inputs = Array.from(document.querySelectorAll('input[type="file"], input, textarea')).slice(0, 20).map((input, index) => ({
+    index,
+    type: input.type || input.tagName,
+    accept: input.getAttribute('accept') || '',
+    placeholder: input.getAttribute('placeholder') || '',
+    value: input.value ? String(input.value).slice(0, 80) : '',
+  }))
+  const actions = collectVisibleActionElements(document.body)
+    .slice(0, 20)
+    .map((item) => ({
+      text: normalizeText(item.text || item.el?.textContent || '').slice(0, 40),
+      rect: compactSnapshotRect(item.rect || item.el?.getBoundingClientRect?.()),
+    }))
+  return {
+    version: GEO_ENV_CONTENT_SCRIPT_VERSION,
+    href: location.href,
+    platform,
+    text: body,
+    inputs,
+    actions,
+    adapterState: collectAdapterState(platform),
+  }
+}
+
+function safeCollectFailureSnapshot(context = {}) {
+  try {
+    return collectFailureSnapshot(context)
+  } catch (error) {
+    return {
+      version: GEO_ENV_CONTENT_SCRIPT_VERSION,
+      href: location.href,
+      platform: normalizePlatform(context.platform || inferPlatformFromLocation()),
+      error: `failure snapshot collect failed: ${error?.message || String(error)}`,
+    }
+  }
+}
+
+function collectAdapterState(platform) {
+  if (platform !== 'douyin') return null
+  const adapter = globalThis.__GEO_DOUYIN_PLATFORM__?.createPublishOptionsAdapter?.({
+    waitForCondition,
+    uploadCoverImageFromLocalHelper,
+    delay,
+    clickTrustedActionOnce,
+    requestTrustedClickAt,
+    findVisibleTextElement,
+    nearestLargeContainer,
+    normalizeText,
+    isVisibleElement,
+    collectVisibleActionElements,
+    showStatus,
+  })
+  try {
+    return adapter?.describeState?.() || null
+  } catch (error) {
+    return `describeState failed: ${error?.message || String(error)}`
+  }
+}
+
+function compactSnapshotRect(rect) {
+  if (!rect) return null
+  return {
+    x: Math.round(rect.left),
+    y: Math.round(rect.top),
+    w: Math.round(rect.width),
+    h: Math.round(rect.height),
+  }
 }
 
 function classifyZhihuFailureCode(message) {
@@ -116,7 +214,7 @@ async function fillPayload(payload) {
     environmentKey: payload.environmentKey || null,
     platform: payload.platform || null,
   }
-  showStatus('正在等待编辑器...', 'info')
+  showStatus(`v${GEO_ENV_CONTENT_SCRIPT_VERSION} 正在等待编辑器...`, 'info')
   const fillProfile = buildFillProfile(payload)
   await ensureEditorVisible(fillProfile)
   normalizeEditorViewport(fillProfile)
@@ -129,7 +227,7 @@ async function fillPayload(payload) {
     throw new Error(`${platformDisplayName(fillProfile.platform)}标题长度不符合平台要求：${expectedTitle}`)
   }
   const rawHtml = payload.renderedHtml || payload.html || payload.content || ''
-  const coverImageCleanup = removeCoverImageFromContent(rawHtml, resolvePayloadCoverImageUrl(payload))
+  const coverImageCleanup = removeCoverImageFromContent(rawHtml, resolvePayloadStandaloneImageUrls(payload))
   const normalizedContent = removeDuplicateLeadingTitle(coverImageCleanup.html, expectedTitle)
   const titleFilled = await fillTitle(filledTitle, titleElement, fillProfile)
   const contentElement = findContentElement(titleElement, fillProfile)
@@ -153,7 +251,7 @@ async function fillPayload(payload) {
   const identityText = identityCheck.message ? `${identityCheck.message}，` : ''
   const contentText = [
     normalizedContent.removedTitle ? '已去除正文重复标题' : '',
-    coverImageCleanup.removed ? '已去除正文重复封面图' : '',
+    coverImageCleanup.removed ? '已去除正文重复头图/封面图' : '',
   ].filter(Boolean).join('，')
   const optionText = publishOptions.message ? `${publishOptions.message}，` : ''
   const draftText = draftState.message ? `${draftState.message}，` : ''
@@ -254,6 +352,7 @@ var DOUYIN_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_DOUYIN_PLATFORM__?.createP
   normalizeText,
   isVisibleElement,
   collectVisibleActionElements,
+  showStatus,
 }) || {
   platform: 'douyin',
   fillPublishOptions: async () => {
@@ -349,6 +448,35 @@ function resolvePayloadCoverImageUrl(payload) {
     profileOptions.coverImageUrl,
     platformSpecific.coverImageUrl,
   )
+}
+
+function resolvePayloadStandaloneImageUrls(payload) {
+  const profileOptions = payload.profile?.platformOptions || {}
+  const platformOptions = payload.platformOptions || {}
+  const platformSpecific = platformOptions[normalizePlatform(payload.platform)] || profileOptions[normalizePlatform(payload.platform)] || {}
+  return uniqueTexts([
+    payload.coverImageUrl,
+    platformOptions.coverImageUrl,
+    profileOptions.coverImageUrl,
+    platformSpecific.coverImageUrl,
+    payload.headImageUrl,
+    platformOptions.headImageUrl,
+    profileOptions.headImageUrl,
+    platformSpecific.headImageUrl,
+  ])
+}
+
+function uniqueTexts(values) {
+  const seen = new Set()
+  const result = []
+  for (const value of values) {
+    if (typeof value !== 'string' || !value.trim()) continue
+    const text = value.trim()
+    if (seen.has(text)) continue
+    seen.add(text)
+    result.push(text)
+  }
+  return result
 }
 
 function firstText(...values) {
@@ -2203,7 +2331,7 @@ async function uploadToutiaoCoverImage(imageUrl, platform) {
   )
 }
 
-async function setFileInputFromLocalHelper(imageUrl, platform) {
+async function setFileInputFromLocalHelper(imageUrl, platform, options = {}) {
   if (!supportsLocalHelperUploadPlatform(platform)) return null
   const response = await safeRuntimeRequest({
     type: 'GEO_ENV_SET_FILE_INPUT_FROM_URL',
@@ -2211,6 +2339,7 @@ async function setFileInputFromLocalHelper(imageUrl, platform) {
     platform: normalizePlatform(platform),
     taskId: globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT?.taskId || null,
     environmentKey: globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT?.environmentKey || null,
+    click: options.click || null,
   })
   if (!response?.ok) {
     throw new Error(`${platformDisplayName(platform)}本地文件上传通道失败：${response?.error || '扩展后台未响应'}`)
@@ -2222,8 +2351,8 @@ async function setFileInputFromLocalHelper(imageUrl, platform) {
   return response
 }
 
-async function uploadCoverImageFromLocalHelper(imageUrl, platform, platformName) {
-  const localUpload = await setFileInputFromLocalHelper(imageUrl, platform)
+async function uploadCoverImageFromLocalHelper(imageUrl, platform, platformName, options = {}) {
+  const localUpload = await setFileInputFromLocalHelper(imageUrl, platform, options)
   if (localUpload?.ok) return localUpload
 
   const fileInput = await waitForCondition(
@@ -2601,9 +2730,9 @@ function removeDuplicateLeadingTitle(html, title) {
 }
 
 function removeCoverImageFromContent(html, coverImageUrl) {
-  if (!html || !coverImageUrl) return { html, removed: false }
-  const coverKey = normalizeImageUrlForComparison(coverImageUrl)
-  if (!coverKey) return { html, removed: false }
+  const imageUrls = Array.isArray(coverImageUrl) ? coverImageUrl : [coverImageUrl]
+  const imageKeys = new Set(imageUrls.map(normalizeImageUrlForComparison).filter(Boolean))
+  if (!html || imageKeys.size === 0) return { html, removed: false }
 
   const template = document.createElement('template')
   template.innerHTML = html
@@ -2611,7 +2740,7 @@ function removeCoverImageFromContent(html, coverImageUrl) {
   const images = Array.from(template.content.querySelectorAll('img[src]'))
   for (const image of images) {
     const src = image.getAttribute('src') || ''
-    if (!sameImageResource(src, coverKey)) continue
+    if (!sameImageResource(src, imageKeys)) continue
     const removable = removableImageBlock(image)
     removable.remove()
     removed = true
@@ -2637,7 +2766,9 @@ function removableImageBlock(image) {
 
 function sameImageResource(src, normalizedCoverKey) {
   const imageKey = normalizeImageUrlForComparison(src)
-  return Boolean(imageKey && normalizedCoverKey && imageKey === normalizedCoverKey)
+  if (!imageKey || !normalizedCoverKey) return false
+  if (normalizedCoverKey instanceof Set) return normalizedCoverKey.has(imageKey)
+  return imageKey === normalizedCoverKey
 }
 
 function normalizeImageUrlForComparison(value) {
@@ -3677,9 +3808,10 @@ async function maybeOpenPlatformEditor(fillProfile) {
   }
 
   if (fillProfile.platform === 'douyin') {
-    if (location.hostname !== 'creator.douyin.com' || !location.pathname.includes('/creator-micro/content/upload')) {
+    if (location.hostname !== 'creator.douyin.com'
+      || (!location.pathname.includes('/creator-micro/content/upload') && !location.pathname.includes('/creator-micro/content/post/article'))) {
       showStatus('抖音当前不在发布入口，切换到创作者中心发布页', 'info')
-      location.href = 'https://creator.douyin.com/creator-micro/content/upload'
+      location.href = 'https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page'
       await delay(2200)
       return
     }
@@ -3689,6 +3821,7 @@ async function maybeOpenPlatformEditor(fillProfile) {
       normalizeText,
       findVisibleTextElement,
       isVisibleElement,
+      showStatus,
     })
     if (findTitleElement(fillProfile) && findContentElement(null, fillProfile)) return
   }
@@ -3766,6 +3899,13 @@ async function clickTrustedActionOnce(el, options = {}) {
   const target = el.closest?.('button, a, [role="button"], [role="tab"], [role="menuitem"]') || el
   target.scrollIntoView?.({ block: 'center', inline: 'center' })
   await delay(100)
+  if (normalizePlatform(options.platform) === 'douyin') {
+    firePointerClick(target, options)
+    target.click?.()
+    await delay(80)
+    await requestTrustedClick(target, options)
+    return
+  }
   if (requiresTrustedClick(options.platform)) {
     await requestTrustedClick(target, options)
     return
@@ -3801,7 +3941,7 @@ function firePointerClick(el, options = {}) {
 }
 
 function requiresTrustedClick(platform) {
-  return ['xiaohongshu', 'toutiao', 'zhihu', 'baijiahao'].includes(normalizePlatform(platform))
+  return ['xiaohongshu', 'toutiao', 'zhihu', 'baijiahao', 'douyin'].includes(normalizePlatform(platform))
 }
 
 async function requestTrustedClick(el, options = {}) {

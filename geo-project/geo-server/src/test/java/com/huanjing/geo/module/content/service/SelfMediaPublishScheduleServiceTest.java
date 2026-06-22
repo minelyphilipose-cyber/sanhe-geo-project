@@ -1766,12 +1766,15 @@ class SelfMediaPublishScheduleServiceTest {
 
         SelfMediaPublishScheduleVO response = service.markLocalAgentExecutionScheduled(
                 117L,
-                "{\"fillResult\":{\"publishOptions\":{\"publishVerification\":{\"verified\":true,\"platformScheduledAt\":\"2026-06-12 09:30\",\"platformScheduleId\":\"schedule-117\"}}}}"
+                "{\"fillResult\":{\"publishOptions\":{\"publishVerification\":{\"verified\":true,\"platformScheduledAt\":\"2026-06-12 09:30\",\"platformScheduleId\":\"schedule-117\",\"platformPublishId\":\"publish-117\",\"platformPublishedUrl\":\"https://example.test/scheduled/117\",\"coverImageUrl\":\"https://cdn.test/cover-117.jpg\"}}}}"
         );
 
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED, response.getStatus());
         assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
         assertEquals("schedule-117", response.getPlatformScheduleId());
+        assertEquals("publish-117", response.getPlatformPublishId());
+        assertEquals("https://example.test/scheduled/117", response.getPlatformPublishedUrl());
+        assertEquals("https://cdn.test/cover-117.jpg", response.getPublishCheckCoverUrl());
         assertEquals(LocalDateTime.of(2026, 6, 12, 9, 30), response.getPlatformScheduledAt());
         assertEquals(LocalDateTime.of(2026, 6, 12, 9, 30), response.getNextAttemptAt());
         verify(companyChannelQuotaService).confirmSelfMediaSchedule(117L);
@@ -1790,15 +1793,17 @@ class SelfMediaPublishScheduleServiceTest {
 
         SelfMediaPublishScheduleVO response = service.markLocalAgentExecutionPublishedConfirmed(
                 118L,
-                "https://example.test/article/118",
-                "{\"published\":true}"
+                null,
+                "{\"fillResult\":{\"publishOptions\":{\"publishVerification\":{\"verified\":true,\"platformPublishedUrl\":\"https://example.test/article/118\",\"platformPublishId\":\"publish-118\",\"coverImageUrl\":\"https://cdn.test/cover-118.jpg\"}}}}"
         );
 
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED, response.getStatus());
         assertEquals("https://example.test/article/118", response.getPlatformPublishedUrl());
+        assertEquals("publish-118", response.getPlatformPublishId());
+        assertEquals("https://cdn.test/cover-118.jpg", response.getPublishCheckCoverUrl());
         assertNull(response.getLockedUntil());
         assertNull(response.getNextAttemptAt());
-        assertEquals("{\"published\":true}", response.getDiagnosticsJson());
+        assertTrue(response.getDiagnosticsJson().contains("\"platformPublishedUrl\":\"https://example.test/article/118\""));
         verify(companyChannelQuotaService).confirmSelfMediaSchedule(118L);
         verify(companyChannelQuotaService).confirmDistribution(318L);
         verify(environmentLockService).release(118L);
