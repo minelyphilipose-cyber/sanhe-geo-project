@@ -10,6 +10,44 @@ import java.util.List;
 public class ProjectSelfMediaScheduleBatchDetailVO {
     private ProjectSelfMediaScheduleBatchVO batch;
     private List<Item> items = new ArrayList<>();
+    private List<FailureSummary> failureSummaries = new ArrayList<>();
+    private List<StatusRule> statusRules = new ArrayList<>();
+    private BatchActionPreview actionPreview;
+
+    @Data
+    public static class FailureSummary {
+        private String code;
+        private String label;
+        private String category;
+        private Integer count;
+        private Boolean retryable;
+        private String actionHint;
+        private String firstMessage;
+        private String groupCode;
+        private String groupLabel;
+        private String operatorAction;
+    }
+
+    @Data
+    public static class StatusRule {
+        private String status;
+        private String label;
+        private String meaning;
+        private List<String> allowedActions = new ArrayList<>();
+        private String operatorHint;
+    }
+
+    @Data
+    public static class BatchActionPreview {
+        private Integer retryFailedCount;
+        private Integer retryAbnormalCount;
+        private Integer manualCount;
+        private Integer rescheduleNextMonthCount;
+        private Integer ignoreCount;
+        private Integer unableCount;
+        private String nextMonth;
+        private List<String> messages = new ArrayList<>();
+    }
 
     @Data
     public static class Item {
@@ -44,5 +82,13 @@ public class ProjectSelfMediaScheduleBatchDetailVO {
         private LocalDateTime lockedUntil;
         private String scheduleFailureCode;
         private String scheduleFailureMessage;
+        private String claimDiagnosticCode;
+        private String claimDiagnosticMessage;
+        private String failureGroupCode;
+        private String failureGroupLabel;
+        private String operatorActionHint;
+        private List<String> allowedActions = new ArrayList<>();
+        private Boolean autoCompensationAvailable;
+        private Integer autoCompensationRemaining;
     }
 }

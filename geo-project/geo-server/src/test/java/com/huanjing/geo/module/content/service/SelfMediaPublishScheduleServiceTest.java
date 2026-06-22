@@ -35,6 +35,7 @@ import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -82,6 +83,7 @@ class SelfMediaPublishScheduleServiceTest {
     private ContentDistributionService contentDistributionService;
     private CompanyChannelQuotaService companyChannelQuotaService;
     private BrandAccessService brandAccessService;
+    private SysUserMapper sysUserMapper;
     private LocalAgentSessionMapper localAgentSessionMapper;
     private BusinessCalendarService businessCalendarService;
     private ThirdPartySubjectRotationService thirdPartySubjectRotationService;
@@ -113,6 +115,7 @@ class SelfMediaPublishScheduleServiceTest {
         when(companyChannelQuotaService.selfMediaDistributionQuota(anyLong(), anyString()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 0, 100));
         brandAccessService = mock(BrandAccessService.class);
+        sysUserMapper = mock(SysUserMapper.class);
         localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
         when(localAgentSessionMapper.countOnlineSessionsByOperator(anyLong(), any(), any())).thenReturn(1L);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
@@ -138,6 +141,7 @@ class SelfMediaPublishScheduleServiceTest {
                 companyChannelQuotaService,
                 brandAccessService,
                 currentUserService,
+                sysUserMapper,
                 localAgentSessionMapper,
                 businessCalendarService,
                 thirdPartySubjectRotationService,
@@ -1629,9 +1633,37 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("MANUAL_RETRY_REQUESTED", response.getFailureCode());
         assertEquals(4, response.getMaxAttempts());
         assertNull(row.getLockedUntil());
-        assertTrue(response.getNextAttemptAt().isBefore(LocalDateTime.now().plusSeconds(5)));
+        assertTrue(response.getNextAttemptAt().isAfter(LocalDateTime.now().plusMinutes(1)));
+        assertTrue(response.getNextAttemptAt().isBefore(LocalDateTime.now().plusMinutes(3)));
+        assertEquals(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE, response.getScheduleStrategy());
+        assertEquals(response.getPlannedPublishAt(), response.getPlatformScheduledAt());
+        assertTrue(response.getPlannedPublishAt().isAfter(response.getNextAttemptAt().plusMinutes(120)));
         verify(scheduleMapper).updateById(row);
         verify(environmentLockService).release(114L);
+    }
+
+    @Test
+    void retryNowKeepsPlatformScheduleAfterExecutionLeadBoundary() {
+        when(scheduleAdapterRouter.rules("douyin", SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE))
+                .thenReturn(new SelfMediaPlatformScheduleRules(130, 120, 3, 14 * 24 * 60));
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        row.setId(117L);
+        row.setPlatform("douyin");
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        row.setScheduleStrategy(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE);
+        row.setAttemptCount(0);
+        row.setMaxAttempts(3);
+        row.setLockedUntil(LocalDateTime.now().minusMinutes(1));
+        when(scheduleMapper.selectById(117L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.retryNow(117L);
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PENDING, response.getStatus());
+        assertEquals(response.getPlannedPublishAt(), response.getPlatformScheduledAt());
+        assertTrue(response.getPlannedPublishAt().isAfter(response.getNextAttemptAt().plusMinutes(120)));
+        assertEquals(130, java.time.Duration.between(response.getNextAttemptAt(), response.getPlannedPublishAt()).toMinutes());
+        verify(scheduleMapper).updateById(row);
+        verify(environmentLockService).release(117L);
     }
 
     @Test

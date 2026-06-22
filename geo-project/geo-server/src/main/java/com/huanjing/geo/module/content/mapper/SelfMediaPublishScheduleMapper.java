@@ -344,6 +344,81 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
             <script>
             SELECT *
             FROM self_media_publish_schedule
+            WHERE request_idempotency_key LIKE 'project-auto-%'
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND failure_code IS NOT NULL
+              AND failure_code != ''
+              AND (locked_until IS NULL OR locked_until &lt; #{now})
+            ORDER BY updated_at ASC, id ASC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<SelfMediaPublishSchedule> selectProjectAutoCompensationCandidates(@Param("statuses") List<String> statuses,
+                                                                           @Param("now") LocalDateTime now,
+                                                                           @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE request_idempotency_key LIKE 'project-auto-%'
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND failure_code IS NOT NULL
+              AND failure_code != ''
+              AND (locked_until IS NULL OR locked_until &lt; #{now})
+            </script>
+            """)
+    long countProjectAutoCompensationCandidates(@Param("statuses") List<String> statuses,
+                                                @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE request_idempotency_key LIKE 'project-auto-%'
+              AND attempt_count > 0
+              AND failure_code IS NOT NULL
+              AND failure_code != ''
+            """)
+    long countProjectAutoCompensationTried();
+
+    @Select("""
+            SELECT MAX(last_attempt_at)
+            FROM self_media_publish_schedule
+            WHERE request_idempotency_key LIKE 'project-auto-%'
+              AND attempt_count > 0
+              AND last_attempt_at IS NOT NULL
+            """)
+    LocalDateTime selectProjectAutoLastCompensationTriedAt();
+
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE created_by = #{operatorId}
+              AND queue_kind = #{queueKind}
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now})
+              AND (locked_until IS NULL OR locked_until &lt; #{now})
+            </script>
+            """)
+    long countDueByOperatorAndQueue(@Param("operatorId") Long operatorId,
+                                    @Param("queueKind") String queueKind,
+                                    @Param("statuses") List<String> statuses,
+                                    @Param("now") LocalDateTime now);
+
+    @Select("""
+            <script>
+            SELECT *
+            FROM self_media_publish_schedule
             WHERE status IN
               <foreach collection="statuses" item="status" open="(" separator="," close=")">
                 #{status}
@@ -448,7 +523,7 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
             SET status = 'cancelled',
                 cancelled_at = #{now},
                 failure_code = 'REPLACED_BY_OPERATOR_QUICK_DISPATCH',
-                failure_message = '运营点击平台快速分发时安全替换',
+                failure_message = '当前任务排期已由手动触发占用',
                 locked_until = NULL,
                 next_attempt_at = NULL,
                 updated_at = #{now}

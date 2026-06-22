@@ -273,23 +273,77 @@
               </div>
             </div>
 
-            <div class="auto-schedule-summary">
-              <div class="auto-schedule-stat">
-                <span>预计受理</span>
-                <strong>{{ selfMediaPreview?.plannedCount ?? '-' }}</strong>
+            <div v-loading="selfMediaAutomationOverviewLoading" class="auto-schedule-health">
+              <div class="auto-schedule-health-head">
+                <div>
+                  <strong>运行概况</strong>
+                  <small>{{ selfMediaAutomationSummaryText }}</small>
+                </div>
+                <el-button link type="primary" :loading="selfMediaAutomationOverviewLoading" @click="loadSelfMediaAutomationOverview">
+                  刷新
+                </el-button>
               </div>
-              <div class="auto-schedule-stat">
-                <span>计划数量</span>
-                <strong>{{ selfMediaScheduleBatch?.plannedCount ?? '-' }}</strong>
+              <div class="auto-schedule-health-grid is-compact">
+                <div v-for="item in selfMediaAutomationHealthItems" :key="item.label" class="auto-schedule-health-item">
+                  <span>{{ item.label }}</span>
+                  <strong>{{ item.value }}</strong>
+                  <small>{{ item.hint }}</small>
+                </div>
               </div>
-              <div class="auto-schedule-stat">
-                <span>已排期</span>
-                <strong>{{ selfMediaScheduleBatch?.createdCount ?? '-' }}</strong>
-              </div>
-              <div class="auto-schedule-stat">
-                <span>失败</span>
-                <strong>{{ selfMediaScheduleBatch?.rejectedCount ?? '-' }}</strong>
-              </div>
+              <el-alert
+                v-if="selfMediaAutomationBlocked"
+                type="warning"
+                :closable="false"
+                class="auto-schedule-health-alert"
+                title="当前平台需要本地助手处理，但本地助手不足或未在线，自动排期创建后可能无法按时开始。"
+              />
+              <el-collapse class="auto-schedule-debug-collapse">
+                <el-collapse-item title="排查信息" name="debug">
+                  <div v-if="selfMediaAutomationCompensation" class="auto-schedule-health-note">
+                    <strong>自动补救</strong>
+                    <span>{{ selfMediaAutomationCompensation.message || '暂无自动补救信息' }}</span>
+                    <small>
+                      待补救 {{ selfMediaAutomationCompensation.candidateCount || 0 }} 条
+                      <template v-if="selfMediaAutomationCompensation.lastTriedAt">
+                        / 最近 {{ compactDateTime(selfMediaAutomationCompensation.lastTriedAt) }}
+                      </template>
+                    </small>
+                  </div>
+                  <div v-if="selfMediaLocalAgentSessions.length" class="auto-schedule-agent-list">
+                    <span
+                      v-for="session in selfMediaLocalAgentSessions"
+                      :key="session.sessionId"
+                      class="auto-schedule-agent-item"
+                      :class="{ 'is-offline': !session.online }"
+                    >
+                      <strong>{{ session.helperName || '本地助手' }}</strong>
+                      <small>{{ session.operatorName || '未绑定运营' }}</small>
+                      <el-tag size="small" :type="session.online ? 'success' : 'warning'" effect="light">
+                        {{ session.online ? '在线' : '未在线' }}
+                      </el-tag>
+                      <small>最近 {{ compactDateTime(session.lastSeenAt) }} / 处理中 {{ session.runningLoad || 0 }} / 等待 {{ session.waitingTasks || 0 }}</small>
+                    </span>
+                  </div>
+                  <div v-if="selectedSelfMediaPlatformCapabilities.length" class="auto-schedule-capabilities">
+                    <span
+                      v-for="item in selectedSelfMediaPlatformCapabilities"
+                      :key="item.platform"
+                      class="auto-schedule-capability"
+                      :class="{ 'is-warning': !item.scheduleReady }"
+                    >
+                      <strong>{{ item.displayName || selfMediaPlatformLabel(item.platform) }}</strong>
+                      <small>{{ item.requiresLocalAgent ? '本地助手' : '官方能力' }}</small>
+                      <el-tag size="small" :type="item.scheduleReady ? 'success' : 'warning'" effect="light">
+                        {{ item.scheduleReady ? '可预约发布' : '需确认' }}
+                      </el-tag>
+                      <small class="auto-schedule-capability-rule">
+                        处理提前 {{ selfMediaMinutesText(item.fillLeadMinutes) }} / 平台提前 {{ selfMediaMinutesText(item.minRemainingMinutes) }}
+                      </small>
+                      <em v-if="item.readinessMessage">{{ item.readinessMessage }}</em>
+                    </span>
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
             </div>
 
             <div class="auto-schedule-batch">
@@ -297,7 +351,7 @@
                 <el-tag :type="selfMediaBatchTagType(selfMediaScheduleBatch.status)" effect="light">
                   {{ selfMediaBatchStatusLabel(selfMediaScheduleBatch.status) }}
                 </el-tag>
-                <span>{{ selfMediaScheduleBatch.updatedAt || selfMediaScheduleBatch.createdAt || '-' }}</span>
+                <span>计划 {{ selfMediaScheduleBatch.plannedCount || 0 }}，已排 {{ selfMediaScheduleBatch.createdCount || 0 }}，失败 {{ selfMediaScheduleBatch.rejectedCount || 0 }}</span>
                 <el-button link type="primary" :loading="selfMediaDetailLoading" @click="openSelfMediaBatchDetail">
                   查看明细
                 </el-button>
@@ -312,8 +366,36 @@
               class="auto-schedule-alert"
               :title="selfMediaScheduleBatch.failureMessage"
             />
+            <div v-if="selfMediaPreview?.slotGroups?.length" class="auto-schedule-precheck">
+              <div
+                v-for="group in selfMediaPreview.slotGroups"
+                :key="group.platform || group.platformLabel || 'unknown'"
+                class="auto-schedule-precheck-row"
+                :class="{ 'is-warning': !group.enough }"
+              >
+                <div class="auto-schedule-precheck-main">
+                  <strong>{{ group.platformLabel || selfMediaPlatformLabel(group.platform) }}</strong>
+                  <span>需要 {{ group.requestedCount || 0 }} / 可用 {{ group.availableSlotCount || 0 }}</span>
+                  <el-tag size="small" :type="group.enough ? 'success' : 'danger'" effect="light">
+                    {{ group.enough ? '可自动排期' : '可用时间不足' }}
+                  </el-tag>
+                </div>
+                <div class="auto-schedule-precheck-slots">
+                  <span
+                    v-for="slot in (group.selectedSlots || []).slice(0, 3)"
+                    :key="`${slot.executionAt || ''}-${slot.plannedPublishAt || ''}`"
+                  >
+                    处理 {{ compactDateTime(slot.executionAt) }} / 发布 {{ compactDateTime(slot.plannedPublishAt) }}
+                  </span>
+                  <small v-if="(group.selectedSlots || []).length > 3">
+                    另 {{ (group.selectedSlots || []).length - 3 }} 个可用时间
+                  </small>
+                  <small v-if="!group.enough">{{ group.message || '剩余可用时间不足' }}</small>
+                </div>
+              </div>
+            </div>
             <div class="auto-schedule-submit">
-              <el-button :loading="selfMediaPreviewLoading" @click="previewSelfMediaSchedule">预览数量</el-button>
+              <el-button :loading="selfMediaPreviewLoading" @click="previewSelfMediaSchedule">预检排期</el-button>
               <el-button
                 type="primary"
                 :disabled="!canCreateSelfMediaSchedule"
@@ -344,6 +426,47 @@
           <small>{{ item.hint }}</small>
         </div>
       </div>
+      <div v-if="selfMediaFailureSummaries.length" class="auto-schedule-failure-summary">
+        <div class="auto-schedule-failure-summary-head">
+          <strong>失败原因归因</strong>
+          <small>按批次明细自动聚合</small>
+        </div>
+        <div class="auto-schedule-failure-list">
+          <div
+            v-for="item in selfMediaFailureSummaries"
+            :key="`${item.category || ''}-${item.code || ''}`"
+            class="auto-schedule-failure-item"
+          >
+            <div>
+              <strong>{{ item.groupLabel || item.label || item.code || '未知异常' }}</strong>
+              <small>{{ failureCategoryLabel(item.category) }} · {{ item.operatorAction || item.actionHint || item.firstMessage || '查看单条异常信息' }}</small>
+            </div>
+            <div class="auto-schedule-failure-meta">
+              <el-tag size="small" :type="item.retryable ? 'success' : 'warning'" effect="light">
+                {{ item.retryable ? '可重试' : '需人工确认' }}
+              </el-tag>
+              <span>{{ item.count || 0 }} 条</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <el-collapse
+        v-if="selfMediaActionPreviewMessages.length || selfMediaStatusRules.length"
+        class="auto-schedule-debug-collapse auto-schedule-detail-debug"
+      >
+        <el-collapse-item title="批量操作和状态说明" name="detail-debug">
+          <div v-if="selfMediaActionPreviewMessages.length" class="auto-schedule-action-preview">
+            <span v-for="message in selfMediaActionPreviewMessages" :key="message">{{ message }}</span>
+          </div>
+          <div v-if="selfMediaStatusRules.length" class="auto-schedule-status-rules">
+            <span v-for="rule in selfMediaStatusRules" :key="rule.status">
+              <strong>{{ rule.label || scheduleStatusLabel(rule.status) }}</strong>
+              <small>{{ rule.meaning }}</small>
+              <em>{{ rule.operatorHint }}</em>
+            </span>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
       <div class="auto-schedule-detail-head">
         <div class="auto-schedule-detail-platforms">
           <span
@@ -366,17 +489,77 @@
           >
             重试失败项 {{ selfMediaDetailRetryableCount }}
           </el-button>
+          <el-button
+            v-if="selfMediaDetailAbnormalScheduleCount > 0"
+            size="small"
+            type="warning"
+            plain
+            :loading="selfMediaRetryAbnormalLoading"
+            @click="retrySelfMediaAbnormalSchedules"
+          >
+            批量重新处理 {{ selfMediaDetailAbnormalScheduleCount }}
+          </el-button>
+          <el-button
+            v-if="selfMediaDetailManualMarkableCount > 0"
+            size="small"
+            type="danger"
+            plain
+            :loading="selfMediaMarkManualLoading"
+            @click="markSelfMediaAbnormalSchedulesManualRequired"
+          >
+            批量转人工 {{ selfMediaDetailManualMarkableCount }}
+          </el-button>
+          <el-button
+            v-if="selfMediaDetailAbnormalScheduleCount > 0"
+            size="small"
+            plain
+            :loading="selfMediaRescheduleNextMonthLoading"
+            @click="rescheduleSelfMediaAbnormalNextMonth"
+          >
+            改期到下月 {{ selfMediaDetailAbnormalScheduleCount }}
+          </el-button>
+          <el-button
+            v-if="selfMediaDetailAbnormalScheduleCount > 0"
+            size="small"
+            plain
+            :loading="selfMediaIgnoreAbnormalLoading"
+            @click="ignoreSelfMediaAbnormalSchedules"
+          >
+            忽略异常 {{ selfMediaDetailAbnormalScheduleCount }}
+          </el-button>
           <el-tag v-if="selfMediaBatchDetail?.batch" :type="selfMediaBatchTagType(selfMediaBatchDetail.batch.status)" effect="light">
             {{ selfMediaBatchStatusLabel(selfMediaBatchDetail.batch.status) }}
           </el-tag>
         </div>
       </div>
+      <div class="auto-schedule-detail-filter">
+        <el-radio-group v-model="selfMediaDetailFilter" size="small">
+          <el-radio-button
+            v-for="item in selfMediaDetailFilterOptions"
+            :key="item.value"
+            :label="item.value"
+          >
+            {{ item.label }} {{ item.count }}
+          </el-radio-button>
+        </el-radio-group>
+      </div>
       <el-table
         v-loading="selfMediaDetailLoading"
-        :data="selfMediaBatchDetail?.items || []"
+        :data="filteredSelfMediaDetailItems"
         empty-text="暂无排期明细"
         class="auto-schedule-detail-table"
       >
+        <el-table-column type="expand" width="42">
+          <template #default="{ row }">
+            <div class="auto-schedule-row-debug">
+              <span v-if="row.operatorActionHint">建议：{{ row.operatorActionHint }}</span>
+              <span v-if="row.claimDiagnosticMessage">处理提示：{{ row.claimDiagnosticMessage }}</span>
+              <span>处理次数：{{ scheduleAttemptText(row) }}</span>
+              <span>下次处理：{{ compactDateTime(row.nextAttemptAt) }}</span>
+              <span v-if="row.autoCompensationAvailable">系统还会自动补救 {{ row.autoCompensationRemaining || 0 }} 次</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="计划项" min-width="300">
           <template #default="{ row }">
             <div class="detail-plan-cell">
@@ -436,20 +619,26 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="执行信息" width="210">
-          <template #default="{ row }">
-            <div class="detail-task-cell">
-              <span>尝试 {{ scheduleAttemptText(row) }}</span>
-              <small>下次 {{ compactDateTime(row.nextAttemptAt) }}</small>
-              <small v-if="row.lockedUntil">锁定至 {{ compactDateTime(row.lockedUntil) }}</small>
-            </div>
-          </template>
-        </el-table-column>
         <el-table-column label="异常" min-width="220">
           <template #default="{ row }">
             <span class="detail-error-text">
+              <template v-if="row.failureGroupLabel">{{ row.failureGroupLabel }}：</template>
               {{ row.scheduleFailureMessage || row.generationErrorMessage || row.scheduleFailureCode || '-' }}
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="canRetrySelfMediaDetailRow(row)"
+              link
+              type="primary"
+              :loading="selfMediaScheduleRetryingId === retryingRowKey(row)"
+              @click="retrySelfMediaDetailRow(row)"
+            >
+              重新处理
+            </el-button>
+            <span v-else class="detail-action-placeholder">-</span>
           </template>
         </el-table-column>
       </el-table>
@@ -742,9 +931,13 @@ import {
   getProjectSelfMediaScheduleBatch,
   getProjectSelfMediaScheduleBatchDetail,
   getProjectSelfMediaScheduleConfig,
+  ignoreProjectSelfMediaScheduleBatchAbnormalSchedules,
   getKeywordGroupQuestions,
   importProjectKeywordGroup,
+  markProjectSelfMediaScheduleBatchAbnormalManualRequired,
   previewProjectSelfMediaAutoSchedule,
+  rescheduleProjectSelfMediaScheduleBatchAbnormalNextMonth,
+  retryProjectSelfMediaScheduleBatchAbnormalSchedules,
   retryProjectSelfMediaScheduleBatchFailedItems,
   updateKeywordGroupQuestion,
   updateProject,
@@ -760,8 +953,17 @@ import type {
   ProjectSelfMediaScheduleBatchDetailItem,
   ProjectSelfMediaScheduleConfig,
 } from '@/api/project'
-import { getContentArticleDetail, getSelfMediaAccountsByBrand } from '@/api/content'
-import type { ArticleDetailResponse, KeywordGroup, KeywordGroupQuestion, PageResult, Project, ProjectChannelAllocationItem, SelfMediaAccount } from '@/types'
+import { getContentArticleDetail, getSelfMediaAccountsByBrand, getSelfMediaAutomationOverview, retrySelfMediaPublishScheduleNow } from '@/api/content'
+import type {
+  ArticleDetailResponse,
+  KeywordGroup,
+  KeywordGroupQuestion,
+  PageResult,
+  Project,
+  ProjectChannelAllocationItem,
+  SelfMediaAccount,
+  SelfMediaAutomationOverview,
+} from '@/types'
 import { regionDisplayFromPayload } from '@/constants/region'
 import { isSelfMediaQuotaChannel } from '@/constants/distributionChannels'
 import { selfMediaPlatformLabel } from '@/constants/selfMediaPlatforms'
@@ -818,9 +1020,15 @@ const selfMediaScheduleCreating = ref(false)
 const selfMediaDetailVisible = ref(false)
 const selfMediaDetailLoading = ref(false)
 const selfMediaRetryFailedLoading = ref(false)
+const selfMediaRetryAbnormalLoading = ref(false)
+const selfMediaMarkManualLoading = ref(false)
+const selfMediaRescheduleNextMonthLoading = ref(false)
+const selfMediaIgnoreAbnormalLoading = ref(false)
+const selfMediaAutomationOverviewLoading = ref(false)
 const selfMediaArticlePreviewVisible = ref(false)
 const selfMediaArticlePreviewLoading = ref(false)
 const selfMediaArticlePreview = ref<ArticleDetailResponse | null>(null)
+const selfMediaScheduleRetryingId = ref<string | null>(null)
 const currentKeywordGroup = ref<KeywordGroup | null>(null)
 const currentQuestionId = ref<number | null>(null)
 const channelQuotaItems = ref<ProjectChannelAllocationItem[]>([])
@@ -830,7 +1038,9 @@ const selfMediaScheduleConfig = ref<ProjectSelfMediaScheduleConfig | null>(null)
 const selfMediaScheduleBatch = ref<ProjectSelfMediaScheduleBatch | null>(null)
 const selfMediaBatchDetail = ref<ProjectSelfMediaScheduleBatchDetail | null>(null)
 const selfMediaPreview = ref<ProjectSelfMediaAutoScheduleResponse | null>(null)
+const selfMediaAutomationOverview = ref<SelfMediaAutomationOverview | null>(null)
 const selfMediaScheduleMonth = ref(currentMonthText())
+const selfMediaDetailFilter = ref('all')
 const selectedSelfMediaAccountIds = ref<number[]>([])
 const channelAllocationForm = reactive<Record<string, number>>({})
 const selfMediaScheduleForm = reactive({
@@ -919,7 +1129,67 @@ const activeSelfMediaPlatformPills = computed(() => {
     label: selfMediaPlatformLabel(platform),
   }))
 })
+const selectedSelfMediaPlatforms = computed(() => new Set(activeSelfMediaPlatformPills.value.map((item) => item.platform)))
+const selectedSelfMediaPlatformCapabilities = computed(() => {
+  const selected = selectedSelfMediaPlatforms.value
+  const capabilities = selfMediaAutomationOverview.value?.platformCapabilities || []
+  if (!selected.size) return []
+  return capabilities.filter((item) => selected.has(item.platform || 'unknown'))
+})
+const selfMediaAutomationSummaryText = computed(() => {
+  const local = selfMediaAutomationOverview.value?.localExecution
+  const queue = selfMediaAutomationOverview.value?.queue
+  if (!local || !queue) return '暂无运行数据'
+  if (selfMediaAutomationBlocked.value) return '本地助手不足，可能影响自动处理'
+  const abnormal = (queue.failedTotal || 0) + (queue.manualRequired || 0) + (queue.publishUnknown || 0)
+  if (abnormal > 0) return `有 ${abnormal} 条异常待处理`
+  return '运行正常'
+})
+const selfMediaAutomationHealthItems = computed(() => {
+  const queue = selfMediaAutomationOverview.value?.queue
+  const local = selfMediaAutomationOverview.value?.localExecution
+  return [
+    {
+      label: '本地助手',
+      value: local ? `${local.onlineAgents || 0}/${local.activeSessions || 0}` : '-',
+      hint: local?.message || capacityStatusLabel(local?.capacityStatus),
+    },
+    {
+      label: '等待处理',
+      value: queue ? `${(queue.dueScheduleExecution || 0) + (queue.duePublishCheck || 0)}` : '-',
+      hint: local ? `等待本地助手处理 ${local.waitingForLocalAgent || 0}` : '暂无待处理数据',
+    },
+    {
+      label: '异常待处理',
+      value: queue ? `${(queue.failedTotal || 0) + (queue.manualRequired || 0) + (queue.publishUnknown || 0)}` : '-',
+      hint: queue ? `失败 ${queue.failedTotal || 0} / 需人工处理 ${queue.manualRequired || 0}` : '暂无异常数据',
+    },
+  ]
+})
+const selfMediaAutomationBlocked = computed(() => {
+  const local = selfMediaAutomationOverview.value?.localExecution
+  const localRequired = selectedSelfMediaPlatformCapabilities.value.some((item) => item.requiresLocalAgent)
+  if (!localRequired) return false
+  if (!local) return true
+  return (local.estimatedCapacity || 0) <= 0 || local.capacityStatus === 'blocked'
+})
+const selfMediaLocalAgentSessions = computed(() => selfMediaAutomationOverview.value?.localExecution?.sessions || [])
+const selfMediaAutomationCompensation = computed(() => selfMediaAutomationOverview.value?.compensation || null)
 const selfMediaDetailItems = computed(() => selfMediaBatchDetail.value?.items || [])
+const selfMediaFailureSummaries = computed(() => selfMediaBatchDetail.value?.failureSummaries || [])
+const selfMediaStatusRules = computed(() => (selfMediaBatchDetail.value?.statusRules || []).filter((rule) =>
+  ['pending', 'schedule_failed', 'publish_failed', 'manual_required', 'cancelled', 'published_confirmed'].includes(rule.status),
+))
+const selfMediaActionPreview = computed(() => selfMediaBatchDetail.value?.actionPreview || null)
+const selfMediaActionPreviewMessages = computed(() => {
+  const preview = selfMediaActionPreview.value
+  if (!preview) return []
+  const messages = [...(preview.messages || [])]
+  if ((preview.rescheduleNextMonthCount || 0) > 0 && preview.nextMonth) {
+    messages.push(`改期到下月会影响 ${preview.rescheduleNextMonthCount} 条，目标月份 ${preview.nextMonth}。`)
+  }
+  return messages
+})
 const selfMediaDetailGeneratedCount = computed(() =>
   selfMediaDetailItems.value.filter((item) => item.generationStatus === 'success' || !!item.articleId).length,
 )
@@ -938,6 +1208,38 @@ const selfMediaDetailRejectedScheduleCount = computed(() =>
 const selfMediaDetailRetryableCount = computed(() =>
   selfMediaDetailFailedGenerationCount.value + selfMediaDetailRejectedScheduleCount.value,
 )
+const retryableScheduleStatuses = new Set(['manual_required', 'schedule_failed', 'publish_failed'])
+const manualMarkableScheduleStatuses = new Set(['schedule_failed', 'publish_failed'])
+const selfMediaDetailAbnormalScheduleCount = computed(() =>
+  selfMediaDetailItems.value.filter((item) => !!item.scheduleId && retryableScheduleStatuses.has(item.scheduleStatus || '')).length,
+)
+const selfMediaDetailManualMarkableCount = computed(() =>
+  selfMediaDetailItems.value.filter((item) => !!item.scheduleId && manualMarkableScheduleStatuses.has(item.scheduleStatus || '')).length,
+)
+const selfMediaPreviewHasInsufficientSlots = computed(() =>
+  (selfMediaPreview.value?.slotGroups || []).some((group) => group.enough === false),
+)
+const selfMediaDetailCompletedCount = computed(() =>
+  selfMediaDetailItems.value.filter((item) => item.scheduleStatus === 'scheduled' || item.scheduleStatus === 'published_confirmed').length,
+)
+const selfMediaDetailFilterOptions = computed(() => [
+  { value: 'all', label: '全部', count: selfMediaDetailItems.value.length },
+  { value: 'waiting', label: '待处理', count: selfMediaDetailWaitingCount.value },
+  { value: 'abnormal', label: '异常', count: selfMediaDetailRetryableCount.value + selfMediaDetailAbnormalScheduleCount.value },
+  { value: 'completed', label: '已完成', count: selfMediaDetailCompletedCount.value },
+])
+const filteredSelfMediaDetailItems = computed(() => {
+  if (selfMediaDetailFilter.value === 'waiting') {
+    return selfMediaDetailItems.value.filter((item) => !item.articleId && item.generationStatus !== 'failed')
+  }
+  if (selfMediaDetailFilter.value === 'abnormal') {
+    return selfMediaDetailItems.value.filter((item) => canRetrySelfMediaDetailRow(item))
+  }
+  if (selfMediaDetailFilter.value === 'completed') {
+    return selfMediaDetailItems.value.filter((item) => item.scheduleStatus === 'scheduled' || item.scheduleStatus === 'published_confirmed')
+  }
+  return selfMediaDetailItems.value
+})
 const selfMediaArticlePreviewHtml = computed(() => {
   const versions = selfMediaArticlePreview.value?.versions || []
   const latest = [...versions].sort((a, b) => (b.versionNo || 0) - (a.versionNo || 0))[0]
@@ -959,7 +1261,7 @@ const selfMediaDetailOverviewItems = computed(() => {
     {
       label: '已排期',
       value: batch?.createdCount ?? selfMediaDetailScheduledCount.value,
-      hint: '已进入自媒体发布队列',
+      hint: '已安排发布时间，等待系统处理',
     },
     {
       label: '待处理',
@@ -995,6 +1297,7 @@ const canCreateSelfMediaSchedule = computed(() => {
   if (!canUpdateProject.value || !selfMediaScheduleForm.autoScheduleEnabled) return false
   if (!selfMediaScheduleMonth.value) return false
   if (!activeSelfMediaAccounts.value.length) return false
+  if (selfMediaPreviewHasInsufficientSlots.value) return false
   const status = selfMediaScheduleBatch.value?.status
   return !['processing', 'created', 'partial_failed'].includes(status || '')
 })
@@ -1038,6 +1341,14 @@ function projectStatusClass(status?: string | null) {
   if (status === 'paused' || status === 'pending_start') return 'is-warning'
   if (status === 'expired') return 'is-danger'
   return 'is-muted'
+}
+
+function capacityStatusLabel(status?: string | null) {
+  if (status === 'healthy') return '本地助手可正常处理'
+  if (status === 'pressure') return '本地助手较忙'
+  if (status === 'saturated') return '本地助手已忙满'
+  if (status === 'blocked') return '暂无可用本地助手'
+  return '暂无运行数据'
 }
 
 function keywordExpectedCounts(current: Project) {
@@ -1177,10 +1488,10 @@ function generationStatusTagType(status?: string | null) {
 function scheduleStatusLabel(status?: string | null) {
   const labels: Record<string, string> = {
     rejected: '排期失败',
-    pending: '待领取',
+    pending: '等待处理',
     filling: '助手填充中',
     filled_verified: '填充已核验',
-    scheduling: '平台定时中',
+    scheduling: '正在预约平台发布时间',
     scheduled: '已定时',
     publish_due: '到点待核验',
     checking_publish_result: '发布结果核验中',
@@ -1206,10 +1517,22 @@ function scheduleStatusTagType(status?: string | null) {
 
 function scheduleQueueLabel(value?: string | null) {
   const labels: Record<string, string> = {
-    schedule_execution: '自动执行',
+    schedule_execution: '按计划处理',
     publish_result_check: '发布回查',
   }
   return value ? (labels[value] || value) : '-'
+}
+
+function failureCategoryLabel(category?: string | null) {
+  if (category === 'generation') return '文章生成'
+  if (category === 'schedule_rejected') return '排期创建'
+  if (category === 'schedule_abnormal') return '执行异常'
+  return '异常'
+}
+
+function selfMediaMinutesText(value?: number | null) {
+  if (value === null || value === undefined) return '-'
+  return `${value} 分钟`
 }
 
 function scheduleAttemptText(row: ProjectSelfMediaScheduleBatchDetailItem) {
@@ -1230,7 +1553,7 @@ function selfMediaDetailProgressText(row: ProjectSelfMediaScheduleBatchDetailIte
   }
   if (row.scheduleStatus) {
     const next = compactDateTime(row.nextAttemptAt)
-    return next === '-' ? '排期已创建，等待状态推进' : `排期已创建，下次处理 ${next}`
+    return next === '-' ? '排期已创建，等待系统继续处理' : `排期已创建，下次处理 ${next}`
   }
   if (row.generationStatus === 'success' || row.articleId) {
     return '文章已生成，后台即将创建自媒体排期'
@@ -1242,6 +1565,17 @@ function selfMediaDetailProgressText(row: ProjectSelfMediaScheduleBatchDetailIte
     return '文章生成任务已入队，后台会自动继续处理'
   }
   return '等待后台生成文章并创建排期'
+}
+
+function retryingRowKey(row: ProjectSelfMediaScheduleBatchDetailItem) {
+  return row.scheduleId ? `schedule-${row.scheduleId}` : `generation-${row.generationTaskId || row.articleId || row.selfMediaAccountId || 'unknown'}`
+}
+
+function canRetrySelfMediaDetailRow(row: ProjectSelfMediaScheduleBatchDetailItem) {
+  if (row.scheduleId && retryableScheduleStatuses.has(row.scheduleStatus || '')) return true
+  if (!row.scheduleId && row.scheduleStatus === 'rejected' && row.articleId) return true
+  if (!row.scheduleId && row.generationStatus === 'failed') return true
+  return false
 }
 
 function compactDateTime(value?: string | null) {
@@ -1292,9 +1626,10 @@ async function openSelfMediaBatchDetail() {
 async function retrySelfMediaFailedItems() {
   const current = project.value
   if (!current || !selfMediaScheduleMonth.value || selfMediaRetryFailedLoading.value) return
+  const count = selfMediaActionPreview.value?.retryFailedCount ?? selfMediaDetailRetryableCount.value
   try {
     await ElMessageBox.confirm(
-      '系统会重试当前批次中生成失败的文章，以及已生成但创建自媒体排期失败的文章；已成功排期的内容不会重复处理。是否继续？',
+      `系统会重新处理 ${count} 条失败内容；已经成功安排的内容不会重复处理。是否继续？`,
       '重试失败项',
       { type: 'warning', confirmButtonText: '重试', cancelButtonText: '取消' },
     )
@@ -1306,9 +1641,133 @@ async function retrySelfMediaFailedItems() {
     const { data } = await retryProjectSelfMediaScheduleBatchFailedItems(current.id, selfMediaScheduleMonth.value)
     selfMediaBatchDetail.value = data.data || null
     selfMediaScheduleBatch.value = data.data?.batch || selfMediaScheduleBatch.value
-    ElMessage.success('失败项已重新处理，后台会继续生成或创建排期')
+    ElMessage.success('失败项已重新处理，后台会继续生成文章或安排发布时间')
   } finally {
     selfMediaRetryFailedLoading.value = false
+  }
+}
+
+async function retrySelfMediaAbnormalSchedules() {
+  const current = project.value
+  if (!current || !selfMediaScheduleMonth.value || selfMediaRetryAbnormalLoading.value) return
+  const count = selfMediaActionPreview.value?.retryAbnormalCount ?? selfMediaDetailAbnormalScheduleCount.value
+  try {
+    await ElMessageBox.confirm(
+      `确认批量重新处理 ${count} 条异常内容？系统会重新安排合适的处理时间。`,
+      '批量重新处理',
+      { type: 'warning', confirmButtonText: '重新处理', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  selfMediaRetryAbnormalLoading.value = true
+  try {
+    const { data } = await retryProjectSelfMediaScheduleBatchAbnormalSchedules(current.id, selfMediaScheduleMonth.value)
+    selfMediaBatchDetail.value = data.data || null
+    selfMediaScheduleBatch.value = data.data?.batch || selfMediaScheduleBatch.value
+    ElMessage.success('异常内容已重新安排处理')
+  } finally {
+    selfMediaRetryAbnormalLoading.value = false
+  }
+}
+
+async function markSelfMediaAbnormalSchedulesManualRequired() {
+  const current = project.value
+  if (!current || !selfMediaScheduleMonth.value || selfMediaMarkManualLoading.value) return
+  const count = selfMediaActionPreview.value?.manualCount ?? selfMediaDetailManualMarkableCount.value
+  try {
+    await ElMessageBox.confirm(
+      `确认将 ${count} 条异常内容转为人工处理？转人工后系统不会再自动处理这些内容。`,
+      '批量转人工处理',
+      { type: 'warning', confirmButtonText: '转人工', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  selfMediaMarkManualLoading.value = true
+  try {
+    const { data } = await markProjectSelfMediaScheduleBatchAbnormalManualRequired(current.id, selfMediaScheduleMonth.value)
+    selfMediaBatchDetail.value = data.data || null
+    selfMediaScheduleBatch.value = data.data?.batch || selfMediaScheduleBatch.value
+    ElMessage.success('异常内容已转为人工处理')
+  } finally {
+    selfMediaMarkManualLoading.value = false
+  }
+}
+
+async function rescheduleSelfMediaAbnormalNextMonth() {
+  const current = project.value
+  if (!current || !selfMediaScheduleMonth.value || selfMediaRescheduleNextMonthLoading.value) return
+  const count = selfMediaActionPreview.value?.rescheduleNextMonthCount ?? selfMediaDetailAbnormalScheduleCount.value
+  const nextMonth = selfMediaActionPreview.value?.nextMonth || '下月'
+  try {
+    await ElMessageBox.confirm(
+      `确认将 ${count} 条异常内容改到 ${nextMonth}？系统会重新安排可用的处理时间。`,
+      '批量改期到下月',
+      { type: 'warning', confirmButtonText: '改期到下月', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  selfMediaRescheduleNextMonthLoading.value = true
+  try {
+    const { data } = await rescheduleProjectSelfMediaScheduleBatchAbnormalNextMonth(current.id, selfMediaScheduleMonth.value)
+    selfMediaBatchDetail.value = data.data || null
+    selfMediaScheduleBatch.value = data.data?.batch || selfMediaScheduleBatch.value
+    ElMessage.success('异常内容已改到下月可用时间')
+  } finally {
+    selfMediaRescheduleNextMonthLoading.value = false
+  }
+}
+
+async function ignoreSelfMediaAbnormalSchedules() {
+  const current = project.value
+  if (!current || !selfMediaScheduleMonth.value || selfMediaIgnoreAbnormalLoading.value) return
+  const count = selfMediaActionPreview.value?.ignoreCount ?? selfMediaDetailAbnormalScheduleCount.value
+  try {
+    await ElMessageBox.confirm(
+      `确认忽略 ${count} 条异常内容？忽略后系统不会继续自动处理这些内容。`,
+      '批量忽略异常',
+      { type: 'warning', confirmButtonText: '忽略异常', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  selfMediaIgnoreAbnormalLoading.value = true
+  try {
+    const { data } = await ignoreProjectSelfMediaScheduleBatchAbnormalSchedules(current.id, selfMediaScheduleMonth.value)
+    selfMediaBatchDetail.value = data.data || null
+    selfMediaScheduleBatch.value = data.data?.batch || selfMediaScheduleBatch.value
+    ElMessage.success('异常内容已忽略')
+  } finally {
+    selfMediaIgnoreAbnormalLoading.value = false
+  }
+}
+
+async function retrySelfMediaDetailRow(row: ProjectSelfMediaScheduleBatchDetailItem) {
+  const current = project.value
+  if (!current || !selfMediaScheduleMonth.value || !canRetrySelfMediaDetailRow(row)) return
+  const key = retryingRowKey(row)
+  selfMediaScheduleRetryingId.value = key
+  try {
+    if (row.scheduleId) {
+      await ElMessageBox.confirm(
+        `确认重新处理这条内容？系统会重新安排合适的处理时间。`,
+        '重新处理',
+        { type: 'warning', confirmButtonText: '重新处理', cancelButtonText: '返回' },
+      )
+      await retrySelfMediaPublishScheduleNow(row.scheduleId)
+      ElMessage.success('已重新安排处理')
+      await Promise.all([loadSelfMediaScheduleBatch(), openSelfMediaBatchDetail()])
+      return
+    }
+    await retrySelfMediaFailedItems()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      throw error
+    }
+  } finally {
+    selfMediaScheduleRetryingId.value = null
   }
 }
 
@@ -1325,6 +1784,19 @@ async function openSelfMediaArticlePreview(articleId?: number | null) {
   }
 }
 
+async function loadSelfMediaAutomationOverview() {
+  selfMediaAutomationOverviewLoading.value = true
+  try {
+    const { data } = await getSelfMediaAutomationOverview()
+    selfMediaAutomationOverview.value = data.data
+  } catch (error) {
+    selfMediaAutomationOverview.value = null
+    console.warn('Failed to load self media automation overview', error)
+  } finally {
+    selfMediaAutomationOverviewLoading.value = false
+  }
+}
+
 async function loadSelfMediaSchedulePanel() {
   const current = project.value
   if (!current) return
@@ -1336,7 +1808,7 @@ async function loadSelfMediaSchedulePanel() {
     ])
     applySelfMediaScheduleConfig(configRes.data.data)
     selfMediaAccounts.value = accountsRes.data.data || []
-    await loadSelfMediaScheduleBatch()
+    await Promise.all([loadSelfMediaScheduleBatch(), loadSelfMediaAutomationOverview()])
     selfMediaPreview.value = null
   } finally {
     selfMediaScheduleLoading.value = false
@@ -1378,12 +1850,30 @@ async function previewSelfMediaSchedule() {
   }
 }
 
+async function runSelfMediaSchedulePrecheck() {
+  const current = project.value
+  if (!current || !selfMediaScheduleMonth.value) return null
+  selfMediaPreviewLoading.value = true
+  try {
+    const { data } = await previewProjectSelfMediaAutoSchedule(current.id, selfMediaSchedulePayload())
+    selfMediaPreview.value = data.data
+    return data.data
+  } finally {
+    selfMediaPreviewLoading.value = false
+  }
+}
+
 async function createSelfMediaSchedule() {
   const current = project.value
   if (!current || !canCreateSelfMediaSchedule.value) return
   try {
+    const preview = await runSelfMediaSchedulePrecheck()
+    if ((preview?.slotGroups || []).some((group) => group.enough === false)) {
+      ElMessage.warning('本月剩余可用发布时间不足，请调整账号、减少数量或选择下月')
+      return
+    }
     await ElMessageBox.confirm(
-      `确认创建 ${selfMediaScheduleMonth.value} 的自媒体自动排期？系统会按剩余额度异步生成文章并创建排期。`,
+      `确认创建 ${selfMediaScheduleMonth.value} 的自媒体自动排期？系统会按剩余额度生成文章，并安排发布时间。`,
       '创建自动排期',
       { type: 'warning', confirmButtonText: '确认创建', cancelButtonText: '取消' },
     )
@@ -1391,7 +1881,7 @@ async function createSelfMediaSchedule() {
     await persistSelfMediaScheduleConfig(false)
     const { data } = await createProjectSelfMediaAutoSchedule(current.id, selfMediaSchedulePayload())
     selfMediaPreview.value = data.data
-    ElMessage.success('自动排期已受理，后台正在生成文章并创建排期')
+    ElMessage.success('自动排期已提交，后台正在生成文章并安排发布时间')
     await loadSelfMediaScheduleBatch()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
@@ -2174,6 +2664,191 @@ onMounted(() => {
   background: #f8fafc;
   border: 1px dashed #cbd5e1;
 }
+.auto-schedule-health {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: #fbfdff;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+}
+.auto-schedule-health-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.auto-schedule-health-head div {
+  display: grid;
+  gap: 2px;
+}
+.auto-schedule-health-head strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+.auto-schedule-health-head small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.auto-schedule-health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.auto-schedule-health-grid.is-compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.auto-schedule-health-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.auto-schedule-health-item span,
+.auto-schedule-health-item small {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.auto-schedule-health-item strong {
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.1;
+  word-break: break-word;
+}
+.auto-schedule-health-alert {
+  margin: 0;
+}
+.auto-schedule-debug-collapse {
+  border: 0;
+}
+.auto-schedule-debug-collapse :deep(.el-collapse-item__header) {
+  height: 34px;
+  color: #2563eb;
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+}
+.auto-schedule-debug-collapse :deep(.el-collapse-item__wrap) {
+  background: transparent;
+  border: 0;
+}
+.auto-schedule-debug-collapse :deep(.el-collapse-item__content) {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 0;
+}
+.auto-schedule-health-note {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.auto-schedule-health-note strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+.auto-schedule-health-note span,
+.auto-schedule-health-note small {
+  font-size: 12px;
+  line-height: 1.45;
+}
+.auto-schedule-agent-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.auto-schedule-agent-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+}
+.auto-schedule-agent-item.is-offline {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+.auto-schedule-agent-item strong,
+.auto-schedule-agent-item small {
+  font-size: 12px;
+}
+.auto-schedule-agent-item strong {
+  color: #0f172a;
+}
+.auto-schedule-agent-item small {
+  color: #64748b;
+}
+.auto-schedule-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.auto-schedule-capability {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 12px;
+  font-style: normal;
+}
+.auto-schedule-capability.is-warning {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+.auto-schedule-capability strong {
+  color: #0f172a;
+  font-size: 12px;
+}
+.auto-schedule-capability small,
+.auto-schedule-capability em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+.auto-schedule-mode-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.auto-schedule-mode-guide div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+.auto-schedule-mode-guide strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+.auto-schedule-mode-guide small {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
 .auto-schedule-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2214,6 +2889,45 @@ onMounted(() => {
 }
 .auto-schedule-alert {
   margin-top: 0;
+}
+.auto-schedule-precheck {
+  display: grid;
+  gap: 8px;
+}
+.auto-schedule-precheck-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f7fdf9;
+  border: 1px solid #cdebd8;
+  border-radius: 10px;
+}
+.auto-schedule-precheck-row.is-warning {
+  background: #fff8f6;
+  border-color: #f3c7bd;
+}
+.auto-schedule-precheck-main,
+.auto-schedule-precheck-slots {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.auto-schedule-precheck-main strong {
+  color: #0f172a;
+}
+.auto-schedule-precheck-main span,
+.auto-schedule-precheck-slots span,
+.auto-schedule-precheck-slots small {
+  color: #64748b;
+  font-size: 12px;
+}
+.auto-schedule-precheck-slots span {
+  padding: 3px 7px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
 }
 .auto-schedule-submit {
   display: flex;
@@ -2260,6 +2974,151 @@ onMounted(() => {
   color: #94a3b8;
   line-height: 1.5;
 }
+.auto-schedule-failure-summary {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+}
+.auto-schedule-action-preview {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+}
+.auto-schedule-detail-debug {
+  margin-bottom: 12px;
+  padding: 0 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.auto-schedule-action-preview div {
+  display: grid;
+  gap: 3px;
+  min-width: 160px;
+}
+.auto-schedule-action-preview strong {
+  color: #075985;
+  font-size: 14px;
+}
+.auto-schedule-action-preview small,
+.auto-schedule-action-preview span {
+  color: #0369a1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.auto-schedule-action-preview span {
+  padding: 4px 8px;
+  background: #fff;
+  border: 1px solid #bae6fd;
+  border-radius: 999px;
+}
+.auto-schedule-status-rules {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.auto-schedule-status-rules span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+.auto-schedule-status-rules strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+.auto-schedule-status-rules small,
+.auto-schedule-status-rules em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
+}
+.auto-schedule-row-debug {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  color: #64748b;
+  background: #f8fafc;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.auto-schedule-row-debug span {
+  padding: 3px 7px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+}
+.auto-schedule-failure-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.auto-schedule-failure-summary-head strong {
+  color: #9a3412;
+  font-size: 14px;
+}
+.auto-schedule-failure-summary-head small {
+  color: #c2410c;
+  font-size: 12px;
+}
+.auto-schedule-failure-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.auto-schedule-failure-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+}
+.auto-schedule-failure-item div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.auto-schedule-failure-item strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+.auto-schedule-failure-item small {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.auto-schedule-failure-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 700;
+}
 .auto-schedule-detail-platforms {
   display: flex;
   align-items: center;
@@ -2287,6 +3146,11 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+.auto-schedule-detail-filter {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 .auto-schedule-detail-table {
   border: 1px solid #e5e7eb;
@@ -2347,6 +3211,9 @@ onMounted(() => {
   color: #c45656;
   word-break: break-word;
 }
+.detail-action-placeholder {
+  color: #c0c4cc;
+}
 .article-preview-wrap {
   min-height: 320px;
 }
@@ -2397,6 +3264,13 @@ onMounted(() => {
   .auto-schedule-detail-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .auto-schedule-failure-list {
+    grid-template-columns: 1fr;
+  }
+  .auto-schedule-status-rules,
+  .auto-schedule-agent-list {
+    grid-template-columns: 1fr;
+  }
 }
 .channel-group-card {
   display: grid;
@@ -2431,7 +3305,9 @@ onMounted(() => {
   }
   .auto-schedule-layout,
   .auto-schedule-toolbar,
-  .auto-schedule-summary {
+  .auto-schedule-summary,
+  .auto-schedule-health-grid,
+  .auto-schedule-mode-guide {
     grid-template-columns: 1fr;
   }
   .auto-schedule-overview {

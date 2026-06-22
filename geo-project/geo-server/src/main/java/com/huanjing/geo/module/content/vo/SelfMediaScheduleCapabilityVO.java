@@ -29,6 +29,10 @@ public class SelfMediaScheduleCapabilityVO {
     private Boolean contractSupportsLocation;
     private Boolean contractSupportsOneClickFormat;
     private Boolean contractSupportsPublishCheck;
+    private Integer fillLeadMinutes;
+    private Integer minRemainingMinutes;
+    private Integer maxAttempts;
+    private Integer maxRemainingMinutes;
     private LocalDateTime verifiedAt;
     private Long verifiedBy;
     private LocalDateTime createdAt;

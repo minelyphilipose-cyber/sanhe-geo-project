@@ -86,6 +86,14 @@ public class BusinessCalendarService {
         return selectEvenlyFromSlots(allSlots, count);
     }
 
+    public List<PublishSlot> allPublishSlots(YearMonth month, boolean includeAdjustedWorkdays) {
+        List<BusinessDay> days = publishDays(month, includeAdjustedWorkdays);
+        return days.stream()
+                .flatMap(day -> day.windows().stream().map(window -> toSlot(day, window)))
+                .sorted(Comparator.comparing(PublishSlot::plannedAt))
+                .toList();
+    }
+
     private List<PublishSlot> selectOneSlotPerDay(List<BusinessDay> days, int count) {
         List<PublishSlot> result = new ArrayList<>();
         for (int i = 0; i < count; i++) {

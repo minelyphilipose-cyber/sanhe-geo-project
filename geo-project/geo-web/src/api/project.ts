@@ -96,11 +96,54 @@ export interface ProjectSelfMediaScheduleBatchDetailItem {
   lockedUntil?: string | null
   scheduleFailureCode?: string | null
   scheduleFailureMessage?: string | null
+  claimDiagnosticCode?: string | null
+  claimDiagnosticMessage?: string | null
+  failureGroupCode?: string | null
+  failureGroupLabel?: string | null
+  operatorActionHint?: string | null
+  allowedActions?: string[]
+  autoCompensationAvailable?: boolean | null
+  autoCompensationRemaining?: number | null
 }
 
 export interface ProjectSelfMediaScheduleBatchDetail {
   batch?: ProjectSelfMediaScheduleBatch | null
   items: ProjectSelfMediaScheduleBatchDetailItem[]
+  failureSummaries?: ProjectSelfMediaScheduleFailureSummary[]
+  statusRules?: ProjectSelfMediaScheduleStatusRule[]
+  actionPreview?: ProjectSelfMediaScheduleActionPreview | null
+}
+
+export interface ProjectSelfMediaScheduleFailureSummary {
+  code?: string | null
+  label?: string | null
+  category?: string | null
+  count: number
+  retryable?: boolean | null
+  actionHint?: string | null
+  firstMessage?: string | null
+  groupCode?: string | null
+  groupLabel?: string | null
+  operatorAction?: string | null
+}
+
+export interface ProjectSelfMediaScheduleStatusRule {
+  status: string
+  label?: string | null
+  meaning?: string | null
+  allowedActions?: string[]
+  operatorHint?: string | null
+}
+
+export interface ProjectSelfMediaScheduleActionPreview {
+  retryFailedCount?: number | null
+  retryAbnormalCount?: number | null
+  manualCount?: number | null
+  rescheduleNextMonthCount?: number | null
+  ignoreCount?: number | null
+  unableCount?: number | null
+  nextMonth?: string | null
+  messages?: string[]
 }
 
 export interface ProjectSelfMediaAutoScheduleResponse {
@@ -111,6 +154,35 @@ export interface ProjectSelfMediaAutoScheduleResponse {
   plannedCount: number
   rejectedCount: number
   created: boolean
+  plannedItems?: ProjectSelfMediaAutoSchedulePreviewItem[]
+  slotGroups?: ProjectSelfMediaAutoScheduleSlotGroup[]
+}
+
+export interface ProjectSelfMediaAutoSchedulePreviewItem {
+  articleId?: number | null
+  selfMediaAccountId?: number | null
+  platform?: string | null
+  calendarDate?: string | null
+  plannedPublishAt?: string | null
+  windowName?: string | null
+  status?: string | null
+  rejectionCode?: string | null
+  rejectionMessage?: string | null
+}
+
+export interface ProjectSelfMediaAutoScheduleSlotGroup {
+  platform?: string | null
+  platformLabel?: string | null
+  scheduleStrategy?: string | null
+  requestedCount: number
+  availableSlotCount: number
+  enough: boolean
+  message?: string | null
+  selectedSlots?: Array<{
+    executionAt?: string | null
+    plannedPublishAt?: string | null
+    windowName?: string | null
+  }>
 }
 
 export interface ProjectSelfMediaAutoSchedulePayload {
@@ -143,6 +215,22 @@ export function getProjectSelfMediaScheduleBatchDetail(id: number, targetMonth: 
 
 export function retryProjectSelfMediaScheduleBatchFailedItems(id: number, targetMonth: string) {
   return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/retry-failed`)
+}
+
+export function retryProjectSelfMediaScheduleBatchAbnormalSchedules(id: number, targetMonth: string) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/retry-abnormal-schedules`)
+}
+
+export function markProjectSelfMediaScheduleBatchAbnormalManualRequired(id: number, targetMonth: string) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/mark-abnormal-manual-required`)
+}
+
+export function rescheduleProjectSelfMediaScheduleBatchAbnormalNextMonth(id: number, targetMonth: string) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/reschedule-abnormal-next-month`)
+}
+
+export function ignoreProjectSelfMediaScheduleBatchAbnormalSchedules(id: number, targetMonth: string) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/ignore-abnormal-schedules`)
 }
 
 export function previewProjectSelfMediaAutoSchedule(id: number, data: ProjectSelfMediaAutoSchedulePayload) {

@@ -72,6 +72,25 @@ public interface LocalAgentSessionMapper extends BaseMapper<LocalAgentSession> {
                                        @Param("now") LocalDateTime now,
                                        @Param("onlineSince") LocalDateTime onlineSince);
 
+    @Select("""
+            SELECT *
+            FROM local_agent_session
+            WHERE status = 'active'
+              AND expires_at > #{now}
+            ORDER BY last_seen_at DESC, updated_at DESC
+            LIMIT #{limit}
+            """)
+    List<LocalAgentSession> selectRecentActiveSessions(@Param("now") LocalDateTime now,
+                                                       @Param("limit") int limit);
+
+    @Select("""
+            SELECT MAX(last_seen_at)
+            FROM local_agent_session
+            WHERE status = 'active'
+              AND expires_at > #{now}
+            """)
+    LocalDateTime selectLatestHeartbeatAt(@Param("now") LocalDateTime now);
+
     @Update("""
             UPDATE local_agent_session
             SET status = 'revoked',

@@ -1386,6 +1386,19 @@ export interface SelfMediaAutomationOverview {
     waitingForLocalAgent: number
     capacityStatus: 'healthy' | 'pressure' | 'saturated' | 'blocked' | string
     message?: string | null
+    latestHeartbeatAt?: string | null
+    sessions?: Array<{
+      sessionId: number
+      operatorId?: number | null
+      operatorName?: string | null
+      helperName?: string | null
+      status?: string | null
+      online?: boolean | null
+      lastSeenAt?: string | null
+      expiresAt?: string | null
+      runningLoad?: number | null
+      waitingTasks?: number | null
+    }>
   }
   statusCounts: Array<{ status: string; count: number }>
   platformCounts: Array<{ platform: string; activeCount: number; failedCount: number; dueCount: number }>
@@ -1429,6 +1442,12 @@ export interface SelfMediaAutomationOverview {
       message?: string | null
       blockingReasons?: string[]
     }>
+  } | null
+  compensation?: {
+    candidateCount: number
+    alreadyTriedCount: number
+    lastTriedAt?: string | null
+    message?: string | null
   } | null
 }
 

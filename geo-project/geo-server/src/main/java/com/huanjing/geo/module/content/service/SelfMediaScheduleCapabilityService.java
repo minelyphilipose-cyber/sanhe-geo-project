@@ -13,6 +13,7 @@ import com.huanjing.geo.module.content.mapper.SelfMediaScheduleCapabilityMapper;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
 import com.huanjing.geo.module.content.vo.SelfMediaScheduleCapabilityVO;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -67,6 +68,7 @@ public class SelfMediaScheduleCapabilityService {
                     SelfMediaScheduleCapability row = rowsByPlatform.remove(platform);
                     SelfMediaScheduleCapabilityVO vo = row == null ? defaultVo(contract) : SelfMediaScheduleCapabilityVO.from(row);
                     vo.applyContract(contract);
+                    applyScheduleRules(vo, contract);
                     capabilities.put(platform, vo);
                 });
         rowsByPlatform.values().stream()
@@ -180,7 +182,9 @@ public class SelfMediaScheduleCapabilityService {
     private SelfMediaScheduleCapabilityVO toVo(SelfMediaScheduleCapability row) {
         SelfMediaScheduleCapabilityVO vo = SelfMediaScheduleCapabilityVO.from(row);
         if (vo != null) {
-            scheduleAdapterRouter.contract(vo.getPlatform()).ifPresent(vo::applyContract);
+            SelfMediaPlatformCapabilityContract contract = scheduleAdapterRouter.contract(vo.getPlatform()).orElse(null);
+            vo.applyContract(contract);
+            applyScheduleRules(vo, contract);
         }
         return vo;
     }
@@ -196,7 +200,39 @@ public class SelfMediaScheduleCapabilityService {
         vo.setSupportsPublishCheck(contract.supportsPublishCheck());
         vo.setV1Strategy(STRATEGY_PENDING);
         vo.applyContract(contract);
+        applyScheduleRules(vo, contract);
         return vo;
+    }
+
+    private void applyScheduleRules(SelfMediaScheduleCapabilityVO vo, SelfMediaPlatformCapabilityContract contract) {
+        if (vo == null || !StringUtils.hasText(vo.getPlatform())) {
+            return;
+        }
+        String strategy = StringUtils.hasText(vo.getV1Strategy()) && !STRATEGY_PENDING.equals(normalize(vo.getV1Strategy()))
+                ? normalize(vo.getV1Strategy())
+                : defaultStrategy(contract);
+        SelfMediaPlatformScheduleRules rules = scheduleAdapterRouter.rules(vo.getPlatform(), strategy);
+        if (rules == null && contract != null) {
+            rules = contract.scheduleRules();
+        }
+        if (rules == null) {
+            rules = SelfMediaPlatformScheduleRules.defaults();
+        }
+        vo.setFillLeadMinutes(rules.fillLeadMinutes());
+        vo.setMinRemainingMinutes(rules.minRemainingMinutes());
+        vo.setMaxAttempts(rules.maxAttempts());
+        vo.setMaxRemainingMinutes(rules.maxRemainingMinutes());
+    }
+
+    private String defaultStrategy(SelfMediaPlatformCapabilityContract contract) {
+        if (contract == null) {
+            return STRATEGY_PLATFORM_SCHEDULE;
+        }
+        return switch (contract.scheduleMode()) {
+            case BACKEND_DELAYED -> STRATEGY_BACKEND_DELAYED_PUBLISH;
+            case PLATFORM_NATIVE -> STRATEGY_PLATFORM_SCHEDULE;
+            default -> STRATEGY_SEMI_AUTO;
+        };
     }
 
     private ValidatedCapability validate(SelfMediaScheduleCapabilityUpsertRequest request) {

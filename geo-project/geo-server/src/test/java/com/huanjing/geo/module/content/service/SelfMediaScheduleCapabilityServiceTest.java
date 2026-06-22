@@ -66,6 +66,7 @@ class SelfMediaScheduleCapabilityServiceTest {
     void listIncludesContractPlatformsWithoutStoredRows() {
         when(mapper.selectList(any())).thenReturn(List.of());
         when(adapterRouter.contracts()).thenReturn(List.of(toutiaoContract()));
+        when(adapterRouter.rules("toutiao", "platform_schedule")).thenReturn(new SelfMediaPlatformScheduleRules(130, 120, 4, 10080));
 
         List<SelfMediaScheduleCapabilityVO> capabilities = service.list();
 
@@ -78,6 +79,10 @@ class SelfMediaScheduleCapabilityServiceTest {
         assertEquals("pending", capability.getV1Strategy());
         assertTrue(capability.getContractRequiresCoverUpload());
         assertTrue(capability.getContractSupportsLocation());
+        assertEquals(130, capability.getFillLeadMinutes());
+        assertEquals(120, capability.getMinRemainingMinutes());
+        assertEquals(4, capability.getMaxAttempts());
+        assertEquals(10080, capability.getMaxRemainingMinutes());
     }
 
     @Test

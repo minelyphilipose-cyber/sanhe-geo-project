@@ -99,6 +99,33 @@ public class ProjectController {
         return R.ok(projectSelfMediaScheduleService.retryFailedItems(id, targetMonth));
     }
 
+    @PostMapping("/{id:\\d+}/self-media-schedule-batches/{targetMonth}/retry-abnormal-schedules")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> retryAbnormalSelfMediaScheduleBatchItems(@PathVariable Long id,
+                                                                                             @PathVariable String targetMonth) {
+        return R.ok(projectSelfMediaScheduleService.retryAbnormalScheduleItems(id, targetMonth));
+    }
+
+    @PostMapping("/{id:\\d+}/self-media-schedule-batches/{targetMonth}/mark-abnormal-manual-required")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> markAbnormalSelfMediaScheduleBatchItemsManualRequired(
+            @PathVariable Long id,
+            @PathVariable String targetMonth) {
+        return R.ok(projectSelfMediaScheduleService.markAbnormalScheduleItemsManualRequired(id, targetMonth));
+    }
+
+    @PostMapping("/{id:\\d+}/self-media-schedule-batches/{targetMonth}/reschedule-abnormal-next-month")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> rescheduleAbnormalSelfMediaScheduleBatchItemsToNextMonth(
+            @PathVariable Long id,
+            @PathVariable String targetMonth) {
+        return R.ok(projectSelfMediaScheduleService.rescheduleAbnormalScheduleItemsToNextMonth(id, targetMonth));
+    }
+
+    @PostMapping("/{id:\\d+}/self-media-schedule-batches/{targetMonth}/ignore-abnormal-schedules")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> ignoreAbnormalSelfMediaScheduleBatchItems(
+            @PathVariable Long id,
+            @PathVariable String targetMonth) {
+        return R.ok(projectSelfMediaScheduleService.ignoreAbnormalScheduleItems(id, targetMonth));
+    }
+
     @PostMapping("/{id:\\d+}/self-media-schedules/auto-preview")
     public R<SelfMediaPublishAutoScheduleResponse> previewSelfMediaAutoSchedules(
             @PathVariable Long id,

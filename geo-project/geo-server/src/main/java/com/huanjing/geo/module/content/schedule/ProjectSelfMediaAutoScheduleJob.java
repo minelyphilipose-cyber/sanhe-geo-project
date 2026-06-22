@@ -20,6 +20,8 @@ public class ProjectSelfMediaAutoScheduleJob {
     private int limit;
     @Value("${geo.self-media.auto-schedule.job.progress-limit:20}")
     private int progressLimit;
+    @Value("${geo.self-media.auto-schedule.job.compensation-limit:20}")
+    private int compensationLimit;
 
     @Scheduled(cron = "${geo.self-media.auto-schedule.job.cron:0 15 2 1 * *}")
     public void createMonthlySchedules() {
@@ -41,6 +43,18 @@ public class ProjectSelfMediaAutoScheduleJob {
             }
         } catch (Exception ex) {
             log.warn("project self-media auto schedule progress failed error={}", ex.getMessage());
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${geo.self-media.auto-schedule.job.compensation-poll-ms:300000}")
+    public void compensateRetryableAbnormalSchedules() {
+        try {
+            int processed = projectSelfMediaScheduleService.compensateRetryableAbnormalSchedules(compensationLimit);
+            if (processed > 0) {
+                log.info("project self-media auto schedule compensation completed processed={}", processed);
+            }
+        } catch (Exception ex) {
+            log.warn("project self-media auto schedule compensation failed error={}", ex.getMessage());
         }
     }
 }

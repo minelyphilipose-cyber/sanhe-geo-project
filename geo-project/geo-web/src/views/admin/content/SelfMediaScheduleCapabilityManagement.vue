@@ -52,6 +52,16 @@
               {{ row.minDelayMinutes ?? '-' }} ~ {{ row.maxDelayMinutes ?? '-' }} 分钟
             </template>
           </el-table-column>
+          <el-table-column label="生效规则" min-width="220">
+            <template #default="{ row }">
+              <div class="rule-cell">
+                <span>填充提前 {{ minutesText(row.fillLeadMinutes) }}</span>
+                <span>平台至少提前 {{ minutesText(row.minRemainingMinutes) }}</span>
+                <span>最多重试 {{ row.maxAttempts ?? '-' }} 次</span>
+                <span v-if="row.maxRemainingMinutes">最远 {{ durationText(row.maxRemainingMinutes) }}</span>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="能力" min-width="240">
             <template #default="{ row }">
               <div class="capability-tags">
@@ -231,6 +241,9 @@ const editingSummaryItems = computed(() => {
   if (!row) return []
   return [
     { label: '账号要求', value: accountRequirementText(row) },
+    { label: '填充提前', value: minutesText(row.fillLeadMinutes) },
+    { label: '平台提前量', value: minutesText(row.minRemainingMinutes) },
+    { label: '最大重试', value: `${row.maxAttempts ?? '-'} 次` },
     { label: '回查地址', value: worksListUrlText(row) },
     { label: '选择器状态', value: selectorStatusLabel(form.selectorStatus) },
     { label: '点击节流', value: throttleSummaryText(row.platform) },
@@ -351,6 +364,8 @@ function numberOrDefault(value: unknown, fallback: number) {
 function capabilitySummary(row: SelfMediaScheduleCapability) {
   const items = [
     accountRequirementText(row),
+    `填充提前 ${minutesText(row.fillLeadMinutes)}`,
+    `平台提前 ${minutesText(row.minRemainingMinutes)}`,
     row.supportsPublishCheck ? '发布后回查' : '不回查',
     selectorStatusLabel(row.selectorStatus),
   ]
@@ -380,6 +395,18 @@ function throttleSummaryText(platform?: string | null) {
     `点击后 ${baijiahaoThrottle.afterConfirmClickDelayMs}ms`,
     `${baijiahaoThrottle.maxConfirmAttempts} 次`,
   ].join(' / ')
+}
+
+function minutesText(value?: number | null) {
+  if (value === null || value === undefined) return '-'
+  return `${value} 分钟`
+}
+
+function durationText(value?: number | null) {
+  if (!value) return '-'
+  if (value % (24 * 60) === 0) return `${value / (24 * 60)} 天`
+  if (value % 60 === 0) return `${value / 60} 小时`
+  return `${value} 分钟`
 }
 
 function defaultStrategy(row: SelfMediaScheduleCapability) {
@@ -464,7 +491,8 @@ function publishChannelLabel(value?: string | null) {
 }
 
 .platform-cell,
-.strategy-cell {
+.strategy-cell,
+.rule-cell {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -472,7 +500,8 @@ function publishChannelLabel(value?: string | null) {
 }
 
 .platform-cell span,
-.strategy-cell span {
+.strategy-cell span,
+.rule-cell span {
   color: #64748b;
   font-size: 12px;
 }

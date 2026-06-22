@@ -33,6 +33,7 @@ import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchDetailVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.entity.Project;
@@ -43,16 +44,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.time.LocalDate;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -81,6 +86,7 @@ class ProjectSelfMediaScheduleServiceTest {
     private BusinessCalendarService businessCalendarService;
     private BrandAccessService brandAccessService;
     private SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
+    private LocalAgentSessionMapper localAgentSessionMapper;
     private ProjectSelfMediaScheduleService service;
 
     @BeforeEach
@@ -105,6 +111,7 @@ class ProjectSelfMediaScheduleServiceTest {
         businessCalendarService = mock(BusinessCalendarService.class);
         brandAccessService = mock(BrandAccessService.class);
         scheduleAdapterRouter = mock(SelfMediaPlatformScheduleAdapterRouter.class);
+        localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
         SysUser user = new SysUser();
         user.setId(99L);
@@ -112,6 +119,10 @@ class ProjectSelfMediaScheduleServiceTest {
         when(projectMapper.selectById(7L)).thenReturn(project());
         when(perspectiveService.resolve(any(), anyString(), anyString()))
                 .thenReturn(TemplatePerspectiveService.ResolvedPerspective.customer());
+        when(businessCalendarService.allPublishSlots(any(), anyBoolean()))
+                .thenReturn(List.of(slot(11, 9), slot(12, 9), slot(13, 9), slot(14, 9), slot(15, 9)));
+        when(scheduleAdapterRouter.rules(anyString(), anyString()))
+                .thenReturn(SelfMediaPlatformScheduleRules.defaults());
 
         service = new ProjectSelfMediaScheduleService(
                 projectMapper,
@@ -134,9 +145,11 @@ class ProjectSelfMediaScheduleServiceTest {
                 companyChannelQuotaService,
                 brandAccessService,
                 currentUserService,
+                localAgentSessionMapper,
                 new ObjectMapper(),
                 scheduleAdapterRouter
         );
+        service.setClock(Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneId.systemDefault()));
     }
 
     @Test
@@ -296,8 +309,88 @@ class ProjectSelfMediaScheduleServiceTest {
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
                 eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
                 .thenReturn(1L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(11, 9), slot(12, 9), slot(13, 9)));
+        when(scheduleAdapterRouter.rules("toutiao", "platform_schedule"))
+                .thenReturn(SelfMediaPlatformScheduleRules.defaults());
 
         assertEquals(3, service.previewForProject(7L, request).getPlannedCount());
+    }
+
+    @Test
+    void previewForProjectReportsInsufficientFutureSlots() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
+        ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
+        request.setTargetMonth("2026-06");
+        request.setSelfMediaAccountIds(List.of(20L));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 2));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(LocalDateTime.of(2026, 6, 21, 9, 10))));
+        when(scheduleAdapterRouter.rules("toutiao", "platform_schedule"))
+                .thenReturn(new SelfMediaPlatformScheduleRules(10, 120, 4, 7 * 24 * 60));
+
+        var response = service.previewForProject(7L, request);
+
+        assertEquals(2, response.getRequestedCount());
+        assertEquals(2, response.getRejectedCount());
+        assertEquals(1, response.getSlotGroups().size());
+        assertEquals(false, response.getSlotGroups().get(0).getEnough());
+        assertTrue(response.getSlotGroups().get(0).getMessage().contains("本月剩余可自动排期时间不足"));
+    }
+
+    @Test
+    void retryAbnormalScheduleItemsRetriesExistingFailedSchedules() {
+        ProjectSelfMediaScheduleBatch batch = processingBatchWithTwoGenerationPlans();
+        batch.setStatus("partial_failed");
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
+        SelfMediaPublishSchedule schedule = new SelfMediaPublishSchedule();
+        schedule.setId(88L);
+        schedule.setStatus("manual_required");
+        schedule.setPlannedPublishAt(LocalDateTime.of(2026, 6, 1, 9, 10));
+        when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
+                .thenReturn(schedule);
+        SelfMediaPublishScheduleVO retried = new SelfMediaPublishScheduleVO();
+        retried.setId(88L);
+        when(scheduleService.retryNow(88L)).thenReturn(retried);
+
+        ProjectSelfMediaScheduleBatchDetailVO detail = service.retryAbnormalScheduleItems(7L, "2026-06");
+
+        assertEquals(2, detail.getItems().size());
+        verify(scheduleService).retryNow(88L);
+    }
+
+    @Test
+    void markAbnormalScheduleItemsManualRequiredMarksFailedSchedules() {
+        ProjectSelfMediaScheduleBatch batch = processingBatchWithTwoGenerationPlans();
+        batch.setStatus("partial_failed");
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
+        SelfMediaPublishSchedule schedule = new SelfMediaPublishSchedule();
+        schedule.setId(88L);
+        schedule.setStatus("schedule_failed");
+        schedule.setPlannedPublishAt(LocalDateTime.of(2026, 6, 1, 9, 10));
+        when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
+                .thenReturn(schedule);
+        SelfMediaPublishScheduleVO marked = new SelfMediaPublishScheduleVO();
+        marked.setId(88L);
+        when(scheduleService.markManualRequired(eq(88L), anyString())).thenReturn(marked);
+
+        ProjectSelfMediaScheduleBatchDetailVO detail =
+                service.markAbnormalScheduleItemsManualRequired(7L, "2026-06");
+
+        assertEquals(2, detail.getItems().size());
+        verify(scheduleService).markManualRequired(eq(88L), anyString());
+        verify(scheduleService, never()).retryNow(88L);
     }
 
     @Test
@@ -327,7 +420,7 @@ class ProjectSelfMediaScheduleServiceTest {
         BatchArticleGenerationTask secondTask = generationTask(56L, 67L);
         when(generationTaskMapper.selectById(55L)).thenReturn(firstTask);
         when(generationTaskMapper.selectById(56L)).thenReturn(secondTask);
-        when(businessCalendarService.selectEvenly(eq(java.time.YearMonth.of(2026, 6)), eq(2), eq(false)))
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
                 .thenReturn(List.of(slot(11, 10), slot(12, 15)));
         when(scheduleAdapterRouter.rules("toutiao", "platform_schedule"))
                 .thenReturn(SelfMediaPlatformScheduleRules.defaults());
@@ -374,7 +467,7 @@ class ProjectSelfMediaScheduleServiceTest {
                 """);
         when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
         when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
-        when(businessCalendarService.selectEvenly(eq(java.time.YearMonth.of(2026, 6)), eq(1), eq(false)))
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
                 .thenReturn(List.of(slot(11, 10)));
         when(scheduleAdapterRouter.contract("toutiao")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
                 "toutiao",
@@ -446,9 +539,8 @@ class ProjectSelfMediaScheduleServiceTest {
         when(generationTaskMapper.selectById(56L)).thenReturn(generationTask(56L, 67L));
         when(generationTaskMapper.selectById(57L)).thenReturn(generationTask(57L, 68L));
         when(generationTaskMapper.selectById(58L)).thenReturn(generationTask(58L, 69L));
-        when(businessCalendarService.selectEvenly(eq(java.time.YearMonth.of(2026, 6)), eq(2), eq(false)))
-                .thenReturn(List.of(slot(11, 9), slot(29, 14)))
-                .thenReturn(List.of(slot(12, 9), slot(30, 14)));
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(11, 9), slot(12, 9), slot(29, 14), slot(30, 14)));
         when(scheduleAdapterRouter.rules("toutiao", "platform_schedule"))
                 .thenReturn(SelfMediaPlatformScheduleRules.defaults());
         when(scheduleAdapterRouter.rules("xiaohongshu", "platform_schedule"))
@@ -466,9 +558,49 @@ class ProjectSelfMediaScheduleServiceTest {
 
         assertEquals(1, processed);
         assertEquals(LocalDateTime.of(2026, 6, 11, 9, 10), requestCaptor.getAllValues().get(0).getWindowStart());
-        assertEquals(LocalDateTime.of(2026, 6, 12, 9, 10), requestCaptor.getAllValues().get(1).getWindowStart());
+        assertEquals(LocalDateTime.of(2026, 6, 11, 9, 10), requestCaptor.getAllValues().get(1).getWindowStart());
         assertEquals(LocalDateTime.of(2026, 6, 29, 14, 10), requestCaptor.getAllValues().get(2).getWindowStart());
-        assertEquals(LocalDateTime.of(2026, 6, 30, 14, 10), requestCaptor.getAllValues().get(3).getWindowStart());
+        assertEquals(LocalDateTime.of(2026, 6, 29, 14, 10), requestCaptor.getAllValues().get(3).getWindowStart());
+    }
+
+    @Test
+    void progressProcessingBatchesSkipsExpiredAndTooCloseSlots() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
+        ProjectSelfMediaScheduleBatch batch = processingBatchWithTwoGenerationPlans();
+        batch.setRequestPayload("""
+                {
+                  "targetMonth": "2026-06",
+                  "scheduleStrategy": "platform_schedule",
+                  "includeAdjustedWorkdays": false,
+                  "plans": [
+                    {"generationBatchId": 44, "generationTaskId": 55, "selfMediaAccountId": 20, "platform": "toutiao"}
+                  ]
+                }
+                """);
+        when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
+        when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(
+                        slot(LocalDateTime.of(2026, 6, 1, 9, 0)),
+                        slot(LocalDateTime.of(2026, 6, 21, 9, 10)),
+                        slot(LocalDateTime.of(2026, 6, 25, 9, 0))
+                ));
+        when(scheduleAdapterRouter.rules("toutiao", "platform_schedule"))
+                .thenReturn(new SelfMediaPlatformScheduleRules(10, 120, 4, 7 * 24 * 60));
+
+        SelfMediaPublishScheduleCreateResponse created = new SelfMediaPublishScheduleCreateResponse();
+        SelfMediaPublishScheduleVO createdSchedule = new SelfMediaPublishScheduleVO();
+        createdSchedule.setId(88L);
+        created.getCreatedSchedules().add(createdSchedule);
+        ArgumentCaptor<SelfMediaPublishScheduleCreateRequest> requestCaptor =
+                ArgumentCaptor.forClass(SelfMediaPublishScheduleCreateRequest.class);
+        when(scheduleService.createSystemSchedules(requestCaptor.capture(), anyString(), eq(99L))).thenReturn(created);
+
+        int processed = service.progressProcessingBatches(5);
+
+        assertEquals(1, processed);
+        assertEquals(LocalDateTime.of(2026, 6, 25, 9, 10), requestCaptor.getValue().getWindowStart());
+        assertEquals(LocalDateTime.of(2026, 6, 25, 9, 0), requestCaptor.getValue().getExecutionWindowStart());
     }
 
     @Test
@@ -619,6 +751,64 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals("rejected", item.getScheduleStatus());
         assertEquals("ARTICLE_SELF_MEDIA_SCHEDULE_ACTIVE", item.getScheduleFailureCode());
         assertEquals("文章已有自媒体排期正在处理，不能重复创建分发任务", item.getScheduleFailureMessage());
+        assertEquals(1, detail.getFailureSummaries().size());
+        assertEquals("ARTICLE_SELF_MEDIA_SCHEDULE_ACTIVE", detail.getFailureSummaries().get(0).getCode());
+        assertEquals("schedule_rejected", detail.getFailureSummaries().get(0).getCategory());
+        assertEquals(1, detail.getFailureSummaries().get(0).getCount());
+    }
+
+    @Test
+    void getBatchDetailShowsOperatorFriendlyMessageForReplacedSchedule() {
+        ProjectSelfMediaScheduleBatch batch = new ProjectSelfMediaScheduleBatch();
+        batch.setId(33L);
+        batch.setProjectId(7L);
+        batch.setBrandId(8L);
+        batch.setCompanyId(6L);
+        batch.setTargetMonth("2026-06");
+        batch.setStatus("partial_failed");
+        batch.setRequestPayload("""
+                {
+                  "targetMonth": "2026-06",
+                  "scheduleStrategy": "platform_schedule",
+                  "includeAdjustedWorkdays": false,
+                  "plans": [
+                    {
+                      "generationBatchId": 44,
+                      "generationTaskId": 55,
+                      "selfMediaAccountId": 20,
+                      "platform": "toutiao"
+                    }
+                  ]
+                }
+                """);
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(55L);
+        task.setBatchId(44L);
+        task.setStatus("success");
+        task.setArticleId(66L);
+        when(generationTaskMapper.selectById(55L)).thenReturn(task);
+
+        SelfMediaPublishScheduleRequest scheduleRequest = new SelfMediaPublishScheduleRequest();
+        scheduleRequest.setId(77L);
+        when(selfMediaPublishScheduleRequestMapper.selectByRequestKey(8L, "project-auto-33-55"))
+                .thenReturn(scheduleRequest);
+
+        SelfMediaPublishSchedule schedule = new SelfMediaPublishSchedule();
+        schedule.setId(88L);
+        schedule.setStatus("cancelled");
+        schedule.setFailureCode("REPLACED_BY_OPERATOR_QUICK_DISPATCH");
+        schedule.setFailureMessage("运营点击平台快速分发时安全替换");
+        when(selfMediaPublishScheduleMapper.selectByRequestId(77L)).thenReturn(List.of(schedule));
+
+        ProjectSelfMediaScheduleBatchDetailVO detail = service.getBatchDetail(7L, "2026-06");
+
+        ProjectSelfMediaScheduleBatchDetailVO.Item item = detail.getItems().get(0);
+        assertEquals("当前任务排期已由手动触发占用", item.getScheduleFailureMessage());
+        assertEquals("REPLACED_BY_NEW_TASK", item.getFailureGroupCode());
+        assertEquals("手动触发已占用", item.getFailureGroupLabel());
     }
 
     @Test
@@ -687,7 +877,7 @@ class ProjectSelfMediaScheduleServiceTest {
         SelfMediaAccount secondAccount = account();
         secondAccount.setId(21L);
         when(selfMediaAccountMapper.selectById(21L)).thenReturn(secondAccount);
-        when(businessCalendarService.selectEvenly(any(), eq(1), eq(false)))
+        when(businessCalendarService.allPublishSlots(any(), eq(false)))
                 .thenReturn(List.of(slot(15, 9)));
         when(scheduleAdapterRouter.rules(eq("toutiao"), anyString()))
                 .thenReturn(new SelfMediaPlatformScheduleRules(130, 120, 4, 7 * 24 * 60));
@@ -706,6 +896,39 @@ class ProjectSelfMediaScheduleServiceTest {
         verify(batchMapper).updateById(batch);
         assertEquals(1, batch.getCreatedCount());
         assertEquals(0, batch.getRejectedCount());
+    }
+
+    @Test
+    void getBatchDetailAggregatesGenerationFailureSummaries() {
+        ProjectSelfMediaScheduleBatch batch = processingBatchWithTwoGenerationPlans();
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        SelfMediaAccount secondAccount = account();
+        secondAccount.setId(21L);
+        when(selfMediaAccountMapper.selectById(21L)).thenReturn(secondAccount);
+        when(generationTaskMapper.selectById(55L)).thenReturn(failedGenerationTask(55L, "模板缺失"));
+        when(generationTaskMapper.selectById(56L)).thenReturn(failedGenerationTask(56L, "模型超时"));
+
+        ProjectSelfMediaScheduleBatchDetailVO detail = service.getBatchDetail(7L, "2026-06");
+
+        assertEquals(1, detail.getFailureSummaries().size());
+        assertEquals("GENERATION_FAILED", detail.getFailureSummaries().get(0).getCode());
+        assertEquals("generation", detail.getFailureSummaries().get(0).getCategory());
+        assertEquals(2, detail.getFailureSummaries().get(0).getCount());
+    }
+
+    @Test
+    void compensateRetryableAbnormalSchedulesRetriesOnlySafeProjectAutoCandidates() {
+        SelfMediaPublishSchedule retryable = projectAutoSchedule(88L, "LOCAL_AGENT_HEARTBEAT_TIMEOUT", 2);
+        SelfMediaPublishSchedule exhausted = projectAutoSchedule(89L, "PAGE_LOAD_TIMEOUT", 3);
+        SelfMediaPublishSchedule notRetryable = projectAutoSchedule(90L, "LOGIN_REQUIRED", 1);
+        when(selfMediaPublishScheduleMapper.selectProjectAutoCompensationCandidates(anyList(), any(), eq(10)))
+                .thenReturn(List.of(retryable, exhausted, notRetryable));
+
+        int processed = service.compensateRetryableAbnormalSchedules(10);
+
+        assertEquals(1, processed);
+        verify(scheduleService).retryNowSystem(88L, "项目自动排期补偿任务已重新计算安全执行时间并重试");
     }
 
     private ProjectSelfMediaScheduleBatch processingBatchWithTwoGenerationPlans() {
@@ -729,6 +952,16 @@ class ProjectSelfMediaScheduleServiceTest {
                 }
                 """);
         return batch;
+    }
+
+    private SelfMediaPublishSchedule projectAutoSchedule(Long id, String failureCode, int attempts) {
+        SelfMediaPublishSchedule schedule = new SelfMediaPublishSchedule();
+        schedule.setId(id);
+        schedule.setRequestIdempotencyKey("project-auto-33-55");
+        schedule.setStatus("manual_required");
+        schedule.setFailureCode(failureCode);
+        schedule.setAttemptCount(attempts);
+        return schedule;
     }
 
     private BatchArticleGenerationTask generationTask(Long taskId, Long articleId) {
@@ -757,17 +990,26 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     private BusinessCalendarService.PublishSlot slot(int day, int hour) {
+        return slot(LocalDateTime.of(2026, 6, day, hour, 0));
+    }
+
+    private BusinessCalendarService.PublishSlot slot(LocalDateTime plannedAt) {
         return new BusinessCalendarService.PublishSlot(
-                LocalDate.of(2026, 6, day),
+                plannedAt.toLocalDate(),
                 "上午",
                 LocalTime.of(9, 0),
                 LocalTime.of(12, 0),
-                LocalDateTime.of(2026, 6, day, hour, 0),
+                plannedAt,
                 0,
                 "工作日",
                 2,
                 false
         );
+    }
+
+    private Clock fixedClock(LocalDateTime value) {
+        ZoneId zone = ZoneId.systemDefault();
+        return Clock.fixed(value.atZone(zone).toInstant(), zone);
     }
 
     private ProjectSelfMediaAutoScheduleRequest request() {

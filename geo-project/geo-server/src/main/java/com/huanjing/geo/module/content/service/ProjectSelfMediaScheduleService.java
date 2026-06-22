@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
+import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
@@ -27,10 +28,12 @@ import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleConfigMapp
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchVO;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchDetailVO;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleConfigVO;
+import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleItemVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleRejectedItemVO;
@@ -38,6 +41,7 @@ import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
@@ -51,9 +55,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,6 +73,9 @@ import java.util.Set;
 public class ProjectSelfMediaScheduleService {
     private static final int ERROR_CODE = 70043;
     private static final int GENERATION_BATCH_LIMIT = 30;
+    private static final int AUTO_COMPENSATION_MAX_ATTEMPTS = 3;
+    private static final int LOCAL_AGENT_ONLINE_WINDOW_MINUTES = 10;
+    private static final int LOCAL_AGENT_ASSUMED_CAPACITY = 2;
     public static final String TRIGGER_MANUAL = "manual";
     public static final String TRIGGER_JOB = "job";
 
@@ -90,8 +99,10 @@ public class ProjectSelfMediaScheduleService {
     private final CompanyChannelQuotaService companyChannelQuotaService;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
+    private final LocalAgentSessionMapper localAgentSessionMapper;
     private final ObjectMapper objectMapper;
     private final SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
+    private Clock clock = Clock.systemDefaultZone();
 
     public ProjectSelfMediaScheduleConfigVO getConfig(Long projectId) {
         Project project = requireProject(projectId);
@@ -163,6 +174,9 @@ public class ProjectSelfMediaScheduleService {
         for (GenerationPlan plan : payload.plans()) {
             detail.getItems().add(toDetailItem(batch, plan, rejectedItems, accountCache, articleCache));
         }
+        detail.setFailureSummaries(buildFailureSummaries(detail.getItems()));
+        detail.setStatusRules(scheduleStatusRules());
+        detail.setActionPreview(buildBatchActionPreview(detail.getItems(), targetMonth));
         return detail;
     }
 
@@ -214,6 +228,144 @@ public class ProjectSelfMediaScheduleService {
         return getBatchDetail(projectId, targetMonth);
     }
 
+    public ProjectSelfMediaScheduleBatchDetailVO retryAbnormalScheduleItems(Long projectId, String targetMonth) {
+        Project project = requireProject(projectId);
+        requireProjectOperate(project);
+        ProjectSelfMediaScheduleBatchDetailVO detail = getBatchDetail(projectId, targetMonth);
+        if (detail == null || detail.getItems() == null || detail.getItems().isEmpty()) {
+            throw new BizException(ERROR_CODE, "自动排期批次不存在或没有可处理明细");
+        }
+        int retried = 0;
+        for (ProjectSelfMediaScheduleBatchDetailVO.Item item : detail.getItems()) {
+            if (item.getScheduleId() == null || !isRetryableScheduleStatus(item.getScheduleStatus())) {
+                continue;
+            }
+            scheduleService.retryNow(item.getScheduleId());
+            retried++;
+        }
+        if (retried <= 0) {
+            throw new BizException(ERROR_CODE, "当前批次没有可重新处理的异常排期");
+        }
+        return getBatchDetail(project.getId(), targetMonth);
+    }
+
+    public ProjectSelfMediaScheduleBatchDetailVO markAbnormalScheduleItemsManualRequired(Long projectId, String targetMonth) {
+        Project project = requireProject(projectId);
+        requireProjectOperate(project);
+        ProjectSelfMediaScheduleBatchDetailVO detail = getBatchDetail(projectId, targetMonth);
+        if (detail == null || detail.getItems() == null || detail.getItems().isEmpty()) {
+            throw new BizException(ERROR_CODE, "自动排期批次不存在或没有可处理明细");
+        }
+        int marked = 0;
+        for (ProjectSelfMediaScheduleBatchDetailVO.Item item : detail.getItems()) {
+            if (item.getScheduleId() == null || !isManualRequiredMarkableScheduleStatus(item.getScheduleStatus())) {
+                continue;
+            }
+            scheduleService.markManualRequired(item.getScheduleId(), "项目自动排期批量转人工处理");
+            marked++;
+        }
+        if (marked <= 0) {
+            throw new BizException(ERROR_CODE, "当前批次没有可转人工处理的异常排期");
+        }
+        return getBatchDetail(project.getId(), targetMonth);
+    }
+
+    public ProjectSelfMediaScheduleBatchDetailVO rescheduleAbnormalScheduleItemsToNextMonth(Long projectId, String targetMonth) {
+        Project project = requireProject(projectId);
+        requireProjectOperate(project);
+        ProjectSelfMediaScheduleBatch batch = batchMapper.selectByProjectAndMonth(projectId, targetMonth);
+        if (batch == null) {
+            throw new BizException(ERROR_CODE, "自动排期批次不存在");
+        }
+        GenerationPayload payload = readGenerationPayload(batch.getRequestPayload());
+        ProjectSelfMediaScheduleBatchDetailVO detail = getBatchDetail(projectId, targetMonth);
+        List<ProjectSelfMediaScheduleBatchDetailVO.Item> candidates = detail == null ? List.of() : detail.getItems().stream()
+                .filter(item -> item.getScheduleId() != null && isRetryableScheduleStatus(item.getScheduleStatus()))
+                .toList();
+        if (candidates.isEmpty()) {
+            throw new BizException(ERROR_CODE, "当前批次没有可改期的异常排期");
+        }
+        YearMonth nextMonth = YearMonth.parse(targetMonth).plusMonths(1);
+        List<GeneratedSchedulePlan> reschedulePlans = candidates.stream()
+                .map(item -> new GeneratedSchedulePlan(
+                        new GenerationPlan(
+                                item.getGenerationBatchId(),
+                                item.getGenerationTaskId(),
+                                item.getSelfMediaAccountId(),
+                                item.getPlatform()
+                        ),
+                        item.getArticleId()
+                ))
+                .toList();
+        List<BusinessCalendarService.PublishSlot> slots = selectSlotsEvenlyByPlatform(
+                nextMonth,
+                reschedulePlans,
+                payload == null ? null : payload.scheduleStrategy(),
+                payload != null && payload.includeAdjustedWorkdays()
+        );
+        LocalDateTime now = LocalDateTime.now(clock);
+        int changed = 0;
+        for (int i = 0; i < candidates.size(); i++) {
+            ProjectSelfMediaScheduleBatchDetailVO.Item item = candidates.get(i);
+            SelfMediaPublishSchedule row = selfMediaPublishScheduleMapper.selectById(item.getScheduleId());
+            if (row == null || !isRetryableScheduleStatus(row.getStatus())) {
+                continue;
+            }
+            BusinessCalendarService.PublishSlot slot = slots.get(i);
+            String strategy = resolveItemStrategy(firstText(row.getScheduleStrategy(), payload == null ? null : payload.scheduleStrategy()), row.getPlatform());
+            row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+            row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+            row.setScheduleStrategy(strategy);
+            row.setNextAttemptAt(slot.plannedAt());
+            row.setPlannedPublishAt(resolvePlannedPublishAt(slot, row.getPlatform(), strategy));
+            row.setPlatformScheduledAt(row.getPlannedPublishAt());
+            row.setLockedUntil(null);
+            row.setFailureCode("RESCHEDULED_TO_NEXT_MONTH");
+            row.setFailureMessage("运营批量改期到下月后重新等待系统自动处理");
+            row.setUpdatedAt(now);
+            selfMediaPublishScheduleMapper.updateById(row);
+            changed++;
+        }
+        if (changed <= 0) {
+            throw new BizException(ERROR_CODE, "当前批次没有可改期的异常排期");
+        }
+        return getBatchDetail(project.getId(), targetMonth);
+    }
+
+    public ProjectSelfMediaScheduleBatchDetailVO ignoreAbnormalScheduleItems(Long projectId, String targetMonth) {
+        Project project = requireProject(projectId);
+        requireProjectOperate(project);
+        ProjectSelfMediaScheduleBatchDetailVO detail = getBatchDetail(projectId, targetMonth);
+        if (detail == null || detail.getItems() == null || detail.getItems().isEmpty()) {
+            throw new BizException(ERROR_CODE, "自动排期批次不存在或没有可处理明细");
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        int ignored = 0;
+        for (ProjectSelfMediaScheduleBatchDetailVO.Item item : detail.getItems()) {
+            if (item.getScheduleId() == null || !isRetryableScheduleStatus(item.getScheduleStatus())) {
+                continue;
+            }
+            SelfMediaPublishSchedule row = selfMediaPublishScheduleMapper.selectById(item.getScheduleId());
+            if (row == null || !isRetryableScheduleStatus(row.getStatus())) {
+                continue;
+            }
+            row.setStatus(SelfMediaPublishScheduleConstants.STATUS_CANCELLED);
+            row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+            row.setLockedUntil(null);
+            row.setNextAttemptAt(null);
+            row.setCancelledAt(now);
+            row.setFailureCode("IGNORED_BY_OPERATOR");
+            row.setFailureMessage("运营批量忽略该异常排期");
+            row.setUpdatedAt(now);
+            selfMediaPublishScheduleMapper.updateById(row);
+            ignored++;
+        }
+        if (ignored <= 0) {
+            throw new BizException(ERROR_CODE, "当前批次没有可忽略的异常排期");
+        }
+        return getBatchDetail(project.getId(), targetMonth);
+    }
+
     public SelfMediaPublishAutoScheduleResponse previewForProject(Long projectId,
                                                                   ProjectSelfMediaAutoScheduleRequest request) {
         Project project = requireProject(projectId);
@@ -224,7 +376,18 @@ public class ProjectSelfMediaScheduleService {
                 ? selectBrandAccountIds(project.getBrandId())
                 : autoRequest.getSelfMediaAccountIds();
         List<AccountPublishPlan> plans = buildAccountPublishPlans(project, autoRequest.getTargetMonth(), accountIds);
-        return acceptedResponse(autoRequest, plans.size());
+        SelfMediaPublishAutoScheduleResponse response = acceptedResponse(autoRequest, plans.size());
+        response.setSlotGroups(analyzeAvailableSlots(
+                YearMonth.parse(autoRequest.getTargetMonth()),
+                plans,
+                autoRequest.getScheduleStrategy(),
+                Boolean.TRUE.equals(autoRequest.getIncludeAdjustedWorkdays())
+        ));
+        response.getPlannedItems().addAll(buildPreviewItems(response.getSlotGroups(), plans));
+        response.setRejectedCount((int) response.getPlannedItems().stream()
+                .filter(item -> "rejected".equals(item.getStatus()))
+                .count());
+        return response;
     }
 
     @Transactional
@@ -298,6 +461,32 @@ public class ProjectSelfMediaScheduleService {
         return processed;
     }
 
+    public int compensateRetryableAbnormalSchedules(int limit) {
+        int processed = 0;
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<SelfMediaPublishSchedule> candidates = selfMediaPublishScheduleMapper.selectProjectAutoCompensationCandidates(
+                List.of(
+                        SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
+                        SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED
+                ),
+                now,
+                Math.max(1, limit)
+        );
+        for (SelfMediaPublishSchedule candidate : candidates) {
+            if (candidate == null || !isAutoCompensationCandidate(candidate)) {
+                continue;
+            }
+            try {
+                scheduleService.retryNowSystem(candidate.getId(), "项目自动排期补偿任务已重新计算安全执行时间并重试");
+                processed++;
+            } catch (Exception ex) {
+                log.warn("project self-media auto schedule compensation skipped scheduleId={} code={} error={}",
+                        candidate.getId(), candidate.getFailureCode(), trimMessage(ex.getMessage()));
+            }
+        }
+        return processed;
+    }
+
     private Long resolveSystemOperatorId(Project project, ProjectSelfMediaScheduleConfig config) {
         Long operatorId = config.getUpdatedBy() != null && config.getUpdatedBy() > 0 ? config.getUpdatedBy() : config.getCreatedBy();
         if (operatorId == null || operatorId <= 0) {
@@ -323,6 +512,7 @@ public class ProjectSelfMediaScheduleService {
         if (plans.isEmpty()) {
             throw new BizException(ERROR_CODE, "该项目本月自媒体平台剩余额度为 0，无法创建自动化排期");
         }
+        validateAvailableSlotsBeforeGeneration(autoRequest, plans);
 
         ProjectSelfMediaScheduleBatch batch = reusableBatch == null
                 ? newBatch(project, autoRequest, triggerMode, operatorId)
@@ -567,6 +757,7 @@ public class ProjectSelfMediaScheduleService {
         List<BusinessCalendarService.PublishSlot> slots = selectSlotsEvenlyByPlatform(
                 targetMonth,
                 generated,
+                payload.scheduleStrategy(),
                 payload.includeAdjustedWorkdays()
         );
         SelfMediaPublishAutoScheduleResponse response = acceptedResponse(
@@ -682,27 +873,352 @@ public class ProjectSelfMediaScheduleService {
 
     private List<BusinessCalendarService.PublishSlot> selectSlotsEvenlyByPlatform(YearMonth targetMonth,
                                                                                   List<GeneratedSchedulePlan> generated,
+                                                                                  String requestedScheduleStrategy,
                                                                                   boolean includeAdjustedWorkdays) {
-        Map<String, List<Integer>> indexesByPlatform = new LinkedHashMap<>();
-        for (int i = 0; i < generated.size(); i++) {
-            String platform = normalizePlatform(generated.get(i).plan().platform());
-            indexesByPlatform.computeIfAbsent(firstText(platform, "unknown"), ignored -> new ArrayList<>()).add(i);
-        }
-        List<BusinessCalendarService.PublishSlot> result = new ArrayList<>();
-        for (int i = 0; i < generated.size(); i++) {
-            result.add(null);
-        }
-        for (List<Integer> indexes : indexesByPlatform.values()) {
-            List<BusinessCalendarService.PublishSlot> platformSlots = businessCalendarService.selectEvenly(
-                    targetMonth,
-                    indexes.size(),
-                    includeAdjustedWorkdays
-            );
-            for (int i = 0; i < indexes.size(); i++) {
-                result.set(indexes.get(i), platformSlots.get(i));
+        List<AccountPublishPlan> plans = generated.stream()
+                .map(item -> new AccountPublishPlan(item.plan().selfMediaAccountId(), item.plan().platform()))
+                .toList();
+        List<SelfMediaPublishAutoScheduleResponse.SlotGroup> groups = analyzeAvailableSlots(
+                targetMonth,
+                plans,
+                requestedScheduleStrategy,
+                includeAdjustedWorkdays
+        );
+        for (SelfMediaPublishAutoScheduleResponse.SlotGroup group : groups) {
+            if (!Boolean.TRUE.equals(group.getEnough())) {
+                throw new BizException(
+                        ERROR_CODE,
+                        firstText(group.getMessage(),
+                                group.getPlatformLabel() + "本月剩余可自动排期时间不足，请选择下月或减少排期数量")
+                );
             }
         }
+        return selectedSlotsByGeneratedPlans(generated, groups);
+    }
+
+    private List<BusinessCalendarService.PublishSlot> selectedSlotsByGeneratedPlans(
+            List<GeneratedSchedulePlan> generated,
+            List<SelfMediaPublishAutoScheduleResponse.SlotGroup> groups
+    ) {
+        Map<String, List<SelfMediaPublishAutoScheduleResponse.SlotPreview>> previewsByPlatform = new LinkedHashMap<>();
+        for (SelfMediaPublishAutoScheduleResponse.SlotGroup group : groups) {
+            previewsByPlatform.put(firstText(normalizePlatform(group.getPlatform()), "unknown"), group.getSelectedSlots());
+        }
+        Map<String, Integer> cursorByPlatform = new LinkedHashMap<>();
+        List<BusinessCalendarService.PublishSlot> result = new ArrayList<>();
+        for (GeneratedSchedulePlan item : generated) {
+            String platform = firstText(normalizePlatform(item.plan().platform()), "unknown");
+            int cursor = cursorByPlatform.getOrDefault(platform, 0);
+            List<SelfMediaPublishAutoScheduleResponse.SlotPreview> previews = previewsByPlatform.get(platform);
+            if (previews == null || cursor >= previews.size()) {
+                throw new BizException(ERROR_CODE, platformLabel(platform) + "本月剩余可自动排期时间不足，请选择下月或减少排期数量");
+            }
+            SelfMediaPublishAutoScheduleResponse.SlotPreview preview = previews.get(cursor);
+            cursorByPlatform.put(platform, cursor + 1);
+            result.add(new BusinessCalendarService.PublishSlot(
+                    preview.getExecutionAt().toLocalDate(),
+                    preview.getWindowName(),
+                    preview.getExecutionAt().toLocalTime(),
+                    preview.getExecutionAt().toLocalTime(),
+                    preview.getExecutionAt(),
+                    0,
+                    null,
+                    0,
+                    false
+            ));
+        }
         return result;
+    }
+
+    private List<SelfMediaPublishAutoScheduleResponse.SlotGroup> analyzeAvailableSlots(
+            YearMonth targetMonth,
+            List<AccountPublishPlan> plans,
+            String requestedScheduleStrategy,
+            boolean includeAdjustedWorkdays
+    ) {
+        Map<String, List<AccountPublishPlan>> plansByPlatform = new LinkedHashMap<>();
+        for (AccountPublishPlan plan : plans) {
+            String platform = firstText(normalizePlatform(plan.platform()), "unknown");
+            plansByPlatform.computeIfAbsent(platform, ignored -> new ArrayList<>()).add(plan);
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<BusinessCalendarService.PublishSlot> candidateSlots =
+                businessCalendarService.allPublishSlots(targetMonth, includeAdjustedWorkdays);
+        List<SelfMediaPublishAutoScheduleResponse.SlotGroup> groups = new ArrayList<>();
+        for (Map.Entry<String, List<AccountPublishPlan>> entry : plansByPlatform.entrySet()) {
+            String platform = entry.getKey();
+            String scheduleStrategy = resolveItemStrategy(requestedScheduleStrategy, platform);
+            List<BusinessCalendarService.PublishSlot> platformSlots = candidateSlots.stream()
+                    .filter(slot -> isFutureExecutableSlot(slot, platform, scheduleStrategy, now))
+                    .sorted(Comparator.comparing(BusinessCalendarService.PublishSlot::plannedAt))
+                    .toList();
+            SelfMediaPublishAutoScheduleResponse.SlotGroup group = new SelfMediaPublishAutoScheduleResponse.SlotGroup();
+            group.setPlatform(platform);
+            group.setPlatformLabel(platformLabel(platform));
+            group.setScheduleStrategy(scheduleStrategy);
+            group.setRequestedCount(entry.getValue().size());
+            group.setAvailableSlotCount(platformSlots.size());
+            group.setEnough(platformSlots.size() >= entry.getValue().size());
+            group.setMessage(Boolean.TRUE.equals(group.getEnough())
+                    ? "可满足本月自动排期"
+                    : platformLabel(platform) + "本月剩余可自动排期时间不足，请选择下月或减少排期数量");
+            List<BusinessCalendarService.PublishSlot> selectedSlots = group.getEnough()
+                    ? selectEvenlyFromSlots(platformSlots, entry.getValue().size())
+                    : List.of();
+            for (BusinessCalendarService.PublishSlot slot : selectedSlots) {
+                SelfMediaPublishAutoScheduleResponse.SlotPreview preview = new SelfMediaPublishAutoScheduleResponse.SlotPreview();
+                preview.setExecutionAt(slot.plannedAt());
+                preview.setPlannedPublishAt(resolvePlannedPublishAt(slot, platform, scheduleStrategy));
+                preview.setWindowName(slot.windowName());
+                group.getSelectedSlots().add(preview);
+            }
+            groups.add(group);
+        }
+        return groups;
+    }
+
+    private void validateAvailableSlotsBeforeGeneration(SelfMediaPublishAutoScheduleRequest request,
+                                                        List<AccountPublishPlan> plans) {
+        List<SelfMediaPublishAutoScheduleResponse.SlotGroup> groups = analyzeAvailableSlots(
+                YearMonth.parse(request.getTargetMonth()),
+                plans,
+                request.getScheduleStrategy(),
+                Boolean.TRUE.equals(request.getIncludeAdjustedWorkdays())
+        );
+        for (SelfMediaPublishAutoScheduleResponse.SlotGroup group : groups) {
+            if (!Boolean.TRUE.equals(group.getEnough())) {
+                throw new BizException(
+                        ERROR_CODE,
+                        firstText(group.getMessage(),
+                                group.getPlatformLabel() + "本月剩余可自动排期时间不足，请选择下月或减少排期数量")
+                );
+            }
+        }
+    }
+
+    private List<SelfMediaPublishAutoScheduleItemVO> buildPreviewItems(
+            List<SelfMediaPublishAutoScheduleResponse.SlotGroup> groups,
+            List<AccountPublishPlan> plans
+    ) {
+        Map<String, List<SelfMediaPublishAutoScheduleResponse.SlotPreview>> previewsByPlatform = new LinkedHashMap<>();
+        for (SelfMediaPublishAutoScheduleResponse.SlotGroup group : groups) {
+            previewsByPlatform.put(firstText(normalizePlatform(group.getPlatform()), "unknown"), group.getSelectedSlots());
+        }
+        Map<String, Integer> cursorByPlatform = new LinkedHashMap<>();
+        List<SelfMediaPublishAutoScheduleItemVO> items = new ArrayList<>();
+        for (AccountPublishPlan plan : plans) {
+            String platform = firstText(normalizePlatform(plan.platform()), "unknown");
+            int cursor = cursorByPlatform.getOrDefault(platform, 0);
+            cursorByPlatform.put(platform, cursor + 1);
+            SelfMediaPublishAutoScheduleItemVO item = new SelfMediaPublishAutoScheduleItemVO();
+            item.setSelfMediaAccountId(plan.accountId());
+            item.setPlatform(platform);
+            List<SelfMediaPublishAutoScheduleResponse.SlotPreview> previews = previewsByPlatform.get(platform);
+            if (previews != null && cursor < previews.size()) {
+                SelfMediaPublishAutoScheduleResponse.SlotPreview preview = previews.get(cursor);
+                item.setCalendarDate(preview.getExecutionAt().toLocalDate());
+                item.setPlannedPublishAt(preview.getPlannedPublishAt());
+                item.setWindowName(preview.getWindowName());
+                item.setStatus("planned");
+            } else {
+                item.setStatus("rejected");
+                item.setRejectionCode("PROJECT_AUTO_SCHEDULE_SLOT_UNAVAILABLE");
+                item.setRejectionMessage(platformLabel(platform) + "本月剩余可自动排期时间不足");
+            }
+            items.add(item);
+        }
+        return items;
+    }
+
+    private List<BusinessCalendarService.PublishSlot> selectEvenlyFromSlots(List<BusinessCalendarService.PublishSlot> slots,
+                                                                            int count) {
+        if (count <= 0) {
+            return List.of();
+        }
+        List<BusinessCalendarService.PublishSlot> result = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            int slotIndex = Math.min(slots.size() - 1, (int) Math.floor((double) i * slots.size() / count));
+            result.add(slots.get(slotIndex));
+        }
+        return result;
+    }
+
+    private boolean isFutureExecutableSlot(BusinessCalendarService.PublishSlot slot,
+                                           String platform,
+                                           String scheduleStrategy,
+                                           LocalDateTime now) {
+        if (slot == null || slot.plannedAt() == null || !slot.plannedAt().isAfter(now)) {
+            return false;
+        }
+        if (!SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalizeText(scheduleStrategy))) {
+            return true;
+        }
+        LocalDateTime plannedPublishAt = resolvePlannedPublishAt(slot, platform, scheduleStrategy);
+        int minRemainingMinutes = Math.max(0, scheduleAdapterRouter.rules(platform, scheduleStrategy).minRemainingMinutes());
+        return plannedPublishAt != null && plannedPublishAt.isAfter(now.plusMinutes(minRemainingMinutes));
+    }
+
+    private boolean isRetryableScheduleStatus(String status) {
+        String normalized = normalizeText(status);
+        return SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED.equals(normalized)
+                || SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED.equals(normalized)
+                || SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED.equals(normalized);
+    }
+
+    private boolean isManualRequiredMarkableScheduleStatus(String status) {
+        String normalized = normalizeText(status);
+        return SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED.equals(normalized)
+                || SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED.equals(normalized);
+    }
+
+    private boolean isAutoCompensationCandidate(SelfMediaPublishSchedule row) {
+        if (row == null || row.getId() == null) {
+            return false;
+        }
+        String status = normalizeText(row.getStatus());
+        if (!SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED.equals(status)
+                && !SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED.equals(status)) {
+            return false;
+        }
+        if (!SelfMediaPublishFailureCodes.isScheduleExecutionRetryable(row.getFailureCode())) {
+            return false;
+        }
+        int attempts = row.getAttemptCount() == null ? 0 : row.getAttemptCount();
+        return attempts < AUTO_COMPENSATION_MAX_ATTEMPTS;
+    }
+
+    private List<ProjectSelfMediaScheduleBatchDetailVO.FailureSummary> buildFailureSummaries(
+            List<ProjectSelfMediaScheduleBatchDetailVO.Item> items
+    ) {
+        Map<String, ProjectSelfMediaScheduleBatchDetailVO.FailureSummary> summaries = new LinkedHashMap<>();
+        for (ProjectSelfMediaScheduleBatchDetailVO.Item item : items) {
+            FailureReason reason = failureReason(item);
+            if (reason == null) {
+                continue;
+            }
+            ProjectSelfMediaScheduleBatchDetailVO.FailureSummary summary = summaries.computeIfAbsent(
+                    reason.key(),
+                    ignored -> {
+                        ProjectSelfMediaScheduleBatchDetailVO.FailureSummary created =
+                                new ProjectSelfMediaScheduleBatchDetailVO.FailureSummary();
+                        created.setCode(reason.code());
+                        created.setLabel(reason.label());
+                        created.setCategory(reason.category());
+                        created.setCount(0);
+                        created.setRetryable(reason.retryable());
+                        created.setActionHint(reason.actionHint());
+                        created.setFirstMessage(reason.message());
+                        created.setGroupCode(reason.groupCode());
+                        created.setGroupLabel(reason.groupLabel());
+                        created.setOperatorAction(reason.operatorAction());
+                        return created;
+                    }
+            );
+            summary.setCount((summary.getCount() == null ? 0 : summary.getCount()) + 1);
+            if (!StringUtils.hasText(summary.getFirstMessage())) {
+                summary.setFirstMessage(reason.message());
+            }
+        }
+        return summaries.values().stream()
+                .sorted(Comparator
+                        .comparing(ProjectSelfMediaScheduleBatchDetailVO.FailureSummary::getCount,
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(ProjectSelfMediaScheduleBatchDetailVO.FailureSummary::getLabel,
+                                Comparator.nullsLast(String::compareTo)))
+                .toList();
+    }
+
+    private FailureReason failureReason(ProjectSelfMediaScheduleBatchDetailVO.Item item) {
+        if (item == null) {
+            return null;
+        }
+        if ("failed".equals(normalizeText(item.getGenerationStatus()))) {
+            String message = item.getGenerationErrorMessage();
+            return new FailureReason(
+                    "GENERATION_FAILED",
+                    "文章生成失败",
+                    "generation",
+                    false,
+                    "检查文章模板、问题池和模型返回后重试失败项。",
+                    firstText(message, "文章生成失败"),
+                    "ARTICLE_GENERATION",
+                    "文章生成问题",
+                    "先重新处理失败项；如果连续失败，请检查选题和模板。"
+            );
+        }
+        String code = trimToNull(item.getScheduleFailureCode());
+        String message = firstText(item.getScheduleFailureMessage(), code);
+        if (!StringUtils.hasText(code) && !StringUtils.hasText(message)) {
+            return null;
+        }
+        String normalizedStatus = normalizeText(item.getScheduleStatus());
+        String category = "rejected".equals(normalizedStatus) ? "schedule_rejected" : "schedule_abnormal";
+        if (!StringUtils.hasText(code) && StringUtils.hasText(message)) {
+            code = SelfMediaPublishFailureCodes.classifyByMessage(message);
+        }
+        String safeCode = firstText(code, "UNKNOWN_FAILURE");
+        Boolean retryable = SelfMediaPublishFailureCodes.retryable(safeCode);
+        FailureGroup group = failureGroup(safeCode, message, normalizedStatus);
+        return new FailureReason(
+                safeCode,
+                firstText(SelfMediaPublishFailureCodes.label(safeCode), safeCode),
+                category,
+                Boolean.TRUE.equals(retryable),
+                SelfMediaPublishFailureCodes.actionHint(safeCode),
+                message,
+                group.code(),
+                group.label(),
+                group.operatorAction()
+        );
+    }
+
+    private record FailureReason(String code,
+                                 String label,
+                                 String category,
+                                 Boolean retryable,
+                                 String actionHint,
+                                 String message,
+                                 String groupCode,
+                                 String groupLabel,
+                                 String operatorAction) {
+        String key() {
+            return category + "|" + groupCode + "|" + code;
+        }
+    }
+
+    private FailureGroup failureGroup(String code, String message, String status) {
+        String text = (firstText(code, "") + " " + firstText(message, "") + " " + firstText(status, "")).toLowerCase(Locale.ROOT);
+        if (text.contains("replaced_by_operator") || text.contains("安全替换") || text.contains("被新的快速分发任务替换")
+                || text.contains("被快速分发替换") || text.contains("由平台快速排期替换")
+                || text.contains("由手动触发占用")) {
+            return new FailureGroup("REPLACED_BY_NEW_TASK", "手动触发已占用", "无需处理这条自动排期。");
+        }
+        if (text.contains("too_close") || text.contains("remaining") || text.contains("lead")
+                || text.contains("过近") || text.contains("提前") || text.contains("时间不足")) {
+            return new FailureGroup("PUBLISH_TIME", "发布时间不合适", "改期到下月，或减少本月数量后重新处理。");
+        }
+        if (text.contains("local_agent") || text.contains("adspower") || text.contains("helper")
+                || text.contains("助手") || text.contains("浏览器")) {
+            return new FailureGroup("LOCAL_HELPER", "本地助手问题", "确认本地助手已打开、账号匹配后重新处理。");
+        }
+        if (text.contains("account") || text.contains("auth") || text.contains("credential")
+                || text.contains("账号") || text.contains("授权") || text.contains("cookie")) {
+            return new FailureGroup("ACCOUNT_CONFIG", "账号配置问题", "检查平台账号、授权和绑定运营后重新处理。");
+        }
+        if (text.contains("platform") || text.contains("submit") || text.contains("schedule")
+                || text.contains("平台") || text.contains("预约") || text.contains("定时")) {
+            return new FailureGroup("PLATFORM_REJECTED", "平台没有接受", "查看平台规则，调整发布时间或内容后重新处理。");
+        }
+        if (text.contains("publish_failed") || text.contains("publish_unknown") || text.contains("发布")) {
+            return new FailureGroup("PUBLISH_RESULT", "发布结果异常", "检查平台作品列表，确认是否已发布；必要时重新校验。");
+        }
+        if ("rejected".equals(status)) {
+            return new FailureGroup("SCHEDULE_CREATE", "发布时间安排失败", "调整账号或发布时间后重新处理。");
+        }
+        return new FailureGroup("OTHER", "其他异常", "查看单条异常信息后决定重新处理、改期或转人工。");
+    }
+
+    private record FailureGroup(String code, String label, String operatorAction) {
     }
 
     private LocalDateTime resolvePlannedPublishAt(BusinessCalendarService.PublishSlot executionSlot,
@@ -867,16 +1383,250 @@ public class ProjectSelfMediaScheduleService {
             item.setNextAttemptAt(schedule.getNextAttemptAt());
             item.setLockedUntil(schedule.getLockedUntil());
             item.setScheduleFailureCode(schedule.getFailureCode());
-            item.setScheduleFailureMessage(schedule.getFailureMessage());
+            item.setScheduleFailureMessage(operatorFriendlyScheduleFailureMessage(
+                    schedule.getFailureCode(),
+                    schedule.getFailureMessage()
+            ));
+            applyClaimDiagnostic(item, schedule);
+            applyStatusActionInfo(item, schedule);
         } else {
             SelfMediaPublishScheduleRejectedItemVO rejected = findRejectedItem(rejectedItems, item.getArticleId(), plan);
             if (rejected != null) {
                 item.setScheduleStatus("rejected");
                 item.setScheduleFailureCode(rejected.getCode());
-                item.setScheduleFailureMessage(firstText(rejected.getMessage(), rejected.getCode()));
+                item.setScheduleFailureMessage(operatorFriendlyScheduleFailureMessage(
+                        rejected.getCode(),
+                        firstText(rejected.getMessage(), rejected.getCode())
+                ));
+            }
+            applyStatusActionInfo(item, null);
+        }
+        applyFailureGroup(item);
+        return item;
+    }
+
+    private String operatorFriendlyScheduleFailureMessage(String code, String message) {
+        String text = firstText(code, "") + " " + firstText(message, "");
+        if (text.contains("REPLACED_BY_OPERATOR_QUICK_DISPATCH")
+                || text.contains("REPLACED_BY_OPERATOR_QUICK_SCHEDULE")
+                || text.contains("运营点击平台快速分发时安全替换")
+                || text.contains("运营确认后由平台快速排期替换")
+                || text.contains("旧排期已被新的快速分发任务替换")
+                || text.contains("旧排期已被快速分发替换")
+                || text.contains("当前任务排期已由手动触发占用")) {
+            return "当前任务排期已由手动触发占用";
+        }
+        return message;
+    }
+
+    private void applyClaimDiagnostic(ProjectSelfMediaScheduleBatchDetailVO.Item item, SelfMediaPublishSchedule schedule) {
+        ClaimDiagnostic diagnostic = claimDiagnostic(schedule);
+        item.setClaimDiagnosticCode(diagnostic.code());
+        item.setClaimDiagnosticMessage(diagnostic.message());
+    }
+
+    private void applyStatusActionInfo(ProjectSelfMediaScheduleBatchDetailVO.Item item, SelfMediaPublishSchedule schedule) {
+        List<String> actions = new ArrayList<>();
+        String generationStatus = normalizeText(item.getGenerationStatus());
+        String scheduleStatus = normalizeText(item.getScheduleStatus());
+        if ("failed".equals(generationStatus) && item.getScheduleId() == null) {
+            actions.add("重新处理");
+            item.setOperatorActionHint("文章生成失败，可先重新处理失败项；如果持续失败，请检查选题、模板或提示词。");
+        } else if ("rejected".equals(scheduleStatus)) {
+            actions.add("重新处理");
+            item.setOperatorActionHint("文章已生成，但发布时间没有安排成功。请调整发布时间或账号后重新处理。");
+        } else if (isRetryableScheduleStatus(scheduleStatus)) {
+            actions.add("重新处理");
+            actions.add("改期到下月");
+            actions.add("忽略");
+            if (isManualRequiredMarkableScheduleStatus(scheduleStatus)) {
+                actions.add("转人工");
+            }
+            item.setOperatorActionHint("这条内容处理异常，可重新处理；如果本月时间不足，建议改期到下月。");
+        } else if (SelfMediaPublishScheduleConstants.STATUS_PENDING.equals(scheduleStatus)) {
+            item.setOperatorActionHint("已安排好，等待系统到时间后处理。");
+        } else if (SelfMediaPublishScheduleConstants.STATUS_SCHEDULED.equals(scheduleStatus)
+                || SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE.equals(scheduleStatus)
+                || SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(scheduleStatus)) {
+            item.setOperatorActionHint("已提交到平台或正在确认发布结果，一般无需人工处理。");
+        } else if (SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(scheduleStatus)) {
+            item.setOperatorActionHint("已确认发布完成。");
+        } else if (SelfMediaPublishScheduleConstants.STATUS_CANCELLED.equals(scheduleStatus)) {
+            item.setOperatorActionHint("已取消，系统不会继续处理。");
+        } else if (item.getArticleId() != null && item.getScheduleId() == null) {
+            item.setOperatorActionHint("文章已生成，等待系统安排发布时间。");
+        } else {
+            item.setOperatorActionHint("等待文章生成或后续处理。");
+        }
+        item.setAllowedActions(actions);
+        if (schedule != null && isAutoCompensationCandidate(schedule)) {
+            int attempts = schedule.getAttemptCount() == null ? 0 : schedule.getAttemptCount();
+            item.setAutoCompensationAvailable(true);
+            item.setAutoCompensationRemaining(Math.max(0, AUTO_COMPENSATION_MAX_ATTEMPTS - attempts));
+        } else {
+            item.setAutoCompensationAvailable(false);
+            item.setAutoCompensationRemaining(0);
+        }
+    }
+
+    private void applyFailureGroup(ProjectSelfMediaScheduleBatchDetailVO.Item item) {
+        FailureReason reason = failureReason(item);
+        if (reason == null) {
+            return;
+        }
+        item.setFailureGroupCode(reason.groupCode());
+        item.setFailureGroupLabel(reason.groupLabel());
+        if (!StringUtils.hasText(item.getOperatorActionHint())) {
+            item.setOperatorActionHint(reason.actionHint());
+        }
+    }
+
+    private ProjectSelfMediaScheduleBatchDetailVO.BatchActionPreview buildBatchActionPreview(
+            List<ProjectSelfMediaScheduleBatchDetailVO.Item> items,
+            String targetMonth
+    ) {
+        ProjectSelfMediaScheduleBatchDetailVO.BatchActionPreview preview =
+                new ProjectSelfMediaScheduleBatchDetailVO.BatchActionPreview();
+        int retryFailed = 0;
+        int retryAbnormal = 0;
+        int manual = 0;
+        int reschedule = 0;
+        int ignore = 0;
+        int unable = 0;
+        for (ProjectSelfMediaScheduleBatchDetailVO.Item item : items) {
+            boolean generationFailed = "failed".equals(normalizeText(item.getGenerationStatus())) && item.getScheduleId() == null;
+            boolean rejected = item.getScheduleId() == null
+                    && "rejected".equals(normalizeText(item.getScheduleStatus()))
+                    && item.getArticleId() != null;
+            boolean retryableSchedule = item.getScheduleId() != null && isRetryableScheduleStatus(item.getScheduleStatus());
+            if (generationFailed || rejected) {
+                retryFailed++;
+            }
+            if (retryableSchedule) {
+                retryAbnormal++;
+                reschedule++;
+                ignore++;
+            }
+            if (item.getScheduleId() != null && isManualRequiredMarkableScheduleStatus(item.getScheduleStatus())) {
+                manual++;
+            }
+            if (!generationFailed && !rejected && !retryableSchedule && item.getScheduleFailureCode() != null) {
+                unable++;
             }
         }
-        return item;
+        preview.setRetryFailedCount(retryFailed);
+        preview.setRetryAbnormalCount(retryAbnormal);
+        preview.setManualCount(manual);
+        preview.setRescheduleNextMonthCount(reschedule);
+        preview.setIgnoreCount(ignore);
+        preview.setUnableCount(unable);
+        preview.setNextMonth(nextMonthText(targetMonth));
+        if (retryFailed > 0) {
+            preview.getMessages().add("有 " + retryFailed + " 条可重新生成文章或重新安排发布时间。");
+        }
+        if (retryAbnormal > 0) {
+            preview.getMessages().add("有 " + retryAbnormal + " 条异常内容可重新处理、改期或忽略。");
+        }
+        if (manual > 0) {
+            preview.getMessages().add("有 " + manual + " 条可转给运营人工处理。");
+        }
+        if (unable > 0) {
+            preview.getMessages().add("有 " + unable + " 条当前不适合批量处理，请查看单条异常。");
+        }
+        return preview;
+    }
+
+    private List<ProjectSelfMediaScheduleBatchDetailVO.StatusRule> scheduleStatusRules() {
+        List<ProjectSelfMediaScheduleBatchDetailVO.StatusRule> rules = new ArrayList<>();
+        rules.add(statusRule("pending", "等待处理", "已安排好时间，系统会在合适时间处理。", List.of(), "一般无需操作；如果一直不动，请看处理提示。"));
+        rules.add(statusRule("filling", "正在准备内容", "本地助手正在打开平台并填写内容。", List.of(), "等待处理完成。"));
+        rules.add(statusRule("scheduling", "正在预约发布时间", "系统正在把发布时间提交到平台。", List.of(), "等待平台返回结果。"));
+        rules.add(statusRule("scheduled", "已预约", "平台已接受预约发布时间。", List.of(), "等待到发布时间后确认结果。"));
+        rules.add(statusRule("schedule_failed", "预约失败", "平台没有接受这次预约。", List.of("重新处理", "转人工", "改期到下月", "忽略"), "优先看异常原因；时间太近时建议改期。"));
+        rules.add(statusRule("publish_failed", "发布失败", "到发布时间后未确认发布成功。", List.of("重新处理", "转人工", "改期到下月", "忽略"), "检查平台账号和本地助手后再处理。"));
+        rules.add(statusRule("manual_required", "需人工处理", "系统判断继续自动处理意义不大。", List.of("重新处理", "改期到下月", "忽略"), "按异常原因处理后再重新处理。"));
+        rules.add(statusRule("cancelled", "已忽略", "运营已忽略或系统已取消。", List.of(), "系统不会继续处理。"));
+        rules.add(statusRule("published_confirmed", "已发布", "系统已确认发布成功。", List.of(), "无需处理。"));
+        return rules;
+    }
+
+    private ProjectSelfMediaScheduleBatchDetailVO.StatusRule statusRule(String status,
+                                                                        String label,
+                                                                        String meaning,
+                                                                        List<String> allowedActions,
+                                                                        String hint) {
+        ProjectSelfMediaScheduleBatchDetailVO.StatusRule rule = new ProjectSelfMediaScheduleBatchDetailVO.StatusRule();
+        rule.setStatus(status);
+        rule.setLabel(label);
+        rule.setMeaning(meaning);
+        rule.setAllowedActions(new ArrayList<>(allowedActions));
+        rule.setOperatorHint(hint);
+        return rule;
+    }
+
+    private String nextMonthText(String targetMonth) {
+        try {
+            return YearMonth.parse(targetMonth).plusMonths(1).toString();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private ClaimDiagnostic claimDiagnostic(SelfMediaPublishSchedule schedule) {
+        if (schedule == null) {
+            return new ClaimDiagnostic("NO_SCHEDULE", "暂未生成发布任务");
+        }
+        String status = normalizeText(schedule.getStatus());
+        String queueKind = normalizeText(schedule.getQueueKind());
+        LocalDateTime now = LocalDateTime.now(clock);
+        if (!requiresLocalAgent(schedule)) {
+            return new ClaimDiagnostic("OFFICIAL_API_OR_BACKEND", "该平台可由系统直接处理，不需要打开本地助手");
+        }
+        if (schedule.getLockedUntil() != null && schedule.getLockedUntil().isAfter(now)) {
+            return new ClaimDiagnostic("LOCKED", "正在处理中，预计到 " + schedule.getLockedUntil() + " 后可继续处理");
+        }
+        if (!SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION.equals(queueKind)
+                || !SelfMediaPublishScheduleConstants.STATUS_PENDING.equals(status)) {
+            return new ClaimDiagnostic("NOT_CLAIMABLE_STATUS", "当前还不能自动处理，请查看进度或异常原因");
+        }
+        if (schedule.getNextAttemptAt() != null && schedule.getNextAttemptAt().isAfter(now)) {
+            return new ClaimDiagnostic("NOT_DUE", "还没到处理时间，预计 " + schedule.getNextAttemptAt());
+        }
+        if (schedule.getCreatedBy() == null || schedule.getCreatedBy() <= 0) {
+            return new ClaimDiagnostic("OPERATOR_MISSING", "未找到负责运营，请先绑定运营人员");
+        }
+        long onlineSessions = localAgentSessionMapper.countOnlineSessionsByOperator(
+                schedule.getCreatedBy(),
+                now,
+                now.minusMinutes(LOCAL_AGENT_ONLINE_WINDOW_MINUTES)
+        );
+        if (onlineSessions <= 0) {
+            return new ClaimDiagnostic("LOCAL_AGENT_OFFLINE", "负责运营的本地助手未在线，请先打开本地助手");
+        }
+        long runningLoad = selfMediaPublishScheduleMapper.countLockedByOperatorAndStatuses(
+                schedule.getCreatedBy(),
+                List.of(
+                        SelfMediaPublishScheduleConstants.STATUS_FILLING,
+                        SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
+                        SelfMediaPublishScheduleConstants.STATUS_SCHEDULING,
+                        SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT
+                ),
+                now
+        );
+        long estimatedCapacity = onlineSessions * LOCAL_AGENT_ASSUMED_CAPACITY;
+        if (runningLoad >= estimatedCapacity) {
+            return new ClaimDiagnostic("LOCAL_AGENT_CAPACITY_FULL", "本地助手正在处理其他任务，请稍后再试或增加在线助手");
+        }
+        return new ClaimDiagnostic("CLAIMABLE", "已到处理时间，等待本地助手开始处理");
+    }
+
+    private boolean requiresLocalAgent(SelfMediaPublishSchedule schedule) {
+        if (schedule == null) {
+            return false;
+        }
+        return scheduleAdapterRouter.contract(schedule.getPlatform())
+                .map(contract -> SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION.equals(contract.publishChannel()))
+                .orElse(true);
     }
 
     private String resolveBrandName(Long brandId) {
@@ -1165,6 +1915,26 @@ public class ProjectSelfMediaScheduleService {
         return ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(value.trim().toLowerCase(Locale.ROOT));
     }
 
+    private String normalizeText(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String platformLabel(String platform) {
+        return switch (normalizeText(platform)) {
+            case "toutiao" -> "今日头条";
+            case "baijiahao" -> "百家号";
+            case "zhihu" -> "知乎";
+            case "xiaohongshu" -> "小红书";
+            case "douyin" -> "抖音图文";
+            case "wechat", "wechat_mp" -> "微信公众号";
+            default -> StringUtils.hasText(platform) ? platform : "自媒体平台";
+        };
+    }
+
+    void setClock(Clock clock) {
+        this.clock = clock == null ? Clock.systemDefaultZone() : clock;
+    }
+
     private record AccountPublishPlan(Long accountId, String platform) {
     }
 
@@ -1181,5 +1951,8 @@ public class ProjectSelfMediaScheduleService {
     }
 
     private record GeneratedSchedulePlan(GenerationPlan plan, Long articleId) {
+    }
+
+    private record ClaimDiagnostic(String code, String message) {
     }
 }

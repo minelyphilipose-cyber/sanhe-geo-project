@@ -37,10 +37,12 @@ import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.extension.entity.LocalAgentSession;
 import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
@@ -159,6 +161,7 @@ public class SelfMediaPublishScheduleService {
     private final CompanyChannelQuotaService companyChannelQuotaService;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
+    private final SysUserMapper sysUserMapper;
     private final LocalAgentSessionMapper localAgentSessionMapper;
     private final BusinessCalendarService businessCalendarService;
     private final ThirdPartySubjectRotationService thirdPartySubjectRotationService;
@@ -668,6 +671,7 @@ public class SelfMediaPublishScheduleService {
         long onlineAgents = localAgentSessionMapper.countOnlineSessions(now, now.minusMinutes(LOCAL_AGENT_ONLINE_WINDOW_MINUTES));
         long estimatedCapacity = onlineAgents * LOCAL_AGENT_ASSUMED_CAPACITY;
         long waitingForLocalAgent = dueScheduleExecution + duePublishCheck;
+        LocalDateTime latestHeartbeatAt = localAgentSessionMapper.selectLatestHeartbeatAt(now);
 
         return SelfMediaAutomationOverviewVO.builder()
                 .generatedAt(now)
@@ -690,12 +694,15 @@ public class SelfMediaPublishScheduleService {
                         .waitingForLocalAgent(waitingForLocalAgent)
                         .capacityStatus(capacityStatus(onlineAgents, estimatedCapacity, runningTotal, waitingForLocalAgent))
                         .message(capacityMessage(onlineAgents, estimatedCapacity, runningTotal, waitingForLocalAgent))
+                        .latestHeartbeatAt(latestHeartbeatAt)
+                        .sessions(localAgentSessions(now))
                         .build())
                 .statusCounts(statusCounts())
                 .platformCounts(platformCounts(now, activeStatuses))
                 .failureCodeCounts(failureCodeCounts())
                 .platformCapabilities(platformCapabilities())
                 .thirdPartySubjectPool(thirdPartySubjectPoolOverview())
+                .compensation(compensationOverview(now))
                 .build();
     }
 
@@ -713,6 +720,61 @@ public class SelfMediaPublishScheduleService {
                         .count(longValue(row.get("total")))
                         .build())
                 .toList();
+    }
+
+    private List<SelfMediaAutomationOverviewVO.LocalAgentSessionOverview> localAgentSessions(LocalDateTime now) {
+        LocalDateTime onlineSince = now.minusMinutes(LOCAL_AGENT_ONLINE_WINDOW_MINUTES);
+        return localAgentSessionMapper.selectRecentActiveSessions(now, 8).stream()
+                .map(session -> {
+                    Long operatorId = session.getOperatorId();
+                    long runningLoad = operatorId == null ? 0 : scheduleMapper.countLockedByOperatorAndStatuses(
+                            operatorId,
+                            LOCAL_AGENT_RUNNING_STATUSES,
+                            now
+                    );
+                    long waitingTasks = operatorId == null ? 0 : scheduleMapper.countDueByOperatorAndQueue(
+                            operatorId,
+                            SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION,
+                            List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING),
+                            now
+                    );
+                    SysUser operator = operatorId == null ? null : sysUserMapper.selectById(operatorId);
+                    boolean online = session.getLastSeenAt() != null && !session.getLastSeenAt().isBefore(onlineSince);
+                    return SelfMediaAutomationOverviewVO.LocalAgentSessionOverview.builder()
+                            .sessionId(session.getId())
+                            .operatorId(operatorId)
+                            .operatorName(operator == null
+                                    ? (operatorId == null ? null : "#" + operatorId)
+                                    : firstText(operator.getDisplayName(), operator.getUsername(), "#" + operatorId))
+                            .helperName(firstText(session.getHelperName(), "本地助手"))
+                            .status(session.getStatus())
+                            .online(online)
+                            .lastSeenAt(session.getLastSeenAt())
+                            .expiresAt(session.getExpiresAt())
+                            .runningLoad(runningLoad)
+                            .waitingTasks(waitingTasks)
+                            .build();
+                })
+                .toList();
+    }
+
+    private SelfMediaAutomationOverviewVO.CompensationOverview compensationOverview(LocalDateTime now) {
+        List<String> statuses = List.of(
+                SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
+                SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED
+        );
+        long candidateCount = scheduleMapper.countProjectAutoCompensationCandidates(statuses, now);
+        long triedCount = scheduleMapper.countProjectAutoCompensationTried();
+        LocalDateTime lastTriedAt = scheduleMapper.selectProjectAutoLastCompensationTriedAt();
+        String message = candidateCount > 0
+                ? "系统会继续尝试自动补救其中可重试的异常内容。"
+                : "当前没有等待系统自动补救的异常内容。";
+        return SelfMediaAutomationOverviewVO.CompensationOverview.builder()
+                .candidateCount(candidateCount)
+                .alreadyTriedCount(triedCount)
+                .lastTriedAt(lastTriedAt)
+                .message(message)
+                .build();
     }
 
     private List<SelfMediaAutomationOverviewVO.PlatformCount> platformCounts(LocalDateTime now, List<String> activeStatuses) {
@@ -759,6 +821,10 @@ public class SelfMediaPublishScheduleService {
                             .readinessCode(readiness.code())
                             .readinessMessage(readiness.message())
                             .requiresLocalAgent(requiresLocalAgent)
+                            .fillLeadMinutes(item.getFillLeadMinutes())
+                            .minRemainingMinutes(item.getMinRemainingMinutes())
+                            .maxAttempts(item.getMaxAttempts())
+                            .maxRemainingMinutes(item.getMaxRemainingMinutes())
                             .build();
                 })
                 .toList();
@@ -1912,6 +1978,21 @@ public class SelfMediaPublishScheduleService {
     @Transactional
     public SelfMediaPublishScheduleVO retryNow(Long id) {
         SelfMediaPublishSchedule row = requireScheduleWithAccess(id);
+        return retryNowInternal(row, "MANUAL_RETRY_REQUESTED", "已人工触发立即重试");
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleVO retryNowSystem(Long id, String reason) {
+        SelfMediaPublishSchedule row = scheduleMapper.selectById(id);
+        if (row == null) {
+            fail("SCHEDULE_NOT_FOUND", "排期不存在");
+        }
+        return retryNowInternal(row, "AUTO_COMPENSATION_RETRY", trimFailureMessage(reason));
+    }
+
+    private SelfMediaPublishScheduleVO retryNowInternal(SelfMediaPublishSchedule row,
+                                                        String failureCode,
+                                                        String failureMessage) {
         String status = normalize(row.getStatus());
         String queueKind = normalize(row.getQueueKind());
         if (SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK.equals(queueKind)
@@ -1929,12 +2010,21 @@ public class SelfMediaPublishScheduleService {
         if (isStillLocked(row)) {
             fail("SCHEDULE_LOCK_STILL_ACTIVE", "当前排期仍被本地助手锁定，请等待心跳超时或先转人工处理");
         }
+        LocalDateTime now = LocalDateTime.now();
+        String strategy = StringUtils.hasText(row.getScheduleStrategy())
+                ? normalize(row.getScheduleStrategy())
+                : quickScheduleStrategy(row.getPlatform());
+        LocalDateTime nextAttemptAt = nextBrandProtectedImmediateAttemptAt(row.getBrandId(), now);
+        LocalDateTime plannedPublishAt = plannedPublishAtForQuickSchedule(row.getPlatform(), strategy, nextAttemptAt, now);
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
-        row.setNextAttemptAt(LocalDateTime.now());
+        row.setScheduleStrategy(strategy);
+        row.setNextAttemptAt(nextAttemptAt);
+        row.setPlannedPublishAt(plannedPublishAt);
+        row.setPlatformScheduledAt(plannedPublishAt);
         row.setLockedUntil(null);
-        row.setFailureCode("MANUAL_RETRY_REQUESTED");
-        row.setFailureMessage("已人工触发立即重试");
+        row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "MANUAL_RETRY_REQUESTED");
+        row.setFailureMessage(StringUtils.hasText(failureMessage) ? failureMessage : "已人工触发立即重试");
         row.setMaxAttempts(Math.max(row.getMaxAttempts() == null ? 0 : row.getMaxAttempts(),
                 (row.getAttemptCount() == null ? 0 : row.getAttemptCount()) + 1));
         touch(row);
@@ -2812,6 +2902,10 @@ public class SelfMediaPublishScheduleService {
         SelfMediaPlatformScheduleRules rules = scheduleAdapterRouter.rules(platform, strategy);
         int fillLead = Math.max(0, rules.fillLeadMinutes());
         LocalDateTime planned = nextAttemptAt.plusMinutes(fillLead);
+        int minRemaining = Math.max(0, rules.minRemainingMinutes());
+        if (minRemaining > 0 && !planned.isAfter(nextAttemptAt.plusMinutes(minRemaining))) {
+            planned = nextAttemptAt.plusMinutes(minRemaining + 1).withSecond(0).withNano(0);
+        }
         int requiredLead = requiredPlatformScheduleCreateLeadMinutes(strategy, platform);
         if (requiredLead > 0 && !planned.isAfter(now.plusMinutes(requiredLead))) {
             planned = now.plusMinutes(requiredLead + 1).withSecond(0).withNano(0);

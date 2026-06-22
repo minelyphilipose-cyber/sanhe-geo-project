@@ -17,6 +17,7 @@ public class SelfMediaAutomationOverviewVO {
     private List<FailureCodeCount> failureCodeCounts;
     private List<PlatformCapability> platformCapabilities;
     private ThirdPartySubjectPoolOverview thirdPartySubjectPool;
+    private CompensationOverview compensation;
 
     @Data
     @Builder
@@ -41,6 +42,32 @@ public class SelfMediaAutomationOverviewVO {
         private long runningLoad;
         private long waitingForLocalAgent;
         private String capacityStatus;
+        private String message;
+        private LocalDateTime latestHeartbeatAt;
+        private List<LocalAgentSessionOverview> sessions;
+    }
+
+    @Data
+    @Builder
+    public static class LocalAgentSessionOverview {
+        private Long sessionId;
+        private Long operatorId;
+        private String operatorName;
+        private String helperName;
+        private String status;
+        private Boolean online;
+        private LocalDateTime lastSeenAt;
+        private LocalDateTime expiresAt;
+        private Long runningLoad;
+        private Long waitingTasks;
+    }
+
+    @Data
+    @Builder
+    public static class CompensationOverview {
+        private long candidateCount;
+        private long alreadyTriedCount;
+        private LocalDateTime lastTriedAt;
         private String message;
     }
 
@@ -83,6 +110,10 @@ public class SelfMediaAutomationOverviewVO {
         private String readinessCode;
         private String readinessMessage;
         private boolean requiresLocalAgent;
+        private Integer fillLeadMinutes;
+        private Integer minRemainingMinutes;
+        private Integer maxAttempts;
+        private Integer maxRemainingMinutes;
     }
 
     @Data

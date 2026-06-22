@@ -9,7 +9,7 @@ import java.util.Locale;
 public class DouyinPlatformScheduleAdapter implements SelfMediaPlatformScheduleAdapter {
     public static final String PLATFORM = "douyin";
     private static final int DEFAULT_FILL_LEAD_MINUTES = 10;
-    private static final int PLATFORM_SCHEDULE_FILL_LEAD_MINUTES = 120;
+    private static final int PLATFORM_SCHEDULE_FILL_LEAD_MINUTES = 130;
     private static final int PLATFORM_SCHEDULE_MIN_REMAINING_MINUTES = 120;
     private static final int PLATFORM_SCHEDULE_MAX_REMAINING_MINUTES = 14 * 24 * 60;
     private static final int PLATFORM_SCHEDULE_MAX_ATTEMPTS = 3;
