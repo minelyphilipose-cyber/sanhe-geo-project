@@ -59,7 +59,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import logoLightUrl from '@/assets/brand/logo-light.svg'
+import logoLightUrl from '@/assets/brand/fantasy-logo-light.png'
 import { useUserStore } from '@/stores/user'
 import type { FormInstance, FormRules } from 'element-plus'
 import { resolvePostLoginPath } from '@/utils/navigation'
@@ -183,8 +183,8 @@ async function handleLogin() {
 }
 
 .login-card__brand-logo {
-  width: 220px;
-  height: 48px;
+  width: 240px;
+  height: 84px;
   object-fit: contain;
   flex-shrink: 0;
 }

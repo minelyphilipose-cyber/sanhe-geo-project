@@ -60,8 +60,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import logoHorizontalUrl from '@/assets/brand/logo-dark.svg'
-import logoSymbolUrl from '@/assets/brand/logo-icon.svg'
+import logoHorizontalUrl from '@/assets/brand/fantasy-logo-dark.png'
+import logoSymbolUrl from '@/assets/brand/fantasy-logo-icon-dark.png'
 import { useUserStore } from '@/stores/user'
 import type { RoleType } from '@/types'
 
@@ -191,17 +191,17 @@ const visibleGroups = computed(() =>
 }
 
 .sidebar__brand {
-  width: 178px;
-  height: 39px;
+  width: 144px;
+  height: 50px;
   object-fit: contain;
   object-position: center;
   flex-shrink: 0;
-  filter: drop-shadow(0 10px 24px rgba(15, 23, 42, 0.3));
+  filter: drop-shadow(0 10px 24px rgba(15, 23, 42, 0.32));
 }
 
 .sidebar__brand--collapsed {
-  width: 36px;
-  height: 36px;
+  width: 29px;
+  height: 29px;
   object-position: center;
 }
 
