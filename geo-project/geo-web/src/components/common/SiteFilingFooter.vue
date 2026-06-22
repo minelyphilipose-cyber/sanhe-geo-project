@@ -8,8 +8,21 @@
     >
       皖ICP备2026007423号-3
     </a>
+    <a
+      class="police-filing-link"
+      href="https://www.beian.gov.cn/portal/registerSystemInfo?recordcode=34018102340792"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <img :src="publicSecurityFilingIcon" alt="" class="police-filing-icon" />
+      <span>皖公网安备34018102340792号</span>
+    </a>
   </footer>
 </template>
+
+<script setup lang="ts">
+import publicSecurityFilingIcon from '@/assets/brand/public-security-filing.png'
+</script>
 
 <style scoped>
 .site-filing-footer {
@@ -36,5 +49,18 @@
 
 .site-filing-footer a:hover {
   color: #2563eb;
+}
+
+.police-filing-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.police-filing-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex: 0 0 auto;
 }
 </style>
