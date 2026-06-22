@@ -298,6 +298,8 @@ class ContentDistributionServiceTest {
         assertEquals("submitting", inserted.getValue().getStatus());
         assertEquals(BrandGeoSiteAdapter.PLATFORM, inserted.getValue().getTargetKind());
         assertEquals(30L, inserted.getValue().getTargetBrandId());
+        assertEquals("ok Agent 官网", brandGeoSiteAdapter.capturedTarget.siteName());
+        assertEquals("www.ok.com", brandGeoSiteAdapter.capturedTarget.domain());
         assertArticleStatusTransitions("distributing", "published");
     }
 
@@ -620,7 +622,9 @@ class ContentDistributionServiceTest {
     private void givenBrandGeoSite(String siteCode, String status) {
         Brand brand = new Brand();
         brand.setId(30L);
-        brand.setGeoSiteCode(siteCode);
+        brand.setBrandName(siteCode == null ? "Brand" : siteCode);
+        brand.setGeoSiteName(siteCode == null ? null : siteCode + " Agent 官网");
+        brand.setGeoSiteDomain(siteCode == null ? null : "www." + siteCode + ".com");
         brand.setGeoSiteStatus(status);
         when(brandAccessService.requireBrandAccess(30L, 100L, BrandAccessAction.OPERATE)).thenReturn(brand);
     }
@@ -683,6 +687,7 @@ class ContentDistributionServiceTest {
     private static class TestBrandGeoSiteAdapter extends BrandGeoSiteAdapter {
         private SubmitResult result;
         private boolean throwUnexpected;
+        private TargetContext.BrandGeoSiteTarget capturedTarget;
 
         TestBrandGeoSiteAdapter() {
             super(null, null, new MarkdownToHtmlRenderer());
@@ -698,7 +703,13 @@ class ContentDistributionServiceTest {
             if (throwUnexpected) {
                 throw new IllegalStateException("boom");
             }
+            this.capturedTarget = (TargetContext.BrandGeoSiteTarget) target;
             return result;
+        }
+
+        @Override
+        public EndpointProbeResult probeEndpoint(String domain) {
+            return new EndpointProbeResult(true, "https://" + domain + "/api/v1/admin/content", 405, "ok");
         }
     }
 

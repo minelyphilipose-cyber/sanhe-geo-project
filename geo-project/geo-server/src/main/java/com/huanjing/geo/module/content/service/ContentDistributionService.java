@@ -606,9 +606,14 @@ public class ContentDistributionService {
                                                       TargetContext.BrandGeoSiteTarget brandGeoTarget) {
         Brand brand = brandAccessService.requireBrandAccess(brandGeoTarget.brandId(), operator.getId(), BrandAccessAction.OPERATE);
         BrandGeoSitePublishTarget publishTarget = resolveBrandGeoSitePublishTarget(brand);
+        BrandGeoSiteAdapter adapter = resolveBrandGeoSiteAdapter();
+        BrandGeoSiteAdapter.EndpointProbeResult probeResult = adapter.probeEndpoint(publishTarget.domain());
+        if (probeResult != null && !probeResult.passed()) {
+            throw new BizException(400, probeResult.message()
+                    + (StringUtils.hasText(probeResult.endpoint()) ? "：" + probeResult.endpoint() : ""));
+        }
 
         String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
-        BrandGeoSiteAdapter adapter = resolveBrandGeoSiteAdapter();
         DistributionTask task = createAttemptForBrandGeoSite(article, brand, operator.getId());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.BRAND_GEO_SITE, task.getId());
         try {

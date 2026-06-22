@@ -17,6 +17,7 @@ import org.springframework.util.StringUtils;
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Component
 @RequiredArgsConstructor
@@ -117,6 +118,30 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
                                                  int connectTimeoutMs,
                                                  int requestTimeoutMs) throws Exception {
         return HttpClientUtil.postJson(url, headers, body, connectTimeoutMs, requestTimeoutMs);
+    }
+
+    public EndpointProbeResult probeEndpoint(String domain) {
+        String endpoint;
+        try {
+            endpoint = buildEndpoint(domain);
+        } catch (Exception ex) {
+            return new EndpointProbeResult(false, null, null, "Agent 官网域名配置无效：" + safeMessage(ex));
+        }
+        try {
+            HttpClientUtil.HttpResult response = HttpClientUtil.get(
+                    endpoint,
+                    Map.of("Accept", "application/json"),
+                    properties.getConnectTimeoutMs(),
+                    properties.getReadTimeoutMs()
+            );
+            boolean passed = isProbePassed(response.statusCode(), response.body());
+            String message = passed
+                    ? "Agent 官网发布接口可达"
+                    : "Agent 官网发布接口不存在或未部署，请检查域名与 /api/v1/admin/content";
+            return new EndpointProbeResult(passed, endpoint, response.statusCode(), message);
+        } catch (Exception ex) {
+            return new EndpointProbeResult(false, endpoint, null, "Agent 官网发布接口连接失败：" + safeMessage(ex));
+        }
     }
 
     private TargetContext.BrandGeoSiteTarget requireTarget(TargetContext target) {
@@ -267,6 +292,23 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
         return normalizeBaseUrl(endpoint);
     }
 
+    private boolean isProbePassed(int statusCode, String body) {
+        if (Set.of(400, 401, 403, 405, 415, 422).contains(statusCode)) {
+            return true;
+        }
+        return statusCode >= 200 && statusCode < 300 && !looksLikeHtml(body);
+    }
+
+    private boolean looksLikeHtml(String body) {
+        if (!StringUtils.hasText(body)) {
+            return false;
+        }
+        String trimmed = body.trim().toLowerCase();
+        return trimmed.startsWith("<!doctype html")
+                || trimmed.startsWith("<html")
+                || trimmed.contains("<body");
+    }
+
     private String firstText(JsonNode node, String... names) {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
@@ -311,5 +353,8 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
                 || lowered.contains("conflict")
                 || lowered.contains("重复")
                 || lowered.contains("已存在");
+    }
+
+    public record EndpointProbeResult(boolean passed, String endpoint, Integer statusCode, String message) {
     }
 }
