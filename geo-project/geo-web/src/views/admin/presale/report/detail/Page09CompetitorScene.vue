@@ -13,6 +13,7 @@
           <h3 class="chinese-serif p09-title">{{ detailTitle }}</h3>
           <div class="p09-title-note">
             本页只看"推荐型高价值"切片;您列标注品牌状态,竞品列标注该场景里哪些对手被 AI 提到。
+            <span v-if="hasWeakRows" class="p09-weak-note">"弱"表示您在该场景也被提到,但出现平台数少于至少一个竞品。</span>
           </div>
         </div>
 
@@ -312,6 +313,11 @@ const showRawTag = computed(() =>
   font-size: 11px;
   line-height: 1.7;
   color: #6b6456;
+}
+.p09-weak-note {
+  display: block;
+  margin-top: 2px;
+  color: #8a7461;
 }
 
 /* 场景表 */
