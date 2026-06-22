@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.customer.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderRequest;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderVO;
@@ -155,6 +157,27 @@ public class BrandImageFolderService {
                 .filter(item -> folder.getId().equals(item.getId()))
                 .findFirst()
                 .orElseGet(() -> BrandImageFolderVO.from(folder));
+    }
+
+    @Transactional
+    public void deleteFolder(Long brandId, Long folderId) {
+        Brand brand = requireAccessibleBrand(brandId, false);
+        BrandImageFolder folder = requireFolder(brand.getId(), folderId);
+        if (Boolean.TRUE.equals(folder.getDefaultFlag())) {
+            throw new BizException(400, "默认图库不能删除");
+        }
+        if (!STATUS_DISABLED.equalsIgnoreCase(folder.getStatus())) {
+            throw new BizException(400, "请先停用图库文件夹后再删除");
+        }
+        brandMaterialMapper.update(null, new UpdateWrapper<BrandMaterial>()
+                .eq("brand_id", brand.getId())
+                .eq("folder_id", folder.getId())
+                .set("folder_id", null));
+        folderProjectMapper.delete(new QueryWrapper<BrandImageFolderProject>()
+                .eq("folder_id", folder.getId()));
+        folderTagMapper.delete(new QueryWrapper<BrandImageFolderTag>()
+                .eq("folder_id", folder.getId()));
+        folderMapper.deleteById(folder.getId());
     }
 
     @Transactional

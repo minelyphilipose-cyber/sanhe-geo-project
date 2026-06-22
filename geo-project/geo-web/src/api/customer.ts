@@ -228,6 +228,10 @@ export function updateBrandImageFolder(brandId: number, folderId: number, data: 
   return request.put<R<BrandImageFolder>>(`/brands/${brandId}/image-folders/${folderId}`, data)
 }
 
+export function deleteBrandImageFolder(brandId: number, folderId: number) {
+  return request.delete<R<void>>(`/brands/${brandId}/image-folders/${folderId}`)
+}
+
 export function suggestBrandImageFolderTags(brandId: number, keyword?: string) {
   return request.get<R<string[]>>(`/brands/${brandId}/image-folder-tags`, { params: { keyword } })
 }

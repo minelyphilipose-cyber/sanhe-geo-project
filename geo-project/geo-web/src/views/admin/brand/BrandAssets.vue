@@ -102,6 +102,14 @@
             <div v-if="folder.projectIds?.length" class="text-xs text-gray-500 mt-2">关联项目：{{ formatFolderProjects(folder.projectIds) }}</div>
             <div class="flex justify-end gap-2 mt-3">
               <el-button v-if="canUploadMaterial" size="small" @click.stop="openEditFolder(folder)">编辑</el-button>
+              <el-button
+                v-if="canDeleteImageFolder(folder)"
+                size="small"
+                type="danger"
+                @click.stop="confirmDeleteFolder(folder)"
+              >
+                删除
+              </el-button>
             </div>
           </div>
         </div>
@@ -116,6 +124,16 @@
             <span class="ml-2 text-xs text-gray-400">共 {{ selectedFolderMaterials.length }} 张</span>
           </div>
           <div class="flex items-center gap-3">
+            <el-button
+              v-if="canDeleteMaterial"
+              type="danger"
+              size="small"
+              :loading="batchDeleting"
+              :disabled="selectedImageMaterialIds.length === 0 || batchDeleting"
+              @click="confirmBatchDeleteMaterials"
+            >
+              批量删除<span v-if="selectedImageMaterialIds.length">（{{ selectedImageMaterialIds.length }}）</span>
+            </el-button>
             <el-input v-model="searchKeyword" placeholder="搜索文件名" clearable size="small" style="width: 180px" :prefix-icon="Search" />
             <el-radio-group v-model="viewMode" size="small">
               <el-radio-button value="grid">
@@ -162,8 +180,16 @@
             v-for="mat in visibleMaterials"
             :key="mat.id"
             class="group relative border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
+            :class="{ 'material-card-selected': selectedImageMaterialIds.includes(mat.id) }"
             @click="handleMaterialCardClick(mat)"
           >
+            <el-checkbox
+              v-if="canDeleteMaterial"
+              class="material-select"
+              :model-value="selectedImageMaterialIds.includes(mat.id)"
+              @click.stop
+              @change="(checked: boolean) => toggleImageMaterialSelection(mat.id, checked)"
+            />
             <div class="aspect-square bg-gray-50 dark:bg-gray-800 flex items-center justify-center overflow-hidden">
               <img
                 v-if="isImageType(mat.fileType) && mat._thumbUrl"
@@ -187,7 +213,15 @@
           </div>
         </div>
 
-        <el-table v-if="viewMode === 'list'" :data="visibleMaterials" border>
+        <el-table
+          v-if="viewMode === 'list'"
+          ref="imageTableRef"
+          :data="visibleMaterials"
+          border
+          row-key="id"
+          @selection-change="handleImageSelectionChange"
+        >
+          <el-table-column v-if="canDeleteMaterial" type="selection" width="44" />
           <el-table-column label="文件名" min-width="240">
             <template #default="{ row }">
               <div class="flex items-center gap-2">
@@ -389,6 +423,7 @@ import {
   getBrandVersions,
   createBrandImageFolder,
   updateBrandImageFolder,
+  deleteBrandImageFolder,
   suggestBrandImageFolderTags,
 } from '@/api/customer'
 import { getProjectList } from '@/api/project'
@@ -422,6 +457,8 @@ const foldersLoading = ref(false)
 const materialsLoading = ref(false)
 const projectsLoading = ref(false)
 const selectedFolderId = ref<number | null>(null)
+const selectedImageMaterialIds = ref<number[]>([])
+const batchDeleting = ref(false)
 const folderExpanded = ref(false)
 const searchKeyword = ref('')
 const viewMode = ref<'grid' | 'list'>('grid')
@@ -434,6 +471,7 @@ const uploadFailed = ref(0)
 const uploadCurrentFileName = ref('')
 const uploadPhase = ref<'uploading' | 'refreshing'>('uploading')
 const fileInputRef = ref<HTMLInputElement>()
+const imageTableRef = ref()
 const versionsTotal = ref(0)
 const folderDialogVisible = ref(false)
 const folderSaving = ref(false)
@@ -929,6 +967,37 @@ async function saveFolder() {
   }
 }
 
+function canDeleteImageFolder(folder: BrandImageFolder) {
+  return canUploadMaterial.value && folder.status === 'disabled' && !folder.isDefault
+}
+
+async function confirmDeleteFolder(folder: BrandImageFolder) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除文件夹“${folder.folderName}”？文件夹内图片会保留，并移出该文件夹。`,
+      '删除图库文件夹',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await deleteBrandImageFolder(brandId.value, folder.id)
+    if (selectedFolderId.value === folder.id) {
+      selectedFolderId.value = null
+    }
+    await Promise.all([loadFolders(), loadMaterials()])
+    ElMessage.success('图库文件夹已删除')
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '删除失败')
+  }
+}
+
 // ────────── 预览/下载（blob 方案，带 JWT） ──────────
 async function previewMaterial(row: BrandMaterialExt) {
   if (!isPreviewableType(row.fileType)) {
@@ -966,6 +1035,36 @@ function handleMaterialCardClick(row: BrandMaterialExt) {
   void downloadMaterial(row)
 }
 
+function toggleImageMaterialSelection(id: number, checked: boolean) {
+  const ids = new Set(selectedImageMaterialIds.value)
+  if (checked) {
+    ids.add(id)
+  } else {
+    ids.delete(id)
+  }
+  selectedImageMaterialIds.value = Array.from(ids)
+  syncImageTableSelection()
+}
+
+function handleImageSelectionChange(rows: BrandMaterialExt[]) {
+  const visibleIds = new Set(visibleMaterials.value.map((item) => item.id))
+  const preserved = selectedImageMaterialIds.value.filter((id) => !visibleIds.has(id))
+  const current = rows.map((row) => row.id)
+  selectedImageMaterialIds.value = Array.from(new Set([...preserved, ...current]))
+}
+
+function syncImageTableSelection() {
+  const table = imageTableRef.value
+  if (!table || viewMode.value !== 'list') return
+  const selected = new Set(selectedImageMaterialIds.value)
+  table.clearSelection()
+  for (const row of visibleMaterials.value) {
+    if (selected.has(row.id)) {
+      table.toggleRowSelection(row, true)
+    }
+  }
+}
+
 async function downloadMaterial(row: BrandMaterialExt) {
   row._downloading = true
   try {
@@ -997,10 +1096,47 @@ async function confirmDeleteMaterial(mat: BrandMaterialExt) {
 async function removeMaterial(row: BrandMaterial) {
   try {
     await deleteBrandMaterial(brandId.value, row.id)
+    selectedImageMaterialIds.value = selectedImageMaterialIds.value.filter((id) => id !== row.id)
     ElMessage.success('已删除')
     await Promise.all([loadFolders(), loadMaterials()])
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || '删除失败')
+  }
+}
+
+async function confirmBatchDeleteMaterials() {
+  const ids = selectedImageMaterialIds.value.filter((id) => selectedFolderMaterials.value.some((item) => item.id === id))
+  if (ids.length === 0 || batchDeleting.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除选中的 ${ids.length} 张图片？删除后将无法在品牌资产中恢复。`,
+      '批量删除图片',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  batchDeleting.value = true
+  try {
+    const results = await Promise.allSettled(ids.map((id) => deleteBrandMaterial(brandId.value, id)))
+    const successCount = results.filter((item) => item.status === 'fulfilled').length
+    const failedCount = results.length - successCount
+    selectedImageMaterialIds.value = selectedImageMaterialIds.value.filter((id) => !ids.includes(id))
+    await Promise.all([loadFolders(), loadMaterials()])
+    if (failedCount > 0) {
+      ElMessage.warning(`已删除 ${successCount} 张，失败 ${failedCount} 张`)
+    } else {
+      ElMessage.success(`已删除 ${successCount} 张图片`)
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '批量删除失败')
+  } finally {
+    batchDeleting.value = false
   }
 }
 
@@ -1084,6 +1220,7 @@ onMounted(loadAll)
 watch(() => route.params.id, (newId, oldId) => {
   if (newId !== oldId && newId) {
     selectedFolderId.value = null
+    selectedImageMaterialIds.value = []
     folderExpanded.value = false
     searchKeyword.value = ''
     viewMode.value = 'grid'
@@ -1095,9 +1232,17 @@ watch(() => route.params.id, (newId, oldId) => {
 watch(
   () => visibleMaterials.value.map((mat) => mat.id).join(','),
   () => {
+    const validIds = new Set(selectedFolderMaterials.value.map((mat) => mat.id))
+    selectedImageMaterialIds.value = selectedImageMaterialIds.value.filter((id) => validIds.has(id))
     void loadVisibleThumbnails()
+    requestAnimationFrame(syncImageTableSelection)
   },
 )
+
+watch(selectedFolderId, () => {
+  selectedImageMaterialIds.value = []
+  requestAnimationFrame(syncImageTableSelection)
+})
 
 onBeforeUnmount(() => {
   resetThumbnails()
@@ -1153,6 +1298,21 @@ export default {}
   border-color: #f97316;
   background: #fff7ed;
   box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.14);
+}
+
+.material-card-selected {
+  border-color: #f97316;
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.16);
+}
+
+.material-select {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  padding: 2px 5px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .folder-toggle {

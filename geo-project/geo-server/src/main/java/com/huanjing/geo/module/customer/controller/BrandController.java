@@ -32,9 +32,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.bind.annotation.*;
-import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 import java.nio.charset.StandardCharsets;
@@ -188,6 +186,12 @@ public class BrandController {
         return R.ok(brandImageFolderService.updateFolder(id, folderId, req));
     }
 
+    @DeleteMapping("/{id}/image-folders/{folderId}")
+    public R<Void> deleteImageFolder(@PathVariable Long id, @PathVariable Long folderId) {
+        brandImageFolderService.deleteFolder(id, folderId);
+        return R.ok();
+    }
+
     @GetMapping("/{id}/image-folder-tags")
     public R<List<String>> suggestImageFolderTags(@PathVariable Long id,
                                                   @RequestParam(required = false) String keyword) {
@@ -215,31 +219,24 @@ public class BrandController {
     }
 
     @GetMapping("/{brandId}/materials/{materialId}/stream")
-    public ResponseEntity<StreamingResponseBody> streamMaterial(
+    public ResponseEntity<byte[]> streamMaterial(
             @PathVariable Long brandId,
             @PathVariable Long materialId,
             @RequestParam(defaultValue = "false") boolean download
     ) {
         BrandMaterial material = brandProfileService.materialDetail(brandId, materialId);
+        byte[] bytes = brandProfileService.readVerifiedMaterialBytes(material);
         String fileName = material.getFileName();
         MediaType mediaType = MediaTypeFactory.getMediaType(fileName).orElse(MediaType.APPLICATION_OCTET_STREAM);
         boolean forceDownload = download || !isPreviewable(mediaType);
         ContentDisposition disposition = forceDownload
                 ? ContentDisposition.attachment().filename(fileName, StandardCharsets.UTF_8).build()
                 : ContentDisposition.inline().filename(fileName, StandardCharsets.UTF_8).build();
-        InputStream inputStream = brandProfileService.openVerifiedMaterialStream(material);
-        StreamingResponseBody body = outputStream -> {
-            try (inputStream) {
-                inputStream.transferTo(outputStream);
-            }
-        };
-        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
+        return ResponseEntity.ok()
                 .contentType(mediaType)
-                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString());
-        if (material.getFileSize() != null && material.getFileSize() > 0) {
-            builder.contentLength(material.getFileSize());
-        }
-        return builder.body(body);
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(bytes);
     }
 
     @GetMapping("/{brandId}/materials/{materialId}/preview-url")
