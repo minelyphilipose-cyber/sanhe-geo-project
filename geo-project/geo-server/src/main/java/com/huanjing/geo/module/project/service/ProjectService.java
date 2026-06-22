@@ -22,6 +22,7 @@ import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
 import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
 import com.huanjing.geo.module.content.mapper.ContentQuestionRotationMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.content.service.SpecialIndustryReadinessService;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
@@ -135,6 +136,7 @@ public class ProjectService {
     private final ActivityLogService activityLogService;
     private final ProjectDistributionChannelAllocationService channelAllocationService;
     private final KeywordTypeConfigService keywordTypeConfigService;
+    private final SpecialIndustryReadinessService specialIndustryReadinessService;
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
         return page(current, size, keyword, status, stage, partnerId, brandId, false);
@@ -883,6 +885,7 @@ public class ProjectService {
 
     private void validateKeywordGroupQuota(Project project) {
         keywordGroupService.validateProjectKeywordGroupComplete(project);
+        specialIndustryReadinessService.validateProjectActivation(project);
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
         KeywordAllocation limit = bindingKeywordLimit(binding);
         KeywordAllocation activeUsed = activeKeywordAllocation(project.getCompanyId(), project.getId());

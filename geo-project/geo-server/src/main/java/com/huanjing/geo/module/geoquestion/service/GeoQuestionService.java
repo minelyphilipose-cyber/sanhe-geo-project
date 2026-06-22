@@ -11,6 +11,7 @@ import com.huanjing.geo.common.llm.LlmInvokeResult;
 import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.LlmProperties;
+import com.huanjing.geo.module.content.service.SpecialIndustryReadinessService;
 import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
@@ -66,6 +67,11 @@ public class GeoQuestionService {
             "靠谱吗", "比较靠谱", "推荐", "排行", "排名", "选哪个", "值得买吗",
             "哪家口碑好", "口碑好", "性价比", "性价比高"
     );
+    private static final Set<String> MEDICAL_FORBIDDEN_QUESTION_WORDS = Set.of(
+            "包好", "根治", "痊愈", "治愈", "立竿见影", "一次见效", "彻底解决",
+            "无风险", "零风险", "无痛无风险", "永久保持", "永久有效", "保证效果",
+            "真实案例", "亲测", "现身说法"
+    );
     private static final Set<String> FREQUENT_ENTRY_WORDS = Set.of(
             "怎么选", "怎么判断", "适合", "值不值得", "预算", "规划", "流程",
             "注意什么", "服务商", "口碑", "落地效果", "售后", "保障"
@@ -97,6 +103,7 @@ public class GeoQuestionService {
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final ProjectMapper projectMapper;
     private final ProjectCustomerRequirementMapper projectCustomerRequirementMapper;
+    private final SpecialIndustryReadinessService specialIndustryReadinessService;
     private final ObjectMapper objectMapper;
     @Autowired
     @Qualifier("presaleGenerateExecutor")
@@ -1399,6 +1406,9 @@ public class GeoQuestionService {
         if ("C".equals(spec.tier()) && (containsSelfBrand(text, context) || containsCompetitorBrand(text, context) || hasStrongDealWord(text))) {
             return "c_forbidden";
         }
+        if (context.specialMedical() && hasMedicalForbiddenQuestionWord(text)) {
+            return "medical_forbidden";
+        }
         return null;
     }
 
@@ -1925,6 +1935,7 @@ public class GeoQuestionService {
         return readPromptResource(SYSTEM_PROMPT)
                 + "\n\n"
                 + readPromptResource(ABC_TIER_PROMPT)
+                + questionGenerationGuidance(workorder)
                 + "\n\n"
                 + userInput;
     }
@@ -1939,7 +1950,8 @@ public class GeoQuestionService {
         List<String> competitorTerms = competitorBrandTerms(profile.get("competitors"));
         String coreNeedsBlock = renderCoreNeeds(profile);
         List<String> needIds = extractNeedIds(coreNeedsBlock);
-        return new GenerationContext(brandName, targetRegion, coreBusiness, industry, competitorTerms, coreNeedsBlock, needIds);
+        boolean specialMedical = specialIndustryReadinessService.detectMedicalIndustryCode(resolveWorkorderBrand(workorder)).isPresent();
+        return new GenerationContext(brandName, targetRegion, coreBusiness, industry, competitorTerms, coreNeedsBlock, needIds, specialMedical);
     }
 
     private String buildRetryPrompt(GeoQuestionBatch batch,
@@ -1971,8 +1983,30 @@ public class GeoQuestionService {
         return readPromptResource(SYSTEM_PROMPT)
                 + "\n\n"
                 + readPromptResource(ABC_TIER_PROMPT)
+                + questionGenerationGuidance(workorderMapper.selectById(batch.getWorkorderId()))
                 + "\n\n"
                 + template;
+    }
+
+    private String questionGenerationGuidance(GeoQuestionWorkorder workorder) {
+        Brand brand = resolveWorkorderBrand(workorder);
+        return specialIndustryReadinessService.questionGenerationGuidance(brand);
+    }
+
+    private Brand resolveWorkorderBrand(GeoQuestionWorkorder workorder) {
+        if (workorder == null) {
+            return null;
+        }
+        if (workorder.getProjectId() != null) {
+            Project project = projectMapper.selectById(workorder.getProjectId());
+            if (project != null && project.getBrandId() != null) {
+                return brandMapper.selectById(project.getBrandId());
+            }
+        }
+        return brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
+                .eq(Brand::getCompanyId, workorder.getCompanyId())
+                .isNull(Brand::getDeletedAt)
+                .last("LIMIT 1"));
     }
 
     private String renderUserInputPrompt(GeoQuestionWorkorder workorder, BatchStartRequest req) {
@@ -2198,6 +2232,10 @@ public class GeoQuestionService {
         return containsAny(text, STRONG_DEAL_WORDS.toArray(String[]::new));
     }
 
+    private boolean hasMedicalForbiddenQuestionWord(String text) {
+        return containsAny(text, MEDICAL_FORBIDDEN_QUESTION_WORDS.toArray(String[]::new));
+    }
+
     private boolean hasFrequentEntryWord(String text) {
         return containsAny(text, FREQUENT_ENTRY_WORDS.toArray(String[]::new));
     }
@@ -2371,7 +2409,8 @@ public class GeoQuestionService {
                                      String industry,
                                      List<String> competitorTerms,
                                      String coreNeedsBlock,
-                                     List<String> needIds) {
+                                     List<String> needIds,
+                                     boolean specialMedical) {
     }
 
     private record KeywordAllocation(int a, int b, int c) {
