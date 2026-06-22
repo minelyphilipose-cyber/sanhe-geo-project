@@ -6,7 +6,7 @@
         <span>06 / 竞品对标</span>
       </div>
 
-      <div class="p08-panel">
+      <div class="p08-panel p08-body">
         <div class="p08-kicker mono">06 · COMPETITIVE BENCHMARK</div>
         <h1 class="p08-headline chinese-serif">{{ storyTitle }}</h1>
 

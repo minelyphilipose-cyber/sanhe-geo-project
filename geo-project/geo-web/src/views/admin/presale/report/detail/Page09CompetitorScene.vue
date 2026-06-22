@@ -215,7 +215,7 @@ function isTargetAbsentScene(scene: SceneCompetitorPressureItem): boolean {
 }
 
 function isDisplayDetailScene(scene: SceneCompetitorPressureItem): boolean {
-  return isTargetAbsentScene(scene) || isWeakerThanCompetitor(scene)
+  return hasCoveredCompetitor(scene) && (isTargetAbsentScene(scene) || isWeakerThanCompetitor(scene))
 }
 
 function isWeakerThanCompetitor(scene: SceneCompetitorPressureItem): boolean {
@@ -223,6 +223,13 @@ function isWeakerThanCompetitor(scene: SceneCompetitorPressureItem): boolean {
   return (scene.competitors ?? []).some((item) =>
     competitorNames.value.includes(item.name) &&
     (item.mentioned_platform_count ?? 0) > targetCount
+  )
+}
+
+function hasCoveredCompetitor(scene: SceneCompetitorPressureItem): boolean {
+  return (scene.competitors ?? []).some((item) =>
+    competitorNames.value.includes(item.name) &&
+    (item.mentioned_platform_count ?? 0) > 0
   )
 }
 
