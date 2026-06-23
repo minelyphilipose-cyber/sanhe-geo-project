@@ -199,10 +199,11 @@ public class ProjectSelfMediaScheduleService {
             BatchArticleGenerationTask task = generationTaskMapper.selectById(plan.generationTaskId());
             if (task != null && "failed".equals(task.getStatus())) {
                 failedGenerationBatchIds.add(plan.generationBatchId());
-            } else if (task != null && "success".equals(task.getStatus()) && task.getArticleId() != null
-                    && findRejectedItem(rejectedItems, task.getArticleId(), plan) != null
-                    && findScheduleForGenerationPlan(batch, plan) == null) {
-                rejectedSchedulePlans.add(new GeneratedSchedulePlan(plan, task.getArticleId()));
+            } else if (isGeneratedWithoutSchedule(batch, plan, task)) {
+                SelfMediaPublishScheduleRejectedItemVO rejected = findRejectedItem(rejectedItems, task.getArticleId(), plan);
+                if (rejected != null || task.getArticleId() != null) {
+                    rejectedSchedulePlans.add(new GeneratedSchedulePlan(plan, task.getArticleId()));
+                }
             }
         }
         if (failedGenerationBatchIds.isEmpty() && rejectedSchedulePlans.isEmpty()) {
@@ -871,6 +872,15 @@ public class ProjectSelfMediaScheduleService {
         return failed;
     }
 
+    private boolean isGeneratedWithoutSchedule(ProjectSelfMediaScheduleBatch batch,
+                                               GenerationPlan plan,
+                                               BatchArticleGenerationTask task) {
+        return task != null
+                && "success".equals(task.getStatus())
+                && task.getArticleId() != null
+                && findScheduleForGenerationPlan(batch, plan) == null;
+    }
+
     private List<BusinessCalendarService.PublishSlot> selectSlotsEvenlyByPlatform(YearMonth targetMonth,
                                                                                   List<GeneratedSchedulePlan> generated,
                                                                                   String requestedScheduleStrategy,
@@ -1435,6 +1445,9 @@ public class ProjectSelfMediaScheduleService {
         } else if ("rejected".equals(scheduleStatus)) {
             actions.add("重新处理");
             item.setOperatorActionHint("文章已生成，但发布时间没有安排成功。请调整发布时间或账号后重新处理。");
+        } else if (item.getArticleId() != null && item.getScheduleId() == null) {
+            actions.add("重新处理");
+            item.setOperatorActionHint("文章已生成但还没有安排发布时间，可点击重新处理补上排期。");
         } else if (isRetryableScheduleStatus(scheduleStatus)) {
             actions.add("重新处理");
             actions.add("改期到下月");
@@ -1453,8 +1466,6 @@ public class ProjectSelfMediaScheduleService {
             item.setOperatorActionHint("已确认发布完成。");
         } else if (SelfMediaPublishScheduleConstants.STATUS_CANCELLED.equals(scheduleStatus)) {
             item.setOperatorActionHint("已取消，系统不会继续处理。");
-        } else if (item.getArticleId() != null && item.getScheduleId() == null) {
-            item.setOperatorActionHint("文章已生成，等待系统安排发布时间。");
         } else {
             item.setOperatorActionHint("等待文章生成或后续处理。");
         }
@@ -1498,8 +1509,11 @@ public class ProjectSelfMediaScheduleService {
             boolean rejected = item.getScheduleId() == null
                     && "rejected".equals(normalizeText(item.getScheduleStatus()))
                     && item.getArticleId() != null;
+            boolean generatedWithoutSchedule = item.getScheduleId() == null
+                    && item.getArticleId() != null
+                    && !"rejected".equals(normalizeText(item.getScheduleStatus()));
             boolean retryableSchedule = item.getScheduleId() != null && isRetryableScheduleStatus(item.getScheduleStatus());
-            if (generationFailed || rejected) {
+            if (generationFailed || rejected || generatedWithoutSchedule) {
                 retryFailed++;
             }
             if (retryableSchedule) {
@@ -1522,7 +1536,7 @@ public class ProjectSelfMediaScheduleService {
         preview.setUnableCount(unable);
         preview.setNextMonth(nextMonthText(targetMonth));
         if (retryFailed > 0) {
-            preview.getMessages().add("有 " + retryFailed + " 条可重新生成文章或重新安排发布时间。");
+            preview.getMessages().add("有 " + retryFailed + " 条可重新生成文章或补上发布时间。");
         }
         if (retryAbnormal > 0) {
             preview.getMessages().add("有 " + retryAbnormal + " 条异常内容可重新处理、改期或忽略。");

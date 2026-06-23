@@ -872,7 +872,11 @@ class ProjectSelfMediaScheduleServiceTest {
                 """);
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
         when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
-        when(generationTaskMapper.selectById(56L)).thenReturn(generationTask(56L, 67L));
+        BatchArticleGenerationTask pendingTask = new BatchArticleGenerationTask();
+        pendingTask.setId(56L);
+        pendingTask.setBatchId(44L);
+        pendingTask.setStatus("running");
+        when(generationTaskMapper.selectById(56L)).thenReturn(pendingTask);
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
         SelfMediaAccount secondAccount = account();
         secondAccount.setId(21L);
@@ -881,6 +885,50 @@ class ProjectSelfMediaScheduleServiceTest {
                 .thenReturn(List.of(slot(15, 9)));
         when(scheduleAdapterRouter.rules(eq("toutiao"), anyString()))
                 .thenReturn(new SelfMediaPlatformScheduleRules(130, 120, 4, 7 * 24 * 60));
+        SelfMediaPublishScheduleCreateResponse created = new SelfMediaPublishScheduleCreateResponse();
+        SelfMediaPublishScheduleVO schedule = new SelfMediaPublishScheduleVO();
+        schedule.setId(88L);
+        created.setCreatedSchedules(List.of(schedule));
+        when(scheduleService.createSystemSchedules(any(), org.mockito.ArgumentMatchers.startsWith("project-auto-33-55-retry-"), eq(99L)))
+                .thenReturn(created);
+
+        ProjectSelfMediaScheduleBatchDetailVO detail = service.retryFailedItems(7L, "2026-06");
+
+        assertEquals("created", detail.getBatch().getStatus());
+        verify(scheduleService).createSystemSchedules(any(), org.mockito.ArgumentMatchers.startsWith("project-auto-33-55-retry-"), eq(99L));
+        verify(generationService, never()).retryFailedSystem(any());
+        verify(batchMapper).updateById(batch);
+        assertEquals(1, batch.getCreatedCount());
+        assertEquals(0, batch.getRejectedCount());
+    }
+
+    @Test
+    void retryFailedItemsCreatesScheduleForGeneratedButUnscheduledHistory() {
+        ProjectSelfMediaScheduleBatch batch = processingBatchWithTwoGenerationPlans();
+        batch.setStatus("partial_failed");
+        batch.setCreatedCount(0);
+        batch.setRejectedCount(1);
+        batch.setRequestPayload("""
+                {
+                  "targetMonth": "2026-06",
+                  "scheduleStrategy": "platform_schedule",
+                  "includeAdjustedWorkdays": false,
+                  "plans": [
+                    {"generationBatchId": 44, "generationTaskId": 55, "selfMediaAccountId": 20, "platform": "toutiao"}
+                  ]
+                }
+                """);
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(selfMediaPublishScheduleRequestMapper.selectByRequestKey(8L, "project-auto-33-55"))
+                .thenReturn(null);
+        when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
+                .thenReturn(null);
+        when(businessCalendarService.allPublishSlots(any(), eq(false)))
+                .thenReturn(List.of(slot(15, 9)));
+        when(scheduleAdapterRouter.rules(eq("toutiao"), anyString()))
+                .thenReturn(SelfMediaPlatformScheduleRules.defaults());
         SelfMediaPublishScheduleCreateResponse created = new SelfMediaPublishScheduleCreateResponse();
         SelfMediaPublishScheduleVO schedule = new SelfMediaPublishScheduleVO();
         schedule.setId(88L);

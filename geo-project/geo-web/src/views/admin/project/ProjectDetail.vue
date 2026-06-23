@@ -487,7 +487,7 @@
             :loading="selfMediaRetryFailedLoading"
             @click="retrySelfMediaFailedItems"
           >
-            重试失败项 {{ selfMediaDetailRetryableCount }}
+            补排期/重试 {{ selfMediaDetailRetryableCount }}
           </el-button>
           <el-button
             v-if="selfMediaDetailAbnormalScheduleCount > 0"
@@ -552,7 +552,7 @@
         <el-table-column type="expand" width="42">
           <template #default="{ row }">
             <div class="auto-schedule-row-debug">
-              <span v-if="row.operatorActionHint">建议：{{ row.operatorActionHint }}</span>
+              <span v-if="selfMediaDetailOperatorHint(row)">建议：{{ selfMediaDetailOperatorHint(row) }}</span>
               <span v-if="row.claimDiagnosticMessage">处理提示：{{ row.claimDiagnosticMessage }}</span>
               <span>处理次数：{{ scheduleAttemptText(row) }}</span>
               <span>下次处理：{{ compactDateTime(row.nextAttemptAt) }}</span>
@@ -1205,8 +1205,11 @@ const selfMediaDetailFailedGenerationCount = computed(() =>
 const selfMediaDetailRejectedScheduleCount = computed(() =>
   selfMediaDetailItems.value.filter((item) => item.scheduleStatus === 'rejected' && !!item.articleId && !item.scheduleId).length,
 )
+const selfMediaDetailUnscheduledGeneratedCount = computed(() =>
+  selfMediaDetailItems.value.filter((item) => !!item.articleId && !item.scheduleId && item.scheduleStatus !== 'rejected').length,
+)
 const selfMediaDetailRetryableCount = computed(() =>
-  selfMediaDetailFailedGenerationCount.value + selfMediaDetailRejectedScheduleCount.value,
+  selfMediaDetailFailedGenerationCount.value + selfMediaDetailRejectedScheduleCount.value + selfMediaDetailUnscheduledGeneratedCount.value,
 )
 const retryableScheduleStatuses = new Set(['manual_required', 'schedule_failed', 'publish_failed'])
 const manualMarkableScheduleStatuses = new Set(['schedule_failed', 'publish_failed'])
@@ -1556,7 +1559,7 @@ function selfMediaDetailProgressText(row: ProjectSelfMediaScheduleBatchDetailIte
     return next === '-' ? '排期已创建，等待系统继续处理' : `排期已创建，下次处理 ${next}`
   }
   if (row.generationStatus === 'success' || row.articleId) {
-    return '文章已生成，后台即将创建自媒体排期'
+    return '文章已生成，通常 1 分钟内会自动排期；超过 2 分钟仍未排期，可点击补排期/重试'
   }
   if (row.generationStatus === 'running') {
     return '文章正在生成，完成后会自动进入排期创建'
@@ -1567,6 +1570,13 @@ function selfMediaDetailProgressText(row: ProjectSelfMediaScheduleBatchDetailIte
   return '等待后台生成文章并创建排期'
 }
 
+function selfMediaDetailOperatorHint(row: ProjectSelfMediaScheduleBatchDetailItem) {
+  if (!row.scheduleId && row.articleId && row.scheduleStatus !== 'rejected') {
+    return '文章已生成，通常 1 分钟内会自动排期；超过 2 分钟仍未排期，可点击补排期/重试。'
+  }
+  return row.operatorActionHint || ''
+}
+
 function retryingRowKey(row: ProjectSelfMediaScheduleBatchDetailItem) {
   return row.scheduleId ? `schedule-${row.scheduleId}` : `generation-${row.generationTaskId || row.articleId || row.selfMediaAccountId || 'unknown'}`
 }
@@ -1574,6 +1584,7 @@ function retryingRowKey(row: ProjectSelfMediaScheduleBatchDetailItem) {
 function canRetrySelfMediaDetailRow(row: ProjectSelfMediaScheduleBatchDetailItem) {
   if (row.scheduleId && retryableScheduleStatuses.has(row.scheduleStatus || '')) return true
   if (!row.scheduleId && row.scheduleStatus === 'rejected' && row.articleId) return true
+  if (!row.scheduleId && row.articleId) return true
   if (!row.scheduleId && row.generationStatus === 'failed') return true
   return false
 }
@@ -1629,9 +1640,9 @@ async function retrySelfMediaFailedItems() {
   const count = selfMediaActionPreview.value?.retryFailedCount ?? selfMediaDetailRetryableCount.value
   try {
     await ElMessageBox.confirm(
-      `系统会重新处理 ${count} 条失败内容；已经成功安排的内容不会重复处理。是否继续？`,
-      '重试失败项',
-      { type: 'warning', confirmButtonText: '重试', cancelButtonText: '取消' },
+      `系统会处理 ${count} 条内容：已生成但未排期的会补上发布时间，生成失败的会重新生成；已经成功安排的内容不会重复处理。是否继续？`,
+      '补排期/重试',
+      { type: 'warning', confirmButtonText: '继续处理', cancelButtonText: '取消' },
     )
   } catch {
     return
@@ -1641,7 +1652,7 @@ async function retrySelfMediaFailedItems() {
     const { data } = await retryProjectSelfMediaScheduleBatchFailedItems(current.id, selfMediaScheduleMonth.value)
     selfMediaBatchDetail.value = data.data || null
     selfMediaScheduleBatch.value = data.data?.batch || selfMediaScheduleBatch.value
-    ElMessage.success('失败项已重新处理，后台会继续生成文章或安排发布时间')
+    ElMessage.success('已提交处理，后台会补上发布时间或重新生成文章')
   } finally {
     selfMediaRetryFailedLoading.value = false
   }
