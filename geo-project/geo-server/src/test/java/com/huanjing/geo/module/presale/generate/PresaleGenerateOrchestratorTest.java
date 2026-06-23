@@ -1523,6 +1523,34 @@ class PresaleGenerateOrchestratorTest {
     }
 
     @Test
+    void analyzeWithEvaluationModel_excludesDegradedEvaluationPlatforms() throws Exception {
+        PlatformCallContext sourceCtx = new PlatformCallContext(
+                9303L, 2, "chatgpt", 11L, "c1", "Acme", 1L, false);
+        PlatformCallContext deepseekCtx = new PlatformCallContext(
+                9303L, 2, "deepseek", 11L, "c1", "Acme", 1L, false);
+        PlatformCallContext doubaoCtx = new PlatformCallContext(
+                9303L, 2, "doubao", 11L, "c1", "Acme", 1L, false);
+        LlmCallResult expected = successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}");
+
+        when(evaluationModelRouter.routeContexts(sourceCtx)).thenReturn(List.of(deepseekCtx, doubaoCtx));
+        when(llmInvoker.analyze(any(), anyString(), anyString())).thenReturn(expected);
+
+        LlmCallResult actual = ReflectionTestUtils.invokeMethod(
+                orchestrator,
+                "analyzeWithEvaluationModel",
+                sourceCtx,
+                "prompt",
+                "answer",
+                Set.of("deepseek")
+        );
+
+        assertEquals(expected, actual);
+        ArgumentCaptor<PlatformCallContext> ctxCaptor = ArgumentCaptor.forClass(PlatformCallContext.class);
+        verify(llmInvoker, times(1)).analyze(ctxCaptor.capture(), anyString(), anyString());
+        assertEquals("doubao", ctxCaptor.getValue().platformCode());
+    }
+
+    @Test
     void analyzeWithEvaluationModel_retriesThreeRoundsAndCompensationWhenAllJudgesBusy() throws Exception {
         PlatformCallContext sourceCtx = new PlatformCallContext(
                 9301L, 1, "chatgpt", 11L, "", "Acme", 1L, false);

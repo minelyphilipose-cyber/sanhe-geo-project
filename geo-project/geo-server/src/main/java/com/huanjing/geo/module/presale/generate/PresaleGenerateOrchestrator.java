@@ -808,7 +808,7 @@ public class PresaleGenerateOrchestrator {
                 boolean interruptedInAnalyze = false;
                 String analyzeRequestPrompt = buildAnalyzeRequestPrompt(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
                 try {
-                    LlmCallResult analyzeResult = analyzeWithEvaluationModel(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
+                    LlmCallResult analyzeResult = analyzeWithEvaluationModel(ctx, renderedPrompt, reusedQueryCall.getRawResponse(), Set.of());
                     PresaleAiCall analyzeCall = buildCall(
                             versionId, 1, platformCode, template.getId(), "",
                             "ANALYZE", reusedQueryCall.getId(), analyzeRequestPrompt, analyzeResult, null
@@ -867,7 +867,7 @@ public class PresaleGenerateOrchestrator {
 
         try {
             String analyzeRequestPrompt = buildAnalyzeRequestPrompt(ctx, renderedPrompt, queryResult.rawResponse());
-            LlmCallResult analyzeResult = analyzeWithEvaluationModel(ctx, renderedPrompt, queryResult.rawResponse());
+            LlmCallResult analyzeResult = analyzeWithEvaluationModel(ctx, renderedPrompt, queryResult.rawResponse(), Set.of());
             PresaleAiCall analyzeCall = insertCall(
                     versionId, 1, platformCode, template.getId(), "",
                     "ANALYZE", queryCall.getId(), analyzeRequestPrompt, analyzeResult, null
@@ -1017,7 +1017,7 @@ public class PresaleGenerateOrchestrator {
                 boolean interruptedInAnalyze = false;
                 String analyzeRequestPrompt = buildAnalyzeRequestPrompt(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
                 try {
-                    LlmCallResult analyzeResult = analyzeWithEvaluationModel(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
+                    LlmCallResult analyzeResult = analyzeWithEvaluationModel(ctx, renderedPrompt, reusedQueryCall.getRawResponse(), degradedPlatforms);
                     PresaleAiCall analyzeCall = buildCall(
                             versionId, 2, platformCode, template.getId(), competitorGroupName,
                             "ANALYZE", reusedQueryCall.getId(), analyzeRequestPrompt, analyzeResult, null
@@ -1078,7 +1078,7 @@ public class PresaleGenerateOrchestrator {
 
         try {
             String analyzeRequestPrompt = buildAnalyzeRequestPrompt(ctx, renderedPrompt, queryResult.rawResponse());
-            LlmCallResult analyzeResult = analyzeWithEvaluationModel(ctx, renderedPrompt, queryResult.rawResponse());
+            LlmCallResult analyzeResult = analyzeWithEvaluationModel(ctx, renderedPrompt, queryResult.rawResponse(), degradedPlatforms);
             PresaleAiCall analyzeCall = insertCall(
                     versionId, 2, platformCode, template.getId(), competitorGroupName,
                     "ANALYZE", queryCall.getId(), analyzeRequestPrompt, analyzeResult, null
@@ -1781,11 +1781,22 @@ public class PresaleGenerateOrchestrator {
                                                      String originalPrompt,
                                                      String queryAnswer)
             throws LlmInvokeException, AnalyzeParseException {
+        return analyzeWithEvaluationModel(sourceCtx, originalPrompt, queryAnswer, Set.of());
+    }
+
+    private LlmCallResult analyzeWithEvaluationModel(PlatformCallContext sourceCtx,
+                                                     String originalPrompt,
+                                                     String queryAnswer,
+                                                     Set<String> excludedEvaluationPlatforms)
+            throws LlmInvokeException, AnalyzeParseException {
         LlmPermitUnavailableException lastBusy = null;
         Exception lastEvaluationFailure = null;
-        List<PlatformCallContext> candidates = evaluationModelRouter.routeContexts(sourceCtx);
+        Set<String> excludedPlatforms = excludedEvaluationPlatforms == null ? Set.of() : excludedEvaluationPlatforms;
+        List<PlatformCallContext> candidates = evaluationModelRouter.routeContexts(sourceCtx).stream()
+                .filter(candidate -> candidate != null && !excludedPlatforms.contains(candidate.platformCode()))
+                .toList();
         if (candidates.isEmpty()) {
-            throw new LlmInvokeException("No presale evaluation model enabled");
+            throw new LlmInvokeException("No presale evaluation model enabled after excluding degraded platforms");
         }
         for (int attempt = 1; attempt <= EVALUATION_MODEL_BUSY_ATTEMPTS; attempt++) {
             for (PlatformCallContext candidate : candidates) {
