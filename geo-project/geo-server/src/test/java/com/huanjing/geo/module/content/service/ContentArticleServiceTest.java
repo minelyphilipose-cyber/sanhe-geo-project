@@ -24,6 +24,7 @@ import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
 import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
+import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
@@ -64,6 +65,7 @@ class ContentArticleServiceTest {
     private ArticleDraftMapper articleDraftMapper;
     private ArticleDraftVersionMapper articleDraftVersionMapper;
     private BatchArticleGenerationTaskMapper batchArticleGenerationTaskMapper;
+    private SelfMediaPublishScheduleMapper selfMediaPublishScheduleMapper;
     private ProjectMapper projectMapper;
     private BrandAccessService brandAccessService;
     private AuditService auditService;
@@ -82,6 +84,7 @@ class ContentArticleServiceTest {
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
         batchArticleGenerationTaskMapper = mock(BatchArticleGenerationTaskMapper.class);
+        selfMediaPublishScheduleMapper = mock(SelfMediaPublishScheduleMapper.class);
         brandAccessService = mock(BrandAccessService.class);
         auditService = mock(AuditService.class);
         articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
@@ -103,6 +106,7 @@ class ContentArticleServiceTest {
                 mock(ArticlePublishLogMapper.class),
                 batchArticleGenerationTaskMapper,
                 mock(ArticlePromptTemplateMapper.class),
+                selfMediaPublishScheduleMapper,
                 mock(BrandMapper.class),
                 projectMapper,
                 mock(SysDictItemMapper.class),
@@ -369,6 +373,21 @@ class ContentArticleServiceTest {
         assertEquals("批量文章主题", row.getTopic());
         assertEquals("批量问题词", row.getTopicAsQuestion());
         assertEquals(Boolean.TRUE, row.getSystemGenerated());
+    }
+
+    @Test
+    void pageShowsArticleAsDistributingWhenActiveSelfMediaScheduleExists() {
+        ArticleDraft article = article("approved");
+        Page<ArticleDraft> mapperPage = new Page<>(1, 10, 1);
+        mapperPage.setRecords(List.of(article));
+        when(articleDraftMapper.selectPage(any(Page.class), any())).thenReturn(mapperPage);
+        when(selfMediaPublishScheduleMapper.selectActiveArticleIds(any(), any())).thenReturn(List.of(99L));
+        when(projectMapper.selectList(any())).thenReturn(List.of(project()));
+
+        Page<ArticleDraft> result = service.page(null, null, null, 1, 10);
+
+        assertEquals("distributing", result.getRecords().get(0).getStatus());
+        verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
     }
 
     @Test

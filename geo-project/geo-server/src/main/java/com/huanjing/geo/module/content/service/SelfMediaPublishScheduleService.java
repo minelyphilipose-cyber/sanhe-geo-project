@@ -631,6 +631,7 @@ public class SelfMediaPublishScheduleService {
         }
 
         Page<SelfMediaPublishSchedule> data = scheduleMapper.selectPage(new Page<>(pageNo, pageSize), wrapper);
+        syncArticlesForActiveSchedules(data.getRecords());
         Page<SelfMediaPublishScheduleVO> result = new Page<>(data.getCurrent(), data.getSize(), data.getTotal());
         List<SelfMediaPublishScheduleVO> records = data.getRecords().stream().map(SelfMediaPublishScheduleVO::from).toList();
         enrichDisplayNames(records);
@@ -707,7 +708,9 @@ public class SelfMediaPublishScheduleService {
     }
 
     public SelfMediaPublishScheduleVO detail(Long id) {
-        SelfMediaPublishScheduleVO vo = SelfMediaPublishScheduleVO.from(requireScheduleWithAccess(id));
+        SelfMediaPublishSchedule row = requireScheduleWithAccess(id);
+        syncArticleForActiveSchedule(row);
+        SelfMediaPublishScheduleVO vo = SelfMediaPublishScheduleVO.from(row);
         enrichDisplayNames(List.of(vo));
         enrichAlerts(List.of(vo));
         return vo;
@@ -1201,6 +1204,7 @@ public class SelfMediaPublishScheduleService {
             row.setFailureMessage(null);
             row.setDiagnosticsJson(trimToNull(diagnosticsJson));
             scheduleMapper.updateById(row);
+            markArticlePublished(row.getArticleId());
             confirmScheduleQuotaIfPresent(row);
             confirmDistributionQuotaIfPresent(row);
             environmentLockService.release(row.getId());
@@ -1281,6 +1285,7 @@ public class SelfMediaPublishScheduleService {
             row.setFailureMessage(null);
             row.setDiagnosticsJson(trimToNull(diagnosticsJson));
             scheduleMapper.updateById(row);
+            markArticlePublished(row.getArticleId());
             confirmScheduleQuotaIfPresent(row);
             confirmDistributionQuotaIfPresent(row);
             environmentLockService.release(row.getId());
@@ -1636,6 +1641,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(null);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
+        syncArticleForActiveSchedule(row);
         confirmScheduleQuotaIfPresent(row);
         confirmDistributionQuotaIfPresent(row);
         environmentLockService.release(row.getId());
@@ -1740,6 +1746,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(null);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
+        syncArticleForActiveSchedule(row);
         return SelfMediaPublishScheduleVO.from(row);
     }
 
@@ -1752,6 +1759,7 @@ public class SelfMediaPublishScheduleService {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
+        syncArticleForActiveSchedule(row);
         return SelfMediaPublishScheduleVO.from(row);
     }
 
@@ -1770,6 +1778,7 @@ public class SelfMediaPublishScheduleService {
             row.setFailureCode("PLATFORM_SCHEDULED_WAITING");
             row.setFailureMessage("平台已定时，等待发布时间后复查");
             scheduleMapper.updateById(row);
+            syncArticleForActiveSchedule(row);
             environmentLockService.release(row.getId());
             reconcileAlerts(row);
             return SelfMediaPublishScheduleVO.from(row);
@@ -1789,6 +1798,7 @@ public class SelfMediaPublishScheduleService {
             row.setFailureMessage("多次复查后仍未匹配到平台作品，请人工确认");
         }
         scheduleMapper.updateById(row);
+        syncArticleForActiveSchedule(row);
         environmentLockService.release(row.getId());
         reconcileAlerts(row);
         return SelfMediaPublishScheduleVO.from(row);
@@ -1886,6 +1896,7 @@ public class SelfMediaPublishScheduleService {
             row.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
         }
         scheduleMapper.updateById(row);
+        syncArticleForActiveSchedule(row);
         if (SelfMediaPublishScheduleConstants.STATUS_FILLING.equals(normalize(expectedRunningStatus))) {
             refundDistributionQuotaIfPresent(row);
         }
@@ -2512,6 +2523,21 @@ public class SelfMediaPublishScheduleService {
         articleDraftMapper.updateById(article);
     }
 
+    private void syncArticleForActiveSchedule(SelfMediaPublishSchedule row) {
+        if (row != null && SelfMediaPublishScheduleConstants.ACTIVE_STATUSES.contains(normalize(row.getStatus()))) {
+            markArticleDistributing(row.getArticleId());
+        }
+    }
+
+    private void syncArticlesForActiveSchedules(List<SelfMediaPublishSchedule> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        for (SelfMediaPublishSchedule row : rows) {
+            syncArticleForActiveSchedule(row);
+        }
+    }
+
     private void markArticlePublished(Long articleId) {
         ArticleDraft article = articleId == null ? null : articleDraftMapper.selectById(articleId);
         if (article == null) {
@@ -2545,6 +2571,10 @@ public class SelfMediaPublishScheduleService {
                 excludedScheduleId,
                 new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
         ) > 0;
+    }
+
+    public boolean hasActiveSelfMediaSchedule(Long articleId) {
+        return hasActiveSelfMediaSchedule(articleId, null);
     }
 
     private void refundDistributionQuotaIfPresent(SelfMediaPublishSchedule row) {

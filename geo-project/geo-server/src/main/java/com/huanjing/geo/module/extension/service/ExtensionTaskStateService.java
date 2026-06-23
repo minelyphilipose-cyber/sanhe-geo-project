@@ -370,6 +370,9 @@ public class ExtensionTaskStateService {
         if (task.getArticleId() == null) {
             throw new BizException(TASK_NOT_FOUND, "task article not found");
         }
+        if (selfMediaPublishScheduleService.hasActiveSelfMediaSchedule(task.getArticleId())) {
+            return;
+        }
         ArticleDraft update = new ArticleDraft();
         update.setStatus(ARTICLE_STATUS_APPROVED);
         articleDraftMapper.update(update,

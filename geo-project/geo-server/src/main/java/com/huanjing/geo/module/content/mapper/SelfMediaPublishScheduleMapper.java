@@ -318,6 +318,23 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
 
     @Select("""
             <script>
+            SELECT DISTINCT article_id
+            FROM self_media_publish_schedule
+            WHERE article_id IN
+              <foreach collection="articleIds" item="articleId" open="(" separator="," close=")">
+                #{articleId}
+              </foreach>
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    List<Long> selectActiveArticleIds(@Param("articleIds") List<Long> articleIds,
+                                      @Param("statuses") List<String> statuses);
+
+    @Select("""
+            <script>
             SELECT *
             FROM self_media_publish_schedule
             WHERE status IN

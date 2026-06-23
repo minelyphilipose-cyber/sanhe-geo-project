@@ -1215,23 +1215,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     return 'info'
   }
 
-  function scheduleDistributionStatusRefresh() {
-    if (!options.rows.value.some(row => row.status === 'distributing')) return
-    window.setTimeout(() => {
-      void options.load()
-    }, 800)
-  }
-
-  function handleWindowFocusForDistribution() {
-    scheduleDistributionStatusRefresh()
-  }
-
-  function handleVisibilityChangeForDistribution() {
-    if (document.visibilityState === 'visible') {
-      scheduleDistributionStatusRefresh()
-    }
-  }
-
   watch(mediaDistributeVisible, (visible) => {
     if (!visible) {
       stopBrowserEnvironmentStatusPolling()
@@ -1239,12 +1222,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     }
   })
 
-  window.addEventListener('focus', handleWindowFocusForDistribution)
-  document.addEventListener('visibilitychange', handleVisibilityChangeForDistribution)
-
   onBeforeUnmount(() => {
-    window.removeEventListener('focus', handleWindowFocusForDistribution)
-    document.removeEventListener('visibilitychange', handleVisibilityChangeForDistribution)
     stopBrowserEnvironmentStatusPolling()
     cleanupMaterialThumbs()
   })

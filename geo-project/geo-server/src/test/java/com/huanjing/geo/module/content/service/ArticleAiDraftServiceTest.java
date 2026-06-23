@@ -397,7 +397,7 @@ class ArticleAiDraftServiceTest {
         return new ContentArticleService(articleMapper, versionMapper,
                 mock(ArticleReviewLogMapper.class), mock(ArticlePublishLogMapper.class),
                 mock(BatchArticleGenerationTaskMapper.class), mock(ArticlePromptTemplateMapper.class), mock(BrandMapper.class),
-                projectMapper, mock(SysDictItemMapper.class), currentUserService,
+                mock(SelfMediaPublishScheduleMapper.class), projectMapper, mock(SysDictItemMapper.class), currentUserService,
                 mock(MarkdownImageReferenceValidator.class), mock(com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService.class),
                 mock(ArticleImagePublicUrlRewriter.class), mock(ArticleAutoImageInsertionService.class),
                 mock(ArticleCoverSelectionService.class),

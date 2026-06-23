@@ -886,13 +886,17 @@ class SelfMediaPublishScheduleServiceTest {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         Page<SelfMediaPublishSchedule> mapperPage = new Page<>(1, 20, 1);
         mapperPage.setRecords(List.of(row));
+        ArticleDraft article = article();
         when(scheduleMapper.selectPage(any(), any())).thenReturn(mapperPage);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
 
         Page<SelfMediaPublishScheduleVO> response = service.pageSchedules(
                 null, "toutiao", SelfMediaPublishScheduleConstants.STATUS_PENDING, null, null, null, 1L, 20L);
 
         assertEquals(1, response.getTotal());
         assertEquals(30L, response.getRecords().get(0).getId());
+        assertEquals("distributing", article.getStatus());
+        verify(articleDraftMapper).updateById(article);
         verify(brandAccessService).listAccessibleBrandIds(99L, BrandAccessAction.OPERATE);
         verify(brandAccessService, never()).requireBrandAccess(anyLong(), anyLong(), any());
         verify(scheduleMapper).selectPage(any(), any());
@@ -1789,7 +1793,9 @@ class SelfMediaPublishScheduleServiceTest {
         row.setDistributionTaskId(318L);
         row.setLockedUntil(LocalDateTime.now().plusMinutes(5));
         row.setNextAttemptAt(LocalDateTime.now().plusMinutes(10));
+        ArticleDraft article = article();
         when(scheduleMapper.selectById(118L)).thenReturn(row);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
 
         SelfMediaPublishScheduleVO response = service.markLocalAgentExecutionPublishedConfirmed(
                 118L,
@@ -1804,6 +1810,8 @@ class SelfMediaPublishScheduleServiceTest {
         assertNull(response.getLockedUntil());
         assertNull(response.getNextAttemptAt());
         assertTrue(response.getDiagnosticsJson().contains("\"platformPublishedUrl\":\"https://example.test/article/118\""));
+        assertEquals("published", article.getStatus());
+        verify(articleDraftMapper).updateById(article);
         verify(companyChannelQuotaService).confirmSelfMediaSchedule(118L);
         verify(companyChannelQuotaService).confirmDistribution(318L);
         verify(environmentLockService).release(118L);
@@ -1827,6 +1835,20 @@ class SelfMediaPublishScheduleServiceTest {
         verify(scheduleMapper).updateById(scheduling);
         verify(companyChannelQuotaService).confirmDistribution(302L);
         verify(environmentLockService).release(102L);
+    }
+
+    @Test
+    void markClaimedScheduledKeepsArticleDistributingWhenPlatformScheduled() {
+        SelfMediaPublishSchedule scheduling = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
+        scheduling.setId(102L);
+        ArticleDraft article = article();
+        when(scheduleMapper.selectById(102L)).thenReturn(scheduling);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+
+        service.markClaimedScheduled(102L, "platform-schedule-1", "{\"ok\":true}");
+
+        assertEquals("distributing", article.getStatus());
+        verify(articleDraftMapper).updateById(article);
     }
 
     @Test
