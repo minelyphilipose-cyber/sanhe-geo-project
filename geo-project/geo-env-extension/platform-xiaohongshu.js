@@ -382,7 +382,9 @@
   
   function verifyXiaohongshuPublishSubmitted(context = {}) {
     const text = normalizeText(document.body?.innerText || document.body?.textContent || '')
-    const success = text.includes('发布成功') || text.includes('秒后将返回发布页') || location.href.includes('/publish/success')
+    const successUrl = location.href.includes('/publish/success')
+      || (location.pathname.includes('/publish/publish') && new URLSearchParams(location.search).get('published') === 'true')
+    const success = text.includes('发布成功') || text.includes('秒后将返回发布页') || successUrl
     if (!success) return null
     const identity = readXiaohongshuIdentity()
     return {
@@ -406,7 +408,8 @@
       successSignal: {
         successText: text.includes('发布成功'),
         redirectText: text.includes('秒后将返回发布页'),
-        successUrl: location.href.includes('/publish/success'),
+        successUrl,
+        publishedQuery: new URLSearchParams(location.search).get('published') === 'true',
       },
       textSample: text.slice(0, 500),
     }

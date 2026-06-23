@@ -49,6 +49,28 @@ test('xiaohongshu publish check confirms published note after scheduled time', (
   assert.equal(result.platformPublishedUrl, '')
 })
 
+test('xiaohongshu publish check confirms note-manager card without explicit published label', () => {
+  const result = evaluateXiaohongshuPublishSignals(
+    {
+      title: '[杂谈] 在阜阳装修，我几乎把 “全屋智能有线和无线哪个” 这题做成了毕业论文',
+      platformScheduledAt: '2026-06-23T16:48:00',
+    },
+    {
+      url: 'https://creator.xiaohongshu.com/new/note-manager',
+      text: '创作服务平台\n发布笔记\n笔记管理\n全部 8 已发布 审核中 未通过\n[杂谈] 在阜阳装修，我几乎把 “全屋智能有线和无线哪个” 这题做成了毕业论文\n2026-06-23 16:48\n1 0 0 0 0',
+    },
+    {
+      nowMs: new Date(2026, 5, 23, 17, 10, 0).getTime(),
+    },
+  )
+
+  assert.equal(result.found, true)
+  assert.equal(result.pendingScheduled, false)
+  assert.equal(result.hasPublishedCard, true)
+  assert.equal(result.platformStatus, 'published')
+  assert.equal(result.reason, 'matched published note card')
+})
+
 test('xiaohongshu publish check does not treat note manager route as published signal', () => {
   const result = evaluateXiaohongshuPublishSignals(
     {

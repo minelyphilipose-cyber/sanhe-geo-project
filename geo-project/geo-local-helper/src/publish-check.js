@@ -10,35 +10,53 @@ export function evaluateXiaohongshuPublishSignals(target = {}, pageState = {}, o
   const isBeforeScheduledAt = Number.isFinite(scheduledAtMs) && scheduledAtMs > nowMs
   const url = String(pageState.url || '')
   const isNoteManager = /\/new\/note-manager/.test(url) || normalizedText.includes('笔记管理')
-  const hasScheduledSignal = /定时发布|定时发布中|将于|发布时间/.test(text)
-  const hasPublishedSignal = /发布成功|已发布|审核中/.test(text)
+  const titleIndex = titleProbe ? normalizedText.indexOf(titleProbe) : -1
+  const targetTextWindow = titleIndex >= 0 ? normalizedText.slice(titleIndex, titleIndex + 260) : ''
+  const hasScheduledSignal = /定时发布|定时发布中|将于|发布时间/.test(targetTextWindow)
+  const hasReviewSignal = /审核中|待审核|提交成功|已提交/.test(targetTextWindow)
+  const hasRejectedSignal = /审核未通过|未通过|审核失败|发布失败|不通过/.test(targetTextWindow)
+  const hasPublishedSignal = /发布成功|已发布/.test(targetTextWindow)
     || /\/explore\/|\/discovery\/item\//.test(url)
 
   const matchedUrl = Array.isArray(pageState.anchors)
     ? pageState.anchors.find((item) => normalizeCompact(item.text).includes(titleProbe))?.href || ''
     : ''
   const pendingScheduled = hasTitle && isBeforeScheduledAt && (hasScheduleTime || hasScheduledSignal || isNoteManager)
+  const hasPublishedCard = hasTitle
+    && isNoteManager
+    && hasScheduleTime
+    && !hasScheduledSignal
+    && !hasReviewSignal
+    && !hasRejectedSignal
+  const found = hasTitle && !isBeforeScheduledAt && (hasPublishedSignal || hasPublishedCard)
 
   return {
-    found: hasTitle && !isBeforeScheduledAt && hasPublishedSignal,
+    found,
     pendingScheduled,
     reason: pendingScheduled
       ? 'platform schedule time not due'
-      : hasTitle && !hasPublishedSignal
+      : found
+        ? (hasPublishedCard ? 'matched published note card' : 'matched title and platform status')
+        : hasTitle && !hasPublishedSignal
         ? 'title matched but published signal missing'
         : 'title not matched',
     hasTitle,
     hasScheduleTime,
     hasScheduledSignal,
+    hasReviewSignal,
+    hasRejectedSignal,
     hasPublishedSignal,
+    hasPublishedCard,
     isBeforeScheduledAt,
     isNoteManager,
+    platformStatus: found ? 'published' : (pendingScheduled ? 'scheduled' : hasReviewSignal ? 'reviewing' : hasRejectedSignal ? 'rejected' : 'unknown'),
     targetTitle: target.title || '',
     platformScheduledAt: target.platformScheduledAt || '',
     scheduleProbe,
     url,
     platformPublishedUrl: '',
     pageTitle: pageState.pageTitle || '',
+    matchedText: targetTextWindow.slice(0, 300),
     textSample: text.slice(0, 1200),
   }
 }

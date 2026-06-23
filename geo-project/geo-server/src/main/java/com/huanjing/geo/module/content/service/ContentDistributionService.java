@@ -849,7 +849,7 @@ public class ContentDistributionService {
             throw ex;
         }
         LocalDateTime issuedAt = LocalDateTime.now(SH_ZONE);
-        updateSemiAutoTaskTokenIssued(reusable.getId(), issuedAt);
+        updateSemiAutoTaskTokenIssued(reusable.getId(), issuedAt, operator.getId());
 
         DistributionTask returned = distributionTaskMapper.selectById(reusable.getId());
         if (returned == null) {
@@ -1032,7 +1032,7 @@ public class ContentDistributionService {
             throw ex;
         }
         LocalDateTime issuedAt = LocalDateTime.now(SH_ZONE);
-        updateSemiAutoTaskTokenIssued(task.getId(), issuedAt);
+        updateSemiAutoTaskTokenIssued(task.getId(), issuedAt, operator.getId());
         task.setDispatchMode("SEMI_AUTO");
         task.setStatus("token_issued");
         task.setFillPayload(fillPayload);
@@ -1093,11 +1093,12 @@ public class ContentDistributionService {
         distributionTaskMapper.update(null, wrapper);
     }
 
-    private void updateSemiAutoTaskTokenIssued(Long taskId, LocalDateTime issuedAt) {
+    private void updateSemiAutoTaskTokenIssued(Long taskId, LocalDateTime issuedAt, Long operatorId) {
         LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
                 .eq(DistributionTask::getId, taskId)
                 .eq(DistributionTask::getDispatchMode, "SEMI_AUTO")
                 .set(DistributionTask::getStatus, "token_issued")
+                .set(DistributionTask::getOperatorId, operatorId)
                 .set(DistributionTask::getFillTokenIssuedAt, issuedAt);
         distributionTaskMapper.update(null, wrapper);
     }

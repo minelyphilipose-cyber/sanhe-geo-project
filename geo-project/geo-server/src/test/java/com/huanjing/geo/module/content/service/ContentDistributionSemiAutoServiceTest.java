@@ -385,6 +385,10 @@ class ContentDistributionSemiAutoServiceTest {
         assertEquals("nonce-2", task.getFillTokenNonce());
         verify(fillTokenService).replaceActiveAndIssueInternalWithoutVersionCheck(60L, 10L, 99L, 50L);
         verify(fillTokenService, never()).issueInternalWithoutVersionCheck(60L, 10L, 99L, 50L);
+
+        ArgumentCaptor<LambdaUpdateWrapper<DistributionTask>> updateCaptor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(distributionTaskMapper, times(1)).update(eq(null), updateCaptor.capture());
+        assertTrue(updateCaptor.getValue().getSqlSet().contains("operator_id"));
     }
 
     @Test
