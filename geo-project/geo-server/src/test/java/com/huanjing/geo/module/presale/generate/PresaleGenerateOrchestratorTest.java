@@ -1487,6 +1487,42 @@ class PresaleGenerateOrchestratorTest {
     }
 
     @Test
+    void analyzeWithEvaluationModel_fallsBackWhenFirstJudgeInvokeFails() throws Exception {
+        PlatformCallContext sourceCtx = new PlatformCallContext(
+                9302L, 1, "chatgpt", 11L, "", "Acme", 1L, false);
+        PlatformCallContext deepseekCtx = new PlatformCallContext(
+                9302L, 1, "deepseek", 11L, "", "Acme", 1L, false);
+        PlatformCallContext doubaoCtx = new PlatformCallContext(
+                9302L, 1, "doubao", 11L, "", "Acme", 1L, false);
+        LlmCallResult expected = successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}");
+
+        when(evaluationModelRouter.routeContexts(sourceCtx)).thenReturn(List.of(deepseekCtx, doubaoCtx));
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenAnswer(inv -> {
+                    PlatformCallContext ctx = inv.getArgument(0, PlatformCallContext.class);
+                    if ("deepseek".equals(ctx.platformCode())) {
+                        throw new LlmInvokeException("deepseek quota exhausted");
+                    }
+                    return expected;
+                });
+
+        LlmCallResult actual = ReflectionTestUtils.invokeMethod(
+                orchestrator,
+                "analyzeWithEvaluationModel",
+                sourceCtx,
+                "prompt",
+                "answer"
+        );
+
+        assertEquals(expected, actual);
+        ArgumentCaptor<PlatformCallContext> ctxCaptor = ArgumentCaptor.forClass(PlatformCallContext.class);
+        verify(llmInvoker, times(2)).analyze(ctxCaptor.capture(), anyString(), anyString());
+        assertEquals(List.of("deepseek", "doubao"), ctxCaptor.getAllValues().stream()
+                .map(PlatformCallContext::platformCode)
+                .toList());
+    }
+
+    @Test
     void analyzeWithEvaluationModel_retriesThreeRoundsAndCompensationWhenAllJudgesBusy() throws Exception {
         PlatformCallContext sourceCtx = new PlatformCallContext(
                 9301L, 1, "chatgpt", 11L, "", "Acme", 1L, false);

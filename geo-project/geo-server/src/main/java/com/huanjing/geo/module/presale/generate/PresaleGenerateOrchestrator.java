@@ -1782,6 +1782,7 @@ public class PresaleGenerateOrchestrator {
                                                      String queryAnswer)
             throws LlmInvokeException, AnalyzeParseException {
         LlmPermitUnavailableException lastBusy = null;
+        Exception lastEvaluationFailure = null;
         List<PlatformCallContext> candidates = evaluationModelRouter.routeContexts(sourceCtx);
         if (candidates.isEmpty()) {
             throw new LlmInvokeException("No presale evaluation model enabled");
@@ -1794,6 +1795,15 @@ public class PresaleGenerateOrchestrator {
                     lastBusy = ex;
                     log.debug("presale analyze evaluation model busy, versionId={}, platformCode={}, attempt={}/{}",
                             sourceCtx.versionId(), candidate.platformCode(), attempt, EVALUATION_MODEL_BUSY_ATTEMPTS);
+                } catch (LlmInvokeException | AnalyzeParseException ex) {
+                    lastEvaluationFailure = ex;
+                    log.warn("presale analyze evaluation model failed, versionId={}, sourcePlatform={}, evaluationPlatform={}, attempt={}/{}, reason={}",
+                            sourceCtx.versionId(),
+                            sourceCtx.platformCode(),
+                            candidate.platformCode(),
+                            attempt,
+                            EVALUATION_MODEL_BUSY_ATTEMPTS,
+                            ex.getMessage());
                 }
             }
             if (attempt < EVALUATION_MODEL_BUSY_ATTEMPTS) {
@@ -1815,8 +1825,23 @@ public class PresaleGenerateOrchestrator {
                     log.debug("presale analyze evaluation model compensation busy, versionId={}, platformCode={}, attempt={}/{}",
                             sourceCtx.versionId(), candidate.platformCode(), attempt,
                             EVALUATION_MODEL_BUSY_COMPENSATION_ATTEMPTS);
+                } catch (LlmInvokeException | AnalyzeParseException ex) {
+                    lastEvaluationFailure = ex;
+                    log.warn("presale analyze evaluation model compensation failed, versionId={}, sourcePlatform={}, evaluationPlatform={}, attempt={}/{}, reason={}",
+                            sourceCtx.versionId(),
+                            sourceCtx.platformCode(),
+                            candidate.platformCode(),
+                            attempt,
+                            EVALUATION_MODEL_BUSY_COMPENSATION_ATTEMPTS,
+                            ex.getMessage());
                 }
             }
+        }
+        if (lastEvaluationFailure instanceof AnalyzeParseException ex) {
+            throw ex;
+        }
+        if (lastEvaluationFailure instanceof LlmInvokeException ex) {
+            throw new LlmInvokeException("All presale evaluation models failed after bounded retries", ex);
         }
         throw new LlmInvokeException("All presale evaluation models are busy after bounded retries", lastBusy);
     }
