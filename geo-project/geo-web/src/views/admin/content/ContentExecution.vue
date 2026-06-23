@@ -168,19 +168,6 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="医疗合规" width="150">
-            <template #default="scope">
-              <div v-if="isMedicalArticle(scope.row)" class="medical-status-cell">
-                <el-tag size="small" :type="medicalComplianceTag(scope.row.complianceStatus)">
-                  {{ medicalComplianceLabel(scope.row.complianceStatus) }}
-                </el-tag>
-                <el-tag v-if="scope.row.medicalChannelTier === 'official_site'" size="small" :type="medicalReviewTag(scope.row.publishReviewStatus)">
-                  {{ medicalReviewLabel(scope.row.publishReviewStatus) }}
-                </el-tag>
-              </div>
-              <span v-else class="admin-cell-sub">-</span>
-            </template>
-          </el-table-column>
           <el-table-column label="创建时间" width="180">
             <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
           </el-table-column>
@@ -227,6 +214,7 @@
       :detail-channel-label="detailChannelLabel"
       :detail-template-usage-label="detailTemplateUsageLabel"
       :detail-topic="detailTopic"
+      :is-special-industry-article="isSpecialIndustryArticle"
       :risk-word-hits="riskWordHits"
       :risk-severity-label="riskSeverityLabel"
       :risk-source-label="riskSourceLabel"
@@ -1043,8 +1031,11 @@ function statusLabel(v: string) {
   return statusOptions.find((s) => s.value === v)?.label || v
 }
 
-function isMedicalArticle(row?: ArticleDraft | null) {
-  return !!row?.medicalIndustryCode || !!row?.medicalChannelTier || !!row?.complianceStatus
+function isSpecialIndustryArticle(row?: ArticleDraft | null) {
+  return !!row?.medicalIndustryCode
+    || !!row?.medicalChannelTier
+    || !!row?.medicalCategoryCode
+    || !!row?.medicalAdReviewNo
 }
 
 function medicalComplianceLabel(v?: string | null) {

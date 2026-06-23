@@ -42,17 +42,17 @@
           <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleTypeCode) }}</el-descriptions-item>
           <el-descriptions-item label="发布渠道">{{ detailChannelLabel(detailData) }}</el-descriptions-item>
           <el-descriptions-item label="文章模板">{{ detailTemplateUsageLabel(detailData) }}</el-descriptions-item>
-          <el-descriptions-item v-if="detailData.article.medicalIndustryCode" label="医疗行业">{{ detailData.article.medicalIndustryCode }}</el-descriptions-item>
-          <el-descriptions-item v-if="detailData.article.medicalCategoryCode" label="医疗品类">{{ detailData.article.medicalCategoryCode }}</el-descriptions-item>
-          <el-descriptions-item v-if="detailData.article.medicalChannelTier" label="医疗档位">
+          <el-descriptions-item v-if="showArticleMedicalCompliance && detailData.article.medicalIndustryCode" label="医疗行业">{{ detailData.article.medicalIndustryCode }}</el-descriptions-item>
+          <el-descriptions-item v-if="showArticleMedicalCompliance && detailData.article.medicalCategoryCode" label="医疗品类">{{ detailData.article.medicalCategoryCode }}</el-descriptions-item>
+          <el-descriptions-item v-if="showArticleMedicalCompliance && detailData.article.medicalChannelTier" label="医疗档位">
             {{ detailData.article.medicalChannelTier }}
           </el-descriptions-item>
-          <el-descriptions-item v-if="detailData.article.complianceStatus" label="合规状态">
+          <el-descriptions-item v-if="showArticleMedicalCompliance && detailData.article.complianceStatus" label="合规状态">
             <el-tag size="small" :type="medicalComplianceTag(detailData.article.complianceStatus)">
               {{ medicalComplianceLabel(detailData.article.complianceStatus) }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item v-if="detailData.article.medicalChannelTier === 'official_site'" label="发布确认">
+          <el-descriptions-item v-if="showArticleMedicalCompliance && detailData.article.medicalChannelTier === 'official_site'" label="发布确认">
             <div class="medical-review-line">
               <el-tag size="small" :type="medicalReviewTag(detailData.article.publishReviewStatus)">
                 {{ medicalReviewLabel(detailData.article.publishReviewStatus) }}
@@ -75,7 +75,7 @@
               </el-button>
             </div>
           </el-descriptions-item>
-          <el-descriptions-item v-if="detailData.article.medicalAdReviewNo" label="广告审查号" :span="2">
+          <el-descriptions-item v-if="showArticleMedicalCompliance && detailData.article.medicalAdReviewNo" label="广告审查号" :span="2">
             {{ detailData.article.medicalAdReviewNo }}
           </el-descriptions-item>
           <el-descriptions-item label="文章主题" :span="2">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
@@ -119,7 +119,7 @@
             <el-descriptions-item label="生成状态">{{ batchTaskStatusLabel(detailData.batchGenerationTask.status) }}</el-descriptions-item>
             <el-descriptions-item label="质量状态">{{ detailData.batchGenerationTask.qualityStatus || '-' }}</el-descriptions-item>
             <el-descriptions-item label="重试次数">{{ detailData.batchGenerationTask.retryCount ?? 0 }}</el-descriptions-item>
-            <el-descriptions-item v-if="detailData.batchGenerationTask.complianceStatus" label="合规状态">
+            <el-descriptions-item v-if="showBatchTaskMedicalCompliance && detailData.batchGenerationTask.complianceStatus" label="合规状态">
               <el-tag size="small" :type="medicalComplianceTag(detailData.batchGenerationTask.complianceStatus)">
                 {{ medicalComplianceLabel(detailData.batchGenerationTask.complianceStatus) }}
               </el-tag>
@@ -130,10 +130,10 @@
             <el-descriptions-item v-if="detailData.batchGenerationTask.errorMessage" label="失败原因" :span="3">
               {{ detailData.batchGenerationTask.errorMessage }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailData.batchGenerationTask.medicalIndustryCode" label="特殊行业">
+            <el-descriptions-item v-if="showBatchTaskMedicalCompliance && detailData.batchGenerationTask.medicalIndustryCode" label="特殊行业">
               {{ detailData.batchGenerationTask.medicalIndustryCode }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailData.batchGenerationTask.medicalCategoryCode || detailData.batchGenerationTask.medicalCategoryName" label="医疗品类">
+            <el-descriptions-item v-if="showBatchTaskMedicalCompliance && (detailData.batchGenerationTask.medicalCategoryCode || detailData.batchGenerationTask.medicalCategoryName)" label="医疗品类">
               {{ detailData.batchGenerationTask.medicalCategoryName || detailData.batchGenerationTask.medicalCategoryCode }}
             </el-descriptions-item>
             <el-descriptions-item v-if="detailData.batchGenerationTask.topicAngleId" label="选题角度ID">
@@ -146,7 +146,7 @@
               {{ detailData.batchGenerationTask.focus }}
             </el-descriptions-item>
           </el-descriptions>
-          <div v-if="batchComplianceIssues(detailData.batchGenerationTask).length" class="trace-issue-list">
+          <div v-if="showBatchTaskMedicalCompliance && batchComplianceIssues(detailData.batchGenerationTask).length" class="trace-issue-list">
             <div class="trace-subtitle">命中规则</div>
             <el-table :data="batchComplianceIssues(detailData.batchGenerationTask)" border>
               <el-table-column label="规则" min-width="160">
@@ -164,7 +164,7 @@
             </el-table>
           </div>
           <el-alert
-            v-else-if="detailData.batchGenerationTask.complianceIssuesJson"
+            v-else-if="showBatchTaskMedicalCompliance && detailData.batchGenerationTask.complianceIssuesJson"
             type="warning"
             :closable="false"
             show-icon
@@ -244,6 +244,7 @@ const props = defineProps<{
   detailChannelLabel: (detail: ArticleDetailResponse) => string
   detailTemplateUsageLabel: (detail: ArticleDetailResponse) => string
   detailTopic: (detail: ArticleDetailResponse) => string
+  isSpecialIndustryArticle: (article?: ArticleDraft | null) => boolean
   riskWordHits: (article?: Pick<ArticleDraft, 'riskWordsJson'> | null) => RiskWordHit[]
   riskSeverityLabel: (severity?: string | null) => string
   riskSourceLabel: (source?: string | null) => string
@@ -271,6 +272,15 @@ const visible = computed({
 const viewMode = computed({
   get: () => props.viewMode,
   set: (value) => emit('update:viewMode', value),
+})
+
+const showArticleMedicalCompliance = computed(() =>
+  props.detailData ? props.isSpecialIndustryArticle(props.detailData.article) : false,
+)
+
+const showBatchTaskMedicalCompliance = computed(() => {
+  const task = props.detailData?.batchGenerationTask
+  return !!task?.medicalIndustryCode || !!task?.medicalCategoryCode || !!task?.medicalCategoryName
 })
 
 function batchTaskStatusLabel(value?: string | null) {
