@@ -1,6 +1,6 @@
 importScripts('fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.1.1'
+const EXTENSION_VERSION = '0.1.3'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
 const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 'baijiahao', 'douyin'])
@@ -537,11 +537,11 @@ function runtimeConfigAdoptionDecision(rawConfig, runtime, selected) {
   return { apply: true }
 }
 
-function classifyTaskFailure(errorOrMessage) {
+function classifyTaskFailure(errorOrMessage, platform = '') {
   const text = String(errorOrMessage?.message || errorOrMessage || '')
   const code = errorOrMessage?.code
     || text.match(/^([A-Z0-9_]{3,80})[：:]/)?.[1]
-    || classifyTaskFailureCode(text)
+    || classifyTaskFailureCode(text, platform)
   const failure = {
     code,
     message: text || '页面填充失败',
@@ -554,7 +554,7 @@ function classifyTaskFailure(errorOrMessage) {
 }
 
 async function enrichTaskFailure(config, task, error) {
-  const failure = classifyTaskFailure(error)
+  const failure = classifyTaskFailure(error, task?.platform)
   failure.extensionVersion = EXTENSION_VERSION
   if (!failure.diagnostics && error?.diagnostics) failure.diagnostics = error.diagnostics
   const tabId = await findActivePlatformTabId(task?.platform).catch(() => null)
@@ -585,7 +585,8 @@ async function captureFailureSnapshot(tabId, platform) {
   }
 }
 
-function classifyTaskFailureCode(text) {
+function classifyTaskFailureCode(text, platform = '') {
+  const normalizedPlatform = normalizePlatform(platform)
   if (text.includes('fill token used or expired')) return 'FILL_TOKEN_USED_OR_EXPIRED'
   if (text.includes('作品列表') || text.includes('作品管理页') || text.includes('WORKS_LIST_VERIFY_TIMEOUT')) return 'WORKS_LIST_VERIFY_TIMEOUT'
   if (text.includes('账号不一致') || text.includes('LOGIN_STATUS_MISMATCH') || text.includes('账号身份预检失败')) return 'ACCOUNT_MISMATCH'
@@ -593,14 +594,12 @@ function classifyTaskFailureCode(text) {
   if (text.includes('平台定时发布能力')) return 'PLATFORM_CAPABILITY_UNVERIFIED'
   if (text.includes('Material not found') || text.includes('素材不存在')) return 'COVER_MATERIAL_NOT_FOUND'
   if (text.includes('封面图片类型不支持') || text.includes('图片类型不支持')) return 'COVER_IMAGE_UNSUPPORTED'
-  const zhihuCode = globalThis.__GEO_ZHIHU_PLATFORM__?.classifyFailureCode?.(text, 'zhihu')
-  if (zhihuCode) return zhihuCode
+  const platformCode = classifyPlatformTaskFailureCode(text, normalizedPlatform)
+  if (platformCode) return platformCode
+  const textMatchedPlatformCode = classifyPlatformTaskFailureCode(text, '')
+  if (textMatchedPlatformCode) return textMatchedPlatformCode
   if (text.includes('知乎发布被草稿加载阻塞') || text.includes('知乎草稿加载未完成') || text.includes('草稿加载中')) return 'ZHIHU_DRAFT_LOADING'
   if (text.includes('知乎发布后未检测到完成状态')) return 'ZHIHU_PUBLISH_NOT_SUBMITTED'
-  const xiaohongshuCode = globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.classifyFailureCode?.(text, 'xiaohongshu')
-  if (xiaohongshuCode) return xiaohongshuCode
-  const baijiahaoCode = globalThis.__GEO_BAIJIAHAO_PLATFORM__?.classifyFailureCode?.(text, 'baijiahao')
-  if (baijiahaoCode) return baijiahaoCode
   if (text.includes('小红书一键排版按钮未找到')) return 'XIAOHONGSHU_FORMAT_BUTTON_NOT_FOUND'
   if (text.includes('小红书一键排版后未进入排版页') || text.includes('小红书排版页未就绪')) return 'XIAOHONGSHU_FORMAT_NOT_READY'
   if (text.includes('小红书下一步按钮未找到')) return 'XIAOHONGSHU_NEXT_BUTTON_NOT_FOUND'
@@ -626,6 +625,27 @@ function classifyTaskFailureCode(text) {
   if (text.includes('页面填充执行超时') || text.includes('超时')) return 'PAGE_LOAD_TIMEOUT'
   if (text.includes('未找到') || text.includes('编辑器')) return 'EDITOR_NOT_READY'
   return 'FILL_FAILED'
+}
+
+function classifyPlatformTaskFailureCode(text, platform = '') {
+  const normalizedPlatform = normalizePlatform(platform)
+  if (normalizedPlatform === 'douyin') {
+    return globalThis.__GEO_DOUYIN_PLATFORM__?.classifyFailureCode?.(text, 'douyin') || ''
+  }
+  if (normalizedPlatform === 'zhihu') {
+    return globalThis.__GEO_ZHIHU_PLATFORM__?.classifyFailureCode?.(text, 'zhihu') || ''
+  }
+  if (normalizedPlatform === 'xiaohongshu') {
+    return globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.classifyFailureCode?.(text, 'xiaohongshu') || ''
+  }
+  if (normalizedPlatform === 'baijiahao') {
+    return globalThis.__GEO_BAIJIAHAO_PLATFORM__?.classifyFailureCode?.(text, 'baijiahao') || ''
+  }
+  return globalThis.__GEO_DOUYIN_PLATFORM__?.classifyFailureCode?.(text, '')
+    || globalThis.__GEO_ZHIHU_PLATFORM__?.classifyFailureCode?.(text, '')
+    || globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.classifyFailureCode?.(text, '')
+    || globalThis.__GEO_BAIJIAHAO_PLATFORM__?.classifyFailureCode?.(text, '')
+    || ''
 }
 
 function isRetryableTaskFailureCode(code) {
@@ -862,12 +882,53 @@ function normalizeFillResult(fillResult, task = {}) {
 }
 
 async function recoverPublishAfterFillError(tabId, task, payload, error) {
+  const douyinResult = await recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payload, error).catch((douyinError) => {
+    if (douyinError !== error) throw douyinError
+    return null
+  })
+  if (douyinResult) return douyinResult
   const zhihuResult = await recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload, error).catch((zhihuError) => {
     if (zhihuError !== error) throw zhihuError
     return null
   })
   if (zhihuResult) return zhihuResult
   return recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload, error)
+}
+
+async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payload, error) {
+  const message = error?.message || String(error || '')
+  if (normalizePlatform(task?.platform || payload?.platform) !== 'douyin' || !isMessageChannelClosedError(message)) {
+    throw error
+  }
+  const context = buildDouyinManageVerifyContext(payload)
+  if (!context.title) throw error
+
+  let latest = null
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await delay(900 + attempt * 700)
+    await waitForTabComplete(tabId, 30_000).catch(() => null)
+    latest = await inspectDouyinManageTab(tabId, context, attempt)
+    if (latest?.verified) {
+      return {
+        titleFilled: true,
+        contentFilled: true,
+        tagsFilled: false,
+        publishOptions: {
+          filled: true,
+          scheduled: Boolean(context.scheduledAt),
+          published: !context.scheduledAt,
+          publishVerification: latest,
+          message: '抖音发布后页面跳转导致消息通道关闭，已通过作品管理页确认发布结果',
+        },
+        recoveredAfterMessageChannelClosed: true,
+        messageChannelClosedError: message,
+      }
+    }
+    if (latest?.isManagePage && attempt >= 1 && attempt < 4) {
+      await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
+    }
+  }
+  throw error
 }
 
 async function recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload, error) {
@@ -903,6 +964,237 @@ function isMessageChannelClosedError(message) {
   return text.includes('message channel closed')
     || text.includes('receiving end does not exist')
     || text.includes('Extension context invalidated')
+}
+
+function buildDouyinManageVerifyContext(payload = {}) {
+  const platformOptions = payload.platformOptions || {}
+  const profileOptions = payload.profile?.platformOptions || {}
+  const douyinOptions = payload.douyinOptions || platformOptions.douyin || profileOptions.douyin || {}
+  return {
+    title: firstText(payload.title, payload.articleTitle).slice(0, 30),
+    scheduledAt: firstText(
+      payload.scheduledAt,
+      payload.platformScheduledAt,
+      platformOptions.scheduledAt,
+      platformOptions.platformScheduledAt,
+      profileOptions.scheduledAt,
+      profileOptions.platformScheduledAt,
+      douyinOptions.scheduledAt,
+      douyinOptions.platformScheduledAt,
+    ),
+  }
+}
+
+async function inspectDouyinManageTab(tabId, context, attempt) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null)
+  if (!tab?.url || !isAllowedPlatformUrl('douyin', tab.url)) {
+    return {
+      verified: false,
+      pageUrl: tab?.url || '',
+      diagnostics: `attempt=${attempt}; not_douyin_tab`,
+    }
+  }
+  const [state] = await chrome.scripting.executeScript({
+    target: { tabId },
+    args: [context, attempt],
+    func: (context, attempt) => {
+      const title = String(context?.title || '').trim().slice(0, 30)
+      const scheduledAt = String(context?.scheduledAt || '').trim()
+      const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim()
+      const normalizeCompact = (value) => normalizeText(value).replace(/\s+/g, '')
+      const isManagePage = location.hostname === 'creator.douyin.com' && location.href.includes('/creator-micro/content/manage')
+      const pageText = normalizeText(document.body?.innerText || document.body?.textContent || '')
+      if (!isManagePage || !title) {
+        return {
+          verified: false,
+          isManagePage,
+          pageUrl: location.href,
+          pageTitle: document.title,
+          diagnostics: `attempt=${attempt}; text=${pageText.slice(0, 220)}`,
+        }
+      }
+
+      const normalizedTitle = normalizeCompact(title)
+      const scheduledVariants = scheduleTextVariants(scheduledAt)
+      const candidates = Array.from(document.querySelectorAll('section, article, li, tr, div'))
+        .filter(isVisible)
+        .map((el) => {
+          const rect = el.getBoundingClientRect()
+          const text = normalizeText(el.innerText || el.textContent || '')
+          return {
+            el,
+            rect,
+            text,
+            compactText: normalizeCompact(text),
+            hasImage: Array.from(el.querySelectorAll('img')).some(isVisible) || hasBackgroundImage(el),
+          }
+        })
+        .filter((item) => item.text
+          && item.rect.width >= 260
+          && item.rect.height >= 60
+          && item.rect.width <= 1600
+          && item.rect.height <= 420
+          && !looksLikeWholeManagePage(item.text)
+          && item.compactText.includes(normalizedTitle))
+        .sort((left, right) => manageRecordScore(right) - manageRecordScore(left))
+
+      const record = candidates.find(isExpectedRecord)
+      if (!record) {
+        return {
+          verified: false,
+          isManagePage,
+          pageUrl: location.href,
+          pageTitle: document.title,
+          targetTitle: title,
+          scheduledAt,
+          diagnostics: candidates.slice(0, 4).map((item) => item.text.slice(0, 160)).join('|') || pageText.slice(0, 260),
+        }
+      }
+
+      const pageStatus = extractManageStatus(record.text)
+      const pageStatusCode = normalizeManageStatus(pageStatus, scheduledAt ? 'scheduled' : 'published')
+      const links = extractManageRecordLinks(record.el)
+      return {
+        verified: true,
+        platformStatus: scheduledAt ? 'scheduled' : 'published',
+        pageStatusCode,
+        pageStatus,
+        platformScheduledAt: scheduledAt || null,
+        scheduledAtText: extractManageScheduleText(record.text, scheduledVariants) || scheduledAt || null,
+        platformPublishId: extractManageRecordPublishId(record.el, links) || null,
+        platformPublishedUrl: null,
+        coverImageUrl: extractManageRecordImageUrl(record.el) || null,
+        recordLinks: links,
+        title,
+        manageUrl: location.href,
+        matchedText: record.text.slice(0, 180),
+        refreshed: attempt > 0,
+        reloadCount: attempt,
+      }
+
+      function isExpectedRecord(item) {
+        if (!item.compactText.includes(normalizedTitle)) return false
+        if (scheduledAt && !scheduledVariants.some((value) => value && item.compactText.includes(normalizeCompact(value)))) return false
+        if (scheduledAt && !/定时发布中|定时|修改定时/.test(item.text)) return false
+        if (!scheduledAt && /草稿|未通过|删除作品/.test(item.text) && !/审核中|已发布|发布成功/.test(item.text)) return false
+        return true
+      }
+
+      function manageRecordScore(item) {
+        let score = 0
+        if (item.compactText.includes(normalizedTitle)) score += 1000
+        if (item.hasImage) score += 80
+        if (scheduledAt && scheduledVariants.some((value) => value && item.compactText.includes(normalizeCompact(value)))) score += 500
+        if (scheduledAt && /定时发布中|修改定时/.test(item.text)) score += 260
+        if (!scheduledAt && /审核中|已发布|发布成功/.test(item.text)) score += 220
+        if (/播放|点赞|评论|收藏|详情页进入率/.test(item.text)) score += 60
+        score -= Math.min(item.text.length, 1200) / 12
+        score -= Math.min(item.rect.width * item.rect.height, 1_000_000) / 120_000
+        return score
+      }
+
+      function scheduleTextVariants(value) {
+        const normalized = normalizeScheduleDateTime(value)
+        if (!normalized) return []
+        const [date, time] = normalized.split(' ')
+        const [year, month, day] = date.split('-')
+        const looseMonth = String(Number(month))
+        const looseDay = String(Number(day))
+        return [
+          normalized,
+          `${year}年${month}月${day}日 ${time}`,
+          `${year}年${looseMonth}月${looseDay}日 ${time}`,
+          `${month}月${day}日 ${time}`,
+          `${looseMonth}月${looseDay}日 ${time}`,
+        ]
+      }
+
+      function normalizeScheduleDateTime(value) {
+        const text = String(value || '').trim().replace('T', ' ')
+        const match = text.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+(\d{1,2}):(\d{1,2})/)
+        if (!match) return ''
+        const pad = (num) => String(Number(num)).padStart(2, '0')
+        return `${match[1]}-${pad(match[2])}-${pad(match[3])} ${pad(match[4])}:${pad(match[5])}`
+      }
+
+      function extractManageStatus(text) {
+        return ['定时发布中', '审核中', '已发布', '发布成功', '未通过', '草稿'].find((value) => text.includes(value)) || ''
+      }
+
+      function extractManageScheduleText(text, variants) {
+        const compact = normalizeCompact(text)
+        return variants.find((item) => item && compact.includes(normalizeCompact(item))) || ''
+      }
+
+      function normalizeManageStatus(pageStatus, platformStatus) {
+        if (/定时发布中|定时/.test(pageStatus)) return 'scheduled'
+        if (/审核中/.test(pageStatus)) return 'reviewing'
+        if (/已发布|发布成功/.test(pageStatus)) return 'published'
+        if (/未通过/.test(pageStatus)) return 'rejected'
+        if (/草稿/.test(pageStatus)) return 'draft'
+        return platformStatus || ''
+      }
+
+      function extractManageRecordLinks(el) {
+        return Array.from(el?.querySelectorAll?.('a[href]') || [])
+          .map((link) => link.href || link.getAttribute('href') || '')
+          .filter(Boolean)
+          .slice(0, 8)
+      }
+
+      function extractManageRecordPublishedUrl(links) {
+        return links.find((href) => /item_id=|aweme_id=|\/video\/|\/note\//.test(href)) || ''
+      }
+
+      function extractManageRecordPublishId(el, links) {
+        const source = [
+          ...links,
+          ...Array.from(el?.attributes || []).map((attr) => `${attr.name}=${attr.value}`),
+          el?.innerHTML || '',
+        ].join(' ')
+        const match = source.match(/(?:item_id|aweme_id|group_id|creation_id|itemId|awemeId)[=:]"?([A-Za-z0-9_-]{6,})/)
+          || source.match(/\/(?:video|note)\/([A-Za-z0-9_-]{6,})/)
+        return match?.[1] || ''
+      }
+
+      function extractManageRecordImageUrl(el) {
+        const img = Array.from(el?.querySelectorAll?.('img') || []).find(isVisible)
+        if (img?.currentSrc || img?.src) return img.currentSrc || img.src
+        const withBg = Array.from(el?.querySelectorAll?.('[style*="background-image"]') || []).find((node) => {
+          const bg = getComputedStyle(node).backgroundImage || ''
+          return isVisible(node) && bg.includes('url(')
+        })
+        const bg = withBg ? getComputedStyle(withBg).backgroundImage || '' : ''
+        return String(bg).match(/url\(["']?([^"')]+)["']?\)/)?.[1] || ''
+      }
+
+      function looksLikeWholeManagePage(text) {
+        return text.includes('作品管理')
+          && text.includes('全部作品')
+          && text.includes('已发布')
+          && text.includes('审核中')
+          && text.length > 260
+      }
+
+      function hasBackgroundImage(el) {
+        return String(getComputedStyle(el).backgroundImage || '').includes('url(')
+      }
+
+      function isVisible(el) {
+        if (!el || !el.getBoundingClientRect) return false
+        const rect = el.getBoundingClientRect()
+        const style = getComputedStyle(el)
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+      }
+    },
+  }).catch((error) => ([{
+    result: {
+      verified: false,
+      pageUrl: tab.url,
+      diagnostics: `attempt=${attempt}; inspect_failed=${error?.message || String(error)}`,
+    },
+  }]))
+  return state?.result || null
 }
 
 async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload, error) {

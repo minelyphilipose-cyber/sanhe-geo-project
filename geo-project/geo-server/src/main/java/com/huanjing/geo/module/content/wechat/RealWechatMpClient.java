@@ -113,9 +113,31 @@ public class RealWechatMpClient implements WechatMpClient {
         return new PublishStatusResult(
                 root.path("publish_status").asInt(-1),
                 root.path("article_id").asText(null),
+                firstArticleUrl(root),
                 root.toString(),
                 root.path("fail_idx").asText(null)
         );
+    }
+
+    private String firstArticleUrl(JsonNode root) {
+        JsonNode items = root.path("article_detail").path("item");
+        if (!items.isArray()) {
+            return null;
+        }
+        String first = null;
+        for (JsonNode item : items) {
+            String url = item.path("article_url").asText(null);
+            if (url == null || url.isBlank()) {
+                continue;
+            }
+            if (item.path("idx").asInt(-1) == 1) {
+                return url;
+            }
+            if (first == null) {
+                first = url;
+            }
+        }
+        return first;
     }
 
     @Override

@@ -57,7 +57,10 @@ public interface WechatMpClient {
     record PublishResult(String publishId) {
     }
 
-    record PublishStatusResult(int publishStatus, String articleId, String rawResponse, String failIndex) {
+    record PublishStatusResult(int publishStatus, String articleId, String articleUrl, String rawResponse, String failIndex) {
+        public PublishStatusResult(int publishStatus, String articleId, String rawResponse, String failIndex) {
+            this(publishStatus, articleId, null, rawResponse, failIndex);
+        }
     }
 
     record MaterialCountResult(int voiceCount, int videoCount, int imageCount, int newsCount) {

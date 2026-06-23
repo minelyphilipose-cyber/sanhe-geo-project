@@ -189,13 +189,19 @@ class WechatMpAdapterTest {
         Fixture fixture = fixture(true);
         DistributionTask task = reviewTask("publish_id");
         when(fixture.wechatMpClient.getPublishStatus(eq("access-token"), eq("publish_id")))
-                .thenReturn(new WechatMpClient.PublishStatusResult(0, "article_id", "{\"publish_status\":0}", null));
+                .thenReturn(new WechatMpClient.PublishStatusResult(
+                        0,
+                        "article_id",
+                        "https://mp.weixin.qq.com/s/article-url",
+                        "{\"publish_status\":0}",
+                        null));
 
         ReviewStatusResult result = fixture.adapter.refreshReviewStatus(task, fixture.account);
 
         assertEquals(ReviewStatusResult.ReviewStatus.PUBLISHED, result.status());
         assertEquals("0", result.externalStatus());
         assertEquals("article_id", result.platformArticleId());
+        assertEquals("https://mp.weixin.qq.com/s/article-url", result.publishedUrl());
     }
 
     @Test

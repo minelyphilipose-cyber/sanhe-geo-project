@@ -15,6 +15,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
@@ -72,6 +73,7 @@ class SelfMediaPublishScheduleServiceTest {
     private SelfMediaPublishScheduleMapper scheduleMapper;
     private SelfMediaPublishScheduleRequestMapper requestMapper;
     private ArticleDraftMapper articleDraftMapper;
+    private DistributionTaskMapper distributionTaskMapper;
     private SelfMediaAccountMapper accountMapper;
     private ProjectMapper projectMapper;
     private BrandMapper brandMapper;
@@ -94,6 +96,7 @@ class SelfMediaPublishScheduleServiceTest {
         scheduleMapper = mock(SelfMediaPublishScheduleMapper.class);
         requestMapper = mock(SelfMediaPublishScheduleRequestMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
+        distributionTaskMapper = mock(DistributionTaskMapper.class);
         accountMapper = mock(SelfMediaAccountMapper.class);
         projectMapper = mock(ProjectMapper.class);
         brandMapper = mock(BrandMapper.class);
@@ -129,6 +132,7 @@ class SelfMediaPublishScheduleServiceTest {
                 scheduleMapper,
                 requestMapper,
                 articleDraftMapper,
+                distributionTaskMapper,
                 accountMapper,
                 projectMapper,
                 brandMapper,
@@ -1849,6 +1853,31 @@ class SelfMediaPublishScheduleServiceTest {
 
         assertEquals("distributing", article.getStatus());
         verify(articleDraftMapper).updateById(article);
+    }
+
+    @Test
+    void markClaimedPublishedConfirmedClosesLinkedDistributionTask() {
+        SelfMediaPublishSchedule checking = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        checking.setId(103L);
+        checking.setDistributionTaskId(318L);
+        ArticleDraft article = article();
+        when(scheduleMapper.selectById(103L)).thenReturn(checking);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedPublishedConfirmed(
+                103L,
+                null,
+                """
+                        {"found":true,"platformPublishedUrl":"https://www.douyin.com/video/123","platformPublishId":"123","coverImageUrl":"https://p.example.test/cover.jpg"}
+                        """
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED, response.getStatus());
+        assertEquals("https://www.douyin.com/video/123", response.getPlatformPublishedUrl());
+        assertEquals("123", response.getPlatformPublishId());
+        assertEquals("https://p.example.test/cover.jpg", response.getPublishCheckCoverUrl());
+        assertEquals("published", article.getStatus());
+        verify(distributionTaskMapper).update(eq(null), any());
     }
 
     @Test

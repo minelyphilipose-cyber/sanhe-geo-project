@@ -6,7 +6,8 @@ public record ReviewStatusResult(
         String reviewFeedback,
         boolean retryable,
         String rawResponse,
-        String platformArticleId
+        String platformArticleId,
+        String publishedUrl
 ) {
     public enum ReviewStatus {
         NOT_APPLICABLE,
@@ -29,7 +30,16 @@ public record ReviewStatusResult(
                               String externalStatus,
                               String reviewFeedback,
                               boolean retryable,
+                              String rawResponse,
+                              String platformArticleId) {
+        this(status, externalStatus, reviewFeedback, retryable, rawResponse, platformArticleId, null);
+    }
+
+    public ReviewStatusResult(ReviewStatus status,
+                              String externalStatus,
+                              String reviewFeedback,
+                              boolean retryable,
                               String rawResponse) {
-        this(status, externalStatus, reviewFeedback, retryable, rawResponse, null);
+        this(status, externalStatus, reviewFeedback, retryable, rawResponse, null, null);
     }
 }

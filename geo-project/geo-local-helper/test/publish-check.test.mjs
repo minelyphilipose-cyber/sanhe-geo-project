@@ -45,7 +45,8 @@ test('xiaohongshu publish check confirms published note after scheduled time', (
 
   assert.equal(result.found, true)
   assert.equal(result.pendingScheduled, false)
-  assert.equal(result.url, 'https://www.xiaohongshu.com/explore/abc123')
+  assert.equal(result.url, 'https://creator.xiaohongshu.com/new/note-manager')
+  assert.equal(result.platformPublishedUrl, '')
 })
 
 test('xiaohongshu publish check does not treat note manager route as published signal', () => {
@@ -114,7 +115,8 @@ test('baijiahao publish check keeps reviewing article non-final after scheduled 
   assert.equal(result.pendingScheduled, false)
   assert.equal(result.platformStatus, 'reviewing')
   assert.equal(result.reason, 'title matched and platform is still reviewing')
-  assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content/detail?id=abc')
+  assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content?app_id=1867055852901021')
+  assert.equal(result.platformPublishedUrl, '')
 })
 
 test('baijiahao publish check confirms published article on works list', () => {
@@ -129,7 +131,7 @@ test('baijiahao publish check confirms published article on works list', () => {
       anchors: [
         {
           text: '装修前根本没想过这事，阜阳一业主在水电进场时才慌了',
-          href: 'https://baijiahao.baidu.com/builder/rc/content/detail?id=abc',
+          href: 'http://baijiahao.baidu.com/s?id=1868043633218529302',
         },
       ],
     },
@@ -141,7 +143,8 @@ test('baijiahao publish check confirms published article on works list', () => {
   assert.equal(result.found, true)
   assert.equal(result.pendingScheduled, false)
   assert.equal(result.platformStatus, 'published')
-  assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content/detail?id=abc')
+  assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content?app_id=1867055852901021')
+  assert.equal(result.platformPublishedUrl, 'http://baijiahao.baidu.com/s?id=1868043633218529302')
 })
 
 test('baijiahao publish check confirms published article when list omits scheduled time', () => {
@@ -156,7 +159,7 @@ test('baijiahao publish check confirms published article when list omits schedul
       anchors: [
         {
           text: '「讨论」在阜阳一聊“全屋智能哪家好” 就被问预算？不如先把这四笔成本结构拆透再挑店',
-          href: 'https://baijiahao.baidu.com/builder/rc/content/detail?id=published',
+          href: 'http://baijiahao.baidu.com/s?id=1868043633218529303',
         },
       ],
     },
@@ -170,7 +173,8 @@ test('baijiahao publish check confirms published article when list omits schedul
   assert.equal(result.hasScheduleTime, false)
   assert.equal(result.hasPublishedNearTitle, true)
   assert.equal(result.platformStatus, 'published')
-  assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content/detail?id=published')
+  assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content?currentPage=1&pageSize=10&app_id=1867055852901021')
+  assert.equal(result.platformPublishedUrl, 'http://baijiahao.baidu.com/s?id=1868043633218529303')
 })
 
 test('baijiahao publish check reports rejected article as failed', () => {

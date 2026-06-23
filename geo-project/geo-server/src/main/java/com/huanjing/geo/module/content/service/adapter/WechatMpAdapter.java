@@ -192,8 +192,16 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
         String feedback = result == null ? null : result.failIndex();
         String rawResponse = result == null ? null : result.rawResponse();
         String articleId = result == null ? null : result.articleId();
+        String articleUrl = result == null ? null : result.articleUrl();
         if (publishStatus == 0) {
-            return new ReviewStatusResult(ReviewStatusResult.ReviewStatus.PUBLISHED, externalStatus, feedback, false, rawResponse, articleId);
+            return new ReviewStatusResult(
+                    ReviewStatusResult.ReviewStatus.PUBLISHED,
+                    externalStatus,
+                    feedback,
+                    false,
+                    rawResponse,
+                    articleId,
+                    articleUrl);
         }
         if (publishStatus == 1) {
             return new ReviewStatusResult(ReviewStatusResult.ReviewStatus.UNDER_REVIEW, externalStatus, feedback, true, rawResponse);

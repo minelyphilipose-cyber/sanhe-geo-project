@@ -73,8 +73,11 @@ public class MockWechatMpClient implements WechatMpClient {
     public PublishStatusResult getPublishStatus(String authorizerAccessToken, String publishId) {
         failIf("invalid_credential", 40001, "invalid credential");
         failIf("permission_missing", 48001, "api unauthorized");
-        String raw = "{\"publish_status\":0,\"article_id\":\"mock_article_id\"}";
-        return new PublishStatusResult(0, "mock_article_id", raw, null);
+        String articleUrl = "https://mp.weixin.qq.com/s/mock_article";
+        String raw = "{\"publish_status\":0,\"article_id\":\"mock_article_id\",\"article_detail\":{\"count\":1,\"item\":[{\"idx\":1,\"article_url\":\""
+                + articleUrl
+                + "\"}]}}";
+        return new PublishStatusResult(0, "mock_article_id", articleUrl, raw, null);
     }
 
     @Override

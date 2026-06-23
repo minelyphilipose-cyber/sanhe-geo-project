@@ -20,6 +20,7 @@ const TEMP_FILES_DIR = new URL('temp-files/', RUNTIME_DIR)
 const tasksById = new Map()
 const extensionBindIntentsByHash = new Map()
 const CLAIM_TIMEOUT_MS = 30_000
+const CLAIM_BACKEND_HEARTBEAT_MAX_MS = 2 * 60_000
 const CLAIMABLE_STATUSES = new Set(['pending', 'requeued'])
 const SIGNATURE_MAX_SKEW_SECONDS = 300
 const NONCE_FLUSH_DELAY_MS = 1_000
@@ -1268,6 +1269,9 @@ async function evaluatePublishResult(page, schedule) {
   if (platform === 'baijiahao') {
     return evaluateBaijiahaoPublishResult(page, schedule)
   }
+  if (platform === 'douyin') {
+    return evaluateDouyinPublishResult(page, schedule)
+  }
   return evaluateToutiaoPublishResult(page, schedule)
 }
 
@@ -1279,6 +1283,11 @@ async function evaluateToutiaoPublishResult(page, schedule) {
   }
   return page.evaluate((input) => {
     const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
+    const parseTimeMs = (value) => {
+      const match = String(value || '').match(/(\d{4})-(\d{1,2})-(\d{1,2})[T\s](\d{1,2}):(\d{1,2})/)
+      if (!match) return Number.NaN
+      return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5])).getTime()
+    }
     const text = document.body?.innerText || ''
     const normalizedText = normalize(text)
     const normalizedTitle = normalize(input.title)
@@ -1286,22 +1295,45 @@ async function evaluateToutiaoPublishResult(page, schedule) {
     const locationProbe = normalize(input.locationName)
     const hasTitle = Boolean(titleProbe && normalizedText.includes(titleProbe))
     const hasLocation = !locationProbe || normalizedText.includes(locationProbe)
-    const hasPublishedSignal = /定时发布中|已发布|审核中|将于\d{1,2}[-月]\d{1,2}/.test(text)
+    const scheduledAtMs = parseTimeMs(input.platformScheduledAt)
+    const isBeforeScheduledAt = Number.isFinite(scheduledAtMs) && scheduledAtMs > Date.now()
+    const hasScheduledSignal = /定时发布中|待发布|将于\d{1,2}[-月]\d{1,2}|发布时间/.test(text)
+    const hasPublishedSignal = /已发布|发布成功|审核中/.test(text)
     let matchedUrl = ''
     if (hasTitle) {
       const anchors = Array.from(document.querySelectorAll('a[href]'))
-      const anchor = anchors.find((item) => normalize(item.textContent).includes(titleProbe))
+      const anchor = anchors.find((item) => {
+        const href = item.href || ''
+        return normalize(item.textContent).includes(titleProbe) && /toutiao\.com\/item\//.test(href)
+      }) || anchors.find((item) => {
+        const href = item.href || ''
+        const boxText = normalize(item.closest('.article-card, [class*="article-card"], li, tr, div')?.textContent || item.textContent)
+        return boxText.includes(titleProbe) && /toutiao\.com\/item\//.test(href)
+      })
       matchedUrl = anchor?.href || ''
     }
+    const pendingScheduled = hasTitle && hasLocation && (isBeforeScheduledAt || (hasScheduledSignal && !hasPublishedSignal))
+    const found = hasTitle && hasLocation && !isBeforeScheduledAt && hasPublishedSignal
     return {
-      found: hasTitle && hasLocation && hasPublishedSignal,
+      found,
+      pendingScheduled,
+      reason: pendingScheduled
+        ? 'platform schedule time not due'
+        : hasTitle && hasLocation && !hasPublishedSignal
+          ? 'title matched but published signal missing'
+          : 'title not matched',
       hasTitle,
       hasLocation,
+      hasScheduledSignal,
       hasPublishedSignal,
+      isBeforeScheduledAt,
+      platformStatus: found ? (/审核中/.test(text) ? 'reviewing' : 'published') : (pendingScheduled ? 'scheduled' : 'unknown'),
+      pageStatusCode: found ? (/审核中/.test(text) ? 'reviewing' : 'published') : (pendingScheduled ? 'scheduled' : ''),
       targetTitle: input.title,
       locationName: input.locationName,
       platformScheduledAt: input.platformScheduledAt,
-      url: matchedUrl || location.href,
+      url: location.href,
+      platformPublishedUrl: found ? matchedUrl : '',
       pageTitle: document.title,
       textSample: text.slice(0, 1200),
     }
@@ -1347,16 +1379,22 @@ async function evaluateZhihuPublishResult(page, schedule) {
     let matchedUrl = ''
     if (hasTitle) {
       const anchors = Array.from(document.querySelectorAll('a[href]'))
-      const anchor = anchors.find((item) => normalize(item.textContent).includes(titleProbe))
+      const anchor = anchors.find((item) => {
+        const href = item.href || ''
+        return normalize(item.textContent).includes(titleProbe) && /zhuanlan\.zhihu\.com\/(p|article)\//.test(href)
+      })
       matchedUrl = anchor?.href || ''
     }
+    const realUrlSource = matchedUrl || (/^\/p\/|^\/article\//.test(location.pathname) ? location.href : '')
+    const realUrl = realUrlSource ? normalizeZhihuUrl(realUrlSource) : ''
     return {
       found: hasTitle && hasPublishedSignal,
       hasTitle,
       hasPublishedSignal,
       targetTitle: input.title,
       platformScheduledAt: input.platformScheduledAt,
-      url: normalizeZhihuUrl(matchedUrl || location.href),
+      url: location.href,
+      platformPublishedUrl: hasTitle && hasPublishedSignal ? realUrl : '',
       pageTitle: document.title,
       textSample: text.slice(0, 1200),
     }
@@ -1379,7 +1417,107 @@ async function evaluateXiaohongshuPublishResult(page, schedule) {
         .slice(0, 80),
     }
   })
-  return evaluateXiaohongshuPublishSignals(target, pageState)
+  const result = evaluateXiaohongshuPublishSignals(target, pageState)
+  if (result.found && !result.platformPublishedUrl) {
+    const detailUrl = await openXiaohongshuPublishedNoteDetail(page, schedule).catch((error) => {
+      result.detailOpenError = error instanceof Error ? error.message : String(error)
+      return ''
+    })
+    if (detailUrl) {
+      result.platformPublishedUrl = detailUrl
+      result.url = detailUrl
+    }
+  }
+  return result
+}
+
+async function openXiaohongshuPublishedNoteDetail(page, schedule) {
+  const title = schedule?.publishCheckTitle || ''
+  const browser = page.browser()
+  const beforeTargets = new Set(browser.targets().map((target) => target._targetId || target.url()))
+  const clicked = await page.evaluate((input) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
+    const title = normalize(input.title)
+    const titleProbe = title.length > 18 ? title.slice(0, 18) : title
+    if (!titleProbe) return { clicked: false, reason: 'missing title' }
+    const cards = Array.from(document.querySelectorAll('.note-card, [class*="note-card"], section, article, li, div'))
+      .map((el) => {
+        const rect = el.getBoundingClientRect()
+        const text = normalize(el.innerText || el.textContent || '')
+        return { el, rect, text }
+      })
+      .filter((item) => item.text.includes(titleProbe)
+        && item.rect.width >= 180
+        && item.rect.height >= 120
+        && item.rect.width <= 1200
+        && item.rect.height <= 800)
+      .sort((left, right) => {
+        const leftMedia = left.el.querySelector('img, [style*="background-image"], .media, [class*="media"]') ? 1 : 0
+        const rightMedia = right.el.querySelector('img, [style*="background-image"], .media, [class*="media"]') ? 1 : 0
+        return rightMedia - leftMedia || left.rect.top - right.rect.top
+      })
+    const card = cards[0]?.el
+    if (!card) return { clicked: false, reason: 'card not found' }
+    const target = card.querySelector('a[href*="/explore/"], img, [style*="background-image"], .media, [class*="media"]') || card
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }))
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }))
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+    return { clicked: true, reason: '' }
+  }, { title })
+  if (!clicked?.clicked) {
+    throw new Error(`xiaohongshu note card click failed: ${clicked?.reason || 'unknown'}`)
+  }
+  const target = await browser.waitForTarget((item) => {
+    const url = item.url()
+    if (!/xiaohongshu\.com\/explore\//.test(url)) return false
+    const key = item._targetId || url
+    return !beforeTargets.has(key)
+  }, { timeout: 12_000 }).catch(() => null)
+  const detailPage = target ? await target.page().catch(() => null) : await newestXiaohongshuExplorePage(browser, beforeTargets)
+  if (!detailPage) {
+    throw new Error('xiaohongshu note detail tab not found')
+  }
+  await detailPage.bringToFront().catch(() => {})
+  await detailPage.waitForFunction(
+    (input) => {
+      const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
+      const title = normalize(input.title)
+      const titleProbe = title.length > 18 ? title.slice(0, 18) : title
+      const text = normalize(document.body?.innerText || '')
+      return Boolean(location.href.includes('/explore/') && (!titleProbe || text.includes(titleProbe)))
+    },
+    { timeout: 15_000 },
+    { title },
+  ).catch(() => null)
+  const verification = await detailPage.evaluate((input) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
+    const title = normalize(input.title)
+    const titleProbe = title.length > 18 ? title.slice(0, 18) : title
+    const text = normalize(document.body?.innerText || '')
+    return {
+      url: location.href,
+      titleMatched: Boolean(!titleProbe || text.includes(titleProbe)),
+      textSample: (document.body?.innerText || '').slice(0, 500),
+    }
+  }, { title })
+  if (!verification.titleMatched || !/xiaohongshu\.com\/explore\//.test(verification.url || '')) {
+    throw new Error(`xiaohongshu note detail mismatch: ${JSON.stringify(verification).slice(0, 500)}`)
+  }
+  return verification.url
+}
+
+async function newestXiaohongshuExplorePage(browser, beforeTargets) {
+  const pages = await browser.pages()
+  const candidates = []
+  for (const item of pages) {
+    const url = item.url()
+    if (!/xiaohongshu\.com\/explore\//.test(url)) continue
+    const target = item.target()
+    const key = target?._targetId || url
+    candidates.push({ page: item, isNew: !beforeTargets.has(key) })
+  }
+  candidates.sort((left, right) => Number(right.isNew) - Number(left.isNew))
+  return candidates[0]?.page || null
 }
 
 async function evaluateBaijiahaoPublishResult(page, schedule) {
@@ -1401,9 +1539,130 @@ async function evaluateBaijiahaoPublishResult(page, schedule) {
   return evaluateBaijiahaoPublishSignals(target, pageState)
 }
 
+async function evaluateDouyinPublishResult(page, schedule) {
+  const target = {
+    title: schedule?.publishCheckTitle || '',
+    platformScheduledAt: schedule?.platformScheduledAt || schedule?.plannedPublishAt || '',
+  }
+  return page.evaluate((input) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
+    const normalizeCompact = (value) => normalize(value)
+      .replace(/[年月/.]/g, '-')
+      .replace(/[日号]/g, '')
+      .replace(/(\d{4})-(\d{1,2})-(\d{1,2})/, (_, y, m, d) => `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`)
+      .replace(/(\d{1,2}):(\d{1,2})/, (_, h, m) => `${h.padStart(2, '0')}:${m.padStart(2, '0')}`)
+    const scheduleVariants = (value) => {
+      const raw = String(value || '').trim()
+      if (!raw) return []
+      const compact = normalizeCompact(raw.replace('T', ' '))
+      const withoutSeconds = compact.replace(/:\d{2}$/, '')
+      return Array.from(new Set([raw, raw.replace('T', ' '), compact, withoutSeconds].filter(Boolean)))
+    }
+    const title = normalize(input.title)
+    const titleProbe = title.length > 24 ? title.slice(0, 24) : title
+    const expectedScheduleVariants = scheduleVariants(input.platformScheduledAt)
+    const isVisible = (el) => {
+      const rect = el?.getBoundingClientRect?.()
+      const style = el ? getComputedStyle(el) : null
+      return Boolean(rect && rect.width > 0 && rect.height > 0 && style?.display !== 'none' && style?.visibility !== 'hidden')
+    }
+    const records = Array.from(document.querySelectorAll('section, article, li, tr, div'))
+      .filter(isVisible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect()
+        const text = String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim()
+        const compactText = normalizeCompact(text)
+        const links = Array.from(el.querySelectorAll('a[href]')).map((link) => ({
+          text: String(link.textContent || '').trim(),
+          href: link.href || '',
+        }))
+        const images = Array.from(el.querySelectorAll('img[src]')).map((img) => img.src || '').filter(Boolean)
+        return { el, rect, text, compactText, links, images }
+      })
+      .filter((item) => item.text
+        && item.rect.width >= 260
+        && item.rect.height >= 60
+        && item.rect.width <= 1600
+        && item.rect.height <= 460)
+      .filter((item) => titleProbe && normalize(item.text).includes(titleProbe))
+      .filter((item) => {
+        if (!expectedScheduleVariants.length) return true
+        return expectedScheduleVariants.some((value) => value && item.compactText.includes(normalizeCompact(value)))
+          || /已发布|审核中|发布成功/.test(item.text)
+      })
+      .map((item) => {
+        let score = 0
+        if (titleProbe && normalize(item.text).includes(titleProbe)) score += 1000
+        if (/已发布|发布成功/.test(item.text)) score += 340
+        if (/审核中/.test(item.text)) score += 260
+        if (/定时发布中|修改定时/.test(item.text)) score += 180
+        if (expectedScheduleVariants.some((value) => value && item.compactText.includes(normalizeCompact(value)))) score += 500
+        if (item.images.length) score += 40
+        if (/删除作品|作品置顶|设置权限/.test(item.text)) score += 30
+        if (/草稿|未通过/.test(item.text) && !/已发布|审核中|发布成功/.test(item.text)) score -= 500
+        return { ...item, score }
+      })
+      .sort((left, right) => right.score - left.score)
+    const record = records[0]
+    if (!record) {
+      const text = document.body?.innerText || ''
+      return {
+        found: false,
+        hasTitle: Boolean(titleProbe && normalize(text).includes(titleProbe)),
+        hasPublishedSignal: /定时发布中|已发布|审核中|发布成功/.test(text),
+        targetTitle: input.title,
+        platformScheduledAt: input.platformScheduledAt,
+        url: location.href,
+        pageTitle: document.title,
+        textSample: text.slice(0, 1200),
+      }
+    }
+    const statusText = (() => {
+      const match = record.text.match(/(定时发布中|已发布|审核中|发布成功|未通过|草稿)/)
+      return match?.[1] || ''
+    })()
+    const pageStatusCode = (() => {
+      if (/已发布|发布成功/.test(statusText)) return 'published'
+      if (/审核中/.test(statusText)) return 'reviewing'
+      if (/定时发布中/.test(statusText)) return 'scheduled'
+      return ''
+    })()
+    const publishedLink = record.links.find((link) => /\/video\/|\/note\/|modal_id=|item_id=/.test(link.href)) || record.links[0]
+    const publishId = (() => {
+      const href = publishedLink?.href || ''
+      const patterns = [/\/video\/(\d+)/, /modal_id=(\d+)/, /item_id=(\d+)/, /\/note\/([^/?#]+)/]
+      for (const pattern of patterns) {
+        const match = href.match(pattern)
+        if (match?.[1]) return match[1]
+      }
+      return ''
+    })()
+    return {
+      found: ['published', 'reviewing'].includes(pageStatusCode),
+      pendingScheduled: pageStatusCode === 'scheduled',
+      reason: pageStatusCode === 'scheduled' ? 'platform schedule time not due' : '',
+      hasTitle: true,
+      hasPublishedSignal: Boolean(pageStatusCode),
+      platformStatus: pageStatusCode || 'matched',
+      pageStatusCode,
+      pageStatus: statusText,
+      targetTitle: input.title,
+      platformScheduledAt: input.platformScheduledAt,
+      scheduledAtText: expectedScheduleVariants.find((value) => value && record.compactText.includes(normalizeCompact(value))) || '',
+      url: publishedLink?.href || location.href,
+      platformPublishedUrl: '',
+      platformPublishId: publishId,
+      coverImageUrl: record.images[0] || '',
+      pageTitle: document.title,
+      matchedText: record.text.slice(0, 300),
+      textSample: record.text.slice(0, 1200),
+    }
+  }, target)
+}
+
 async function reportPublishCheckPublished(config, scheduleId, result) {
   const query = new URLSearchParams()
-  if (result?.url) query.set('platformPublishedUrl', result.url)
+  if (result?.platformPublishedUrl) query.set('platformPublishedUrl', result.platformPublishedUrl)
   query.set('diagnosticsJson', shortDiagnosticsJson(result))
   const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/publish-checks/published?${query}`
   return signedTrustedBackendRequest(config, path, { method: 'POST' })
@@ -1491,6 +1750,10 @@ function scheduleIdOfTask(task) {
 
 function shouldHeartbeatScheduleTask(task) {
   if (!task || isTerminalStatus(task.status)) return false
+  if (task.status === 'claimed') {
+    if (!task.claimedAt) return false
+    return Date.now() - Date.parse(task.claimedAt) <= CLAIM_BACKEND_HEARTBEAT_MAX_MS
+  }
   if (!scheduleIdOfTask(task)) return false
   return Boolean(task.backendTask || task.schedule)
 }
@@ -1499,6 +1762,18 @@ async function heartbeatActiveScheduleTasks(config) {
   let sent = 0
   let failed = 0
   let changed = false
+  const staleClaimKeys = new Set()
+  for (const task of tasksById.values()) {
+    if (task.status !== 'claimed' || !task.claimedAt) continue
+    const claimedMs = Date.now() - Date.parse(task.claimedAt)
+    if (claimedMs <= CLAIM_BACKEND_HEARTBEAT_MAX_MS) continue
+    if (task.environmentKey) staleClaimKeys.add(`env:${task.environmentKey}`)
+    if (task.platform) staleClaimKeys.add(`platform:${task.platform}`)
+  }
+  for (const key of staleClaimKeys) {
+    if (key.startsWith('env:')) await requeueTimedOutClaims(key.slice(4))
+    if (key.startsWith('platform:')) await requeueTimedOutClaimsByPlatform(key.slice(9))
+  }
   for (const task of tasksById.values()) {
     if (!shouldHeartbeatScheduleTask(task)) continue
     const scheduleId = scheduleIdOfTask(task)

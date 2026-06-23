@@ -429,7 +429,7 @@
       platformScheduledAt: scheduledAt || null,
       scheduledAtText: record.scheduledAtText || scheduledAt || null,
       platformPublishId: record.platformPublishId || null,
-      platformPublishedUrl: record.platformPublishedUrl || null,
+      platformPublishedUrl: null,
       coverImageUrl: record.coverImageUrl || null,
       recordLinks: record.links,
       title,
@@ -454,7 +454,7 @@
       pageStatus: extractManageStatus(matched.text),
       scheduledAtText: extractManageScheduleText(matched.text, scheduledAt),
       links: extractManageRecordLinks(matched.el),
-      platformPublishedUrl: extractManageRecordPublishedUrl(matched.el),
+      platformPublishedUrl: null,
       platformPublishId: extractManageRecordPublishId(matched.el),
       coverImageUrl: extractManageRecordImageUrl(matched.el),
     }

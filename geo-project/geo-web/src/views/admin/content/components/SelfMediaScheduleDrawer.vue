@@ -81,6 +81,32 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="平台结果" min-width="190">
+          <template #default="scope">
+            <div class="schedule-stack">
+              <div class="schedule-tag-row">
+                <el-tag v-if="platformResultStatus(scope.row)" size="small" :type="platformResultTag(scope.row)">
+                  {{ platformResultStatus(scope.row) }}
+                </el-tag>
+                <span v-else>-</span>
+              </div>
+              <a
+                v-if="realPlatformPublishedUrl(scope.row)"
+                class="schedule-link"
+                :href="realPlatformPublishedUrl(scope.row)"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                打开作品
+              </a>
+              <span v-else-if="scope.row.platformPublishId">发布 ID {{ scope.row.platformPublishId }}</span>
+              <span v-if="scope.row.publishCheckCoverUrl" class="schedule-cover-line">
+                <img :src="scope.row.publishCheckCoverUrl" alt="" loading="lazy" />
+                已回传封面
+              </span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="健康/阶段" min-width="170">
           <template #default="scope">
             <div class="schedule-stack">
@@ -181,6 +207,59 @@
               <dd>{{ item.value }}</dd>
             </template>
           </dl>
+        </section>
+
+        <section v-if="publishVerificationFields.length" class="schedule-diagnostics-section">
+          <h4>发布回查结果</h4>
+          <dl class="schedule-diagnostics-grid">
+            <template v-for="item in publishVerificationFields" :key="item.label">
+              <dt>{{ item.label }}</dt>
+              <dd>
+                <a
+                  v-if="item.href"
+                  class="schedule-link"
+                  :href="item.href"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ item.value }}
+                </a>
+                <span v-else>{{ item.value }}</span>
+              </dd>
+            </template>
+          </dl>
+        </section>
+
+        <section v-if="failureSnapshotFields.length" class="schedule-diagnostics-section">
+          <h4>失败页面快照</h4>
+          <dl class="schedule-diagnostics-grid">
+            <template v-for="item in failureSnapshotFields" :key="item.label">
+              <dt>{{ item.label }}</dt>
+              <dd>{{ item.value }}</dd>
+            </template>
+          </dl>
+        </section>
+
+        <section v-if="failureSnapshotInputs.length" class="schedule-diagnostics-section">
+          <h4>页面输入框</h4>
+          <div class="schedule-diagnostics-list">
+            <div v-for="item in failureSnapshotInputs" :key="item.key" class="schedule-diagnostics-list-item">
+              <strong>{{ item.title }}</strong>
+              <span>{{ item.detail }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="failureSnapshotActions.length" class="schedule-diagnostics-section">
+          <h4>可点击元素</h4>
+          <div class="schedule-diagnostics-list is-compact">
+            <span v-for="item in failureSnapshotActions" :key="item.key">{{ item.text }}</span>
+          </div>
+        </section>
+
+        <section v-if="failureSnapshotAdapterState" class="schedule-diagnostics-section">
+          <h4>适配器状态</h4>
+          <pre class="schedule-diagnostics-json is-compact">{{ failureSnapshotAdapterState }}</pre>
         </section>
 
         <section class="schedule-diagnostics-section">
@@ -331,7 +410,7 @@ const diagnosticsFields = computed(() => {
     { label: '浏览器环境', value: `${row.browserEnvironmentId || '-'} / 绑定 ${row.browserEnvironmentAccountId || '-'}` },
     { label: '平台排期 ID', value: platformScheduleIdFieldValue(row) },
     { label: '平台发布 ID', value: row.platformPublishId || '-' },
-    { label: '平台发布链接', value: row.platformPublishedUrl || '-' },
+    { label: '平台发布链接', value: realPlatformPublishedUrl(row) || '-' },
     { label: '下次处理', value: timeText(row.nextAttemptAt) },
     { label: '锁定至', value: timeText(row.lockedUntil) },
     { label: '尝试次数', value: attemptText(row) },
@@ -355,18 +434,19 @@ const platformDiagnosticsFields = computed(() => {
   const row = diagnosticsRow.value
   const payload = diagnosticsPayload.value
   if (!row || !payload) return []
+  const verification = extractPublishVerification(payload)
   const values: Array<{ label: string; value: string }> = []
   const add = (label: string, value: unknown) => {
     const text = diagnosticValueText(value)
     if (text) values.push({ label, value: text })
   }
 
-  add('页面 URL', payload.pageUrl || payload.url)
+  add('页面 URL', payload.pageUrl || payload.url || verification?.manageUrl)
   add('页面标题', payload.pageTitle)
-  add('目标标题', payload.expectedTitle || payload.targetTitle)
-  add('计划时间', payload.scheduledAtText || payload.platformScheduledAt || payload.scheduleProbe)
+  add('目标标题', payload.expectedTitle || payload.targetTitle || verification?.title)
+  add('计划时间', payload.scheduledAtText || payload.platformScheduledAt || payload.scheduleProbe || verification?.scheduledAtText)
   add('失败环节', operationStageLabel(payload.operationStage, payload.operationStageLabel))
-  add('平台状态', platformPublishStatusLabel(payload.platformStatus))
+  add('平台状态', platformPublishStatusLabel(firstText(payload.platformStatus, verification?.pageStatusCode, verification?.platformStatus)))
   add('回查原因', payload.reason)
   add('回查失败码', failureCodeLabel(payload.failureCode) || payload.failureLabel)
   add('匹配标题', payload.hasTitle === undefined ? undefined : (payload.hasTitle ? '已匹配' : '未匹配'))
@@ -390,6 +470,87 @@ const platformDiagnosticsFields = computed(() => {
   add('可见图片数', payload.xhsVisibleImageCount)
   add('预览页数', payload.xhsPreviewPages)
   return values.slice(0, 18)
+})
+
+const publishVerificationFields = computed(() => {
+  const row = diagnosticsRow.value
+  const payload = diagnosticsPayload.value
+  if (!row) return []
+  const verification = payload ? extractPublishVerification(payload) : null
+  const values: Array<{ label: string; value: string; href?: string }> = []
+  const add = (label: string, value: unknown, href?: unknown) => {
+    const text = diagnosticValueText(value)
+    if (!text) return
+    const link = diagnosticValueText(href)
+    values.push({ label, value: text, ...(link ? { href: link } : {}) })
+  }
+
+  add('平台发布 ID', firstText(row.platformPublishId, verification?.platformPublishId))
+  add('平台发布链接', realPlatformPublishedUrl(row, verification?.platformPublishedUrl) || '-', realPlatformPublishedUrl(row, verification?.platformPublishedUrl))
+  add('封面图', firstText(row.publishCheckCoverUrl, verification?.coverImageUrl), firstText(row.publishCheckCoverUrl, verification?.coverImageUrl))
+  add('平台状态', platformPublishStatusLabel(firstText(verification?.pageStatusCode, verification?.platformStatus)) || verification?.pageStatus)
+  add('平台定时时间', firstText(verification?.scheduledAtText, verification?.platformScheduledAt, row.platformScheduledAt))
+  add('作品管理页', verification?.manageUrl, verification?.manageUrl)
+  add('匹配标题', verification?.title)
+  add('刷新回查', verification?.refreshed === undefined ? undefined : (verification.refreshed ? `已刷新 ${verification.reloadCount || 1} 次` : '未刷新'))
+  add('匹配文本', verification?.matchedText)
+  return values
+})
+
+const failureSnapshot = computed(() => {
+  const payload = diagnosticsPayload.value
+  if (!payload) return null
+  return extractFailureSnapshot(payload)
+})
+
+const failureSnapshotFields = computed(() => {
+  const snapshot = failureSnapshot.value
+  if (!snapshot) return []
+  const page = snapshot.page && typeof snapshot.page === 'object' ? snapshot.page : {}
+  const values: Array<{ label: string; value: string }> = []
+  const add = (label: string, value: unknown) => {
+    const text = diagnosticValueText(value)
+    if (text) values.push({ label, value: text })
+  }
+  add('扩展版本', snapshot.extensionVersion || page.version)
+  add('环境标识', snapshot.environmentKey)
+  add('快照 URL', page.href || snapshot.href)
+  add('页面标题', snapshot.title)
+  add('平台', page.platform)
+  add('截图', snapshot.screenshotCaptured === undefined ? undefined : (snapshot.screenshotCaptured ? '已采集' : '未采集'))
+  add('页面文本', page.text)
+  return values
+})
+
+const failureSnapshotInputs = computed(() => {
+  const page = failureSnapshot.value?.page
+  const inputs = Array.isArray(page?.inputs) ? page.inputs : []
+  return inputs.slice(0, 8).map((item: any, index: number) => {
+    const title = `#${item.index ?? index} ${firstText(item.type, 'input')}`
+    const detail = [
+      item.placeholder ? `placeholder=${item.placeholder}` : '',
+      item.accept ? `accept=${item.accept}` : '',
+      item.value ? `value=${item.value}` : '',
+    ].filter(Boolean).join('；') || '无可见描述'
+    return { key: `${index}-${title}-${detail}`, title, detail }
+  })
+})
+
+const failureSnapshotActions = computed(() => {
+  const page = failureSnapshot.value?.page
+  const actions = Array.isArray(page?.actions) ? page.actions : []
+  return actions.slice(0, 14)
+    .map((item: any, index: number) => ({
+      key: `${index}-${item.text || ''}`,
+      text: item.text || `元素 #${index + 1}`,
+    }))
+    .filter((item: { text: string }) => item.text)
+})
+
+const failureSnapshotAdapterState = computed(() => {
+  const state = failureSnapshot.value?.page?.adapterState
+  if (!state) return ''
+  return typeof state === 'string' ? state : JSON.stringify(state, null, 2)
 })
 
 watch(() => props.modelValue, (opened) => {
@@ -691,6 +852,38 @@ function parseDiagnostics(value?: string | null): Record<string, any> | null {
   }
 }
 
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function nestedRecord(source: any, path: string[]) {
+  let current = source
+  for (const key of path) {
+    if (!current || typeof current !== 'object') return null
+    current = current[key]
+  }
+  return current && typeof current === 'object' ? current : null
+}
+
+function extractPublishVerification(payload: Record<string, any>) {
+  return nestedRecord(payload, ['fillResult', 'publishOptions', 'publishVerification'])
+    || nestedRecord(payload, ['publishOptions', 'publishVerification'])
+    || nestedRecord(payload, ['publishVerification'])
+    || nestedRecord(payload, ['result', 'publishOptions', 'publishVerification'])
+}
+
+function extractFailureSnapshot(payload: Record<string, any>) {
+  return nestedRecord(payload, ['failureSnapshot'])
+    || nestedRecord(payload, ['failure', 'failureSnapshot'])
+    || nestedRecord(payload, ['error', 'failureSnapshot'])
+    || null
+}
+
 function operationStageLabel(stage?: string | null, fallback?: string | null) {
   if (fallback) return fallback
   const labels: Record<string, string> = {
@@ -700,6 +893,30 @@ function operationStageLabel(stage?: string | null, fallback?: string | null) {
     WECHAT_SUBMIT_PUBLISH: '提交公众号发布',
   }
   return stage ? labels[stage] || stage : ''
+}
+
+function platformResultStatus(row: SelfMediaPublishSchedule) {
+  if (row.status === 'published_confirmed') return '已确认发布'
+  if (realPlatformPublishedUrl(row)) return '已回传链接'
+  if (row.platformPublishId) return '已回传 ID'
+  if (row.publishCheckCoverUrl) return '已回传封面'
+  if (row.status === 'scheduled') return '等待发布'
+  if (row.status === 'publish_unknown' || row.status === 'checking_publish_result') return '回查中'
+  return ''
+}
+
+function platformResultTag(row: SelfMediaPublishSchedule): 'success' | 'warning' | 'danger' | 'info' {
+  if (row.status === 'published_confirmed' || realPlatformPublishedUrl(row)) return 'success'
+  if (row.status === 'publish_unknown' || row.status === 'checking_publish_result') return 'warning'
+  if (row.status === 'publish_failed') return 'danger'
+  return 'info'
+}
+
+function realPlatformPublishedUrl(row: SelfMediaPublishSchedule, candidate?: string | null) {
+  if (row.platform === 'douyin') return ''
+  const value = firstText(candidate, row.platformPublishedUrl)
+  if (!/^https?:\/\//i.test(value)) return ''
+  return value
 }
 
 function articleDisplay(row: SelfMediaPublishSchedule) {
@@ -838,6 +1055,7 @@ function platformPublishStatusLabel(status?: string | null) {
     scheduled: '已定时/待发布',
     rejected: '审核未通过',
     withdrawn: '已撤回/删除',
+    draft: '草稿',
     unknown: '未知',
   }
   return labels[status] || status
@@ -1275,6 +1493,24 @@ function platformLabel(value?: string | null) {
   font-weight: 650;
 }
 
+.schedule-cover-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #4b5563;
+}
+
+.schedule-cover-line img {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  object-fit: cover;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: #f9fafb;
+}
+
 .schedule-pagination {
   display: flex;
   justify-content: flex-end;
@@ -1335,6 +1571,48 @@ function platformLabel(value?: string | null) {
   line-height: 1.5;
 }
 
+.schedule-diagnostics-list {
+  display: grid;
+  gap: 8px;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.schedule-diagnostics-list.is-compact {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+.schedule-diagnostics-list.is-compact span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #111827;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.schedule-diagnostics-list-item {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.schedule-diagnostics-list-item strong {
+  color: #111827;
+  font-weight: 650;
+}
+
+.schedule-diagnostics-list-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .schedule-diagnostics-advice {
   margin: 0;
   color: #374151;
@@ -1363,5 +1641,9 @@ function platformLabel(value?: string | null) {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   padding: 12px;
+}
+
+.schedule-diagnostics-json.is-compact {
+  max-height: 180px;
 }
 </style>

@@ -36,7 +36,8 @@ export function evaluateXiaohongshuPublishSignals(target = {}, pageState = {}, o
     targetTitle: target.title || '',
     platformScheduledAt: target.platformScheduledAt || '',
     scheduleProbe,
-    url: matchedUrl || url,
+    url,
+    platformPublishedUrl: '',
     pageTitle: pageState.pageTitle || '',
     textSample: text.slice(0, 1200),
   }
@@ -54,7 +55,10 @@ export function evaluateBaijiahaoPublishSignals(target = {}, pageState = {}, opt
   const isBeforeScheduledAt = Number.isFinite(scheduledAtMs) && scheduledAtMs > nowMs
   const url = String(pageState.url || '')
   const matchedUrl = Array.isArray(pageState.anchors)
-    ? pageState.anchors.find((item) => normalizeCompact(item.text).includes(titleProbe))?.href || ''
+    ? pageState.anchors.find((item) => {
+        const href = String(item.href || '')
+        return normalizeCompact(item.text).includes(titleProbe) && /baijiahao\.baidu\.com\/s\?id=/.test(href)
+      })?.href || ''
     : ''
   const hasRejectedSignal = /审核未通过|未通过|审核失败|发布失败|不通过/.test(text)
   const hasWithdrawnSignal = /已撤回|已删除|已下线|已撤销/.test(text)
@@ -116,7 +120,8 @@ export function evaluateBaijiahaoPublishSignals(target = {}, pageState = {}, opt
     platformScheduledAt: target.platformScheduledAt || '',
     platformScheduledText,
     scheduleProbe,
-    url: matchedUrl || url,
+    url,
+    platformPublishedUrl: found ? matchedUrl : '',
     pageTitle: pageState.pageTitle || '',
     textSample: text.slice(0, 1200),
   }

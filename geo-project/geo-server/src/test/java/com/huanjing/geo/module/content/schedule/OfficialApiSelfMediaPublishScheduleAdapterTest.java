@@ -336,6 +336,44 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
         ));
     }
 
+    @Test
+    void checkPublishResultReturnsWechatArticleUrlWhenReviewPublished() {
+        adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
+                platformRouter,
+                List.of(new PublishedReviewAdapter()),
+                scheduleMapper,
+                distributionTaskMapper,
+                articleDraftMapper,
+                articleDraftVersionMapper,
+                selfMediaAccountMapper,
+                projectMapper,
+                imagePublicUrlRewriter,
+                materialSelectionService,
+                capabilityService,
+                new ObjectMapper()
+        );
+        SelfMediaPublishSchedule row = scheduleRow();
+        row.setDistributionTaskId(99L);
+        DistributionTask task = new DistributionTask();
+        task.setId(99L);
+        task.setSelfMediaAccountId(40L);
+        task.setStatus("submitted");
+        task.setReviewStatus("under_review");
+        when(scheduleMapper.selectById(10L)).thenReturn(row);
+        when(distributionTaskMapper.selectById(99L)).thenReturn(task);
+        when(selfMediaAccountMapper.selectById(40L)).thenReturn(account());
+
+        PublishCheckResult result = adapter.checkPublishResult(SelfMediaPublishScheduleVO.from(row));
+
+        assertEquals(PublishCheckResult.Outcome.PUBLISHED, result.outcome());
+        assertEquals("https://mp.weixin.qq.com/s/article-1", result.platformPublishedUrl());
+        verify(distributionTaskMapper).updateById(ArgumentMatchers.argThat(updated ->
+                "published".equals(updated.getStatus())
+                        && "article-1".equals(updated.getPlatformArticleId())
+                        && "https://mp.weixin.qq.com/s/article-1".equals(updated.getPublishedUrl())
+        ));
+    }
+
     private SelfMediaPublishSchedule scheduleRow() {
         SelfMediaPublishSchedule row = new SelfMediaPublishSchedule();
         row.setId(10L);
@@ -417,6 +455,21 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
         @Override
         public ReviewStatusResult refreshReviewStatus(DistributionTask task, SelfMediaAccount account) {
             throw new IllegalStateException("api unavailable");
+        }
+    }
+
+    private static class PublishedReviewAdapter extends FakeOfficialApiAdapter {
+        @Override
+        public ReviewStatusResult refreshReviewStatus(DistributionTask task, SelfMediaAccount account) {
+            return new ReviewStatusResult(
+                    ReviewStatusResult.ReviewStatus.PUBLISHED,
+                    "0",
+                    null,
+                    false,
+                    "{\"publish_status\":0}",
+                    "article-1",
+                    "https://mp.weixin.qq.com/s/article-1"
+            );
         }
     }
 

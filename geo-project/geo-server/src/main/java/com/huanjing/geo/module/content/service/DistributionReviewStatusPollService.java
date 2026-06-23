@@ -161,6 +161,9 @@ public class DistributionReviewStatusPollService {
         if (StringUtils.hasText(safeResult.platformArticleId())) {
             wrapper.set(DistributionTask::getPlatformArticleId, safeResult.platformArticleId());
         }
+        if (StringUtils.hasText(safeResult.publishedUrl())) {
+            wrapper.set(DistributionTask::getPublishedUrl, safeResult.publishedUrl());
+        }
         if (isTerminalReview(reviewStatus)) {
             wrapper.set(DistributionTask::getFinishedAt, now);
         }

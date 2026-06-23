@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,6 +23,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
@@ -149,6 +152,7 @@ public class SelfMediaPublishScheduleService {
     private final SelfMediaPublishScheduleMapper scheduleMapper;
     private final SelfMediaPublishScheduleRequestMapper requestMapper;
     private final ArticleDraftMapper articleDraftMapper;
+    private final DistributionTaskMapper distributionTaskMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
@@ -1205,6 +1209,7 @@ public class SelfMediaPublishScheduleService {
             row.setDiagnosticsJson(trimToNull(diagnosticsJson));
             scheduleMapper.updateById(row);
             markArticlePublished(row.getArticleId());
+            markDistributionTaskPublished(row);
             confirmScheduleQuotaIfPresent(row);
             confirmDistributionQuotaIfPresent(row);
             environmentLockService.release(row.getId());
@@ -1286,6 +1291,7 @@ public class SelfMediaPublishScheduleService {
             row.setDiagnosticsJson(trimToNull(diagnosticsJson));
             scheduleMapper.updateById(row);
             markArticlePublished(row.getArticleId());
+            markDistributionTaskPublished(row);
             confirmScheduleQuotaIfPresent(row);
             confirmDistributionQuotaIfPresent(row);
             environmentLockService.release(row.getId());
@@ -1657,27 +1663,33 @@ public class SelfMediaPublishScheduleService {
             JsonNode root = objectMapper.readTree(diagnosticsJson);
             JsonNode verification = root.path("fillResult").path("publishOptions").path("publishVerification");
             if (verification.isMissingNode()) {
-                return new PlatformScheduleVerification(null, null, null, null, null);
+                verification = root;
             }
             LocalDateTime platformScheduledAt = parseLocalDateTime(firstText(
                     verification.path("platformScheduledAt").asText(null),
-                    verification.path("scheduledAtText").asText(null)
+                    verification.path("scheduledAtText").asText(null),
+                    root.path("platformScheduledAt").asText(null),
+                    root.path("scheduledAtText").asText(null)
             ));
             String platformScheduleId = trimToNull(firstText(
-                    verification.path("platformScheduleId").asText(null)
+                    verification.path("platformScheduleId").asText(null),
+                    root.path("platformScheduleId").asText(null)
             ));
             String platformPublishId = trimToNull(firstText(
-                    verification.path("platformPublishId").asText(null)
+                    verification.path("platformPublishId").asText(null),
+                    root.path("platformPublishId").asText(null)
             ));
             String platformPublishedUrl = trimToNull(firstText(
                     verification.path("platformPublishedUrl").asText(null),
                     verification.path("publishedUrl").asText(null),
-                    root.path("fillResult").path("publishOptions").path("platformPublishedUrl").asText(null)
+                    root.path("fillResult").path("publishOptions").path("platformPublishedUrl").asText(null),
+                    root.path("platformPublishedUrl").asText(null)
             ));
             String coverImageUrl = trimToNull(firstText(
                     verification.path("coverImageUrl").asText(null),
                     root.path("fillResult").path("publishOptions").path("coverImageUrl").asText(null),
-                    root.path("fillResult").path("coverImageUrl").asText(null)
+                    root.path("fillResult").path("coverImageUrl").asText(null),
+                    root.path("coverImageUrl").asText(null)
             ));
             return new PlatformScheduleVerification(
                     platformScheduledAt,
@@ -1837,15 +1849,23 @@ public class SelfMediaPublishScheduleService {
         if (!SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(normalize(row.getStatus()))) {
             fail("SCHEDULE_STATUS_NOT_CHECKING_PUBLISH_RESULT", "当前排期未处于发布结果确认中");
         }
+        PlatformScheduleVerification verification = parsePlatformScheduleVerification(diagnosticsJson);
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED);
         row.setPublishedConfirmedAt(LocalDateTime.now());
-        row.setPlatformPublishedUrl(trimToNull(platformPublishedUrl));
+        row.setPlatformPublishedUrl(trimToNull(firstText(platformPublishedUrl, verification.platformPublishedUrl())));
+        if (verification.platformPublishId() != null) {
+            row.setPlatformPublishId(verification.platformPublishId());
+        }
+        if (verification.coverImageUrl() != null) {
+            row.setPublishCheckCoverUrl(verification.coverImageUrl());
+        }
         row.setLockedUntil(null);
         row.setFailureCode(null);
         row.setFailureMessage(null);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
         markArticlePublished(row.getArticleId());
+        markDistributionTaskPublished(row);
         confirmDistributionQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         reconcileAlerts(row);
@@ -2545,6 +2565,25 @@ public class SelfMediaPublishScheduleService {
         }
         article.setStatus("published");
         articleDraftMapper.updateById(article);
+    }
+
+    private void markDistributionTaskPublished(SelfMediaPublishSchedule row) {
+        if (row == null || row.getDistributionTaskId() == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        distributionTaskMapper.update(null, new UpdateWrapper<DistributionTask>()
+                .eq("id", row.getDistributionTaskId())
+                .eq("dispatch_mode", "SEMI_AUTO")
+                .in("status", List.of("pending", "token_issued", "filling", "filled", "submitting", "submitted"))
+                .set("status", "published")
+                .set("published_url", trimToNull(row.getPlatformPublishedUrl()))
+                .set("platform_publish_id", trimToNull(row.getPlatformPublishId()))
+                .set("published_at", now)
+                .set("finished_at", now)
+                .set("failure_kind", null)
+                .set("error_message", null)
+                .set("locked_until", null));
     }
 
     private void releaseArticleIfNoActiveSchedule(SelfMediaPublishSchedule row) {

@@ -360,6 +360,9 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         if (StringUtils.hasText(status.platformArticleId())) {
             next.setPlatformArticleId(status.platformArticleId());
         }
+        if (StringUtils.hasText(status.publishedUrl())) {
+            next.setPublishedUrl(status.publishedUrl());
+        }
         if (ReviewStatusResult.ReviewStatus.PUBLISHED.equals(status.status())) {
             next.setStatus("published");
             next.setPublishedAt(LocalDateTime.now());
