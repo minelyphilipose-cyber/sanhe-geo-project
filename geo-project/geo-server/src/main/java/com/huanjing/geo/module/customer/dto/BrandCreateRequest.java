@@ -63,6 +63,8 @@ public class BrandCreateRequest {
     private String forbiddenPhrases;
     private String geoSiteCode;
     private String geoSiteStatus;
+    private String geoSiteName;
+    private String geoSiteDomain;
     private String industrySiteName;
     private String industrySiteCode;
     private String status;

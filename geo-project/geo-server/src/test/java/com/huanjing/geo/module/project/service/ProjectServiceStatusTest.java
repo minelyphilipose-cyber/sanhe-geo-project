@@ -10,6 +10,7 @@ import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
+import com.huanjing.geo.module.content.service.SpecialIndustryReadinessService;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
 import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
 import com.huanjing.geo.module.partner.mapper.PartnerAccountMapper;
@@ -79,6 +80,8 @@ class ProjectServiceStatusTest {
     private ProjectDistributionChannelAllocationService channelAllocationService;
     @Mock
     private KeywordTypeConfigService keywordTypeConfigService;
+    @Mock
+    private SpecialIndustryReadinessService specialIndustryReadinessService;
 
     @InjectMocks
     private ProjectService projectService;

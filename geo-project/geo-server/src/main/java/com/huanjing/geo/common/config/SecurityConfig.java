@@ -59,6 +59,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/public/authority-media/previews/**").permitAll()
                 .requestMatchers("/api/public/brand-materials/**").permitAll()
                 .requestMatchers("/api/public/dashboard/**").permitAll()
+                .requestMatchers("/api/public/mobile-dashboard/**").permitAll()
                 .requestMatchers("/api/wechat/open-platform/auth/callback").permitAll()
                 .requestMatchers("/api/wechat/open-platform/events/**").permitAll()
                 .requestMatchers("/api/wechat/open-platform/messages/**").permitAll()

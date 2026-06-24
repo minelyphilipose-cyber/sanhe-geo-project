@@ -1,4 +1,4 @@
-﻿import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
 import { ElMessage } from 'element-plus'
@@ -24,11 +24,65 @@ const presalePrintPocRoutes = enablePresalePrintPoc
       },
     ]
   : []
+const mobileDashboardRoutes = [
+  {
+    path: '/home',
+    component: () => import('@/views/mobile-dashboard/MobileDashboardLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'MobileDashboardHome',
+        component: () => import('@/views/mobile-dashboard/HomeView.vue'),
+        meta: { title: '移动数据看板' },
+      },
+    ],
+  },
+  {
+    path: '/monitor',
+    component: () => import('@/views/mobile-dashboard/MobileDashboardLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'MobileDashboardMonitor',
+        component: () => import('@/views/mobile-dashboard/MonitorView.vue'),
+        meta: { title: '移动数据看板' },
+      },
+    ],
+  },
+  {
+    path: '/content',
+    component: () => import('@/views/mobile-dashboard/MobileDashboardLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'MobileDashboardContent',
+        component: () => import('@/views/mobile-dashboard/ContentView.vue'),
+        meta: { title: '移动数据看板' },
+      },
+    ],
+  },
+  {
+    path: '/report',
+    component: () => import('@/views/mobile-dashboard/MobileDashboardLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'MobileDashboardReport',
+        component: () => import('@/views/mobile-dashboard/ReportView.vue'),
+        meta: { title: '移动数据看板' },
+      },
+    ],
+  },
+]
 const publicPathPrefixes = [
   '/login',
   '/r/',
   '/realtime-dashboard/',
   '/dashboard/',
+  '/home',
+  '/monitor',
+  '/content',
+  '/report',
   '/presale-print/',
   ...(enablePresalePrintPoc ? ['/presale-print-poc/'] : []),
   '/403',
@@ -74,6 +128,7 @@ const router = createRouter({
       component: () => import('@/views/share/ProjectDashboard.vue'),
       meta: { title: '项目统计看板' },
     },
+    ...mobileDashboardRoutes,
     {
       path: '/presale-print/:renderToken',
       name: 'PresalePrint',

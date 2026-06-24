@@ -128,13 +128,13 @@
         <section v-show="activeStep === 2">
           <div class="design-note">
             <strong>Step 2 说明：</strong>
-            客户主档案带入到工单级快照。同步回客户档案关闭时仅保存当前工单；开启时覆盖客户主档案级竞品和核心需求。
+            客户主档案与项目竞品配置带入到工单级快照。同步关闭时仅保存当前工单；开启时会同步项目级竞品配置，并影响移动看板竞品卡与后续裁判。
           </div>
           <div class="source-legend">
             <span><i class="src-icon src-from-profile">✓</i> 已带入</span>
             <span><i class="src-icon src-missing">!</i> 需补全</span>
             <span><i class="src-icon src-modified">✎</i> 已修改</span>
-            <label class="switch-line"><input v-model="syncToProfile" type="checkbox"> 同步回客户档案</label>
+            <label class="switch-line"><input v-model="syncToProfile" type="checkbox"> 同步回客户档案 / 项目竞品配置</label>
           </div>
           <div class="card profile-card">
             <div class="card-head"><span>分组 A · 客户基本信息</span><span class="tag">9 个字段</span></div>
@@ -151,15 +151,16 @@
             </div>
           </div>
           <div class="card competitor-card">
-            <div class="card-head"><span>分组 B · 主竞品</span><span class="tag">至少 1 条，建议 ≤6 条</span></div>
+            <div class="card-head"><span>分组 B · 主竞品</span><span class="tag">最多 3 条，与项目竞品配置共用</span></div>
             <div class="card-body">
+              <div class="inline-tip competitor-sync-tip">改动后的竞品信息将同步至项目竞品信息中。</div>
               <div v-for="(c, idx) in profile.competitors" :key="idx" class="competitor-item">
                 <div class="need-head"><span class="idx"><span class="src-icon src-from-profile">✓</span>竞品 {{ idx + 1 }}</span><button class="btn btn-sm btn-danger" @click="profile.competitors.splice(idx, 1)">删除</button></div>
                 <Field label="名称" required compact><input v-model="c.competitorName" class="text-input"></Field>
                 <Field label="优势" required compact><textarea v-model="c.advantages" class="text-input textarea"></textarea></Field>
                 <Field label="劣势" required compact><textarea v-model="c.disadvantages" class="text-input textarea"></textarea></Field>
               </div>
-              <button class="btn" @click="addCompetitor">+ 增加竞品</button>
+              <button class="btn" :disabled="profile.competitors.length >= MAX_COMPETITORS" @click="addCompetitor">+ 增加竞品</button>
             </div>
           </div>
           <div class="card needs-card">
@@ -574,6 +575,7 @@ const manualRows = ref<ManualQuestionRow[]>([])
 const manualRowKey = ref(1)
 const tierTab = ref<'all' | 'A' | 'B' | 'C'>('all')
 const questionTabs = ['all', 'A', 'B', 'C'] as const
+const MAX_COMPETITORS = 3
 const syncToProfile = ref(false)
 const profileDraftSaved = ref(false)
 const profileLoaded = ref(false)
@@ -761,7 +763,7 @@ function applyProfileSnapshot(nextProfile: ProfileVO) {
     targetCustomer: nextProfile.targetCustomer || '',
     coreAdvantage: nextProfile.coreAdvantage || '',
     benchmarkSpecs: nextProfile.benchmarkSpecs || '',
-    competitors: Array.isArray(nextProfile.competitors) ? nextProfile.competitors : [],
+    competitors: normalizeCompetitors(nextProfile.competitors),
     coreNeeds: Array.isArray(nextProfile.coreNeeds) ? nextProfile.coreNeeds : [],
   })
 }
@@ -893,7 +895,7 @@ async function goStep2() {
   activeStep.value = 2
 }
 async function saveDraft() {
-  if (!workorder.value) return
+  if (!workorder.value) return false
   await saveGeoDraft({ workorderId: workorder.value.id, profileJson: JSON.stringify(profile), syncToCustomerProfile: syncToProfile.value, validationStatus: 'valid' })
   profileDraftSaved.value = true
   profileSnapshots.set(workorder.value.id, {
@@ -902,10 +904,11 @@ async function saveDraft() {
     draftSaved: true,
   })
   ElMessage.success('草稿已保存')
+  return true
 }
 async function goStep3() {
   if (!(await ensureEditableWorkorder())) return
-  await saveDraft()
+  if (!(await saveDraft())) return
   await refreshQuota()
   fillToLimit()
   activeStep.value = 3
@@ -915,7 +918,16 @@ async function refreshQuota() {
   const { data } = await getGeoProjectQuota(selectedProject.value.id, workorder.value.id)
   quota.value = data.data
 }
-function addCompetitor() { profile.competitors.push({ competitorName: '', advantages: '', disadvantages: '' }) }
+function normalizeCompetitors(value: ProfileVO['competitors']) {
+  return (Array.isArray(value) ? value : []).slice(0, MAX_COMPETITORS)
+}
+function addCompetitor() {
+  if (profile.competitors.length >= MAX_COMPETITORS) {
+    ElMessage.warning('项目竞品最多配置3个')
+    return
+  }
+  profile.competitors.push({ competitorName: '', advantages: '', disadvantages: '' })
+}
 function addNeed() { profile.coreNeeds.push({ text: '', scene: 'brand', urgent: false }) }
 function defaultManualRow(questionText = ''): ManualQuestionRow {
   return {

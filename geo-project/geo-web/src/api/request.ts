@@ -5,6 +5,10 @@ import router from '@/router'
 import type { R } from '@/types'
 import { normalizeLocalAgentErrorMessage } from '@/api/localAgentErrorMessages'
 
+interface GeoRequestConfig extends AxiosRequestConfig {
+  silentError?: boolean
+}
+
 const request = axios.create({
   baseURL: '/api',
   timeout: 30000,
@@ -101,8 +105,10 @@ request.interceptors.response.use(
       return response
     }
     const res = response.data
-    const reqUrl = response.config.url || ''
+    const config = response.config as GeoRequestConfig
+    const reqUrl = config.url || ''
     const isAuthApi = isAuthRequest(reqUrl)
+    const silentError = Boolean(config.silentError)
 
     if (res.code !== 0) {
       if (isLocalAgentRequest(reqUrl)) {
@@ -120,7 +126,9 @@ request.interceptors.response.use(
         router.push('/403')
         return Promise.reject(buildApiError(res.message || '无权限访问', res.code, res.data))
       }
-      ElMessage.error(res.message || '请求失败')
+      if (!silentError) {
+        ElMessage.error(res.message || '请求失败')
+      }
       return Promise.reject(buildApiError(res.message || '请求失败', res.code, res.data))
     }
 
@@ -128,8 +136,9 @@ request.interceptors.response.use(
   },
 
   async (error) => {
-    const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean }
+    const originalRequest = error.config as GeoRequestConfig & { _retry?: boolean }
     const isAuthApi = isAuthRequest(originalRequest?.url)
+    const silentError = Boolean(originalRequest?.silentError)
 
     if (error.response?.status === 401 && !isAuthApi && !originalRequest._retry) {
       originalRequest._retry = true
@@ -221,7 +230,9 @@ request.interceptors.response.use(
       if (isLocalAgentRequest(originalRequest?.url)) {
         return Promise.reject(buildApiError(msg, responseData.code, responseData.data, error.response?.status))
       }
-      ElMessage.error(msg)
+      if (!silentError) {
+        ElMessage.error(msg)
+      }
       return Promise.reject(buildApiError(msg, responseData.code, responseData.data, error.response?.status))
     }
 
@@ -231,7 +242,9 @@ request.interceptors.response.use(
     if (isLocalAgentRequest(originalRequest?.url)) {
       return Promise.reject(buildApiError(msg, undefined, error.response?.data, error.response?.status))
     }
-    ElMessage.error(msg)
+    if (!silentError) {
+      ElMessage.error(msg)
+    }
     return Promise.reject(error)
   },
 )

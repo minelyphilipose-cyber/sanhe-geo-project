@@ -1,10 +1,9 @@
 package com.huanjing.geo.module.presale.generate;
 
-import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
+import com.huanjing.geo.common.llm.LlmCapacityView;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -21,12 +20,12 @@ public class PresaleEvaluationModelRouter {
     );
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
-    private final LlmExecutionGateway executionGateway;
+    private final LlmCapacityView llmCapacityView;
 
     public PresaleEvaluationModelRouter(AiPlatformConfigMapper aiPlatformConfigMapper,
-                                        ObjectProvider<LlmExecutionGateway> executionGatewayProvider) {
+                                        LlmCapacityView llmCapacityView) {
         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
-        this.executionGateway = executionGatewayProvider.getIfAvailable();
+        this.llmCapacityView = llmCapacityView;
     }
 
     public List<PlatformCallContext> routeContexts(PlatformCallContext source) {
@@ -40,6 +39,10 @@ public class PresaleEvaluationModelRouter {
                 .map(AiPlatformConfig::getPlatformCode)
                 .filter(StringUtils::hasText)
                 .findFirst();
+    }
+
+    public List<AiPlatformConfig> routePlatforms() {
+        return evaluationPlatforms();
     }
 
     private PlatformCallContext toContext(PlatformCallContext source, String platformCode) {
@@ -78,7 +81,7 @@ public class PresaleEvaluationModelRouter {
         int limit = platform.getConcurrencyLimit() == null || platform.getConcurrencyLimit() <= 0
                 ? 1
                 : platform.getConcurrencyLimit();
-        Long active = executionGateway == null ? 0L : executionGateway.activePlatformCount(platform.getPlatformCode());
+        Long active = llmCapacityView.activePlatformCount(platform.getPlatformCode());
         return (active == null ? 0D : active.doubleValue()) / limit;
     }
 

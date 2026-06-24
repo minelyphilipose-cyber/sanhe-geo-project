@@ -31,7 +31,11 @@ public sealed interface TargetContext
 
     record BrandOfficialSiteTarget(BrandOfficialSite site) implements TargetContext {}
 
-    record BrandGeoSiteTarget(Long brandId, String siteCode) implements TargetContext {}
+    record BrandGeoSiteTarget(Long brandId, String siteName, String domain) implements TargetContext {
+        public BrandGeoSiteTarget(Long brandId, String siteName) {
+            this(brandId, siteName, null);
+        }
+    }
 
     record IndustrySiteTarget(PublishSite site, Project project) implements TargetContext {
         public IndustrySiteTarget(PublishSite site) {

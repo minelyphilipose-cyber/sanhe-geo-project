@@ -1,9 +1,12 @@
 package com.huanjing.geo.common.llm;
 
 import java.util.Map;
+import java.util.List;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 
 /**
- * Replaceable HTTP abstraction for LLM unit tests.
+ * Single transport abstraction for OpenAI-compatible chat completions requests.
  */
 public interface LlmHttpClient {
 
@@ -13,6 +16,17 @@ public interface LlmHttpClient {
                           int connectTimeoutMs,
                           int requestTimeoutMs) throws Exception;
 
-    record HttpResponse(int statusCode, String body) {
+    record HttpResponse(int statusCode, String body, Map<String, List<String>> headers) {
+        public HttpResponse(int statusCode, String body) {
+            this(statusCode, body, Collections.emptyMap());
+        }
+
+        public HttpResponse {
+            if (headers == null) {
+                headers = Collections.emptyMap();
+            } else {
+                headers = Collections.unmodifiableMap(new LinkedHashMap<>(headers));
+            }
+        }
     }
 }

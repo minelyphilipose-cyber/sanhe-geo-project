@@ -3,7 +3,9 @@ import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+import Vant from 'vant'
 import 'element-plus/dist/index.css'
+import 'vant/lib/index.css'
 import '@fontsource/playfair-display/400.css'
 import '@fontsource/playfair-display/900.css'
 import '@fontsource/noto-serif-sc/400.css'
@@ -30,6 +32,9 @@ app.use(router)
 
 // Element Plus
 app.use(ElementPlus, { locale: zhCn })
+
+// Vant for mobile H5 dashboard
+app.use(Vant)
 
 // 注册所有 Element Plus 图标
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {

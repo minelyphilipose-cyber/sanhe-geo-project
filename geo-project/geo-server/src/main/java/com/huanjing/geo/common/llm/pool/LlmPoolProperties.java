@@ -5,20 +5,24 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 @Data
 @Component
 @ConfigurationProperties(prefix = "geo.llm.pool")
 public class LlmPoolProperties {
     private boolean enabled = false;
-    private int globalConcurrency = 8;
+    private int globalConcurrency = 36;
     private long leaseMs = 600_000L;
     private long leaseRenewIntervalMs = 30_000L;
     private long leaseSafetyMs = 60_000L;
     private long shutdownGraceMs = 30_000L;
     private long permitWaitTimeoutMs = 120_000L;
     private long permitRetryIntervalMs = 200L;
+    private boolean blockingAcquireFailFastEnabled = false;
+    private Set<String> blockingAcquireFailFastFeatures = new LinkedHashSet<>();
     private String permitKeyPrefix = "geo:llm:permit";
     private int circuitBreakerFailureThreshold = 5;
     private long circuitBreakerOpenDurationMs = 60_000L;
@@ -26,6 +30,7 @@ public class LlmPoolProperties {
             "monitoring", 8,
             "article", 4,
             "presale", 8,
+            "baseline", 16,
             "draft", 4,
             "generic", 4
     ));
@@ -58,6 +63,25 @@ public class LlmPoolProperties {
         this.permitRetryIntervalMs = Math.max(10L, permitRetryIntervalMs);
     }
 
+    public void setBlockingAcquireFailFastFeatures(Set<String> blockingAcquireFailFastFeatures) {
+        Set<String> normalized = new LinkedHashSet<>();
+        if (blockingAcquireFailFastFeatures != null) {
+            blockingAcquireFailFastFeatures.forEach(feature -> {
+                if (feature != null && !feature.isBlank()) {
+                    normalized.add(feature.trim().toLowerCase());
+                }
+            });
+        }
+        this.blockingAcquireFailFastFeatures = normalized;
+    }
+
+    public boolean isBlockingAcquireFailFastEnabledFor(String feature) {
+        if (!blockingAcquireFailFastEnabled) {
+            return false;
+        }
+        return blockingAcquireFailFastFeatures.contains(normalizedFeature(feature));
+    }
+
     public void setCircuitBreakerFailureThreshold(int circuitBreakerFailureThreshold) {
         this.circuitBreakerFailureThreshold = Math.max(1, circuitBreakerFailureThreshold);
     }
@@ -79,9 +103,13 @@ public class LlmPoolProperties {
     }
 
     public int featureLimit(String feature) {
+        return featureConcurrency.getOrDefault(normalizedFeature(feature), 0);
+    }
+
+    private String normalizedFeature(String feature) {
         if (feature == null || feature.isBlank()) {
-            return featureConcurrency.getOrDefault("generic", 0);
+            return "generic";
         }
-        return featureConcurrency.getOrDefault(feature.trim().toLowerCase(), 0);
+        return feature.trim().toLowerCase();
     }
 }

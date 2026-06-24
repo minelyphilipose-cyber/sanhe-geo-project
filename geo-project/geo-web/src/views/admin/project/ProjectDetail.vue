@@ -36,6 +36,7 @@
           <span>基础信息</span>
           <div class="space-x-2">
             <el-button size="small" @click="goReports">实时看板</el-button>
+            <el-button size="small" type="primary" plain @click="goMobileDashboardAdmin">移动数据看板</el-button>
             <el-button v-if="project?.status === 'active'" size="small" type="primary" plain @click="goBaselineReport">基线检测报告</el-button>
             <el-tag>{{ projectStatusLabel(project?.status) }}</el-tag>
           </div>
@@ -69,6 +70,12 @@
       </div>
       <el-empty v-else description="暂无客户需求" :image-size="72" />
     </el-card>
+
+    <MobileDashboardCompetitorPanel
+      v-if="project"
+      :project-id="projectId"
+      :editable="canManageMobileCompetitors"
+    />
 
     <el-card v-if="project" class="admin-rich-card">
       <template #header>
@@ -968,6 +975,7 @@ import { regionDisplayFromPayload } from '@/constants/region'
 import { isSelfMediaQuotaChannel } from '@/constants/distributionChannels'
 import { selfMediaPlatformLabel } from '@/constants/selfMediaPlatforms'
 import { nullableText } from '@/utils/form'
+import MobileDashboardCompetitorPanel from './MobileDashboardCompetitorPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -994,6 +1002,7 @@ const KEYWORD_GROUP_TYPE_LABELS: Record<string, string> = {
 }
 const canActivateProject = computed(() => userStore.hasPermission('project.start'))
 const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
+const canManageMobileCompetitors = computed(() => userStore.hasPermission('project.competitor.manage'))
 const canPrepareProject = computed(() => project.value?.status === 'pending_start' || project.value?.status === 'paused')
 const canCreateKeywordGroup = computed(() => !!project.value && userStore.hasPermission('keyword_group.write'))
 const canDeleteKeywordGroup = computed(() => !!project.value && canPrepareProject.value && userStore.hasPermission('keyword_group.write'))
@@ -2090,6 +2099,10 @@ async function saveChannelAllocations() {
 
 function goReports() {
   router.push(`/admin/projects/${projectId}/reports`)
+}
+
+function goMobileDashboardAdmin() {
+  router.push(`/admin/projects/${projectId}/mobile-dashboard`)
 }
 
 function goBaselineReport() {

@@ -282,6 +282,11 @@ geo:
   report:
     web-base-url: ${REPORT_WEB_BASE_URL:http://127.0.0.1:3000}
     render-timeout-ms: ${REPORT_RENDER_TIMEOUT_MS:30000}
+  mobile-dashboard:
+    web-base-url: ${MOBILE_DASHBOARD_WEB_BASE_URL:http://127.0.0.1:5173}
+    share-token-salt: ${MOBILE_DASHBOARD_SHARE_TOKEN_SALT:${geo.jwt.secret}}
+    default-share-ttl-days: ${MOBILE_DASHBOARD_SHARE_TTL_DAYS:90}
+    session-ttl-seconds: ${MOBILE_DASHBOARD_SESSION_TTL_SECONDS:7200}
   content:
     batch-publish:
       poll-ms: ${CONTENT_BATCH_PUBLISH_POLL_MS:30000}

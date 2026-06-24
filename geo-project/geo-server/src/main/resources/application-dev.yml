@@ -80,6 +80,10 @@ geo:
     access-token-expire: 7200        # 2小时(秒)
     refresh-token-expire: 604800     # 7天(秒)
 
+  mobile-dashboard:
+    web-base-url: ${MOBILE_DASHBOARD_WEB_BASE_URL:http://localhost:5173}
+    share-token-salt: ${MOBILE_DASHBOARD_SHARE_TOKEN_SALT:local-dev-mobile-dashboard-share-salt}
+
   # MinIO
   minio:
     endpoint: http://192.168.112.175:9000

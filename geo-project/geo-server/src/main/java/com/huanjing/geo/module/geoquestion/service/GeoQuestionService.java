@@ -21,6 +21,7 @@ import com.huanjing.geo.module.customer.service.CompanyService;
 import com.huanjing.geo.module.geoquestion.dto.GeoQuestionDtos.*;
 import com.huanjing.geo.module.geoquestion.entity.*;
 import com.huanjing.geo.module.geoquestion.mapper.*;
+import com.huanjing.geo.module.mobiledashboard.service.ProjectCompetitorConfigService;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.Project;
@@ -104,6 +105,7 @@ public class GeoQuestionService {
     private final ProjectMapper projectMapper;
     private final ProjectCustomerRequirementMapper projectCustomerRequirementMapper;
     private final SpecialIndustryReadinessService specialIndustryReadinessService;
+    private final ProjectCompetitorConfigService projectCompetitorConfigService;
     private final ObjectMapper objectMapper;
     @Autowired
     @Qualifier("presaleGenerateExecutor")
@@ -389,6 +391,7 @@ public class GeoQuestionService {
         vo.setTargetRegion(projectRegion(project, vo.getTargetRegion()));
         vo.setTargetCustomer(defaultText(project.getTargetAudience(), vo.getTargetCustomer()));
         vo.setBenchmarkSpecs(defaultText(project.getCustomStatement(), vo.getBenchmarkSpecs()));
+        vo.setCompetitors(projectCompetitorConfigService.profileCompetitors(projectId, vo.getCompetitors()));
         vo.setCoreNeeds(projectCoreNeeds(projectId));
         return vo;
     }
@@ -397,6 +400,10 @@ public class GeoQuestionService {
     public DraftVO saveDraft(DraftSaveRequest req) {
         if (req.getWorkorderId() == null) {
             throw new BizException(400, "workorderId is required");
+        }
+        GeoQuestionWorkorder workorder = workorderMapper.selectById(req.getWorkorderId());
+        if (workorder == null) {
+            throw new BizException(404, "进行中的问题池工单不存在");
         }
         GeoQuestionProfileDraft draft = draftMapper.selectOne(new LambdaQueryWrapper<GeoQuestionProfileDraft>()
                 .eq(GeoQuestionProfileDraft::getWorkorderId, req.getWorkorderId())
@@ -415,6 +422,12 @@ public class GeoQuestionService {
             draftMapper.insert(draft);
         } else {
             draftMapper.updateById(draft);
+        }
+        if (Boolean.TRUE.equals(req.getSyncToCustomerProfile()) && workorder.getProjectId() != null) {
+            projectCompetitorConfigService.syncFromGeoQuestionProfile(
+                    workorder.getProjectId(),
+                    profileValue(req.getProfileJson(), "competitors")
+            );
         }
         return toDraftVO(draft);
     }
@@ -2057,6 +2070,18 @@ public class GeoQuestionService {
         }
         try {
             return objectMapper.readValue(draft.getProfileJson(), Map.class);
+        } catch (JsonProcessingException e) {
+            throw new BizException(400, "工单信息补全草稿格式错误");
+        }
+    }
+
+    private Object profileValue(String profileJson, String key) {
+        if (!StringUtils.hasText(profileJson)) {
+            return null;
+        }
+        try {
+            Map<?, ?> profile = objectMapper.readValue(profileJson, Map.class);
+            return profile.get(key);
         } catch (JsonProcessingException e) {
             throw new BizException(400, "工单信息补全草稿格式错误");
         }

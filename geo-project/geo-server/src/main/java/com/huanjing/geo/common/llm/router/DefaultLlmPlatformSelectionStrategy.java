@@ -1,6 +1,7 @@
 package com.huanjing.geo.common.llm.router;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.huanjing.geo.common.llm.LlmRoutingStrategy;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
@@ -22,9 +23,16 @@ public class DefaultLlmPlatformSelectionStrategy implements LlmPlatformSelection
         List<AiPlatformConfig> configs = request.platformConfigs().isEmpty()
                 ? loadByFeature(request.feature())
                 : request.platformConfigs();
+        if (request.routingStrategy() == LlmRoutingStrategy.PINNED && configs.size() != 1) {
+            throw new IllegalArgumentException("PINNED LLM routing requires exactly one platform config");
+        }
         List<LlmPlatformCandidate> candidates = new ArrayList<>();
         for (AiPlatformConfig config : rotate(configs, request.cursor())) {
             addPrimary(candidates, config);
+            if (request.routingStrategy() == LlmRoutingStrategy.PINNED
+                    || request.routingStrategy() == LlmRoutingStrategy.CANDIDATE_LIST) {
+                continue;
+            }
             addBackupKey(candidates, config);
             addBackupProvider(candidates, config);
         }

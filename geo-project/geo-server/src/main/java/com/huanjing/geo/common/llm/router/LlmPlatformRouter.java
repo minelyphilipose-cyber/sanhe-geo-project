@@ -7,8 +7,12 @@ import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
 import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
 import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
+import com.huanjing.geo.common.llm.measurement.LlmCapacitySignal;
+import com.huanjing.geo.common.llm.measurement.LlmErrorCategory;
+import com.huanjing.geo.common.llm.measurement.LlmMeasurementCollector;
+import com.huanjing.geo.common.llm.measurement.LlmStructuredException;
 import com.huanjing.geo.module.dispatch.service.AiPlatformHealthMonitorService;
-import com.huanjing.geo.module.dispatch.service.PlatformRateLimiterService;
+import com.huanjing.geo.common.llm.limiter.PlatformRateLimiterService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +30,7 @@ public class LlmPlatformRouter {
     private final LlmInvoker llmInvoker;
     private final LlmExecutionGateway executionGateway;
     private final AiPlatformHealthMonitorService platformHealthMonitorService;
+    private final LlmMeasurementCollector measurementCollector;
 
     public LlmRouteResult invoke(LlmRouteRequest request) {
         List<LlmPlatformCandidate> candidates = selectionStrategy.selectCandidates(request);
@@ -41,27 +46,32 @@ public class LlmPlatformRouter {
         Exception lastError = null;
 
         for (LlmPlatformCandidate candidate : candidates) {
+            String breakerKey = breakerKey(request, candidate.platformCode());
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
                 throw new LlmRouteException(LlmRouteFailureKind.INTERRUPTED, "Interrupted during LLM routing",
                         requestCount, lastError);
             }
-            if (!circuitBreakerService.allowRequest(candidate.platformCode())) {
+            if (!circuitBreakerService.allowRequest(breakerKey)) {
                 circuitOpen++;
                 platformHealthMonitorService.recordCircuitOpen(candidate.platformCode(), request.feature());
                 continue;
             }
             requestCount++;
-            try (LlmExecutionPermit ignored = executionGateway.acquire(request.feature(), candidate.platformConfig())) {
+            try (LlmExecutionPermit ignored = request.waitForPermit()
+                    ? executionGateway.acquireBlocking(request.feature(), candidate.platformConfig())
+                    : executionGateway.acquire(request.feature(), candidate.platformConfig())) {
+                recordCapacitySignal(request, candidate, null);
                 AiPlatformConfig config = candidate.platformConfig();
                 if (!platformRateLimiterService.tryAcquire(config, request.tokenCost())) {
                     rateLimited++;
                     requestCount--;
                     platformHealthMonitorService.recordRateLimited(candidate.platformCode(), request.feature());
+                    recordCapacitySignal(request, candidate, LlmErrorCategory.INTERNAL_RATE_LIMITED);
                     continue;
                 }
                 LlmInvokeResult result = llmInvoker.invoke(request.userPrompt(), buildModelConfig(request, candidate));
-                circuitBreakerService.recordSuccess(candidate.platformCode());
+                circuitBreakerService.recordSuccess(breakerKey);
                 return new LlmRouteResult(
                         candidate.platformCode(),
                         candidate.platformName(),
@@ -77,11 +87,13 @@ public class LlmPlatformRouter {
                 permitBusy++;
                 lastError = ex;
                 platformHealthMonitorService.recordPermitBusy(candidate.platformCode(), request.feature());
+                recordCapacitySignal(request, candidate, LlmErrorCategory.PERMIT_BUSY);
                 log.debug("LLM permit busy, feature={}, platform={}, channel={}",
                         request.feature(), candidate.platformCode(), candidate.channel());
             } catch (LlmInvokeException ex) {
                 lastError = ex;
-                circuitBreakerService.recordFailure(candidate.platformCode());
+                recordStructuredInvokeFailure(request, candidate, ex);
+                circuitBreakerService.recordFailure(breakerKey);
                 log.warn("LLM candidate failed, feature={}, platform={}, channel={}, reason={}",
                         request.feature(), candidate.platformCode(), candidate.channel(), ex.getMessage());
             }
@@ -121,6 +133,13 @@ public class LlmPlatformRouter {
         );
     }
 
+    private String breakerKey(LlmRouteRequest request, String platformCode) {
+        if (LlmFeature.BASELINE.equals(request.feature())) {
+            return request.feature() + ":" + platformCode;
+        }
+        return platformCode;
+    }
+
     private LlmRouteFailureKind resolveFailureKind(int total, int rateLimited, int circuitOpen, int permitBusy) {
         if (rateLimited == total) {
             return LlmRouteFailureKind.ALL_RATE_LIMITED;
@@ -141,5 +160,62 @@ public class LlmPlatformRouter {
             return LlmRouteFailureKind.ALL_CIRCUIT_OPEN;
         }
         return LlmRouteFailureKind.ALL_FAILED;
+    }
+
+    private void recordStructuredInvokeFailure(LlmRouteRequest request,
+                                               LlmPlatformCandidate candidate,
+                                               LlmInvokeException ex) {
+        LlmStructuredException structured = findStructured(ex);
+        if (structured != null && structured.errorCategory() != null) {
+            recordCapacitySignal(request, candidate, structured.errorCategory());
+            return;
+        }
+        if (isTimeout(ex)) {
+            recordCapacitySignal(request, candidate, LlmErrorCategory.TIMEOUT);
+        }
+    }
+
+    private LlmStructuredException findStructured(Throwable ex) {
+        Throwable current = ex;
+        while (current != null) {
+            if (current instanceof LlmStructuredException structured) {
+                return structured;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private boolean isTimeout(Throwable ex) {
+        Throwable current = ex;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && message.toLowerCase().contains("timed out")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private void recordCapacitySignal(LlmRouteRequest request,
+                                      LlmPlatformCandidate candidate,
+                                      LlmErrorCategory category) {
+        measurementCollector.recordCapacitySignal(new LlmCapacitySignal(
+                request.measurementContext(),
+                request.feature(),
+                candidate.platformCode(),
+                com.huanjing.geo.common.llm.LlmGovernanceStack.GATEWAY,
+                category,
+                safe(executionGateway.activeGlobalCount()),
+                safe(executionGateway.activeFeatureCount(request.feature())),
+                safe(executionGateway.activePlatformCount(candidate.platformCode())),
+                safe(executionGateway.activeWaiterCount()),
+                0L
+        ));
+    }
+
+    private long safe(Long value) {
+        return value == null ? 0L : value;
     }
 }

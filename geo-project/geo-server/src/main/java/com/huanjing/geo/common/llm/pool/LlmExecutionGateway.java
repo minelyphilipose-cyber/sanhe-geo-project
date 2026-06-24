@@ -25,6 +25,7 @@ public class LlmExecutionGateway {
     private final LeaseRenewalService renewalService;
     private final LlmGatewayMetrics metrics;
     private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicLong blockingWaiters = new java.util.concurrent.atomic.AtomicLong();
     private final String instanceId = resolveInstanceId();
 
     public LlmExecutionPermit acquire(String feature, AiPlatformConfig platformConfig) {
@@ -102,6 +103,18 @@ public class LlmExecutionGateway {
     }
 
     public LlmExecutionPermit acquireBlocking(String feature, AiPlatformConfig platformConfig) {
+        if (properties.isBlockingAcquireFailFastEnabledFor(feature)) {
+            return acquire(feature, platformConfig);
+        }
+        blockingWaiters.incrementAndGet();
+        try {
+            return acquireBlockingInternal(feature, platformConfig);
+        } finally {
+            blockingWaiters.decrementAndGet();
+        }
+    }
+
+    private LlmExecutionPermit acquireBlockingInternal(String feature, AiPlatformConfig platformConfig) {
         long waitTimeoutMs = Math.max(0L, properties.getPermitWaitTimeoutMs());
         long retryIntervalMs = Math.max(10L, properties.getPermitRetryIntervalMs());
         long deadline = System.currentTimeMillis() + waitTimeoutMs;
@@ -163,6 +176,10 @@ public class LlmExecutionGateway {
                 counts.put(feature, activeFeatureCount(feature))
         );
         return counts;
+    }
+
+    public Long activeWaiterCount() {
+        return blockingWaiters.get();
     }
 
     @PreDestroy

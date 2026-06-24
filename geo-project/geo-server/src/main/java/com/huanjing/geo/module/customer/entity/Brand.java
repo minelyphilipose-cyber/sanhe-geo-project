@@ -97,6 +97,10 @@ public class Brand {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String geoSiteStatus;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String geoSiteName;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String geoSiteDomain;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String industrySiteName;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String industrySiteCode;

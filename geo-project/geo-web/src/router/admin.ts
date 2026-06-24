@@ -121,6 +121,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '基线检测报告', hidden: true, permissions: ['project.read'] },
     },
     {
+      path: 'projects/:id/mobile-dashboard',
+      name: 'ProjectMobileDashboardAdmin',
+      component: () => import('@/views/admin/project/MobileDashboardAdmin.vue'),
+      meta: { title: '移动数据看板', hidden: true, permissions: ['project.read'] },
+    },
+    {
       path: 'projects/:id/review',
       name: 'ReviewPanel',
       component: () => import('@/views/admin/project/ReviewPanel.vue'),

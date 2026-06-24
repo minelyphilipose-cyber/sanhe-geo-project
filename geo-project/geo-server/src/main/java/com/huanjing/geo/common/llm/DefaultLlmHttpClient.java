@@ -16,6 +16,6 @@ public class DefaultLlmHttpClient implements LlmHttpClient {
         HttpClientUtil.HttpResult response = HttpClientUtil.postJson(
                 url, headers, body, connectTimeoutMs, requestTimeoutMs
         );
-        return new HttpResponse(response.statusCode(), response.body());
+        return new HttpResponse(response.statusCode(), response.body(), response.headers());
     }
 }

@@ -27,7 +27,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class PublicDashboardRateLimitFilter extends OncePerRequestFilter {
 
-    private static final String PATH_PREFIX = "/api/public/dashboard/";
+    private static final List<String> PATH_PREFIXES = List.of(
+            "/api/public/dashboard/",
+            "/api/public/mobile-dashboard/"
+    );
     private static final int LIMIT_PER_MINUTE = 30;
     private static final DateTimeFormatter WINDOW_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
     private static final DefaultRedisScript<Long> LIMIT_SCRIPT = new DefaultRedisScript<>(
@@ -49,7 +52,8 @@ public class PublicDashboardRateLimitFilter extends OncePerRequestFilter {
         if (HttpMethod.OPTIONS.matches(request.getMethod())) {
             return true;
         }
-        return !request.getRequestURI().startsWith(PATH_PREFIX);
+        String uri = request.getRequestURI();
+        return PATH_PREFIXES.stream().noneMatch(uri::startsWith);
     }
 
     @Override
