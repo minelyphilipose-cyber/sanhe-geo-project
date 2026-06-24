@@ -217,16 +217,11 @@ public class KeywordGroupService {
     public void delete(Long id) {
         currentUserService.ensurePermission("keyword_group.write");
         KeywordGroup group = requireGroup(id);
-        if (group.getProjectId() != null) {
-            Project project = requireProject(group.getProjectId());
-            if (!isProjectPrepareStatus(project.getStatus())) {
-                throw new BizException(400, "项目已启动，不能删除拓词组");
-            }
-        }
-        keywordGroupResultMapper.delete(new LambdaQueryWrapper<KeywordGroupResult>().eq(KeywordGroupResult::getGroupId, id));
-        keywordGroupWordMapper.delete(new LambdaQueryWrapper<KeywordGroupWord>().eq(KeywordGroupWord::getGroupId, id));
         projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>().eq(ProjectKeywordGroupRel::getKeywordGroupId, id));
-        keywordGroupMapper.deleteById(group.getId());
+        group.setDeleted(true);
+        group.setName(deletedGroupName(group));
+        group.setUpdatedAt(LocalDateTime.now());
+        keywordGroupMapper.updateById(group);
     }
 
     @Transactional
@@ -1418,6 +1413,13 @@ public class KeywordGroupService {
 
     private String normalizeNullable(String raw) {
         return StringUtils.hasText(raw) ? raw.trim() : null;
+    }
+
+    private String deletedGroupName(KeywordGroup group) {
+        String suffix = "_deleted_" + group.getId();
+        String name = StringUtils.hasText(group.getName()) ? group.getName().trim() : "keyword_group";
+        int maxPrefixLength = Math.max(0, 64 - suffix.length());
+        return name.substring(0, Math.min(name.length(), maxPrefixLength)) + suffix;
     }
 
     private void ensureNameUnique(Long companyId, String name, Long excludeId) {

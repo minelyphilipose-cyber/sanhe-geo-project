@@ -47,16 +47,19 @@ public class DispatchPollShardPersistenceService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PollResult upsertPollResultAndMarkItem(PollResult result, PollBatchShardItem item) {
-        PollResult existing = pollResultMapper.selectOne(
-                new LambdaQueryWrapper<PollResult>()
-                        .eq(PollResult::getProjectId, result.getProjectId())
-                        .eq(PollResult::getPlatformId, result.getPlatformId())
-                        .eq(PollResult::getBatchDate, result.getBatchDate())
-                        .eq(PollResult::getBatchNo, result.getBatchNo())
-                        .eq(PollResult::getQuestionTier, result.getQuestionTier())
-                        .eq(PollResult::getKeywordResultId, result.getKeywordResultId())
-                        .last("LIMIT 1")
-        );
+        LambdaQueryWrapper<PollResult> wrapper = new LambdaQueryWrapper<PollResult>()
+                .eq(PollResult::getProjectId, result.getProjectId())
+                .eq(PollResult::getPlatformId, result.getPlatformId())
+                .eq(PollResult::getBatchDate, result.getBatchDate())
+                .eq(PollResult::getBatchNo, result.getBatchNo())
+                .eq(PollResult::getQuestionTier, result.getQuestionTier());
+        if (result.getKeywordResultId() == null) {
+            wrapper.isNull(PollResult::getKeywordResultId)
+                    .eq(PollResult::getKeywordTextSnapshot, result.getKeywordTextSnapshot());
+        } else {
+            wrapper.eq(PollResult::getKeywordResultId, result.getKeywordResultId());
+        }
+        PollResult existing = pollResultMapper.selectOne(wrapper.last("LIMIT 1"));
         if (existing == null) {
             pollResultMapper.insert(result);
         } else {
