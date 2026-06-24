@@ -299,6 +299,9 @@ public class CompanyChannelQuotaService {
     public void refundSelfMediaSchedule(Long scheduleId) {
         CompanyChannelQuotaLedger ledger = updateReservedLedger(BIZ_TYPE_SELF_MEDIA_SCHEDULE, scheduleId, "refunded");
         if (ledger == null) {
+            ledger = refundConfirmedLedger(BIZ_TYPE_SELF_MEDIA_SCHEDULE, scheduleId);
+        }
+        if (ledger == null) {
             return;
         }
         releaseUsage(ledger);
@@ -306,16 +309,24 @@ public class CompanyChannelQuotaService {
 
     @Transactional
     public void refundConfirmedDistribution(Long distributionTaskId) {
-        CompanyChannelQuotaLedger ledger = findDistributionLedger(distributionTaskId);
-        if (ledger == null || !"confirmed".equals(ledger.getStatus())) {
+        CompanyChannelQuotaLedger ledger = refundConfirmedLedger(BIZ_TYPE_DISTRIBUTION, distributionTaskId);
+        if (ledger == null) {
             return;
+        }
+        releaseUsage(ledger);
+    }
+
+    private CompanyChannelQuotaLedger refundConfirmedLedger(String bizType, Long bizId) {
+        CompanyChannelQuotaLedger ledger = findLedger(bizType, bizId);
+        if (ledger == null || !"confirmed".equals(ledger.getStatus())) {
+            return null;
         }
         int updated = ledgerMapper.refundConfirmed(ledger.getId(), LocalDateTime.now(BUSINESS_ZONE));
         if (updated != 1) {
-            return;
+            return null;
         }
         ledger.setStatus("refunded");
-        releaseUsage(ledger);
+        return ledger;
     }
 
     public DistributionQuotaView distributionQuota(Long companyId, String targetKind) {
@@ -382,10 +393,6 @@ public class CompanyChannelQuotaService {
             return null;
         }
         return updateLedgerStatusFromReserved(ledger, targetStatus);
-    }
-
-    private CompanyChannelQuotaLedger findDistributionLedger(Long distributionTaskId) {
-        return findLedger(BIZ_TYPE_DISTRIBUTION, distributionTaskId);
     }
 
     private CompanyChannelQuotaLedger updateReservedLedger(String bizType, Long bizId, String targetStatus) {

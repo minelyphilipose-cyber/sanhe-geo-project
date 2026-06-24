@@ -239,4 +239,45 @@ class CompanyChannelQuotaServiceTest {
         verify(usageMapper, times(2)).resetSessionLockWaitTimeout();
         verify(transactionManager, times(2)).getTransaction(any(TransactionDefinition.class));
     }
+
+    @Test
+    void refundSelfMediaScheduleReleasesReservedLedger() {
+        CompanyChannelQuotaLedger ledger = new CompanyChannelQuotaLedger();
+        ledger.setId(501L);
+        ledger.setCompanyId(7L);
+        ledger.setChannelCode("self_media:toutiao");
+        ledger.setPeriodType("month");
+        ledger.setPeriodKey("2026-06");
+        ledger.setStatus("reserved");
+        when(ledgerMapper.selectByBiz("self_media_schedule", "401")).thenReturn(ledger);
+        when(ledgerMapper.updateStatusFromReserved(eq(501L), eq("refunded"), any())).thenReturn(1);
+        when(usageMapper.releaseReserved(eq(7L), eq("self_media:toutiao"), eq("month"), eq("2026-06"))).thenReturn(1);
+
+        service.refundSelfMediaSchedule(401L);
+
+        verify(ledgerMapper).updateStatusFromReserved(eq(501L), eq("refunded"), any());
+        verify(ledgerMapper, never()).refundConfirmed(any(), any());
+        verify(usageMapper).releaseReserved(eq(7L), eq("self_media:toutiao"), eq("month"), eq("2026-06"));
+    }
+
+    @Test
+    void refundSelfMediaScheduleReleasesConfirmedLedger() {
+        CompanyChannelQuotaLedger ledger = new CompanyChannelQuotaLedger();
+        ledger.setId(502L);
+        ledger.setCompanyId(7L);
+        ledger.setChannelCode("self_media:toutiao");
+        ledger.setPeriodType("month");
+        ledger.setPeriodKey("2026-06");
+        ledger.setStatus("confirmed");
+        when(ledgerMapper.selectByBiz("self_media_schedule", "402")).thenReturn(ledger);
+        when(ledgerMapper.updateStatusFromReserved(eq(502L), eq("refunded"), any())).thenReturn(0);
+        when(ledgerMapper.refundConfirmed(eq(502L), any())).thenReturn(1);
+        when(usageMapper.releaseReserved(eq(7L), eq("self_media:toutiao"), eq("month"), eq("2026-06"))).thenReturn(1);
+
+        service.refundSelfMediaSchedule(402L);
+
+        verify(ledgerMapper).updateStatusFromReserved(eq(502L), eq("refunded"), any());
+        verify(ledgerMapper).refundConfirmed(eq(502L), any());
+        verify(usageMapper).releaseReserved(eq(7L), eq("self_media:toutiao"), eq("month"), eq("2026-06"));
+    }
 }

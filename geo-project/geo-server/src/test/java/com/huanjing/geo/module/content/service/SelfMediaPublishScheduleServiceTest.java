@@ -956,6 +956,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_CANCELLED, response.getStatus());
         assertEquals("PLATFORM_CANCEL_CONFIRMED", response.getFailureCode());
         verify(scheduleMapper).updateById(row);
+        verify(companyChannelQuotaService).refundSelfMediaSchedule(92L);
         verify(environmentLockService).release(92L);
     }
 
@@ -988,6 +989,27 @@ class SelfMediaPublishScheduleServiceTest {
         verify(scheduleMapper).updateById(row);
         verify(companyChannelQuotaService).refundSelfMediaSchedule(94L);
         verify(environmentLockService).release(94L);
+    }
+
+    @Test
+    void markClaimedPublishFailedRefundsScheduleQuota() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        row.setId(119L);
+        when(scheduleMapper.selectById(119L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedPublishFailed(
+                119L,
+                "PLATFORM_REJECTED",
+                "平台审核未通过",
+                "{\"status\":\"rejected\"}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED, response.getStatus());
+        assertEquals("PLATFORM_REJECTED", response.getFailureCode());
+        assertEquals("平台审核未通过", response.getFailureMessage());
+        verify(scheduleMapper).updateById(row);
+        verify(companyChannelQuotaService).refundSelfMediaSchedule(119L);
+        verify(environmentLockService).release(119L);
     }
 
     @Test
@@ -1835,7 +1857,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED, response.getStatus());
         assertEquals("platform-schedule-1", response.getPlatformScheduleId());
         assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
-        assertEquals(LocalDateTime.of(2026, 6, 2, 9, 15), response.getNextAttemptAt());
+        assertEquals(LocalDateTime.of(2026, 6, 2, 9, 30), response.getNextAttemptAt());
         verify(scheduleMapper).updateById(scheduling);
         verify(companyChannelQuotaService).confirmDistribution(302L);
         verify(environmentLockService).release(102L);
@@ -1889,13 +1911,13 @@ class SelfMediaPublishScheduleServiceTest {
         when(scheduleMapper.selectById(102L)).thenReturn(scheduling);
         SelfMediaPublishSchedule occupied = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         occupied.setId(201L);
-        occupied.setNextAttemptAt(LocalDateTime.of(2026, 6, 2, 9, 15));
+        occupied.setNextAttemptAt(LocalDateTime.of(2026, 6, 2, 9, 30));
         when(scheduleMapper.selectBrandActiveScheduleSlots(eq(8L), any(), any(), anyList()))
                 .thenReturn(List.of(occupied));
 
         SelfMediaPublishScheduleVO response = service.markClaimedScheduled(102L, "platform-schedule-1", "{\"ok\":true}");
 
-        assertEquals(LocalDateTime.of(2026, 6, 2, 9, 18), response.getNextAttemptAt());
+        assertEquals(LocalDateTime.of(2026, 6, 2, 9, 33), response.getNextAttemptAt());
         verify(scheduleMapper).updateById(scheduling);
     }
 
