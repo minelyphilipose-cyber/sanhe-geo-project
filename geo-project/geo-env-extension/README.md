@@ -25,7 +25,7 @@ D:\code\sanhe-geo-project\geo-project\geo-env-extension
 
 打开扩展弹窗，填写：
 
-- 后台地址：生产环境填 `http://119.45.154.127`；本地联调必须填当前本地后端地址，例如 `http://127.0.0.1:8080`
+- 后台地址：生产环境填 `https://www.huanjingaigeo.com`；本地联调必须填当前本地后端地址，例如 `http://127.0.0.1:8080`
 - 本地助手地址：`http://127.0.0.1:17891`
 - 本地助手 Token：PoC 兜底字段，可留空。扩展绑定后台且本地助手完成 C2 配对后，会优先使用后台签发的 `helper.session.{sessionId}` + HMAC 签名访问本地助手。
 - 环境标识：例如 `geo_b`

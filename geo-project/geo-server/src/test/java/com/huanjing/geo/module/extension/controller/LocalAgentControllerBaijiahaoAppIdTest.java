@@ -50,6 +50,22 @@ class LocalAgentControllerBaijiahaoAppIdTest {
         assertNull(defaultWorksListUrl(account));
     }
 
+    @Test
+    void defaultPublishUrlUsesDouyinCreatorUploadPage() throws Exception {
+        assertEquals(
+                "https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page",
+                defaultPublishUrl("douyin")
+        );
+    }
+
+    @Test
+    void defaultWorksListUrlUsesDouyinCreatorManagePage() throws Exception {
+        assertEquals(
+                "https://creator.douyin.com/creator-micro/content/manage?enter_from=publish",
+                defaultWorksListUrl("douyin")
+        );
+    }
+
     private String defaultWorksListUrl(SelfMediaAccount account) throws Exception {
         Method method = LocalAgentController.class.getDeclaredMethod(
                 "defaultWorksListUrl",
@@ -58,5 +74,17 @@ class LocalAgentControllerBaijiahaoAppIdTest {
         );
         method.setAccessible(true);
         return (String) method.invoke(controller, "baijiahao", account);
+    }
+
+    private String defaultPublishUrl(String platform) throws Exception {
+        Method method = LocalAgentController.class.getDeclaredMethod("defaultPublishUrl", String.class);
+        method.setAccessible(true);
+        return (String) method.invoke(controller, platform);
+    }
+
+    private String defaultWorksListUrl(String platform) throws Exception {
+        Method method = LocalAgentController.class.getDeclaredMethod("defaultWorksListUrl", String.class);
+        method.setAccessible(true);
+        return (String) method.invoke(controller, platform);
     }
 }

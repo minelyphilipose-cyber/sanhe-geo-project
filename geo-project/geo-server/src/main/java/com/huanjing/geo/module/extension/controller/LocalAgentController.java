@@ -349,6 +349,9 @@ public class LocalAgentController {
         if ("baijiahao".equalsIgnoreCase(platform)) {
             return "https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1";
         }
+        if ("douyin".equalsIgnoreCase(platform)) {
+            return "https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page";
+        }
         if (StringUtils.hasText(platform)) {
             try {
                 return semiAutoPlatformProperties.profile(platform.toLowerCase()).publishUrl();
@@ -365,6 +368,9 @@ public class LocalAgentController {
         }
         if ("xiaohongshu".equalsIgnoreCase(platform)) {
             return "https://creator.xiaohongshu.com/new/note-manager";
+        }
+        if ("douyin".equalsIgnoreCase(platform)) {
+            return "https://creator.douyin.com/creator-micro/content/manage?enter_from=publish";
         }
         if ("baijiahao".equalsIgnoreCase(platform)) {
             return null;

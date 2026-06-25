@@ -1124,8 +1124,19 @@ function canRecheck(row: SelfMediaPublishSchedule) {
 function canRetryNow(row: SelfMediaPublishSchedule | null) {
   if (!props.canPublish || !row) return false
   if (['cancelled', 'published_confirmed', 'cancel_pending_platform', 'routed_to_semi_auto'].includes(row.status)) return false
+  if (hasPendingRetryRequest(row) || isLocked(row)) return false
   if (row.queueKind === 'publish_result_check') return ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed', 'manual_required'].includes(row.status)
-  return ['pending', 'filling', 'filled_verified', 'scheduling', 'schedule_failed', 'manual_required'].includes(row.status) && !isLocked(row)
+  return ['pending', 'filling', 'filled_verified', 'scheduling', 'schedule_failed', 'manual_required'].includes(row.status)
+}
+
+function hasPendingRetryRequest(row: SelfMediaPublishSchedule | null) {
+  if (!row) return false
+  const text = `${row.failureCode || ''} ${row.failureMessage || ''} ${row.status || ''}`.toLowerCase()
+  return text.includes('retry_requested')
+    || text.includes('requested immediate retry')
+    || text.includes('立即重试')
+    || text.includes('已请求')
+    || text.includes('重试中')
 }
 
 function isMaterialFailure(row: SelfMediaPublishSchedule | null) {

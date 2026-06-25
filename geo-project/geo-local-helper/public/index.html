@@ -70,7 +70,7 @@
       }
       .status {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 10px;
       }
       .status-item {
@@ -116,6 +116,10 @@
           <div class="status-item">
             <span class="status-label">配对状态</span>
             <span id="pairingState" class="status-value">-</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">会话 / 操作员</span>
+            <span id="sessionState" class="status-value">-</span>
           </div>
           <div class="status-item">
             <span class="status-label">AdsPower</span>
@@ -196,11 +200,13 @@
         const result = await c2Request('/health')
         $('serviceVersion').textContent = result.version || '-'
         $('pairingState').textContent = result.paired ? '已配对' : '未配对'
+        $('sessionState').textContent = formatSession(result.session)
         $('adspowerState').textContent = result.adspower?.apiKeyConfigured ? '已配置 API Key' : '未配置 API Key'
         appendLog({
           service: result.service,
           version: result.version,
           paired: result.paired,
+          session: result.session,
           runtime: result.runtime,
           schedulePoll: result.schedulePoll,
           config: {
@@ -209,6 +215,13 @@
           }
         })
         return result
+      }
+
+      function formatSession(session) {
+        if (!session?.sessionId) return '-'
+        const values = [`sessionId=${session.sessionId}`]
+        if (session.operatorId) values.push(`operatorId=${session.operatorId}`)
+        return values.join(' / ')
       }
 
       async function loadAdspowerSettings() {

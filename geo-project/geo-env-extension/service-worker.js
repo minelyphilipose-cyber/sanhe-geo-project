@@ -1,10 +1,11 @@
 importScripts('fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.1.3'
+const EXTENSION_VERSION = '0.1.5'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
 const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 'baijiahao', 'douyin'])
 const autoLoginReportAtByKey = new Map()
+const autoPollTabUpdatedAtByKey = new Map()
 const bindIntentInFlight = new Set()
 const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
 
@@ -821,8 +822,7 @@ async function handleTask(config, session, task, options = {}) {
   payload.precheckedIdentity = precheckedIdentity || null
 
   const tab = await resolveFillTab(options.identityTabId, task.platform, payload.publishUrl)
-  await waitForTabComplete(tab.id, 30_000)
-  await waitForContentScript(tab.id, 8, 500)
+  await waitForFillContentScriptReady(tab.id, 30_000)
   let fillResult
   try {
     const fillResponse = await sendFillMessageOnce(tab.id, {
@@ -897,7 +897,7 @@ async function recoverPublishAfterFillError(tabId, task, payload, error) {
 
 async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payload, error) {
   const message = error?.message || String(error || '')
-  if (normalizePlatform(task?.platform || payload?.platform) !== 'douyin' || !isMessageChannelClosedError(message)) {
+  if (normalizePlatform(task?.platform || payload?.platform) !== 'douyin' || !isRecoverableDouyinPublishVerifyError(error, message)) {
     throw error
   }
   const context = buildDouyinManageVerifyContext(payload)
@@ -929,6 +929,14 @@ async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payloa
     }
   }
   throw error
+}
+
+function isRecoverableDouyinPublishVerifyError(error, message) {
+  const text = String(message || '')
+  return isMessageChannelClosedError(text)
+    || isWorksListVerifyTimeout(error, text)
+    || text.includes('页面填充执行超时')
+    || (text.includes('抖音发布后未检测到成功状态') && text.includes('作品管理'))
 }
 
 async function recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload, error) {
@@ -1404,6 +1412,8 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
     return {
       verified: true,
       pageUrl: publishedUrl,
+      platformPublishedUrl: publishedUrl,
+      publishedUrl,
       pageTitle,
       expectedTitle: context.expectedTitle || '',
       titleMatch: matchZhihuPublishedTitle(context.expectedTitle || '', pageTitle, ''),
@@ -1535,6 +1545,8 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
     return {
       verified: true,
       pageUrl: normalizeZhihuPublishedUrl(result.href || url),
+      platformPublishedUrl: normalizeZhihuPublishedUrl(result.href || url),
+      publishedUrl: normalizeZhihuPublishedUrl(result.href || url),
       pageTitle: result.title || tab?.title || '',
       expectedTitle: result.expectedTitle || context.expectedTitle || '',
       titleMatch: result.titleMatch || null,
@@ -2176,6 +2188,22 @@ async function waitForContentScript(tabId, attempts, delayMs) {
   throw lastError || new Error('页面脚本未就绪')
 }
 
+async function waitForFillContentScriptReady(tabId, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs
+  let lastError = null
+  while (Date.now() < deadline) {
+    try {
+      await ensureContentScript(tabId)
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' })
+      if (response?.ok) return response
+    } catch (error) {
+      lastError = error
+    }
+    await delay(400)
+  }
+  throw lastError || new Error('页面脚本未就绪')
+}
+
 async function sendFillMessageOnce(tabId, message) {
   const response = await withTimeout(
     chrome.tabs.sendMessage(tabId, message),
@@ -2304,6 +2332,7 @@ async function setFileInputFromUrl(tabId, urlValue, options = {}) {
       taskId: options.taskId || null,
       environmentKey: options.environmentKey || config.environmentKey,
       platform,
+      targetPageUrl: tab.url,
     }),
   }, session)
   if (!uploaded?.ok) throw new Error(`本地助手未完成${platformDisplayName(platform)}文件上传`)
@@ -2318,20 +2347,72 @@ async function setFileInputFromUrl(tabId, urlValue, options = {}) {
   }
 }
 
-async function setFileInputFromUrlByDebugger(tabId, urlValue, options, config, session) {
-  const image = await helperRequest(config, '/v1/extension/files/download-image', {
-    method: 'POST',
-    body: JSON.stringify({
-      url: urlValue,
-      backendBase: config.apiBase,
-    }),
-  }, session)
-  if (!image?.filePath) throw new Error('本地助手未返回图片临时文件路径')
-  const clicks = await findDouyinUploadClickPoints(tabId)
-  const fallbackClick = options.click?.clientX != null && options.click?.clientY != null ? options.click : null
-  const clickCandidates = clicks.length ? clicks : (fallbackClick ? [fallbackClick] : [])
-  if (!clickCandidates.length) throw new Error('抖音文章头图上传入口坐标未找到')
-  return setFileInputByFileChooserClick(tabId, image.filePath, clickCandidates)
+async function setBaijiahaoUeditorContentInMainWorld(tabId, message = {}) {
+  if (!tabId) throw new Error('百家号正文写入缺少 tabId')
+  const frameId = String(message.frameId || 'ueditor_0')
+  const instantId = String(message.instantId || '')
+  const html = String(message.html || '')
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    args: [frameId, instantId, html],
+    func: (targetFrameId, targetInstantId, contentHtml) => {
+      function pickEditor() {
+        const candidates = [
+          window.UE_V2?.getEditor?.(targetFrameId),
+          window.UE_V2?.instants?.[targetFrameId],
+          window.UE_V2?.instances?.[targetFrameId],
+          targetInstantId ? window.UE_V2?.instants?.[targetInstantId] : null,
+          targetInstantId ? window.UE_V2?.instances?.[targetInstantId] : null,
+          window.UE?.getEditor?.(targetFrameId),
+          window.UE?.instants?.[targetFrameId],
+          window.UE?.instances?.[targetFrameId],
+        ]
+        return candidates.find((item) => item && typeof item.setContent === 'function') || null
+      }
+      const editor = pickEditor()
+      if (editor) {
+        editor.setContent(contentHtml)
+        editor.sync?.()
+        editor.fireEvent?.('contentchange')
+        editor.fireEvent?.('selectionchange')
+      }
+      const frame = document.getElementById(targetFrameId)
+      const doc = frame?.contentDocument || frame?.contentWindow?.document || null
+      const body = doc?.body || null
+      if (body) {
+        if (!String(body.innerText || body.textContent || '').trim()) {
+          try {
+            body.focus?.()
+            const selection = frame.contentWindow?.getSelection?.()
+            const range = doc.createRange()
+            range.selectNodeContents(body)
+            selection?.removeAllRanges()
+            selection?.addRange(range)
+            doc.execCommand?.('delete', false)
+            doc.execCommand?.('insertHTML', false, contentHtml)
+          } catch (_) {
+            // Fall back to direct DOM assignment below.
+          }
+        }
+        body.innerHTML = contentHtml
+        const EventCtor = frame.contentWindow?.Event || Event
+        const InputEventCtor = frame.contentWindow?.InputEvent || InputEvent
+        body.dispatchEvent(new InputEventCtor('input', { bubbles: true, inputType: 'insertHTML' }))
+        body.dispatchEvent(new InputEventCtor('beforeinput', { bubbles: true, inputType: 'insertHTML' }))
+        body.dispatchEvent(new EventCtor('change', { bubbles: true }))
+        body.dispatchEvent(new EventCtor('blur', { bubbles: true }))
+      }
+      editor?.sync?.()
+      return {
+        ok: Boolean(editor || body),
+        editorFound: Boolean(editor),
+        bodyFound: Boolean(body),
+        bodyText: String(body?.innerText || body?.textContent || '').slice(0, 200),
+      }
+    },
+  })
+  return result?.result || { ok: false, editorFound: false, bodyFound: false, bodyText: '' }
 }
 
 async function findDouyinUploadClickPoints(tabId) {
@@ -2458,6 +2539,224 @@ async function setFileInputByFileChooserClick(tabId, filePath, clickCandidates) 
   } finally {
     await chrome.debugger.detach(target).catch(() => {})
   }
+}
+
+async function setPlatformImageInputInCurrentTab(tabId, filePath, platform, options = {}) {
+  const target = { tabId }
+  await chrome.debugger.attach(target, '1.3')
+  try {
+    await chrome.debugger.sendCommand(target, 'Page.enable').catch(() => {})
+    await chrome.debugger.sendCommand(target, 'DOM.enable').catch(() => {})
+    await chrome.debugger.sendCommand(target, 'Runtime.enable').catch(() => {})
+
+    const direct = await waitForPlatformImageInput(target, filePath, platform, 'initial', 1200)
+    if (direct) return direct
+
+    const clickCandidates = await findPlatformUploadClickPoints(tabId, platform)
+    const fallbackClick = options.click?.clientX != null && options.click?.clientY != null ? options.click : null
+    const attempts = clickCandidates.length ? clickCandidates : (fallbackClick ? [fallbackClick] : [])
+    const tried = []
+
+    for (const click of attempts.slice(0, 8)) {
+      tried.push(click)
+      await dispatchDebuggerClick(target, click)
+      const afterClick = await waitForPlatformImageInput(target, filePath, platform, `after_click_${click.pointLabel || 'point'}`, 3000)
+      if (afterClick) return { ...afterClick, chooserTried: tried }
+    }
+
+    const diagnostics = await describePlatformFileInputs(target, platform)
+    throw new Error(`${platformDisplayName(platform)} image file input not found; diagnostics=${JSON.stringify({
+      platform,
+      strategy: `${platform || 'platform'}_exact_tab_upload`,
+      pageUrl: (await chrome.tabs.get(tabId).catch(() => null))?.url || '',
+      fileInputCount: diagnostics.length,
+      chooserTried: tried,
+      inputs: diagnostics.slice(0, 8),
+    }).slice(0, 1200)}`)
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {})
+  }
+}
+
+async function waitForPlatformImageInput(target, filePath, platform, stage, timeoutMs) {
+  const startedAt = Date.now()
+  let last = null
+  while (Date.now() - startedAt < timeoutMs) {
+    last = await setPlatformImageInputIfAvailable(target, filePath, platform, stage).catch(() => null)
+    if (last) return last
+    await delay(250)
+  }
+  return null
+}
+
+async function setPlatformImageInputIfAvailable(target, filePath, platform, stage) {
+  const documentResult = await chrome.debugger.sendCommand(target, 'DOM.getDocument', { depth: -1, pierce: true }).catch(() => null)
+  const rootNodeId = documentResult?.root?.nodeId
+  if (!rootNodeId) return null
+  const query = await chrome.debugger.sendCommand(target, 'DOM.querySelectorAll', {
+    nodeId: rootNodeId,
+    selector: 'input[type="file"]',
+  }).catch(() => null)
+  const nodeIds = Array.isArray(query?.nodeIds) ? query.nodeIds : []
+  const chosen = await choosePlatformImageInputNode(target, nodeIds, platform)
+  if (!chosen?.nodeId) return null
+  await chrome.debugger.sendCommand(target, 'DOM.setFileInputFiles', {
+    nodeId: chosen.nodeId,
+    files: [filePath],
+  })
+  const inputState = await dispatchFileInputEvents(target, chosen.nodeId)
+  return {
+    pageUrl: (await chrome.tabs.get(target.tabId).catch(() => null))?.url || '',
+    fileInputCount: nodeIds.length,
+    inputState,
+    chosenInput: chosen.diagnostic,
+    via: `debugger_exact_tab_input_${stage}`,
+  }
+}
+
+async function choosePlatformImageInputNode(target, nodeIds, platform) {
+  const candidates = []
+  for (const nodeId of nodeIds) {
+    const described = await chrome.debugger.sendCommand(target, 'DOM.describeNode', { nodeId }).catch(() => null)
+    const attrs = attributesToObject(described?.node?.attributes || [])
+    const context = await describeFileInputContext(target, nodeId)
+    const diagnostic = { attrs, context }
+    const score = scorePlatformImageFileInput(attrs, context, platform)
+    if (score > 0) candidates.push({ nodeId, score, diagnostic })
+  }
+  candidates.sort((left, right) => right.score - left.score)
+  return candidates[0] || null
+}
+
+function scorePlatformImageFileInput(attrs, context, platform) {
+  const normalizedPlatform = normalizePlatform(platform)
+  const descriptor = `${attrs.accept || ''} ${attrs.id || ''} ${attrs.name || ''} ${attrs.class || ''} ${context?.contextText || ''}`.toLowerCase()
+  let score = 0
+  if (/(image|jpg|jpeg|png|webp|gif|jfif)/.test(descriptor)) score += 100
+  if (/视频|video|mp4|mov|avi|mkv|webm|mpeg|ogg|flv|vob|rmvb/.test(descriptor)) score -= 260
+  if (/头像|avatar|logo|账号|profile/.test(descriptor)) score -= 120
+  if (normalizedPlatform === 'baijiahao') {
+    if (/media|cheetah-upload|本地上传|点击本地上传|正文\/本地上传|设置封面|封面预览|支持jpg|支持png/.test(descriptor)) score += 180
+    if (/ai封图|免费正版图库/.test(descriptor)) score -= 30
+  } else if (normalizedPlatform === 'zhihu') {
+    if (/添加文章封面|添加封面|上传封面|图片上传格式|jpeg|jpg|png/.test(descriptor)) score += 180
+  }
+  if (context?.visible) score += 5
+  return score
+}
+
+async function describePlatformFileInputs(target, platform) {
+  const documentResult = await chrome.debugger.sendCommand(target, 'DOM.getDocument', { depth: -1, pierce: true }).catch(() => null)
+  const rootNodeId = documentResult?.root?.nodeId
+  if (!rootNodeId) return []
+  const query = await chrome.debugger.sendCommand(target, 'DOM.querySelectorAll', {
+    nodeId: rootNodeId,
+    selector: 'input[type="file"]',
+  }).catch(() => null)
+  const nodeIds = Array.isArray(query?.nodeIds) ? query.nodeIds : []
+  const result = []
+  for (const nodeId of nodeIds.slice(0, 12)) {
+    const described = await chrome.debugger.sendCommand(target, 'DOM.describeNode', { nodeId }).catch(() => null)
+    const attrs = attributesToObject(described?.node?.attributes || [])
+    const context = await describeFileInputContext(target, nodeId)
+    result.push({
+      accept: attrs.accept || '',
+      id: attrs.id || '',
+      name: attrs.name || '',
+      class: attrs.class || '',
+      visible: Boolean(context?.visible),
+      contextText: String(context?.contextText || '').slice(0, 220),
+      score: scorePlatformImageFileInput(attrs, context, platform),
+    })
+  }
+  return result
+}
+
+async function findPlatformUploadClickPoints(tabId, platform) {
+  const result = await chrome.scripting.executeScript({
+    target: { tabId },
+    args: [normalizePlatform(platform)],
+    func: (platform) => {
+      function visible(el) {
+        if (!el || !el.getBoundingClientRect) return false
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+      }
+      function normalize(text) {
+        return String(text || '').replace(/\s+/g, '')
+      }
+      function contextText(el) {
+        const parts = []
+        let current = el
+        for (let depth = 0; current && depth < 7; depth += 1) {
+          parts.push(normalize(current.textContent))
+          parts.push(normalize(current.className))
+          current = current.parentElement
+        }
+        return parts.join('')
+      }
+      function scoreCandidate(el, text) {
+        const context = contextText(el)
+        let score = 0
+        if (platform === 'baijiahao') {
+          if (text.includes('点击本地上传') || text.includes('本地上传')) score += 140
+          if (context.includes('正文/本地上传') || context.includes('设置封面')) score += 160
+          if (context.includes('AI封图') || context.includes('免费正版图库')) score -= 40
+        } else if (platform === 'zhihu') {
+          if (text.includes('添加文章封面') || text.includes('添加封面') || text.includes('上传封面')) score += 180
+          if (context.includes('发布设置') || context.includes('图片上传格式')) score += 120
+        }
+        return score
+      }
+      function pointFromRect(rect, label, score, text, clickableText) {
+        if (!rect || rect.width <= 0 || rect.height <= 0) return null
+        const clientX = Math.round(rect.left + rect.width / 2)
+        const clientY = Math.round(rect.top + rect.height / 2)
+        const screenOffsetX = window.screenX + Math.round((window.outerWidth - window.innerWidth) / 2)
+        const screenOffsetY = window.screenY + Math.round(window.outerHeight - window.innerHeight)
+        return {
+          score,
+          text,
+          clickableText,
+          pointLabel: label,
+          clientX,
+          clientY,
+          screenX: screenOffsetX + clientX,
+          screenY: screenOffsetY + clientY,
+        }
+      }
+      const candidates = Array.from(document.querySelectorAll('button, [role="button"], label, div, span'))
+        .filter(visible)
+        .flatMap((el) => {
+          const text = normalize(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title'))
+          const score = scoreCandidate(el, text)
+          if (score <= 0) return []
+          const clickable = el.closest('button, label, [role="button"], [class*="upload"], [class*="cover"], [class*="Cover"]') || el
+          if (!visible(clickable)) return []
+          const rect = clickable.getBoundingClientRect()
+          const clickableText = normalize(clickable.textContent).slice(0, 120)
+          return [
+            pointFromRect(rect, 'platform_upload_center', score + 10, text, clickableText),
+            pointFromRect({
+              left: rect.left + Math.min(48, Math.max(12, rect.width * 0.12)),
+              top: rect.top,
+              width: 4,
+              height: rect.height,
+            }, 'platform_upload_left', score + 5, text, clickableText),
+          ].filter(Boolean)
+        })
+        .sort((left, right) => right.score - left.score)
+      const seen = new Set()
+      return candidates.filter((item) => {
+        const key = `${item.clientX},${item.clientY}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      }).slice(0, 10)
+    },
+  }).catch(() => null)
+  return Array.isArray(result?.[0]?.result) ? result[0].result : []
 }
 
 async function waitForDouyinArticleImageInput(target, filePath, stage, timeoutMs) {
@@ -2911,6 +3210,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         click: message.click || null,
       })
     }
+    if (message?.type === 'GEO_ENV_SET_BAIJIAHAO_UEDITOR_CONTENT') {
+      const result = await setBaijiahaoUeditorContentInMainWorld(sender.tab?.id || null, message)
+      return { ok: Boolean(result?.ok), result }
+    }
     if (message?.type === 'GEO_ENV_FETCH_IMAGE_DATA_URL') {
       const result = await fetchImageDataUrl(message.url)
       return { ok: true, result }
@@ -2930,6 +3233,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   const url = changeInfo.url || tab?.url || ''
-  if (!url || !url.includes('geoEnvBindIntent=')) return
-  bindFromTabUrl(tabId, url)
+  if (url && url.includes('geoEnvBindIntent=')) {
+    bindFromTabUrl(tabId, url)
+    return
+  }
+  if (changeInfo.status !== 'complete') return
+  const readyUrl = tab?.url || url
+  if (!isAutoPollReadyUrl(readyUrl)) return
+  triggerAutoPollFromTabComplete(tabId, readyUrl)
 })
+
+function triggerAutoPollFromTabComplete(tabId, urlValue) {
+  const platform = inferPlatformFromUrl(urlValue)
+  const key = `${tabId}:${platform || 'unknown'}`
+  const now = Date.now()
+  if (now - (autoPollTabUpdatedAtByKey.get(key) || 0) < 12_000) return
+  autoPollTabUpdatedAtByKey.set(key, now)
+  setTimeout(async () => {
+    try {
+      await ensureContentScript(tabId)
+      await autoPollOnce(`tab_complete:${platform || 'unknown'}`, tabId)
+    } catch (error) {
+      await appendEventLog({
+        type: 'auto_fill',
+        ok: false,
+        reason: 'tab_complete',
+        platform,
+        error: error.message,
+      })
+    }
+  }, 600)
+}

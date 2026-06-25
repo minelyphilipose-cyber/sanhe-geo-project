@@ -17,9 +17,13 @@ export function evaluateXiaohongshuPublishSignals(target = {}, pageState = {}, o
   const hasRejectedSignal = /审核未通过|未通过|审核失败|发布失败|不通过/.test(targetTextWindow)
   const hasPublishedSignal = /发布成功|已发布/.test(targetTextWindow)
     || /\/explore\/|\/discovery\/item\//.test(url)
+  const currentPublishedUrl = /xiaohongshu\.com\/(explore|discovery\/item)\//.test(url) ? url : ''
 
   const matchedUrl = Array.isArray(pageState.anchors)
-    ? pageState.anchors.find((item) => normalizeCompact(item.text).includes(titleProbe))?.href || ''
+    ? pageState.anchors.find((item) => {
+        const href = String(item.href || '')
+        return normalizeCompact(item.text).includes(titleProbe) && /xiaohongshu\.com\/(explore|discovery\/item)\//.test(href)
+      })?.href || ''
     : ''
   const pendingScheduled = hasTitle && isBeforeScheduledAt && (hasScheduleTime || hasScheduledSignal || isNoteManager)
   const hasPublishedCard = hasTitle
@@ -54,7 +58,7 @@ export function evaluateXiaohongshuPublishSignals(target = {}, pageState = {}, o
     platformScheduledAt: target.platformScheduledAt || '',
     scheduleProbe,
     url,
-    platformPublishedUrl: '',
+    platformPublishedUrl: found ? (matchedUrl || currentPublishedUrl) : '',
     pageTitle: pageState.pageTitle || '',
     matchedText: targetTextWindow.slice(0, 300),
     textSample: text.slice(0, 1200),
@@ -78,12 +82,12 @@ export function evaluateBaijiahaoPublishSignals(target = {}, pageState = {}, opt
         return normalizeCompact(item.text).includes(titleProbe) && /baijiahao\.baidu\.com\/s\?id=/.test(href)
       })?.href || ''
     : ''
-  const hasRejectedSignal = /审核未通过|未通过|审核失败|发布失败|不通过/.test(text)
-  const hasWithdrawnSignal = /已撤回|已删除|已下线|已撤销/.test(text)
-  const hasReviewSignal = /审核中|待审核|提交成功|已提交/.test(text)
-  const hasScheduledSignal = /预计\d{4}[-年]\d{1,2}[-月]\d{1,2}|预计\s*\d{4}|定时发布|发布时间|待发布|将于/.test(text)
   const titleIndex = titleProbe ? normalizedText.indexOf(titleProbe) : -1
   const targetTextWindow = titleIndex >= 0 ? normalizedText.slice(titleIndex, titleIndex + 240) : ''
+  const hasRejectedSignal = /审核未通过|未通过|审核失败|发布失败|不通过/.test(targetTextWindow)
+  const hasWithdrawnSignal = /已撤回|已删除|已下线|已撤销/.test(targetTextWindow)
+  const hasReviewSignal = /审核中|待审核|提交成功|已提交/.test(targetTextWindow)
+  const hasScheduledSignal = /预计\d{4}[-年]\d{1,2}[-月]\d{1,2}|预计\s*\d{4}|定时发布|发布时间|待发布|将于/.test(targetTextWindow)
   const hasPublishedNearTitle = /已发布|已推荐|发布成功/.test(targetTextWindow)
   const hasPublishedSignal = hasPublishedNearTitle || /已发布|已推荐|发布成功/.test(text)
   const platformScheduledText = extractBaijiahaoScheduledText(text)
@@ -141,6 +145,7 @@ export function evaluateBaijiahaoPublishSignals(target = {}, pageState = {}, opt
     url,
     platformPublishedUrl: found ? matchedUrl : '',
     pageTitle: pageState.pageTitle || '',
+    matchedText: targetTextWindow.slice(0, 300),
     textSample: text.slice(0, 1200),
   }
 }

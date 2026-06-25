@@ -1200,22 +1200,54 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
     const { page } = await reuseOrCreatePublishCheckPage(browser, platform, effectiveTargetUrl)
     await page.goto(effectiveTargetUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
     await delay(3_000)
-    const deadline = Date.now() + 20_000
+    const deadline = Date.now() + publishCheckEvaluateTimeoutMs(platform)
     let latest = null
+    let reloadCount = 0
     while (Date.now() < deadline) {
       latest = await evaluatePublishResult(page, schedule)
       if (latest.found) return latest
+      if (shouldReloadPublishCheckPage(platform, latest, reloadCount)) {
+        reloadCount += 1
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => null)
+        await delay(3_000)
+        latest = {
+          ...(latest || {}),
+          reloadedForStaleWorksList: true,
+          reloadCount,
+          reason: latest?.reason || 'works list looked stale before reload',
+        }
+        continue
+      }
       await delay(2_000)
     }
-    return latest || {
+    return latest ? { ...latest, reloadCount } : {
       found: false,
       reason: 'works list not evaluated',
       targetTitle: schedule?.publishCheckTitle || '',
       url: page.url(),
+      reloadCount,
     }
   } finally {
     await browser.disconnect()
   }
+}
+
+function publishCheckEvaluateTimeoutMs(platform) {
+  const normalized = String(platform || '').trim().toLowerCase()
+  return normalized === 'douyin' ? 45_000 : 20_000
+}
+
+function shouldReloadPublishCheckPage(platform, result, reloadCount) {
+  const normalized = String(platform || '').trim().toLowerCase()
+  if (normalized !== 'douyin' || reloadCount >= 2 || result?.found) return false
+  const text = String(result?.textSample || '')
+  if (/没有更多作品|暂无作品|共\s*0\s*个作品/.test(text)) return true
+  const looksLikeManageShell = text.includes('作品管理')
+    && text.includes('全部作品')
+    && text.includes('已发布')
+    && text.includes('审核中')
+  if (looksLikeManageShell && !result?.hasTitle) return true
+  return !result?.hasTitle && !result?.hasPublishedSignal
 }
 
 async function reuseOrCreatePublishCheckPage(browser, platform, targetUrl) {
@@ -1347,13 +1379,14 @@ async function evaluateZhihuPublishResult(page, schedule) {
   }
   return page.evaluate((input) => {
     const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
+    const isPublishedZhihuPath = (pathname) => /^\/p\/[^/]+/.test(pathname) || /^\/article\/[^/]+/.test(pathname)
     const text = document.body?.innerText || ''
     const normalizedText = normalize(text)
     const normalizedTitle = normalize(input.title)
     const titleProbe = normalizedTitle.length > 24 ? normalizedTitle.slice(0, 24) : normalizedTitle
     const hasTitle = Boolean(titleProbe && normalizedText.includes(titleProbe))
     const hasPublishedSignal = /发布成功|已发布|审核中|发布于\d{4}[-年]\d{1,2}[-月]\d{1,2}/.test(text)
-      || /\/p\/|\/article\//.test(location.href)
+      || isPublishedZhihuPath(location.pathname)
     const normalizeZhihuUrl = (value) => {
       try {
         const url = new URL(value || location.href, location.href)
@@ -1385,7 +1418,7 @@ async function evaluateZhihuPublishResult(page, schedule) {
       })
       matchedUrl = anchor?.href || ''
     }
-    const realUrlSource = matchedUrl || (/^\/p\/|^\/article\//.test(location.pathname) ? location.href : '')
+    const realUrlSource = matchedUrl || (isPublishedZhihuPath(location.pathname) ? location.href : '')
     const realUrl = realUrlSource ? normalizeZhihuUrl(realUrlSource) : ''
     return {
       found: hasTitle && hasPublishedSignal,
@@ -1435,16 +1468,18 @@ async function openXiaohongshuPublishedNoteDetail(page, schedule) {
   const title = schedule?.publishCheckTitle || ''
   const browser = page.browser()
   const beforeTargets = new Set(browser.targets().map((target) => target._targetId || target.url()))
-  const clicked = await page.evaluate((input) => {
+  const clickTarget = await page.evaluate((input) => {
     const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
     const title = normalize(input.title)
     const titleProbe = title.length > 18 ? title.slice(0, 18) : title
-    if (!titleProbe) return { clicked: false, reason: 'missing title' }
+    if (!titleProbe) return { clickReady: false, reason: 'missing title' }
     const cards = Array.from(document.querySelectorAll('.note-card, [class*="note-card"], section, article, li, div'))
       .map((el) => {
         const rect = el.getBoundingClientRect()
         const text = normalize(el.innerText || el.textContent || '')
-        return { el, rect, text }
+        const hasMedia = Boolean(el.querySelector('a[href*="/explore/"], img, [style*="background-image"], .media, [class*="media"]'))
+        const noteClass = String(el.className || '').includes('note-card') ? 1 : 0
+        return { el, rect, text, hasMedia, noteClass }
       })
       .filter((item) => item.text.includes(titleProbe)
         && item.rect.width >= 180
@@ -1452,24 +1487,50 @@ async function openXiaohongshuPublishedNoteDetail(page, schedule) {
         && item.rect.width <= 1200
         && item.rect.height <= 800)
       .sort((left, right) => {
-        const leftMedia = left.el.querySelector('img, [style*="background-image"], .media, [class*="media"]') ? 1 : 0
-        const rightMedia = right.el.querySelector('img, [style*="background-image"], .media, [class*="media"]') ? 1 : 0
-        return rightMedia - leftMedia || left.rect.top - right.rect.top
+        return right.noteClass - left.noteClass
+          || Number(right.hasMedia) - Number(left.hasMedia)
+          || left.rect.top - right.rect.top
       })
     const card = cards[0]?.el
-    if (!card) return { clicked: false, reason: 'card not found' }
+    if (!card) {
+      return {
+        clickReady: false,
+        reason: 'card not found',
+        candidateCount: cards.length,
+      }
+    }
+    const directLink = card.querySelector('a[href*="/explore/"], a[href*="/discovery/item/"]')
+    if (directLink?.href) {
+      return {
+        clickReady: true,
+        href: directLink.href,
+        reason: 'direct link found',
+      }
+    }
     const target = card.querySelector('a[href*="/explore/"], img, [style*="background-image"], .media, [class*="media"]') || card
-    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }))
-    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }))
-    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-    return { clicked: true, reason: '' }
+    target.scrollIntoView({ block: 'center', inline: 'center' })
+    const rect = target.getBoundingClientRect()
+    return {
+      clickReady: true,
+      reason: 'click point found',
+      clientX: Math.round(rect.left + Math.min(Math.max(rect.width / 2, 12), Math.max(rect.width - 12, 12))),
+      clientY: Math.round(rect.top + Math.min(Math.max(rect.height / 2, 12), Math.max(rect.height - 12, 12))),
+      targetText: normalize(target.innerText || target.textContent || '').slice(0, 120),
+    }
   }, { title })
-  if (!clicked?.clicked) {
-    throw new Error(`xiaohongshu note card click failed: ${clicked?.reason || 'unknown'}`)
+  if (!clickTarget?.clickReady) {
+    throw new Error(`xiaohongshu note card click failed: ${clickTarget?.reason || 'unknown'}`)
   }
+  if (clickTarget.href && /xiaohongshu\.com\/(explore|discovery\/item)\//.test(clickTarget.href)) {
+    return clickTarget.href
+  }
+  if (!Number.isFinite(clickTarget.clientX) || !Number.isFinite(clickTarget.clientY)) {
+    throw new Error(`xiaohongshu note card click point invalid: ${JSON.stringify(clickTarget).slice(0, 500)}`)
+  }
+  await page.mouse.click(clickTarget.clientX, clickTarget.clientY, { delay: 30 })
   const target = await browser.waitForTarget((item) => {
     const url = item.url()
-    if (!/xiaohongshu\.com\/explore\//.test(url)) return false
+    if (!/xiaohongshu\.com\/(explore|discovery\/item)\//.test(url)) return false
     const key = item._targetId || url
     return !beforeTargets.has(key)
   }, { timeout: 12_000 }).catch(() => null)
@@ -1484,7 +1545,7 @@ async function openXiaohongshuPublishedNoteDetail(page, schedule) {
       const title = normalize(input.title)
       const titleProbe = title.length > 18 ? title.slice(0, 18) : title
       const text = normalize(document.body?.innerText || '')
-      return Boolean(location.href.includes('/explore/') && (!titleProbe || text.includes(titleProbe)))
+      return Boolean(/\/(explore|discovery\/item)\//.test(location.pathname) && (!titleProbe || text.includes(titleProbe)))
     },
     { timeout: 15_000 },
     { title },
@@ -1500,7 +1561,7 @@ async function openXiaohongshuPublishedNoteDetail(page, schedule) {
       textSample: (document.body?.innerText || '').slice(0, 500),
     }
   }, { title })
-  if (!verification.titleMatched || !/xiaohongshu\.com\/explore\//.test(verification.url || '')) {
+  if (!verification.titleMatched || !/xiaohongshu\.com\/(explore|discovery\/item)\//.test(verification.url || '')) {
     throw new Error(`xiaohongshu note detail mismatch: ${JSON.stringify(verification).slice(0, 500)}`)
   }
   return verification.url
@@ -1511,7 +1572,7 @@ async function newestXiaohongshuExplorePage(browser, beforeTargets) {
   const candidates = []
   for (const item of pages) {
     const url = item.url()
-    if (!/xiaohongshu\.com\/explore\//.test(url)) continue
+    if (!/xiaohongshu\.com\/(explore|discovery\/item)\//.test(url)) continue
     const target = item.target()
     const key = target?._targetId || url
     candidates.push({ page: item, isNew: !beforeTargets.has(key) })
@@ -1748,14 +1809,34 @@ function scheduleIdOfTask(task) {
   return task?.schedule?.id || task?.backendTask?.platformOptions?.scheduleId || task?.backendTask?.scheduleId
 }
 
+function claimedTimeoutMsForTask(task) {
+  return scheduleIdOfTask(task) ? CLAIM_BACKEND_HEARTBEAT_MAX_MS : CLAIM_TIMEOUT_MS
+}
+
+function expireClaimedTask(task) {
+  if (scheduleIdOfTask(task)) {
+    task.status = 'failed'
+    task.failedAt = nowIso()
+    task.failureCode = 'LOCAL_HELPER_CLAIM_TIMEOUT'
+    task.lastError = {
+      code: 'LOCAL_HELPER_CLAIM_TIMEOUT',
+      message: '本地助手等待扩展回写超时，已释放后端排期锁',
+    }
+  } else {
+    task.status = 'requeued'
+    task.requeuedAt = nowIso()
+    task.lastError = { message: 'claimed task timed out and was requeued' }
+  }
+  task.claimedAt = null
+  task.claimOwner = null
+}
+
 function shouldHeartbeatScheduleTask(task) {
   if (!task || isTerminalStatus(task.status)) return false
-  if (task.status === 'claimed') {
-    if (!task.claimedAt) return false
-    return Date.now() - Date.parse(task.claimedAt) <= CLAIM_BACKEND_HEARTBEAT_MAX_MS
-  }
   if (!scheduleIdOfTask(task)) return false
-  return Boolean(task.backendTask || task.schedule)
+  if (!task.backendTask && !task.schedule) return false
+  if (task.status !== 'claimed' || !task.claimedAt) return false
+  return Date.now() - Date.parse(task.claimedAt) <= CLAIM_BACKEND_HEARTBEAT_MAX_MS
 }
 
 async function heartbeatActiveScheduleTasks(config) {
@@ -1919,7 +2000,7 @@ function worksListUrlForPublishCheck(platform, launchUrl, context = {}) {
     if (baijiahaoWorksListHasAppId(launchUrl)) return launchUrl
     return null
   }
-  if (normalized === 'xiaohongshu' || normalized === 'toutiao') {
+  if (normalized === 'douyin' || normalized === 'xiaohongshu' || normalized === 'toutiao') {
     return defaultWorksListUrlForPlatform(normalized)
   }
   return launchUrl || defaultWorksListUrlForPlatform(normalized)
@@ -2212,12 +2293,8 @@ async function requeueTimedOutClaims(environmentKey) {
   for (const task of tasksById.values()) {
     if (task.environmentKey !== environmentKey || task.status !== 'claimed' || !task.claimedAt) continue
     const claimedMs = Date.now() - Date.parse(task.claimedAt)
-    if (claimedMs <= CLAIM_TIMEOUT_MS) continue
-    task.status = 'requeued'
-    task.claimedAt = null
-    task.claimOwner = null
-    task.requeuedAt = nowIso()
-    task.lastError = { message: 'claimed task timed out and was requeued' }
+    if (claimedMs <= claimedTimeoutMsForTask(task)) continue
+    expireClaimedTask(task)
     changed = true
   }
   if (changed) await saveRuntimeTasks()
@@ -2229,12 +2306,8 @@ async function requeueTimedOutClaimsByPlatform(platform) {
     if (platform && task.platform !== platform) continue
     if (task.status !== 'claimed' || !task.claimedAt) continue
     const claimedMs = Date.now() - Date.parse(task.claimedAt)
-    if (claimedMs <= CLAIM_TIMEOUT_MS) continue
-    task.status = 'requeued'
-    task.claimedAt = null
-    task.claimOwner = null
-    task.requeuedAt = nowIso()
-    task.lastError = { message: 'claimed task timed out and was requeued' }
+    if (claimedMs <= claimedTimeoutMsForTask(task)) continue
+    expireClaimedTask(task)
     changed = true
   }
   if (changed) await saveRuntimeTasks()
@@ -2263,7 +2336,7 @@ function isReusableActiveTask(task) {
   return Boolean(
     task
     && task.adspower?.puppeteerWs
-    && (CLAIMABLE_STATUSES.has(task.status) || task.status === 'claimed')
+    && (task.status === 'pending' || task.status === 'claimed')
   )
 }
 
@@ -2444,12 +2517,11 @@ async function uploadImageFileToAdsPowerPage(body, filePath) {
   const browser = await puppeteer.connect({ browserWSEndpoint: task.adspower.puppeteerWs, protocolTimeout: 30_000 })
   try {
     const pages = await browser.pages()
-    const page = findUploadTargetPage(pages, platform)
+    const page = findUploadTargetPage(pages, platform, body.targetPageUrl || body.pageUrl || '')
     if (!page) {
       throw new Error(`AdsPower browser has no active ${platform || 'target'} page`)
     }
     await page.bringToFront().catch(() => {})
-    await page.waitForSelector('input[type="file"]', { timeout: 3_000 }).catch(() => null)
     const chooserState = await acceptPlatformFileChooser(page, filePath, platform)
     if (chooserState?.accepted) {
       return chooserState
@@ -2459,7 +2531,9 @@ async function uploadImageFileToAdsPowerPage(body, filePath) {
       ? await chooseZhihuCoverImageInputs(inputs)
       : platform === 'baijiahao'
         ? await chooseBaijiahaoCoverImageInputs(inputs)
-        : await choosePuppeteerImageInputs(inputs)
+        : platform === 'toutiao'
+          ? await chooseToutiaoCoverImageInputs(inputs)
+          : await choosePuppeteerImageInputs(inputs)
     if (!targets.length) {
       const diagnostic = chooserState?.tried
         ? `; chooserTried=${JSON.stringify(chooserState.tried).slice(0, 800)}`
@@ -2482,12 +2556,18 @@ async function uploadImageFileToAdsPowerPage(body, filePath) {
   }
 }
 
-function findUploadTargetPage(pages, platform) {
+function findUploadTargetPage(pages, platform, targetPageUrl = '') {
   const normalized = String(platform || '').trim().toLowerCase()
+  const targetUrl = String(targetPageUrl || '').trim()
+  if (targetUrl) {
+    const matched = pages.find((item) => sameBrowserPageUrl(item.url(), targetUrl))
+      || pages.find((item) => sameBrowserPagePath(item.url(), targetUrl))
+    if (matched) return matched
+  }
   if (normalized === 'zhihu') {
     return pages.find((item) => {
       const pageUrl = item.url()
-      return pageUrl.includes('zhihu.com') && pageUrl.includes('/write')
+      return pageUrl.includes('zhihu.com') && (pageUrl.includes('/write') || pageUrl.includes('/edit'))
     }) || pages.find((item) => item.url().includes('zhihu.com'))
   }
   if (normalized === 'toutiao') {
@@ -2512,9 +2592,37 @@ function findUploadTargetPage(pages, platform) {
   return pages.find((item) => item.url().includes(normalized))
 }
 
+function sameBrowserPageUrl(left, right) {
+  try {
+    const leftUrl = new URL(String(left || ''))
+    const rightUrl = new URL(String(right || ''))
+    leftUrl.hash = ''
+    rightUrl.hash = ''
+    return leftUrl.href === rightUrl.href
+  } catch {
+    return String(left || '') === String(right || '')
+  }
+}
+
+function sameBrowserPagePath(left, right) {
+  try {
+    const leftUrl = new URL(String(left || ''))
+    const rightUrl = new URL(String(right || ''))
+    return leftUrl.origin === rightUrl.origin && leftUrl.pathname === rightUrl.pathname
+  } catch {
+    return false
+  }
+}
+
 async function acceptPlatformFileChooser(page, filePath, platform) {
   const labels = uploadChooserLabels(platform)
-  if (String(platform || '').trim().toLowerCase() === 'douyin') {
+  const normalized = String(platform || '').trim().toLowerCase()
+  // Baijiahao reuses the same upload text for article, cover, and video controls.
+  // Use the direct image input path below instead of opening a generic file chooser.
+  if (normalized === 'baijiahao') {
+    return null
+  }
+  if (normalized === 'douyin') {
     return acceptFileChooserByClickCandidates(page, filePath, labels)
   }
 
@@ -2548,114 +2656,33 @@ async function acceptFileChooserByClickCandidates(page, filePath, labels) {
   return { accepted: false, noChooser: true, tried }
 }
 
-async function acceptFileChooserByCdpCandidates(page, filePath, candidates) {
-  if (!Array.isArray(candidates) || candidates.length === 0) return null
-  const client = await page.target().createCDPSession()
-  const tried = []
-  try {
-    await client.send('Page.setInterceptFileChooserDialog', { enabled: true })
-    for (const candidate of candidates.slice(0, 6)) {
-      tried.push({
-        score: candidate.score,
-        text: candidate.text,
-        clickableText: candidate.clickableText,
-        x: Math.round(candidate.x),
-        y: Math.round(candidate.y),
-      })
-      const chooserPromise = new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          client.off('Page.fileChooserOpened', onChooser)
-          resolve(null)
-        }, 2500)
-        function onChooser(event) {
-          clearTimeout(timer)
-          client.off('Page.fileChooserOpened', onChooser)
-          resolve(event)
-        }
-        client.on('Page.fileChooserOpened', onChooser)
-      })
-      await client.send('Input.dispatchMouseEvent', {
-        type: 'mouseMoved',
-        x: candidate.x,
-        y: candidate.y,
-        button: 'none',
-      }).catch(() => {})
-      await client.send('Input.dispatchMouseEvent', {
-        type: 'mousePressed',
-        x: candidate.x,
-        y: candidate.y,
-        button: 'left',
-        clickCount: 1,
-      }).catch(() => {})
-      await delay(40)
-      await client.send('Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x: candidate.x,
-        y: candidate.y,
-        button: 'left',
-        clickCount: 1,
-      }).catch(() => {})
-      const chooser = await chooserPromise
-      if (!chooser?.backendNodeId) continue
-      await client.send('DOM.setFileInputFiles', {
-        backendNodeId: chooser.backendNodeId,
-        files: [filePath],
-      })
-      const inputState = await dispatchFileInputEventsByBackendNodeId(client, chooser.backendNodeId)
-      await delay(500)
-      return {
-        accepted: true,
-        via: 'cdp_file_chooser',
-        pageUrl: page.url(),
-        fileInputCount: null,
-        inputState,
-        inputStates: inputState ? [inputState] : [],
-        tried,
-      }
-    }
-    return { accepted: false, noChooser: true, tried }
-  } finally {
-    await client.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => {})
-    await client.detach().catch(() => {})
-  }
-}
-
-async function dispatchFileInputEventsByBackendNodeId(client, backendNodeId) {
-  const resolved = await client.send('DOM.resolveNode', { backendNodeId }).catch(() => null)
-  const objectId = resolved?.object?.objectId
-  if (!objectId) return { filesLength: null }
-  const result = await client.send('Runtime.callFunctionOn', {
-    objectId,
-    returnByValue: true,
-    functionDeclaration: `function() {
-      const events = ['input', 'change'];
-      for (const type of events) {
-        this.dispatchEvent(new Event(type, { bubbles: true }));
-      }
-      return {
-        filesLength: this.files ? this.files.length : null,
-        value: this.value || '',
-        accept: this.getAttribute('accept') || ''
-      };
-    }`,
-  }).catch(() => null)
-  return result?.result?.value || { filesLength: null }
-}
-
 async function acceptChooserAndReadState(page, chooser, filePath, extra = {}) {
   await chooser.accept([filePath])
   await delay(500)
-  const inputs = await page.$$('input[type="file"]')
   const states = []
-  for (const input of inputs) {
-    states.push(await readAndDispatchFileInputState(input))
+  let inputs = []
+  let stateReadError = ''
+  try {
+    inputs = await page.$$('input[type="file"]')
+    for (const input of inputs) {
+      states.push(await readAndDispatchFileInputState(input))
+    }
+  } catch (error) {
+    stateReadError = error?.message || String(error)
+  }
+  let pageUrl = ''
+  try {
+    pageUrl = page.url()
+  } catch {
+    pageUrl = ''
   }
   return {
     accepted: true,
-    pageUrl: page.url(),
+    pageUrl,
     fileInputCount: inputs.length,
     inputState: states.find((state) => state.filesLength > 0) || states[0] || null,
     inputStates: states,
+    stateReadError: stateReadError || undefined,
     ...extra,
   }
 }
@@ -2679,55 +2706,49 @@ async function collectUploadClickCandidates(page, labels) {
     return Array.from(document.querySelectorAll('button, [role="button"], div, span, label'))
       .filter(visible)
       .map((el) => {
-      function visible(el) {
-        const style = window.getComputedStyle(el)
-        const rect = el.getBoundingClientRect()
-        return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
-      }
-      if (!visible(el)) return null
-      const text = String(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, '')
-      const score = scoreUploadCandidate(el, text, labels)
-      if (score <= 0) return null
-      const clickable = el.closest('button, label, [role="button"], [class*="mycard"], [class*="content-upload"]') || el
-      const rect = clickable.getBoundingClientRect()
-      const icon = clickable.querySelector('[class*="addIcon"], [class*="addInnerIcon"]')
-      const iconRect = icon?.getBoundingClientRect?.()
-      const point = iconRect && iconRect.width > 0 && iconRect.height > 0
-        ? { x: iconRect.left + iconRect.width / 2, y: iconRect.top + iconRect.height / 2 }
-        : { x: rect.left + Math.min(48, Math.max(12, rect.width * 0.08)), y: rect.top + rect.height / 2 }
-      return {
-        score,
-        text,
-        clickableText: String(clickable.textContent || '').replace(/\s+/g, '').slice(0, 120),
-        x: point.x,
-        y: point.y,
-      }
-
-      function scoreUploadCandidate(el, text, labels) {
-        if (!labels.some((label) => text === label || text.includes(label))) return 0
-        let score = 10
-        if (labels.some((label) => text === label)) score += 100
-        const context = contextText(el)
-        if (context.includes('文章头图')) score += 300
-        if (context.includes('封面设置')) score -= 120
-        if (context.includes('点击上传图片')) score += 80
-        if (context.includes('点击上传封面图')) score -= 60
-        if (String(el.className || '').includes('mycard')) score += 20
-        return score
-      }
-
-      function contextText(el) {
-        const parts = []
-        let current = el
-        for (let depth = 0; current && depth < 6; depth += 1) {
-          parts.push(String(current.textContent || '').replace(/\s+/g, ''))
-          current = current.parentElement
+        const text = String(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, '')
+        const score = scoreUploadCandidate(el, text, labels)
+        if (score <= 0) return null
+        const clickable = el.closest('button, label, [role="button"], [class*="mycard"], [class*="content-upload"]') || el
+        const rect = clickable.getBoundingClientRect()
+        const icon = clickable.querySelector('[class*="addIcon"], [class*="addInnerIcon"]')
+        const iconRect = icon?.getBoundingClientRect?.()
+        const point = iconRect && iconRect.width > 0 && iconRect.height > 0
+          ? { x: iconRect.left + iconRect.width / 2, y: iconRect.top + iconRect.height / 2 }
+          : { x: rect.left + Math.min(48, Math.max(12, rect.width * 0.08)), y: rect.top + rect.height / 2 }
+        return {
+          score,
+          text,
+          clickableText: String(clickable.textContent || '').replace(/\s+/g, '').slice(0, 120),
+          x: point.x,
+          y: point.y,
         }
-        return parts.join('')
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.score - left.score)
+
+    function scoreUploadCandidate(el, text, labels) {
+      if (!labels.some((label) => text === label || text.includes(label))) return 0
+      let score = 10
+      if (labels.some((label) => text === label)) score += 100
+      const context = contextText(el)
+      if (context.includes('文章头图')) score += 300
+      if (context.includes('封面设置')) score -= 120
+      if (context.includes('点击上传图片')) score += 80
+      if (context.includes('点击上传封面图')) score -= 60
+      if (String(el.className || '').includes('mycard')) score += 20
+      return score
+    }
+
+    function contextText(el) {
+      const parts = []
+      let current = el
+      for (let depth = 0; current && depth < 6; depth += 1) {
+        parts.push(String(current.textContent || '').replace(/\s+/g, ''))
+        current = current.parentElement
       }
-    })
-    .filter(Boolean)
-    .sort((left, right) => right.score - left.score)
+      return parts.join('')
+    }
   }, labels).catch(() => [])
 }
 
@@ -2784,6 +2805,46 @@ async function choosePuppeteerImageInputs(inputs) {
   return candidates.length ? candidates.map((item) => item.input) : inputs.slice().reverse()
 }
 
+async function chooseToutiaoCoverImageInputs(inputs) {
+  const candidates = []
+  for (const input of inputs) {
+    const meta = await input.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      const accept = el.getAttribute('accept') || ''
+      const id = el.id || ''
+      const name = el.name || ''
+      const className = String(el.className || '')
+      const nearbyText = (() => {
+        let current = el
+        const parts = []
+        for (let depth = 0; current && depth < 8; depth += 1) {
+          parts.push(current.id || '')
+          parts.push(String(current.className || ''))
+          parts.push(current.getAttribute?.('data-e2e') || '')
+          const text = String(current.textContent || '').replace(/\s+/g, '')
+          if (text && text.length <= 220) parts.push(text)
+          current = current.parentElement
+        }
+        const drawer = el.closest?.('[class*="drawer"], [class*="modal"], [class*="dialog"], [class*="upload"]')
+        const drawerText = String(drawer?.textContent || '').replace(/\s+/g, '')
+        if (drawerText && drawerText.length <= 260) parts.push(drawerText)
+        return parts.join(' ')
+      })()
+      return { accept, id, name, className, visible: rect.width > 0 && rect.height > 0, nearbyText }
+    }).catch(() => ({}))
+    const accept = String(meta.accept || '').toLowerCase()
+    const descriptor = `${meta.accept || ''} ${meta.id || ''} ${meta.name || ''} ${meta.className || ''} ${meta.nearbyText || ''}`.toLowerCase()
+    if (isVideoFileInputDescriptor(accept, descriptor)) continue
+    const hasImageAccept = /(image|jpg|jpeg|png|webp|gif|jfif|bmp)/.test(accept)
+    const hasToutiaoUploadIdentity = /(upload|file|image|img|cover|封面|图片|本地上传|上传图片|upload-drag-input|btn-upload)/.test(descriptor)
+    if (!hasImageAccept && !hasToutiaoUploadIdentity) continue
+    const score = scoreToutiaoCoverInput(descriptor, meta)
+    if (score > 0) candidates.push({ input, score })
+  }
+  candidates.sort((left, right) => right.score - left.score)
+  return candidates.length ? [candidates[0].input] : []
+}
+
 function scorePuppeteerImageInput(descriptor, meta) {
   let score = 0
   if (/(image|jpg|jpeg|png|webp)/.test(descriptor)) score += 20
@@ -2792,6 +2853,19 @@ function scorePuppeteerImageInput(descriptor, meta) {
   if (/扫码上传/.test(descriptor)) score -= 30
   if (/头像|avatar|logo|账号|profile/.test(descriptor)) score -= 80
   if (meta?.visible) score += 5
+  return score
+}
+
+function scoreToutiaoCoverInput(descriptor, meta) {
+  let score = 0
+  if (/(image|jpg|jpeg|png|webp|gif|jfif|bmp)/.test(descriptor)) score += 80
+  if (/本地上传|上传图片|选择图片|展示封面|单图|封面|btn-upload|upload-handler|upload-drag-input/.test(descriptor)) score += 140
+  if (/drawer|modal|dialog|upload/.test(descriptor)) score += 40
+  if (meta?.visible) score += 5
+  if (/正文|toolbar|editor|contenteditable|插入|链接|表情|ai创作|头条创作助手/.test(descriptor)) score -= 90
+  if (/扫码上传|手机上传/.test(descriptor)) score -= 40
+  if (/头像|avatar|logo|账号|profile/.test(descriptor)) score -= 120
+  if (isVideoFileInputDescriptor('', descriptor)) score -= 300
   return score
 }
 
@@ -2833,34 +2907,55 @@ async function chooseBaijiahaoCoverImageInputs(inputs) {
       const id = el.id || ''
       const name = el.name || ''
       const className = String(el.className || '')
-      const nearbyText = (() => {
+      const pickerInfo = (() => {
         let current = el.parentElement
-        for (let depth = 0; current && depth < 7; depth += 1) {
+        for (let depth = 0; current && depth < 9; depth += 1) {
           const text = String(current.textContent || '').replace(/\s+/g, '')
-          if (/正文\/本地上传|本地上传|AI封图|免费正版图库|封面预览|确定\(\d+\)/.test(text)) {
-            return text.slice(0, 180)
+          if (/正文\/本地上传|点击本地上传|本地上传|AI封图|免费正版图库|封面预览|确定\(\d+\)/.test(text)) {
+            return { inPicker: true, text: text.slice(0, 240) }
           }
           current = current.parentElement
         }
-        return ''
+        return { inPicker: false, text: '' }
       })()
-      return { accept, id, name, className, visible: rect.width > 0 && rect.height > 0, nearbyText }
+      return {
+        accept,
+        id,
+        name,
+        className,
+        visible: rect.width > 0 && rect.height > 0,
+        inPicker: pickerInfo.inPicker,
+        nearbyText: pickerInfo.text,
+      }
     }).catch(() => ({}))
     const accept = String(meta.accept || '').toLowerCase()
-    const descriptor = `${meta.accept || ''} ${meta.id || ''} ${meta.name || ''} ${meta.className || ''} ${meta.nearbyText || ''}`.toLowerCase()
-    if (!/(image|jpg|jpeg|png|webp|avif|heic)/.test(accept + descriptor)) continue
+    const identity = `${meta.id || ''} ${meta.name || ''} ${meta.className || ''}`.toLowerCase()
+    const descriptor = `${meta.accept || ''} ${identity} ${meta.nearbyText || ''}`.toLowerCase()
+    if (isVideoFileInputDescriptor(accept, descriptor)) continue
+    const hasImageAccept = /(image|jpg|jpeg|png|webp|avif|heic)/.test(accept)
+    const hasCoverPickerContext = Boolean(meta.inPicker) || /正文\/本地上传|点击本地上传|本地上传|ai封图|免费正版图库|封面预览|确定\(\d+\)/.test(descriptor)
+    const hasImageIdentity = /(image|img|upload|cover|file|封面|图片)/.test(identity)
+    if (!hasImageAccept && !(hasCoverPickerContext && hasImageIdentity)) continue
     candidates.push({ input, score: scoreBaijiahaoCoverInput(descriptor, meta) })
   }
   candidates.sort((left, right) => right.score - left.score)
   return candidates.length ? [candidates[0].input] : []
 }
 
+function isVideoFileInputDescriptor(accept, descriptor) {
+  return /(video|mp4|mov|avi|mkv|wmv|webm|mpeg|flv|rmvb|vob|ogg|视频)/.test(`${accept || ''} ${descriptor || ''}`)
+}
+
 function scoreBaijiahaoCoverInput(descriptor, meta) {
   let score = 0
-  if (/正文\/本地上传|本地上传|ai封图|免费正版图库|封面预览|确定\(\d+\)/.test(descriptor)) score += 120
+  const accept = String(meta?.accept || '').toLowerCase()
+  if (meta?.inPicker) score += 180
+  if (/正文\/本地上传|点击本地上传|本地上传|ai封图|免费正版图库|封面预览|确定\(\d+\)/.test(descriptor)) score += 120
+  if (/^image\/\*/.test(accept)) score += 80
   if (/cover|image|upload|file|封面|图片/.test(descriptor)) score += 20
   if (meta?.visible) score += 5
   if (/toolbar|editor|content|article|正文输入|请输入正文|插入/.test(descriptor)) score -= 60
+  if (isVideoFileInputDescriptor('', descriptor)) score -= 300
   if (/\.pdf|\.doc|\.ppt|\.xls|mobi|epub|csv|azw3/.test(descriptor)) score -= 80
   return score
 }
@@ -2887,7 +2982,15 @@ async function readAndDispatchFileInputState(input) {
       name: el.name || '',
       className: String(el.className || ''),
     }
-  }).catch((error) => ({ error: error.message }))
+  }).catch((error) => ({
+    filesLength: null,
+    fileName: '',
+    accept: '',
+    id: '',
+    name: '',
+    className: '',
+    stateReadError: error.message,
+  }))
 }
 
 function delay(ms) {
@@ -3052,7 +3155,7 @@ async function route(req, res, config) {
         platforms: cachedSelfMediaSchedulePlatforms || [],
         platformSource: 'backend',
         platformFetchError: lastSelfMediaSchedulePlatformsError,
-        intervalMs: Number(config.selfMediaSchedulePollIntervalMs || 30_000),
+        intervalMs: Number(config.selfMediaSchedulePollIntervalMs || 10_000),
       },
       scheduleHeartbeat: {
         inFlight: scheduleHeartbeatInFlight,
@@ -3133,7 +3236,7 @@ server.listen(config.port, config.host, () => {
 })
 
 function startSchedulePoller(config) {
-  const intervalMs = Number(config.selfMediaSchedulePollIntervalMs || 30_000)
+  const intervalMs = Number(config.selfMediaSchedulePollIntervalMs || 10_000)
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) return
   const tick = () => {
     if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return

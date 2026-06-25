@@ -35,7 +35,7 @@ async function load() {
   const result = await chrome.storage.local.get(['geoEnvConfig', 'geoEnvSession', 'geoEnvEventLog'])
   const sessionBrandId = result.geoEnvSession?.brandId || ''
   const config = {
-    apiBase: 'http://119.45.154.127',
+    apiBase: 'https://www.huanjingaigeo.com',
     helperBase: 'http://127.0.0.1:17891',
     environmentKey: '',
     environmentAccountId: '',
@@ -82,7 +82,8 @@ function renderStoredLogs(events) {
 
 function collectConfig() {
   return {
-    apiBase: normalizeBaseUrl(fields.apiBase.value || 'http://119.45.154.127'),
+    // apiBase: normalizeBaseUrl(fields.apiBase.value || 'https://www.huanjingaigeo.com'),
+    apiBase: normalizeBaseUrl(fields.apiBase.value || 'http://192.168.112.189:8080'),
     helperBase: normalizeBaseUrl(fields.helperBase.value || 'http://127.0.0.1:17891'),
     environmentKey: fields.environmentKey.value.trim(),
     environmentAccountId: fields.environmentAccountId.value ? Number(fields.environmentAccountId.value) : null,

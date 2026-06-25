@@ -1201,6 +1201,38 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void claimNextTaskForLocalAgentRecoversExpiredRunningLockBeforeCapacityCheck() {
+        stubCurrentTimeInsideBusinessWindow();
+        SelfMediaPublishSchedule expiredRunning = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        expiredRunning.setId(108L);
+        expiredRunning.setCreatedBy(99L);
+        expiredRunning.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        expiredRunning.setLockedUntil(LocalDateTime.now().minusMinutes(1));
+        expiredRunning.setAttemptCount(0);
+        expiredRunning.setMaxAttempts(2);
+        when(scheduleMapper.selectTimedOutRunning(anyList(), any(), eq(10))).thenReturn(List.of(expiredRunning));
+        when(scheduleMapper.selectById(108L)).thenReturn(expiredRunning);
+        when(scheduleMapper.countLockedByOperatorAndStatuses(eq(99L), anyList(), any())).thenReturn(0L);
+
+        var response = service.claimNextTaskForLocalAgent(99L, "toutiao", 10);
+
+        assertNull(response);
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PENDING, expiredRunning.getStatus());
+        assertEquals("LOCAL_AGENT_HEARTBEAT_TIMEOUT", expiredRunning.getFailureCode());
+        verify(scheduleMapper).updateById(expiredRunning);
+        verify(environmentLockService).release(108L);
+        verify(scheduleMapper).selectDueQueueCandidatesForOperator(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(99L),
+                eq("toutiao"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
+        );
+    }
+
+    @Test
     void automationOverviewMapsFailureCodesAndLocalCapacityStatus() {
         when(scheduleMapper.countByStatuses(anyList())).thenReturn(7L, 1L, 2L, 1L, 1L);
         when(scheduleMapper.countDueByQueue(

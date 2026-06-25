@@ -399,6 +399,10 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   async function handleWechatPlatformClick() {
+    if (selfMediaSubmitting.value) {
+      ElMessage.info('已有分发任务正在处理，请稍候')
+      return
+    }
     selectedMediaPlatform.value = 'wechat_mp'
     selectedSelfMediaAccountId.value = null
     selectedCoverMaterialId.value = null
@@ -513,6 +517,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   function canSubmitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
+    if (selfMediaSubmitting.value) return false
     const binding = environmentAccountOf(account)
     return account.status === 'active' && !!binding && binding.loginStatus === 'logged_in'
   }
@@ -864,7 +869,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     if (platform === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1'
     if (platform === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
     if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish'
-    if (platform === 'douyin') return 'https://creator.douyin.com/creator-micro/content/upload'
+    if (platform === 'douyin') return 'https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page'
     return undefined
   }
 

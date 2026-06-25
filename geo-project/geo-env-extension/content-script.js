@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION || '0.1.3'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION || '0.1.4'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -228,7 +228,8 @@ async function fillPayload(payload) {
   }
   const rawHtml = payload.renderedHtml || payload.html || payload.content || ''
   const coverImageCleanup = removeCoverImageFromContent(rawHtml, resolvePayloadStandaloneImageUrls(payload))
-  const normalizedContent = removeDuplicateLeadingTitle(coverImageCleanup.html, expectedTitle)
+  const imageCleanup = removeUnsupportedContentImages(coverImageCleanup.html, fillProfile)
+  const normalizedContent = removeDuplicateLeadingTitle(imageCleanup.html, expectedTitle)
   const titleFilled = await fillTitle(filledTitle, titleElement, fillProfile)
   const contentElement = findContentElement(titleElement, fillProfile)
   if (titleElement && contentElement && titleElement === contentElement && normalizePlatform(fillProfile.platform) !== 'baijiahao') {
@@ -252,6 +253,7 @@ async function fillPayload(payload) {
   const contentText = [
     normalizedContent.removedTitle ? '已去除正文重复标题' : '',
     coverImageCleanup.removed ? '已去除正文重复头图/封面图' : '',
+    imageCleanup.removed ? `已去除${imageCleanup.count}张平台不可访问正文图片` : '',
   ].filter(Boolean).join('，')
   const optionText = publishOptions.message ? `${publishOptions.message}，` : ''
   const draftText = draftState.message ? `${draftState.message}，` : ''
@@ -267,6 +269,8 @@ async function fillPayload(payload) {
     draftState,
     removedDuplicateTitle: normalizedContent.removedTitle,
     removedDuplicateCoverImage: coverImageCleanup.removed,
+    removedUnsupportedContentImages: imageCleanup.removed,
+    removedUnsupportedContentImageCount: imageCleanup.count,
     titleNormalizedForPlatform: Boolean(expectedTitle && filledTitle !== expectedTitle),
     filledTitle,
     titleElement: describeElement(titleElement),
@@ -681,7 +685,11 @@ async function fillToutiaoCover(options, platform) {
     await openToutiaoCoverDrawer(platform)
     await uploadToutiaoCoverImage(options.coverImageUrl, platform)
     await confirmToutiaoCoverDrawer(platform)
-    await waitForCondition(() => hasToutiaoCoverThumbnail(), 8000, '等待头条封面回填超时')
+    await waitForCondition(
+      () => hasToutiaoCoverThumbnail(),
+      10000,
+      `等待头条封面回填超时；${describeToutiaoCoverArea(findVisibleTextElement('展示封面'))}; ${describeToutiaoUploadState(null)}`,
+    )
   }
   return { filled: true, message: '已上传封面' }
 }
@@ -2304,12 +2312,12 @@ async function uploadToutiaoCoverImage(imageUrl, platform) {
     fileInput = await waitForCondition(
       () => findToutiaoCoverDrawerFileInput(),
       8000,
-      '头条封面本地上传文件框未找到',
+      `头条封面本地上传文件框未找到；${describeToutiaoUploadState(null)}`,
     )
   } else {
     await delay(200)
   }
-  const localUpload = await setFileInputFromLocalHelper(imageUrl, platform)
+  const localUpload = await setFileInputFromLocalHelper(imageUrl, platform).catch((error) => ({ ok: false, error }))
   if (localUpload?.ok) {
     await waitForCondition(
       () => isToutiaoCoverDrawerImageUploaded(),
@@ -2318,17 +2326,27 @@ async function uploadToutiaoCoverImage(imageUrl, platform) {
     )
     return
   }
+
+  if (fileInput || findToutiaoCoverDrawerFileInput()) {
+    fileInput = fileInput || findToutiaoCoverDrawerFileInput()
+    await setFileInputFromPageFetch(fileInput, imageUrl)
+    await waitForCondition(
+      () => isToutiaoCoverDrawerImageUploaded(),
+      20000,
+      `等待头条封面图片上传完成超时；${describeToutiaoUploadState(null)}`,
+    )
+    return
+  }
+  throw localUpload?.error || new Error(`头条封面本地上传通道失败；${describeToutiaoUploadState(null)}`)
+}
+
+async function setFileInputFromPageFetch(fileInput, imageUrl) {
   const file = await fetchImageAsFile(imageUrl)
   const transfer = new DataTransfer()
   transfer.items.add(file)
   fileInput.files = transfer.files
   fileInput.dispatchEvent(new Event('input', { bubbles: true }))
   fileInput.dispatchEvent(new Event('change', { bubbles: true }))
-  await waitForCondition(
-    () => isToutiaoCoverDrawerImageUploaded(),
-    20000,
-    `等待头条封面图片上传完成超时；${describeToutiaoUploadState(null)}`,
-  )
 }
 
 async function setFileInputFromLocalHelper(imageUrl, platform, options = {}) {
@@ -2392,8 +2410,11 @@ function describeToutiaoUploadState(localUpload) {
   const drawer = findToutiaoCoverDrawer()
   const drawerText = normalizeText(drawer?.textContent || document.body?.innerText || '').slice(0, 180)
   const imageCount = Array.from((drawer || document).querySelectorAll('img')).length
+  const uploadedThumbnail = Boolean(findToutiaoCoverDrawerUploadedThumbnail(drawer || document))
+  const resourceSelectText = normalizeText(drawer?.querySelector?.('.resource-select, [class*="resource-select"]')?.textContent || '').slice(0, 120)
+  const confirm = findToutiaoCoverDrawerConfirmButton()
   const helperState = localUpload?.inputState ? JSON.stringify(localUpload.inputState) : '-'
-  return `helperInput=${helperState}; fileInputs=${JSON.stringify(fileInputs).slice(0, 300)}; imageCount=${imageCount}; drawerText=${drawerText || '-'}`
+  return `helperInput=${helperState}; fileInputs=${JSON.stringify(fileInputs).slice(0, 300)}; imageCount=${imageCount}; uploadedThumbnail=${uploadedThumbnail}; confirmDisabled=${confirm ? isDisabledElement(confirm) : 'missing'}; resourceSelect=${resourceSelectText || '-'}; drawerText=${drawerText || '-'}`
 }
 
 function findLatestFileInput() {
@@ -2406,9 +2427,25 @@ function findToutiaoCoverDrawerFileInput() {
   const roots = [drawer, document].filter(Boolean)
   const selectors = [
     '.btn-upload-handle.upload-handler input[type="file"][accept*="image"]',
+    '.btn-upload-handle.upload-handler input[type="file"][accept*="jpg"]',
+    '.btn-upload-handle.upload-handler input[type="file"][accept*="jpeg"]',
+    '.btn-upload-handle.upload-handler input[type="file"][accept*="png"]',
+    '.btn-upload-handle.upload-handler input[type="file"]',
     '.upload-handler input[type="file"][accept*="image"]',
+    '.upload-handler input[type="file"][accept*="jpg"]',
+    '.upload-handler input[type="file"][accept*="jpeg"]',
+    '.upload-handler input[type="file"][accept*="png"]',
+    '.upload-handler input[type="file"]',
     '#upload-drag-input[type="file"][accept*="image"]',
+    '#upload-drag-input[type="file"][accept*="jpg"]',
+    '#upload-drag-input[type="file"][accept*="jpeg"]',
+    '#upload-drag-input[type="file"][accept*="png"]',
+    '#upload-drag-input[type="file"]',
     'input[type="file"][accept*="image"]',
+    'input[type="file"][accept*="jpg"]',
+    'input[type="file"][accept*="jpeg"]',
+    'input[type="file"][accept*="png"]',
+    'input[type="file"]',
   ]
   for (const root of roots) {
     for (const selector of selectors) {
@@ -2429,7 +2466,7 @@ function isLikelyToutiaoCoverFileInput(input) {
     input.className || '',
     collectAncestorText(input, 5),
   ].join(' '))
-  return descriptor.includes('image')
+  return /(image|jpg|jpeg|png|webp|gif|jfif|bmp)/.test(descriptor)
     && /上传图片|本地上传|扫码上传|btn-upload|upload|upload-drag-input/.test(descriptor)
 }
 
@@ -2532,21 +2569,54 @@ function dataUrlToFile(dataUrl, preferredType) {
 }
 
 function isToutiaoCoverDrawerImageUploaded() {
-  const text = normalizeText(document.body?.innerText || '')
-  if (text.includes('已上传') || text.includes('支持拖拽调整图片顺序')) return true
   const drawer = findToutiaoCoverDrawer()
-  return Array.from((drawer || document).querySelectorAll('img'))
-    .some((img) => isVisibleElement(img) && img.getBoundingClientRect().width >= 50 && img.getBoundingClientRect().height >= 50)
+  const root = drawer || document
+  const text = normalizeText(root?.textContent || document.body?.innerText || '')
+  if (text.includes('上传成功') || text.includes('支持拖拽调整图片顺序')) return true
+  return findToutiaoCoverDrawerUploadedThumbnail(root) !== null
+}
+
+function findToutiaoCoverDrawerUploadedThumbnail(root = null) {
+  const scope = root || findToutiaoCoverDrawer() || document
+  const selectors = [
+    '.resource-select img',
+    '[class*="resource-select"] img',
+    '[class*="upload-list"] img',
+    '[class*="image-list"] img',
+    '[class*="image-item"] img',
+    '[class*="pic-list"] img',
+    '[class*="preview"] img',
+  ]
+  for (const selector of selectors) {
+    const image = Array.from(scope.querySelectorAll(selector))
+      .find((img) => {
+        if (!isVisibleElement(img)) return false
+        const rect = img.getBoundingClientRect()
+        return rect.width >= 40 && rect.height >= 40
+      })
+    if (image) return image
+  }
+  return null
 }
 
 async function confirmToutiaoCoverDrawer(platform) {
   const confirm = await waitForCondition(
-    () => findDrawerActionButton('确定'),
+    () => findToutiaoCoverDrawerConfirmButton(),
     8000,
-    '头条封面上传抽屉确定按钮未找到',
+    `头条封面上传抽屉确定按钮未找到或不可用；${describeToutiaoUploadState(null)}`,
   )
   await clickClosestAction(confirm, { platform })
   await delay(800)
+}
+
+function findToutiaoCoverDrawerConfirmButton() {
+  const drawer = findToutiaoCoverDrawer()
+  const root = drawer || document
+  const exact = root.querySelector?.('button[data-e2e="imageUploadConfirmBtn"]')
+  if (exact && isVisibleElement(exact) && !isDisabledElement(exact)) return exact
+  const button = findDrawerActionButton('确定')
+  if (button && !isDisabledElement(button)) return button
+  return null
 }
 
 function findDrawerActionButton(text) {
@@ -2746,6 +2816,49 @@ function removeCoverImageFromContent(html, coverImageUrl) {
     removed = true
   }
   return { html: template.innerHTML, removed }
+}
+
+function removeUnsupportedContentImages(html, fillProfile) {
+  const platform = normalizePlatform(fillProfile?.platform)
+  if (!html || !['toutiao', 'baijiahao'].includes(platform)) {
+    return { html, removed: false, count: 0 }
+  }
+  const template = document.createElement('template')
+  template.innerHTML = html
+  let count = 0
+  const images = Array.from(template.content.querySelectorAll('img[src], img[data-src]'))
+  for (const image of images) {
+    const src = image.getAttribute('src') || image.getAttribute('data-src') || ''
+    if (!isUnsupportedPlatformImageUrl(src)) continue
+    removableImageBlock(image).remove()
+    count += 1
+  }
+  return { html: template.innerHTML, removed: count > 0, count }
+}
+
+function isUnsupportedPlatformImageUrl(value) {
+  const raw = String(value || '').replace(/&amp;/g, '&').trim()
+  if (!raw) return true
+  if (/^(data|blob|file):/i.test(raw)) return true
+  try {
+    const url = new URL(raw, location.href)
+    if (!['http:', 'https:'].includes(url.protocol)) return true
+    const hostname = url.hostname.toLowerCase()
+    if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) return true
+    if (hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname === '::1' || hostname === '[::1]') return true
+    const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+    if (ipv4) {
+      const first = Number(ipv4[1])
+      const second = Number(ipv4[2])
+      if (first === 10 || first === 127 || first === 0) return true
+      if (first === 172 && second >= 16 && second <= 31) return true
+      if (first === 192 && second === 168) return true
+      if (first === 169 && second === 254) return true
+    }
+    return false
+  } catch {
+    return true
+  }
 }
 
 function removableImageBlock(image) {
@@ -3470,11 +3583,14 @@ async function fillContent(html, contentElement, fillProfile, context = {}) {
     return setZhihuEditablePlainText(el, htmlToPlainText(html))
   }
   if (normalizePlatform(fillProfile?.platform) === 'baijiahao' && isBaijiahaoUeditorFrame(el)) {
-    setBaijiahaoUeditorContent(el, html)
+    await setBaijiahaoUeditorContent(el, html)
     return true
   }
   if (normalizePlatform(fillProfile?.platform) === 'baijiahao' && (el.isContentEditable || el.getAttribute('contenteditable') === 'true')) {
-    await setBaijiahaoEditableContent(el, html, { preserveExisting: context.titleElement === el })
+    await setBaijiahaoEditableContent(el, html, {
+      preserveExisting: context.titleElement === el || el.contains?.(context.titleElement),
+      titleElement: context.titleElement,
+    })
     return true
   }
   if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
@@ -3486,33 +3602,109 @@ async function fillContent(html, contentElement, fillProfile, context = {}) {
   return true
 }
 
-function setBaijiahaoUeditorContent(frame, html) {
+async function setBaijiahaoUeditorContent(frame, html) {
   const doc = baijiahaoUeditorDocument(frame)
   const body = doc?.body
   if (!body) throw new Error(`百家号 UEditor iframe 未就绪：${describeElement(frame)}`)
   const normalized = normalizeEditorHtmlForUeditor(html)
+  const probe = normalizeArticleText(htmlToPlainText(normalized)).slice(0, 24)
+  const instantId = baijiahaoUeditorInstantId(frame)
+  await waitForBaijiahaoUeditorReady(frame)
+  let pageWrite = null
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    pageWrite = await setBaijiahaoUeditorContentInPageWorld(frame.id || 'ueditor_0', instantId, normalized).catch(() => null)
+    writeBaijiahaoIframeBody(frame, normalized)
+    await delay(180 + attempt * 120)
+    if (!probe || normalizeArticleText(readElementText(frame)).includes(probe)) return
+  }
+  writeBaijiahaoIframeBody(frame, normalized)
+  await delay(120)
+  if (!probe || normalizeArticleText(readElementText(frame)).includes(probe)) return
+  if (pageWrite?.bodyText) return
+  throw new Error(`百家号 UEditor 正文写入后未生效：frame=${describeElement(frame)}；mainWorld=${JSON.stringify(pageWrite || {}).slice(0, 500)}；body="${readElementText(frame).slice(0, 120)}"`)
+}
+
+async function waitForBaijiahaoUeditorReady(frame) {
+  await waitForCondition(
+    () => {
+      const doc = baijiahaoUeditorDocument(frame)
+      const body = doc?.body
+      if (!body) return null
+      if (body.getAttribute('contenteditable') === 'true' || body.isContentEditable) return true
+      return null
+    },
+    5000,
+    `百家号 UEditor 正文 iframe 未初始化：${describeElement(frame)}`,
+  )
+}
+
+function writeBaijiahaoIframeBody(frame, normalized) {
+  const doc = baijiahaoUeditorDocument(frame)
+  const body = doc?.body
+  if (!body) return
   const editorApi = findBaijiahaoUeditorApi(frame)
   if (editorApi?.setContent) {
     editorApi.setContent(normalized)
+    editorApi.sync?.()
     editorApi.fireEvent?.('contentchange')
     editorApi.fireEvent?.('selectionchange')
   }
   body.focus?.()
+  try {
+    const selection = frame.contentWindow?.getSelection?.()
+    const range = doc.createRange()
+    range.selectNodeContents(body)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    doc.execCommand?.('delete', false)
+    doc.execCommand?.('insertHTML', false, normalized)
+  } catch (_) {
+    // Fallback to direct DOM assignment below.
+  }
   body.innerHTML = normalized
-  body.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertHTML' }))
-  body.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertHTML' }))
-  body.dispatchEvent(new Event('change', { bubbles: true }))
+  const EventCtor = frame.contentWindow?.Event || Event
+  const InputEventCtor = frame.contentWindow?.InputEvent || InputEvent
+  body.dispatchEvent(new InputEventCtor('input', { bubbles: true, inputType: 'insertHTML' }))
+  body.dispatchEvent(new InputEventCtor('beforeinput', { bubbles: true, inputType: 'insertHTML' }))
+  body.dispatchEvent(new EventCtor('change', { bubbles: true }))
+  body.dispatchEvent(new EventCtor('blur', { bubbles: true }))
+  editorApi?.sync?.()
   frame.dispatchEvent(new Event('load', { bubbles: false }))
+}
+
+async function setBaijiahaoUeditorContentInPageWorld(frameId, instantId, html) {
+  const response = await safeRuntimeRequest({
+    type: 'GEO_ENV_SET_BAIJIAHAO_UEDITOR_CONTENT',
+    frameId,
+    instantId,
+    html,
+  })
+  if (!response?.ok) return null
+  return response.result || null
 }
 
 function findBaijiahaoUeditorApi(frame) {
   const id = frame?.id || 'ueditor_0'
+  const instantId = baijiahaoUeditorInstantId(frame)
   const candidates = [
     globalThis.UE?.getEditor?.(id),
     globalThis.UE?.instants?.[id],
     globalThis.UE?.instances?.[id],
+    globalThis.UE_V2?.getEditor?.(id),
+    globalThis.UE_V2?.instants?.[id],
+    globalThis.UE_V2?.instances?.[id],
+    instantId ? globalThis.UE_V2?.instants?.[instantId] : null,
+    instantId ? globalThis.UE_V2?.instances?.[instantId] : null,
   ]
   return candidates.find((item) => item && typeof item.setContent === 'function') || null
+}
+
+function baijiahaoUeditorInstantId(frame) {
+  const html = String(frame?.getAttribute?.('src') || '')
+  const matched = html.match(/UE_V2\.instants\[['"]([^'"]+)['"]\]/)
+  if (matched?.[1]) return matched[1]
+  const number = String(frame?.id || '').match(/ueditor_(\d+)/)?.[1]
+  return number != null ? `ueditorInstant${number}` : ''
 }
 
 function normalizeEditorHtmlForUeditor(html) {
@@ -3628,6 +3820,13 @@ async function setBaijiahaoEditableContent(el, html, options = {}) {
   el.innerHTML = plainTextToHtml(text)
   dispatchEditEvents(el)
   await delay(80)
+  if (editableContainsProbe(el, probe)) return
+
+  const bodyTarget = findBaijiahaoBodyInsertionTarget(options.titleElement, el)
+  if (bodyTarget && bodyTarget !== el) {
+    setBaijiahaoEditableBodyHtml(bodyTarget, text)
+    await delay(120)
+  }
 }
 
 async function insertBaijiahaoBodyIntoSharedEditor(el, text) {
@@ -3638,7 +3837,11 @@ async function insertBaijiahaoBodyIntoSharedEditor(el, text) {
   } else {
     await clickBaijiahaoEditorBody(el)
   }
-  const activeEditable = currentEditableFromSelection() || currentEditableFromActiveElement() || el
+  const titleElement = findTitleElement(buildFillProfile({ platform: 'baijiahao' }))
+  const activeEditable = safeBaijiahaoBodyEditable(currentEditableFromSelection(), titleElement)
+    || safeBaijiahaoBodyEditable(currentEditableFromActiveElement(), titleElement)
+    || findBaijiahaoBodyInsertionTarget(titleElement, el)
+  if (!activeEditable) return
   dispatchPasteIntoEditable(activeEditable, text)
   dispatchEditEvents(activeEditable)
   await delay(120)
@@ -3647,6 +3850,66 @@ async function insertBaijiahaoBodyIntoSharedEditor(el, text) {
   document.execCommand?.('insertText', false, text)
   dispatchEditEvents(activeEditable)
   await delay(120)
+  if (editableContainsProbe(el, normalizeArticleText(text).slice(0, 24))) return
+
+  setBaijiahaoEditableBodyHtml(activeEditable, text)
+  dispatchEditEvents(activeEditable)
+  await delay(120)
+}
+
+function safeBaijiahaoBodyEditable(candidate, titleElement) {
+  if (!candidate || !isVisibleElement(candidate)) return null
+  if (titleElement && (candidate === titleElement || candidate.contains?.(titleElement) || titleElement.contains?.(candidate))) return null
+  if (candidate.isContentEditable || candidate.getAttribute?.('contenteditable') === 'true' || candidate instanceof HTMLTextAreaElement) return candidate
+  return null
+}
+
+function findBaijiahaoBodyInsertionTarget(titleElement, fallback) {
+  const placeholder = findVisibleTextElement('请输入正文', { exact: false, maxLength: 12 })
+  const titleRect = titleElement?.getBoundingClientRect?.() || null
+  const placeholderTarget = nearestBaijiahaoBodyEditable(placeholder, titleElement)
+  if (placeholderTarget) return placeholderTarget
+
+  const candidates = Array.from(document.querySelectorAll('[contenteditable="true"], textarea, div[role="textbox"]'))
+    .map((candidate) => resolveBaijiahaoEditableCandidate(candidate))
+    .filter((candidate, index, list) => candidate && list.indexOf(candidate) === index)
+    .filter((candidate) => safeBaijiahaoBodyEditable(candidate, titleElement))
+    .filter((candidate) => {
+      const rect = candidate.getBoundingClientRect?.()
+      return !titleRect || !rect || rect.top > titleRect.bottom - 8
+    })
+    .map((candidate) => ({
+      candidate,
+      score: scoreBaijiahaoContentCandidate(candidate, titleRect, normalizeText(readElementText(titleElement)).slice(0, 80)),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+  if (candidates[0]?.candidate) return candidates[0].candidate
+  return safeBaijiahaoBodyEditable(fallback, titleElement)
+}
+
+function nearestBaijiahaoBodyEditable(start, titleElement) {
+  let current = start
+  for (let depth = 0; current && current !== document.body && depth < 8; depth += 1) {
+    const editable = resolveBaijiahaoEditableCandidate(current)
+    const safe = safeBaijiahaoBodyEditable(editable, titleElement)
+    if (safe) return safe
+    current = current.parentElement
+  }
+  return null
+}
+
+function setBaijiahaoEditableBodyHtml(el, text) {
+  const html = plainTextToHtml(text)
+  if (el instanceof HTMLTextAreaElement) {
+    setTextValue(el, text)
+    return
+  }
+  if (!el?.isContentEditable && el?.getAttribute?.('contenteditable') !== 'true') return
+  focusEditableElement(el)
+  clearEditableTextWithSelection(el)
+  el.innerHTML = html
+  dispatchEditEvents(el)
 }
 
 async function clickBaijiahaoBodyPlaceholder(placeholder) {
@@ -4323,6 +4586,17 @@ function isVisibleElement(el) {
   if (rect.width <= 0 || rect.height <= 0) return false
   const style = window.getComputedStyle(el)
   return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
+}
+
+function isDisabledElement(el) {
+  if (!el) return false
+  const target = el.closest?.('button, [role="button"], [aria-disabled], [disabled]') || el
+  return Boolean(
+    target.disabled
+    || target.getAttribute?.('disabled') !== null
+    || target.getAttribute?.('aria-disabled') === 'true'
+    || /\b(disabled|is-disabled|byte-btn-disabled)\b/i.test(String(target.className || '')),
+  )
 }
 
 function hasVisibleAncestor(el) {

@@ -724,21 +724,38 @@
       || findTextInRoot(deps, root, '本地上传', { exact: false, maxLength: 16 })
   }
 
-  function findCoverFileInput(root = document) {
-    const inputs = Array.from((root || document).querySelectorAll('input[type="file"]'))
-    return inputs
-      .filter((input) => {
-        const descriptor = [
-          input.getAttribute('accept') || '',
-          input.id || '',
-          input.name || '',
-          String(input.className || ''),
-          nearestText(input),
-        ].join(' ').toLowerCase()
-        return /image|jpg|jpeg|png|webp|upload|cover|file|封面|图片/.test(descriptor)
-      })
-      .pop() || inputs.at(-1) || null
-  }
+function findCoverFileInput(root = document) {
+  const inputs = Array.from((root || document).querySelectorAll('input[type="file"]'))
+  const imageInputs = inputs
+    .map((input) => {
+      const accept = String(input.getAttribute('accept') || '').toLowerCase()
+      const identity = [
+        input.id || '',
+        input.name || '',
+        String(input.className || ''),
+      ].join(' ').toLowerCase()
+      const text = nearestText(input)
+      const descriptor = [
+        accept,
+        identity,
+        text,
+      ].join(' ').toLowerCase()
+      if (/(video|mp4|mov|avi|mkv|wmv|webm|mpeg|flv|rmvb|vob|ogg|视频)/.test(descriptor)) {
+        return null
+      }
+
+      let score = 0
+      if (/(image|jpg|jpeg|png|webp)/.test(accept)) score += 120
+      if (/正文\/本地上传|点击本地上传|本地上传|ai封图|免费正版图库|封面预览|确定\(\d+\)/.test(descriptor)) score += 160
+      if (/(upload|cover|file|封面|图片)/.test(identity)) score += 20
+      if (/toolbar|editor|content|article|正文输入|请输入正文|插入/.test(descriptor)) score -= 80
+      if (/上传视频|视频/.test(descriptor)) score -= 200
+      return score > 0 ? { input, score } : null
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.score - left.score)
+  return imageInputs[0]?.input || null
+}
 
   function isFileInput(el) {
     return el?.tagName?.toLowerCase() === 'input' && String(el.getAttribute?.('type') || '').toLowerCase() === 'file'

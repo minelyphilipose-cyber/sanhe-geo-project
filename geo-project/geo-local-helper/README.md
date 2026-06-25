@@ -23,19 +23,21 @@ Copy-Item config.example.json config.local.json
   "host": "127.0.0.1",
   "port": 17891,
   "helperToken": "",
-  "trustedBackendBase": "http://119.45.154.127",
+  "trustedBackendBase": "https://www.huanjingaigeo.com",
   "enableLegacyBackendTokenRoutes": false,
   "enableStaticHelperToken": false,
   "allowedOrigins": [
     "http://127.0.0.1:17891",
     "http://localhost:17891",
-    "http://119.45.154.127"
+    "https://www.huanjingaigeo.com"
   ],
   "adspower": {
     "apiBase": "http://localhost:50325"
   }
 }
 ```
+
+如果生产后台页面报 `blocked by CORS policy` 或 `loopback address space`，优先确认同事本机助手已更新到最新包，并重启 `npm start`。新版助手会自动允许 `https://www.huanjingaigeo.com` 并响应浏览器 Private Network Access 预检所需的 `Access-Control-Allow-Private-Network`。
 
 `helperToken` 默认禁用。v1 主链路只使用 C2 配对后的签名请求；只有临时回归旧 PoC 时，才同时配置随机 `helperToken` 并把 `enableStaticHelperToken` 改为 `true`。
 

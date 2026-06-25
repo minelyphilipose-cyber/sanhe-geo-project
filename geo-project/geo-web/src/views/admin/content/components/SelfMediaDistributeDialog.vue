@@ -12,8 +12,9 @@
       <div class="media-grid">
         <button
           class="media-platform"
-          :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: !wechatDistributionAvailable }"
+          :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: selfMediaSubmitting || !wechatDistributionAvailable }"
           type="button"
+          :disabled="selfMediaSubmitting || !wechatDistributionAvailable"
           @click="actions.handleWechatPlatformClick()"
         >
           <span class="wechat-mark">微</span>
@@ -22,8 +23,9 @@
         </button>
         <button
           class="media-platform"
-          :class="{ active: selectedMediaPlatform === 'douyin', disabled: !douyinDistributionAvailable }"
+          :class="{ active: selectedMediaPlatform === 'douyin', disabled: selfMediaSubmitting || !douyinDistributionAvailable }"
           type="button"
+          :disabled="selfMediaSubmitting || !douyinDistributionAvailable"
           @click="actions.handleDouyinPlatformClick()"
         >
           <span class="douyin-mark">抖</span>
@@ -32,8 +34,9 @@
         </button>
         <button
           class="media-platform"
-          :class="{ active: selectedMediaPlatform === 'toutiao', disabled: !toutiaoAccounts.length }"
+          :class="{ active: selectedMediaPlatform === 'toutiao', disabled: selfMediaSubmitting || !toutiaoAccounts.length }"
           type="button"
+          :disabled="selfMediaSubmitting || !toutiaoAccounts.length"
           @click="actions.handleSemiAutoPlatformClick('toutiao')"
         >
           <span class="toutiao-mark">头</span>
@@ -42,8 +45,9 @@
         </button>
         <button
           class="media-platform"
-          :class="{ active: selectedMediaPlatform === 'baijiahao', disabled: !baijiahaoAccounts.length }"
+          :class="{ active: selectedMediaPlatform === 'baijiahao', disabled: selfMediaSubmitting || !baijiahaoAccounts.length }"
           type="button"
+          :disabled="selfMediaSubmitting || !baijiahaoAccounts.length"
           @click="actions.handleSemiAutoPlatformClick('baijiahao')"
         >
           <span class="baijiahao-mark">百</span>
@@ -52,8 +56,9 @@
         </button>
         <button
           class="media-platform"
-          :class="{ active: selectedMediaPlatform === 'zhihu', disabled: !zhihuAccounts.length }"
+          :class="{ active: selectedMediaPlatform === 'zhihu', disabled: selfMediaSubmitting || !zhihuAccounts.length }"
           type="button"
+          :disabled="selfMediaSubmitting || !zhihuAccounts.length"
           @click="actions.handleSemiAutoPlatformClick('zhihu')"
         >
           <span class="zhihu-mark">知</span>
@@ -62,8 +67,9 @@
         </button>
         <button
           class="media-platform"
-          :class="{ active: selectedMediaPlatform === 'xiaohongshu', disabled: !xiaohongshuAccounts.length }"
+          :class="{ active: selectedMediaPlatform === 'xiaohongshu', disabled: selfMediaSubmitting || !xiaohongshuAccounts.length }"
           type="button"
+          :disabled="selfMediaSubmitting || !xiaohongshuAccounts.length"
           @click="actions.handleSemiAutoPlatformClick('xiaohongshu')"
         >
           <span class="xiaohongshu-mark">红</span>
@@ -114,6 +120,7 @@
             v-if="selectedMediaPlatform === 'wechat_mp' && account.status === 'active'"
             size="small"
             :loading="checkingSelfMediaAccountId === account.id"
+            :disabled="selfMediaSubmitting"
             @click="actions.checkWechatAccount(account.id)"
           >
             检测登录
@@ -121,7 +128,7 @@
           <el-button
             v-if="actions.isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
             size="small"
-            :disabled="!!actions.environmentAccountOf(account)"
+            :disabled="selfMediaSubmitting || !!actions.environmentAccountOf(account)"
             @click="emit('brandConfig', mediaDistributeBrandId)"
           >
             {{ actions.environmentAccountOf(account) ? '已绑定环境' : '去品牌配置环境' }}
@@ -130,6 +137,7 @@
             v-if="actions.isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && actions.environmentAccountOf(account) && !actions.canSubmitSemiAutoEnvironmentTask(account)"
             size="small"
             :loading="semiAutoLoginOpeningAccountId === account.id"
+            :disabled="selfMediaSubmitting"
             @click="actions.openSemiAutoEnvironmentForLogin(account)"
           >
             打开环境登录
@@ -140,6 +148,7 @@
             type="warning"
             plain
             :loading="environmentAccountResettingId === account.id"
+            :disabled="selfMediaSubmitting"
             @click="actions.resetEnvironmentAccountIdentity(account)"
           >
             重置账号校验

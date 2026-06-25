@@ -3,6 +3,7 @@
   const MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage'
   const MIN_SCHEDULE_LEAD_MINUTES = 120
   const MAX_SCHEDULE_LEAD_MINUTES = 14 * 24 * 60
+  const SCHEDULE_STEP_MINUTES = 5
 
   const RETRYABLE_FAILURE_CODES = new Set([
     'DOUYIN_ARTICLE_FORM_NOT_READY',
@@ -330,7 +331,7 @@
       scheduled: true,
       publishVerification,
       message: adjusted.adjustedFrom
-        ? `已设置抖音定时发布=${adjusted.full}（原计划=${adjusted.adjustedFrom}，已调整到平台最早可选时间）`
+        ? `已设置抖音定时发布=${adjusted.full}（原计划=${adjusted.adjustedFrom}，已调整到平台可选时间）`
         : `已设置抖音定时发布=${adjusted.full}`,
     }
   }
@@ -632,11 +633,26 @@
     if (target > latest) {
       throw new Error(`DOUYIN_SCHEDULE_TIME_TOO_LATE：抖音定时时间过远：${value.full}`)
     }
-    if (target < earliest) {
-      const adjusted = formatDateTime(earliest)
-      return { full: adjusted, date: earliest, adjustedFrom: value.full }
+    const boundedTarget = target < earliest ? earliest : target
+    const steppedTarget = roundDateUpToMinuteStep(boundedTarget, SCHEDULE_STEP_MINUTES)
+    if (steppedTarget > latest) {
+      throw new Error(`DOUYIN_SCHEDULE_TIME_TOO_LATE：抖音定时时间过远：${value.full}`)
     }
-    return value
+    const adjusted = formatDateTime(steppedTarget)
+    if (adjusted !== value.full) {
+      return { full: adjusted, date: steppedTarget, adjustedFrom: value.full }
+    }
+    return { ...value, date: steppedTarget }
+  }
+
+  function roundDateUpToMinuteStep(date, stepMinutes) {
+    const rounded = new Date(date.getTime())
+    rounded.setSeconds(0, 0)
+    const remainder = rounded.getMinutes() % stepMinutes
+    if (remainder > 0) {
+      rounded.setMinutes(rounded.getMinutes() + (stepMinutes - remainder))
+    }
+    return rounded
   }
 
   function formatDateTime(date) {

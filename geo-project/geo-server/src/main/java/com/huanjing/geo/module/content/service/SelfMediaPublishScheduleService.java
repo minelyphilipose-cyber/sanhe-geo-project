@@ -1028,6 +1028,9 @@ public class SelfMediaPublishScheduleService {
                 now,
                 Math.max(limit, 1)
         );
+        if (rows == null || rows.isEmpty()) {
+            return 0;
+        }
         for (SelfMediaPublishSchedule row : rows) {
             if (recoverTimedOutLocalAgentSchedule(row, now)) {
                 recovered++;
@@ -1049,6 +1052,7 @@ public class SelfMediaPublishScheduleService {
         if (normalizedPlatform != null && !allowedPlatforms.contains(normalizedPlatform)) {
             return null;
         }
+        recoverTimedOutLocalAgentSchedules(DEFAULT_CLAIM_LIMIT);
         if (!hasAvailableLocalAgentCapacity(operatorId)) {
             return null;
         }
@@ -1106,6 +1110,7 @@ public class SelfMediaPublishScheduleService {
         if (normalizedPlatform != null && !allowedPlatforms.contains(normalizedPlatform)) {
             return null;
         }
+        recoverTimedOutLocalAgentSchedules(DEFAULT_CLAIM_LIMIT);
         if (!hasAvailableLocalAgentCapacity(operatorId)) {
             return null;
         }

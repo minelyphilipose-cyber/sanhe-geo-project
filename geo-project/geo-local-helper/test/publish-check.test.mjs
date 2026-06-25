@@ -46,7 +46,7 @@ test('xiaohongshu publish check confirms published note after scheduled time', (
   assert.equal(result.found, true)
   assert.equal(result.pendingScheduled, false)
   assert.equal(result.url, 'https://creator.xiaohongshu.com/new/note-manager')
-  assert.equal(result.platformPublishedUrl, '')
+  assert.equal(result.platformPublishedUrl, 'https://www.xiaohongshu.com/explore/abc123')
 })
 
 test('xiaohongshu publish check confirms note-manager card without explicit published label', () => {
@@ -69,6 +69,32 @@ test('xiaohongshu publish check confirms note-manager card without explicit publ
   assert.equal(result.hasPublishedCard, true)
   assert.equal(result.platformStatus, 'published')
   assert.equal(result.reason, 'matched published note card')
+  assert.equal(result.platformPublishedUrl, '')
+})
+
+test('xiaohongshu publish check returns current detail url after opening published note', () => {
+  const result = evaluateXiaohongshuPublishSignals(
+    {
+      title: '看到好多阜阳姐妹在装修群里问“全屋智能哪家好”',
+      platformScheduledAt: '2026-06-24T17:05:00',
+    },
+    {
+      url: 'https://www.xiaohongshu.com/explore/6a3b88d2000000000803d330?xsec_token=abc%3D&xsec_source=pc_creatormng',
+      text: 'wohaiyjhm\n看到好多阜阳姐妹在装修群里问“全屋智能哪家好”\n夏天美甲款式推荐',
+      anchors: [],
+    },
+    {
+      nowMs: new Date(2026, 5, 24, 17, 20, 0).getTime(),
+    },
+  )
+
+  assert.equal(result.found, true)
+  assert.equal(result.pendingScheduled, false)
+  assert.equal(result.platformStatus, 'published')
+  assert.equal(
+    result.platformPublishedUrl,
+    'https://www.xiaohongshu.com/explore/6a3b88d2000000000803d330?xsec_token=abc%3D&xsec_source=pc_creatormng',
+  )
 })
 
 test('xiaohongshu publish check does not treat note manager route as published signal', () => {
@@ -197,6 +223,34 @@ test('baijiahao publish check confirms published article when list omits schedul
   assert.equal(result.platformStatus, 'published')
   assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content?currentPage=1&pageSize=10&app_id=1867055852901021')
   assert.equal(result.platformPublishedUrl, 'http://baijiahao.baidu.com/s?id=1868043633218529303')
+})
+
+test('baijiahao publish check ignores status tabs when matching published card', () => {
+  const result = evaluateBaijiahaoPublishSignals(
+    {
+      title: '在阜阳装修，总怕“全屋智能”装完变“全屋智障”，问题到底出在哪？',
+      platformScheduledAt: '2026-06-23T20:34:00',
+    },
+    {
+      url: 'https://baijiahao.baidu.com/builder/rc/content?currentPage=1&pageSize=10&search=&type=&collection=&app_id=1867055852901021&startDate=&endDate=',
+      text: '全部 图文 视频 小视频 动态 直播 合集 图集\n全部 已发布 待发布 未通过 已撤回\n共5篇\n在阜阳装修，总怕“全屋智能”装完变“全屋智障”，问题到底出在哪？\n已发布\n0 0 0 0 0 0\n在阜阳装修，全屋智能到底值不值？',
+      anchors: [
+        {
+          text: '在阜阳装修，总怕“全屋智能”装完变“全屋智障”，问题到底出在哪？',
+          href: 'http://baijiahao.baidu.com/s?id=1869000000000000001',
+        },
+      ],
+    },
+    {
+      nowMs: new Date(2026, 5, 24, 9, 40, 0).getTime(),
+    },
+  )
+
+  assert.equal(result.found, true)
+  assert.equal(result.failed, false)
+  assert.equal(result.hasRejectedSignal, false)
+  assert.equal(result.platformStatus, 'published')
+  assert.equal(result.platformPublishedUrl, 'http://baijiahao.baidu.com/s?id=1869000000000000001')
 })
 
 test('baijiahao publish check reports rejected article as failed', () => {

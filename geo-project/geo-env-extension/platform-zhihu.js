@@ -1051,6 +1051,8 @@
     return {
       verified: true,
       pageUrl: url,
+      platformPublishedUrl: url,
+      publishedUrl: url,
       pageTitle,
       expectedTitle,
       titleMatch,

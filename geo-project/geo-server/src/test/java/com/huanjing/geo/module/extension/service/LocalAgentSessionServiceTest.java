@@ -58,6 +58,25 @@ class LocalAgentSessionServiceTest {
     }
 
     @Test
+    void signRequestAllowsEncodedQueryContainingPublishedUrlAndDiagnostics() {
+        when(currentUserService.requireCurrentUser()).thenReturn(operator(20L));
+        when(sessionMapper.selectById(9L)).thenReturn(activeSession(9L, 20L));
+
+        LocalAgentSignResponse response = service.signRequest(9L, new LocalAgentSignRequest(
+                "POST",
+                "/api/v1/local-agent/self-media-schedules/209/publish-checks/published"
+                        + "?platformPublishedUrl=https%3A%2F%2Fwww.xiaohongshu.com%2Fexplore%2Fabc123"
+                        + "%3Fxsec_token%3Dtoken%253D%26xsec_source%3Dpc_creatormng"
+                        + "&diagnosticsJson=%7B%22textSample%22%3A%22title...body%22%7D",
+                EMPTY_BODY_HASH
+        ));
+
+        Map<String, String> headers = response.headers();
+        assertEquals("helper.session.9", headers.get("X-Geo-Helper-Access"));
+        assertTrue(headers.containsKey("X-Geo-Helper-Signature"));
+    }
+
+    @Test
     void signRequestRejectsUnsupportedHelperPath() {
         when(currentUserService.requireCurrentUser()).thenReturn(operator(20L));
         when(sessionMapper.selectById(9L)).thenReturn(activeSession(9L, 20L));
