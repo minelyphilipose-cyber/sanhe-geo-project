@@ -91,13 +91,13 @@
                 <span v-else>-</span>
               </div>
               <a
-                v-if="realPlatformPublishedUrl(scope.row)"
+                v-if="resolvedPlatformPublishedUrl(scope.row)"
                 class="schedule-link"
-                :href="realPlatformPublishedUrl(scope.row)"
+                :href="resolvedPlatformPublishedUrl(scope.row)"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                打开作品
+                {{ publishedUrlLinkText(scope.row) }}
               </a>
               <span v-else-if="scope.row.platformPublishId">发布 ID {{ scope.row.platformPublishId }}</span>
               <span v-if="scope.row.publishCheckCoverUrl" class="schedule-cover-line">
@@ -173,7 +173,18 @@
           <dl class="schedule-diagnostics-grid">
             <template v-for="item in diagnosticsFields" :key="item.label">
               <dt>{{ item.label }}</dt>
-              <dd>{{ item.value }}</dd>
+              <dd>
+                <a
+                  v-if="item.href"
+                  class="schedule-link"
+                  :href="item.href"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ item.value }}
+                </a>
+                <span v-else>{{ item.value }}</span>
+              </dd>
             </template>
           </dl>
         </section>
@@ -410,7 +421,7 @@ const diagnosticsFields = computed(() => {
     { label: '浏览器环境', value: `${row.browserEnvironmentId || '-'} / 绑定 ${row.browserEnvironmentAccountId || '-'}` },
     { label: '平台排期 ID', value: platformScheduleIdFieldValue(row) },
     { label: '平台发布 ID', value: row.platformPublishId || '-' },
-    { label: '平台发布链接', value: realPlatformPublishedUrl(row) || '-' },
+    { label: '平台发布链接', value: resolvedPlatformPublishedUrl(row) || '-', href: resolvedPlatformPublishedUrl(row) },
     { label: '下次处理', value: timeText(row.nextAttemptAt) },
     { label: '锁定至', value: timeText(row.lockedUntil) },
     { label: '尝试次数', value: attemptText(row) },
@@ -477,6 +488,7 @@ const publishVerificationFields = computed(() => {
   const payload = diagnosticsPayload.value
   if (!row) return []
   const verification = payload ? extractPublishVerification(payload) : null
+  const publishedUrl = resolvedPlatformPublishedUrl(row)
   const values: Array<{ label: string; value: string; href?: string }> = []
   const add = (label: string, value: unknown, href?: unknown) => {
     const text = diagnosticValueText(value)
@@ -486,7 +498,7 @@ const publishVerificationFields = computed(() => {
   }
 
   add('平台发布 ID', firstText(row.platformPublishId, verification?.platformPublishId))
-  add('平台发布链接', realPlatformPublishedUrl(row, verification?.platformPublishedUrl) || '-', realPlatformPublishedUrl(row, verification?.platformPublishedUrl))
+  add('平台发布链接', publishedUrl || '-', publishedUrl)
   add('封面图', firstText(row.publishCheckCoverUrl, verification?.coverImageUrl), firstText(row.publishCheckCoverUrl, verification?.coverImageUrl))
   add('平台状态', platformPublishStatusLabel(firstText(verification?.pageStatusCode, verification?.platformStatus)) || verification?.pageStatus)
   add('平台定时时间', firstText(verification?.scheduledAtText, verification?.platformScheduledAt, row.platformScheduledAt))
@@ -877,6 +889,12 @@ function extractPublishVerification(payload: Record<string, any>) {
     || nestedRecord(payload, ['result', 'publishOptions', 'publishVerification'])
 }
 
+function extractPublishOptions(payload: Record<string, any>) {
+  return nestedRecord(payload, ['fillResult', 'publishOptions'])
+    || nestedRecord(payload, ['publishOptions'])
+    || nestedRecord(payload, ['result', 'publishOptions'])
+}
+
 function extractFailureSnapshot(payload: Record<string, any>) {
   return nestedRecord(payload, ['failureSnapshot'])
     || nestedRecord(payload, ['failure', 'failureSnapshot'])
@@ -897,7 +915,7 @@ function operationStageLabel(stage?: string | null, fallback?: string | null) {
 
 function platformResultStatus(row: SelfMediaPublishSchedule) {
   if (row.status === 'published_confirmed') return '已确认发布'
-  if (realPlatformPublishedUrl(row)) return '已回传链接'
+  if (resolvedPlatformPublishedUrl(row)) return '已回传链接'
   if (row.platformPublishId) return '已回传 ID'
   if (row.publishCheckCoverUrl) return '已回传封面'
   if (row.status === 'scheduled') return '等待发布'
@@ -906,17 +924,41 @@ function platformResultStatus(row: SelfMediaPublishSchedule) {
 }
 
 function platformResultTag(row: SelfMediaPublishSchedule): 'success' | 'warning' | 'danger' | 'info' {
-  if (row.status === 'published_confirmed' || realPlatformPublishedUrl(row)) return 'success'
+  if (row.status === 'published_confirmed' || resolvedPlatformPublishedUrl(row)) return 'success'
   if (row.status === 'publish_unknown' || row.status === 'checking_publish_result') return 'warning'
   if (row.status === 'publish_failed') return 'danger'
   return 'info'
 }
 
-function realPlatformPublishedUrl(row: SelfMediaPublishSchedule, candidate?: string | null) {
-  if (row.platform === 'douyin') return ''
-  const value = firstText(candidate, row.platformPublishedUrl)
+function resolvedPlatformPublishedUrl(row: SelfMediaPublishSchedule, candidate?: string | null) {
+  const payload = parseDiagnostics(row.diagnosticsJson)
+  const verification = payload ? extractPublishVerification(payload) : null
+  const publishOptions = payload ? extractPublishOptions(payload) : null
+  const value = firstText(
+    candidate,
+    row.platformPublishedUrl,
+    verification?.platformPublishedUrl,
+    verification?.publishedUrl,
+    publishOptions?.platformPublishedUrl,
+    publishOptions?.publishedUrl,
+    payload?.platformPublishedUrl,
+    payload?.publishedUrl,
+  )
   if (!/^https?:\/\//i.test(value)) return ''
   return value
+}
+
+function publishedUrlLinkText(row: SelfMediaPublishSchedule) {
+  const url = resolvedPlatformPublishedUrl(row)
+  if (!url) return '打开作品'
+  try {
+    const parsed = new URL(url)
+    const path = `${parsed.pathname}${parsed.search}`.replace(/\/$/, '')
+    const text = `${parsed.hostname}${path}`
+    return text.length > 42 ? `${text.slice(0, 39)}...` : text
+  } catch {
+    return url.length > 42 ? `${url.slice(0, 39)}...` : url
+  }
 }
 
 function articleDisplay(row: SelfMediaPublishSchedule) {
