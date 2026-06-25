@@ -348,6 +348,29 @@
               />
             </div>
 
+            <div v-if="requiresHeadImage" class="form-item cover-field">
+              <div class="cover-label-row">
+                <label class="form-label">文章头图</label>
+                <el-button size="small" :icon="Picture" :disabled="!selectedProject?.brandId" @click="openHeadImagePicker">
+                  选择头图
+                </el-button>
+              </div>
+              <div v-if="selectedHeadImageMaterial" class="cover-card">
+                <img :src="materialThumbUrl(selectedHeadImageMaterial)" :alt="selectedHeadImageMaterial.fileName" />
+                <div class="cover-card-body">
+                  <strong>{{ selectedHeadImageMaterial.fileName }}</strong>
+                  <span>会插入到抖音图文正文开头，不能与封面图片相同。</span>
+                </div>
+                <el-button link type="danger" @click="clearSelectedHeadImage">移除</el-button>
+              </div>
+              <el-alert
+                v-else
+                type="info"
+                :closable="false"
+                title="可为抖音图文选择一张头图；AI 自动生成保存时若未选择，系统会自动从品牌图库补充。"
+              />
+            </div>
+
             <div class="paragraph-header">
               <label class="form-label">小标题段落</label>
               <span class="form-help">共 {{ manualForm.sections.length }} 段 · 使用操作调整顺序</span>
@@ -596,7 +619,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="imagePickerVisible" :title="imagePickerMode === 'cover' ? '选择文章封面' : '选择品牌图片'" width="860px">
+    <el-dialog v-model="imagePickerVisible" :title="imagePickerTitle" width="860px">
       <div class="image-picker">
         <div class="image-picker-toolbar">
           <el-select
@@ -640,7 +663,7 @@
       <template #footer>
         <el-button @click="imagePickerVisible = false">取消</el-button>
         <el-button type="primary" :disabled="!activePickerMaterial" @click="confirmImagePicker">
-          {{ imagePickerMode === 'cover' ? '设为封面' : '插入文章' }}
+          {{ imagePickerConfirmText }}
         </el-button>
       </template>
     </el-dialog>
@@ -783,7 +806,7 @@ const markdownOverridden = ref(false)
 const sourceExpanded = ref(false)
 const previewMode = ref<'rendered' | 'markdown'>('rendered')
 const imagePickerVisible = ref(false)
-const imagePickerMode = ref<'insert' | 'cover'>('insert')
+const imagePickerMode = ref<'insert' | 'cover' | 'head'>('insert')
 const questionPickerVisible = ref(false)
 const questionPickerLoading = ref(false)
 const imageFoldersLoading = ref(false)
@@ -793,6 +816,7 @@ const imagePreviewUrls = ref<Record<string, string>>({})
 const selectedImageFolderId = ref<number | null>(null)
 const selectedImageMaterialId = ref<number | null>(null)
 const selectedCoverMaterialId = ref<number | null>(null)
+const selectedHeadImageMaterialId = ref<number | null>(null)
 const imageAltText = ref('')
 const generationNotice = ref<NoticeState | null>(null)
 const parseNotice = ref<NoticeState | null>(null)
@@ -887,6 +911,7 @@ const previewContentStyleLabel = computed(() => {
 const draftContentStyle = computed(() => createMode.value === 'auto' ? aiForm.contentStyle : manualForm.contentStyle)
 const draftTopic = computed(() => createMode.value === 'auto' ? aiForm.topic.trim() : manualForm.topic.trim())
 const requiresCover = computed(() => isCoverRequiredStyle(draftContentStyle.value))
+const requiresHeadImage = computed(() => isDouyinStyle(draftContentStyle.value))
 const templateChannelGroups = computed(() => generationOptions.value?.groups || [])
 const selectedTemplateChannel = computed(() => findTemplateChannel(templateForm.channelKey))
 const availableTemplateOptions = computed(() => {
@@ -975,8 +1000,27 @@ const selectedImageMaterial = computed(() => imageMaterials.value.find((item) =>
 const allImageMaterials = computed(() => imageFolders.value.flatMap((folder) => folder.materials || [])
   .filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.publicUrl)))
 const selectedCoverMaterial = computed(() => allImageMaterials.value.find((item) => item.id === selectedCoverMaterialId.value) || null)
-const activePickerMaterialId = computed(() => imagePickerMode.value === 'cover' ? selectedCoverMaterialId.value : selectedImageMaterialId.value)
-const activePickerMaterial = computed(() => imagePickerMode.value === 'cover' ? selectedCoverMaterial.value : selectedImageMaterial.value)
+const selectedHeadImageMaterial = computed(() => allImageMaterials.value.find((item) => item.id === selectedHeadImageMaterialId.value) || null)
+const activePickerMaterialId = computed(() => {
+  if (imagePickerMode.value === 'cover') return selectedCoverMaterialId.value
+  if (imagePickerMode.value === 'head') return selectedHeadImageMaterialId.value
+  return selectedImageMaterialId.value
+})
+const activePickerMaterial = computed(() => {
+  if (imagePickerMode.value === 'cover') return selectedCoverMaterial.value
+  if (imagePickerMode.value === 'head') return selectedHeadImageMaterial.value
+  return selectedImageMaterial.value
+})
+const imagePickerTitle = computed(() => {
+  if (imagePickerMode.value === 'cover') return '选择文章封面'
+  if (imagePickerMode.value === 'head') return '选择文章头图'
+  return '选择品牌图片'
+})
+const imagePickerConfirmText = computed(() => {
+  if (imagePickerMode.value === 'cover') return '设为封面'
+  if (imagePickerMode.value === 'head') return '设为头图'
+  return '插入文章'
+})
 const questionSceneOptions: QuestionSceneOption[] = [
   { value: 'brand', label: '品牌场景' },
   { value: 'decision', label: '决策场景' },
@@ -1399,6 +1443,20 @@ async function openCoverPicker() {
   }
 }
 
+async function openHeadImagePicker() {
+  if (!selectedProject.value?.brandId) {
+    ElMessage.warning('请先选择绑定项目')
+    return
+  }
+  imagePickerMode.value = 'head'
+  imagePickerVisible.value = true
+  if (!imageFolders.value.length) {
+    await loadImageFolders()
+  } else if (!Object.keys(imageThumbUrls.value).length) {
+    await loadImageThumbs(selectedProject.value.brandId)
+  }
+}
+
 async function openQuestionPicker() {
   if (!manualForm.projectId) {
     ElMessage.warning('请先选择绑定项目')
@@ -1532,6 +1590,7 @@ async function loadImageFolders() {
     imageFolders.value = []
     selectedImageFolderId.value = null
     selectedImageMaterialId.value = null
+    selectedHeadImageMaterialId.value = null
     return
   }
   imageFoldersLoading.value = true
@@ -1548,12 +1607,16 @@ async function loadImageFolders() {
     if (!imageMaterials.value.some((material) => material.id === selectedImageMaterialId.value)) {
       selectedImageMaterialId.value = imageMaterials.value[0]?.id || null
     }
+    if (!allImageMaterials.value.some((material) => material.id === selectedHeadImageMaterialId.value)) {
+      selectedHeadImageMaterialId.value = null
+    }
     await loadImageThumbs(project.brandId)
   } catch (err) {
     console.error(err)
     imageFolders.value = []
     selectedImageFolderId.value = null
     selectedImageMaterialId.value = null
+    selectedHeadImageMaterialId.value = null
     ElMessage.error('加载品牌图库失败')
   } finally {
     imageFoldersLoading.value = false
@@ -1562,7 +1625,17 @@ async function loadImageFolders() {
 
 function selectImageMaterial(material: BrandMaterial) {
   if (imagePickerMode.value === 'cover') {
+    if (selectedHeadImageMaterialId.value === material.id) {
+      ElMessage.warning('封面图片不能与头图相同')
+      return
+    }
     selectedCoverMaterialId.value = material.id
+  } else if (imagePickerMode.value === 'head') {
+    if (selectedCoverMaterialId.value === material.id) {
+      ElMessage.warning('头图图片不能与封面相同')
+      return
+    }
+    selectedHeadImageMaterialId.value = material.id
   } else {
     selectedImageMaterialId.value = material.id
   }
@@ -1660,6 +1733,10 @@ function confirmImagePicker() {
     selectCoverImage()
     return
   }
+  if (imagePickerMode.value === 'head') {
+    selectHeadImage()
+    return
+  }
   insertSelectedImage()
 }
 
@@ -1674,6 +1751,23 @@ function selectCoverImage() {
 
 function clearSelectedCover() {
   selectedCoverMaterialId.value = null
+}
+
+function selectHeadImage() {
+  if (!selectedHeadImageMaterial.value) {
+    ElMessage.warning('请选择可用图片')
+    return
+  }
+  if (selectedHeadImageMaterialId.value === selectedCoverMaterialId.value) {
+    ElMessage.warning('头图图片不能与封面相同')
+    return
+  }
+  imagePickerVisible.value = false
+  ElMessage.success('头图已选择')
+}
+
+function clearSelectedHeadImage() {
+  selectedHeadImageMaterialId.value = null
 }
 
 function insertSelectedImage() {
@@ -1724,7 +1818,11 @@ function isImageType(fileType?: string | null) {
 }
 
 function isCoverRequiredStyle(style?: string | null) {
-  return ['toutiao', 'baijiahao', 'netease'].includes((style || '').trim())
+  return ['toutiao', 'baijiahao', 'netease', 'douyin'].includes((style || '').trim())
+}
+
+function isDouyinStyle(style?: string | null) {
+  return (style || '').trim() === 'douyin'
 }
 
 function clearStillGeneratingTimer() {
@@ -2101,6 +2199,7 @@ async function submitManualCreate() {
       title: manualForm.title.trim(),
       contentMarkdown,
       coverMaterialId: requiresCover.value && selectedCoverMaterialId.value ? selectedCoverMaterialId.value : undefined,
+      headImageMaterialId: requiresHeadImage.value && selectedHeadImageMaterialId.value ? selectedHeadImageMaterialId.value : undefined,
       source: aiMetadata.value ? 'ai_preview' : 'manual',
       aiMetadata: aiMetadata.value || undefined,
     })
@@ -2157,6 +2256,7 @@ watch(() => manualForm.projectId, async () => {
   selectedImageFolderId.value = null
   selectedImageMaterialId.value = null
   selectedCoverMaterialId.value = null
+  selectedHeadImageMaterialId.value = null
   imageAltText.value = ''
   questionRows.value = []
   selectedQuestionKey.value = ''
@@ -2176,6 +2276,9 @@ watch(() => manualForm.articleType, () => {
 watch(draftContentStyle, () => {
   if (!requiresCover.value) {
     selectedCoverMaterialId.value = null
+  }
+  if (!requiresHeadImage.value) {
+    selectedHeadImageMaterialId.value = null
   }
 })
 

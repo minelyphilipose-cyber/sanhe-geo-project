@@ -175,6 +175,121 @@ class MobileDashboardAggregateServiceTest {
     }
 
     @Test
+    void completeBatchCoverageIgnoresNewerPartialPollRefresh() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createQuestionCoverageTables(jdbcTemplate);
+        jdbcTemplate.update("INSERT INTO keyword_group (id, deleted) VALUES (10, 0)");
+        jdbcTemplate.update("INSERT INTO project_keyword_group_rel (project_id, keyword_group_id) VALUES (1, 10)");
+        jdbcTemplate.update("""
+                INSERT INTO keyword_group_result (id, group_id, scene_code, question_tier)
+                VALUES
+                    (1001, 10, 'brand_awareness', 'A'),
+                    (1002, 10, 'qa', 'A')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_keyword_daily_summary
+                    (project_id, keyword_result_id, batch_date, question_tier, completed_count, hit_count, effective_hit_count)
+                VALUES
+                    (1, 1001, DATE '2026-06-20', 'A', 1, 0, 1),
+                    (1, 1002, DATE '2026-06-20', 'A', 1, 1, 0),
+                    (1, 1001, DATE '2026-06-21', 'A', 1, 0, 0)
+                """);
+        MobileDashboardAggregateService service = newService(jdbcTemplate);
+
+        Object completeBatchDate = invoke(service, "loadLatestCompletePollBatchDate", 1L);
+        Object coverage = invoke(service, "loadCompleteBatchQuestionCoverage", 1L, completeBatchDate);
+
+        assertThat(completeBatchDate).isEqualTo(LocalDate.of(2026, 6, 20));
+        assertThat(recordValue(coverage, "total")).isEqualTo(2L);
+        assertThat(recordValue(coverage, "covered")).isEqualTo(2L);
+    }
+
+    @Test
+    void completeBatchCoveragePrefersPollResultEffectiveHitOverSummaryRawHit() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createQuestionCoverageTables(jdbcTemplate);
+        createPollResultsTable(jdbcTemplate);
+        jdbcTemplate.update("INSERT INTO keyword_group (id, deleted) VALUES (10, 0)");
+        jdbcTemplate.update("INSERT INTO project_keyword_group_rel (project_id, keyword_group_id) VALUES (1, 10)");
+        jdbcTemplate.update("""
+                INSERT INTO keyword_group_result (id, group_id, scene_code, question_tier)
+                VALUES
+                    (1001, 10, 'brand_awareness', 'A'),
+                    (1002, 10, 'qa', 'A')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_keyword_daily_summary
+                    (project_id, keyword_result_id, batch_date, question_tier, completed_count, hit_count, effective_hit_count)
+                VALUES
+                    (1, 1001, DATE '2026-06-20', 'A', 1, 1, 0),
+                    (1, 1002, DATE '2026-06-20', 'A', 1, 1, 0)
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, batch_date, question_tier, status, effective_hit, updated_at)
+                VALUES
+                    (1, 1, 1001, 'q1', 'doubao', DATE '2026-06-20', 'A', 'completed', 0, TIMESTAMP '2026-06-20 09:00:00'),
+                    (2, 1, 1002, 'q2', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, TIMESTAMP '2026-06-20 09:00:00')
+                """);
+        MobileDashboardAggregateService service = newService(jdbcTemplate);
+
+        LocalDate completeBatchDate = LocalDate.of(2026, 6, 20);
+        assertThat(invoke(service, "hasCompleteBatchPollResults", 1L, completeBatchDate)).isEqualTo(true);
+        Object coverage = invoke(service, "loadCompleteBatchQuestionCoverage", 1L, completeBatchDate);
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.SceneMetric> scenes =
+                (List<MobileDashboardAggregateVO.SceneMetric>) invoke(service, "loadCompleteBatchSceneCoverage",
+                        1L, completeBatchDate);
+
+        assertThat(recordValue(coverage, "total")).isEqualTo(2L);
+        assertThat(recordValue(coverage, "covered")).isEqualTo(1L);
+        assertThat(scenes).filteredOn(row -> "brand_awareness".equals(row.getCode()))
+                .singleElement()
+                .satisfies(row -> assertThat(row.getCovered().getValue()).isEqualTo(0L));
+        assertThat(scenes).filteredOn(row -> "qa".equals(row.getCode()))
+                .singleElement()
+                .satisfies(row -> assertThat(row.getCovered().getValue()).isEqualTo(1L));
+    }
+
+    @Test
+    void completeBatchMentionAggregateUsesSummaryFallbackInsteadOfLatestResultEffectiveHit() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        jdbcTemplate.execute("""
+                CREATE TABLE poll_platform_daily_summary (
+                    project_id BIGINT,
+                    batch_date DATE,
+                    platform_code VARCHAR(32),
+                    question_tier VARCHAR(8),
+                    completed_count BIGINT,
+                    hit_count BIGINT,
+                    effective_hit_count BIGINT
+                )
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_platform_daily_summary
+                    (project_id, batch_date, platform_code, question_tier, completed_count, hit_count, effective_hit_count)
+                VALUES
+                    (1, DATE '2026-06-20', 'doubao', 'A', 10, 4, 0),
+                    (1, DATE '2026-06-20', 'deepseek', 'A', 5, 0, 3),
+                    (1, DATE '2026-06-21', 'doubao', 'A', 2, 0, 0)
+                """);
+        MobileDashboardAggregateService service = newService(jdbcTemplate);
+
+        Object aggregate = invoke(service, "loadCompleteBatchMentionAggregate", 1L, LocalDate.of(2026, 6, 20), null);
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.PlatformMetric> rows =
+                (List<MobileDashboardAggregateVO.PlatformMetric>) invoke(service, "loadCompleteBatchPlatformPerformance",
+                        1L, LocalDate.of(2026, 6, 20));
+
+        assertThat(recordValue(aggregate, "completed")).isEqualTo(15L);
+        assertThat(recordValue(aggregate, "mentions")).isEqualTo(7L);
+        assertThat(rows).extracting(MobileDashboardAggregateVO.PlatformMetric::getCode)
+                .containsExactly("deepseek", "doubao");
+        assertThat(rows.get(0).getRate().getValue()).isEqualTo(60);
+        assertThat(rows.get(1).getRate().getValue()).isEqualTo(40);
+    }
+
+    @Test
     void platformPerformanceSortsByRateDescendingThenStableAiPlatformOrder() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         jdbcTemplate.execute("""
@@ -360,6 +475,7 @@ class MobileDashboardAggregateServiceTest {
                     keyword_result_id BIGINT,
                     batch_date DATE,
                     question_tier VARCHAR(8),
+                    completed_count BIGINT,
                     hit_count BIGINT,
                     effective_hit_count BIGINT
                 )

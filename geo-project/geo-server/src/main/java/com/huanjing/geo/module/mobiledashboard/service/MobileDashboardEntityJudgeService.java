@@ -21,7 +21,6 @@ import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -61,18 +60,7 @@ public class MobileDashboardEntityJudgeService {
     private final ProjectCompetitorConfigService competitorConfigService;
     private final MobileEntityMentionMatcher mentionMatcher;
     private final CurrentUserService currentUserService;
-
-    @Value("${geo.mobile-dashboard.entity-judge.enabled:false}")
-    private boolean entityJudgeEnabled;
-
-    @Value("${geo.mobile-dashboard.entity-judge.max-projects-per-run:20}")
-    private int maxProjectsPerRun;
-
-    @Value("${geo.mobile-dashboard.entity-judge.per-project-limit:10}")
-    private int perProjectLimit;
-
-    @Value("${geo.mobile-dashboard.entity-judge.platform-codes:deepseek,doubao,qwen}")
-    private String judgePlatformCodes = "deepseek,doubao,qwen";
+    private final MobileEntityJudgeRuntimeConfig judgeRuntimeConfig;
 
     public EntityJudgeRunVO runOnce(EntityJudgeRunRequest request) {
         currentUserService.ensurePermission("project.competitor.manage");
@@ -86,14 +74,14 @@ public class MobileDashboardEntityJudgeService {
 
     @Scheduled(fixedDelayString = "${geo.mobile-dashboard.entity-judge.worker-ms:60000}")
     public void scheduledRun() {
-        if (!entityJudgeEnabled) {
+        if (!judgeRuntimeConfig.isEnabled()) {
             return;
         }
         try {
             LocalDate startDate = LocalDate.now().minusDays(2);
             LocalDate endDate = LocalDate.now();
-            List<Long> projectIds = loadPendingProjectIds(startDate, endDate, Math.max(1, maxProjectsPerRun));
-            int limit = Math.max(1, perProjectLimit);
+            List<Long> projectIds = loadPendingProjectIds(startDate, endDate, Math.max(1, judgeRuntimeConfig.getMaxProjectsPerRun()));
+            int limit = Math.max(1, judgeRuntimeConfig.getPerProjectLimit());
             for (Long projectId : projectIds) {
                 judgeCandidates(loadCandidates(projectId, startDate, endDate, limit));
             }
@@ -460,7 +448,7 @@ public class MobileDashboardEntityJudgeService {
     }
 
     private List<AiPlatformConfig> loadJudgePlatforms() {
-        Set<String> codes = LlmPlatformCodeFilters.parseCodes(judgePlatformCodes);
+        Set<String> codes = judgeRuntimeConfig.platformCodeSet();
         if (codes.isEmpty()) {
             return List.of();
         }

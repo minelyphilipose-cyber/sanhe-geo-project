@@ -84,7 +84,7 @@ public class DispatchQuestionPollPlanningService {
         }
 
         int planCap = resolveTierPollLimit(project, questionTier);
-        int takeCount = planCap > 0 ? Math.min(planCap, allKeywords.size()) : allKeywords.size();
+        int takeCount = resolveDailyTakeCount(allKeywords.size(), planCap, questionTier);
         List<PollKeywordCandidate> selected = selectRotatedKeywords(project.getId(), questionTier, allKeywords, takeCount);
         int shardSize = resolveEffectiveShardSize();
         int shardCountPerPlatform = (int) Math.ceil(selected.size() / (double) shardSize);
@@ -141,6 +141,22 @@ public class DispatchQuestionPollPlanningService {
                     configured, maxAllowed, effective);
         }
         return effective;
+    }
+
+    int resolveDailyTakeCount(int deduplicatedKeywordCount, int planCap, String questionTier) {
+        int total = Math.max(0, deduplicatedKeywordCount);
+        if (total == 0) {
+            return 0;
+        }
+        int effectiveTotal = planCap > 0 ? Math.min(total, planCap) : total;
+        if (!"A".equalsIgnoreCase(questionTier)) {
+            return effectiveTotal;
+        }
+        int cycleDays = Math.max(1, dispatchProperties.getQuestionPollCycleDays());
+        if (cycleDays <= 1) {
+            return effectiveTotal;
+        }
+        return Math.max(1, (int) Math.ceil(effectiveTotal / (double) cycleDays));
     }
 
     private List<DispatchTask> createShardsAndTasks(PollBatch batch,
@@ -203,6 +219,8 @@ public class DispatchQuestionPollPlanningService {
                         null,
                         null
                 );
+                task.setPlatformCode(platform.getPlatformCode());
+                dispatchTaskService.updateTaskPlatform(task);
                 shard.setDispatchTaskId(task.getId());
                 pollBatchShardMapper.updateById(shard);
                 shardTasks.add(task);
@@ -218,13 +236,13 @@ public class DispatchQuestionPollPlanningService {
         }
         DispatchTaskService dispatchTaskService = dispatchTaskServiceProvider.getObject();
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            tasks.forEach(dispatchTaskService::enqueueIfNeeded);
+            dispatchTaskService.enqueueQuestionPollShardTasksWithStagger(tasks);
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                tasks.forEach(dispatchTaskService::enqueueIfNeeded);
+                dispatchTaskService.enqueueQuestionPollShardTasksWithStagger(tasks);
             }
         });
     }

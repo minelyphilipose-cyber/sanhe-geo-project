@@ -7,8 +7,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
-import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.LlmProperties;
 import com.huanjing.geo.module.content.service.SpecialIndustryReadinessService;
@@ -90,7 +91,7 @@ public class GeoQuestionService {
     private final CompanyService companyService;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
-    private final LlmInvoker llmInvoker;
+    private final LlmCallFacade llmCallFacade;
     private final LlmProperties llmProperties;
     private final GeoQuestionWorkorderMapper workorderMapper;
     private final GeoQuestionProfileDraftMapper draftMapper;
@@ -1098,7 +1099,7 @@ public class GeoQuestionService {
                 defaultText(batch.getPromptSnapshot(), "")
         );
         try {
-            LlmInvokeResult result = llmInvoker.invoke(prompt, new LlmModelConfig(
+            LlmInvokeResult result = llmCallFacade.execute(LlmCallRequest.direct(prompt, new LlmModelConfig(
                     config.getPlatformCode(),
                     config.getPlatformName(),
                     modelId,
@@ -1116,7 +1117,7 @@ public class GeoQuestionService {
                     QUESTION_GENERATION_TIMEOUT_MS,
                     "geo_question",
                     config.getConcurrencyLimit()
-            ));
+            ))).invokeResult();
             GenerationContext context = generationContext(batch);
             List<GeneratedQuestionSpec> specs = filterGeneratedQuestions(parseGeneratedQuestions(result.responseText(), batch), batch, context, List.of());
             if (specs.isEmpty()) {
@@ -1195,7 +1196,7 @@ public class GeoQuestionService {
                                                String apiKey,
                                                GeoQuestionBatch batch,
                                                String prompt) throws Exception {
-        return llmInvoker.invoke(prompt, new LlmModelConfig(
+        return llmCallFacade.execute(LlmCallRequest.direct(prompt, new LlmModelConfig(
                 config.getPlatformCode(),
                 config.getPlatformName(),
                 modelId,
@@ -1213,7 +1214,7 @@ public class GeoQuestionService {
                 QUESTION_GENERATION_TIMEOUT_MS,
                 "geo_question",
                 config.getConcurrencyLimit()
-        ));
+        ))).invokeResult();
     }
 
     private void saveLlmResponse(Long batchId, String responseText, LlmInvokeResult result) {

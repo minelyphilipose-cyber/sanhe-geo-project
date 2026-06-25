@@ -4,8 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
-import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.LlmProperties;
 import com.huanjing.geo.module.presale.dto.PresalePromptCategoryCode;
@@ -41,7 +42,7 @@ public class PresaleLlmPromptQuestionService {
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
-    private final LlmInvoker llmInvoker;
+    private final LlmCallFacade llmCallFacade;
     private final LlmProperties llmProperties;
     private final ObjectMapper objectMapper;
     private final CurrentUserService currentUserService;
@@ -237,7 +238,7 @@ public class PresaleLlmPromptQuestionService {
         }
 
         try {
-            LlmInvokeResult response = llmInvoker.invoke(userPrompt, new LlmModelConfig(
+            LlmInvokeResult response = llmCallFacade.execute(LlmCallRequest.direct(userPrompt, new LlmModelConfig(
                 config.getPlatformCode(),
                 config.getPlatformName(),
                 modelId,
@@ -252,7 +253,7 @@ public class PresaleLlmPromptQuestionService {
                 Math.max(1, config.getRateLimitQps() == null ? 1 : config.getRateLimitQps()),
                 null,
                 false
-            ));
+            ))).invokeResult();
             return response.responseText();
         } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
             throw new LlmQuestionProviderException(

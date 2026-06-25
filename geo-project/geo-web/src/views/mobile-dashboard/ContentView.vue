@@ -13,7 +13,14 @@
     <DashboardCard :title="platformCompletionTitle" icon="dashboard">
       <div v-if="data?.platformCompletion?.length" class="completion-rail">
         <div v-for="item in data.platformCompletion" :key="item.code" class="completion-item">
-          <div class="platform-icon">{{ contentPlatformLabel(item.code).slice(0, 1) }}</div>
+          <div class="platform-icon" :class="`platform-icon--${item.code}`">
+            <img
+              v-if="contentPlatformLogo(item.code)"
+              :src="contentPlatformLogo(item.code)"
+              :alt="contentPlatformLabel(item.code)"
+            >
+            <MobileIcon v-else :name="contentPlatformIcon(item.code)" />
+          </div>
           <div class="completion-copy">
             <span>{{ contentPlatformLabel(item.code) }}</span>
             <strong>{{ completionMainText(item) }}</strong>
@@ -34,7 +41,14 @@
           :class="{ clickable: canOpenTask(item) }"
           @click="openTask(item)"
         >
-          <div class="task-icon">{{ taskIconText(item.platformCodes) }}</div>
+          <div class="task-icon" :class="`task-icon--${firstTaskPlatformCode(item.platformCodes)}`">
+            <img
+              v-if="taskLogo(item.platformCodes)"
+              :src="taskLogo(item.platformCodes)"
+              :alt="taskPlatforms(item.platformCodes)"
+            >
+            <span v-else>{{ taskIconText(item.platformCodes) }}</span>
+          </div>
           <div class="task-main">
             <div class="task-title-row">
               <h3>{{ item.title }}</h3>
@@ -58,7 +72,12 @@
       <section v-if="data?.ownedPublish?.length" class="owned-grid">
         <div v-for="item in data.ownedPublish" :key="item.code" class="owned-item">
           <div class="platform-symbol" :class="`platform-symbol--${item.code}`">
-            <MobileIcon :name="contentPlatformIcon(item.code)" />
+            <img
+              v-if="contentPlatformLogo(item.code)"
+              :src="contentPlatformLogo(item.code)"
+              :alt="contentPlatformLabel(item.code)"
+            >
+            <MobileIcon v-else :name="contentPlatformIcon(item.code)" />
           </div>
           <span>{{ contentPlatformLabel(item.code) }}</span>
           <strong>{{ metricText(item.published, false) }}/{{ metricText(item.indexed, false) }}</strong>
@@ -88,10 +107,26 @@ import EmptyState from '@/components/mobile-dashboard/EmptyState.vue'
 import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { ContentDashboardData, ContentTaskItem, DashboardMetric, PlatformCompletion } from '@/types/mobileDashboard'
-import { contentPlatformLabel } from '@/utils/mobileDashboardDictionaries'
+import { contentPlatformIcon, contentPlatformLabel } from '@/utils/mobileDashboardDictionaries'
+import baijiahaoLogo from '@/assets/self-media-platform-logos/百家号.svg'
+import douyinLogo from '@/assets/self-media-platform-logos/抖音.svg'
+import officialSiteLogo from '@/assets/self-media-platform-logos/Agent官网.svg'
+import toutiaoLogo from '@/assets/self-media-platform-logos/今日头条.svg'
+import wechatMpLogo from '@/assets/self-media-platform-logos/公众号.svg'
+import xiaohongshuLogo from '@/assets/self-media-platform-logos/小红书.svg'
+import zhihuLogo from '@/assets/self-media-platform-logos/知乎.svg'
 
 const store = useMobileDashboardStore()
 const data = ref<ContentDashboardData>()
+const selfMediaPlatformLogos: Record<string, string> = {
+  official_site: officialSiteLogo,
+  douyin: douyinLogo,
+  xiaohongshu: xiaohongshuLogo,
+  wechat_mp: wechatMpLogo,
+  toutiao: toutiaoLogo,
+  baijiahao: baijiahaoLogo,
+  zhihu: zhihuLogo,
+}
 
 const overviewCards = computed(() => {
   const overview = data.value?.overview
@@ -168,17 +203,18 @@ function taskIconText(codes: string[]) {
   return contentPlatformLabel(codes[0]).slice(0, 1)
 }
 
-function contentPlatformIcon(code?: string | null) {
-  const icons: Record<string, string> = {
-    official_site: 'globe',
-    douyin: 'movie',
-    xiaohongshu: 'favorite',
-    wechat_mp: 'chat',
-    toutiao: 'newspaper',
-    baijiahao: 'article',
-    zhihu: 'question',
-  }
-  return code ? icons[code] || 'globe' : 'globe'
+function firstTaskPlatformCode(codes: string[]) {
+  return codes?.[0] || 'pending'
+}
+
+function contentPlatformLogo(code?: string | null) {
+  if (!code) return ''
+  return selfMediaPlatformLogos[code] || ''
+}
+
+function taskLogo(codes: string[]) {
+  if (!codes?.length) return ''
+  return contentPlatformLogo(codes[0])
 }
 
 function formatDate(value?: string | null) {
@@ -253,7 +289,7 @@ onMounted(async () => {
   border-radius: 10px;
   background: #e6f7ef;
   color: #006D44;
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .overview-strip .inline-metric .mobile-icon {
@@ -267,7 +303,9 @@ onMounted(async () => {
   display: block;
   margin-top: 7px;
   color: #52625C;
-  font-size: 12px;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .overview-strip .inline-metric span {
@@ -283,13 +321,14 @@ onMounted(async () => {
   display: block;
   margin-top: 5px;
   color: #131b2e;
-  font-size: 18px;
-  font-weight: 800;
+  font-size: var(--mobile-metric, 18px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-title, 24px);
 }
 
 .overview-strip .inline-metric strong {
   text-align: center;
-  font-size: 18px;
+  font-size: var(--mobile-metric, 18px);
 }
 
 .completion-rail {
@@ -310,14 +349,14 @@ onMounted(async () => {
 }
 
 .completion-item {
-  flex: 0 0 118px;
-  min-width: 118px;
+  flex: 0 0 132px;
+  min-width: 132px;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-columns: 36px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
-  padding: 10px;
-  border-radius: 13px;
+  padding: 12px;
+  border-radius: 14px;
   background: #f8fafc;
   scroll-snap-align: start;
 }
@@ -329,23 +368,98 @@ onMounted(async () => {
 
 .platform-icon {
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #e6f7ef;
   color: #006D44;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.platform-icon .mobile-icon {
+  font-size: 18px;
+}
+
+.platform-icon img,
+.platform-symbol img,
+.task-icon img {
+  display: block;
+  max-width: 72%;
+  max-height: 72%;
+  object-fit: contain;
+}
+
+.platform-icon img {
+  max-width: 28px;
+  max-height: 28px;
+}
+
+.platform-symbol img {
+  max-width: 30px;
+  max-height: 30px;
+}
+
+.task-icon img {
+  max-width: 30px;
+  max-height: 30px;
+}
+
+.platform-icon--xiaohongshu {
+  background: #fff5f5;
+  color: #dc2626;
+}
+
+.platform-icon--douyin,
+.platform-icon--toutiao,
+.platform-icon--baijiahao,
+.platform-icon--zhihu,
+.platform-symbol--douyin,
+.platform-symbol--toutiao,
+.platform-symbol--baijiahao,
+.platform-symbol--zhihu,
+.task-icon--douyin,
+.task-icon--toutiao,
+.task-icon--baijiahao,
+.task-icon--zhihu {
+  border: 1px solid #eef0f2;
+  background: #fff;
+}
+
+.platform-icon--wechat_mp,
+.platform-icon--official_site,
+.platform-symbol--wechat_mp,
+.platform-symbol--official_site,
+.task-icon--wechat_mp,
+.task-icon--official_site {
+  border: 1px solid #d8f5e5;
+  background: #fff;
+}
+
+.task-icon--xiaohongshu,
+.platform-symbol--xiaohongshu {
+  border: 1px solid #fee2e2;
+  background: #fff5f5;
+}
+
+.platform-icon--zhihu {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.platform-icon--douyin {
+  background: #f8fafc;
+  color: #131b2e;
 }
 
 .completion-item span,
 .owned-item span {
   display: block;
   color: #6b7280;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--mobile-text-xs, 12px);
+  line-height: var(--mobile-leading-label, 16px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -356,9 +470,9 @@ onMounted(async () => {
   display: block;
   margin-top: 3px;
   color: #131b2e;
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.2;
+  font-size: var(--mobile-text-lg, 16px);
+  font-weight: 600;
+  line-height: var(--mobile-leading-lg, 22px);
   white-space: nowrap;
 }
 
@@ -375,29 +489,29 @@ onMounted(async () => {
   display: block;
   margin-top: 5px;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: var(--mobile-text-xs, 12px);
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .module-note {
   margin: 5px 0 0;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--mobile-text-xs, 12px);
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .task-list {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .task-item {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
-  padding: 10px;
+  padding: 14px;
   border: 1px solid #eef0f2;
-  border-radius: 13px;
+  border-radius: 16px;
   background: #fff;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
@@ -414,15 +528,20 @@ onMounted(async () => {
 
 .task-icon {
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
   border-radius: 50%;
   background: #e6f7ef;
   color: #006D44;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.task-icon span {
+  line-height: 1;
 }
 
 .task-main {
@@ -443,9 +562,9 @@ onMounted(async () => {
   color: #131b2e;
   display: -webkit-box;
   overflow: hidden;
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1.38;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-md, 20px);
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
@@ -459,14 +578,15 @@ onMounted(async () => {
   border-radius: 999px;
   background: #f3f4f6;
   color: #6b7280;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label, 16px);
   white-space: nowrap;
 }
 
 .task-status .mobile-icon {
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .task-status.indexed,
@@ -482,11 +602,11 @@ onMounted(async () => {
 
 .task-keyword {
   max-width: 100%;
-  margin: 5px 0 0;
+  margin: 7px 0 0;
   color: #52625C;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.45;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label, 16px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -496,10 +616,10 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 7px;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: var(--mobile-text-xs, 12px);
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .task-meta span {
@@ -528,12 +648,12 @@ onMounted(async () => {
 .owned-item {
   min-width: 0;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  column-gap: 9px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  column-gap: 10px;
   align-items: center;
-  padding: 10px;
+  padding: 12px;
   border: 1px solid #eef0f2;
-  border-radius: 13px;
+  border-radius: 16px;
   background: #fff;
 }
 
@@ -543,14 +663,14 @@ onMounted(async () => {
 
 .platform-symbol {
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  width: 38px;
+  height: 38px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 13px;
   background: #e6f7ef;
   color: #006D44;
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .platform-symbol--douyin {
@@ -585,17 +705,17 @@ onMounted(async () => {
 .eco-item span {
   display: block;
   color: #52625C;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--mobile-text-2xs, 10px);
+  line-height: var(--mobile-leading-label-sm, 14px);
 }
 
 .eco-item strong {
   display: block;
   margin-top: 5px;
   color: #131b2e;
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.15;
+  font-size: var(--mobile-text-lg, 16px);
+  font-weight: 600;
+  line-height: var(--mobile-leading-lg, 22px);
 }
 
 .scope-note {
@@ -603,8 +723,8 @@ onMounted(async () => {
   padding-top: 10px;
   border-top: 1px solid #eef0f2;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: var(--mobile-text-2xs, 10px);
+  line-height: var(--mobile-leading-label-sm, 14px);
 }
 
 @media (max-width: 374px) {
@@ -617,7 +737,7 @@ onMounted(async () => {
   }
 
   .overview-strip .inline-metric strong {
-    font-size: 16px;
+    font-size: var(--mobile-text-lg, 16px);
   }
 
   .completion-item {
@@ -638,7 +758,7 @@ onMounted(async () => {
   }
 
   .task-title-row h3 {
-    font-size: 13px;
+    font-size: var(--mobile-text-xs, 12px);
   }
 }
 </style>

@@ -102,6 +102,85 @@
       </div>
     </section>
 
+    <section class="prelaunch-grid">
+      <div class="prelaunch-panel">
+        <div class="llm-pool-head">
+          <div>
+            <div class="panel-kicker">上线配置核对</div>
+            <h3 class="panel-title">运行时生效值</h3>
+          </div>
+          <span class="platform-status" :class="runtimeConfig?.dispatch?.stagger?.enabled ? 'dot-green' : 'dot-gray'">
+            <span class="health-dot"></span>
+            Stagger {{ runtimeConfig?.dispatch?.stagger?.enabled ? 'ON' : 'OFF' }}
+          </span>
+        </div>
+        <div class="config-chip-row">
+          <span>cycle {{ runtimeConfig?.dispatch?.questionPollCycleDays || '-' }} 天</span>
+          <span>global {{ runtimeConfig?.llmPool?.globalConcurrency || '-' }}</span>
+          <span>fail-fast {{ runtimeConfig?.llmPool?.blockingAcquireFailFastEnabled ? 'ON' : 'OFF' }}</span>
+          <span>mobile_judge {{ joinCodes(runtimeConfig?.mobileJudge?.platformCodes) }}</span>
+          <span>article exclude {{ joinCodes(runtimeConfig?.articleRouting?.excludedPlatformCodes) }}</span>
+        </div>
+        <div class="runtime-detail-grid">
+          <div>
+            <b>错峰窗口</b>
+            <span>{{ runtimeConfig?.dispatch?.stagger?.windowMinutes || 0 }}m / max {{ runtimeConfig?.dispatch?.stagger?.maxDelayMinutes || 0 }}m</span>
+          </div>
+          <div>
+            <b>混元 override</b>
+            <span>{{ hunyuanStaggerText }}</span>
+          </div>
+          <div>
+            <b>feature permit</b>
+            <span>{{ featurePermitText }}</span>
+          </div>
+          <div>
+            <b>fail-fast 白名单</b>
+            <span>{{ joinCodes(runtimeConfig?.llmPool?.blockingAcquireFailFastFeatures) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="prelaunch-panel">
+        <div class="llm-pool-head">
+          <div>
+            <div class="panel-kicker">混元决策区</div>
+            <h3 class="panel-title">距离红线</h3>
+          </div>
+          <el-button v-if="hunyuanCapacity?.openAlert?.open" size="small" type="danger" plain @click="goAlertCenter">
+            查看系统待办
+          </el-button>
+        </div>
+        <div class="hunyuan-metric-row">
+          <div>
+            <span>当前 active</span>
+            <strong>{{ hunyuanCapacity?.currentActive || 0 }} / {{ hunyuanCapacity?.activeLimit || 0 }}</strong>
+          </div>
+          <div>
+            <span>窗口 peak</span>
+            <strong>{{ hunyuanCapacity?.activePeak || 0 }}</strong>
+          </div>
+          <div>
+            <span>限流比例</span>
+            <strong>{{ percentText(hunyuanCapacity?.limitRatio) }}</strong>
+          </div>
+          <div>
+            <span>重排耗尽</span>
+            <strong>{{ hunyuanCapacity?.retryExhausted?.count || 0 }}</strong>
+          </div>
+        </div>
+        <div class="slice-progress-row">
+          <span>切片进度 {{ percentText(hunyuanCapacity?.sliceProgress?.actualProgress) }} / 期望 {{ percentText(hunyuanCapacity?.sliceProgress?.expectedProgress) }}</span>
+          <el-progress :percentage="ratioPercent(hunyuanCapacity?.sliceProgress?.actualProgress)" :status="hunyuanProgressStatus" />
+        </div>
+        <div class="platform-observe-row">
+          <span>平台 {{ joinCodes(hunyuanCapacity?.platformCodes) }}</span>
+          <span>阈值 {{ percentText(hunyuanCapacity?.limitRatioThreshold) }}</span>
+          <span>resource_wait {{ hunyuanCapacity?.sliceProgress?.resourceWaitCount || 0 }}</span>
+        </div>
+      </div>
+    </section>
+
     <DataState :loading="loading" :empty="!loading && platforms.length === 0" empty-text="暂无平台健康数据">
       <div class="platform-grid">
         <article v-for="item in platforms" :key="item.id" class="platform-card" :class="platformCardClass(item)">
@@ -161,11 +240,13 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
-import { getDispatchPlatforms, getLlmPoolSnapshot, type DispatchRangeParams } from '@/api/dispatch'
-import type { DispatchPlatformHealthItem, LlmPoolSnapshot } from '@/types'
+import { getDispatchPlatforms, getHunyuanCapacity, getLlmPoolSnapshot, getLlmRuntimeConfig, type DispatchRangeParams } from '@/api/dispatch'
+import type { DispatchPlatformHealthItem, HunyuanCapacity, LlmPoolSnapshot, LlmRuntimeConfig } from '@/types'
 
+const router = useRouter()
 const loading = ref(false)
 const autoRefresh = ref(true)
 let timer: number | null = null
@@ -177,6 +258,8 @@ const filters = reactive({
 
 const platforms = ref<DispatchPlatformHealthItem[]>([])
 const llmPool = ref<LlmPoolSnapshot | null>(null)
+const runtimeConfig = ref<LlmRuntimeConfig | null>(null)
+const hunyuanCapacity = ref<HunyuanCapacity | null>(null)
 
 const p0Count = computed(() => platforms.value.filter((x) => x.priorityLevel === 'P0').length)
 const p1Count = computed(() => platforms.value.filter((x) => x.priorityLevel === 'P1').length)
@@ -218,6 +301,21 @@ const featureUsageItems = computed(() => {
     limit: Number(limit || 0),
     active: Number(active[key] || 0),
   }))
+})
+const featurePermitText = computed(() => {
+  const items = runtimeConfig.value?.llmPool?.featureConcurrency || {}
+  return Object.entries(items).map(([key, value]) => `${featureLabel(key)} ${value}`).join(' / ') || '-'
+})
+const hunyuanStaggerText = computed(() => {
+  const platforms = runtimeConfig.value?.dispatch?.stagger?.platforms || {}
+  const hunyuan = platforms.hunyuan || platforms.yuanbao
+  if (!hunyuan) return '未配置平台 override'
+  return `max ${hunyuan.maxDelayMinutes || '-'}m / jitter ${hunyuan.jitterSeconds || '-'}s`
+})
+const hunyuanProgressStatus = computed<'' | 'success' | 'warning' | 'exception'>(() => {
+  if (hunyuanCapacity.value?.openAlert?.open) return 'exception'
+  if ((hunyuanCapacity.value?.sliceProgress?.lag || 0) > 0.1) return 'warning'
+  return 'success'
 })
 
 function ensureCustomRange() {
@@ -301,12 +399,16 @@ async function loadPlatforms() {
   if (!ensureCustomRange()) return
   loading.value = true
   try {
-    const [{ data }, poolResp] = await Promise.all([
+    const [{ data }, poolResp, runtimeResp, hunyuanResp] = await Promise.all([
       getDispatchPlatforms(buildRangeParams()),
       getLlmPoolSnapshot(),
+      getLlmRuntimeConfig(),
+      getHunyuanCapacity(),
     ])
     platforms.value = data.data || []
     llmPool.value = poolResp.data.data || null
+    runtimeConfig.value = runtimeResp.data.data || null
+    hunyuanCapacity.value = hunyuanResp.data.data || null
   } finally {
     loading.value = false
   }
@@ -326,8 +428,25 @@ function featureLabel(feature: string) {
     presale: '售前',
     draft: '草稿',
     generic: '通用',
+    mobile_judge: '裁判',
   }
   return labels[feature] || feature
+}
+
+function joinCodes(codes?: string[] | null) {
+  return codes?.length ? codes.join(', ') : '-'
+}
+
+function ratioPercent(value?: number | null) {
+  return Math.max(0, Math.min(100, Math.round(Number(value || 0) * 100)))
+}
+
+function percentText(value?: number | null) {
+  return `${ratioPercent(value)}%`
+}
+
+function goAlertCenter() {
+  router.push({ path: '/admin/alerts', query: { tab: 'system' } })
 }
 
 function startTimer() {
@@ -507,6 +626,85 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.prelaunch-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.prelaunch-panel {
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+}
+
+.config-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.config-chip-row span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.runtime-detail-grid,
+.hunyuan-metric-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.runtime-detail-grid div,
+.hunyuan-metric-row div {
+  padding: 10px;
+  border: 1px solid #e7edf5;
+  border-radius: 10px;
+  background: #f8fafc;
+  min-width: 0;
+}
+
+.runtime-detail-grid b,
+.hunyuan-metric-row span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.runtime-detail-grid span,
+.hunyuan-metric-row strong {
+  display: block;
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.slice-progress-row {
+  margin: 12px 0 8px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.slice-progress-row .el-progress {
+  margin-top: 8px;
 }
 
 .platform-grid {
@@ -767,6 +965,10 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 980px) {
+  .prelaunch-grid {
+    grid-template-columns: 1fr;
+  }
+
   .platform-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -784,6 +986,11 @@ onBeforeUnmount(() => {
   }
 
   .llm-pool-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .runtime-detail-grid,
+  .hunyuan-metric-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

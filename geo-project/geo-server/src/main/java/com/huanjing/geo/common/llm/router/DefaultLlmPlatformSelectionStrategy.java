@@ -11,12 +11,14 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class DefaultLlmPlatformSelectionStrategy implements LlmPlatformSelectionStrategy {
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
+    private final LlmRoutingRuntimeConfig routingRuntimeConfig;
 
     @Override
     public List<LlmPlatformCandidate> selectCandidates(LlmRouteRequest request) {
@@ -42,13 +44,26 @@ public class DefaultLlmPlatformSelectionStrategy implements LlmPlatformSelection
     private List<AiPlatformConfig> loadByFeature(String feature) {
         LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true);
+        Set<String> excluded = Set.of();
         if (LlmFeature.ARTICLE.equals(feature)) {
             wrapper.eq(AiPlatformConfig::getEnabledForArticle, true);
+            excluded = routingRuntimeConfig.articleExcludedPlatformCodeSet();
+            if (!excluded.isEmpty()) {
+                wrapper.notIn(AiPlatformConfig::getPlatformCode, excluded);
+            }
         } else if (LlmFeature.PRESALE.equals(feature)) {
             wrapper.eq(AiPlatformConfig::getEnabledForPresale, true);
         }
         wrapper.orderByAsc(AiPlatformConfig::getId);
-        return aiPlatformConfigMapper.selectList(wrapper);
+        List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(wrapper);
+        if (excluded.isEmpty()) {
+            return configs;
+        }
+        Set<String> excludedCodes = excluded;
+        return configs.stream()
+                .filter(config -> config != null
+                        && !excludedCodes.contains(LlmPlatformCodeFilters.normalize(config.getPlatformCode())))
+                .toList();
     }
 
     private List<AiPlatformConfig> rotate(List<AiPlatformConfig> configs, int cursor) {

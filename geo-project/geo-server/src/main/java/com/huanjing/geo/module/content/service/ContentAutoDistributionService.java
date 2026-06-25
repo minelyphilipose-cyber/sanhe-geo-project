@@ -620,11 +620,12 @@ public class ContentAutoDistributionService {
                 return List.of();
             }
             Brand brand = brandMapper.selectById(project.getBrandId());
-            if (brand == null || !StringUtils.hasText(brand.getGeoSiteCode())
+            if (brand == null || !StringUtils.hasText(brand.getGeoSiteDomain())
                     || (StringUtils.hasText(brand.getGeoSiteStatus()) && !"active".equalsIgnoreCase(brand.getGeoSiteStatus()))) {
                 return List.of();
             }
-            return List.of(new TargetRef(DistributionTargetKind.BRAND_GEO_SITE, brand.getId(), "Agent 官网", brand.getId(), null, null));
+            String targetName = StringUtils.hasText(brand.getGeoSiteName()) ? brand.getGeoSiteName() : "Agent 官网";
+            return List.of(new TargetRef(DistributionTargetKind.BRAND_GEO_SITE, brand.getId(), targetName, brand.getId(), null, null));
         }
         if ("industry_site".equals(channelCode)) {
             PublishSite site = resolveBrandIndustrySite(project);

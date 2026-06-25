@@ -70,6 +70,68 @@
         </div>
       </div>
 
+      <div class="prelaunch-monitor-grid">
+        <section class="dashboard-panel slice-panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">周期摊</div>
+              <h3 class="panel-title">今日 A 类切片进度</h3>
+            </div>
+            <span class="panel-status" :class="sliceRiskClass">{{ percentText(pollSliceProgress?.actualProgress) }}</span>
+          </div>
+          <div class="slice-stat-grid">
+            <div>
+              <span>应跑</span>
+              <strong>{{ pollSliceProgress?.expectedCount || 0 }}</strong>
+            </div>
+            <div>
+              <span>已完成</span>
+              <strong>{{ pollSliceProgress?.completedCount || 0 }}</strong>
+            </div>
+            <div>
+              <span>失败</span>
+              <strong>{{ pollSliceProgress?.failedCount || 0 }}</strong>
+            </div>
+            <div>
+              <span>resource_wait</span>
+              <strong>{{ pollSliceProgress?.resourceWaitCount || 0 }}</strong>
+            </div>
+          </div>
+          <div class="slice-progress-line">
+            <span>期望 {{ percentText(pollSliceProgress?.expectedProgress) }} · lag {{ percentText(pollSliceProgress?.lag) }}</span>
+            <el-progress :percentage="ratioPercent(pollSliceProgress?.actualProgress)" :status="sliceProgressStatus" />
+          </div>
+        </section>
+
+        <section class="dashboard-panel due-panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">错峰验证</div>
+              <h3 class="panel-title">未来 24h due_time 分布</h3>
+            </div>
+            <span class="panel-status is-info">{{ dueTimeDistribution?.bucketMinutes || 60 }}m</span>
+          </div>
+          <div class="due-platform-list">
+            <div v-for="platform in dueTimePlatforms" :key="platform.platformCode" class="due-platform-row">
+              <div class="due-platform-head">
+                <strong>{{ platform.platformCode }}</strong>
+                <span>pending {{ platform.pendingTotal }} / retry {{ platform.retryTotal }} / running {{ platform.runningTotal }}</span>
+              </div>
+              <div class="due-bars">
+                <span
+                  v-for="bucket in platform.buckets"
+                  :key="`${platform.platformCode}-${bucket.bucketStart}-${bucket.status}`"
+                  class="due-bar"
+                  :class="`is-${bucket.status}`"
+                  :style="{ height: `${bucket.height}%` }"
+                  :title="`${platform.platformCode} ${bucket.status} ${bucket.taskCount}`"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
       <div class="dashboard-insight-grid">
         <section class="dashboard-panel completion-panel">
           <div class="panel-head">
@@ -367,13 +429,15 @@ import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import {
   getDispatchDashboard,
+  getDispatchDueTimeDistribution,
   getDispatchTask,
   getDispatchTasks,
+  getPollSliceProgress,
   replayDispatchTask,
   type DispatchRangeParams,
   type DispatchTaskQuery,
 } from '@/api/dispatch'
-import type { DispatchDashboardMetrics, DispatchTaskItem } from '@/types'
+import type { DispatchDashboardMetrics, DispatchDueTimeDistribution, DispatchTaskItem, PollSliceProgress } from '@/types'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
@@ -401,6 +465,8 @@ const dashboard = reactive<DispatchDashboardMetrics>({
 })
 
 const tasks = ref<DispatchTaskItem[]>([])
+const dueTimeDistribution = ref<DispatchDueTimeDistribution | null>(null)
+const pollSliceProgress = ref<PollSliceProgress | null>(null)
 const taskDetailVisible = ref(false)
 const taskDetailLoading = ref(false)
 const taskDetail = ref<DispatchTaskItem | null>(null)
@@ -541,6 +607,44 @@ const taskStat = computed(() => ({
   failed: tasks.value.filter((x) => x.status === 'failed').length,
   dead: tasks.value.filter((x) => x.status === 'dead_letter').length,
 }))
+const sliceProgressStatus = computed<'' | 'success' | 'warning' | 'exception'>(() => {
+  if ((pollSliceProgress.value?.failedCount || 0) > 0) return 'exception'
+  if ((pollSliceProgress.value?.lag || 0) > 0.1) return 'warning'
+  return 'success'
+})
+const sliceRiskClass = computed(() => {
+  if ((pollSliceProgress.value?.failedCount || 0) > 0) return 'is-danger'
+  if ((pollSliceProgress.value?.lag || 0) > 0.1) return 'is-warning'
+  return 'is-success'
+})
+const dueTimePlatforms = computed(() => {
+  const platforms = dueTimeDistribution.value?.platforms || []
+  const rows = platforms.map((platform) => {
+    const bucketRows = platform.statuses.flatMap((series) => (series.buckets || []).map((bucket) => ({
+      status: series.status,
+      bucketStart: bucket.bucketStart,
+      taskCount: Number(bucket.taskCount || 0),
+    })))
+    const pendingTotal = bucketRows.filter((x) => x.status === 'pending').reduce((sum, x) => sum + x.taskCount, 0)
+    const retryTotal = bucketRows.filter((x) => x.status === 'retry_pending').reduce((sum, x) => sum + x.taskCount, 0)
+    const runningTotal = bucketRows.filter((x) => x.status === 'running').reduce((sum, x) => sum + x.taskCount, 0)
+    return {
+      platformCode: platform.platformCode,
+      pendingTotal,
+      retryTotal,
+      runningTotal,
+      buckets: bucketRows,
+    }
+  })
+  const max = Math.max(1, ...rows.flatMap((row) => row.buckets.map((bucket) => bucket.taskCount)))
+  return rows.map((row) => ({
+    ...row,
+    buckets: row.buckets.map((bucket) => ({
+      ...bucket,
+      height: Math.max(8, Math.round((bucket.taskCount / max) * 100)),
+    })),
+  }))
+})
 
 function buildRangeParams(): DispatchRangeParams {
   const params: DispatchRangeParams = { rangeType: filters.rangeType }
@@ -573,6 +677,14 @@ function formatDurationMs(ms?: number | null) {
   const m = Math.floor(s / 60)
   const r = s % 60
   return `${m}m${r}s`
+}
+
+function ratioPercent(value?: number | null) {
+  return Math.max(0, Math.min(100, Math.round(Number(value || 0) * 100)))
+}
+
+function percentText(value?: number | null) {
+  return `${ratioPercent(value)}%`
 }
 
 function taskDuration(task: DispatchTaskItem) {
@@ -657,8 +769,14 @@ function taskAvatarInitial(value?: string | null) {
 }
 
 async function loadDashboard() {
-  const { data } = await getDispatchDashboard(buildRangeParams())
+  const [{ data }, dueResp, sliceResp] = await Promise.all([
+    getDispatchDashboard(buildRangeParams()),
+    getDispatchDueTimeDistribution({ bucketMinutes: 60 }),
+    getPollSliceProgress({ questionTier: 'A' }),
+  ])
   Object.assign(dashboard, data.data)
+  dueTimeDistribution.value = dueResp.data.data || null
+  pollSliceProgress.value = sliceResp.data.data || null
 }
 
 async function loadTasks() {
@@ -826,6 +944,13 @@ onBeforeUnmount(() => {
   margin-top: 10px;
 }
 
+.prelaunch-monitor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 14px;
+  margin: 14px 0;
+}
+
 .dashboard-insight-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.92fr);
@@ -840,6 +965,90 @@ onBeforeUnmount(() => {
   background:
     linear-gradient(180deg, #ffffff 0%, #ffffff 72%, #f8fafc 100%);
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.065);
+}
+
+.slice-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px 18px 0;
+}
+
+.slice-stat-grid div,
+.due-platform-row {
+  padding: 10px;
+  border: 1px solid #e7edf5;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.slice-stat-grid span,
+.due-platform-head span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.slice-stat-grid strong {
+  display: block;
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.slice-progress-line {
+  padding: 12px 18px 16px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.slice-progress-line .el-progress {
+  margin-top: 8px;
+}
+
+.due-platform-list {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+}
+
+.due-platform-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.due-platform-head strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.due-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 54px;
+}
+
+.due-bar {
+  display: block;
+  width: 8px;
+  min-height: 6px;
+  border-radius: 3px 3px 0 0;
+  background: #2563eb;
+}
+
+.due-bar.is-retry_pending {
+  background: #f59e0b;
+}
+
+.due-bar.is-running {
+  background: #10b981;
 }
 
 .panel-head {
@@ -1433,8 +1642,10 @@ onBeforeUnmount(() => {
   }
 
   .dashboard-insight-grid,
+  .prelaunch-monitor-grid,
   .completion-body,
   .chain-grid,
+  .slice-stat-grid,
   .detail-info-grid,
   .detail-info-grid.is-time,
   .detail-code-grid {

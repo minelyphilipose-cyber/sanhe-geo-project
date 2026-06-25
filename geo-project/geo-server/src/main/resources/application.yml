@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 8080
   servlet:
     context-path: /
@@ -201,7 +201,7 @@ semi-auto:
           - a
           - img
       douyin:
-        publish-url: ${SEMI_AUTO_DOUYIN_PUBLISH_URL:https://creator.douyin.com/creator-micro/content/upload}
+        publish-url: ${SEMI_AUTO_DOUYIN_PUBLISH_URL:https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page}
         cookie-domains:
           - ".douyin.com"
           - ".bytedance.com"
@@ -248,7 +248,6 @@ geo:
     init-admin-password:
       enabled: ${GEO_INIT_ADMIN_PASSWORD_ENABLED:false}
   brand-geo-site:
-    endpoint: ${BRAND_GEO_SITE_ENDPOINT:}
     connect-timeout-ms: ${BRAND_GEO_SITE_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${BRAND_GEO_SITE_READ_TIMEOUT_MS:30000}
   douyin:
@@ -355,6 +354,11 @@ geo:
     lock-ttl-seconds: 600
     worker-poll-concurrency: ${WORKER_POLL_CONCURRENCY:4}
     worker-poll-ms: 1000
+    worker-pop-admission-enabled: ${DISPATCH_WORKER_POP_ADMISSION_ENABLED:true}
+    # 0 means worker-poll-concurrency. Larger values re-enable local queueing before execution.
+    worker-max-in-flight: ${DISPATCH_WORKER_MAX_IN_FLIGHT:0}
+    worker-permit-governor-enabled: ${DISPATCH_WORKER_PERMIT_GOVERNOR_ENABLED:false}
+    worker-permit-governor-busy-ratio: ${DISPATCH_WORKER_PERMIT_GOVERNOR_BUSY_RATIO:0.9}
     retry-check-ms: 30000
     queue-key: "geo:dispatch:queue:zset"
     retry-delays: "1m,5m,15m"
@@ -365,21 +369,51 @@ geo:
     model-request-timeout-ms: 180000
     question-poll-shard-size: ${DISPATCH_QUESTION_POLL_SHARD_SIZE:20}
     question-poll-max-shard-size: ${DISPATCH_QUESTION_POLL_MAX_SHARD_SIZE:20}
+    # 1 keeps legacy daily full polling. Set to 7 to roll A-tier questions across a weekly cycle.
+    question-poll-cycle-days: ${DISPATCH_QUESTION_POLL_CYCLE_DAYS:7}
     resource-busy-retry-min-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MIN_SECONDS:30}
     resource-busy-retry-jitter-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_JITTER_SECONDS:30}
+    resource-busy-retry-max-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MAX_SECONDS:900}
     resource-busy-max-attempts: ${DISPATCH_RESOURCE_BUSY_MAX_ATTEMPTS:60}
+    capacity-failure-classification-enabled: ${DISPATCH_CAPACITY_FAILURE_CLASSIFICATION_ENABLED:false}
+    resource-busy-retry-after-enabled: ${DISPATCH_RESOURCE_BUSY_RETRY_AFTER_ENABLED:false}
     auto-content-generation-enabled: ${DISPATCH_AUTO_CONTENT_GENERATION_ENABLED:false}
     api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET:geo-dispatch-key}
+    stagger:
+      enabled: ${DISPATCH_STAGGER_ENABLED:false}
+      task-types: ${DISPATCH_STAGGER_TASK_TYPES:BI_DAILY_POLL}
+      window-minutes: ${DISPATCH_STAGGER_WINDOW_MINUTES:60}
+      max-delay-minutes: ${DISPATCH_STAGGER_MAX_DELAY_MINUTES:60}
+      jitter-seconds: ${DISPATCH_STAGGER_JITTER_SECONDS:60}
+      cap-jitter-seconds: ${DISPATCH_STAGGER_CAP_JITTER_SECONDS:60}
+      max-queue-size: ${DISPATCH_STAGGER_MAX_QUEUE_SIZE:0}
+      overflow-policy: ${DISPATCH_STAGGER_OVERFLOW_POLICY:ALERT_ONLY}
+      platforms:
+        hunyuan:
+          window-minutes: ${DISPATCH_STAGGER_HUNYUAN_WINDOW_MINUTES:1440}
+          max-delay-minutes: ${DISPATCH_STAGGER_HUNYUAN_MAX_DELAY_MINUTES:1440}
+          jitter-seconds: ${DISPATCH_STAGGER_HUNYUAN_JITTER_SECONDS:300}
+          cap-jitter-seconds: ${DISPATCH_STAGGER_HUNYUAN_CAP_JITTER_SECONDS:300}
+        yuanbao:
+          window-minutes: ${DISPATCH_STAGGER_YUANBAO_WINDOW_MINUTES:1440}
+          max-delay-minutes: ${DISPATCH_STAGGER_YUANBAO_MAX_DELAY_MINUTES:1440}
+          jitter-seconds: ${DISPATCH_STAGGER_YUANBAO_JITTER_SECONDS:300}
+          cap-jitter-seconds: ${DISPATCH_STAGGER_YUANBAO_CAP_JITTER_SECONDS:300}
   llm:
+    routing:
+      article-excluded-platform-codes: ${GEO_LLM_ROUTING_ARTICLE_EXCLUDED_PLATFORM_CODES:hunyuan,yuanbao}
     pool:
       enabled: ${GEO_LLM_POOL_ENABLED:true}
-      global-concurrency: ${GEO_LLM_POOL_GLOBAL_CONCURRENCY:24}
+      global-concurrency: ${GEO_LLM_POOL_GLOBAL_CONCURRENCY:36}
       lease-ms: ${GEO_LLM_POOL_LEASE_MS:600000}
       lease-renew-interval-ms: ${GEO_LLM_POOL_LEASE_RENEW_INTERVAL_MS:30000}
       lease-safety-ms: ${GEO_LLM_POOL_LEASE_SAFETY_MS:60000}
       shutdown-grace-ms: ${GEO_LLM_POOL_SHUTDOWN_GRACE_MS:30000}
       permit-wait-timeout-ms: ${GEO_LLM_POOL_PERMIT_WAIT_TIMEOUT_MS:120000}
       permit-retry-interval-ms: ${GEO_LLM_POOL_PERMIT_RETRY_INTERVAL_MS:200}
+      # Compatibility switch: acquireBlocking keeps its method name; fail-fast applies only to explicitly listed features.
+      blocking-acquire-fail-fast-enabled: ${GEO_LLM_POOL_BLOCKING_ACQUIRE_FAIL_FAST_ENABLED:false}
+      blocking-acquire-fail-fast-features: ${GEO_LLM_POOL_BLOCKING_ACQUIRE_FAIL_FAST_FEATURES:}
       permit-key-prefix: ${GEO_LLM_POOL_PERMIT_KEY_PREFIX:geo:llm:permit}
       circuit-breaker-failure-threshold: ${GEO_LLM_POOL_CIRCUIT_BREAKER_FAILURE_THRESHOLD:5}
       circuit-breaker-open-duration-ms: ${GEO_LLM_POOL_CIRCUIT_BREAKER_OPEN_DURATION_MS:60000}
@@ -387,8 +421,26 @@ geo:
         monitoring: ${GEO_LLM_POOL_FEATURE_MONITORING:8}
         article: ${GEO_LLM_POOL_FEATURE_ARTICLE:4}
         presale: ${GEO_LLM_POOL_FEATURE_PRESALE:12}
+        baseline: ${GEO_LLM_POOL_FEATURE_BASELINE:16}
+        mobile_judge: ${GEO_LLM_POOL_FEATURE_MOBILE_JUDGE:4}
         draft: ${GEO_LLM_POOL_FEATURE_DRAFT:4}
         generic: ${GEO_LLM_POOL_FEATURE_GENERIC:4}
+    capacity-alert:
+      enabled: ${GEO_LLM_CAPACITY_ALERT_ENABLED:true}
+      scan-fixed-delay-ms: ${GEO_LLM_CAPACITY_ALERT_SCAN_FIXED_DELAY_MS:120000}
+      window-minutes: ${GEO_LLM_CAPACITY_ALERT_WINDOW_MINUTES:10}
+      min-calls-for-ratio: ${GEO_LLM_CAPACITY_ALERT_MIN_CALLS_FOR_RATIO:20}
+      rate-limit-ratio-threshold: ${GEO_LLM_CAPACITY_ALERT_RATE_LIMIT_RATIO_THRESHOLD:0.05}
+      recipient-role: ${GEO_LLM_CAPACITY_ALERT_RECIPIENT_ROLE:super_admin}
+      hunyuan:
+        platform-codes: ${GEO_LLM_CAPACITY_ALERT_HUNYUAN_PLATFORM_CODES:hunyuan,yuanbao}
+        active-peak-threshold: ${GEO_LLM_CAPACITY_ALERT_HUNYUAN_ACTIVE_PEAK_THRESHOLD:5}
+        active-peak-sustained-minutes: ${GEO_LLM_CAPACITY_ALERT_HUNYUAN_ACTIVE_PEAK_SUSTAINED_MINUTES:5}
+        progress-lag-warn-ratio: ${GEO_LLM_CAPACITY_ALERT_HUNYUAN_PROGRESS_LAG_WARN_RATIO:0.20}
+        progress-lag-sustained-minutes: ${GEO_LLM_CAPACITY_ALERT_HUNYUAN_PROGRESS_LAG_SUSTAINED_MINUTES:30}
+        final-completion-critical-ratio: ${GEO_LLM_CAPACITY_ALERT_HUNYUAN_FINAL_COMPLETION_CRITICAL_RATIO:0.95}
+        slice-start-minute-of-day: ${GEO_LLM_CAPACITY_ALERT_HUNYUAN_SLICE_START_MINUTE_OF_DAY:5}
+        completion-grace-minutes: ${GEO_LLM_CAPACITY_ALERT_HUNYUAN_COMPLETION_GRACE_MINUTES:60}
   extension:
     fill-token:
       hmac-secret: ${FILL_TOKEN_HMAC_SECRET:__REQUIRED_FILL_TOKEN_HMAC_SECRET__}
@@ -433,6 +485,7 @@ presale:
     prompt-max-concurrency-per-report: ${PRESALE_PROMPT_MAX_CONCURRENCY_PER_REPORT:6}
     db-write-max-concurrency: ${PRESALE_DB_WRITE_MAX_CONCURRENCY:6}
     max-concurrent-reports: ${PRESALE_MAX_CONCURRENT_REPORTS:2}
+    capacity-failure-defer-enabled: ${PRESALE_GENERATE_CAPACITY_FAILURE_DEFER_ENABLED:false}
     queue-dispatch:
       batch-size: ${PRESALE_QUEUE_DISPATCH_BATCH_SIZE:10}
     recovery:
@@ -443,6 +496,22 @@ presale:
     allow-synthetic-fallback:
       mock: true
       real: false
+
+baseline:
+  collection:
+    sample-executor:
+      core-pool-size: ${BASELINE_COLLECTION_SAMPLE_CORE_POOL_SIZE:12}
+      max-pool-size: ${BASELINE_COLLECTION_SAMPLE_MAX_POOL_SIZE:16}
+      queue-capacity: ${BASELINE_COLLECTION_SAMPLE_QUEUE_CAPACITY:512}
+      await-termination-seconds: ${BASELINE_COLLECTION_SAMPLE_AWAIT_TERMINATION_SECONDS:30}
+    db-write-max-concurrency: ${BASELINE_COLLECTION_DB_WRITE_MAX_CONCURRENCY:6}
+    transient-retry-max-attempts: ${BASELINE_COLLECTION_TRANSIENT_RETRY_MAX_ATTEMPTS:2}
+    transient-retry-initial-backoff-ms: ${BASELINE_COLLECTION_TRANSIENT_RETRY_INITIAL_BACKOFF_MS:800}
+    transient-retry-max-backoff-ms: ${BASELINE_COLLECTION_TRANSIENT_RETRY_MAX_BACKOFF_MS:5000}
+    model-connect-timeout-ms: ${BASELINE_COLLECTION_MODEL_CONNECT_TIMEOUT_MS:10000}
+    model-request-timeout-ms: ${BASELINE_COLLECTION_MODEL_REQUEST_TIMEOUT_MS:45000}
+    max-concurrent-baselines: ${BASELINE_COLLECTION_MAX_CONCURRENT_BASELINES:1}
+    capacity-failure-defer-enabled: ${BASELINE_COLLECTION_CAPACITY_FAILURE_DEFER_ENABLED:false}
 
 management:
   endpoint:

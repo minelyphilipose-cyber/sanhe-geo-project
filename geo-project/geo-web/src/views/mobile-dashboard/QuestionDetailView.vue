@@ -109,7 +109,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import MarkdownIt from 'markdown-it'
-import { getMobileDashboardMonitor, withRenewedMobileDashboardSession } from '@/api/mobileDashboard'
+import { getMobileDashboardQuestionDetail, withRenewedMobileDashboardSession } from '@/api/mobileDashboard'
 import DashboardCard from '@/components/mobile-dashboard/DashboardCard.vue'
 import EmptyState from '@/components/mobile-dashboard/EmptyState.vue'
 import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
@@ -118,8 +118,8 @@ import type { DashboardMetric, QuestionMonitorItem } from '@/types/mobileDashboa
 import { aiPlatformLabel } from '@/utils/mobileDashboardDictionaries'
 import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
 import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
-import hunyuanLogo from '@/assets/ai-model-logos/hunyuan-color.png'
 import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
+import yuanbaoLogo from '@/assets/ai-model-logos/yuanbao-color.svg'
 import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
 
 const QUESTION_DETAIL_CACHE_KEY = 'mobile_dashboard_question_detail'
@@ -143,8 +143,8 @@ const aiPlatformLogos: Record<string, string> = {
   qwen: qwenLogo,
   wenxin: wenxinLogo,
   ernie: wenxinLogo,
-  yuanbao: hunyuanLogo,
-  hunyuan: hunyuanLogo,
+  yuanbao: yuanbaoLogo,
+  hunyuan: yuanbaoLogo,
 }
 
 function metricBool(metric?: DashboardMetric<boolean>) {
@@ -242,17 +242,24 @@ function readCachedItem() {
 }
 
 async function loadItem() {
-  item.value = readCachedItem()
-  if (item.value) return
+  const cached = readCachedItem()
+  if (cached) {
+    item.value = cached
+  }
   loading.value = true
   try {
     const res = await withRenewedMobileDashboardSession(
-      (sessionToken) => getMobileDashboardMonitor(sessionToken),
+      (sessionToken) => getMobileDashboardQuestionDetail(sessionToken, pollResultId.value),
       store,
     )
-    item.value = res.data.data.questionList.items.find((row) => Number(row.pollResultId) === pollResultId.value) || null
+    item.value = res.data.data || null
+    if (item.value) {
+      sessionStorage.setItem(QUESTION_DETAIL_CACHE_KEY, JSON.stringify(item.value))
+    }
   } catch (error: any) {
-    showToast(error?.message || '详情加载失败')
+    if (!cached) {
+      showToast(error?.message || '详情加载失败')
+    }
   } finally {
     loading.value = false
   }
@@ -276,8 +283,9 @@ onMounted(loadItem)
   border: 0;
   background: transparent;
   color: #006D44;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .detail-hero {
@@ -297,7 +305,7 @@ onMounted(loadItem)
   background: #e6f7ef;
   color: #006D44;
   font-size: 18px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .detail-avatar img {
@@ -315,22 +323,24 @@ onMounted(loadItem)
   margin: 0 0 4px;
   color: #52625C;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .detail-title h2 {
   margin: 0;
   color: #131b2e;
   font-size: 18px;
-  font-weight: 900;
-  line-height: 1.4;
+  font-weight: 700;
+  line-height: var(--mobile-leading-title, 24px);
 }
 
 .detail-status {
   flex: 0 0 auto;
   color: #006D44;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
+  line-height: var(--mobile-leading-label, 16px);
   white-space: nowrap;
 }
 
@@ -353,21 +363,22 @@ onMounted(loadItem)
 .result-card__head span {
   color: #52625C;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .result-card__head strong {
   color: #131b2e;
-  font-size: 15px;
-  font-weight: 900;
-  line-height: 1.4;
+  font-size: var(--mobile-text-lg, 16px);
+  font-weight: 600;
+  line-height: var(--mobile-leading-lg, 22px);
 }
 
 .result-card p {
   margin: 10px 0 0;
   color: #3d4a41;
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: var(--mobile-text-md, 14px);
+  line-height: var(--mobile-leading-md, 20px);
 }
 
 .detail-tags {
@@ -387,22 +398,25 @@ onMounted(loadItem)
 
 .tag {
   flex: 0 0 auto;
-  padding: 4px 9px;
-  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
   background: #f3f4f6;
   color: #6b7280;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.4;
+  font-size: var(--mobile-text-2xs, 10px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label-sm, 14px);
   white-space: nowrap;
 }
 
 .tag.platform-tag {
+  border-color: #dbeafe;
   background: #eef4ff;
 }
 
 .tag.success,
 .tag.primary {
+  border-color: rgba(7, 166, 107, 0.2);
   background: #e6f7ef;
   color: #006D44;
 }
@@ -428,22 +442,23 @@ onMounted(loadItem)
 
 .block-title .mobile-icon {
   color: #006D44;
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .block-title h3 {
   margin: 0;
   color: #131b2e;
-  font-size: 15px;
-  font-weight: 900;
+  font-size: var(--mobile-text-lg, 16px);
+  font-weight: 600;
+  line-height: var(--mobile-leading-lg, 22px);
 }
 
 .question-text,
 .empty-answer {
   margin: 0;
   color: #3d4a41;
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: var(--mobile-text-md, 14px);
+  line-height: var(--mobile-leading-md, 20px);
   word-break: break-word;
 }
 
@@ -458,8 +473,8 @@ onMounted(loadItem)
   border-radius: 14px;
   background: #f8fafc;
   color: #24352c;
-  font-size: 13px;
-  line-height: 1.75;
+  font-size: var(--mobile-text-md, 14px);
+  line-height: var(--mobile-leading-md, 20px);
   word-break: break-word;
 }
 
@@ -491,18 +506,19 @@ onMounted(loadItem)
 .markdown-answer :deep(h4) {
   margin: 14px 0 8px;
   color: #131b2e;
-  font-weight: 900;
-  line-height: 1.35;
+  font-weight: 700;
+  line-height: var(--mobile-leading-title, 24px);
 }
 
 .markdown-answer :deep(h1) {
-  font-size: 17px;
+  font-size: var(--mobile-title-md, 18px);
 }
 
 .markdown-answer :deep(h2),
 .markdown-answer :deep(h3),
 .markdown-answer :deep(h4) {
-  font-size: 15px;
+  font-size: var(--mobile-text-lg, 16px);
+  line-height: var(--mobile-leading-lg, 22px);
 }
 
 .markdown-answer :deep(ul),
@@ -562,7 +578,7 @@ onMounted(loadItem)
 
 .markdown-answer :deep(a) {
   color: #006D44;
-  font-weight: 800;
+  font-weight: 700;
   word-break: break-all;
 }
 
@@ -588,15 +604,16 @@ onMounted(loadItem)
   flex: 1;
   min-width: 0;
   color: #52625C;
-  font-size: 13px;
+  font-size: var(--mobile-text-md, 14px);
+  line-height: var(--mobile-leading-md, 20px);
 }
 
 .analysis-row strong {
   flex: 0 1 auto;
   color: #131b2e;
-  font-size: 13px;
-  font-weight: 900;
-  line-height: 1.4;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-md, 20px);
   text-align: right;
   word-break: break-word;
 }
@@ -608,8 +625,8 @@ onMounted(loadItem)
   border-radius: 0 10px 10px 0;
   background: #f2fbf7;
   color: #3d4a41;
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: var(--mobile-text-md, 14px);
+  line-height: var(--mobile-leading-md, 20px);
 }
 
 .meta-grid {
@@ -629,7 +646,7 @@ onMounted(loadItem)
   display: block;
   color: #52625C;
   font-size: 12px;
-  line-height: 1.35;
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .meta-grid strong {
@@ -637,8 +654,8 @@ onMounted(loadItem)
   margin-top: 6px;
   color: #131b2e;
   font-size: 14px;
-  font-weight: 900;
-  line-height: 1.4;
+  font-weight: 700;
+  line-height: var(--mobile-leading-md, 20px);
   word-break: break-word;
 }
 

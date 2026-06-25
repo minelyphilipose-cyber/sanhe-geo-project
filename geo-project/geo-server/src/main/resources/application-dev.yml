@@ -14,9 +14,6 @@ spring:
 
 # JWT
 geo:
-  brand-geo-site:
-    endpoint: https://www.fyhuaweizhijia.com/api/v1/content
-
   public-base-url: http://localhost:8080
   wechat:
     client:
@@ -81,8 +78,19 @@ geo:
     refresh-token-expire: 604800     # 7天(秒)
 
   mobile-dashboard:
-    web-base-url: ${MOBILE_DASHBOARD_WEB_BASE_URL:http://localhost:5173}
+    web-base-url: ${MOBILE_DASHBOARD_WEB_BASE_URL:http://localhost:3000}
     share-token-salt: ${MOBILE_DASHBOARD_SHARE_TOKEN_SALT:local-dev-mobile-dashboard-share-salt}
+    entity-judge:
+      enabled: true
+      platform-codes: deepseek,doubao,qwen
+      max-projects-per-run: 20
+      per-project-limit: 10
+      worker-ms: 60000
+
+  llm:
+    pool:
+      feature-concurrency:
+        mobile_judge: 4
 
   # MinIO
   minio:

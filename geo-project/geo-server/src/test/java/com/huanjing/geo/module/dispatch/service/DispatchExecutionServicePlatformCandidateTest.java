@@ -18,7 +18,8 @@ import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.capacity.LlmCapacityFailureClassifier;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -27,6 +28,7 @@ import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
@@ -74,6 +76,27 @@ class DispatchExecutionServicePlatformCandidateTest {
                 service,
                 100L,
                 DispatchTaskType.BI_DAILY_POLL
+        );
+
+        assertEquals(List.of(qwen), candidates);
+    }
+
+    @Test
+    void contentGenerationArticleCandidatesApplyExcludedPlatformFilter() throws Exception {
+        AiPlatformConfigMapper platformMapper = mock(AiPlatformConfigMapper.class);
+        AiPlatformConfig hunyuan = platform(2L, "hunyuan", "P0");
+        hunyuan.setEnabledForArticle(true);
+        AiPlatformConfig qwen = platform(3L, "qwen", "P0");
+        qwen.setEnabledForArticle(true);
+        when(platformMapper.selectList(any())).thenReturn(List.of(hunyuan, qwen));
+
+        DispatchExecutionService service = service(platformMapper);
+        ReflectionTestUtils.setField(service, "articleExcludedPlatformCodes", "hunyuan,yuanbao");
+
+        List<AiPlatformConfig> candidates = resolvePlatformCandidates(
+                service,
+                100L,
+                DispatchTaskType.CONTENT_GENERATION
         );
 
         assertEquals(List.of(qwen), candidates);
@@ -166,9 +189,7 @@ class DispatchExecutionServicePlatformCandidateTest {
         return new DispatchExecutionService(
                 platformMapper,
                 mock(PlatformCredentialService.class),
-                mock(PlatformRateLimiterService.class),
-                mock(PlatformConcurrencyLimiterService.class),
-                mock(LlmPlatformRouter.class),
+                mock(LlmCallFacade.class),
                 mock(ProjectMapper.class),
                 mock(PackageContentConfigMapper.class),
                 mock(ArticleBatchMapper.class),
@@ -188,7 +209,8 @@ class DispatchExecutionServicePlatformCandidateTest {
                 dispatchProperties,
                 mock(DispatchQuestionPollPlanningService.class),
                 mock(DispatchPollShardPersistenceService.class),
-                mock(DispatchPollAggregationService.class)
+                mock(DispatchPollAggregationService.class),
+                new LlmCapacityFailureClassifier()
         );
     }
 }

@@ -152,27 +152,15 @@ public class BusinessCalendarService {
             if (start == null || end == null || preferred == null) {
                 continue;
             }
-            PublishWindow normalized = normalizeWindow(new PublishWindow(
+            PublishWindow normalized = new PublishWindow(
                     StringUtils.hasText(node.path("name").asText(null)) ? node.path("name").asText() : "custom",
                     start,
                     end,
                     preferred
-            ));
-            if (normalized != null) {
-                result.add(normalized);
-            }
+            );
+            result.add(normalized);
         }
         return result;
-    }
-
-    private PublishWindow normalizeWindow(PublishWindow window) {
-        for (PublishWindow policy : DEFAULT_WINDOWS) {
-            if (!policy.name().equalsIgnoreCase(window.name())) {
-                continue;
-            }
-            return policy;
-        }
-        return window;
     }
 
     private LocalDate parseDate(String value) {

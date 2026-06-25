@@ -2,6 +2,9 @@ package com.huanjing.geo.common.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.llm.measurement.LlmErrorCategory;
+import com.huanjing.geo.common.llm.measurement.LlmHttpErrorException;
+import com.huanjing.geo.common.llm.measurement.RetryAfterParser;
 import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
 import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
 import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
@@ -123,7 +126,13 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
                 modelConfig.requestTimeoutMs()
         );
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new LlmInvokeException("HTTP " + response.statusCode() + ": " + safeSnippet(response.body()));
+            throw new LlmHttpErrorException(
+                    response.statusCode(),
+                    "HTTP " + response.statusCode() + ": " + safeSnippet(response.body()),
+                    extractProviderErrorCode(response.body()),
+                    RetryAfterParser.parse(response.headers()),
+                    classifyHttpStatus(response.statusCode())
+            );
         }
         InvocationResponse invocation = extractResponse(response.body());
         if (!StringUtils.hasText(invocation.text())) {
@@ -235,6 +244,37 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
         }
         String trimmed = text.trim();
         return trimmed.length() <= 300 ? trimmed : trimmed.substring(0, 300);
+    }
+
+    private LlmErrorCategory classifyHttpStatus(int statusCode) {
+        if (statusCode == 429) {
+            return LlmErrorCategory.PLATFORM_429;
+        }
+        if (statusCode >= 500) {
+            return LlmErrorCategory.HTTP_5XX;
+        }
+        return LlmErrorCategory.INVOKE_FAILED;
+    }
+
+    private String extractProviderErrorCode(String body) {
+        if (!StringUtils.hasText(body)) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode error = root.path("error");
+            JsonNode code = error.path("code");
+            if (code.isTextual()) {
+                return code.asText();
+            }
+            JsonNode type = error.path("type");
+            if (type.isTextual()) {
+                return type.asText();
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
     }
 
     private void throttle(String platformCode, int qps) throws LlmInvokeException {

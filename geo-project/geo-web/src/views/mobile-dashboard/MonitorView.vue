@@ -12,10 +12,23 @@
 
     <div class="filter-summary" aria-label="当前展示范围">
       <MobileIcon name="info" />
-      <p>当前展示全平台汇总。</p>
+      <p>{{ filterSummaryText }}</p>
     </div>
 
-    <DashboardCard title="核心问题监测" icon="search">
+    <nav v-if="platformChips.length" class="platform-filter" aria-label="平台筛选">
+      <button
+        v-for="chip in platformChips"
+        :key="chip.code"
+        type="button"
+        :class="{ active: selectedPlatform === chip.code }"
+        @click="changePlatform(chip.code)"
+      >
+        {{ chip.label }}
+      </button>
+    </nav>
+
+    <section class="question-section">
+      <h2>核心问题监测</h2>
       <p v-if="judgeNotice" class="judge-note">
         <MobileIcon name="info" />
         <span>{{ judgeNotice }}</span>
@@ -71,7 +84,7 @@
         </nav>
       </div>
       <EmptyState v-else :description="data?.questionList?.reason || '暂无重点问题监测数据'" />
-    </DashboardCard>
+    </section>
 
     <DashboardCard title="场景表现分析" icon="cluster">
       <div v-if="visibleScenes.length" class="scene-list">
@@ -118,14 +131,15 @@ import type { DashboardMetric, MonitorDashboardData, QuestionMonitorItem } from 
 import { aiPlatformLabel, sceneLabel } from '@/utils/mobileDashboardDictionaries'
 import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
 import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
-import hunyuanLogo from '@/assets/ai-model-logos/hunyuan-color.png'
 import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
+import yuanbaoLogo from '@/assets/ai-model-logos/yuanbao-color.svg'
 import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
 
 const store = useMobileDashboardStore()
 const router = useRouter()
 const data = ref<MonitorDashboardData>()
 const questionPage = ref(1)
+const selectedPlatform = ref('all')
 const questionPageSize = 5
 const QUESTION_DETAIL_CACHE_KEY = 'mobile_dashboard_question_detail'
 const aiPlatformLogos: Record<string, string> = {
@@ -135,8 +149,8 @@ const aiPlatformLogos: Record<string, string> = {
   qwen: qwenLogo,
   wenxin: wenxinLogo,
   ernie: wenxinLogo,
-  yuanbao: hunyuanLogo,
-  hunyuan: hunyuanLogo,
+  yuanbao: yuanbaoLogo,
+  hunyuan: yuanbaoLogo,
 }
 
 const overviewCards = computed(() => {
@@ -150,6 +164,15 @@ const overviewCards = computed(() => {
   ]
 })
 const questionItems = computed(() => data.value?.questionList?.items || [])
+const platformChips = computed(() => [
+  { code: 'all', label: '全部' },
+  ...(data.value?.platformFilters || []).map((code) => ({ code, label: platformLabel(code) })),
+])
+const filterSummaryText = computed(() =>
+  selectedPlatform.value === 'all'
+    ? '当前展示全平台汇总。'
+    : `当前展示 ${platformLabel(selectedPlatform.value)} 平台。`
+)
 const questionPageCount = computed(() => Math.max(1, Math.ceil(questionItems.value.length / questionPageSize)))
 const displayedQuestionItems = computed(() => {
   const page = Math.min(questionPage.value, questionPageCount.value)
@@ -229,16 +252,39 @@ function truncateText(text: string, max = 34) {
 }
 
 function questionSummary(item: QuestionMonitorItem) {
-  if (item.evidence?.trim()) return truncateText(item.evidence, 42)
+  const evidence = publicEvidence(item.evidence)
+  if (evidence) return truncateText(evidence, 42)
   if (metricBool(item.recommended)) return '本轮回答中出现主动推荐，推荐详情可进入查看。'
   if (item.mentioned) return `${hitPlatformLabel(item)} 回答已提及品牌，推荐与排名结果将在核心样本分析充分后展示。`
   return '相关场景内容正在持续建设与覆盖。'
+}
+
+function publicEvidence(value?: string | null) {
+  const text = value?.replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  const normalized = text.toLowerCase()
+  if (
+    normalized === 'no_tracked_entity_matched'
+    || normalized === 'no_entity_hit'
+    || normalized === 'deterministic_no_entity_hit'
+    || normalized.startsWith('no_tracked_entity_')
+    || normalized.startsWith('deterministic_')
+  ) {
+    return ''
+  }
+  return text
 }
 
 function openQuestionDetail(item: QuestionMonitorItem) {
   if (!item.mentioned) return
   sessionStorage.setItem(QUESTION_DETAIL_CACHE_KEY, JSON.stringify(item))
   router.push({ name: 'MobileDashboardQuestionDetail', params: { pollResultId: String(item.pollResultId) } })
+}
+
+async function changePlatform(code: string) {
+  if (selectedPlatform.value === code) return
+  selectedPlatform.value = code
+  await loadData()
 }
 
 function scenePercent(item: { covered?: DashboardMetric<number>; total?: DashboardMetric<number> }) {
@@ -256,7 +302,7 @@ function coveragePercent(metric?: DashboardMetric<number>) {
 async function loadData() {
   try {
     const res = await withRenewedMobileDashboardSession(
-      (sessionToken) => getMobileDashboardMonitor(sessionToken),
+      (sessionToken) => getMobileDashboardMonitor(sessionToken, selectedPlatform.value),
       store,
     )
     data.value = res.data.data
@@ -323,22 +369,23 @@ onMounted(loadData)
 .inline-metric span {
   display: block;
   color: #52625C;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--mobile-text-2xs, 10px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label-sm, 14px);
 }
 
 .inline-metric strong {
   display: block;
   margin-top: 6px;
   color: #131b2e;
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.15;
+  font-size: var(--mobile-metric, 18px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-title, 24px);
 }
 
 .overview-strip .inline-metric strong {
   margin-top: 0;
-  font-size: clamp(14px, 4vw, 18px);
+  font-size: var(--mobile-metric, 18px);
   white-space: nowrap;
 }
 
@@ -361,8 +408,8 @@ onMounted(loadData)
 .judge-note {
   margin: 0 2px;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: var(--mobile-text-xs, 12px);
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .filter-summary p {
@@ -372,13 +419,48 @@ onMounted(loadData)
   white-space: nowrap;
 }
 
+.platform-filter {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  margin: -2px -2px 0;
+  padding: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.platform-filter::-webkit-scrollbar {
+  display: none;
+}
+
+.platform-filter button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--mobile-border, #eef0f2);
+  border-radius: 999px;
+  background: var(--mobile-subtle, #f8fafc);
+  color: var(--mobile-muted, #52625C);
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 400;
+  line-height: var(--mobile-leading-md, 20px);
+  white-space: nowrap;
+}
+
+.platform-filter button.active {
+  border-color: var(--mobile-primary, #006D44);
+  background: var(--mobile-primary, #006D44);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 109, 68, 0.16);
+}
+
 .judge-note {
   display: flex;
   align-items: flex-start;
   gap: 6px;
   margin: 0 0 12px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  padding: 12px;
+  border-radius: 12px;
   background: #f2fbf7;
   color: #64748b;
 }
@@ -393,6 +475,21 @@ onMounted(loadData)
   min-width: 0;
 }
 
+.question-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.question-section > h2 {
+  margin: 0;
+  padding: 0 4px;
+  color: #131b2e;
+  font-size: var(--mobile-text-lg, 16px);
+  font-weight: 600;
+  line-height: var(--mobile-leading-lg, 22px);
+}
+
 .question-list {
   display: grid;
   gap: 10px;
@@ -402,11 +499,11 @@ onMounted(loadData)
   display: flex;
   gap: 10px;
   min-width: 0;
-  padding: 12px 12px 11px;
+  padding: 14px;
   border: 1px solid #eef0f2;
-  border-radius: 14px;
+  border-radius: 12px;
   background: #fff;
-  box-shadow: 0 5px 16px rgba(15, 23, 42, 0.025);
+  box-shadow: var(--mobile-card-shadow, 0 4px 20px rgba(15, 23, 42, 0.04));
 }
 
 .question-item--clickable {
@@ -426,20 +523,21 @@ onMounted(loadData)
 
 .question-avatar {
   flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #e6f7ef;
   color: #006D44;
-  font-size: 14px;
-  font-weight: 800;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 700;
+  overflow: hidden;
 }
 
 .question-avatar img {
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
   object-fit: contain;
 }
 
@@ -454,8 +552,9 @@ onMounted(loadData)
 
 .question-title-row {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
 }
 
 .question-title-row h3 {
@@ -463,13 +562,12 @@ onMounted(loadData)
   min-width: 0;
   margin: 0;
   color: #131b2e;
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1.45;
-  display: -webkit-box;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-md, 20px);
   overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .question-rank {
@@ -478,13 +576,14 @@ onMounted(loadData)
   gap: 1px;
   flex: 0 0 auto;
   color: #006D44;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--mobile-text-2xs, 10px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-label-sm, 14px);
   white-space: nowrap;
 }
 
 .question-rank .mobile-icon {
-  font-size: 11px;
+  font-size: var(--mobile-text-2xs, 10px);
 }
 
 .question-rank.building {
@@ -493,8 +592,9 @@ onMounted(loadData)
 
 .tag-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  margin-top: 8px;
+  margin-bottom: 8px;
   overflow-x: auto;
   scrollbar-width: none;
   max-width: 100%;
@@ -506,23 +606,26 @@ onMounted(loadData)
 
 .tag {
   flex: 0 0 auto;
-  padding: 3px 8px;
-  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
   background: #f3f4f6;
   color: #6b7280;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.4;
+  font-size: var(--mobile-text-2xs, 10px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label-sm, 14px);
   white-space: nowrap;
 }
 
 .tag.platform-tag {
-  background: #eef4ff;
-  color: #4f6174;
+  border-color: #dbeafe;
+  background: #eff6ff;
+  color: #2563eb;
 }
 
 .tag.success,
 .tag.primary {
+  border-color: rgba(7, 166, 107, 0.2);
   background: #e6f7ef;
   color: #006D44;
 }
@@ -534,10 +637,11 @@ onMounted(loadData)
 }
 
 .question-desc {
-  margin: 8px 0 0;
+  margin: 0;
   color: #3d4a41;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 400;
+  line-height: 18px;
   display: -webkit-box;
   overflow: hidden;
   -webkit-line-clamp: 2;
@@ -553,11 +657,12 @@ onMounted(loadData)
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding-top: 2px;
+  padding-top: 4px;
 }
 
 .question-pagination button {
-  height: 34px;
+  min-width: 116px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -566,8 +671,9 @@ onMounted(loadData)
   border-radius: 999px;
   background: #fff;
   color: #006D44;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 400;
+  line-height: var(--mobile-leading-md, 20px);
 }
 
 .question-pagination button:disabled {
@@ -579,8 +685,8 @@ onMounted(loadData)
 .question-pagination span {
   min-width: 48px;
   color: #64748b;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 700;
   text-align: center;
 }
 
@@ -599,7 +705,8 @@ onMounted(loadData)
   align-items: center;
   gap: 10px;
   color: #6b7280;
-  font-size: 13px;
+  font-size: var(--mobile-text-md, 14px);
+  line-height: var(--mobile-leading-md, 20px);
 }
 
 .scene-row__meta span {
@@ -612,7 +719,8 @@ onMounted(loadData)
 
 .scene-row__meta strong {
   color: #131b2e;
-  font-size: 14px;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 500;
 }
 
 .bar {
@@ -650,7 +758,7 @@ onMounted(loadData)
   border-radius: 999px;
   background: #e6f7ef;
   color: #006D44;
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .coverage-row__body {
@@ -672,7 +780,8 @@ onMounted(loadData)
   min-width: 0;
   overflow: hidden;
   color: #6b7280;
-  font-size: 13px;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -680,9 +789,9 @@ onMounted(loadData)
 .coverage-row__meta strong {
   flex: 0 0 auto;
   color: #131b2e;
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.1;
+  font-size: var(--mobile-metric, 18px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-title, 24px);
 }
 
 @media (max-width: 374px) {
@@ -696,7 +805,7 @@ onMounted(loadData)
   }
 
   .overview-strip .inline-metric strong {
-    font-size: 16px;
+    font-size: var(--mobile-text-md, 14px);
   }
 
   .overview-strip .inline-metric .mobile-icon {
@@ -705,12 +814,5 @@ onMounted(loadData)
     font-size: 16px;
   }
 
-  .question-title-row h3 {
-    font-size: 13px;
-  }
-
-  .question-rank {
-    font-size: 11px;
-  }
 }
 </style>

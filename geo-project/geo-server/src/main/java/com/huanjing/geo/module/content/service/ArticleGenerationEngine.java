@@ -1,12 +1,13 @@
 package com.huanjing.geo.module.content.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
+import com.huanjing.geo.common.llm.LlmCallResult;
 import com.huanjing.geo.common.llm.LlmInvokeException;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
-import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.router.LlmFeature;
-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
 import com.huanjing.geo.common.llm.router.LlmRouteException;
 import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
@@ -26,9 +27,8 @@ public class ArticleGenerationEngine {
     private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
     private static final double ARTICLE_TEMPERATURE = 0.4D;
 
-    private final LlmInvoker llmInvoker;
+    private final LlmCallFacade llmCallFacade;
     private final ArticleModelResolver modelResolver;
-    private final LlmPlatformRouter llmPlatformRouter;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
     private final ArticleAiDraftPromptFilter promptFilter;
     private final BatchArticleQualityChecker qualityChecker;
@@ -68,10 +68,10 @@ public class ArticleGenerationEngine {
                     input.systemPrompt(),
                     input.longForm()
             );
-            return new GenerationCall(model, llmInvoker.invoke(outboundPrompt, model.config()));
+            return new GenerationCall(model, llmCallFacade.execute(LlmCallRequest.direct(outboundPrompt, model.config())).invokeResult());
         }
         try {
-            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
+            LlmCallResult callResult = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
                     LlmFeature.ARTICLE,
                     input.systemPrompt(),
                     outboundPrompt,
@@ -85,7 +85,8 @@ public class ArticleGenerationEngine {
                     1,
                     0,
                     List.of()
-            ));
+            )));
+            LlmRouteResult routed = callResult.routeResult();
             return new GenerationCall(
                     new ArticleModelResolver.ModelSelection(routed.platformCode(), routed.modelId(), null),
                     routed.invokeResult()

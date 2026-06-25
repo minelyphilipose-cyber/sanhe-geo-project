@@ -434,6 +434,8 @@ export interface AIPlatformConfigItem {
   platformHomeUrl?: string | null
   platformLogoUrl?: string | null
   priorityLevel: 'P0' | 'P1' | 'P2'
+  rpmLimit?: number | null
+  tpmLimit?: number | null
   apiKey: string
   primaryKeyRef?: string | null
   backupKeyRef?: string | null
@@ -962,6 +964,140 @@ export interface LlmPoolSnapshot {
   }>
 }
 
+export interface LlmRuntimeConfig {
+  dispatch: {
+    questionPollCycleDays: number
+    workerPollConcurrency: number
+    workerPopAdmissionEnabled: boolean
+    workerMaxInFlight: number
+    workerPermitGovernorEnabled: boolean
+    workerPermitGovernorBusyRatio: number
+    capacityFailureClassificationEnabled: boolean
+    resourceBusyRetryAfterEnabled: boolean
+    resourceBusyRetryMinSeconds: number
+    resourceBusyRetryJitterSeconds: number
+    resourceBusyRetryMaxSeconds: number
+    resourceBusyMaxAttempts: number
+    stagger: {
+      enabled: boolean
+      taskTypes: string
+      windowMinutes: number
+      maxDelayMinutes: number
+      jitterSeconds: number
+      capJitterSeconds: number
+      maxQueueSize: number
+      overflowPolicy: string
+      platforms?: Record<string, {
+        windowMinutes?: number | null
+        maxDelayMinutes?: number | null
+        jitterSeconds?: number | null
+        capJitterSeconds?: number | null
+      }>
+    }
+  }
+  llmPool: {
+    enabled: boolean
+    globalConcurrency: number
+    blockingAcquireFailFastEnabled: boolean
+    blockingAcquireFailFastFeatures: string[]
+    featureConcurrency: Record<string, number>
+  }
+  mobileJudge: {
+    enabled: boolean
+    maxProjectsPerRun: number
+    perProjectLimit: number
+    workerMs: number
+    platformCodes: string[]
+  }
+  articleRouting: {
+    excludedPlatformCodes: string[]
+  }
+}
+
+export interface HunyuanCapacity {
+  platformCodes: string[]
+  activeLimit: number
+  activePeak: number
+  currentActive: number
+  totalCount: number
+  limitedCount: number
+  limitRatio: number
+  limitRatioThreshold: number
+  limitCategories: string[]
+  sliceProgress?: {
+    batchDate?: string | null
+    questionTier?: string | null
+    expectedCount: number
+    completedCount: number
+    failedCount: number
+    resourceWaitCount: number
+    actualProgress: number
+    expectedProgress: number
+    lag: number
+    windowMinutes: number
+    sliceStart?: string | null
+    rows?: Array<{
+      platformCode: string
+      expectedCount: number
+      completedCount: number
+      failedCount: number
+      resourceWaitCount: number
+    }>
+  }
+  retryExhausted?: {
+    count: number
+    windowStart?: string | null
+    windowEnd?: string | null
+  }
+  openAlert?: {
+    open: boolean
+    dedupeKey?: string | null
+    alertType?: string | null
+    severity?: AlertSeverity | string | null
+    message?: string | null
+  }
+}
+
+export interface DispatchDueTimeDistribution {
+  taskType: string
+  rangeStart: string
+  rangeEnd: string
+  bucketMinutes: number
+  platforms: Array<{
+    platformCode: string
+    statuses: Array<{
+      status: string
+      buckets: Array<{
+        bucketStart: string
+        taskCount: number
+      }>
+    }>
+  }>
+}
+
+export interface PollSliceProgress {
+  batchDate?: string | null
+  questionTier?: string | null
+  platformCodes: string[]
+  expectedCount: number
+  completedCount: number
+  failedCount: number
+  resourceWaitCount: number
+  actualProgress: number
+  expectedProgress: number
+  lag: number
+  windowMinutes: number
+  sliceStart?: string | null
+  observedAt?: string | null
+  rows?: Array<{
+    platformCode: string
+    expectedCount: number
+    completedCount: number
+    failedCount: number
+    resourceWaitCount: number
+  }>
+}
+
 export interface DispatchAlertItem {
   id: number
   alertCode: string
@@ -979,6 +1115,9 @@ export interface DispatchAlertItem {
   openGroupCount?: number | null
   detailAlerts?: DispatchAlertItem[] | null
   platformFailures?: DispatchPlatformFailureSummary[] | null
+  expectedResultCount?: number | null
+  failedCount?: number | null
+  failureRate?: number | null
   resolvedAt?: string | null
   resolvedBy?: number | null
   createdAt: string

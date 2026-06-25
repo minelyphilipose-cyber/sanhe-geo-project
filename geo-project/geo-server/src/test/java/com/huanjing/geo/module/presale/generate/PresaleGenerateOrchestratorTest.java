@@ -62,6 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -138,7 +139,7 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(reuseDecisionService.preloadByVersionAndBatch(any(), anyInt())).thenReturn(Map.of());
         lenient().when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
         lenient().when(reuseDecisionService.snapshotOf(any(), any())).thenReturn(null);
-        lenient().when(competitorAggregator.extractTopCompetitorsFromBatch1(any(), anyString())).thenReturn(List.of());
+        lenient().when(competitorAggregator.extractTopCompetitorsFromBatch1(any(), anyCollection())).thenReturn(List.of());
         lenient().when(sysDictItemMapper.selectList(any())).thenReturn(List.of());
         lenient().when(competitorAggregator.normalizeName(anyString())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(cancellationRegistry.isCanceled(any())).thenReturn(false);
@@ -961,13 +962,13 @@ class PresaleGenerateOrchestratorTest {
     @Test
     @SuppressWarnings("unchecked")
     void competitorExtract_aggregatesTop3AndFiltersBrand() throws Exception {
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(9201L, "Acme  AI"))
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(9201L), anyCollection()))
                 .thenReturn(List.of("Claude", "ChatGPT", "Doubao"));
 
         Method m = PresaleGenerateOrchestrator.class
-                .getDeclaredMethod("extractTopCompetitorsFromBatch1", Long.class, String.class);
+                .getDeclaredMethod("extractTopCompetitorsFromBatch1", Long.class, List.class);
         m.setAccessible(true);
-        List<String> competitors = (List<String>) m.invoke(orchestrator, 9201L, "Acme  AI");
+        List<String> competitors = (List<String>) m.invoke(orchestrator, 9201L, List.of("Acme  AI"));
 
         assertEquals(List.of("Claude", "ChatGPT", "Doubao"), competitors);
     }
@@ -994,13 +995,13 @@ class PresaleGenerateOrchestratorTest {
     @Test
     @SuppressWarnings("unchecked")
     void competitorExtract_lessThan3Candidates_returnsActualSize() throws Exception {
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(9301L, "Acme"))
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(9301L), anyCollection()))
                 .thenReturn(List.of("Claude", "ChatGPT"));
 
         Method m = PresaleGenerateOrchestrator.class
-                .getDeclaredMethod("extractTopCompetitorsFromBatch1", Long.class, String.class);
+                .getDeclaredMethod("extractTopCompetitorsFromBatch1", Long.class, List.class);
         m.setAccessible(true);
-        List<String> competitors = (List<String>) m.invoke(orchestrator, 9301L, "Acme");
+        List<String> competitors = (List<String>) m.invoke(orchestrator, 9301L, List.of("Acme"));
 
         assertEquals(List.of("Claude", "ChatGPT"), competitors);
     }
@@ -1008,13 +1009,13 @@ class PresaleGenerateOrchestratorTest {
     @Test
     @SuppressWarnings("unchecked")
     void competitorExtract_invalidJsonIsSkipped_withoutBreakingOtherRows() throws Exception {
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(9302L, "Acme"))
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(9302L), anyCollection()))
                 .thenReturn(List.of("Claude", "Gemini"));
 
         Method m = PresaleGenerateOrchestrator.class
-                .getDeclaredMethod("extractTopCompetitorsFromBatch1", Long.class, String.class);
+                .getDeclaredMethod("extractTopCompetitorsFromBatch1", Long.class, List.class);
         m.setAccessible(true);
-        List<String> competitors = (List<String>) m.invoke(orchestrator, 9302L, "Acme");
+        List<String> competitors = (List<String>) m.invoke(orchestrator, 9302L, List.of("Acme"));
 
         assertEquals(List.of("Claude", "Gemini"), competitors);
     }
@@ -1022,13 +1023,13 @@ class PresaleGenerateOrchestratorTest {
     @Test
     @SuppressWarnings("unchecked")
     void competitorExtract_rowLevelDedup_countsSameNameOncePerRow() throws Exception {
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(9303L, "Acme"))
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(9303L), anyCollection()))
                 .thenReturn(List.of("Claude", "Gemini"));
 
         Method m = PresaleGenerateOrchestrator.class
-                .getDeclaredMethod("extractTopCompetitorsFromBatch1", Long.class, String.class);
+                .getDeclaredMethod("extractTopCompetitorsFromBatch1", Long.class, List.class);
         m.setAccessible(true);
-        List<String> competitors = (List<String>) m.invoke(orchestrator, 9303L, "Acme");
+        List<String> competitors = (List<String>) m.invoke(orchestrator, 9303L, List.of("Acme"));
 
         assertEquals(List.of("Claude", "Gemini"), competitors);
     }
@@ -1049,7 +1050,7 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(401L, "[\"Claude\", \"Gemini\"]"))
         );
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(9401L, "Acme"))
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(9401L), anyCollection()))
                 .thenReturn(List.of("Claude", "Gemini"));
         when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
@@ -1102,7 +1103,7 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(501L, "[\"Claude\", \"Gemini\", \"Doubao\"]"))
         );
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(9402L, "Acme"))
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(9402L), anyCollection()))
                 .thenReturn(List.of("Claude", "Gemini", "Doubao"));
         when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
@@ -1183,7 +1184,7 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(611L, "[\"Claude\"]"))
         );
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(9502L, "Acme"))
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(9502L), anyCollection()))
                 .thenReturn(List.of("Claude"));
         when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
@@ -1252,7 +1253,7 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(821L, "[\"Claude\"]"))
         );
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(9801L, "Acme"))
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(9801L), anyCollection()))
                 .thenReturn(List.of("Claude"));
         when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
@@ -1319,6 +1320,31 @@ class PresaleGenerateOrchestratorTest {
         assertTrue(editableWritten);
         assertEquals(PresaleGenerateStatus.DONE.name(), done.getGenerationStatus());
         assertNull(done.getGenerationStage());
+    }
+
+    @Test
+    void realFullFlow_capacityFailureDefer_requeuesWithoutFailedObservation() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ReflectionTestUtils.setField(orchestrator, "capacityFailureDeferEnabled", true);
+        setupSimpleRealFlow(9920L, 8920L, List.of("Claude"));
+        when(llmInvoker.query(any(), anyString()))
+                .thenThrow(new LlmInvokeException("permit busy",
+                        new LlmPermitUnavailableException(LlmPermitScope.FEATURE, "presale-generation")));
+
+        orchestrator.triggerGenerate(9920L, 920L, false);
+
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        PresaleReportVersion deferred = versionCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.QUEUED.name().equals(v.getGenerationStatus()))
+                .reduce((first, second) -> second)
+                .orElseThrow();
+        assertNull(deferred.getGenerationStage());
+        assertEquals("CAPACITY_DEFERRED", deferred.getFailureCategory());
+        assertTrue(deferred.getFailureReason().startsWith("CAPACITY_DEFERRED: PERMIT_BUSY"));
+        assertTrue(versionCaptor.getAllValues().stream()
+                .noneMatch(v -> PresaleGenerateStatus.FAILED.name().equals(v.getGenerationStatus())));
+        verify(aiCallMapper, never()).insert(any(PresaleAiCall.class));
     }
 
     @Test
@@ -1464,7 +1490,7 @@ class PresaleGenerateOrchestratorTest {
                 List.of(promptTemplate(1991L, "G1", "行业={industry},身份={industry_role},品牌={brand}")),
                 List.of(promptTemplate(1992L, "C1", "batch2 {competitor}"))
         );
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(9911L, "Acme")).thenReturn(List.of());
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(9911L), anyCollection())).thenReturn(List.of());
         when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenCallRealMethod();
         when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
@@ -1687,7 +1713,7 @@ class PresaleGenerateOrchestratorTest {
                 List.of(promptTemplate(991L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(992L, "C1", "batch2 {competitor}"))
         );
-        when(competitorAggregator.extractTopCompetitorsFromBatch1(versionId, "Acme"))
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(eq(versionId), anyCollection()))
                 .thenReturn(extractedCompetitors);
         when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));

@@ -2,6 +2,8 @@ package com.huanjing.geo.module.presale.generate.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
 import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.LlmModelConfig;
@@ -27,7 +29,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
-    private final LlmInvoker llmInvoker;
+    private final LlmCallFacade llmCallFacade;
+    private final LlmInvoker testLlmInvoker;
     private final LlmProperties llmProperties;
     private final ObjectMapper objectMapper;
 
@@ -37,18 +40,19 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
     @Autowired
     public OpenAiCompatiblePresaleLlmInvoker(AiPlatformConfigMapper aiPlatformConfigMapper,
                                              PlatformCredentialService platformCredentialService,
-                                             LlmInvoker llmInvoker,
+                                             LlmCallFacade llmCallFacade,
                                              LlmProperties llmProperties,
                                              ObjectMapper objectMapper) {
         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
         this.platformCredentialService = platformCredentialService;
-        this.llmInvoker = llmInvoker;
+        this.llmCallFacade = llmCallFacade;
+        this.testLlmInvoker = null;
         this.llmProperties = llmProperties;
         this.objectMapper = objectMapper;
     }
 
     /**
-     * @deprecated 仅供 presale 现有测试兼容，新代码使用主构造器（依赖 LlmInvoker bean）。
+     * @deprecated 仅供 presale 现有测试兼容，新代码使用主构造器（依赖 LlmCallFacade bean）。
      *             计划在 Sprint 3 迁移 presale 测试后删除。
      */
     @Deprecated
@@ -56,21 +60,20 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                                       PlatformCredentialService platformCredentialService,
                                       PresaleLlmHttpClient httpClient,
                                       ObjectMapper objectMapper) {
-        this(
-                aiPlatformConfigMapper,
-                platformCredentialService,
-                new com.huanjing.geo.common.llm.OpenAiCompatibleLlmInvoker(
-                        (url, headers, body, connectTimeoutMs, requestTimeoutMs) -> {
-                            PresaleLlmHttpClient.HttpResponse response = httpClient.postJson(
-                                    url, headers, body, connectTimeoutMs, requestTimeoutMs);
-                            return new com.huanjing.geo.common.llm.LlmHttpClient.HttpResponse(
-                                    response.statusCode(), response.body());
-                        },
-                        objectMapper
-                ),
-                new LlmProperties(),
+        this.aiPlatformConfigMapper = aiPlatformConfigMapper;
+        this.platformCredentialService = platformCredentialService;
+        this.llmCallFacade = null;
+        this.testLlmInvoker = new com.huanjing.geo.common.llm.OpenAiCompatibleLlmInvoker(
+                (url, headers, body, connectTimeoutMs, requestTimeoutMs) -> {
+                    PresaleLlmHttpClient.HttpResponse response = httpClient.postJson(
+                            url, headers, body, connectTimeoutMs, requestTimeoutMs);
+                    return new com.huanjing.geo.common.llm.LlmHttpClient.HttpResponse(
+                            response.statusCode(), response.body());
+                },
                 objectMapper
         );
+        this.llmProperties = new LlmProperties();
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -173,7 +176,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         }
 
         try {
-            LlmInvokeResult result = llmInvoker.invoke(userPrompt, new LlmModelConfig(
+            LlmModelConfig modelConfig = new LlmModelConfig(
                     config.getPlatformCode(),
                     config.getPlatformName(),
                     modelId,
@@ -191,7 +194,10 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                     LlmModelConfig.MAX_REQUEST_TIMEOUT_MS,
                     feature,
                     config.getConcurrencyLimit()
-            ));
+            );
+            LlmInvokeResult result = llmCallFacade == null
+                    ? testLlmInvoker.invoke(userPrompt, modelConfig)
+                    : llmCallFacade.execute(LlmCallRequest.direct(userPrompt, modelConfig)).invokeResult();
             return new LlmCallResult(
                     result.responseText(),
                     result.promptTokens(),

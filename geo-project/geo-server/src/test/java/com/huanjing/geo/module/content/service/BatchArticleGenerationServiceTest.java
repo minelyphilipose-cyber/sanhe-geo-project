@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.LlmCallStatus;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
-import com.huanjing.geo.common.llm.LlmInvoker;
+import com.huanjing.geo.common.llm.LlmCallFacade;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
@@ -131,7 +131,7 @@ class BatchArticleGenerationServiceTest {
                 currentUserService,
                 brandAccessService,
                 mock(PlatformCredentialService.class),
-                mock(LlmInvoker.class),
+                mock(LlmCallFacade.class),
                 mock(MarkdownImageReferenceValidator.class),
                 mock(ArticleAiDraftPromptFilter.class),
                 articleGenerationEngine,
@@ -887,6 +887,8 @@ class BatchArticleGenerationServiceTest {
     private ArticleAutoImageInsertionService passThroughAutoImageInsertionService() {
         ArticleAutoImageInsertionService service = mock(ArticleAutoImageInsertionService.class);
         when(service.insertForChannel(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
+        when(service.insertForChannel(any(), any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(3));
+        when(service.insertForTargetChannel(any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
         return service;
     }
 

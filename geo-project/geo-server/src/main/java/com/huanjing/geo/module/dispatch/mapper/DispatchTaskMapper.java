@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.dispatch.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.huanjing.geo.module.dispatch.dto.DispatchDueTimeBucketRow;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -81,4 +82,33 @@ public interface DispatchTaskMapper extends BaseMapper<DispatchTask> {
                                  @Param("finishedAt") LocalDateTime finishedAt,
                                  @Param("lastError") String lastError,
                                  @Param("errorContext") String errorContext);
+
+    @Select("""
+            <script>
+            SELECT
+              COALESCE(platform_code, 'unknown') AS platformCode,
+              status AS status,
+              FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(due_time) / (#{bucketMinutes} * 60)) * (#{bucketMinutes} * 60)) AS bucketStart,
+              COUNT(1) AS taskCount
+            FROM dispatch_task
+            WHERE task_type = #{taskType}
+              AND due_time &gt;= #{rangeStart}
+              AND due_time &lt; #{rangeEnd}
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              <if test="platformCode != null and platformCode != ''">
+                AND platform_code = #{platformCode}
+              </if>
+            GROUP BY COALESCE(platform_code, 'unknown'), status, bucketStart
+            ORDER BY platformCode ASC, status ASC, bucketStart ASC
+            </script>
+            """)
+    List<DispatchDueTimeBucketRow> aggregateDueTimeDistribution(@Param("taskType") String taskType,
+                                                                @Param("rangeStart") LocalDateTime rangeStart,
+                                                                @Param("rangeEnd") LocalDateTime rangeEnd,
+                                                                @Param("bucketMinutes") int bucketMinutes,
+                                                                @Param("statuses") List<String> statuses,
+                                                                @Param("platformCode") String platformCode);
 }

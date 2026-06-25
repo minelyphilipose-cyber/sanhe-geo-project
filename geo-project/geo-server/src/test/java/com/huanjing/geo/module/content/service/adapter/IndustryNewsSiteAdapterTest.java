@@ -7,11 +7,14 @@ import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.system.entity.PublishSite;
+import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class IndustryNewsSiteAdapterTest {
 
@@ -31,6 +34,7 @@ class IndustryNewsSiteAdapterTest {
         assertThat(result.getPublishedUrl()).isEqualTo("https://site.test/a/42");
         assertThat(result.getPlatformArticleId()).isEqualTo("42");
         assertThat(adapter.capturedHeaders).containsEntry("X-Admin-Token", "token-123");
+        assertThat(adapter.capturedHeaders).containsEntry("Content-Type", "application/json; charset=utf-8");
         JsonNode payload = objectMapper.readTree(adapter.capturedBody);
         assertThat(payload.path("categorySlug").asText()).isEqualTo("region");
         assertThat(payload.path("title").asText()).isEqualTo("阜阳全屋智能市场观察 2026");
@@ -39,6 +43,7 @@ class IndustryNewsSiteAdapterTest {
         assertThat(payload.path("city").asText()).isEqualTo("阜阳市");
         assertThat(payload.path("markdown").asText()).contains("正文内容");
         assertThat(payload.path("meta").path("industry").asText()).isEqualTo("全屋智能");
+        assertThat(payload.path("meta").path("canonicalPath").asText()).isEqualTo("/region/anhui/fuyang/article-100.html");
     }
 
     @Test
@@ -65,6 +70,17 @@ class IndustryNewsSiteAdapterTest {
         assertThat(result.getFailureKind()).isEqualTo(FailureKind.CLIENT_ERROR);
     }
 
+    @Test
+    void acceptsCodeZeroResponse() {
+        CapturingAdapter adapter = new CapturingAdapter(objectMapper,
+                new HttpClientUtil.HttpResult(200, "{\"code\":0,\"message\":\"success\",\"data\":{\"id\":88}}", Map.of()));
+
+        SubmitResult result = adapter.submitToTarget(article(), "# 标题\n\n正文", new TargetContext.IndustrySiteTarget(site(), project()));
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getPlatformArticleId()).isEqualTo("88");
+    }
+
     private ArticleDraft article() {
         ArticleDraft article = new ArticleDraft();
         article.setId(100L);
@@ -89,7 +105,7 @@ class IndustryNewsSiteAdapterTest {
         PublishSite site = new PublishSite();
         site.setId(300L);
         site.setApiEndpoint("https://api.site.test/api/admin/articles");
-        site.setRequestHeaderTemplate("{\"X-Admin-Token\":\"token-123\"}");
+        site.setCredentialRef("zhizhuang");
         site.setIndustryTags("[\"全屋智能\"]");
         return site;
     }
@@ -100,7 +116,7 @@ class IndustryNewsSiteAdapterTest {
         private String capturedBody;
 
         private CapturingAdapter(ObjectMapper objectMapper, HttpClientUtil.HttpResult response) {
-            super(objectMapper);
+            super(objectMapper, mockCredentialService());
             this.response = response;
         }
 
@@ -113,6 +129,12 @@ class IndustryNewsSiteAdapterTest {
             this.capturedHeaders = headers;
             this.capturedBody = body;
             return response;
+        }
+
+        private static PlatformCredentialService mockCredentialService() {
+            PlatformCredentialService service = mock(PlatformCredentialService.class);
+            when(service.resolveCredential("zhizhuang", null)).thenReturn("token-123");
+            return service;
         }
     }
 }

@@ -139,8 +139,9 @@ onMounted(async () => {
 .inline-metric span {
   display: block;
   color: #52625C;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--mobile-text-2xs, 10px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label-sm, 14px);
 }
 
 .hero-card strong,
@@ -148,16 +149,23 @@ onMounted(async () => {
   display: block;
   margin-top: 8px;
   color: #131b2e;
-  font-size: 20px;
-  font-weight: 800;
-  line-height: 1.1;
+  font-size: var(--mobile-metric, 18px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-title, 24px);
+}
+
+.hero-card strong {
+  font-size: var(--mobile-metric-lg, 36px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-display, 40px);
+  letter-spacing: -0.04em;
 }
 
 .hero-card p {
   margin: 8px 0 0;
   color: #52625C;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--mobile-text-xs, 12px);
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .metric-grid {
@@ -176,8 +184,9 @@ onMounted(async () => {
 
 .inline-metric {
   min-width: 0;
-  padding: 12px;
-  border-radius: 12px;
+  min-height: 112px;
+  padding: 14px 12px;
+  border-radius: 14px;
   background: #f8fafc;
 }
 
@@ -186,16 +195,21 @@ onMounted(async () => {
   text-align: center;
 }
 
+.overview-strip .inline-metric strong {
+  font-size: var(--mobile-text-md, 14px);
+  line-height: var(--mobile-leading-md, 20px);
+}
+
 .inline-metric .mobile-icon {
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
-  margin-bottom: 8px;
-  border-radius: 10px;
+  margin-bottom: 10px;
+  border-radius: 13px;
   background: #e6f7ef;
   color: #006D44;
-  font-size: 17px;
+  font-size: 20px;
 }
 
 .overview-strip .inline-metric .mobile-icon {
@@ -205,8 +219,8 @@ onMounted(async () => {
 .scope-note {
   margin: 10px 0 0;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: var(--mobile-text-xs, 12px);
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 @media (max-width: 374px) {
@@ -219,7 +233,7 @@ onMounted(async () => {
   }
 
   .overview-strip .inline-metric strong {
-    font-size: 15px;
+    font-size: var(--mobile-text-md, 14px);
   }
 }
 </style>

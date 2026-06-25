@@ -1,6 +1,5 @@
 package com.huanjing.geo.module.system.service;
 
-import com.huanjing.geo.module.content.config.BrandGeoSiteProperties;
 import com.huanjing.geo.module.system.entity.PublishSite;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.PublishSiteMapper;
@@ -21,11 +20,9 @@ class PublishSiteServiceTest {
     private final SysDictItemMapper sysDictItemMapper = mock(SysDictItemMapper.class);
     private final CurrentUserService currentUserService = mock(CurrentUserService.class);
     private final PlatformCredentialService platformCredentialService = mock(PlatformCredentialService.class);
-    private final BrandGeoSiteProperties brandGeoSiteProperties = new BrandGeoSiteProperties();
 
     @Test
-    void brandGeoSiteConnectivityUsesConfiguredEndpoint() {
-        brandGeoSiteProperties.setEndpoint("http://agent.example.test/api/publish");
+    void brandGeoSiteConnectivityUsesSiteDomain() {
         TestPublishSiteService service = new TestPublishSiteService();
         service.nextPingResult = new PublishSiteService.PingResult(true, "ok");
         givenManagerUser();
@@ -35,25 +32,9 @@ class PublishSiteServiceTest {
 
         assertTrue((Boolean) result.get("success"));
         assertTrue((Boolean) result.get("reachable"));
-        assertEquals("endpoint_ping", result.get("testType"));
-        assertEquals("http://agent.example.test/api/publish", result.get("endpoint"));
-        assertEquals("agent.example.test", result.get("host"));
-        assertEquals("agent.example.test", service.pingHost);
-    }
-
-    @Test
-    void brandGeoSiteConnectivityReportsMissingEndpoint() {
-        brandGeoSiteProperties.setEndpoint("");
-        TestPublishSiteService service = new TestPublishSiteService();
-        givenManagerUser();
-        when(publishSiteMapper.selectById(7L)).thenReturn(agentSite());
-
-        Map<String, Object> result = service.testConnectivity(7L);
-
-        assertFalse((Boolean) result.get("success"));
-        assertFalse((Boolean) result.get("reachable"));
-        assertEquals("endpoint_ping", result.get("testType"));
-        assertEquals("BRAND_GEO_SITE_ENDPOINT is not configured", result.get("message"));
+        assertEquals("ping", result.get("testType"));
+        assertEquals("agent-site.local", result.get("host"));
+        assertEquals("agent-site.local", service.pingHost);
     }
 
     @Test
@@ -100,7 +81,7 @@ class PublishSiteServiceTest {
         private String pingHost;
 
         private TestPublishSiteService() {
-            super(publishSiteMapper, sysDictItemMapper, currentUserService, platformCredentialService, brandGeoSiteProperties);
+            super(publishSiteMapper, sysDictItemMapper, currentUserService, platformCredentialService);
         }
 
         @Override

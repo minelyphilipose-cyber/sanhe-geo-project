@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.llm.capacity.LlmCapacityFailure;
+import com.huanjing.geo.common.llm.capacity.LlmCapacityFailureClassifier;
 import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.generate.llm.AnalyzeParseException;
@@ -99,6 +101,7 @@ public class PresaleGenerateOrchestrator {
     private static final String FAILURE_CATEGORY_TOO_MANY_DEGRADED = "TOO_MANY_DEGRADED_PLATFORMS";
     private static final String FAILURE_CATEGORY_INTERRUPTED = "INTERRUPTED";
     private static final String FAILURE_CATEGORY_UNEXPECTED_ERROR = "UNEXPECTED_ERROR";
+    private static final String FAILURE_CATEGORY_CAPACITY_DEFERRED = "CAPACITY_DEFERRED";
     private static final String FAILURE_CATEGORY_SNAPSHOT_BUILD_ERROR = "SNAPSHOT_BUILD_ERROR";
     private static final String FAILURE_CATEGORY_STAGE_D_CHECKPOINT = "STAGE_D_CHECKPOINT";
     private static final String FAILURE_CATEGORY_COMPETITOR_EXTRACT_EMPTY = "COMPETITOR_EXTRACT_EMPTY";
@@ -134,6 +137,7 @@ public class PresaleGenerateOrchestrator {
     private final Map<Long, AtomicLong> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
     private final Map<Long, StageTiming> stageTimingByVersion = new ConcurrentHashMap<>();
     private final Map<String, CallModelSnapshot> modelSnapshotByPlatformCode = new ConcurrentHashMap<>();
+    private final LlmCapacityFailureClassifier capacityFailureClassifier = new LlmCapacityFailureClassifier();
     private volatile Semaphore dbWriteSemaphore;
 
     @Value("${presale.generate.mock}")
@@ -159,6 +163,9 @@ public class PresaleGenerateOrchestrator {
 
     @Value("${presale.generate.max-concurrent-reports:1}")
     private int maxConcurrentReports = 1;
+
+    @Value("${presale.generate.capacity-failure-defer-enabled:false}")
+    private boolean capacityFailureDeferEnabled = false;
 
     public PresaleGenerateOrchestrator(PresaleReportVersionMapper versionMapper,
                                        PresaleReportMapper reportMapper,
@@ -258,7 +265,6 @@ public class PresaleGenerateOrchestrator {
         try {
             doTriggerGenerate(versionId, operatorUserId, isManager);
         } catch (Throwable t) {
-            log.error("Presale generate fatal error, versionId={}", versionId, t);
             try {
                 if (isInterruptedFailure(t) && !isGenerationActive(versionId)) {
                     cancellationRegistry.clear(versionId);
@@ -266,6 +272,16 @@ public class PresaleGenerateOrchestrator {
                     log.info("Presale generate stopped by inactive status, versionId={}", versionId);
                     return;
                 }
+                LlmCapacityFailure capacityFailure = classifyCapacityFailure(t);
+                if (capacityFailure != null) {
+                    markCapacityDeferred(versionId, capacityFailure, t);
+                    cancellationRegistry.clear(versionId);
+                    lastProgressUpdateAtByVersion.remove(versionId);
+                    log.warn("Presale generate deferred by LLM capacity, versionId={}, category={}, retryAfterMs={}",
+                            versionId, capacityFailure.errorCategory(), capacityFailure.retryAfterMs());
+                    return;
+                }
+                log.error("Presale generate fatal error, versionId={}", versionId, t);
                 String failureCategory = isInterruptedFailure(t)
                         ? FAILURE_CATEGORY_INTERRUPTED
                         : FAILURE_CATEGORY_UNEXPECTED_ERROR;
@@ -628,7 +644,7 @@ public class PresaleGenerateOrchestrator {
                             Throwable cause = (ex instanceof CompletionException && ex.getCause() != null)
                                     ? ex.getCause()
                                     : ex;
-                            if (isInterruptedFailure(cause)) {
+                            if (isInterruptedFailure(cause) || isCapacityDeferredFailure(cause)) {
                                 interruptedFailure.compareAndSet(null, cause);
                             }
                             String failedCode = platform.getPlatformCode();
@@ -678,6 +694,9 @@ public class PresaleGenerateOrchestrator {
         if (interruptedFailure.get() != null) {
             log.warn("batch=1 versionId={} platformCode=- threadName={} interruptedFailureDetected={}", versionId,
                     Thread.currentThread().getName(), interruptedFailure.get().getClass().getSimpleName());
+            if (isCapacityDeferredFailure(interruptedFailure.get())) {
+                throw asCapacityDeferredException(interruptedFailure.get());
+            }
             throw new BatchInterruptedException("batch1 interrupted in async execution");
         }
 
@@ -820,6 +839,7 @@ public class PresaleGenerateOrchestrator {
                     withDbWritePermit("presale.reuse.replace_failed_analyze", () ->
                             reusePersistenceService.replaceFailedAnalyzeAndResult(ctx, reusedQueryCall, analyzeCall, promptResult));
                 } catch (LlmInvokeException | AnalyzeParseException ex) {
+                    throwIfCapacityDeferred(versionId, ex);
                     PresaleAiCall analyzeCall = buildFailedCall(
                             versionId, 1, platformCode, template.getId(), "",
                             "ANALYZE", reusedQueryCall.getId(), analyzeRequestPrompt, ex.getMessage()
@@ -852,6 +872,7 @@ public class PresaleGenerateOrchestrator {
                     "QUERY", null, renderedPrompt, queryResult, null
             );
         } catch (LlmInvokeException ex) {
+            throwIfCapacityDeferred(versionId, ex);
             insertFailedCall(versionId, 1, platformCode, template.getId(), "",
                     "QUERY", null, renderedPrompt, ex.getMessage());
             state.incrementProcessed();
@@ -875,6 +896,7 @@ public class PresaleGenerateOrchestrator {
             insertPromptResultSuccess(versionId, 1, platformCode, template.getId(), "",
                     queryCall.getId(), analyzeCall.getId(), renderedPrompt, analyzeResult.rawResponse());
         } catch (LlmInvokeException | AnalyzeParseException ex) {
+            throwIfCapacityDeferred(versionId, ex);
             PresaleAiCall analyzeCall = insertFailedCall(versionId, 1, platformCode, template.getId(), "",
                     "ANALYZE", queryCall.getId(),
                     buildAnalyzeRequestPrompt(ctx, renderedPrompt, queryResult.rawResponse()), ex.getMessage());
@@ -1029,6 +1051,7 @@ public class PresaleGenerateOrchestrator {
                     withDbWritePermit("presale.reuse.replace_failed_analyze", () ->
                             reusePersistenceService.replaceFailedAnalyzeAndResult(ctx, reusedQueryCall, analyzeCall, promptResult));
                 } catch (LlmInvokeException | AnalyzeParseException ex) {
+                    throwIfCapacityDeferred(versionId, ex);
                     PresaleAiCall analyzeCall = buildFailedCall(
                             versionId, 2, platformCode, template.getId(), competitorGroupName,
                             "ANALYZE", reusedQueryCall.getId(), analyzeRequestPrompt, ex.getMessage()
@@ -1062,6 +1085,7 @@ public class PresaleGenerateOrchestrator {
                     "QUERY", null, renderedPrompt, queryResult, null
             );
         } catch (LlmInvokeException ex) {
+            throwIfCapacityDeferred(versionId, ex);
             insertFailedCall(versionId, 2, platformCode, template.getId(), competitorGroupName,
                     "QUERY", null, renderedPrompt, ex.getMessage());
             state.incrementProcessed();
@@ -1086,6 +1110,7 @@ public class PresaleGenerateOrchestrator {
             insertPromptResultSuccess(versionId, 2, platformCode, template.getId(), competitorGroupName,
                     queryCall.getId(), analyzeCall.getId(), renderedPrompt, analyzeResult.rawResponse());
         } catch (LlmInvokeException | AnalyzeParseException ex) {
+            throwIfCapacityDeferred(versionId, ex);
             PresaleAiCall analyzeCall = insertFailedCall(versionId, 2, platformCode, template.getId(), competitorGroupName,
                     "ANALYZE", queryCall.getId(),
                     buildAnalyzeRequestPrompt(ctx, renderedPrompt, queryResult.rawResponse()), ex.getMessage());
@@ -1201,7 +1226,7 @@ public class PresaleGenerateOrchestrator {
                             Throwable cause = (ex instanceof CompletionException && ex.getCause() != null)
                                     ? ex.getCause()
                                     : ex;
-                            if (isInterruptedFailure(cause)) {
+                            if (isInterruptedFailure(cause) || isCapacityDeferredFailure(cause)) {
                                 interruptedFailure.compareAndSet(null, cause);
                             }
                             String failedCode = platform.getPlatformCode();
@@ -1259,6 +1284,9 @@ public class PresaleGenerateOrchestrator {
         if (interruptedFailure.get() != null) {
             log.warn("batch=2 versionId={} platformCode=- threadName={} interruptedFailureDetected={}", versionId,
                     Thread.currentThread().getName(), interruptedFailure.get().getClass().getSimpleName());
+            if (isCapacityDeferredFailure(interruptedFailure.get())) {
+                throw asCapacityDeferredException(interruptedFailure.get());
+            }
             throw new BatchInterruptedException("batch2 interrupted in async execution");
         }
 
@@ -1396,6 +1424,81 @@ public class PresaleGenerateOrchestrator {
         syncReportGenerationStatus(versionId, PresaleGenerateStatus.FAILED.name());
         lastProgressUpdateAtByVersion.remove(versionId);
         logTerminalStageDuration(versionId, PresaleGenerateStatus.FAILED.name());
+    }
+
+    private void markCapacityDeferred(Long versionId, LlmCapacityFailure failure, Throwable cause) {
+        PresaleReportVersion update = new PresaleReportVersion();
+        update.setId(versionId);
+        update.setGenerationStatus(PresaleGenerateStatus.QUEUED.name());
+        update.setGenerationStage(null);
+        update.setFailureCategory(FAILURE_CATEGORY_CAPACITY_DEFERRED);
+        update.setFailureReason(truncateReason(capacityDeferredReason(failure, cause)));
+        update.setUpdatedAt(LocalDateTime.now());
+        updateVersionById(update, "presale.version.capacityDeferred");
+        syncReportGenerationStatus(versionId, PresaleGenerateStatus.QUEUED.name());
+        logTerminalStageDuration(versionId, FAILURE_CATEGORY_CAPACITY_DEFERRED);
+    }
+
+    private String capacityDeferredReason(LlmCapacityFailure failure, Throwable cause) {
+        String category = failure == null || failure.errorCategory() == null
+                ? "UNKNOWN"
+                : failure.errorCategory().name();
+        String retryAfter = failure == null || failure.retryAfterMs() == null
+                ? ""
+                : ", retryAfterMs=" + failure.retryAfterMs();
+        String reason = failure == null || failure.reason() == null || failure.reason().isBlank()
+                ? null
+                : failure.reason();
+        String source = failure == null || failure.source() == null || failure.source().isBlank()
+                ? null
+                : failure.source();
+        String fallbackMessage = cause == null || cause.getMessage() == null ? null : cause.getMessage();
+        String message = reason != null ? reason : (source != null ? source : fallbackMessage);
+        return FAILURE_CATEGORY_CAPACITY_DEFERRED + ": " + category + retryAfter
+                + (message == null || message.isBlank() ? "" : ": " + message);
+    }
+
+    private void throwIfCapacityDeferred(Long versionId, Throwable failure) {
+        LlmCapacityFailure capacityFailure = classifyCapacityFailure(failure);
+        if (capacityFailure == null) {
+            return;
+        }
+        throw new CapacityDeferredException(versionId, capacityFailure, failure);
+    }
+
+    private LlmCapacityFailure classifyCapacityFailure(Throwable failure) {
+        if (!capacityFailureDeferEnabled || failure == null) {
+            return null;
+        }
+        CapacityDeferredException deferred = findCapacityDeferredException(failure);
+        if (deferred != null) {
+            return deferred.capacityFailure;
+        }
+        return capacityFailureClassifier.classify(failure).orElse(null);
+    }
+
+    private boolean isCapacityDeferredFailure(Throwable failure) {
+        return findCapacityDeferredException(failure) != null;
+    }
+
+    private CapacityDeferredException asCapacityDeferredException(Throwable failure) {
+        CapacityDeferredException deferred = findCapacityDeferredException(failure);
+        if (deferred != null) {
+            return deferred;
+        }
+        throw new IllegalStateException("capacity deferred failure not found", failure);
+    }
+
+    private CapacityDeferredException findCapacityDeferredException(Throwable failure) {
+        Throwable current = failure;
+        Set<Throwable> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        while (current != null && seen.add(current)) {
+            if (current instanceof CapacityDeferredException ex) {
+                return ex;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private void markDone(Long versionId) {
@@ -2683,6 +2786,17 @@ public class PresaleGenerateOrchestrator {
         }
         String dictValue = rows.get(0).getDictValue();
         return (dictValue == null || dictValue.isBlank()) ? dictKey : dictValue;
+    }
+
+    private static final class CapacityDeferredException extends RuntimeException {
+        private final Long versionId;
+        private final LlmCapacityFailure capacityFailure;
+
+        private CapacityDeferredException(Long versionId, LlmCapacityFailure capacityFailure, Throwable cause) {
+            super("Presale generation deferred by LLM capacity", cause);
+            this.versionId = versionId;
+            this.capacityFailure = capacityFailure;
+        }
     }
 }
 

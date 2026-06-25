@@ -7,17 +7,22 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.dispatch.dto.DispatchAlertVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchDashboardVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchDateRange;
+import com.huanjing.geo.module.dispatch.dto.DispatchDueTimeBucketRow;
+import com.huanjing.geo.module.dispatch.dto.DispatchDueTimeDistributionVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchPlatformHealthVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchTaskMonitorVO;
 import com.huanjing.geo.module.dispatch.dto.PlatformHealthAggregateRow;
+import com.huanjing.geo.module.dispatch.dto.PollSliceProgressVO;
 import com.huanjing.geo.module.dispatch.entity.DispatchAlert;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.entity.PollBatchShard;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
+import com.huanjing.geo.module.dispatch.enums.DispatchTaskStatus;
 import com.huanjing.geo.module.dispatch.mapper.AiPlatformHealthEventMapper;
 import com.huanjing.geo.module.dispatch.mapper.DispatchAlertMapper;
 import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
+import com.huanjing.geo.common.llm.monitoring.LlmCapacityQueryService;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -25,7 +30,7 @@ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
-import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
+import com.huanjing.geo.common.llm.LlmCapacityView;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -56,8 +61,9 @@ public class DispatchMonitorService {
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final AiPlatformHealthEventMapper aiPlatformHealthEventMapper;
     private final DispatchAlertService dispatchAlertService;
-    private final LlmExecutionGateway llmExecutionGateway;
+    private final LlmCapacityView llmCapacityView;
     private final InternalScopeService internalScopeService;
+    private final LlmCapacityQueryService capacityQueryService;
 
     public DispatchDashboardVO dashboard(String rangeType, LocalDate startDate, LocalDate endDate, Long projectId) {
         SysUser user = ensureMonitorAccess();
@@ -181,6 +187,84 @@ public class DispatchMonitorService {
         return result;
     }
 
+    public DispatchDueTimeDistributionVO dueTimeDistribution(int bucketMinutes, String platformCode) {
+        ensureMonitorAccess();
+        int safeBucketMinutes = Math.max(5, Math.min(bucketMinutes, 240));
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime rangeEnd = now.plusDays(1);
+        List<String> statuses = List.of(
+                DispatchTaskStatus.PENDING.value(),
+                DispatchTaskStatus.RETRY_PENDING.value(),
+                DispatchTaskStatus.RUNNING.value()
+        );
+        List<DispatchDueTimeBucketRow> rows = dispatchTaskMapper.aggregateDueTimeDistribution(
+                DispatchTaskType.BI_DAILY_POLL.name(),
+                now,
+                rangeEnd,
+                safeBucketMinutes,
+                statuses,
+                normalizeFilter(platformCode)
+        );
+        DispatchDueTimeDistributionVO vo = new DispatchDueTimeDistributionVO();
+        vo.setTaskType(DispatchTaskType.BI_DAILY_POLL.name());
+        vo.setRangeStart(now);
+        vo.setRangeEnd(rangeEnd);
+        vo.setBucketMinutes(safeBucketMinutes);
+        Map<String, List<DispatchDueTimeBucketRow>> byPlatform = rows.stream()
+                .collect(Collectors.groupingBy(row -> defaultText(row.getPlatformCode(), "unknown"), LinkedHashMap::new, Collectors.toList()));
+        for (Map.Entry<String, List<DispatchDueTimeBucketRow>> platformEntry : byPlatform.entrySet()) {
+            DispatchDueTimeDistributionVO.PlatformSeries platformSeries = new DispatchDueTimeDistributionVO.PlatformSeries();
+            platformSeries.setPlatformCode(platformEntry.getKey());
+            Map<String, List<DispatchDueTimeBucketRow>> byStatus = platformEntry.getValue().stream()
+                    .collect(Collectors.groupingBy(row -> defaultText(row.getStatus(), "unknown"), LinkedHashMap::new, Collectors.toList()));
+            for (String status : statuses) {
+                List<DispatchDueTimeBucketRow> statusRows = byStatus.getOrDefault(status, List.of());
+                DispatchDueTimeDistributionVO.StatusSeries statusSeries = new DispatchDueTimeDistributionVO.StatusSeries();
+                statusSeries.setStatus(status);
+                statusSeries.setBuckets(statusRows.stream().map(row -> {
+                    DispatchDueTimeDistributionVO.Bucket bucket = new DispatchDueTimeDistributionVO.Bucket();
+                    bucket.setBucketStart(row.getBucketStart());
+                    bucket.setTaskCount(value(row.getTaskCount()));
+                    return bucket;
+                }).toList());
+                platformSeries.getStatuses().add(statusSeries);
+            }
+            vo.getPlatforms().add(platformSeries);
+        }
+        return vo;
+    }
+
+    public PollSliceProgressVO pollSliceProgress(LocalDate batchDate, String questionTier, String platformCode) {
+        ensureMonitorAccess();
+        LocalDate targetDate = batchDate == null ? LocalDate.now() : batchDate;
+        String tier = StringUtils.hasText(questionTier) ? questionTier.trim().toUpperCase() : "A";
+        List<String> platformCodes = StringUtils.hasText(platformCode)
+                ? List.of(platformCode.trim().toLowerCase())
+                : enabledQuestionPollPlatformCodes();
+        LlmCapacityQueryService.PollSliceProgressSnapshot snapshot = capacityQueryService.platformSliceProgress(
+                targetDate,
+                tier,
+                platformCodes,
+                LocalDateTime.now()
+        );
+        PollSliceProgressVO vo = new PollSliceProgressVO();
+        vo.setBatchDate(snapshot.batchDate());
+        vo.setQuestionTier(snapshot.questionTier());
+        vo.setPlatformCodes(snapshot.platformCodes());
+        vo.setExpectedCount(snapshot.expectedCount());
+        vo.setCompletedCount(snapshot.completedCount());
+        vo.setFailedCount(snapshot.failedCount());
+        vo.setResourceWaitCount(snapshot.resourceWaitCount());
+        vo.setActualProgress(snapshot.actualProgress());
+        vo.setExpectedProgress(snapshot.expectedProgress());
+        vo.setLag(snapshot.lag());
+        vo.setWindowMinutes(snapshot.windowMinutes());
+        vo.setSliceStart(snapshot.sliceStart());
+        vo.setObservedAt(snapshot.observedAt());
+        vo.setRows(snapshot.rows());
+        return vo;
+    }
+
     public DispatchTaskMonitorVO taskDetail(Long taskId) {
         SysUser user = ensureMonitorAccess();
         DispatchTask task = dispatchTaskMapper.selectById(taskId);
@@ -237,7 +321,7 @@ public class DispatchMonitorService {
             vo.setRpmLimit(p.getRpmLimit());
             vo.setTpmLimit(p.getTpmLimit());
             vo.setConcurrencyLimit(p.getConcurrencyLimit());
-            vo.setActivePermitCount(llmExecutionGateway.activePlatformCount(p.getPlatformCode()));
+            vo.setActivePermitCount(llmCapacityView.activePlatformCount(p.getPlatformCode()));
             vo.setDegraded(p.getDegraded());
             vo.setDegradedReason(p.getDegradedReason());
             vo.setCurrentHealthStatus(p.getCurrentHealthStatus());
@@ -259,6 +343,26 @@ public class DispatchMonitorService {
 
     private long value(Long value) {
         return value == null ? 0L : value;
+    }
+
+    private String normalizeFilter(String value) {
+        return StringUtils.hasText(value) ? value.trim().toLowerCase() : null;
+    }
+
+    private String defaultText(String value, String fallback) {
+        return StringUtils.hasText(value) ? value : fallback;
+    }
+
+    private List<String> enabledQuestionPollPlatformCodes() {
+        return aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
+                        .orderByAsc(AiPlatformConfig::getId))
+                .stream()
+                .map(AiPlatformConfig::getPlatformCode)
+                .filter(StringUtils::hasText)
+                .map(code -> code.trim().toLowerCase())
+                .toList();
     }
 
     private LocalDateTime resolveLatest(LocalDateTime first, LocalDateTime second) {
@@ -389,6 +493,7 @@ public class DispatchMonitorService {
             vo.setTitle(representative.getTitle() + "（" + group.size() + "条）");
         }
         vo.setPlatformFailures(aggregatePlatformFailures(group));
+        applyBatchFailureStats(vo, group);
         return vo;
     }
 
@@ -411,10 +516,37 @@ public class DispatchMonitorService {
         if (includePlatformFailures) {
             vo.setPlatformFailures(aggregatePlatformFailures(List.of(alert)));
         }
+        applyBatchFailureStats(vo, List.of(alert));
         vo.setResolvedAt(alert.getResolvedAt());
         vo.setResolvedBy(alert.getResolvedBy());
         vo.setCreatedAt(alert.getCreatedAt());
         return vo;
+    }
+
+    private void applyBatchFailureStats(DispatchAlertVO vo, List<DispatchAlert> alerts) {
+        int expected = 0;
+        int failed = 0;
+        boolean hasBatchSummary = false;
+        for (DispatchAlert alert : alerts) {
+            Map<String, Object> context = parsePayload(alert.getContextJson());
+            if (!"question_poll_daily_summary".equals(stringValue(context.get("alertType")))) {
+                continue;
+            }
+            int itemExpected = intValue(context.get("expectedResultCount"));
+            int itemFailed = intValue(context.get("failedCount"));
+            if (itemExpected <= 0 && itemFailed <= 0) {
+                continue;
+            }
+            hasBatchSummary = true;
+            expected += itemExpected;
+            failed += itemFailed;
+        }
+        if (!hasBatchSummary) {
+            return;
+        }
+        vo.setExpectedResultCount(expected);
+        vo.setFailedCount(failed);
+        vo.setFailureRate(expected <= 0 ? (failed > 0 ? 100D : 0D) : Math.round(failed * 10000D / expected) / 100D);
     }
 
     private List<DispatchAlertVO.PlatformFailureSummary> aggregatePlatformFailures(List<DispatchAlert> alerts) {

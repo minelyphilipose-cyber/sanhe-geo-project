@@ -1,8 +1,10 @@
 package com.huanjing.geo.module.mobiledashboard.service;
 
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardAggregateVO;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardMetricVO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Service;
@@ -44,8 +46,9 @@ public class MobileDashboardAggregateService {
 
     public MobileDashboardAggregateVO.Home home(Long projectId, LocalDate startDate, LocalDate endDate) {
         DateRange range = normalizeRange(startDate, endDate, LocalDate.now().minusDays(13), LocalDate.now());
-        MentionAggregate mention = loadLatestMentionAggregate(projectId, null);
-        QuestionCoverage coverage = loadLatestQuestionCoverage(projectId);
+        LocalDate completeBatchDate = loadLatestCompletePollBatchDate(projectId);
+        MentionAggregate mention = loadCompleteBatchMentionAggregate(projectId, completeBatchDate, null);
+        QuestionCoverage coverage = loadCompleteBatchQuestionCoverage(projectId, completeBatchDate);
         ContentFacts content = loadContentFacts(projectId, YearMonth.from(range.end()));
         MobileDashboardEntityJudgeService.JudgeCoverage focusJudge = entityJudgeService.latestFocusCoverage(projectId);
 
@@ -58,8 +61,8 @@ public class MobileDashboardAggregateService {
                 keyMetric("covered_question_count", fractionMetric(coverage.covered(), coverage.total())),
                 keyMetric("total_asset_count", MobileDashboardMetricVO.available(content.totalPublished()))
         ));
-        vo.setPlatformPerformance(loadLatestPlatformPerformance(projectId));
-        vo.setSceneCoverage(loadLatestSceneCoverage(projectId));
+        vo.setPlatformPerformance(loadCompleteBatchPlatformPerformance(projectId, completeBatchDate));
+        vo.setSceneCoverage(loadCompleteBatchSceneCoverage(projectId, completeBatchDate));
         vo.setCompetitorComparison(loadCompetitorComparison(projectId, range, focusJudge));
         vo.setContentProgress(toContentProgress(content));
         vo.setEcoAssets(toEcoAssets(content, coverage.covered()));
@@ -67,8 +70,8 @@ public class MobileDashboardAggregateService {
     }
 
     public MobileDashboardAggregateVO.Monitor monitor(Long projectId, LocalDate startDate, LocalDate endDate, String platformCode) {
-        DateRange range = normalizeRange(startDate, endDate, LocalDate.now().minusDays(13), LocalDate.now());
-        QuestionCoverage coverage = loadLatestQuestionCoverage(projectId);
+        LocalDate completeBatchDate = loadLatestCompletePollBatchDate(projectId);
+        QuestionCoverage coverage = loadCompleteBatchQuestionCoverage(projectId, completeBatchDate);
         MobileDashboardEntityJudgeService.JudgeCoverage focusJudge = entityJudgeService.latestFocusCoverage(projectId, platformCode);
         MobileDashboardAggregateVO.Monitor vo = new MobileDashboardAggregateVO.Monitor();
         MobileDashboardAggregateVO.MonitorOverview overview = new MobileDashboardAggregateVO.MonitorOverview();
@@ -78,8 +81,8 @@ public class MobileDashboardAggregateService {
         overview.setFirstRecommendCount(judgeCountMetric(focusJudge));
         vo.setOverview(overview);
         vo.setPlatformFilters(new ArrayList<>(AI_PLATFORM_CODES));
-        vo.setQuestionList(loadLatestQuestionMonitorList(projectId, platformCode, focusJudge));
-        vo.setScenePerformance(loadLatestSceneCoverage(projectId));
+        vo.setQuestionList(loadCompleteBatchQuestionMonitorList(projectId, platformCode, focusJudge, completeBatchDate));
+        vo.setScenePerformance(loadCompleteBatchSceneCoverage(projectId, completeBatchDate));
         MobileDashboardAggregateVO.QuestionCoverageProgress progress = new MobileDashboardAggregateVO.QuestionCoverageProgress();
         progress.setCovered(MobileDashboardMetricVO.available(coverage.covered()));
         progress.setMonitoring(MobileDashboardMetricVO.available(Math.max(coverage.total() - coverage.covered(), 0)));
@@ -88,10 +91,63 @@ public class MobileDashboardAggregateService {
         return vo;
     }
 
+    public MobileDashboardAggregateVO.QuestionMonitorItem questionDetail(Long projectId, Long pollResultId) {
+        if (pollResultId == null || pollResultId <= 0) {
+            throw new BizException(400, "pollResultId is required");
+        }
+        MobileDashboardEntityJudgeService.JudgeCoverage focusJudge = entityJudgeService.latestFocusCoverage(projectId);
+        boolean judgeReady = entityJudgeService.coverageReady(focusJudge);
+        String judgeReason = judgeNotReadyReason(focusJudge);
+        List<QuestionMonitorRow> rows = jdbcTemplate.query("""
+                SELECT pr.id AS poll_result_id,
+                       %1$s AS platform_code,
+                       COALESCE(NULLIF(pr.keyword_text_snapshot, ''), CONCAT('问题 #', pr.id)) AS question_title,
+                       pr.updated_at AS completed_at,
+                       CASE WHEN pr.effective_hit = 1 THEN 1 ELSE 0 END AS mentioned,
+                       j.judge_status,
+                       j.recommended,
+                       j.first_recommend,
+                       j.rank_position,
+                       j.evidence,
+                       %2$s AS response_text
+                  FROM poll_results pr
+                  LEFT JOIN poll_result_entity_judge j
+                    ON j.poll_result_id = pr.id
+                   AND j.entity_type = 'focus_brand'
+                   AND j.entity_ref_id = 0
+                   AND j.entity_config_version = 1
+                   AND j.judge_prompt_version = ?
+                 WHERE pr.project_id = ?
+                   AND pr.id = ?
+                   AND pr.status = 'completed'
+                   AND pr.question_tier = ?
+                   AND pr.platform_code IN (%3$s)
+                """.formatted(aiPlatformSqlCase("pr.platform_code"), POLL_RESPONSE_TEXT_SQL, supportedAiPlatformAliasSql()), (rs, rowNum) -> {
+            boolean rowJudgeReady = judgeReady && "success".equalsIgnoreCase(rs.getString("judge_status"));
+            return new QuestionMonitorRow(
+                    rs.getLong("poll_result_id"),
+                    normalizeAiPlatformCode(rs.getString("platform_code")),
+                    rs.getString("question_title"),
+                    nullableDateTime(rs, "completed_at"),
+                    rs.getBoolean("mentioned"),
+                    rowJudgeReady,
+                    nullableBoolean(rs, "recommended"),
+                    nullableBoolean(rs, "first_recommend"),
+                    nullableInt(rs, "rank_position"),
+                    rowJudgeReady && StringUtils.hasText(rs.getString("evidence")) ? rs.getString("evidence") : null,
+                    boundedText(rs.getString("response_text"), 4000)
+            );
+        }, MobileDashboardEntityJudgeService.PROMPT_VERSION, projectId, pollResultId, MOBILE_QUESTION_TIER);
+        if (rows.isEmpty()) {
+            throw new BizException(404, "未找到该问题监测记录");
+        }
+        return mergeQuestionMonitorRows(rows, judgeReady, judgeReason).get(0);
+    }
+
     public MobileDashboardAggregateVO.Content content(Long projectId, YearMonth month) {
         YearMonth safeMonth = month == null ? YearMonth.now() : month;
         ContentFacts content = loadContentFacts(projectId, safeMonth);
-        QuestionCoverage coverage = loadLatestQuestionCoverage(projectId);
+        QuestionCoverage coverage = loadCompleteBatchQuestionCoverage(projectId, loadLatestCompletePollBatchDate(projectId));
 
         MobileDashboardAggregateVO.Content vo = new MobileDashboardAggregateVO.Content();
         vo.setOverview(toContentProgress(content));
@@ -104,8 +160,9 @@ public class MobileDashboardAggregateService {
 
     public MobileDashboardAggregateVO.Report report(Long projectId) {
         DateRange range = normalizeRange(null, null, LocalDate.now().minusDays(13), LocalDate.now());
-        MentionAggregate mention = loadLatestMentionAggregate(projectId, null);
-        QuestionCoverage coverage = loadLatestQuestionCoverage(projectId);
+        LocalDate completeBatchDate = loadLatestCompletePollBatchDate(projectId);
+        MentionAggregate mention = loadCompleteBatchMentionAggregate(projectId, completeBatchDate, null);
+        QuestionCoverage coverage = loadCompleteBatchQuestionCoverage(projectId, completeBatchDate);
         ContentFacts content = loadContentFacts(projectId, YearMonth.now());
         MobileDashboardEntityJudgeService.JudgeCoverage focusJudge = entityJudgeService.latestFocusCoverage(projectId);
 
@@ -190,6 +247,13 @@ public class MobileDashboardAggregateService {
                         rs.getLong("mention_count"),
                         rs.getLong("covered_platform_count")
                 ), projectId, MOBILE_QUESTION_TIER);
+    }
+
+    private MentionAggregate loadCompleteBatchMentionAggregate(Long projectId, LocalDate completeBatchDate, String platformCode) {
+        if (completeBatchDate == null) {
+            return new MentionAggregate(0, 0, 0);
+        }
+        return loadMentionAggregate(projectId, new DateRange(completeBatchDate, completeBatchDate), platformCode);
     }
 
     private List<MobileDashboardAggregateVO.TrendPoint> loadMentionTrend(Long projectId, DateRange range) {
@@ -299,6 +363,14 @@ public class MobileDashboardAggregateService {
                 .toList();
     }
 
+    private List<MobileDashboardAggregateVO.PlatformMetric> loadCompleteBatchPlatformPerformance(Long projectId,
+                                                                                                 LocalDate completeBatchDate) {
+        if (completeBatchDate == null) {
+            return List.of();
+        }
+        return loadPlatformPerformance(projectId, new DateRange(completeBatchDate, completeBatchDate));
+    }
+
     private List<MobileDashboardAggregateVO.SceneMetric> loadSceneCoverage(Long projectId, DateRange range) {
         List<SceneRow> rows = jdbcTemplate.query("""
                 SELECT COALESCE(r.scene_code, '') AS scene_code,
@@ -404,6 +476,17 @@ public class MobileDashboardAggregateService {
         }).toList();
     }
 
+    private List<MobileDashboardAggregateVO.SceneMetric> loadCompleteBatchSceneCoverage(Long projectId,
+                                                                                       LocalDate completeBatchDate) {
+        if (completeBatchDate == null) {
+            return loadSceneCoverage(projectId, new DateRange(LocalDate.of(1970, 1, 1), LocalDate.of(1970, 1, 1)));
+        }
+        if (hasCompleteBatchPollResults(projectId, completeBatchDate)) {
+            return loadCompleteBatchResultSceneCoverage(projectId, completeBatchDate);
+        }
+        return loadSceneCoverage(projectId, new DateRange(completeBatchDate, completeBatchDate));
+    }
+
     private QuestionCoverage loadCumulativeQuestionCoverage(Long projectId) {
         return loadQuestionCoverage(projectId, null);
     }
@@ -443,6 +526,173 @@ public class MobileDashboardAggregateService {
                 """.formatted(aiPlatformSqlCase("pr.platform_code"), supportedAiPlatformAliasSql()),
                 (rs, rowNum) -> new QuestionCoverage(rs.getLong("covered_count"), rs.getLong("total_count")),
                 projectId, MOBILE_QUESTION_TIER, projectId, MOBILE_QUESTION_TIER);
+    }
+
+    private QuestionCoverage loadCompleteBatchQuestionCoverage(Long projectId, LocalDate completeBatchDate) {
+        if (completeBatchDate == null) {
+            return new QuestionCoverage(0, loadCoreQuestionTotal(projectId));
+        }
+        if (hasCompleteBatchPollResults(projectId, completeBatchDate)) {
+            return loadCompleteBatchResultQuestionCoverage(projectId, completeBatchDate);
+        }
+        return loadQuestionCoverage(projectId, new DateRange(completeBatchDate, completeBatchDate));
+    }
+
+    private boolean hasCompleteBatchPollResults(Long projectId, LocalDate completeBatchDate) {
+        try {
+            Long count = jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                      FROM poll_results pr
+                     WHERE pr.project_id = ?
+                       AND pr.status = 'completed'
+                       AND pr.batch_date = ?
+                       AND pr.question_tier = ?
+                       AND pr.keyword_result_id IS NOT NULL
+                       AND pr.platform_code IN (%s)
+                    """.formatted(supportedAiPlatformAliasSql()), Long.class,
+                    projectId, Date.valueOf(completeBatchDate), MOBILE_QUESTION_TIER);
+            return count != null && count > 0;
+        } catch (DataAccessException ignored) {
+            return false;
+        }
+    }
+
+    private QuestionCoverage loadCompleteBatchResultQuestionCoverage(Long projectId, LocalDate completeBatchDate) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) AS total_count,
+                       COALESCE(SUM(CASE WHEN hit_flag > 0 THEN 1 ELSE 0 END), 0) AS covered_count
+                  FROM (
+                    SELECT DISTINCT r.id,
+                           COALESCE(latest_hits.hit_flag, 0) AS hit_flag
+                      FROM project_keyword_group_rel rel
+                      JOIN keyword_group kg ON kg.id = rel.keyword_group_id
+                      JOIN keyword_group_result r ON r.group_id = rel.keyword_group_id
+                      LEFT JOIN (
+                            SELECT keyword_result_id,
+                                   MAX(hit_flag) AS hit_flag
+                              FROM (
+                                    SELECT pr.keyword_result_id,
+                                           CASE WHEN pr.effective_hit = 1 THEN 1 ELSE 0 END AS hit_flag,
+                                           ROW_NUMBER() OVER (
+                                               PARTITION BY pr.keyword_result_id, %s
+                                               ORDER BY pr.updated_at DESC, pr.id DESC
+                                           ) AS rn
+                                      FROM poll_results pr
+                                     WHERE pr.project_id = ?
+                                       AND pr.status = 'completed'
+                                       AND pr.batch_date = ?
+                                       AND pr.question_tier = ?
+                                       AND pr.keyword_result_id IS NOT NULL
+                                       AND pr.platform_code IN (%s)
+                              ) latest
+                             WHERE rn = 1
+                             GROUP BY keyword_result_id
+                      ) latest_hits ON latest_hits.keyword_result_id = r.id
+                     WHERE rel.project_id = ?
+                       AND COALESCE(kg.deleted, 0) = 0
+                       AND r.question_tier = ?
+                ) question_rows
+                """.formatted(aiPlatformSqlCase("pr.platform_code"), supportedAiPlatformAliasSql()),
+                (rs, rowNum) -> new QuestionCoverage(rs.getLong("covered_count"), rs.getLong("total_count")),
+                projectId, Date.valueOf(completeBatchDate), MOBILE_QUESTION_TIER,
+                projectId, MOBILE_QUESTION_TIER);
+    }
+
+    private List<MobileDashboardAggregateVO.SceneMetric> loadCompleteBatchResultSceneCoverage(Long projectId,
+                                                                                              LocalDate completeBatchDate) {
+        List<SceneRow> rows = jdbcTemplate.query("""
+                SELECT scene_code,
+                       COUNT(*) AS total_count,
+                       COALESCE(SUM(CASE WHEN hit_flag > 0 THEN 1 ELSE 0 END), 0) AS covered_count
+                  FROM (
+                    SELECT DISTINCT r.id,
+                           COALESCE(r.scene_code, '') AS scene_code,
+                           COALESCE(latest_hits.hit_flag, 0) AS hit_flag
+                      FROM project_keyword_group_rel rel
+                      JOIN keyword_group kg ON kg.id = rel.keyword_group_id
+                      JOIN keyword_group_result r ON r.group_id = rel.keyword_group_id
+                      LEFT JOIN (
+                            SELECT keyword_result_id,
+                                   MAX(hit_flag) AS hit_flag
+                              FROM (
+                                    SELECT pr.keyword_result_id,
+                                           CASE WHEN pr.effective_hit = 1 THEN 1 ELSE 0 END AS hit_flag,
+                                           ROW_NUMBER() OVER (
+                                               PARTITION BY pr.keyword_result_id, %s
+                                               ORDER BY pr.updated_at DESC, pr.id DESC
+                                           ) AS rn
+                                      FROM poll_results pr
+                                     WHERE pr.project_id = ?
+                                       AND pr.status = 'completed'
+                                       AND pr.batch_date = ?
+                                       AND pr.question_tier = ?
+                                       AND pr.keyword_result_id IS NOT NULL
+                                       AND pr.platform_code IN (%s)
+                              ) latest
+                             WHERE rn = 1
+                             GROUP BY keyword_result_id
+                      ) latest_hits ON latest_hits.keyword_result_id = r.id
+                     WHERE rel.project_id = ?
+                       AND COALESCE(kg.deleted, 0) = 0
+                       AND r.question_tier = ?
+                 ) question_rows
+                 GROUP BY scene_code
+                """.formatted(aiPlatformSqlCase("pr.platform_code"), supportedAiPlatformAliasSql()),
+                (rs, rowNum) -> new SceneRow(
+                        normalizeSceneCode(rs.getString("scene_code")),
+                        rs.getLong("covered_count"),
+                        rs.getLong("total_count")
+                ), projectId, Date.valueOf(completeBatchDate), MOBILE_QUESTION_TIER,
+                projectId, MOBILE_QUESTION_TIER);
+        Map<String, SceneRow> merged = new LinkedHashMap<>();
+        for (SceneRow row : rows) {
+            if (!StringUtils.hasText(row.code())) {
+                continue;
+            }
+            merged.merge(row.code(), row, (a, b) -> new SceneRow(a.code(), a.covered() + b.covered(), a.total() + b.total()));
+        }
+        merged.putIfAbsent("conversion", new SceneRow("conversion", 0, 0));
+        return merged.values().stream().map(row -> {
+            MobileDashboardAggregateVO.SceneMetric vo = new MobileDashboardAggregateVO.SceneMetric();
+            vo.setCode(row.code());
+            vo.setVisible(!"conversion".equals(row.code()));
+            vo.setCovered(MobileDashboardMetricVO.available(row.covered()));
+            vo.setTotal(MobileDashboardMetricVO.available(row.total()));
+            return vo;
+        }).toList();
+    }
+
+    private LocalDate loadLatestCompletePollBatchDate(Long projectId) {
+        long totalQuestionCount = loadCoreQuestionTotal(projectId);
+        if (totalQuestionCount <= 0) {
+            return null;
+        }
+        List<LocalDate> dates = jdbcTemplate.query("""
+                SELECT s.batch_date
+                  FROM poll_keyword_daily_summary s
+                 WHERE s.project_id = ?
+                   AND s.question_tier = ?
+                   AND s.keyword_result_id IS NOT NULL
+                 GROUP BY s.batch_date
+                HAVING COUNT(DISTINCT CASE WHEN s.completed_count > 0 THEN s.keyword_result_id END) >= ?
+                 ORDER BY s.batch_date DESC
+                 LIMIT 1
+                """, (rs, rowNum) -> rs.getDate("batch_date").toLocalDate(),
+                projectId, MOBILE_QUESTION_TIER, totalQuestionCount);
+        return dates.isEmpty() ? null : dates.get(0);
+    }
+
+    private long loadCoreQuestionTotal(Long projectId) {
+        Long total = jdbcTemplate.queryForObject("""
+                SELECT COUNT(DISTINCT r.id)
+                  FROM project_keyword_group_rel rel
+                  JOIN keyword_group kg ON kg.id = rel.keyword_group_id
+                  JOIN keyword_group_result r ON r.group_id = rel.keyword_group_id
+                 WHERE rel.project_id = ?
+                   AND COALESCE(kg.deleted, 0) = 0
+                   AND r.question_tier = ?
+                """, Long.class, projectId, MOBILE_QUESTION_TIER);
+        return total == null ? 0 : total;
     }
 
     private QuestionCoverage loadQuestionCoverage(Long projectId, DateRange range) {
@@ -616,6 +866,88 @@ public class MobileDashboardAggregateService {
         return list;
     }
 
+    private MobileDashboardAggregateVO.QuestionMonitorList loadCompleteBatchQuestionMonitorList(Long projectId,
+                                                                                                String platformCode,
+                                                                                                MobileDashboardEntityJudgeService.JudgeCoverage focusJudge,
+                                                                                                LocalDate completeBatchDate) {
+        if (completeBatchDate == null) {
+            MobileDashboardAggregateVO.QuestionMonitorList list = new MobileDashboardAggregateVO.QuestionMonitorList();
+            list.setItems(List.of());
+            list.setAvailable(false);
+            list.setReason("暂无完整批次监测数据");
+            return list;
+        }
+        boolean judgeReady = entityJudgeService.coverageReady(focusJudge);
+        String judgeReason = judgeNotReadyReason(focusJudge);
+        String platformClause = "";
+        if (StringUtils.hasText(platformCode)) {
+            platformClause = " AND pr.platform_code IN (%s) ".formatted(aliasSql(normalizeAiPlatformCode(platformCode)));
+        }
+        List<QuestionMonitorRow> rows = jdbcTemplate.query("""
+                WITH latest AS (
+                    SELECT pr.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY pr.keyword_result_id, %1$s
+                               ORDER BY pr.updated_at DESC, pr.id DESC
+                           ) AS rn
+                      FROM poll_results pr
+                     WHERE pr.project_id = ?
+                       AND pr.status = 'completed'
+                       AND pr.batch_date = ?
+                       AND pr.question_tier = ?
+                       AND pr.keyword_result_id IS NOT NULL
+                       AND pr.platform_code IN (%2$s)
+                       %3$s
+                )
+                SELECT pr.id AS poll_result_id,
+                       %1$s AS platform_code,
+                       COALESCE(NULLIF(pr.keyword_text_snapshot, ''), CONCAT('问题 #', pr.id)) AS question_title,
+                       pr.updated_at AS completed_at,
+                       CASE WHEN pr.effective_hit = 1 THEN 1 ELSE 0 END AS mentioned,
+                       j.judge_status,
+                       j.recommended,
+                       j.first_recommend,
+                       j.rank_position,
+                       j.evidence,
+                       %4$s AS response_text
+                  FROM latest pr
+                  LEFT JOIN poll_result_entity_judge j
+                    ON j.poll_result_id = pr.id
+                   AND j.entity_type = 'focus_brand'
+                   AND j.entity_ref_id = 0
+                   AND j.entity_config_version = 1
+                   AND j.judge_prompt_version = ?
+                 WHERE pr.rn = 1
+                 ORDER BY CASE WHEN pr.effective_hit = 1 THEN 0 ELSE 1 END,
+                          pr.updated_at DESC,
+                          pr.id DESC
+                 LIMIT 100
+                """.formatted(aiPlatformSqlCase("pr.platform_code"), supportedAiPlatformAliasSql(), platformClause, POLL_RESPONSE_TEXT_SQL), (rs, rowNum) -> {
+            boolean rowJudgeReady = judgeReady && "success".equalsIgnoreCase(rs.getString("judge_status"));
+            return new QuestionMonitorRow(
+                    rs.getLong("poll_result_id"),
+                    normalizeAiPlatformCode(rs.getString("platform_code")),
+                    rs.getString("question_title"),
+                    nullableDateTime(rs, "completed_at"),
+                    rs.getBoolean("mentioned"),
+                    rowJudgeReady,
+                    nullableBoolean(rs, "recommended"),
+                    nullableBoolean(rs, "first_recommend"),
+                    nullableInt(rs, "rank_position"),
+                    rowJudgeReady && StringUtils.hasText(rs.getString("evidence")) ? rs.getString("evidence") : null,
+                    boundedText(rs.getString("response_text"), 4000)
+            );
+        }, projectId, Date.valueOf(completeBatchDate), MOBILE_QUESTION_TIER, MobileDashboardEntityJudgeService.PROMPT_VERSION);
+        List<MobileDashboardAggregateVO.QuestionMonitorItem> items = mergeQuestionMonitorRows(rows, judgeReady, judgeReason);
+        MobileDashboardAggregateVO.QuestionMonitorList list = new MobileDashboardAggregateVO.QuestionMonitorList();
+        list.setItems(items);
+        list.setAvailable(!items.isEmpty());
+        if (items.isEmpty()) {
+            list.setReason("暂无完整批次监测数据");
+        }
+        return list;
+    }
+
     private List<MobileDashboardAggregateVO.QuestionMonitorItem> mergeQuestionMonitorRows(List<QuestionMonitorRow> rows,
                                                                                           boolean judgeReady,
                                                                                           String judgeReason) {
@@ -668,12 +1000,15 @@ public class MobileDashboardAggregateService {
             item.setRankPosition(hasSuccessfulJudge && rank != null
                     ? MobileDashboardMetricVO.available(rank)
                     : MobileDashboardMetricVO.unavailable(hasSuccessfulJudge ? "未识别推荐位次" : (judgeReady ? "当前问题暂无成功裁判结果" : judgeReason)));
-            item.setEvidence(group.stream()
+            item.setEvidence(mentioned
+                    ? group.stream()
                     .filter(row -> Objects.equals(row.platformCode(), displayRow.platformCode()))
                     .map(QuestionMonitorRow::evidence)
                     .filter(StringUtils::hasText)
+                    .filter(evidence -> !isInternalJudgeReason(evidence))
                     .findFirst()
-                    .orElse(null));
+                    .orElse(null)
+                    : null);
             item.setResponseText(displayRow.responseText());
             List<String> tags = new ArrayList<>();
             if (mentioned) {
@@ -689,6 +1024,18 @@ public class MobileDashboardAggregateService {
             items.add(item);
         }
         return items;
+    }
+
+    private boolean isInternalJudgeReason(String value) {
+        if (!StringUtils.hasText(value)) {
+            return false;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return normalized.equals("no_tracked_entity_matched")
+                || normalized.equals("no_entity_hit")
+                || normalized.equals("deterministic_no_entity_hit")
+                || normalized.startsWith("no_tracked_entity_")
+                || normalized.startsWith("deterministic_");
     }
 
     private ContentFacts loadContentFacts(Long projectId, YearMonth month) {

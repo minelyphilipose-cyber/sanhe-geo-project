@@ -92,11 +92,22 @@ class ArticleAiDraftServiceTest {
         when(offeringPromptSelector.select(any(), any(), any(), any(), any()))
                 .thenReturn(new BrandOfferingPromptSelector.SelectionResult(
                         List.<BrandOfferingPromptSelector.SelectedOffering>of()));
+        LlmCallFacade llmCallFacade = mock(LlmCallFacade.class);
+        try {
+            when(llmCallFacade.execute(any(LlmCallRequest.class))).thenAnswer(invocation -> {
+                LlmCallRequest request = invocation.getArgument(0);
+                if (request.routeRequest() != null) {
+                    return LlmCallResult.routed(llmPlatformRouter.invoke(request.routeRequest()));
+                }
+                return LlmCallResult.direct(llmInvoker.invoke(request.prompt(), request.modelConfig()));
+            });
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
         ArticleModelResolver modelResolver = new ArticleModelResolver(configMapper, credentialService);
         ArticleGenerationEngine generationEngine = new ArticleGenerationEngine(
-                llmInvoker,
+                llmCallFacade,
                 modelResolver,
-                llmPlatformRouter,
                 mock(MarkdownImageReferenceValidator.class),
                 promptFilter,
                 mock(BatchArticleQualityChecker.class)
@@ -113,8 +124,16 @@ class ArticleAiDraftServiceTest {
                 currentUserService, brandAccessService, promptBuilder, promptContextFactory,
                 offeringPromptSelector, generationEngine, mock(MedicalArticleComplianceChecker.class),
                 mock(SpecialIndustryComplianceAlertService.class),
-                mock(ArticleCoverSelectionService.class), rateLimiter, auditService,
+                mock(ArticleCoverSelectionService.class), passThroughAutoImageInsertionService(), rateLimiter, auditService,
                 objectMapper, txManager(), Runnable::run);
+    }
+
+    private ArticleAutoImageInsertionService passThroughAutoImageInsertionService() {
+        ArticleAutoImageInsertionService service = mock(ArticleAutoImageInsertionService.class);
+        when(service.insertForChannel(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
+        when(service.insertForChannel(any(), any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(3));
+        when(service.insertForTargetChannel(any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
+        return service;
     }
 
     @Test
@@ -396,8 +415,8 @@ class ArticleAiDraftServiceTest {
     private ContentArticleService articleService() {
         return new ContentArticleService(articleMapper, versionMapper,
                 mock(ArticleReviewLogMapper.class), mock(ArticlePublishLogMapper.class),
-                mock(BatchArticleGenerationTaskMapper.class), mock(ArticlePromptTemplateMapper.class), mock(BrandMapper.class),
-                mock(SelfMediaPublishScheduleMapper.class), projectMapper, mock(SysDictItemMapper.class), currentUserService,
+                mock(BatchArticleGenerationTaskMapper.class), mock(ArticlePromptTemplateMapper.class),
+                mock(SelfMediaPublishScheduleMapper.class), mock(BrandMapper.class), projectMapper, mock(SysDictItemMapper.class), currentUserService,
                 mock(MarkdownImageReferenceValidator.class), mock(com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService.class),
                 mock(ArticleImagePublicUrlRewriter.class), mock(ArticleAutoImageInsertionService.class),
                 mock(ArticleCoverSelectionService.class),

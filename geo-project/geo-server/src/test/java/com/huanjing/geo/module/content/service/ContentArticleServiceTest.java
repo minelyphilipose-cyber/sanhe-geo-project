@@ -97,6 +97,9 @@ class ContentArticleServiceTest {
         when(projectMapper.selectById(10L)).thenReturn(project());
         when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
         when(autoImageInsertionService.insertForChannel(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
+        when(autoImageInsertionService.insertForChannel(any(), any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(3));
+        when(autoImageInsertionService.insertForTargetChannel(any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
+        when(autoImageInsertionService.insertSelectedHeadImage(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
         when(coverSelectionService.requireManualCoverUrl(any(), any())).thenReturn("https://example.test/cover.jpg");
 
         service = new ContentArticleService(
@@ -183,6 +186,53 @@ class ContentArticleServiceTest {
         assertNull(draftCaptor.getValue().getCoverImageUrl());
         verify(coverSelectionService, never()).requireManualCoverUrl(any(), any());
         verify(coverSelectionService, never()).selectRandomCoverUrl(any());
+    }
+
+    @Test
+    void createManualDouyinInsertsSelectedHeadImage() {
+        doAnswer(invocation -> {
+            ArticleDraft draft = invocation.getArgument(0);
+            draft.setId(99L);
+            return 1;
+        }).when(articleDraftMapper).insert(any(ArticleDraft.class));
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+        when(autoImageInsertionService.insertSelectedHeadImage(any(), eq(89L), any()))
+                .thenAnswer(invocation -> invocation.getArgument(2) + "\n\n![头图](https://example.test/head.jpg)");
+
+        ManualArticleCreateRequest request = new ManualArticleCreateRequest();
+        request.setProjectId(10L);
+        request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("douyin");
+        request.setCoverMaterialId(88L);
+        request.setHeadImageMaterialId(89L);
+        request.setTopic("Manual topic");
+        request.setTitle("Manual title");
+        request.setContentMarkdown("# Manual title\n\n正文");
+
+        service.createManual(request);
+
+        verify(autoImageInsertionService).insertSelectedHeadImage(any(Project.class), eq(89L), eq("# Manual title\n\n正文"));
+        ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
+        verify(articleDraftVersionMapper).insert(versionCaptor.capture());
+        assertTrue(versionCaptor.getValue().getContentMarkdown().contains("https://example.test/head.jpg"));
+    }
+
+    @Test
+    void createManualDouyinRejectsSameCoverAndHeadImage() {
+        ManualArticleCreateRequest request = new ManualArticleCreateRequest();
+        request.setProjectId(10L);
+        request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("douyin");
+        request.setCoverMaterialId(88L);
+        request.setHeadImageMaterialId(88L);
+        request.setTopic("Manual topic");
+        request.setTitle("Manual title");
+        request.setContentMarkdown("# Manual title\n\n正文");
+
+        BizException ex = assertThrows(BizException.class, () -> service.createManual(request));
+
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
+        verify(articleDraftMapper, never()).insert(any(ArticleDraft.class));
     }
 
     @Test

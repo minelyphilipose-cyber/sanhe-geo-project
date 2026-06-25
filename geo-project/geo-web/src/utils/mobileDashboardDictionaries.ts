@@ -19,6 +19,16 @@ export const contentPlatformLabels: Record<string, string> = {
   zhihu: '知乎'
 }
 
+export const contentPlatformIcons: Record<string, string> = {
+  official_site: 'globe',
+  douyin: 'movie',
+  xiaohongshu: 'favorite',
+  wechat_mp: 'chat',
+  toutiao: 'newspaper',
+  baijiahao: 'article',
+  zhihu: 'question'
+}
+
 export const sceneLabels: Record<string, string> = {
   brand_awareness: '品牌认知',
   regional_recommendation: '地域推荐',
@@ -36,6 +46,11 @@ export function aiPlatformLabel(code?: string | null) {
 export function contentPlatformLabel(code?: string | null) {
   if (!code) return '平台待定'
   return contentPlatformLabels[code] || '平台待定'
+}
+
+export function contentPlatformIcon(code?: string | null) {
+  if (!code) return 'globe'
+  return contentPlatformIcons[code] || 'globe'
 }
 
 export function sceneLabel(code?: string | null) {

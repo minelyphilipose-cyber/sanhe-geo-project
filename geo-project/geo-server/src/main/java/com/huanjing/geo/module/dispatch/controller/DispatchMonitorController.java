@@ -5,9 +5,11 @@ import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.dispatch.dto.DispatchAlertResolveRequest;
 import com.huanjing.geo.module.dispatch.dto.DispatchAlertVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchDashboardVO;
+import com.huanjing.geo.module.dispatch.dto.DispatchDueTimeDistributionVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchPlatformHealthVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchTaskMonitorVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchTaskReleaseRequest;
+import com.huanjing.geo.module.dispatch.dto.PollSliceProgressVO;
 import com.huanjing.geo.module.dispatch.service.DispatchMonitorService;
 import com.huanjing.geo.module.dispatch.service.DispatchTaskService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -51,6 +53,23 @@ public class DispatchMonitorController {
             @RequestParam(required = false) String keyword
     ) {
         return R.ok(dispatchMonitorService.taskPage(current, size, rangeType, startDate, endDate, projectId, taskType, status, keyword));
+    }
+
+    @GetMapping("/due-time-distribution")
+    public R<DispatchDueTimeDistributionVO> dueTimeDistribution(
+            @RequestParam(defaultValue = "60") int bucketMinutes,
+            @RequestParam(required = false) String platformCode
+    ) {
+        return R.ok(dispatchMonitorService.dueTimeDistribution(bucketMinutes, platformCode));
+    }
+
+    @GetMapping("/poll-slice-progress")
+    public R<PollSliceProgressVO> pollSliceProgress(
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate batchDate,
+            @RequestParam(defaultValue = "A") String questionTier,
+            @RequestParam(required = false) String platformCode
+    ) {
+        return R.ok(dispatchMonitorService.pollSliceProgress(batchDate, questionTier, platformCode));
     }
 
     @GetMapping("/tasks/{taskId}")

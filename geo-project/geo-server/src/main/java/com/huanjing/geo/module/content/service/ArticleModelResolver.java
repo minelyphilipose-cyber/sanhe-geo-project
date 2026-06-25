@@ -3,13 +3,17 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.router.LlmPlatformCodeFilters;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -21,11 +25,18 @@ public class ArticleModelResolver {
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
 
+    @Value("${geo.llm.routing.article-excluded-platform-codes:hunyuan,yuanbao}")
+    private String articleExcludedPlatformCodes = "hunyuan,yuanbao";
+
     public ModelSelection resolve(String platformCode, String modelId, String systemPrompt, boolean longForm) {
         LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
                 .eq(AiPlatformConfig::getEnabledForArticle, true)
                 .orderByAsc(AiPlatformConfig::getId);
+        Set<String> excluded = LlmPlatformCodeFilters.parseCodes(articleExcludedPlatformCodes);
+        if (!excluded.isEmpty()) {
+            wrapper.notIn(AiPlatformConfig::getPlatformCode, excluded);
+        }
         if (StringUtils.hasText(platformCode)) {
             wrapper.eq(AiPlatformConfig::getPlatformCode, platformCode.trim());
         }
@@ -36,7 +47,9 @@ public class ArticleModelResolver {
                     .eq(AiPlatformConfig::getLowModelId, trimmedModelId));
         }
         AiPlatformConfig config = aiPlatformConfigMapper.selectOne(wrapper.last("LIMIT 1"));
-        if (config == null || !StringUtils.hasText(config.getApiUrl())) {
+        if (config == null
+                || excluded.contains(LlmPlatformCodeFilters.normalize(config.getPlatformCode()))
+                || !StringUtils.hasText(config.getApiUrl())) {
             throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, "AI article model config missing");
         }
         String resolvedModelId = StringUtils.hasText(modelId)

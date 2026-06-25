@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 @Component
 @ConfigurationProperties(prefix = "geo.brand-geo-site")
 public class BrandGeoSiteProperties {
-    private String endpoint;
     private int connectTimeoutMs = 5000;
     private int readTimeoutMs = 30000;
 }

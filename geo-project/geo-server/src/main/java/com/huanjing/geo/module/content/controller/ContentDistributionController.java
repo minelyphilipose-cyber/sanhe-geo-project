@@ -53,7 +53,7 @@ public class ContentDistributionController {
     public R<DistributionTask> distributeToGeoSite(@PathVariable Long articleId,
                                                    @RequestParam Long brandId) {
         Brand brand = brandService.requireBrandWithAccess(brandId, true);
-        TargetContext.BrandGeoSiteTarget target = new TargetContext.BrandGeoSiteTarget(brand.getId(), brand.getGeoSiteCode());
+        TargetContext.BrandGeoSiteTarget target = new TargetContext.BrandGeoSiteTarget(brand.getId(), brand.getGeoSiteName());
         return R.ok(contentDistributionService.distributeTo(articleId, target));
     }
 

@@ -58,8 +58,6 @@ public class DispatchPlannerService {
     private void planBiDaily(Project project, LocalDate today) {
         LocalDate activatedDate = project.getActivatedAt().toLocalDate();
         planQuestionTierPoll(project, today, activatedDate, "A", 1);
-        planQuestionTierPoll(project, today, activatedDate, "B", 7);
-        planQuestionTierPoll(project, today, activatedDate, "C", 14);
     }
 
     private void planQuestionTierPoll(Project project,

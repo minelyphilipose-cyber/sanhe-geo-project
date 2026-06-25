@@ -192,7 +192,8 @@ class MobileDashboardEntityJudgeServiceTest {
                 platformMapper,
                 competitors,
                 new MobileEntityMentionMatcher(),
-                mock(CurrentUserService.class)
+                mock(CurrentUserService.class),
+                new MobileEntityJudgeRuntimeConfig()
         );
 
         Method method = MobileDashboardEntityJudgeService.class.getDeclaredMethod("judgeOne", pollCandidateClass());
@@ -228,7 +229,8 @@ class MobileDashboardEntityJudgeServiceTest {
                 platformMapper,
                 competitors,
                 new MobileEntityMentionMatcher(),
-                mock(CurrentUserService.class)
+                mock(CurrentUserService.class),
+                new MobileEntityJudgeRuntimeConfig()
         );
 
         Method method = MobileDashboardEntityJudgeService.class.getDeclaredMethod("judgeOne", pollCandidateClass());
@@ -255,7 +257,8 @@ class MobileDashboardEntityJudgeServiceTest {
                 mock(AiPlatformConfigMapper.class),
                 mock(ProjectCompetitorConfigService.class),
                 new MobileEntityMentionMatcher(),
-                mock(CurrentUserService.class)
+                mock(CurrentUserService.class),
+                new MobileEntityJudgeRuntimeConfig()
         );
     }
 

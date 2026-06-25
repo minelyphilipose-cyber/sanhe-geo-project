@@ -15,6 +15,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -110,6 +111,75 @@ public class SystemAlertService {
         }
     }
 
+    public void createOrRefreshRecipientAlert(String alertType,
+                                              String severity,
+                                              String source,
+                                              String message,
+                                              Map<String, Object> context,
+                                              Long recipientUserId,
+                                              String recipientRole,
+                                              String dedupeKey) {
+        String normalizedDedupeKey = StringUtils.hasText(dedupeKey) ? dedupeKey.trim() : null;
+        if (StringUtils.hasText(normalizedDedupeKey)) {
+            SystemAlert existing = systemAlertMapper.selectOne(new LambdaQueryWrapper<SystemAlert>()
+                    .eq(SystemAlert::getDedupeKey, normalizedDedupeKey)
+                    .last("LIMIT 1"));
+            if (existing != null) {
+                populateRecipientAlert(
+                        existing,
+                        alertType,
+                        severity,
+                        source,
+                        message,
+                        context,
+                        recipientUserId,
+                        recipientRole,
+                        normalizedDedupeKey
+                );
+                systemAlertMapper.updateById(existing);
+                return;
+            }
+        }
+
+        SystemAlert alert = new SystemAlert();
+        populateRecipientAlert(
+                alert,
+                alertType,
+                severity,
+                source,
+                message,
+                context,
+                recipientUserId,
+                recipientRole,
+                normalizedDedupeKey
+        );
+        try {
+            systemAlertMapper.insert(alert);
+        } catch (DuplicateKeyException duplicate) {
+            if (!StringUtils.hasText(normalizedDedupeKey)) {
+                throw duplicate;
+            }
+            SystemAlert existing = systemAlertMapper.selectOne(new LambdaQueryWrapper<SystemAlert>()
+                    .eq(SystemAlert::getDedupeKey, normalizedDedupeKey)
+                    .last("LIMIT 1"));
+            if (existing == null) {
+                throw duplicate;
+            }
+            populateRecipientAlert(
+                    existing,
+                    alertType,
+                    severity,
+                    source,
+                    message,
+                    context,
+                    recipientUserId,
+                    recipientRole,
+                    normalizedDedupeKey
+            );
+            systemAlertMapper.updateById(existing);
+        }
+    }
+
     public Page<SystemAlertTodoVO> myTodos(long current, long size) {
         SysUser user = currentUserService.requireCurrentUser();
         Page<SystemAlert> page = systemAlertMapper.selectPage(new Page<>(current, size),
@@ -170,10 +240,19 @@ public class SystemAlertService {
     }
 
     private LambdaQueryWrapper<SystemAlert> visibleAlertWrapper(SysUser user) {
-        return new LambdaQueryWrapper<SystemAlert>()
-                .and(wrapper -> wrapper.eq(SystemAlert::getRecipientUserId, user.getId())
-                        .or()
-                        .eq(SystemAlert::getRecipientRole, user.getRole()));
+        LambdaQueryWrapper<SystemAlert> wrapper = new LambdaQueryWrapper<SystemAlert>();
+        if (isSuperAdmin(user)) {
+            return wrapper;
+        }
+        return wrapper.and(scope -> scope.eq(SystemAlert::getRecipientUserId, user.getId())
+                .or()
+                .eq(SystemAlert::getRecipientRole, user.getRole()));
+    }
+
+    private boolean isSuperAdmin(SysUser user) {
+        return user != null
+                && StringUtils.hasText(user.getRole())
+                && "super_admin".equals(user.getRole().trim().toLowerCase(Locale.ROOT));
     }
 
     private void populateRecipientAlert(SystemAlert alert,

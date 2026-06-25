@@ -20,6 +20,13 @@ class LlmModelConfigTest {
         assertEquals(0.7D, config("doubao", 0.7D).temperature());
     }
 
+    @Test
+    void wenxinTemperature_mustBePositive() {
+        assertEquals(0.1D, config("wenxin", null).temperature());
+        assertEquals(0.1D, config("WENXIN", 0D).temperature());
+        assertEquals(0.6D, config(" wenxin ", 0.6D).temperature());
+    }
+
     private LlmModelConfig config(String platformCode, Double temperature) {
         return new LlmModelConfig(
                 platformCode,

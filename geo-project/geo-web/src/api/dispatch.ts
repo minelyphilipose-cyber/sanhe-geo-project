@@ -2,7 +2,11 @@ import request from './request'
 import type {
   DispatchAlertItem,
   DispatchDashboardMetrics,
+  DispatchDueTimeDistribution,
+  HunyuanCapacity,
   LlmPoolSnapshot,
+  LlmRuntimeConfig,
+  PollSliceProgress,
   DispatchPlatformHealthItem,
   DispatchTaskItem,
   PageResult,
@@ -46,6 +50,22 @@ export function getDispatchPlatforms(params?: DispatchRangeParams) {
 
 export function getLlmPoolSnapshot() {
   return request.get<R<LlmPoolSnapshot>>('/monitoring/llm-pool')
+}
+
+export function getLlmRuntimeConfig() {
+  return request.get<R<LlmRuntimeConfig>>('/monitoring/llm-capacity/runtime-config')
+}
+
+export function getHunyuanCapacity() {
+  return request.get<R<HunyuanCapacity>>('/monitoring/llm-capacity/hunyuan')
+}
+
+export function getDispatchDueTimeDistribution(params?: { bucketMinutes?: number; platformCode?: string }) {
+  return request.get<R<DispatchDueTimeDistribution>>('/dispatch/monitor/due-time-distribution', { params })
+}
+
+export function getPollSliceProgress(params?: { batchDate?: string; questionTier?: string; platformCode?: string }) {
+  return request.get<R<PollSliceProgress>>('/dispatch/monitor/poll-slice-progress', { params })
 }
 
 export function getDispatchAlerts(params?: DispatchAlertQuery) {

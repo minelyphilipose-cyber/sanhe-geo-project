@@ -34,8 +34,8 @@ class BusinessCalendarServiceTest {
         assertEquals(13, slots.size());
         assertEquals(13, slots.stream().map(BusinessCalendarService.PublishSlot::date).distinct().count());
         assertTrue(slots.stream().allMatch(slot ->
-                slot.plannedAt().toLocalTime().equals(LocalTime.of(9, 15))
-                        || slot.plannedAt().toLocalTime().equals(LocalTime.of(14, 30))));
+                slot.plannedAt().toLocalTime().equals(LocalTime.of(10, 0))
+                        || slot.plannedAt().toLocalTime().equals(LocalTime.of(15, 0))));
         assertTrue(slots.stream().noneMatch(slot -> "端午节".equals(slot.dayName())));
     }
 }

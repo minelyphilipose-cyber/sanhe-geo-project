@@ -1,10 +1,11 @@
 package com.huanjing.geo.module.content.service;
 
 import com.huanjing.geo.common.llm.LlmCallStatus;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
+import com.huanjing.geo.common.llm.LlmCallResult;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
-import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.router.LlmFeature;
-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
 import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -27,9 +28,8 @@ class ArticleGenerationEngineTest {
 
     @Test
     void generateUsesRouterWhenNoModelSpecified() throws Exception {
-        LlmInvoker llmInvoker = mock(LlmInvoker.class);
+        LlmCallFacade llmCallFacade = mock(LlmCallFacade.class);
         ArticleModelResolver modelResolver = mock(ArticleModelResolver.class);
-        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
         ArticleAiDraftPromptFilter promptFilter = mock(ArticleAiDraftPromptFilter.class);
         BatchArticleQualityChecker qualityChecker = mock(BatchArticleQualityChecker.class);
         when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -46,7 +46,7 @@ class ArticleGenerationEngineTest {
                 "qwen-plus",
                 "通义千问 Plus"
         );
-        when(router.invoke(any())).thenReturn(new LlmRouteResult(
+        when(llmCallFacade.execute(any())).thenReturn(LlmCallResult.routed(new LlmRouteResult(
                 "qwen",
                 "通义千问",
                 "primary",
@@ -56,12 +56,11 @@ class ArticleGenerationEngineTest {
                 invokeResult.durationMs(),
                 2,
                 invokeResult
-        ));
+        )));
 
         ArticleGenerationEngine engine = new ArticleGenerationEngine(
-                llmInvoker,
+                llmCallFacade,
                 modelResolver,
-                router,
                 mock(MarkdownImageReferenceValidator.class),
                 promptFilter,
                 qualityChecker
@@ -84,10 +83,10 @@ class ArticleGenerationEngineTest {
         assertEquals("qwen-plus", generated.model().modelId());
         assertThat(generated.content()).contains("Routed title");
         verify(modelResolver, never()).resolve(any(), any(), any(), anyBoolean());
-        verify(llmInvoker, never()).invoke(any(), any());
-        ArgumentCaptor<LlmRouteRequest> requestCaptor = ArgumentCaptor.forClass(LlmRouteRequest.class);
-        verify(router).invoke(requestCaptor.capture());
-        assertEquals(LlmFeature.ARTICLE, requestCaptor.getValue().feature());
-        assertEquals(0, requestCaptor.getValue().maxRetry());
+        ArgumentCaptor<LlmCallRequest> requestCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
+        verify(llmCallFacade).execute(requestCaptor.capture());
+        LlmRouteRequest routeRequest = requestCaptor.getValue().routeRequest();
+        assertEquals(LlmFeature.ARTICLE, routeRequest.feature());
+        assertEquals(0, routeRequest.maxRetry());
     }
 }

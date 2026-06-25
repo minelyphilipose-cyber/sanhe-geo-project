@@ -1,6 +1,9 @@
 package com.huanjing.geo.module.dispatch.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.capacity.LlmCapacityFailure;
+import com.huanjing.geo.common.llm.capacity.LlmCapacityFailureClassifier;
+import com.huanjing.geo.common.llm.measurement.LlmErrorCategory;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskStatus;
@@ -13,11 +16,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -32,6 +39,7 @@ class DispatchTaskServiceReleaseTest {
     private DispatchTaskStateService dispatchTaskStateService;
     private CurrentUserService currentUserService;
     private ActivityLogService activityLogService;
+    private DispatchAlertService dispatchAlertService;
     private DispatchTaskService service;
 
     @BeforeEach
@@ -42,22 +50,13 @@ class DispatchTaskServiceReleaseTest {
         dispatchTaskStateService = mock(DispatchTaskStateService.class);
         currentUserService = mock(CurrentUserService.class);
         activityLogService = mock(ActivityLogService.class);
+        dispatchAlertService = mock(DispatchAlertService.class);
 
         SysUser operator = new SysUser();
         operator.setId(7L);
         when(currentUserService.requireCurrentUser()).thenReturn(operator);
 
-        service = new DispatchTaskService(
-                dispatchTaskMapper,
-                dispatchQueueService,
-                dispatchExecutionService,
-                new DispatchProperties(),
-                dispatchTaskStateService,
-                currentUserService,
-                activityLogService,
-                mock(DispatchPollShardPersistenceService.class),
-                mock(DispatchPollAggregationService.class)
-        );
+        service = newService(new DispatchProperties());
     }
 
     @Test
@@ -73,6 +72,28 @@ class DispatchTaskServiceReleaseTest {
         verify(dispatchExecutionService).execute(task);
         verify(dispatchTaskStateService).markCompleted(21L);
         verify(dispatchQueueService, never()).clearQueueMark(21L);
+    }
+
+    @Test
+    void retryAfterDelayIsNotClampedByFallbackMax() throws Exception {
+        DispatchProperties properties = new DispatchProperties();
+        properties.setResourceBusyRetryAfterEnabled(true);
+        properties.setResourceBusyRetryMaxSeconds(900);
+        DispatchTaskService retryService = newService(properties);
+        Method method = DispatchTaskService.class.getDeclaredMethod(
+                "resolveResourceBusyRetryDelaySeconds",
+                int.class,
+                LlmCapacityFailure.class
+        );
+        method.setAccessible(true);
+
+        int delaySeconds = (Integer) method.invoke(
+                retryService,
+                1,
+                new LlmCapacityFailure(LlmErrorCategory.PLATFORM_429, 3_600_000L, "rate_limit", "test")
+        );
+
+        assertEquals(3600, delaySeconds);
     }
 
     @Test
@@ -115,6 +136,88 @@ class DispatchTaskServiceReleaseTest {
         verify(dispatchQueueService, never()).clearQueueMark(org.mockito.ArgumentMatchers.anyLong());
     }
 
+    @Test
+    void questionPollStaggerUsesSeparateTimelinePerPlatform() {
+        DispatchProperties properties = new DispatchProperties();
+        properties.getStagger().setEnabled(true);
+        properties.getStagger().setTaskTypes("BI_DAILY_POLL");
+        properties.getStagger().setWindowMinutes(10);
+        properties.getStagger().setMaxDelayMinutes(10);
+        properties.getStagger().setJitterSeconds(0);
+        properties.getStagger().setCapJitterSeconds(0);
+        DispatchTaskService staggerService = newService(properties);
+        DispatchTask qwenOne = pollTask(101L, "qwen");
+        DispatchTask qwenTwo = pollTask(102L, "qwen");
+        DispatchTask deepseekOne = pollTask(201L, "deepseek");
+        when(dispatchTaskMapper.selectById(101L)).thenReturn(qwenOne);
+        when(dispatchTaskMapper.selectById(102L)).thenReturn(qwenTwo);
+        when(dispatchTaskMapper.selectById(201L)).thenReturn(deepseekOne);
+
+        staggerService.enqueueQuestionPollShardTasksWithStagger(List.of(qwenOne, qwenTwo, deepseekOne));
+
+        ArgumentCaptor<Long> taskIdCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> availableAtCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(dispatchQueueService, org.mockito.Mockito.times(3)).enqueueTask(
+                taskIdCaptor.capture(),
+                eq(DispatchTaskType.BI_DAILY_POLL.getPriorityLevel()),
+                anyLong(),
+                availableAtCaptor.capture()
+        );
+        List<Long> taskIds = taskIdCaptor.getAllValues();
+        List<Long> availableAt = availableAtCaptor.getAllValues();
+        int qwenOneIndex = taskIds.indexOf(101L);
+        int qwenTwoIndex = taskIds.indexOf(102L);
+        int deepseekIndex = taskIds.indexOf(201L);
+
+        assertTrue(availableAt.get(qwenTwoIndex) - availableAt.get(qwenOneIndex) >= 250_000L);
+        assertTrue(Math.abs(availableAt.get(deepseekIndex) - availableAt.get(qwenOneIndex)) < 30_000L);
+    }
+
+    @Test
+    void questionPollStaggerUsesPlatformOverrideWhenConfigured() {
+        DispatchProperties properties = new DispatchProperties();
+        properties.getStagger().setEnabled(true);
+        properties.getStagger().setTaskTypes("BI_DAILY_POLL");
+        properties.getStagger().setWindowMinutes(10);
+        properties.getStagger().setMaxDelayMinutes(10);
+        properties.getStagger().setJitterSeconds(0);
+        properties.getStagger().setCapJitterSeconds(0);
+        DispatchProperties.PlatformOverride qwenOverride = new DispatchProperties.PlatformOverride();
+        qwenOverride.setWindowMinutes(20);
+        qwenOverride.setMaxDelayMinutes(20);
+        qwenOverride.setJitterSeconds(0);
+        qwenOverride.setCapJitterSeconds(0);
+        properties.getStagger().getPlatforms().put("qwen", qwenOverride);
+
+        DispatchTaskService staggerService = newService(properties);
+        DispatchTask qwenOne = pollTask(301L, "qwen");
+        DispatchTask qwenTwo = pollTask(302L, "qwen");
+        DispatchTask deepseekOne = pollTask(401L, "deepseek");
+        DispatchTask deepseekTwo = pollTask(402L, "deepseek");
+        when(dispatchTaskMapper.selectById(301L)).thenReturn(qwenOne);
+        when(dispatchTaskMapper.selectById(302L)).thenReturn(qwenTwo);
+        when(dispatchTaskMapper.selectById(401L)).thenReturn(deepseekOne);
+        when(dispatchTaskMapper.selectById(402L)).thenReturn(deepseekTwo);
+
+        staggerService.enqueueQuestionPollShardTasksWithStagger(List.of(qwenOne, qwenTwo, deepseekOne, deepseekTwo));
+
+        ArgumentCaptor<Long> taskIdCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> availableAtCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(dispatchQueueService, org.mockito.Mockito.times(4)).enqueueTask(
+                taskIdCaptor.capture(),
+                eq(DispatchTaskType.BI_DAILY_POLL.getPriorityLevel()),
+                anyLong(),
+                availableAtCaptor.capture()
+        );
+        List<Long> taskIds = taskIdCaptor.getAllValues();
+        List<Long> availableAt = availableAtCaptor.getAllValues();
+        long qwenGap = availableAt.get(taskIds.indexOf(302L)) - availableAt.get(taskIds.indexOf(301L));
+        long deepseekGap = availableAt.get(taskIds.indexOf(402L)) - availableAt.get(taskIds.indexOf(401L));
+
+        assertTrue(qwenGap >= 550_000L);
+        assertTrue(deepseekGap >= 250_000L && deepseekGap < 550_000L);
+    }
+
     private static DispatchTask contentTask(Long id, String status, String idempotencyKey) {
         DispatchTask task = new DispatchTask();
         task.setId(id);
@@ -125,5 +228,32 @@ class DispatchTaskServiceReleaseTest {
         task.setTargetChannel("official_site");
         task.setGenerationSlotNo(1);
         return task;
+    }
+
+    private static DispatchTask pollTask(Long id, String platformCode) {
+        DispatchTask task = new DispatchTask();
+        task.setId(id);
+        task.setProjectId(100L);
+        task.setTaskType(DispatchTaskType.BI_DAILY_POLL.name());
+        task.setStatus(DispatchTaskStatus.PENDING.value());
+        task.setPriorityLevel(DispatchTaskType.BI_DAILY_POLL.getPriorityLevel());
+        task.setPlatformCode(platformCode);
+        return task;
+    }
+
+    private DispatchTaskService newService(DispatchProperties properties) {
+        return new DispatchTaskService(
+                dispatchTaskMapper,
+                dispatchQueueService,
+                dispatchExecutionService,
+                properties,
+                dispatchTaskStateService,
+                currentUserService,
+                activityLogService,
+                mock(DispatchPollShardPersistenceService.class),
+                mock(DispatchPollAggregationService.class),
+                new LlmCapacityFailureClassifier(),
+                dispatchAlertService
+        );
     }
 }

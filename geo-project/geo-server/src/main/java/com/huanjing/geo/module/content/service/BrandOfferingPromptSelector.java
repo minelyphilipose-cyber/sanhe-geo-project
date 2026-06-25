@@ -4,7 +4,8 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.huanjing.geo.common.llm.LlmInvoker;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
 import com.huanjing.geo.module.customer.entity.BrandOffering;
 import com.huanjing.geo.module.customer.mapper.BrandOfferingMapper;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +33,7 @@ public class BrandOfferingPromptSelector {
 
     private final BrandOfferingMapper offeringMapper;
     private final ArticleModelResolver modelResolver;
-    private final LlmInvoker llmInvoker;
+    private final LlmCallFacade llmCallFacade;
     private final ObjectMapper objectMapper;
 
     public SelectionResult select(Long brandId,
@@ -71,7 +72,7 @@ public class BrandOfferingPromptSelector {
         try {
             ArticleModelResolver.ModelSelection model = modelResolver.resolve(null, null, SELECT_SYSTEM_PROMPT, false);
             String prompt = buildSelectionPrompt(candidates, topic, topicAsQuestion, articleType, contentStyle);
-            String response = llmInvoker.invoke(prompt, model.config()).responseText();
+            String response = llmCallFacade.execute(LlmCallRequest.direct(prompt, model.config())).invokeResult().responseText();
             JsonNode root = objectMapper.readTree(extractJson(response));
             JsonNode ids = root.get("selectedIds");
             if (ids == null || !ids.isArray()) {

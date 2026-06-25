@@ -35,5 +35,7 @@ public class ManualArticleCreateRequest {
 
     private Long coverMaterialId;
 
+    private Long headImageMaterialId;
+
     private Map<String, Object> aiMetadata;
 }

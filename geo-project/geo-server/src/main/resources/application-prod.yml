@@ -56,7 +56,6 @@ logging:
 
 geo:
   brand-geo-site:
-    endpoint: ${BRAND_GEO_SITE_ENDPOINT}
     connect-timeout-ms: ${BRAND_GEO_SITE_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${BRAND_GEO_SITE_READ_TIMEOUT_MS:30000}
   douyin:

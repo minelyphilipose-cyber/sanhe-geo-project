@@ -47,6 +47,6 @@ defineProps<{
   max-width: 230px;
   color: #52625C;
   font-size: 12px;
-  line-height: 1.55;
+  line-height: var(--mobile-leading-label, 16px);
 }
 </style>

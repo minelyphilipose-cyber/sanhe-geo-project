@@ -139,8 +139,8 @@ import type { DashboardMetric, HomeDashboardData } from '@/types/mobileDashboard
 import { aiPlatformLabel, sceneLabel } from '@/utils/mobileDashboardDictionaries'
 import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
 import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
-import hunyuanLogo from '@/assets/ai-model-logos/hunyuan-color.png'
 import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
+import yuanbaoLogo from '@/assets/ai-model-logos/yuanbao-color.svg'
 import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
 
 const store = useMobileDashboardStore()
@@ -165,8 +165,8 @@ const aiPlatformLogos: Record<string, string> = {
   qwen: qwenLogo,
   wenxin: wenxinLogo,
   ernie: wenxinLogo,
-  yuanbao: hunyuanLogo,
-  hunyuan: hunyuanLogo,
+  yuanbao: yuanbaoLogo,
+  hunyuan: yuanbaoLogo,
 }
 const sceneIcons: Record<string, string> = {
   brand_awareness: 'document',
@@ -274,8 +274,9 @@ onMounted(async () => {
 .metric-card span {
   display: block;
   color: #52625C;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .metric-card {
@@ -311,31 +312,35 @@ onMounted(async () => {
   display: block;
   margin-top: 6px;
   color: #131b2e;
-  font-size: 19px;
-  font-weight: 800;
-  line-height: 1.1;
+  font-size: var(--mobile-metric, 18px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-title, 24px);
 }
 
 .metric-card small {
   display: block;
   margin-top: 4px;
   color: #7a8982;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.25;
+  font-size: var(--mobile-text-2xs, 10px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label-sm, 14px);
 }
 
 .hero-card strong {
   margin-top: 9px;
-  font-size: 25px;
+  font-size: var(--mobile-metric-lg, 36px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-display, 40px);
+  letter-spacing: -0.04em;
 }
 
 .hero-card p {
   max-width: 150px;
   margin: 8px 0 0;
   color: #52625C;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label, 16px);
 }
 
 .hero-card :deep(.mobile-trend-chart) {
@@ -384,16 +389,18 @@ onMounted(async () => {
   display: block;
   margin-top: 9px;
   color: #52625C;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--mobile-text-2xs, 10px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label-sm, 14px);
 }
 
 .inline-metric strong {
   display: block;
   margin-top: 6px;
   color: #131b2e;
-  font-size: 18px;
-  font-weight: 800;
+  font-size: var(--mobile-metric, 18px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-title, 24px);
 }
 
 .compact-pair :deep(.mobile-dashboard-card) {
@@ -406,7 +413,9 @@ onMounted(async () => {
 
 .compact-pair :deep(.mobile-dashboard-card__head h2) {
   gap: 5px;
-  font-size: 15px;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-md, 20px);
 }
 
 .delivery-metrics {
@@ -437,16 +446,17 @@ onMounted(async () => {
 .delivery-metric span {
   margin-top: 7px;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.3;
+  font-size: var(--mobile-text-2xs, 10px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label-sm, 14px);
 }
 
 .delivery-metric strong {
   margin-top: 3px;
   color: #071225;
-  font-size: 18px;
-  line-height: 1.1;
-  font-weight: 800;
+  font-size: var(--mobile-metric, 18px);
+  line-height: var(--mobile-leading-title, 24px);
+  font-weight: 700;
 }
 
 .eco-metrics {
@@ -464,17 +474,18 @@ onMounted(async () => {
 .eco-metric span {
   display: block;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: var(--mobile-text-2xs, 10px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label-sm, 14px);
 }
 
 .eco-metric strong {
   display: block;
   margin-top: 4px;
   color: #071225;
-  font-size: 19px;
-  line-height: 1.1;
-  font-weight: 800;
+  font-size: var(--mobile-metric, 18px);
+  line-height: var(--mobile-leading-title, 24px);
+  font-weight: 700;
 }
 
 .progress-list,
@@ -487,8 +498,8 @@ onMounted(async () => {
 .card-subtitle {
   margin: -5px 0 12px;
   color: #52625C;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: var(--mobile-text-2xs, 10px);
+  line-height: var(--mobile-leading-label-sm, 14px);
 }
 
 .competitor-row {
@@ -515,9 +526,9 @@ onMounted(async () => {
 .competitor-name span {
   min-width: 0;
   color: #131b2e;
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1.35;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-md, 20px);
 }
 
 .competitor-name i {
@@ -526,7 +537,7 @@ onMounted(async () => {
   border-radius: 999px;
   background: #006D44;
   color: #fff;
-  font-size: 11px;
+  font-size: var(--mobile-text-xs, 12px);
   font-style: normal;
   font-weight: 700;
   white-space: nowrap;
@@ -552,8 +563,8 @@ onMounted(async () => {
 .competitor-stats span {
   display: block;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.3;
+  font-size: var(--mobile-text-xs, 12px);
+  line-height: var(--mobile-leading-label, 16px);
   white-space: nowrap;
 }
 
@@ -561,9 +572,9 @@ onMounted(async () => {
   display: block;
   margin-top: 4px;
   color: #131b2e;
-  font-size: 16px;
-  font-weight: 800;
-  line-height: 1.1;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-md, 20px);
 }
 
 .progress-row,
@@ -579,7 +590,7 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
   color: #6b7280;
-  font-size: 13px;
+  font-size: var(--mobile-text-xs, 12px);
 }
 
 .progress-row.zero .progress-row__meta,
@@ -608,7 +619,7 @@ onMounted(async () => {
   gap: 8px;
   min-width: 0;
   color: #6b7280;
-  font-size: 13px;
+  font-size: var(--mobile-text-xs, 12px);
 }
 
 .platform-name img,
@@ -625,9 +636,9 @@ onMounted(async () => {
   place-items: center;
   background: #e6f7ef;
   color: #006D44;
-  font-size: 11px;
+  font-size: var(--mobile-text-2xs, 10px);
   font-style: normal;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .platform-name b {
@@ -647,7 +658,7 @@ onMounted(async () => {
 .scene-row__meta .mobile-icon {
   flex: 0 0 auto;
   color: #006D44;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .progress-row__meta strong,
@@ -655,8 +666,8 @@ onMounted(async () => {
 .compact-row strong {
   margin-left: auto;
   color: #131b2e;
-  font-size: 14px;
-  font-weight: 800;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 700;
 }
 
 .bar {
@@ -684,8 +695,8 @@ onMounted(async () => {
   padding-top: 9px;
   border-top: 1px solid #eef0f2;
   color: #52625C;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 9px;
+  line-height: 1.25;
   display: -webkit-box;
   overflow: hidden;
   -webkit-line-clamp: 2;

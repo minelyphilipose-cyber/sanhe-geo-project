@@ -53,7 +53,7 @@ public class ContentArticleService {
     private static final Set<String> LEGACY_PROJECT_UPDATE_ROLES =
             Set.of("operator", "delivery_manager", "partner", "partner_staff");
     private static final Set<String> MANUAL_CREATE_COVER_REQUIRED_SELF_MEDIA_SUBS =
-            Set.of("toutiao", "baijiahao", "netease");
+            Set.of("toutiao", "baijiahao", "netease", "douyin");
 
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
@@ -470,6 +470,16 @@ public class ContentArticleService {
         }
         String createSource = normalizeCreateSource(req.getSource());
         String coverImageUrl = resolveManualCreateCoverUrl(project, req, channelGroupCode, channelSubCode, contentStyle, createSource);
+        if (isDouyinSelfMedia(channelGroupCode, channelSubCode, contentStyle)) {
+            if (req.getHeadImageMaterialId() != null) {
+                if (req.getHeadImageMaterialId().equals(req.getCoverMaterialId())) {
+                    throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Head image must differ from cover image");
+                }
+                content = autoImageInsertionService.insertSelectedHeadImage(project, req.getHeadImageMaterialId(), content);
+            } else if ("ai_preview".equals(createSource)) {
+                content = autoImageInsertionService.insertForChannel(project, channelGroupCode, channelSubCode, content, coverImageUrl);
+            }
+        }
         markdownImageReferenceValidator.validate(project, content);
 
         String initialStatus = "approved";
@@ -803,7 +813,11 @@ public class ContentArticleService {
                                               String periodType,
                                               String periodKey,
                                               Integer generationSlotNo) {
-        contentMarkdown = autoImageInsertionService.insertForChannel(project, targetChannel, contentMarkdown);
+        String coverImageUrl = null;
+        if (isSelfMediaTargetChannel(targetChannel)) {
+            coverImageUrl = coverSelectionService.selectRandomCoverUrl(project.getBrandId());
+        }
+        contentMarkdown = autoImageInsertionService.insertForTargetChannel(project, targetChannel, contentMarkdown, coverImageUrl);
         markdownImageReferenceValidator.validate(project, contentMarkdown);
         ArticleDraft draft = new ArticleDraft();
         draft.setBatchId(batchId);
@@ -814,10 +828,9 @@ public class ContentArticleService {
         draft.setGenerationSlotNo(generationSlotNo);
         draft.setArticleType(articleType);
         draft.setArticleTypeCode(articleType);
+        draft.setCategory(resolveGeneratedCategory(targetChannel, articleType));
         draft.setTitle(title);
-        if (isSelfMediaTargetChannel(targetChannel)) {
-            draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(project.getBrandId()));
-        }
+        draft.setCoverImageUrl(coverImageUrl);
         draft.setStatus("approved");
         draft.setCurrentVersionNo(1);
         draft.setHasRisk(false);
@@ -847,6 +860,21 @@ public class ContentArticleService {
         draft.setDuplicateArticleId(duplicateResult.articleId);
         articleDraftMapper.updateById(draft);
         return draft;
+    }
+
+    private String resolveGeneratedCategory(String targetChannel, String articleType) {
+        if (!ArticlePromptChannels.INDUSTRY_SITE.equals(targetChannel)) {
+            return null;
+        }
+        String type = trimToNull(articleType);
+        if (type == null) {
+            return "industry";
+        }
+        return switch (type.toLowerCase(Locale.ROOT)) {
+            case "buying_guide", "pitfall_guide", "stage_advice", "faq" -> "guide";
+            case "scenario_content" -> "service";
+            default -> "industry";
+        };
     }
 
     private ArticleDraft requireArticle(Long articleId) {
@@ -897,6 +925,14 @@ public class ContentArticleService {
             return true;
         }
         return StringUtils.hasText(contentStyle) && ArticlePromptChannels.SELF_MEDIA_SUBS.contains(contentStyle.trim());
+    }
+
+    private boolean isDouyinSelfMedia(String channelGroupCode, String channelSubCode, String contentStyle) {
+        String subCode = normalizeSelfMediaSubCode(channelSubCode);
+        if (subCode == null) {
+            subCode = normalizeSelfMediaSubCode(contentStyle);
+        }
+        return ArticlePromptChannels.SELF_MEDIA.equals(channelGroupCode) && "douyin".equals(subCode);
     }
 
     private boolean isSelfMediaTargetChannel(String targetChannel) {

@@ -1134,9 +1134,9 @@ function buildChannelOption(channel: ArticleGenerationOptions['groups'][number][
 
 function buildAgentSiteOption(base?: ContentStyleOption): ContentStyleOption {
   const agentSite = findAgentPublishSite()
-  const geoSiteCode = selectedBrand.value?.geoSiteCode?.trim()
+  const geoSiteDomain = selectedBrand.value?.geoSiteDomain?.trim()
   const isActive = selectedBrand.value?.geoSiteStatus === 'active'
-  const disabled = !geoSiteCode || !isActive
+  const disabled = !geoSiteDomain || !isActive
   return {
     value: base?.value || 'agent_site:',
     label: base?.label || 'Agent 官网',
@@ -1148,9 +1148,9 @@ function buildAgentSiteOption(base?: ContentStyleOption): ContentStyleOption {
     templateCount: base?.templateCount,
     templates: base?.templates,
     iconUrl: agentSite?.iconUrl || null,
-    meta: geoSiteCode ? `绑定站点：${geoSiteCode}` : undefined,
+    meta: geoSiteDomain ? `绑定域名：${geoSiteDomain}` : undefined,
     disabled: disabled || base?.disabled,
-    disabledReason: disabled ? '当前品牌未绑定可用 Agent 官网' : base?.disabledReason,
+    disabledReason: disabled ? '当前品牌未配置可用 Agent 官网域名' : base?.disabledReason,
   }
 }
 

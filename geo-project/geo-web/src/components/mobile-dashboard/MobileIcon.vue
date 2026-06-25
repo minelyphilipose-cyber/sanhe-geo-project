@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const symbols: Record<string, string> = {
   dashboard: 'analytics',
+  bubble: 'bubble_chart',
   home: 'home',
   monitor: 'query_stats',
   content: 'content_copy',

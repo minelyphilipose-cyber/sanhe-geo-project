@@ -17,6 +17,10 @@
         :brand-name="mobileDashboardStore.brandName"
         :page-name="currentPageName"
         :filter-label="currentFilterLabel"
+        :icon-name="currentHeaderConfig.icon"
+        :icon-size="currentHeaderConfig.iconSize"
+        :title-tone="currentHeaderConfig.titleTone"
+        :subtitle-tone="currentHeaderConfig.subtitleTone"
       />
       <section class="mobile-dashboard-content">
         <router-view />
@@ -39,11 +43,21 @@ const mobileDashboardStore = useMobileDashboardStore()
 const loading = ref(true)
 const errorMessage = ref('')
 
-const pageConfig: Record<string, { name: string; filter?: string }> = {
-  '/home': { name: '客户总览' },
-  '/monitor': { name: 'AI监测' },
-  '/content': { name: '内容交付' },
-  '/report': { name: '阶段报告' },
+type HeaderTone = 'default' | 'primary'
+type SubtitleTone = 'body' | 'label' | 'micro'
+
+const pageConfig: Record<string, {
+  name: string
+  filter?: string
+  icon: string
+  iconSize: number
+  titleTone: HeaderTone
+  subtitleTone: SubtitleTone
+}> = {
+  '/home': { name: '客户总览', icon: 'dashboard', iconSize: 24, titleTone: 'default', subtitleTone: 'body' },
+  '/monitor': { name: 'AI监测', icon: 'dashboard', iconSize: 28, titleTone: 'default', subtitleTone: 'body' },
+  '/content': { name: '内容交付', icon: 'bubble', iconSize: 28, titleTone: 'primary', subtitleTone: 'label' },
+  '/report': { name: '阶段报告', icon: 'bubble', iconSize: 24, titleTone: 'primary', subtitleTone: 'micro' },
 }
 
 const currentPageKey = computed(() => {
@@ -56,6 +70,7 @@ const currentPageName = computed(() => {
   return pageConfig[currentPageKey.value]?.name || '客户总览'
 })
 const currentFilterLabel = computed(() => pageConfig[currentPageKey.value]?.filter)
+const currentHeaderConfig = computed(() => pageConfig[currentPageKey.value] || pageConfig['/home'])
 
 function removeTokenFromAddressBar() {
   if (!('t' in route.query)) return
@@ -83,14 +98,47 @@ onMounted(async () => {
 
 <style scoped>
 .mobile-dashboard-shell {
+  --mobile-primary: #006D44;
+  --mobile-primary-strong: #07A66B;
+  --mobile-primary-soft: #e6f7ef;
+  --mobile-text: #131b2e;
+  --mobile-muted: #52625C;
+  --mobile-subtle: #f8fafc;
+  --mobile-border: #eef0f2;
+  --mobile-card-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+  --mobile-font: 'Plus Jakarta Sans', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mobile-text-2xs: 10px;
+  --mobile-text-xs: 12px;
+  --mobile-text-sm: 12px;
+  --mobile-text-md: 14px;
+  --mobile-text-lg: 16px;
+  --mobile-title: 16px;
+  --mobile-title-md: 18px;
+  --mobile-title-lg: 20px;
+  --mobile-title-xl: 22px;
+  --mobile-metric: 18px;
+  --mobile-metric-lg: 36px;
+  --mobile-leading-label-sm: 14px;
+  --mobile-leading-label: 16px;
+  --mobile-leading-md: 20px;
+  --mobile-leading-lg: 22px;
+  --mobile-leading-title: 24px;
+  --mobile-leading-title-lg: 26px;
+  --mobile-leading-display: 40px;
+
   min-height: 100vh;
   width: 100%;
   max-width: 100vw;
   background: #fff;
-  color: #131b2e;
-  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  color: var(--mobile-text);
+  font-family: var(--mobile-font);
+  font-size: var(--mobile-text-md);
+  line-height: var(--mobile-leading-md);
+  font-weight: 400;
   overflow-x: hidden;
   scrollbar-width: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 .mobile-dashboard-shell,
@@ -108,11 +156,11 @@ onMounted(async () => {
 }
 
 .mobile-dashboard-content {
-  min-height: calc(100vh - 56px);
+  min-height: calc(100dvh - 72px);
   width: 100%;
   max-width: min(760px, 100vw);
   margin: 0 auto;
-  padding: 14px 12px calc(164px + env(safe-area-inset-bottom));
+  padding: 14px 16px calc(88px + env(safe-area-inset-bottom));
   background: #fff;
   overflow-x: hidden;
   scrollbar-width: none;
@@ -147,16 +195,17 @@ onMounted(async () => {
 
 .mobile-dashboard-error h1 {
   margin: 0;
-  color: #131b2e;
+  color: var(--mobile-text);
   font-size: 20px;
-  font-weight: 800;
+  font-weight: 700;
+  line-height: var(--mobile-leading-title-lg, 26px);
 }
 
 .mobile-dashboard-error p {
   max-width: 280px;
   margin: 0;
-  color: #52625C;
+  color: var(--mobile-muted);
   font-size: 14px;
-  line-height: 1.65;
+  line-height: var(--mobile-leading-md, 20px);
 }
 </style>

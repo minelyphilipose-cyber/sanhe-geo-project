@@ -8,6 +8,7 @@ import org.mockito.InOrder;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -115,6 +116,47 @@ class LlmExecutionGatewayTest {
 
         assertDoesNotThrow(() -> gateway.acquireBlocking("article", platform()).close());
 
+        verify(store, times(2)).acquire(eq("geo:llm:permit:global"), anyString(), eq(8), anyLong(), anyLong(), anyLong());
+    }
+
+    @Test
+    void acquireBlockingFailFastFlagDoesNotRetryOrRegisterWaiter() {
+        when(store.acquire(eq("geo:llm:permit:global"), anyString(), eq(8), anyLong(), anyLong(), anyLong()))
+                .thenReturn(false, true);
+        LlmPoolProperties properties = enabledProperties();
+        properties.setBlockingAcquireFailFastEnabled(true);
+        properties.setBlockingAcquireFailFastFeatures(Set.of("article"));
+        properties.setPermitWaitTimeoutMs(200L);
+        properties.setPermitRetryIntervalMs(10L);
+        LlmExecutionGateway gateway = new LlmExecutionGateway(store, properties, renewalService, new LlmGatewayMetrics());
+
+        LlmPermitUnavailableException ex = assertThrows(
+                LlmPermitUnavailableException.class,
+                () -> gateway.acquireBlocking("article", platform())
+        );
+
+        assertEquals(LlmPermitScope.GLOBAL, ex.getScope());
+        assertEquals(0L, gateway.activeWaiterCount());
+        verify(store, times(1)).acquire(eq("geo:llm:permit:global"), anyString(), eq(8), anyLong(), anyLong(), anyLong());
+    }
+
+    @Test
+    void acquireBlockingFailFastMasterSwitchWithoutFeatureKeepsBlockingBehavior() {
+        when(store.acquire(eq("geo:llm:permit:global"), anyString(), eq(8), anyLong(), anyLong(), anyLong()))
+                .thenReturn(false, true);
+        when(store.acquire(eq("geo:llm:permit:feature:article"), anyString(), eq(4), anyLong(), anyLong(), anyLong()))
+                .thenReturn(true);
+        when(store.acquire(eq("geo:llm:permit:platform:openai"), anyString(), eq(2), anyLong(), anyLong(), anyLong()))
+                .thenReturn(true);
+        LlmPoolProperties properties = enabledProperties();
+        properties.setBlockingAcquireFailFastEnabled(true);
+        properties.setPermitWaitTimeoutMs(200L);
+        properties.setPermitRetryIntervalMs(10L);
+        LlmExecutionGateway gateway = new LlmExecutionGateway(store, properties, renewalService, new LlmGatewayMetrics());
+
+        assertDoesNotThrow(() -> gateway.acquireBlocking("article", platform()).close());
+
+        assertEquals(0L, gateway.activeWaiterCount());
         verify(store, times(2)).acquire(eq("geo:llm:permit:global"), anyString(), eq(8), anyLong(), anyLong(), anyLong());
     }
 

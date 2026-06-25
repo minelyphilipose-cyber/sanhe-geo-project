@@ -84,6 +84,7 @@ public class ArticleAiDraftService {
     private final MedicalArticleComplianceChecker medicalComplianceChecker;
     private final SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService;
     private final ArticleCoverSelectionService coverSelectionService;
+    private final ArticleAutoImageInsertionService autoImageInsertionService;
     private final ArticleAiDraftRateLimiter rateLimiter;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
@@ -101,6 +102,7 @@ public class ArticleAiDraftService {
                                  MedicalArticleComplianceChecker medicalComplianceChecker,
                                  SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService,
                                  ArticleCoverSelectionService coverSelectionService,
+                                 ArticleAutoImageInsertionService autoImageInsertionService,
                                  ArticleAiDraftRateLimiter rateLimiter,
                                  AuditService auditService, ObjectMapper objectMapper,
                                  PlatformTransactionManager transactionManager,
@@ -116,6 +118,7 @@ public class ArticleAiDraftService {
         this.medicalComplianceChecker = medicalComplianceChecker;
         this.specialIndustryComplianceAlertService = specialIndustryComplianceAlertService;
         this.coverSelectionService = coverSelectionService;
+        this.autoImageInsertionService = autoImageInsertionService;
         this.rateLimiter = rateLimiter;
         this.auditService = auditService; this.objectMapper = objectMapper;
         this.transactionManager = transactionManager; this.articleAiDraftExecutor = articleAiDraftExecutor;
@@ -544,8 +547,10 @@ public class ArticleAiDraftService {
             draft.setTopicAsQuestion(context.topicAsQuestion());
             draft.setTitle(title);
             applyMedicalDraftFields(draft, context.medicalContext());
+            String coverImageUrl = null;
             if (ArticlePromptChannels.SELF_MEDIA.equals(context.channelGroupCode())) {
-                draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(context.project().getBrandId()));
+                coverImageUrl = coverSelectionService.selectRandomCoverUrl(context.project().getBrandId());
+                draft.setCoverImageUrl(coverImageUrl);
             }
             draft.setStatus(STATUS_APPROVED);
             draft.setCurrentVersionNo(1);
@@ -558,7 +563,8 @@ public class ArticleAiDraftService {
             version.setArticleId(draft.getId());
             version.setVersionNo(1);
             version.setTitle(title);
-            version.setContentMarkdown(generated.content());
+            version.setContentMarkdown(autoImageInsertionService.insertForChannel(context.project(), context.channelGroupCode(),
+                    context.channelSubCode(), generated.content(), coverImageUrl));
             version.setPromptSnapshot(enrichPromptSnapshot(context.prompt().promptSnapshot(), generated.result(), "AI_TEMPLATE"));
             version.setInputSnapshot(context.prompt().inputSnapshot());
             version.setModelPlatformCode(model.platformCode());

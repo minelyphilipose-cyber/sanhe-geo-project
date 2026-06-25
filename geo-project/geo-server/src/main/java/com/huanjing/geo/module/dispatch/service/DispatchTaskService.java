@@ -4,6 +4,8 @@ import cn.hutool.core.util.RandomUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.capacity.LlmCapacityFailure;
+import com.huanjing.geo.common.llm.capacity.LlmCapacityFailureClassifier;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.enums.DispatchAlertSeverity;
@@ -13,6 +15,7 @@ import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -24,6 +27,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -41,6 +45,22 @@ public class DispatchTaskService {
     private final ActivityLogService activityLogService;
     private final DispatchPollShardPersistenceService pollShardPersistenceService;
     private final DispatchPollAggregationService pollAggregationService;
+    private final LlmCapacityFailureClassifier capacityFailureClassifier;
+    private final DispatchAlertService dispatchAlertService;
+
+    @PostConstruct
+    public void validateStaggerConfiguration() {
+        DispatchProperties.Stagger stagger = dispatchProperties.getStagger();
+        if (stagger == null || !stagger.isEnabled()) {
+            return;
+        }
+        int retrySpreadSeconds = dispatchProperties.getResourceBusyRetryMinSeconds()
+                + dispatchProperties.getResourceBusyRetryJitterSeconds();
+        if (stagger.getJitterSeconds() < retrySpreadSeconds) {
+            log.warn("Dispatch stagger jitter is smaller than resource-busy retry spread, staggerJitterSeconds={}, retrySpreadSeconds={}",
+                    stagger.getJitterSeconds(), retrySpreadSeconds);
+        }
+    }
 
     @Transactional
     public DispatchTask createTaskAndEnqueue(Long projectId,
@@ -177,7 +197,75 @@ public class DispatchTaskService {
                 && !DispatchTaskStatus.RETRY_PENDING.value().equals(task.getStatus())) {
             return;
         }
-        dispatchQueueService.enqueueTask(task.getId(), task.getPriorityLevel(), task.getCreatedAt() == null ? System.currentTimeMillis() : task.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli());
+        enqueueIfNeeded(task, defaultAvailableAtMillis(task));
+    }
+
+    public void enqueueIfNeeded(Long taskId) {
+        if (taskId == null) {
+            return;
+        }
+        DispatchTask task = dispatchTaskMapper.selectById(taskId);
+        if (task == null) {
+            return;
+        }
+        enqueueIfNeeded(task);
+    }
+
+    public void enqueueQuestionPollShardTasksWithStagger(List<DispatchTask> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return;
+        }
+        if (!isStaggerEnabledFor(DispatchTaskType.BI_DAILY_POLL)) {
+            tasks.forEach(this::enqueueIfNeeded);
+            return;
+        }
+        long baseMillis = System.currentTimeMillis();
+        Map<String, List<DispatchTask>> byPlatform = new java.util.LinkedHashMap<>();
+        for (DispatchTask task : tasks) {
+            if (task == null) {
+                continue;
+            }
+            String platformCode = task.getPlatformCode();
+            String platformKey = platformCode == null || platformCode.isBlank() ? "_unknown" : platformCode.trim();
+            byPlatform.computeIfAbsent(platformKey, ignored -> new java.util.ArrayList<>()).add(task);
+        }
+        byPlatform.forEach((platformCode, platformTasks) -> enqueueStaggeredPlatformTasks(platformCode, platformTasks, baseMillis));
+    }
+
+    public void updateTaskPlatform(DispatchTask update) {
+        if (update == null || update.getId() == null) {
+            return;
+        }
+        DispatchTask patch = new DispatchTask();
+        patch.setId(update.getId());
+        patch.setPlatformCode(update.getPlatformCode());
+        dispatchTaskMapper.updateById(patch);
+    }
+
+    public void enqueueIfNeeded(DispatchTask task, long availableAtMillis) {
+        if (task == null || task.getId() == null) {
+            return;
+        }
+        DispatchTask current = dispatchTaskMapper.selectById(task.getId());
+        if (current != null) {
+            task = current;
+        }
+        if (!DispatchTaskType.fromValue(task.getTaskType()).isQueueTask()) {
+            return;
+        }
+        if (!DispatchTaskStatus.PENDING.value().equals(task.getStatus())
+                && !DispatchTaskStatus.RETRY_PENDING.value().equals(task.getStatus())) {
+            return;
+        }
+        if (!guardQueueDepth(task)) {
+            return;
+        }
+        dispatchQueueService.enqueueTask(
+                task.getId(),
+                task.getPriorityLevel(),
+                defaultAvailableAtMillis(task),
+                Math.max(0L, availableAtMillis)
+        );
     }
 
     private void safeEnqueue(DispatchTask task) {
@@ -188,6 +276,126 @@ public class DispatchTaskService {
             log.warn("Dispatch task enqueue failed, taskId={}, taskType={}, reason={}",
                     task.getId(), task.getTaskType(), ex.getMessage());
         }
+    }
+
+    private void enqueueStaggeredPlatformTasks(String platformCode, List<DispatchTask> tasks, long baseMillis) {
+        if (tasks == null || tasks.isEmpty()) {
+            return;
+        }
+        tasks.sort(java.util.Comparator.comparing(DispatchTask::getId, java.util.Comparator.nullsLast(Long::compareTo)));
+        DispatchProperties.Stagger stagger = dispatchProperties.getStagger();
+        StaggerTiming timing = resolveStaggerTiming(stagger, platformCode);
+        long windowMs = Duration.ofMinutes(timing.windowMinutes()).toMillis();
+        long maxDelayMs = Duration.ofMinutes(timing.maxDelayMinutes()).toMillis();
+        long jitterMs = Duration.ofSeconds(timing.jitterSeconds()).toMillis();
+        long capJitterMs = Duration.ofSeconds(timing.capJitterSeconds()).toMillis();
+        boolean overflow = false;
+        int count = tasks.size();
+        for (int i = 0; i < count; i++) {
+            long offsetMs = count <= 1 ? 0L : (windowMs * i) / count;
+            if (jitterMs > 0L) {
+                offsetMs += ThreadLocalRandom.current().nextLong(jitterMs + 1L);
+            }
+            long availableAt;
+            if (offsetMs > maxDelayMs) {
+                overflow = true;
+                long tailJitter = capJitterMs <= 0L ? 0L : ThreadLocalRandom.current().nextLong(Math.min(capJitterMs, maxDelayMs) + 1L);
+                availableAt = baseMillis + Math.max(0L, maxDelayMs - tailJitter);
+            } else {
+                availableAt = baseMillis + offsetMs;
+            }
+            enqueueIfNeeded(tasks.get(i), availableAt);
+        }
+        if (overflow) {
+            alertStaggerOverflow(platformCode, count, windowMs, maxDelayMs);
+        }
+    }
+
+    private StaggerTiming resolveStaggerTiming(DispatchProperties.Stagger stagger, String platformCode) {
+        DispatchProperties.PlatformOverride override = null;
+        if (stagger.getPlatforms() != null && platformCode != null && !platformCode.isBlank()) {
+            override = stagger.getPlatforms().get(platformCode.trim().toLowerCase(Locale.ROOT));
+        }
+        return new StaggerTiming(
+                override == null || override.getWindowMinutes() == null ? stagger.getWindowMinutes() : override.getWindowMinutes(),
+                override == null || override.getMaxDelayMinutes() == null ? stagger.getMaxDelayMinutes() : override.getMaxDelayMinutes(),
+                override == null || override.getJitterSeconds() == null ? stagger.getJitterSeconds() : override.getJitterSeconds(),
+                override == null || override.getCapJitterSeconds() == null ? stagger.getCapJitterSeconds() : override.getCapJitterSeconds()
+        );
+    }
+
+    private boolean guardQueueDepth(DispatchTask task) {
+        DispatchProperties.Stagger stagger = dispatchProperties.getStagger();
+        long maxQueueSize = stagger == null ? 0L : stagger.getMaxQueueSize();
+        if (maxQueueSize <= 0L) {
+            return true;
+        }
+        long queued = dispatchQueueService.queuedTaskCount();
+        if (queued < maxQueueSize) {
+            return true;
+        }
+        Map<String, Object> context = new HashMap<>();
+        context.put("taskType", task.getTaskType());
+        context.put("taskId", task.getId());
+        context.put("queuedTaskCount", queued);
+        context.put("maxQueueSize", maxQueueSize);
+        dispatchAlertService.createOrRefreshAlert(
+                task.getId(),
+                task.getProjectId(),
+                "DISPATCH_QUEUE_DEPTH_LIMIT:" + task.getTaskType(),
+                DispatchAlertSeverity.WARN,
+                "Dispatch queue depth limit reached",
+                "Dispatch enqueue detected queue depth at or above configured limit",
+                task.getRetryCount(),
+                JSONUtil.toJsonStr(context)
+        );
+        return !"REJECT".equalsIgnoreCase(stagger.getOverflowPolicy());
+    }
+
+    private record StaggerTiming(int windowMinutes, int maxDelayMinutes, int jitterSeconds, int capJitterSeconds) {
+    }
+
+    private void alertStaggerOverflow(String platformCode, int taskCount, long windowMs, long maxDelayMs) {
+        Map<String, Object> context = new HashMap<>();
+        context.put("taskType", DispatchTaskType.BI_DAILY_POLL.name());
+        context.put("platformCode", platformCode);
+        context.put("taskCount", taskCount);
+        context.put("windowMinutes", Duration.ofMillis(windowMs).toMinutes());
+        context.put("maxDelayMinutes", Duration.ofMillis(maxDelayMs).toMinutes());
+        context.put("overflowPolicy", "CAP_AND_ALERT");
+        dispatchAlertService.createOrRefreshAlert(
+                null,
+                null,
+                "DISPATCH_STAGGER_OVERFLOW:" + platformCode,
+                DispatchAlertSeverity.WARN,
+                "Dispatch stagger overflow",
+                "Dispatch stagger could not spread all tasks within the configured max delay; capped tasks were placed in the tail jitter band",
+                0,
+                JSONUtil.toJsonStr(context)
+        );
+    }
+
+    private boolean isStaggerEnabledFor(DispatchTaskType taskType) {
+        DispatchProperties.Stagger stagger = dispatchProperties.getStagger();
+        if (stagger == null || !stagger.isEnabled() || taskType == null) {
+            return false;
+        }
+        String raw = stagger.getTaskTypes();
+        if (raw == null || raw.isBlank()) {
+            return false;
+        }
+        for (String item : raw.split(",")) {
+            if (taskType.name().equalsIgnoreCase(item.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private long defaultAvailableAtMillis(DispatchTask task) {
+        return task.getCreatedAt() == null
+                ? System.currentTimeMillis()
+                : task.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
     public void processTask(Long taskId) {
@@ -377,35 +585,44 @@ public class DispatchTaskService {
 
     private void handleFailure(DispatchTask task, Exception ex) {
         LocalDateTime now = LocalDateTime.now();
-        if (ex instanceof DispatchResourceBusyException) {
+        if (ex instanceof DispatchResourceBusyException resourceBusyException) {
             String lastError = trimError(ex.getMessage());
-            String errorContext = JSONUtil.toJsonStr(buildErrorContext(
+            LlmCapacityFailure capacityFailure = resolveCapacityFailure(resourceBusyException);
+            int nextResourceWaitCount = (task.getResourceWaitCount() == null ? 0 : task.getResourceWaitCount()) + 1;
+            if (nextResourceWaitCount > dispatchProperties.getResourceBusyMaxAttempts()) {
+                String reason = dispatchProperties.isResourceBusyRetryAfterEnabled()
+                        ? "CAPACITY_RETRY_EXHAUSTED: resource unavailable after " + nextResourceWaitCount
+                        + " wait attempts: " + lastError
+                        : "resource unavailable after " + nextResourceWaitCount + " wait attempts: " + lastError;
+                markDeadLetter(task, reason);
+                return;
+            }
+            int retryDelaySeconds = resolveResourceBusyRetryDelaySeconds(nextResourceWaitCount, capacityFailure);
+            Map<String, Object> errorContext = buildErrorContext(
                     lastError,
                     ex.getClass().getName(),
                     task.getCurrentChannel(),
                     task.getPlatformCode(),
                     now
-            ));
-            int nextResourceWaitCount = (task.getResourceWaitCount() == null ? 0 : task.getResourceWaitCount()) + 1;
-            if (nextResourceWaitCount > dispatchProperties.getResourceBusyMaxAttempts()) {
-                markDeadLetter(task, "resource unavailable after " + nextResourceWaitCount + " wait attempts: " + lastError);
-                return;
-            }
-            int retryDelaySeconds = dispatchProperties.getResourceBusyRetryMinSeconds();
-            int retryJitterSeconds = dispatchProperties.getResourceBusyRetryJitterSeconds();
-            if (retryJitterSeconds > 0) {
-                retryDelaySeconds += ThreadLocalRandom.current().nextInt(retryJitterSeconds + 1);
+            );
+            if (dispatchProperties.isCapacityFailureClassificationEnabled()
+                    || dispatchProperties.isResourceBusyRetryAfterEnabled()) {
+                enrichCapacityErrorContext(errorContext, capacityFailure, retryDelaySeconds);
             }
             dispatchTaskStateService.markResourceWaiting(
                     task.getId(),
                     nextResourceWaitCount,
                     now.plusSeconds(retryDelaySeconds),
                     lastError,
-                    errorContext,
+                    JSONUtil.toJsonStr(errorContext),
                     task.getPayloadJson(),
                     task.getProjectId()
             );
-            log.info("Task {} postponed for dispatch resource: {}", task.getId(), lastError);
+            log.info("Task {} postponed for dispatch resource, delaySeconds={}, category={}, retryAfterMs={}",
+                    task.getId(),
+                    retryDelaySeconds,
+                    capacityFailure == null ? null : capacityFailure.errorCategory(),
+                    capacityFailure == null ? null : capacityFailure.retryAfterMs());
             return;
         }
         int nextRetryCount = (task.getRetryCount() == null ? 0 : task.getRetryCount()) + 1;
@@ -490,6 +707,54 @@ public class DispatchTaskService {
             return "unknown error";
         }
         return message.length() <= 900 ? message : message.substring(0, 900);
+    }
+
+    private LlmCapacityFailure resolveCapacityFailure(DispatchResourceBusyException ex) {
+        if (ex.getCapacityFailure() != null) {
+            return ex.getCapacityFailure();
+        }
+        if (!dispatchProperties.isCapacityFailureClassificationEnabled()) {
+            return null;
+        }
+        return capacityFailureClassifier.classify(ex).orElse(null);
+    }
+
+    private int resolveResourceBusyRetryDelaySeconds(int resourceWaitCount, LlmCapacityFailure capacityFailure) {
+        if (!dispatchProperties.isResourceBusyRetryAfterEnabled()) {
+            int retryDelaySeconds = dispatchProperties.getResourceBusyRetryMinSeconds();
+            int retryJitterSeconds = dispatchProperties.getResourceBusyRetryJitterSeconds();
+            if (retryJitterSeconds > 0) {
+                retryDelaySeconds += ThreadLocalRandom.current().nextInt(retryJitterSeconds + 1);
+            }
+            return retryDelaySeconds;
+        }
+        int maxSeconds = dispatchProperties.getResourceBusyRetryMaxSeconds();
+        if (capacityFailure != null && capacityFailure.hasRetryAfter()) {
+            long retryAfterSeconds = (capacityFailure.retryAfterMs() + 999L) / 1000L;
+            return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, retryAfterSeconds));
+        }
+        long baseSeconds = Math.max(1L, dispatchProperties.getResourceBusyRetryMinSeconds());
+        int exponent = Math.min(Math.max(resourceWaitCount - 1, 0), 20);
+        long delaySeconds = baseSeconds * (1L << exponent);
+        int retryJitterSeconds = dispatchProperties.getResourceBusyRetryJitterSeconds();
+        if (retryJitterSeconds > 0) {
+            delaySeconds += ThreadLocalRandom.current().nextInt(retryJitterSeconds + 1);
+        }
+        return (int) Math.min(maxSeconds, Math.max(1L, delaySeconds));
+    }
+
+    private void enrichCapacityErrorContext(Map<String, Object> context,
+                                            LlmCapacityFailure capacityFailure,
+                                            int retryDelaySeconds) {
+        context.put("capacityRetryDelaySeconds", retryDelaySeconds);
+        context.put("capacityRetryAfterEnabled", dispatchProperties.isResourceBusyRetryAfterEnabled());
+        if (capacityFailure == null) {
+            return;
+        }
+        context.put("capacityErrorCategory", capacityFailure.errorCategory() == null ? null : capacityFailure.errorCategory().name());
+        context.put("capacityRetryAfterMs", capacityFailure.retryAfterMs());
+        context.put("capacityReason", capacityFailure.reason());
+        context.put("capacitySource", capacityFailure.source());
     }
 
     private String defaultIdempotencyKey(DispatchTaskType taskType, Map<String, Object> payload) {

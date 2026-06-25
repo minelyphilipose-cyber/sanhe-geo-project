@@ -556,14 +556,23 @@ function detailPlatformCount(row?: DispatchAlertItem | null) {
 }
 
 function detailFailedTotal(row?: DispatchAlertItem | null) {
+  if (row?.failedCount !== null && row?.failedCount !== undefined) {
+    return Number(row.failedCount || 0)
+  }
   return (row?.platformFailures || []).reduce((sum, item) => sum + Number(item.failedCount || 0), 0)
 }
 
 function detailExpectedTotal(row?: DispatchAlertItem | null) {
+  if (row?.expectedResultCount !== null && row?.expectedResultCount !== undefined) {
+    return Number(row.expectedResultCount || 0)
+  }
   return (row?.platformFailures || []).reduce((sum, item) => sum + Number(item.expectedCount || 0), 0)
 }
 
 function detailFailureRate(row?: DispatchAlertItem | null) {
+  if (row?.failureRate !== null && row?.failureRate !== undefined) {
+    return Number(row.failureRate)
+  }
   const expected = detailExpectedTotal(row)
   if (!expected) return null
   return Math.round((detailFailedTotal(row) * 10000) / expected) / 100

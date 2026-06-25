@@ -4,14 +4,19 @@ import cn.hutool.json.JSONUtil;
 import cn.hutool.json.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
+import com.huanjing.geo.common.llm.LlmCallResult;
 import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.capacity.LlmCapacityFailure;
+import com.huanjing.geo.common.llm.capacity.LlmCapacityFailureClassifier;
 import com.huanjing.geo.common.llm.router.LlmFeature;
+import com.huanjing.geo.common.llm.router.LlmPlatformCodeFilters;
 import com.huanjing.geo.common.llm.router.LlmRouteException;
 import com.huanjing.geo.common.llm.router.LlmRouteFailureKind;
 import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
-import com.huanjing.geo.common.util.HttpClientUtil;
+import com.huanjing.geo.common.util.EntityMatchTextNormalizer;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
 import com.huanjing.geo.module.content.entity.ArticleGenerationLog;
@@ -48,6 +53,7 @@ import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -89,9 +95,7 @@ public class DispatchExecutionService {
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
-    private final PlatformRateLimiterService platformRateLimiterService;
-    private final PlatformConcurrencyLimiterService platformConcurrencyLimiterService;
-    private final LlmPlatformRouter llmPlatformRouter;
+    private final LlmCallFacade llmCallFacade;
     private final ProjectMapper projectMapper;
     private final PackageContentConfigMapper packageContentConfigMapper;
     private final ArticleBatchMapper articleBatchMapper;
@@ -112,6 +116,10 @@ public class DispatchExecutionService {
     private final DispatchQuestionPollPlanningService questionPollPlanningService;
     private final DispatchPollShardPersistenceService pollShardPersistenceService;
     private final DispatchPollAggregationService pollAggregationService;
+    private final LlmCapacityFailureClassifier capacityFailureClassifier;
+
+    @Value("${geo.llm.routing.article-excluded-platform-codes:hunyuan,yuanbao}")
+    private String articleExcludedPlatformCodes = "hunyuan,yuanbao";
 
     public void execute(DispatchTask task) {
         DispatchTaskType type = DispatchTaskType.fromValue(task.getTaskType());
@@ -536,7 +544,7 @@ public class DispatchExecutionService {
                                                             String userPrompt,
                                                             int cursor) {
         try {
-            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
+            LlmRouteResult routed = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
                     LlmFeature.ARTICLE,
                     systemPrompt,
                     userPrompt,
@@ -550,7 +558,7 @@ public class DispatchExecutionService {
                     1000,
                     cursor,
                     platformConfigs
-            ));
+            ))).routeResult();
             task.setPlatformCode(routed.platformCode());
             task.setCurrentChannel(routed.channel());
             log.info("Content generation task {} executed by platform={}, model={}, channel={}",
@@ -563,10 +571,13 @@ public class DispatchExecutionService {
                     routed.requestCount()
             );
         } catch (LlmRouteException ex) {
-            if (isCapacityFailure(ex.failureKind())) {
-                throw new DispatchResourceBusyException(ex.getMessage(), ex);
+            LlmCapacityFailure capacityFailure = classifyCapacityFailure(ex);
+            if (capacityFailure != null) {
+                throw new DispatchResourceBusyException(ex.getMessage(), ex, capacityFailure);
             }
             return InvocationResult.failure(ex.failureKind().name(), ex.getMessage(), ex.requestCount(), ex);
+        } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
+            return InvocationResult.failure("ALL_FAILED", ex.getMessage(), 0, ex);
         }
     }
 
@@ -575,7 +586,7 @@ public class DispatchExecutionService {
                                                         String questionText,
                                                         int requestTimeoutMs) {
         try {
-            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
+            LlmRouteResult routed = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
                     LlmFeature.MONITORING,
                     "You are a GEO (Generative Engine Optimization) monitoring assistant.",
                     questionText,
@@ -589,7 +600,7 @@ public class DispatchExecutionService {
                     1000,
                     0,
                     List.of(platform)
-            ));
+            ))).routeResult();
             task.setPlatformCode(routed.platformCode());
             task.setCurrentChannel(routed.channel());
             log.info("BI_DAILY_POLL task {} executed by platform={}, model={}, channel={}",
@@ -602,10 +613,13 @@ public class DispatchExecutionService {
                     routed.requestCount()
             );
         } catch (LlmRouteException ex) {
-            if (isCapacityFailure(ex.failureKind())) {
-                throw new DispatchResourceBusyException(ex.getMessage(), ex);
+            LlmCapacityFailure capacityFailure = classifyCapacityFailure(ex);
+            if (capacityFailure != null) {
+                throw new DispatchResourceBusyException(ex.getMessage(), ex, capacityFailure);
             }
             return InvocationResult.failure(ex.failureKind().name(), ex.getMessage(), ex.requestCount(), ex);
+        } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
+            return InvocationResult.failure("ALL_FAILED", ex.getMessage(), 0, ex);
         }
     }
 
@@ -613,6 +627,16 @@ public class DispatchExecutionService {
         return failureKind == LlmRouteFailureKind.ALL_RATE_LIMITED
                 || failureKind == LlmRouteFailureKind.ALL_PERMIT_BUSY
                 || failureKind == LlmRouteFailureKind.ALL_CIRCUIT_OPEN;
+    }
+
+    private LlmCapacityFailure classifyCapacityFailure(LlmRouteException ex) {
+        if (dispatchProperties.isCapacityFailureClassificationEnabled()) {
+            return capacityFailureClassifier.classify(ex).orElse(null);
+        }
+        if (isCapacityFailure(ex.failureKind())) {
+            return new LlmCapacityFailure(null, null, ex.failureKind().name(), ex.getClass().getSimpleName());
+        }
+        return null;
     }
 
     private String buildBrandInfo(Project project, Brand brand) {
@@ -1096,7 +1120,7 @@ public class DispatchExecutionService {
             return JudgeInfo.failed("ANSWER_EMPTY", "大模型回答为空");
         }
         try {
-            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
+            LlmRouteResult routed = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
                     LlmFeature.MONITORING,
                     effectiveHitJudgeSystemPrompt(),
                     buildEffectiveHitJudgeUserPrompt(brand, judgeBrandNames, siteDomains, phones, contactTerms, questionText, responseText),
@@ -1110,11 +1134,14 @@ public class DispatchExecutionService {
                     300,
                     0,
                     List.of()
-            ));
+            ))).routeResult();
             return parseJudgeInfo(routed.responseText(), routed.platformCode() + "/" + routed.modelId());
         } catch (LlmRouteException ex) {
             log.warn("Effective hit judge failed, question={}, reason={}", redactSensitive(questionText), ex.getMessage());
             return JudgeInfo.failed(ex.failureKind().name(), ex.getMessage());
+        } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
+            log.warn("Effective hit judge failed, question={}, reason={}", redactSensitive(questionText), ex.getMessage());
+            return JudgeInfo.failed("ALL_FAILED", ex.getMessage());
         } catch (RuntimeException ex) {
             log.warn("Effective hit judge parse failed, question={}", redactSensitive(questionText), ex);
             return JudgeInfo.failed("JUDGE_PARSE_FAILED", ex.getMessage());
@@ -1371,10 +1398,7 @@ public class DispatchExecutionService {
     }
 
     private String normalizeTextForMatch(String raw) {
-        if (!StringUtils.hasText(raw)) {
-            return "";
-        }
-        return raw.replaceAll("[\\s\\p{Punct}]+", "").toLowerCase(Locale.ROOT);
+        return EntityMatchTextNormalizer.normalize(raw);
     }
 
     private String redactSensitive(String raw) {
@@ -1471,12 +1495,22 @@ public class DispatchExecutionService {
     }
 
     private List<AiPlatformConfig> resolveArticlePlatformCandidates() {
-        return aiPlatformConfigMapper.selectList(
-                new LambdaQueryWrapper<AiPlatformConfig>()
-                        .eq(AiPlatformConfig::getEnabled, true)
-                        .eq(AiPlatformConfig::getEnabledForArticle, true)
-                        .orderByAsc(AiPlatformConfig::getId)
-        );
+        LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
+                .eq(AiPlatformConfig::getEnabled, true)
+                .eq(AiPlatformConfig::getEnabledForArticle, true)
+                .orderByAsc(AiPlatformConfig::getId);
+        Set<String> excluded = LlmPlatformCodeFilters.parseCodes(articleExcludedPlatformCodes);
+        if (!excluded.isEmpty()) {
+            wrapper.notIn(AiPlatformConfig::getPlatformCode, excluded);
+        }
+        List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(wrapper);
+        if (excluded.isEmpty()) {
+            return configs;
+        }
+        return configs.stream()
+                .filter(config -> config != null
+                        && !excluded.contains(LlmPlatformCodeFilters.normalize(config.getPlatformCode())))
+                .collect(Collectors.toList());
     }
 
     private InvocationResult invokeWithFallback(AiPlatformConfig config, DispatchTask task, String questionText) {
@@ -1674,17 +1708,9 @@ public class DispatchExecutionService {
         if (!StringUtils.hasText(apiUrl) || !StringUtils.hasText(modelId) || !StringUtils.hasText(apiKey)) {
             throw new BizException(500, "Invalid platform invocation params");
         }
-        boolean pass = platformRateLimiterService.tryAcquire(config, 1000);
-        if (!pass) {
-            throw new BizException(429, "Platform limited: " + platformCode);
-        }
-
         long started = System.currentTimeMillis();
-        String response;
-        try (PlatformConcurrencyLimiterService.Permit ignored = platformConcurrencyLimiterService.acquire(config)) {
-            String prompt = buildPrompt(task, questionText);
-            response = invokeModelApi(apiUrl, modelId, apiKey, prompt);
-        }
+        String prompt = buildPrompt(task, questionText);
+        String response = invokeModelApi(config, platformCode, channel, apiUrl, modelId, apiKey, prompt, requestCount);
         long durationMs = Math.max(1L, System.currentTimeMillis() - started);
         log.info("Dispatch task {} executed by platform={}, model={}, channel={}, questionPresent={}",
                 task.getId(), platformCode, modelId, channel, StringUtils.hasText(questionText));
@@ -1704,16 +1730,9 @@ public class DispatchExecutionService {
         if (!StringUtils.hasText(apiUrl) || !StringUtils.hasText(modelId) || !StringUtils.hasText(apiKey)) {
             throw new BizException(500, "Invalid platform invocation params");
         }
-        boolean pass = platformRateLimiterService.tryAcquire(config, 1000);
-        if (!pass) {
-            throw new BizException(429, "Platform limited: " + platformCode);
-        }
-
         long started = System.currentTimeMillis();
-        String response;
-        try (PlatformConcurrencyLimiterService.Permit ignored = platformConcurrencyLimiterService.acquire(config)) {
-            response = invokeModelApi(apiUrl, modelId, apiKey, systemPrompt, userPrompt);
-        }
+        String response = invokeModelApi(config, platformCode, channel, apiUrl, modelId, apiKey,
+                systemPrompt, userPrompt, requestCount);
         long durationMs = Math.max(1L, System.currentTimeMillis() - started);
         log.info("Content generation task {} executed by platform={}, model={}, channel={}",
                 task.getId(), platformCode, modelId, channel);
@@ -1727,55 +1746,60 @@ public class DispatchExecutionService {
         return "Please execute task " + task.getTaskType() + " for project " + task.getProjectId();
     }
 
-    private String invokeModelApi(String apiUrl, String modelId, String apiKey, String prompt) {
-        return invokeModelApi(apiUrl, modelId, apiKey, "You are a GEO (Generative Engine Optimization) monitoring assistant.", prompt, 0D);
+    private String invokeModelApi(AiPlatformConfig config,
+                                  String platformCode,
+                                  String channel,
+                                  String apiUrl,
+                                  String modelId,
+                                  String apiKey,
+                                  String prompt,
+                                  int requestCount) {
+        return invokeModelApi(config, platformCode, channel, apiUrl, modelId, apiKey,
+                "You are a GEO (Generative Engine Optimization) monitoring assistant.", prompt, 0D, requestCount);
     }
 
-    private String invokeModelApi(String apiUrl, String modelId, String apiKey, String systemPrompt, String userPrompt) {
-        return invokeModelApi(apiUrl, modelId, apiKey, systemPrompt, userPrompt, 0.7D);
-    }
-
-    private String invokeModelApi(String apiUrl,
+    private String invokeModelApi(AiPlatformConfig config,
+                                  String platformCode,
+                                  String channel,
+                                  String apiUrl,
                                   String modelId,
                                   String apiKey,
                                   String systemPrompt,
                                   String userPrompt,
-                                  double temperature) {
-        String targetUrl = apiUrl.trim();
-        if (!targetUrl.endsWith("/chat/completions")) {
-            targetUrl = targetUrl.endsWith("/") ? targetUrl + "chat/completions" : targetUrl + "/chat/completions";
-        }
+                                  int requestCount) {
+        return invokeModelApi(config, platformCode, channel, apiUrl, modelId, apiKey,
+                systemPrompt, userPrompt, 0.7D, requestCount);
+    }
 
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", modelId);
-        payload.put("temperature", temperature);
-        List<Map<String, String>> messages = new ArrayList<>();
-        if (StringUtils.hasText(systemPrompt)) {
-            messages.add(Map.of("role", "system", "content", systemPrompt));
-        }
-        messages.add(Map.of("role", "user", "content", userPrompt));
-        payload.put("messages", messages);
-
-        String requestJson = JSONUtil.toJsonStr(payload);
-        Map<String, String> headers = new LinkedHashMap<>();
-        headers.put("Content-Type", "application/json");
-        headers.put("Authorization", "Bearer " + apiKey);
-        headers.put("api-key", apiKey);
-        headers.put("x-api-key", apiKey);
-
+    private String invokeModelApi(AiPlatformConfig config,
+                                  String platformCode,
+                                  String channel,
+                                  String apiUrl,
+                                  String modelId,
+                                  String apiKey,
+                                  String systemPrompt,
+                                  String userPrompt,
+                                  double temperature,
+                                  int requestCount) {
         try {
-            HttpClientUtil.HttpResult response = HttpClientUtil.postJson(
-                    targetUrl,
-                    headers,
-                    requestJson,
+            LlmCallResult result = llmCallFacade.execute(LlmCallRequest.legacy(
+                    config,
+                    platformCode,
+                    config.getPlatformName(),
+                    channel,
+                    apiUrl,
+                    modelId,
+                    apiKey,
+                    systemPrompt,
+                    userPrompt,
+                    temperature,
+                    1000,
                     dispatchProperties.getModelConnectTimeoutMs(),
-                    dispatchProperties.getModelRequestTimeoutMs()
-            );
-            int code = response.statusCode();
-            String body = response.body();
-            if (code < 200 || code >= 300) {
-                throw new BizException(code, "Model API HTTP " + code + ": " + safeSnippet(body));
-            }
+                    dispatchProperties.getModelRequestTimeoutMs(),
+                    LlmFeature.GENERIC,
+                    requestCount
+            ));
+            String body = result.rawResponseText();
             String text = extractResponseText(body);
             if (!StringUtils.hasText(text)) {
                 throw new BizException(502, "Model API empty response text");

@@ -56,8 +56,23 @@ function handleChange(name: string) {
 </script>
 
 <style scoped>
+:deep(.van-tabbar) {
+  height: calc(64px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid var(--mobile-border, #eef0f2);
+  box-shadow: 0 -2px 12px rgba(15, 23, 42, 0.03);
+}
+
+:deep(.van-tabbar-item) {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label, 16px);
+}
+
 :deep(.van-tabbar-item__icon) {
-  font-size: 22px;
+  font-size: 24px;
   margin-bottom: 2px;
 }
 </style>

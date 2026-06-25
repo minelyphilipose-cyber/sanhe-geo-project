@@ -61,6 +61,16 @@ public class MobileDashboardPublicController {
         });
     }
 
+    @GetMapping("/monitor/question/{pollResultId}")
+    public R<MobileDashboardAggregateVO.QuestionMonitorItem> questionDetail(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                                                            @PathVariable Long pollResultId,
+                                                                            HttpServletRequest request) {
+        return audited("question_detail", authorization, request, () -> {
+            Long projectId = mobileDashboardShareService.requireValidSession(authorization).projectId();
+            return R.ok(mobileDashboardAggregateService.questionDetail(projectId, pollResultId));
+        });
+    }
+
     @GetMapping("/content")
     public R<MobileDashboardAggregateVO.Content> content(@RequestHeader(value = "Authorization", required = false) String authorization,
                                                          @RequestParam(required = false) String month,

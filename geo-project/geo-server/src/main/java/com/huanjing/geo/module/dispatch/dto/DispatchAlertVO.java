@@ -23,6 +23,9 @@ public class DispatchAlertVO {
     private Integer openGroupCount;
     private List<DispatchAlertVO> detailAlerts;
     private List<PlatformFailureSummary> platformFailures;
+    private Integer expectedResultCount;
+    private Integer failedCount;
+    private Double failureRate;
     private LocalDateTime resolvedAt;
     private Long resolvedBy;
     private LocalDateTime createdAt;

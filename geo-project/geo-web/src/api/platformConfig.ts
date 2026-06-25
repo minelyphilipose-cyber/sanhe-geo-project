@@ -17,6 +17,8 @@ export function createPlatformConfig(data: {
   platformHomeUrl?: string
   platformLogoUrl?: string
   priorityLevel: string
+  rpmLimit?: number
+  tpmLimit?: number
   apiKey: string
   primaryKeyRef?: string
   backupKeyRef?: string
@@ -50,6 +52,8 @@ export function updatePlatformConfig(id: number, data: {
   platformHomeUrl?: string
   platformLogoUrl?: string
   priorityLevel: string
+  rpmLimit?: number
+  tpmLimit?: number
   apiKey: string
   primaryKeyRef?: string
   backupKeyRef?: string

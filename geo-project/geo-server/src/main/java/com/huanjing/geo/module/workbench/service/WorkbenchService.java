@@ -48,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -426,10 +427,19 @@ public class WorkbenchService {
     }
 
     private LambdaQueryWrapper<SystemAlert> visibleSystemAlertWrapper(SysUser user) {
-        return new LambdaQueryWrapper<SystemAlert>()
-                .and(wrapper -> wrapper.eq(SystemAlert::getRecipientUserId, user.getId())
-                        .or()
-                        .eq(SystemAlert::getRecipientRole, user.getRole()));
+        LambdaQueryWrapper<SystemAlert> wrapper = new LambdaQueryWrapper<SystemAlert>();
+        if (isSuperAdmin(user)) {
+            return wrapper;
+        }
+        return wrapper.and(scope -> scope.eq(SystemAlert::getRecipientUserId, user.getId())
+                .or()
+                .eq(SystemAlert::getRecipientRole, user.getRole()));
+    }
+
+    private boolean isSuperAdmin(SysUser user) {
+        return user != null
+                && StringUtils.hasText(user.getRole())
+                && "super_admin".equals(user.getRole().trim().toLowerCase(Locale.ROOT));
     }
 
     private SystemAlertTodoVO toSystemAlertTodoVO(SystemAlert alert) {

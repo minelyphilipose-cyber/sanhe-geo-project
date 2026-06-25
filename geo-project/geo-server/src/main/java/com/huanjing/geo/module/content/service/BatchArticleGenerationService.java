@@ -5,9 +5,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
 import com.huanjing.geo.common.llm.LlmInvokeException;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
-import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
@@ -131,7 +132,7 @@ public class BatchArticleGenerationService {
     private final CurrentUserService currentUserService;
     private final BrandAccessService brandAccessService;
     private final PlatformCredentialService platformCredentialService;
-    private final LlmInvoker llmInvoker;
+    private final LlmCallFacade llmCallFacade;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
     private final ArticleAiDraftPromptFilter promptFilter;
     private final ArticleGenerationEngine articleGenerationEngine;
@@ -174,7 +175,7 @@ public class BatchArticleGenerationService {
                                          CurrentUserService currentUserService,
                                          BrandAccessService brandAccessService,
                                          PlatformCredentialService platformCredentialService,
-                                         LlmInvoker llmInvoker,
+                                         LlmCallFacade llmCallFacade,
                                          MarkdownImageReferenceValidator markdownImageReferenceValidator,
                                          ArticleAiDraftPromptFilter promptFilter,
                                          ArticleGenerationEngine articleGenerationEngine,
@@ -210,7 +211,7 @@ public class BatchArticleGenerationService {
         this.currentUserService = currentUserService;
         this.brandAccessService = brandAccessService;
         this.platformCredentialService = platformCredentialService;
-        this.llmInvoker = llmInvoker;
+        this.llmCallFacade = llmCallFacade;
         this.markdownImageReferenceValidator = markdownImageReferenceValidator;
         this.promptFilter = promptFilter;
         this.articleGenerationEngine = articleGenerationEngine;
@@ -854,6 +855,7 @@ public class BatchArticleGenerationService {
             draft.setChannelSubCode(task.getChannelSubCode());
             draft.setAgentSiteModule(task.getAgentSiteModule());
             draft.setArticleTypeCode(task.getArticleTypeCode());
+            draft.setCategory(resolveIndustrySiteCategory(task));
             draft.setPromptTemplateId(task.getPromptTemplateId());
             draft.setPromptTemplateVersionId(task.getPromptTemplateVersionId());
             draft.setPerspectiveCode(TemplatePerspectiveCodes.normalize(task.getPerspectiveCode()));
@@ -863,8 +865,10 @@ public class BatchArticleGenerationService {
             draft.setTopicAsQuestion(task.getTopicAsQuestion());
             draft.setTitle(title);
             applyMedicalDraftFields(draft, medicalContext, complianceStatus);
+            String coverImageUrl = null;
             if (ArticlePromptChannels.SELF_MEDIA.equals(task.getChannelGroupCode())) {
-                draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(coverBrandId(project, task)));
+                coverImageUrl = coverSelectionService.selectRandomCoverUrl(coverBrandId(project, task));
+                draft.setCoverImageUrl(coverImageUrl);
             }
             draft.setStatus("approved");
             draft.setCurrentVersionNo(1);
@@ -877,7 +881,8 @@ public class BatchArticleGenerationService {
             version.setArticleId(draft.getId());
             version.setVersionNo(1);
             version.setTitle(title);
-            version.setContentMarkdown(autoImageInsertionService.insertForChannel(project, task.getChannelGroupCode(), content));
+            version.setContentMarkdown(autoImageInsertionService.insertForChannel(project, task.getChannelGroupCode(),
+                    task.getChannelSubCode(), content, coverImageUrl));
             version.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), result));
             version.setInputSnapshot(prompt.inputSnapshot());
             version.setModelPlatformCode(model.platformCode());
@@ -904,6 +909,34 @@ public class BatchArticleGenerationService {
         return project == null ? null : project.getBrandId();
     }
 
+    private String resolveIndustrySiteCategory(BatchArticleGenerationTask task) {
+        if (task == null || !ArticlePromptChannels.INDUSTRY_SITE.equals(task.getChannelGroupCode())) {
+            return null;
+        }
+        String contentAngle = task.getContentAngle();
+        if (StringUtils.hasText(contentAngle)) {
+            String angle = contentAngle.trim();
+            if (angle.contains("地域")) {
+                return "region";
+            }
+            if (angle.contains("选择") || angle.contains("避坑") || angle.contains("清单") || angle.contains("决策")) {
+                return "guide";
+            }
+            if (angle.contains("流程") || angle.contains("服务")) {
+                return "service";
+            }
+        }
+        String articleType = task.getArticleType();
+        if (StringUtils.hasText(articleType)) {
+            return switch (articleType.trim().toLowerCase(Locale.ROOT)) {
+                case "buying_guide", "pitfall_guide", "stage_advice", "faq" -> "guide";
+                case "scenario_content" -> "service";
+                default -> "industry";
+            };
+        }
+        return "industry";
+    }
+
     private Long persistDiscardedArticle(Project project,
                                          BatchArticleGenerationTask task,
                                          ArticleGenerationEngine.GeneratedArticle generated,
@@ -924,6 +957,7 @@ public class BatchArticleGenerationService {
             draft.setChannelSubCode(task.getChannelSubCode());
             draft.setAgentSiteModule(task.getAgentSiteModule());
             draft.setArticleTypeCode(task.getArticleTypeCode());
+            draft.setCategory(resolveIndustrySiteCategory(task));
             draft.setPromptTemplateId(task.getPromptTemplateId());
             draft.setPromptTemplateVersionId(task.getPromptTemplateVersionId());
             draft.setPerspectiveCode(TemplatePerspectiveCodes.normalize(task.getPerspectiveCode()));
@@ -1440,7 +1474,8 @@ public class BatchArticleGenerationService {
         }
         try {
             ArticleModelResolver.ModelSelection model = resolveModel(SMART_TEMPLATE_MATCH_SYSTEM_PROMPT);
-            LlmInvokeResult result = llmInvoker.invoke(buildSmartTemplateMatchPrompt(units), model.config());
+            String prompt = buildSmartTemplateMatchPrompt(units);
+            LlmInvokeResult result = llmCallFacade.execute(LlmCallRequest.direct(prompt, model.config())).invokeResult();
             Map<String, SmartTemplateSelection> selections = parseSmartTemplateMatchResult(result.responseText(), units);
             if (!selections.isEmpty()) {
                 return selections;

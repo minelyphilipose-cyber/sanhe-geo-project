@@ -293,6 +293,7 @@ export function createManualContentArticle(data: {
   title?: string
   contentMarkdown: string
   coverMaterialId?: number
+  headImageMaterialId?: number
   source?: 'manual' | 'ai_preview' | string
   aiMetadata?: Record<string, unknown>
 }) {

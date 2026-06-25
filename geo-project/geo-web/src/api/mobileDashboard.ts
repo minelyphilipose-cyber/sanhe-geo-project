@@ -12,6 +12,7 @@ import type {
   MobileDashboardShare,
   MobileDashboardShareAccessSummary,
   MonitorDashboardData,
+  QuestionMonitorItem,
   ReportDashboardData,
 } from '@/types/mobileDashboard'
 
@@ -72,6 +73,12 @@ export function getMobileDashboardMonitor(sessionToken: string, platformCode?: s
   return mobileRequest.get<R<MonitorDashboardData>>('/public/mobile-dashboard/monitor', {
     headers: { Authorization: `Bearer ${sessionToken}` },
     params: platformCode && platformCode !== 'all' ? { platformCode } : undefined,
+  })
+}
+
+export function getMobileDashboardQuestionDetail(sessionToken: string, pollResultId: number) {
+  return mobileRequest.get<R<QuestionMonitorItem>>(`/public/mobile-dashboard/monitor/question/${pollResultId}`, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
   })
 }
 

@@ -22,6 +22,8 @@ public record LlmModelConfig(String platformCode,
                              boolean useExecutionGateway) {
 
     private static final String PLATFORM_KIMI = "kimi";
+    private static final String PLATFORM_WENXIN = "wenxin";
+    private static final double WENXIN_MIN_TEMPERATURE = 0.1D;
 
     public static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
     public static final int DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -153,6 +155,9 @@ public record LlmModelConfig(String platformCode,
     private static double normalizeTemperature(String platformCode, Double temperature) {
         if (StringUtils.hasText(platformCode) && PLATFORM_KIMI.equalsIgnoreCase(platformCode.trim())) {
             return 1D;
+        }
+        if (StringUtils.hasText(platformCode) && PLATFORM_WENXIN.equalsIgnoreCase(platformCode.trim())) {
+            return temperature == null || temperature <= 0D ? WENXIN_MIN_TEMPERATURE : temperature;
         }
         return temperature == null ? 0D : temperature;
     }

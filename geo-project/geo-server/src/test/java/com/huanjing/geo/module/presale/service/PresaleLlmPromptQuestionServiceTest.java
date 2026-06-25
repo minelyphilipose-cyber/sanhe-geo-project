@@ -3,9 +3,11 @@ package com.huanjing.geo.module.presale.service;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
+import com.huanjing.geo.common.llm.LlmCallResult;
 import com.huanjing.geo.common.llm.LlmCallStatus;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
-import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.LlmProperties;
 import com.huanjing.geo.module.presale.dto.PresalePromptCategoryCode;
@@ -44,7 +46,7 @@ class PresaleLlmPromptQuestionServiceTest {
     @Mock
     private PlatformCredentialService platformCredentialService;
     @Mock
-    private LlmInvoker llmInvoker;
+    private LlmCallFacade llmCallFacade;
     @Mock
     private CurrentUserService currentUserService;
     @Mock
@@ -57,7 +59,7 @@ class PresaleLlmPromptQuestionServiceTest {
         service = new PresaleLlmPromptQuestionService(
                 aiPlatformConfigMapper,
                 platformCredentialService,
-                llmInvoker,
+                llmCallFacade,
                 new LlmProperties(),
                 new ObjectMapper(),
                 currentUserService,
@@ -76,22 +78,22 @@ class PresaleLlmPromptQuestionServiceTest {
         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(first, second));
         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
         when(platformCredentialService.resolveApiKey("bbb", null, "key-bbb")).thenReturn("key-bbb");
-        when(llmInvoker.invoke(anyString(), any(LlmModelConfig.class)))
+        when(llmCallFacade.execute(any(LlmCallRequest.class)))
                 .thenThrow(new com.huanjing.geo.common.llm.LlmInvokeException("HTTP 402: insufficient balance"))
-                .thenReturn(successResult("bbb"));
+                .thenReturn(LlmCallResult.direct(successResult("bbb")));
 
         LlmPromptQuestionGenerateVO result = service.generate(request());
 
         assertEquals(5, result.getGeneratedTotal());
         assertEquals(0, result.getMissingTotal());
-        ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
-        verify(llmInvoker, org.mockito.Mockito.times(2)).invoke(anyString(), configCaptor.capture());
+        ArgumentCaptor<LlmCallRequest> configCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
+        verify(llmCallFacade, org.mockito.Mockito.times(2)).execute(configCaptor.capture());
         assertEquals(List.of("http://first.example/v1", "http://second.example/v1"),
-                configCaptor.getAllValues().stream().map(LlmModelConfig::apiUrl).toList());
+                configCaptor.getAllValues().stream().map(LlmCallRequest::modelConfig).map(LlmModelConfig::apiUrl).toList());
         assertEquals(List.of("low-model-aaa", "low-model-bbb"),
-                configCaptor.getAllValues().stream().map(LlmModelConfig::modelId).toList());
+                configCaptor.getAllValues().stream().map(LlmCallRequest::modelConfig).map(LlmModelConfig::modelId).toList());
         assertEquals(List.of(30_000, 30_000),
-                configCaptor.getAllValues().stream().map(LlmModelConfig::requestTimeoutMs).toList());
+                configCaptor.getAllValues().stream().map(LlmCallRequest::modelConfig).map(LlmModelConfig::requestTimeoutMs).toList());
     }
 
     @Test
@@ -99,7 +101,7 @@ class PresaleLlmPromptQuestionServiceTest {
         AiPlatformConfig first = platform("aaa", "http://first.example/v1");
         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(first));
         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
-        when(llmInvoker.invoke(anyString(), any(LlmModelConfig.class)))
+        when(llmCallFacade.execute(any(LlmCallRequest.class)))
                 .thenThrow(new com.huanjing.geo.common.llm.LlmInvokeException("HTTP 402: insufficient balance"));
 
         BizException ex = assertThrows(BizException.class, () -> service.generate(request()));
@@ -112,8 +114,8 @@ class PresaleLlmPromptQuestionServiceTest {
         AiPlatformConfig platform = platform("aaa", "http://first.example/v1");
         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(platform));
         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
-        when(llmInvoker.invoke(anyString(), any(LlmModelConfig.class)))
-                .thenReturn(result("""
+        when(llmCallFacade.execute(any(LlmCallRequest.class)))
+                .thenReturn(LlmCallResult.direct(result("""
                         [
                           {"categoryCode":"PROBLEM","promptContent":"广州诗帝尼门窗有限公司售后靠不靠谱?"},
                           {"categoryCode":"PROBLEM","promptContent":"广州装修选门窗时售后和安装怎么避坑?"},
@@ -122,7 +124,7 @@ class PresaleLlmPromptQuestionServiceTest {
                           {"categoryCode":"COGNITIVE","promptContent":"诗帝尼门窗质量口碑如何?"},
                           {"categoryCode":"COGNITIVE","promptContent":"诗帝尼在门窗行业知名度如何?"}
                         ]
-                        """, "aaa"));
+                        """, "aaa")));
 
         LlmPromptQuestionGenerateVO result = service.generate(problemRequest());
 
@@ -133,9 +135,9 @@ class PresaleLlmPromptQuestionServiceTest {
         assertTrue(result.getQuestions().stream()
                 .anyMatch(q -> q.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
                         && q.getPromptContent().equals("广州装修选门窗时售后和安装怎么避坑?")));
-        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(llmInvoker).invoke(promptCaptor.capture(), any(LlmModelConfig.class));
-        assertTrue(promptCaptor.getValue().contains("PROBLEM 问题型禁止直接提及基础信息中的品牌名称"));
+        ArgumentCaptor<LlmCallRequest> promptCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
+        verify(llmCallFacade).execute(promptCaptor.capture());
+        assertTrue(promptCaptor.getValue().prompt().contains("PROBLEM 问题型禁止直接提及基础信息中的品牌名称"));
     }
 
     private static LlmPromptQuestionGenerateRequest request() {

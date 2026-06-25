@@ -31,6 +31,7 @@ public class LlmPoolProperties {
             "article", 4,
             "presale", 8,
             "baseline", 16,
+            "mobile_judge", 4,
             "draft", 4,
             "generic", 4
     ));

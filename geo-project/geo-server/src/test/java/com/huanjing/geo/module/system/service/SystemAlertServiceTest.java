@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.system.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import cn.hutool.json.JSONUtil;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.system.dto.SystemAlertTodoVO;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -60,6 +62,23 @@ class SystemAlertServiceTest {
         assertEquals(9L, todo.getId());
         assertEquals("xx论坛登录信息已过期，请更新", todo.getMessage());
         assertEquals("{\"route\":\"/admin/content/publish-platforms?siteId=7\"}", todo.getContextJson());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void superAdminMyTodosCanSeeAllSystemAlerts() {
+        Page<SystemAlert> page = new Page<>(1, 20, 0);
+        when(systemAlertMapper.selectPage(any(Page.class), any())).thenReturn(page);
+
+        systemAlertService.myTodos(1, 20);
+
+        ArgumentCaptor<LambdaQueryWrapper<SystemAlert>> wrapperCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(systemAlertMapper).selectPage(any(Page.class), wrapperCaptor.capture());
+        String sql = wrapperCaptor.getValue().getExpression().getNormal().stream()
+                .map(Object::toString)
+                .collect(java.util.stream.Collectors.joining(" "));
+        org.junit.jupiter.api.Assertions.assertFalse(sql.contains("recipient_user_id"));
+        org.junit.jupiter.api.Assertions.assertFalse(sql.contains("recipient_role"));
     }
 
     @Test
@@ -129,6 +148,40 @@ class SystemAlertServiceTest {
         assertEquals(null, updated.getResolvedAt());
         assertEquals(99L, updated.getRecipientUserId());
         assertEquals("账号授权已过期", updated.getMessage());
+    }
+
+    @Test
+    void createOrRefreshRecipientAlertUpdatesOpenDedupeKey() {
+        SystemAlert existing = new SystemAlert();
+        existing.setId(12L);
+        existing.setDedupeKey("llm_capacity:hunyuan:active_peak");
+        existing.setIsResolved(false);
+        existing.setMessage("旧告警");
+        when(systemAlertMapper.selectOne(any())).thenReturn(existing);
+
+        systemAlertService.createOrRefreshRecipientAlert(
+                "LLM_CAPACITY_HUNYUAN_ACTIVE_PEAK",
+                "critical",
+                "llm_capacity_alert",
+                "混元 active peak 持续顶格",
+                Map.of("category", "decision", "threshold", 5),
+                null,
+                "super_admin",
+                "llm_capacity:hunyuan:active_peak"
+        );
+
+        ArgumentCaptor<SystemAlert> captor = ArgumentCaptor.forClass(SystemAlert.class);
+        verify(systemAlertMapper).updateById(captor.capture());
+        SystemAlert updated = captor.getValue();
+        assertEquals(12L, updated.getId());
+        assertEquals(false, updated.getIsResolved());
+        assertEquals("critical", updated.getSeverity());
+        assertEquals("混元 active peak 持续顶格", updated.getMessage());
+        assertEquals("super_admin", updated.getRecipientRole());
+        cn.hutool.json.JSONObject context = JSONUtil.parseObj(updated.getContextJson());
+        assertEquals("decision", context.getStr("category"));
+        assertEquals(5, context.getInt("threshold"));
+        verify(systemAlertMapper, never()).insert(any());
     }
 
     private SysUser user() {

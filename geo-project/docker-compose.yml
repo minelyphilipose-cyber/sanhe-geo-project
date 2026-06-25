@@ -99,6 +99,7 @@ services:
         mc mb --ignore-existing "local/$${MINIO_BUCKET}"
         mc admin user add local "$${MINIO_APP_ACCESS_KEY}" "$${MINIO_APP_SECRET_KEY}" || true
         mc admin policy attach local readwrite --user "$${MINIO_APP_ACCESS_KEY}"
+        mc anonymous set download "local/$${MINIO_BUCKET}"
 
   geo-server:
     image: sanhe-geo/geo-server:${IMAGE_TAG}
