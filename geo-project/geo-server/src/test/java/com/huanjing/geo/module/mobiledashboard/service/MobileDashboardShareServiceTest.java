@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -113,6 +114,61 @@ class MobileDashboardShareServiceTest {
         assertThat(claims.projectId()).isEqualTo(11L);
     }
 
+    @Test
+    void deleteShareRejectsActiveShare() {
+        MobileDashboardShareMapper shareMapper = mock(MobileDashboardShareMapper.class);
+        ProjectMapper projectMapper = mock(ProjectMapper.class);
+        CurrentUserService currentUserService = mock(CurrentUserService.class);
+        MobileDashboardShare share = share("active", 11L, LocalDateTime.now().plusDays(1));
+        share.setTokenPrefix("mdb_active");
+        when(shareMapper.selectById(5L)).thenReturn(share);
+        when(projectMapper.selectById(11L)).thenReturn(project());
+        when(currentUserService.requireCurrentUser()).thenReturn(user());
+
+        MobileDashboardShareService service = new MobileDashboardShareService(
+                shareMapper,
+                mock(MobileDashboardAccessLogMapper.class),
+                projectMapper,
+                currentUserService,
+                mock(ActivityLogService.class),
+                mock(InternalScopeService.class),
+                mock(MobileDashboardSessionTokenService.class)
+        );
+
+        BizException ex = assertThrows(BizException.class, () -> service.deleteShare(5L));
+
+        assertThat(ex.getMessage()).contains("disabled before deletion");
+        verify(shareMapper, never()).deleteById(5L);
+    }
+
+    @Test
+    void deleteShareDeletesDisabledShare() {
+        MobileDashboardShareMapper shareMapper = mock(MobileDashboardShareMapper.class);
+        ProjectMapper projectMapper = mock(ProjectMapper.class);
+        CurrentUserService currentUserService = mock(CurrentUserService.class);
+        ActivityLogService activityLogService = mock(ActivityLogService.class);
+        MobileDashboardShare share = share("disabled", 11L, LocalDateTime.now().plusDays(1));
+        share.setTokenPrefix("mdb_disabled");
+        when(shareMapper.selectById(5L)).thenReturn(share);
+        when(projectMapper.selectById(11L)).thenReturn(project());
+        when(currentUserService.requireCurrentUser()).thenReturn(user());
+
+        MobileDashboardShareService service = new MobileDashboardShareService(
+                shareMapper,
+                mock(MobileDashboardAccessLogMapper.class),
+                projectMapper,
+                currentUserService,
+                activityLogService,
+                mock(InternalScopeService.class),
+                mock(MobileDashboardSessionTokenService.class)
+        );
+
+        service.deleteShare(5L);
+
+        verify(shareMapper).deleteById(5L);
+        verify(activityLogService).logAction(any(), any(), any(), any(), any(), any(), any());
+    }
+
     private MobileDashboardShareService service(MobileDashboardShareMapper shareMapper,
                                                 MobileDashboardSessionTokenService tokenService) {
         return new MobileDashboardShareService(
@@ -133,5 +189,18 @@ class MobileDashboardShareServiceTest {
         share.setStatus(status);
         share.setExpiresAt(expiresAt);
         return share;
+    }
+
+    private Project project() {
+        Project project = new Project();
+        project.setId(11L);
+        project.setPartnerId(1L);
+        return project;
+    }
+
+    private SysUser user() {
+        SysUser user = new SysUser();
+        user.setId(99L);
+        return user;
     }
 }

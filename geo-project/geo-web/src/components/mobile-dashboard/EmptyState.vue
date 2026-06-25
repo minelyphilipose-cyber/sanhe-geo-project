@@ -1,12 +1,14 @@
 <template>
   <div class="mobile-empty-state">
-    <van-icon name="bar-chart-o" />
+    <MobileIcon name="dashboard" />
     <strong>{{ title }}</strong>
     <span>{{ description }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
+import MobileIcon from './MobileIcon.vue'
+
 defineProps<{
   title?: string
   description?: string
@@ -20,30 +22,30 @@ defineProps<{
   place-items: center;
   gap: 6px;
   padding: 18px 12px;
-  color: #9ca3af;
+  color: #52625C;
   text-align: center;
 }
 
-.mobile-empty-state .van-icon {
+.mobile-empty-state .mobile-icon {
   width: 36px;
   height: 36px;
   display: grid;
   place-items: center;
   border-radius: 12px;
   background: #e6f7ef;
-  color: #07a66b;
+  color: #006D44;
   font-size: 20px;
 }
 
 .mobile-empty-state strong {
-  color: #0f172a;
+  color: #131b2e;
   font-size: 14px;
   font-weight: 700;
 }
 
 .mobile-empty-state span {
   max-width: 230px;
-  color: #9ca3af;
+  color: #52625C;
   font-size: 12px;
   line-height: 1.55;
 }

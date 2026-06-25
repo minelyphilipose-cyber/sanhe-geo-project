@@ -1,39 +1,51 @@
 <template>
   <div class="mobile-page">
-    <DashboardCard title="内容交付概览">
-      <section class="metric-grid">
+    <DashboardCard title="内容交付概览" icon="content">
+      <section class="overview-strip">
         <div v-for="item in overviewCards" :key="item.label" class="inline-metric">
-          <van-icon :name="item.icon" />
+          <MobileIcon :name="item.icon" />
           <span>{{ item.label }}</span>
           <strong>{{ metricText(item.metric) }}</strong>
         </div>
       </section>
     </DashboardCard>
 
-    <DashboardCard :title="platformCompletionTitle">
-      <div v-if="data?.platformCompletion?.length" class="completion-grid">
+    <DashboardCard :title="platformCompletionTitle" icon="dashboard">
+      <div v-if="data?.platformCompletion?.length" class="completion-rail">
         <div v-for="item in data.platformCompletion" :key="item.code" class="completion-item">
-          <span>{{ contentPlatformLabel(item.code) }}</span>
-          <strong>{{ completionMainText(item) }}</strong>
-          <small>{{ completionCaption(item) }}</small>
+          <div class="platform-icon">{{ contentPlatformLabel(item.code).slice(0, 1) }}</div>
+          <div class="completion-copy">
+            <span>{{ contentPlatformLabel(item.code) }}</span>
+            <strong>{{ completionMainText(item) }}</strong>
+            <i :style="{ width: completionBarWidth(item) }" />
+          </div>
         </div>
       </div>
+      <p v-if="completionScopeNote" class="module-note">{{ completionScopeNote }}</p>
       <EmptyState v-else description="暂无本月发布数据或逐渠道月度配额。" />
     </DashboardCard>
 
-    <DashboardCard title="内容任务列表">
+    <DashboardCard title="内容任务列表" icon="document">
       <div v-if="taskItems.length" class="task-list">
-        <article v-for="item in taskItems" :key="item.draftId" class="task-item">
+        <article
+          v-for="item in taskItems"
+          :key="item.draftId"
+          class="task-item"
+          :class="{ clickable: canOpenTask(item) }"
+          @click="openTask(item)"
+        >
+          <div class="task-icon">{{ taskIconText(item.platformCodes) }}</div>
           <div class="task-main">
             <div class="task-title-row">
               <h3>{{ item.title }}</h3>
-              <span class="task-status" :class="item.status">{{ taskStatusLabel(item.status) }}</span>
+              <span class="task-status" :class="item.status">
+                {{ taskStatusLabel(item.status) }}
+                <MobileIcon v-if="canOpenTask(item)" name="chevronRight" />
+              </span>
             </div>
-            <div v-if="item.keywords?.length" class="keyword-row">
-              <span v-for="keyword in item.keywords" :key="keyword">{{ keyword }}</span>
-            </div>
+            <p v-if="item.keywords?.length" class="task-keyword">关键词：{{ item.keywords[0] }}</p>
             <div class="task-meta">
-              <span>{{ taskPlatforms(item.platformCodes) }}</span>
+              <span class="task-platform">{{ taskPlatforms(item.platformCodes) }}</span>
               <time>{{ formatDate(item.date) }}</time>
             </div>
           </div>
@@ -42,9 +54,12 @@
       <EmptyState v-else :description="data?.taskList?.reason || '暂无内容任务数据'" />
     </DashboardCard>
 
-    <DashboardCard title="自有平台发布情况">
+    <DashboardCard title="自有平台发布情况" icon="grid">
       <section v-if="data?.ownedPublish?.length" class="owned-grid">
         <div v-for="item in data.ownedPublish" :key="item.code" class="owned-item">
+          <div class="platform-symbol" :class="`platform-symbol--${item.code}`">
+            <MobileIcon :name="contentPlatformIcon(item.code)" />
+          </div>
           <span>{{ contentPlatformLabel(item.code) }}</span>
           <strong>{{ metricText(item.published, false) }}/{{ metricText(item.indexed, false) }}</strong>
           <small>已发布 / 已收录</small>
@@ -52,14 +67,14 @@
       </section>
     </DashboardCard>
 
-    <DashboardCard title="生态资产">
-      <section v-if="ecoCards.length" class="metric-grid">
-        <div v-for="item in ecoCards" :key="item.label" class="inline-metric">
+    <DashboardCard title="生态资产" icon="cluster">
+      <section v-if="ecoCards.length" class="eco-summary">
+        <div v-for="item in ecoCards" :key="item.label" class="eco-item">
           <span>{{ item.label }}</span>
           <strong>{{ metricText(item.metric) }}</strong>
         </div>
       </section>
-      <p v-if="data?.ecoAssets?.indexMeasurementScope" class="scope-note">{{ data.ecoAssets.indexMeasurementScope }}</p>
+      <p v-if="data?.ecoAssets?.indexMeasurementScope" class="scope-note">{{ shortIndexScope }}</p>
     </DashboardCard>
   </div>
 </template>
@@ -67,11 +82,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { showToast } from 'vant'
-import { getMobileDashboardContent } from '@/api/mobileDashboard'
+import { getMobileDashboardContent, withRenewedMobileDashboardSession } from '@/api/mobileDashboard'
 import DashboardCard from '@/components/mobile-dashboard/DashboardCard.vue'
 import EmptyState from '@/components/mobile-dashboard/EmptyState.vue'
+import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
-import type { ContentDashboardData, DashboardMetric, PlatformCompletion } from '@/types/mobileDashboard'
+import type { ContentDashboardData, ContentTaskItem, DashboardMetric, PlatformCompletion } from '@/types/mobileDashboard'
 import { contentPlatformLabel } from '@/utils/mobileDashboardDictionaries'
 
 const store = useMobileDashboardStore()
@@ -81,20 +97,20 @@ const overviewCards = computed(() => {
   const overview = data.value?.overview
   if (!overview) return []
   return [
-    { label: '本月内容', icon: 'description-o', metric: overview.monthContent },
-    { label: '已发布', icon: 'passed', metric: overview.published },
-    { label: '已收录', icon: 'bookmark-o', metric: overview.indexed },
-    { label: '建设中', icon: 'underway-o', metric: overview.building },
+    { label: '本月内容', icon: 'document', metric: overview.monthContent },
+    { label: '已发布', icon: 'check', metric: overview.published },
+    { label: '已收录', icon: 'inbox', metric: overview.indexed },
+    { label: '建设中', icon: 'tools', metric: overview.building },
   ]
 })
 const ecoCards = computed(() => {
   const eco = data.value?.ecoAssets
   if (!eco) return []
   return [
-    { label: '累计资产', metric: eco.totalAssets },
-    { label: '本月新增', metric: eco.monthNew },
-    { label: '已收录', metric: eco.indexed },
-    { label: '核心问题覆盖', metric: eco.coveredQuestions },
+    { label: '累计资产', icon: 'document', metric: eco.totalAssets },
+    { label: '本月新增', icon: 'plus', metric: eco.monthNew },
+    { label: '已收录', icon: 'eye', metric: eco.indexed },
+    { label: '核心问题覆盖', icon: 'check', metric: eco.coveredQuestions },
   ]
 })
 const taskItems = computed(() => data.value?.taskList?.items || [])
@@ -103,6 +119,17 @@ const platformCompletionTitle = computed(() =>
     ? '平台完成度'
     : '平台发布情况'
 )
+const completionScopeNote = computed(() => {
+  const items = data.value?.platformCompletion || []
+  if (!items.length) return ''
+  return items.some((item) => item.completionRate?.available)
+    ? ''
+    : '当前展示各平台真实发布数。'
+})
+const shortIndexScope = computed(() => {
+  if (!data.value?.ecoAssets?.indexMeasurementScope) return ''
+  return '已收录仅统计可测量渠道，未回查渠道不计入。'
+})
 
 function metricText(metric?: DashboardMetric, includeUnit = true) {
   if (!metric?.available) return '暂未统计'
@@ -110,12 +137,16 @@ function metricText(metric?: DashboardMetric, includeUnit = true) {
   return includeUnit && metric.unit ? `${value}${metric.unit}` : `${value}`
 }
 
-function completionCaption(item: PlatformCompletion) {
-  return item.completionRate?.available ? `${item.published}/${item.quota}` : '暂无逐渠道月度配额'
-}
-
 function completionMainText(item: PlatformCompletion) {
   return item.completionRate?.available ? metricText(item.completionRate) : `已发布 ${item.published}`
+}
+
+function completionBarWidth(item: PlatformCompletion) {
+  if (item.completionRate?.available) {
+    return `${Math.max(6, Math.min(100, Number(item.completionRate.value || 0)))}%`
+  }
+  const maxPublished = Math.max(...(data.value?.platformCompletion || []).map((row) => row.published || 0), 1)
+  return `${Math.max(12, Math.round(((item.published || 0) / maxPublished) * 100))}%`
 }
 
 function taskStatusLabel(status: string) {
@@ -132,14 +163,44 @@ function taskPlatforms(codes: string[]) {
   return codes.map((code) => contentPlatformLabel(code)).join(' / ')
 }
 
+function taskIconText(codes: string[]) {
+  if (!codes?.length) return '待'
+  return contentPlatformLabel(codes[0]).slice(0, 1)
+}
+
+function contentPlatformIcon(code?: string | null) {
+  const icons: Record<string, string> = {
+    official_site: 'globe',
+    douyin: 'movie',
+    xiaohongshu: 'favorite',
+    wechat_mp: 'chat',
+    toutiao: 'newspaper',
+    baijiahao: 'article',
+    zhihu: 'question',
+  }
+  return code ? icons[code] || 'globe' : 'globe'
+}
+
 function formatDate(value?: string | null) {
   if (!value) return ''
-  return value.slice(0, 10)
+  return value.slice(5, 10)
+}
+
+function canOpenTask(item: ContentTaskItem) {
+  return /^https?:\/\//i.test(item.publishUrl || '')
+}
+
+function openTask(item: ContentTaskItem) {
+  if (!canOpenTask(item)) return
+  window.open(item.publishUrl!, '_blank', 'noopener,noreferrer')
 }
 
 onMounted(async () => {
   try {
-    const res = await getMobileDashboardContent(store.sessionToken)
+    const res = await withRenewedMobileDashboardSession(
+      (sessionToken) => getMobileDashboardContent(sessionToken),
+      store,
+    )
     data.value = res.data.data
   } catch (error: any) {
     showToast(error?.message || '数据加载失败')
@@ -155,6 +216,13 @@ onMounted(async () => {
   max-width: 100%;
 }
 
+.overview-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -164,49 +232,112 @@ onMounted(async () => {
 
 .inline-metric {
   min-width: 0;
-  padding: 12px;
+  padding: 10px;
   border-radius: 12px;
   background: #f8fafc;
 }
 
-.inline-metric .van-icon {
+.overview-strip .inline-metric {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 80px;
+  padding: 8px 4px;
+}
+
+.inline-metric .mobile-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #e6f7ef;
+  color: #006D44;
+  font-size: 17px;
+}
+
+.overview-strip .inline-metric .mobile-icon {
+  margin-inline: auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 11px;
+}
+
+.inline-metric span {
+  display: block;
+  margin-top: 7px;
+  color: #52625C;
+  font-size: 12px;
+}
+
+.overview-strip .inline-metric span {
+  text-align: center;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-metric strong {
+  display: block;
+  margin-top: 5px;
+  color: #131b2e;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.overview-strip .inline-metric strong {
+  text-align: center;
+  font-size: 18px;
+}
+
+.completion-rail {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  margin: 0 -4px;
+  padding: 2px 4px 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+
+.completion-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.completion-item {
+  flex: 0 0 118px;
+  min-width: 118px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border-radius: 13px;
+  background: #f8fafc;
+  scroll-snap-align: start;
+}
+
+.completion-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.platform-icon {
+  flex: 0 0 auto;
   width: 30px;
   height: 30px;
   display: grid;
   place-items: center;
   border-radius: 10px;
   background: #e6f7ef;
-  color: #07a66b;
-  font-size: 17px;
-}
-
-.inline-metric span {
-  display: block;
-  margin-top: 8px;
-  color: #9ca3af;
-  font-size: 12px;
-}
-
-.inline-metric strong {
-  display: block;
-  margin-top: 6px;
-  color: #0f172a;
-  font-size: 18px;
+  color: #006D44;
+  font-size: 13px;
   font-weight: 800;
-}
-
-.completion-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.completion-item,
-.owned-item {
-  min-width: 0;
-  padding: 12px;
-  border-radius: 12px;
-  background: #f8fafc;
 }
 
 .completion-item span,
@@ -214,62 +345,117 @@ onMounted(async () => {
   display: block;
   color: #6b7280;
   font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .completion-item strong,
 .owned-item strong {
   display: block;
-  margin-top: 8px;
-  color: #0f172a;
-  font-size: 18px;
+  margin-top: 3px;
+  color: #131b2e;
+  font-size: 15px;
   font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
-.completion-item small,
+.completion-item i {
+  display: block;
+  width: 100%;
+  height: 3px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: #006D44;
+}
+
 .owned-item small {
   display: block;
-  margin-top: 4px;
-  color: #9ca3af;
+  margin-top: 5px;
+  color: #52625C;
   font-size: 11px;
+  line-height: 1.35;
+}
+
+.module-note {
+  margin: 5px 0 0;
+  color: #52625C;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .task-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .task-item {
+  display: flex;
+  gap: 10px;
   min-width: 0;
-  padding: 12px;
+  padding: 10px;
   border: 1px solid #eef0f2;
-  border-radius: 14px;
+  border-radius: 13px;
   background: #fff;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.task-item.clickable {
+  cursor: pointer;
+}
+
+.task-item.clickable:active {
+  transform: scale(0.99);
+  border-color: rgba(0, 109, 68, 0.18);
+  box-shadow: 0 6px 16px rgba(0, 109, 68, 0.08);
+}
+
+.task-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e6f7ef;
+  color: #006D44;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .task-main {
+  flex: 1;
   min-width: 0;
 }
 
 .task-title-row {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 7px;
 }
 
 .task-title-row h3 {
   flex: 1;
   min-width: 0;
   margin: 0;
-  color: #0f172a;
+  color: #131b2e;
+  display: -webkit-box;
+  overflow: hidden;
   font-size: 14px;
   font-weight: 800;
-  line-height: 1.45;
+  line-height: 1.38;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .task-status {
   flex: 0 0 auto;
-  padding: 3px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 7px;
   border-radius: 999px;
   background: #f3f4f6;
   color: #6b7280;
@@ -278,39 +464,29 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
+.task-status .mobile-icon {
+  font-size: 10px;
+  font-weight: 800;
+}
+
 .task-status.indexed,
 .task-status.published {
   background: #e6f7ef;
-  color: #07a66b;
+  color: #006D44;
 }
 
 .task-status.building {
-  background: #fff7ed;
-  color: #c2410c;
+  background: #eef2ff;
+  color: #4f46e5;
 }
 
-.keyword-row {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.keyword-row::-webkit-scrollbar {
-  display: none;
-}
-
-.keyword-row span {
-  flex: 0 0 auto;
-  max-width: 220px;
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: #f8fafc;
-  color: #6b7280;
+.task-keyword {
+  max-width: 100%;
+  margin: 5px 0 0;
+  color: #52625C;
   font-size: 11px;
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1.45;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -320,8 +496,8 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 8px;
-  color: #9ca3af;
+  margin-top: 6px;
+  color: #52625C;
   font-size: 11px;
   line-height: 1.5;
 }
@@ -333,6 +509,10 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
+.task-platform {
+  font-weight: 700;
+}
+
 .task-meta time {
   flex: 0 0 auto;
   white-space: nowrap;
@@ -341,14 +521,124 @@ onMounted(async () => {
 .owned-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 9px;
   min-width: 0;
 }
 
+.owned-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  column-gap: 9px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #eef0f2;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.owned-item .platform-symbol {
+  grid-row: span 3;
+}
+
+.platform-symbol {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #e6f7ef;
+  color: #006D44;
+  font-size: 17px;
+}
+
+.platform-symbol--douyin {
+  background: #f8fafc;
+  color: #131b2e;
+}
+
+.platform-symbol--xiaohongshu {
+  background: #fff5f5;
+  color: #dc2626;
+}
+
+.platform-symbol--zhihu {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.eco-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  min-width: 0;
+}
+
+.eco-item {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 13px;
+  background: #f8fafc;
+}
+
+.eco-item span {
+  display: block;
+  color: #52625C;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.eco-item strong {
+  display: block;
+  margin-top: 5px;
+  color: #131b2e;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
 .scope-note {
-  margin: 10px 0 0;
-  color: #9ca3af;
+  margin: 13px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #eef0f2;
+  color: #52625C;
   font-size: 11px;
   line-height: 1.5;
+}
+
+@media (max-width: 374px) {
+  .overview-strip {
+    gap: 6px;
+  }
+
+  .overview-strip .inline-metric {
+    padding: 9px 4px;
+  }
+
+  .overview-strip .inline-metric strong {
+    font-size: 16px;
+  }
+
+  .completion-item {
+    flex-basis: 112px;
+    min-width: 112px;
+    gap: 7px;
+    padding: 9px;
+  }
+
+  .task-item {
+    gap: 9px;
+    padding: 9px;
+  }
+
+  .task-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .task-title-row h3 {
+    font-size: 13px;
+  }
 }
 </style>

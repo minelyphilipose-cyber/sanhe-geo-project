@@ -7,7 +7,7 @@
     </template>
     <template v-else-if="errorMessage">
       <div class="mobile-dashboard-error">
-        <van-icon name="warning-o" />
+        <MobileIcon name="info" />
         <h1>链接不可用</h1>
         <p>{{ errorMessage }}</p>
       </div>
@@ -31,6 +31,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import AppHeader from '@/components/mobile-dashboard/AppHeader.vue'
 import BottomTabbar from '@/components/mobile-dashboard/BottomTabbar.vue'
+import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 
 const route = useRoute()
@@ -39,14 +40,22 @@ const loading = ref(true)
 const errorMessage = ref('')
 
 const pageConfig: Record<string, { name: string; filter?: string }> = {
-  '/home': { name: '客户总览', filter: '近14天' },
-  '/monitor': { name: 'AI监测', filter: '近14天' },
-  '/content': { name: '内容交付', filter: '本月' },
+  '/home': { name: '客户总览' },
+  '/monitor': { name: 'AI监测' },
+  '/content': { name: '内容交付' },
   '/report': { name: '阶段报告' },
 }
 
-const currentPageName = computed(() => pageConfig[route.path]?.name || '客户总览')
-const currentFilterLabel = computed(() => pageConfig[route.path]?.filter)
+const currentPageKey = computed(() => {
+  if (route.path.startsWith('/monitor/question')) return '/monitor/question'
+  if (route.path.startsWith('/monitor')) return '/monitor'
+  return route.path
+})
+const currentPageName = computed(() => {
+  if (currentPageKey.value === '/monitor/question') return '问答详情'
+  return pageConfig[currentPageKey.value]?.name || '客户总览'
+})
+const currentFilterLabel = computed(() => pageConfig[currentPageKey.value]?.filter)
 
 function removeTokenFromAddressBar() {
   if (!('t' in route.query)) return
@@ -75,10 +84,23 @@ onMounted(async () => {
 <style scoped>
 .mobile-dashboard-shell {
   min-height: 100vh;
+  width: 100%;
+  max-width: 100vw;
   background: #fff;
-  color: #0f172a;
+  color: #131b2e;
   font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
   overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.mobile-dashboard-shell,
+.mobile-dashboard-shell * {
+  box-sizing: border-box;
+}
+
+.mobile-dashboard-shell::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .mobile-dashboard-loading {
@@ -87,9 +109,18 @@ onMounted(async () => {
 
 .mobile-dashboard-content {
   min-height: calc(100vh - 56px);
-  padding: 14px 12px calc(128px + env(safe-area-inset-bottom));
+  width: 100%;
+  max-width: min(760px, 100vw);
+  margin: 0 auto;
+  padding: 14px 12px calc(164px + env(safe-area-inset-bottom));
   background: #fff;
   overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.mobile-dashboard-content::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .mobile-dashboard-error {
@@ -102,7 +133,7 @@ onMounted(async () => {
   background: #fff;
 }
 
-.mobile-dashboard-error .van-icon {
+.mobile-dashboard-error .mobile-icon {
   justify-self: center;
   width: 48px;
   height: 48px;
@@ -116,7 +147,7 @@ onMounted(async () => {
 
 .mobile-dashboard-error h1 {
   margin: 0;
-  color: #0f172a;
+  color: #131b2e;
   font-size: 20px;
   font-weight: 800;
 }
@@ -124,7 +155,7 @@ onMounted(async () => {
 .mobile-dashboard-error p {
   max-width: 280px;
   margin: 0;
-  color: #9ca3af;
+  color: #52625C;
   font-size: 14px;
   line-height: 1.65;
 }

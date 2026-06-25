@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <v-chart class="mobile-trend-chart" :option="chartOption" autoresize />
 </template>
 
@@ -38,9 +38,9 @@ const chartOption = computed(() => ({
       data: props.values || [],
       smooth: true,
       symbol: 'circle',
-      symbolSize: 5,
-      lineStyle: { color: '#07A66B', width: 2 },
-      itemStyle: { color: '#07A66B' },
+      symbolSize: 6,
+      lineStyle: { color: '#006D44', width: 3 },
+      itemStyle: { color: '#006D44' },
       areaStyle: {
         color: {
           type: 'linear',

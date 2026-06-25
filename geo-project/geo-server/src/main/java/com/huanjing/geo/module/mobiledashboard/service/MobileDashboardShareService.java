@@ -117,6 +117,26 @@ public class MobileDashboardShareService {
     }
 
     @Transactional
+    public void deleteShare(Long id) {
+        MobileDashboardShare share = requireShare(id);
+        requireWritableProject(share.getProjectId());
+        if (ACTIVE.equalsIgnoreCase(share.getStatus())) {
+            throw new BizException(400, "Active mobile dashboard share must be disabled before deletion");
+        }
+        shareMapper.deleteById(id);
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("shareId", share.getId());
+        metadata.put("status", share.getStatus());
+        metadata.put("tokenPrefix", share.getTokenPrefix());
+        Map<String, Object> before = new LinkedHashMap<>();
+        before.put("tokenPrefix", share.getTokenPrefix());
+        activityLogService.logAction(currentUserService.requireCurrentUser().getId(), "mobile_dashboard_share.delete", "project", share.getProjectId(),
+                metadata,
+                null,
+                before);
+    }
+
+    @Transactional
     public MobileDashboardSessionVO exchangeSession(String token, HttpServletRequest request) {
         if (!StringUtils.hasText(token)) {
             logAccess(null, null, "exchange_session", false, "missing_token", request);

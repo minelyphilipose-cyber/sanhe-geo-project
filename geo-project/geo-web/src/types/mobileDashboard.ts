@@ -119,6 +119,7 @@ export interface QuestionMonitorItem {
   firstRecommend: DashboardMetric<boolean>
   rankPosition: DashboardMetric<number>
   evidence?: string | null
+  responseText?: string | null
   tags: string[]
 }
 
@@ -148,6 +149,7 @@ export interface ContentTaskItem {
   title: string
   keywords: string[]
   platformCodes: string[]
+  publishUrl?: string | null
   status: 'indexed' | 'published' | 'building' | string
   date?: string | null
 }

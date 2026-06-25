@@ -80,7 +80,7 @@ class MobileDashboardAggregateServiceTest {
     }
 
     @Test
-    void platformCompletionKeepsPublishedCountWhenMonthlyChannelQuotaIsMissing() {
+    void platformCompletionKeepsDisplayablePublishedCountWhenMonthlyChannelQuotaIsMissingAndHidesDouyin() {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         jdbcTemplate.execute("""
                 CREATE TABLE project_channel_allocation (
@@ -95,15 +95,15 @@ class MobileDashboardAggregateServiceTest {
         @SuppressWarnings("unchecked")
         List<MobileDashboardAggregateVO.PlatformCompletion> rows =
                 (List<MobileDashboardAggregateVO.PlatformCompletion>) ReflectionTestUtils.invokeMethod(
-                        service, "loadPlatformCompletion", 1L, Map.of("douyin", 5L));
+                        service, "loadPlatformCompletion", 1L, Map.of("douyin", 5L, "xiaohongshu", 3L));
 
         assertThat(rows).hasSize(1);
-        MobileDashboardAggregateVO.PlatformCompletion douyin = rows.get(0);
-        assertThat(douyin.getCode()).isEqualTo("douyin");
-        assertThat(douyin.getPublished()).isEqualTo(5L);
-        assertThat(douyin.getQuota()).isZero();
-        assertThat(douyin.getCompletionRate().isAvailable()).isFalse();
-        assertThat(douyin.getCompletionRate().getReason()).contains("暂无逐渠道月度配额");
+        MobileDashboardAggregateVO.PlatformCompletion xiaohongshu = rows.get(0);
+        assertThat(xiaohongshu.getCode()).isEqualTo("xiaohongshu");
+        assertThat(xiaohongshu.getPublished()).isEqualTo(3L);
+        assertThat(xiaohongshu.getQuota()).isZero();
+        assertThat(xiaohongshu.getCompletionRate().isAvailable()).isFalse();
+        assertThat(xiaohongshu.getCompletionRate().getReason()).contains("暂无逐渠道月度配额");
     }
 
     @Test
@@ -204,7 +204,29 @@ class MobileDashboardAggregateServiceTest {
                         1L, dateRange(LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30)));
 
         assertThat(rows).extracting(MobileDashboardAggregateVO.PlatformMetric::getCode)
-                .containsExactly("wenxin", "deepseek", "tongyi", "doubao");
+                .containsExactly("deepseek", "tongyi", "doubao");
+    }
+
+    @Test
+    void latestMentionAggregateUsesOnlyNewestCompletedResultPerQuestionAndPlatform() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createPollResultsTable(jdbcTemplate);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, batch_date, question_tier, status, effective_hit, updated_at)
+                VALUES
+                    (1, 1, 1001, 'q1', 'doubao', DATE '2026-06-10', 'A', 'completed', 1, TIMESTAMP '2026-06-10 09:00:00'),
+                    (2, 1, 1001, 'q1', 'doubao', DATE '2026-06-17', 'A', 'completed', 0, TIMESTAMP '2026-06-17 09:00:00'),
+                    (3, 1, 1001, 'q1', 'qwen', DATE '2026-06-17', 'A', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00'),
+                    (4, 1, 1002, 'q2', 'hunyuan', DATE '2026-06-17', 'A', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00'),
+                    (5, 1, 1002, 'q2', 'ernie', DATE '2026-06-17', 'A', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00')
+                """);
+
+        Object aggregate = invoke(newService(jdbcTemplate), "loadLatestMentionAggregate", 1L, null);
+
+        assertThat(recordValue(aggregate, "completed")).isEqualTo(3L);
+        assertThat(recordValue(aggregate, "mentions")).isEqualTo(2L);
+        assertThat(recordValue(aggregate, "coveredPlatformCount")).isEqualTo(2L);
     }
 
     @Test
@@ -340,6 +362,24 @@ class MobileDashboardAggregateServiceTest {
                     question_tier VARCHAR(8),
                     hit_count BIGINT,
                     effective_hit_count BIGINT
+                )
+                """);
+    }
+
+    private static void createPollResultsTable(JdbcTemplate jdbcTemplate) {
+        jdbcTemplate.execute("""
+                CREATE TABLE poll_results (
+                    id BIGINT,
+                    project_id BIGINT,
+                    keyword_result_id BIGINT,
+                    keyword_text_snapshot VARCHAR(255),
+                    platform_code VARCHAR(32),
+                    batch_date DATE,
+                    question_tier VARCHAR(8),
+                    status VARCHAR(32),
+                    effective_hit INT,
+                    detail_json CLOB,
+                    updated_at TIMESTAMP
                 )
                 """);
     }

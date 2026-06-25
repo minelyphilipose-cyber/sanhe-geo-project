@@ -72,6 +72,14 @@ export const useMobileDashboardStore = defineStore('mobileDashboard', {
       sessionStorage.setItem(CONTEXT_KEY, JSON.stringify(data))
     },
 
+    async renewSession() {
+      if (!this.longToken) {
+        throw new Error('请使用有效的数据看板分享链接访问')
+      }
+      await this.exchange(this.longToken)
+      return this.sessionToken
+    },
+
     async loadBootstrap() {
       const res = await getMobileDashboardBootstrap(this.sessionToken)
       this.context = res.data.data

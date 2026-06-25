@@ -47,6 +47,12 @@ const mobileDashboardRoutes = [
         component: () => import('@/views/mobile-dashboard/MonitorView.vue'),
         meta: { title: '移动数据看板' },
       },
+      {
+        path: 'question/:pollResultId',
+        name: 'MobileDashboardQuestionDetail',
+        component: () => import('@/views/mobile-dashboard/QuestionDetailView.vue'),
+        meta: { title: '移动数据看板' },
+      },
     ],
   },
   {
@@ -84,6 +90,7 @@ const publicPathPrefixes = [
   '/content',
   '/report',
   '/presale-print/',
+  '/baseline-print/',
   ...(enablePresalePrintPoc ? ['/presale-print-poc/'] : []),
   '/403',
   '/session-expired',
@@ -134,6 +141,12 @@ const router = createRouter({
       name: 'PresalePrint',
       component: () => import('@/views/admin/presale/report/PresalePrint.vue'),
       meta: { title: '售前报表打印' },
+    },
+    {
+      path: '/baseline-print/:renderToken',
+      name: 'BaselinePrint',
+      component: () => import('@/views/admin/project/BaselineReportPoll.vue'),
+      meta: { title: '基线报告打印' },
     },
     ...presalePrintPocRoutes,
     adminRoutes,

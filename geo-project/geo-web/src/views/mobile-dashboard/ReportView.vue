@@ -1,6 +1,6 @@
 <template>
   <div class="mobile-page">
-    <DashboardCard>
+    <DashboardCard title="阶段成绩" icon="monitor">
       <div class="hero-card">
         <div>
           <span class="eyebrow">总体提及率</span>
@@ -11,32 +11,35 @@
       </div>
     </DashboardCard>
 
-    <DashboardCard title="核心结果">
-      <section class="metric-grid">
+    <DashboardCard title="核心结果" icon="check">
+      <section class="overview-strip">
         <div v-for="item in data?.coreResults || []" :key="item.key" class="inline-metric">
+          <MobileIcon :name="resultIcons[item.key] || 'dashboard'" />
           <span>{{ resultLabels[item.key] || item.key }}</span>
           <strong>{{ metricText(item.metric) }}</strong>
         </div>
       </section>
     </DashboardCard>
 
-    <DashboardCard title="本期亮点">
+    <DashboardCard title="本期亮点" icon="star">
       <EmptyState :description="data?.highlights?.reason || '暂无本期亮点数据'" />
     </DashboardCard>
 
-    <DashboardCard title="本期交付摘要">
+    <DashboardCard title="本期交付摘要" icon="document">
       <section v-if="deliveryCards.length" class="metric-grid">
         <div v-for="item in deliveryCards" :key="item.label" class="inline-metric">
+          <MobileIcon :name="item.icon" />
           <span>{{ item.label }}</span>
           <strong>{{ metricText(item.metric) }}</strong>
         </div>
       </section>
-      <p v-if="data?.deliverySummary?.indexMeasurementScope" class="scope-note">{{ data.deliverySummary.indexMeasurementScope }}</p>
+      <p v-if="data?.deliverySummary?.indexMeasurementScope" class="scope-note">{{ shortIndexScope }}</p>
     </DashboardCard>
 
-    <DashboardCard title="生态资产">
+    <DashboardCard title="生态资产" icon="cluster">
       <section v-if="ecoCards.length" class="metric-grid">
         <div v-for="item in ecoCards" :key="item.label" class="inline-metric">
+          <MobileIcon :name="item.icon" />
           <span>{{ item.label }}</span>
           <strong>{{ metricText(item.metric) }}</strong>
         </div>
@@ -48,9 +51,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { showToast } from 'vant'
-import { getMobileDashboardReport } from '@/api/mobileDashboard'
+import { getMobileDashboardReport, withRenewedMobileDashboardSession } from '@/api/mobileDashboard'
 import DashboardCard from '@/components/mobile-dashboard/DashboardCard.vue'
 import EmptyState from '@/components/mobile-dashboard/EmptyState.vue'
+import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import TrendLineChart from '@/components/mobile-dashboard/TrendLineChart.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { DashboardMetric, ReportDashboardData } from '@/types/mobileDashboard'
@@ -60,30 +64,40 @@ const data = ref<ReportDashboardData>()
 const resultLabels: Record<string, string> = {
   ai_recommend_rate: 'AI推荐率',
   first_recommend_count: '首推次数',
-  covered_question_count: '核心问题达标',
-  platform_coverage_count: '覆盖平台数',
+  covered_question_count: '核心问题覆盖',
+  total_asset_count: '累计资产',
+}
+const resultIcons: Record<string, string> = {
+  ai_recommend_rate: 'star',
+  first_recommend_count: 'bars',
+  covered_question_count: 'check',
+  total_asset_count: 'document',
 }
 
 const trendLabels = computed(() => data.value?.trend?.map((item) => item.date.slice(5)) || [])
 const trendValues = computed(() => data.value?.trend?.map((item) => item.value) || [])
+const shortIndexScope = computed(() => {
+  if (!data.value?.deliverySummary?.indexMeasurementScope) return ''
+  return '已收录仅统计可测量渠道，未回查渠道不计入。'
+})
 const deliveryCards = computed(() => {
   const summary = data.value?.deliverySummary
   if (!summary) return []
   return [
-    { label: '自有平台发布', metric: summary.published },
-    { label: '生态资产新增', metric: summary.assetNew },
-    { label: '已收录', metric: summary.indexed },
-    { label: '核心问题覆盖', metric: summary.coveredQuestions },
+    { label: '自有平台发布', icon: 'publish', metric: summary.published },
+    { label: '生态资产新增', icon: 'cluster', metric: summary.assetNew },
+    { label: '已收录', icon: 'eye', metric: summary.indexed },
+    { label: '核心问题覆盖', icon: 'check', metric: summary.coveredQuestions },
   ]
 })
 const ecoCards = computed(() => {
   const eco = data.value?.ecoAssets
   if (!eco) return []
   return [
-    { label: '累计资产', metric: eco.totalAssets },
-    { label: '本月新增', metric: eco.monthNew },
-    { label: '已收录', metric: eco.indexed },
-    { label: '核心问题覆盖', metric: eco.coveredQuestions },
+    { label: '累计资产', icon: 'article', metric: eco.totalAssets },
+    { label: '本月新增', icon: 'plus', metric: eco.monthNew },
+    { label: '已收录', icon: 'eye', metric: eco.indexed },
+    { label: '核心问题覆盖', icon: 'check', metric: eco.coveredQuestions },
   ]
 })
 
@@ -95,7 +109,10 @@ function metricText(metric?: DashboardMetric, includeUnit = true) {
 
 onMounted(async () => {
   try {
-    const res = await getMobileDashboardReport(store.sessionToken)
+    const res = await withRenewedMobileDashboardSession(
+      (sessionToken) => getMobileDashboardReport(sessionToken),
+      store,
+    )
     data.value = res.data.data
   } catch (error: any) {
     showToast(error?.message || '数据加载失败')
@@ -121,7 +138,7 @@ onMounted(async () => {
 .eyebrow,
 .inline-metric span {
   display: block;
-  color: #9ca3af;
+  color: #52625C;
   font-size: 12px;
   line-height: 1.35;
 }
@@ -130,7 +147,7 @@ onMounted(async () => {
 .inline-metric strong {
   display: block;
   margin-top: 8px;
-  color: #0f172a;
+  color: #131b2e;
   font-size: 20px;
   font-weight: 800;
   line-height: 1.1;
@@ -138,7 +155,7 @@ onMounted(async () => {
 
 .hero-card p {
   margin: 8px 0 0;
-  color: #9ca3af;
+  color: #52625C;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -150,6 +167,13 @@ onMounted(async () => {
   min-width: 0;
 }
 
+.overview-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
 .inline-metric {
   min-width: 0;
   padding: 12px;
@@ -157,10 +181,45 @@ onMounted(async () => {
   background: #f8fafc;
 }
 
+.overview-strip .inline-metric {
+  padding: 10px 6px;
+  text-align: center;
+}
+
+.inline-metric .mobile-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: #e6f7ef;
+  color: #006D44;
+  font-size: 17px;
+}
+
+.overview-strip .inline-metric .mobile-icon {
+  margin-inline: auto;
+}
+
 .scope-note {
   margin: 10px 0 0;
-  color: #9ca3af;
+  color: #52625C;
   font-size: 11px;
   line-height: 1.5;
+}
+
+@media (max-width: 374px) {
+  .overview-strip {
+    gap: 6px;
+  }
+
+  .overview-strip .inline-metric {
+    padding: 9px 4px;
+  }
+
+  .overview-strip .inline-metric strong {
+    font-size: 15px;
+  }
 }
 </style>

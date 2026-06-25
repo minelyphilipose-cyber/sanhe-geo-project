@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.mobiledashboard.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
@@ -10,12 +11,13 @@ import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.measurement.LlmCallMeasurementContext;
 import com.huanjing.geo.common.llm.measurement.LlmObservationScope;
 import com.huanjing.geo.common.llm.router.LlmFeature;
+import com.huanjing.geo.common.llm.router.LlmPlatformCodeFilters;
 import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
 import com.huanjing.geo.module.mobiledashboard.dto.EntityJudgeRunRequest;
 import com.huanjing.geo.module.mobiledashboard.dto.EntityJudgeRunVO;
-import com.huanjing.geo.module.presale.generate.PresaleEvaluationModelRouter;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +40,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -52,9 +57,9 @@ public class MobileDashboardEntityJudgeService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final LlmCallFacade llmCallFacade;
-    private final PresaleEvaluationModelRouter evaluationModelRouter;
+    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final ProjectCompetitorConfigService competitorConfigService;
-    private final MobileEntityJudgeBudgetService budgetService;
+    private final MobileEntityMentionMatcher mentionMatcher;
     private final CurrentUserService currentUserService;
 
     @Value("${geo.mobile-dashboard.entity-judge.enabled:false}")
@@ -65,6 +70,9 @@ public class MobileDashboardEntityJudgeService {
 
     @Value("${geo.mobile-dashboard.entity-judge.per-project-limit:10}")
     private int perProjectLimit;
+
+    @Value("${geo.mobile-dashboard.entity-judge.platform-codes:deepseek,doubao,qwen}")
+    private String judgePlatformCodes = "deepseek,doubao,qwen";
 
     public EntityJudgeRunVO runOnce(EntityJudgeRunRequest request) {
         currentUserService.ensurePermission("project.competitor.manage");
@@ -100,6 +108,14 @@ public class MobileDashboardEntityJudgeService {
 
     public JudgeCoverage focusCoverage(Long projectId, LocalDate startDate, LocalDate endDate, String platformCode) {
         return coverage(projectId, startDate, endDate, FOCUS_BRAND, 0L, platformCode);
+    }
+
+    public JudgeCoverage latestFocusCoverage(Long projectId) {
+        return latestFocusCoverage(projectId, null);
+    }
+
+    public JudgeCoverage latestFocusCoverage(Long projectId, String platformCode) {
+        return latestCoverage(projectId, FOCUS_BRAND, 0L, platformCode);
     }
 
     public JudgeCoverage coverage(Long projectId, LocalDate startDate, LocalDate endDate, String entityType, Long entityRefId) {
@@ -167,21 +183,105 @@ public class MobileDashboardEntityJudgeService {
         ), Date.valueOf(startDate), Date.valueOf(endDate), MOBILE_QUESTION_TIER, PROMPT_VERSION, projectId);
     }
 
+    public List<CompetitorSummary> latestCompetitorSummaries(Long projectId) {
+        return jdbcTemplate.query("""
+                WITH latest AS (
+                    SELECT pr.id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY pr.keyword_result_id, pr.platform_code
+                               ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
+                           ) AS rn
+                      FROM poll_results pr
+                     WHERE pr.project_id = ?
+                       AND pr.status = 'completed'
+                       AND pr.question_tier = ?
+                       AND pr.keyword_result_id IS NOT NULL
+                ),
+                latest_count AS (
+                    SELECT COUNT(*) AS expected_count
+                      FROM latest
+                     WHERE rn = 1
+                )
+                SELECT c.id AS entity_ref_id,
+                       c.display_order,
+                       c.qa_status,
+                       COALESCE(MAX(lc.expected_count), 0) AS expected_count,
+                       COALESCE(SUM(CASE WHEN j.judge_status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
+                       COALESCE(SUM(CASE WHEN j.judge_status = 'success' AND j.recommended = 1 THEN 1 ELSE 0 END), 0) AS recommended_count,
+                       COALESCE(SUM(CASE WHEN j.judge_status = 'success' AND j.first_recommend = 1 THEN 1 ELSE 0 END), 0) AS first_recommend_count
+                  FROM project_competitor_config c
+                  CROSS JOIN latest_count lc
+                  LEFT JOIN latest l
+                    ON l.rn = 1
+                  LEFT JOIN poll_result_entity_judge j
+                    ON j.poll_result_id = l.id
+                   AND j.entity_type = 'competitor'
+                   AND j.entity_ref_id = c.id
+                   AND j.entity_config_version = c.config_version
+                   AND j.judge_prompt_version = ?
+                 WHERE c.project_id = ?
+                   AND c.status = 'active'
+                 GROUP BY c.id, c.display_order, c.qa_status
+                 ORDER BY c.display_order ASC, c.id ASC
+                """, (rs, rowNum) -> new CompetitorSummary(
+                rs.getLong("entity_ref_id"),
+                rs.getInt("display_order"),
+                rs.getString("qa_status"),
+                new JudgeCoverage(
+                        rs.getLong("expected_count"),
+                        rs.getLong("success_count"),
+                        rs.getLong("recommended_count"),
+                        rs.getLong("first_recommend_count")
+                )
+        ), projectId, MOBILE_QUESTION_TIER, PROMPT_VERSION, projectId);
+    }
+
+    private JudgeCoverage latestCoverage(Long projectId, String entityType, Long entityRefId, String platformCode) {
+        String platformClause = "";
+        if (StringUtils.hasText(platformCode)) {
+            platformClause = " AND pr.platform_code IN (%s) ".formatted(platformAliasSql(platformCode));
+        }
+        JudgeCoverage row = jdbcTemplate.queryForObject("""
+                WITH latest AS (
+                    SELECT pr.id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY pr.keyword_result_id, pr.platform_code
+                               ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
+                           ) AS rn
+                      FROM poll_results pr
+                     WHERE pr.project_id = ?
+                       AND pr.status = 'completed'
+                       AND pr.question_tier = ?
+                       AND pr.keyword_result_id IS NOT NULL
+                       %s
+                )
+                SELECT COUNT(*) AS expected_count,
+                       COALESCE(SUM(CASE WHEN j.judge_status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
+                       COALESCE(SUM(CASE WHEN j.judge_status = 'success' AND j.recommended = 1 THEN 1 ELSE 0 END), 0) AS recommended_count,
+                       COALESCE(SUM(CASE WHEN j.judge_status = 'success' AND j.first_recommend = 1 THEN 1 ELSE 0 END), 0) AS first_recommend_count
+                  FROM latest l
+                  LEFT JOIN poll_result_entity_judge j
+                    ON j.poll_result_id = l.id
+                   AND j.entity_type = ?
+                   AND j.entity_ref_id = ?
+                   AND j.judge_prompt_version = ?
+                 WHERE l.rn = 1
+                """.formatted(platformClause), (rs, rowNum) -> new JudgeCoverage(
+                rs.getLong("expected_count"),
+                rs.getLong("success_count"),
+                rs.getLong("recommended_count"),
+                rs.getLong("first_recommend_count")
+        ), projectId, MOBILE_QUESTION_TIER, entityType, entityRefId == null ? 0L : entityRefId, PROMPT_VERSION);
+        return row == null ? new JudgeCoverage(0, 0, 0, 0) : row;
+    }
+
     private EntityJudgeRunVO judgeCandidates(List<PollCandidate> candidates) {
         int judged = 0;
         int skipped = 0;
         int failed = 0;
-        int budgetBlocked = 0;
-        String budgetReason = null;
         for (PollCandidate candidate : candidates) {
             if (!StringUtils.hasText(candidate.responseText())) {
                 skipped++;
-                continue;
-            }
-            MobileEntityJudgeBudgetService.BudgetDecision budgetDecision = budgetService.allowNextCall(candidate.projectId());
-            if (!budgetDecision.allowed()) {
-                budgetBlocked++;
-                budgetReason = budgetDecision.reason();
                 continue;
             }
             try {
@@ -193,7 +293,7 @@ public class MobileDashboardEntityJudgeService {
                 log.warn("mobile entity judge failed pollResultId={} msg={}", candidate.id(), ex.getMessage());
             }
         }
-        return new EntityJudgeRunVO(candidates.size(), judged, skipped, failed, budgetBlocked, budgetReason);
+        return new EntityJudgeRunVO(candidates.size(), judged, skipped, failed, 0, null);
     }
 
     private List<Long> loadPendingProjectIds(LocalDate startDate, LocalDate endDate, int limit) {
@@ -294,7 +394,13 @@ public class MobileDashboardEntityJudgeService {
     @Transactional
     void judgeOne(PollCandidate candidate) throws Exception {
         List<ProjectCompetitorConfigService.CompetitorEntity> competitors = competitorConfigService.activeCompetitors(candidate.projectId());
-        JudgePayload payload = invokeJudge(candidate, competitors);
+        MobileEntityMentionMatcher.MatchResult matchResult = mentionMatcher.match(candidate.responseText(), projectAliases(candidate), competitors);
+        if (!Boolean.TRUE.equals(candidate.effectiveHit()) && !matchResult.anyMatched()) {
+            upsertDeterministicNoEntityHit(candidate, competitors);
+            recomputeDaily(candidate.projectId(), candidate.batchDate(), candidate.questionTier(), candidate.platformCode());
+            return;
+        }
+        JudgePayload payload = invokeJudge(candidate, competitors, matchResult);
         String model = payload.model();
         upsertFocus(candidate, payload.focus(), model, payload.rawJson());
         Map<Long, EntityResult> byCompetitorId = new LinkedHashMap<>();
@@ -311,8 +417,9 @@ public class MobileDashboardEntityJudgeService {
     }
 
     private JudgePayload invokeJudge(PollCandidate candidate,
-                                     List<ProjectCompetitorConfigService.CompetitorEntity> competitors) throws Exception {
-        List<AiPlatformConfig> judgePlatforms = evaluationModelRouter.routePlatforms().stream()
+                                     List<ProjectCompetitorConfigService.CompetitorEntity> competitors,
+                                     MobileEntityMentionMatcher.MatchResult matchResult) throws Exception {
+        List<AiPlatformConfig> judgePlatforms = loadJudgePlatforms().stream()
                 .map(this::useLowModel)
                 .toList();
         if (judgePlatforms.isEmpty()) {
@@ -320,7 +427,7 @@ public class MobileDashboardEntityJudgeService {
         }
         String prompt = buildPrompt(candidate, competitors);
         LlmCallRequest callRequest = LlmCallRequest.routed(new LlmRouteRequest(
-                LlmFeature.MONITORING,
+                LlmFeature.MOBILE_JUDGE,
                 "你是严格的 GEO 移动数据看板实体裁判。只输出合法 JSON,不要输出 markdown 或解释。",
                 prompt,
                 0D,
@@ -347,9 +454,33 @@ public class MobileDashboardEntityJudgeService {
         if (root == null || !root.isObject()) {
             throw new IllegalStateException("ENTITY_JUDGE_RESPONSE_NOT_OBJECT");
         }
-        EntityResult focus = parseFocus(root.path("focus_brand"), candidate);
+        EntityResult focus = parseFocus(root.path("focus_brand"), candidate, matchResult.focusMatched());
         List<EntityResult> competitorResults = parseCompetitors(root.path("competitors"), competitors);
         return new JudgePayload(focus, competitorResults, routeResult.modelId(), routeResult.responseText());
+    }
+
+    private List<AiPlatformConfig> loadJudgePlatforms() {
+        Set<String> codes = LlmPlatformCodeFilters.parseCodes(judgePlatformCodes);
+        if (codes.isEmpty()) {
+            return List.of();
+        }
+        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .in(AiPlatformConfig::getPlatformCode, codes)
+        );
+        Map<String, AiPlatformConfig> byCode = platforms.stream()
+                .filter(platform -> platform != null && StringUtils.hasText(platform.getPlatformCode()))
+                .collect(Collectors.toMap(
+                        platform -> LlmPlatformCodeFilters.normalize(platform.getPlatformCode()),
+                        Function.identity(),
+                        (left, ignored) -> left,
+                        LinkedHashMap::new
+                ));
+        return codes.stream()
+                .map(byCode::get)
+                .filter(Objects::nonNull)
+                .toList();
     }
 
     private AiPlatformConfig useLowModel(AiPlatformConfig platform) {
@@ -414,9 +545,9 @@ public class MobileDashboardEntityJudgeService {
                 """.formatted(objectMapper.writeValueAsString(input));
     }
 
-    private EntityResult parseFocus(JsonNode node, PollCandidate candidate) {
+    private EntityResult parseFocus(JsonNode node, PollCandidate candidate, boolean focusMatchedByLocalMatcher) {
         EntityResult parsed = parseEntity(node, 0L);
-        if (!Boolean.TRUE.equals(candidate.effectiveHit())) {
+        if (!Boolean.TRUE.equals(candidate.effectiveHit()) && !focusMatchedByLocalMatcher) {
             return new EntityResult(0L, false, false, null, parsed.evidence(), parsed.matchedAlias(), parsed.confidence());
         }
         return parsed;
@@ -470,6 +601,25 @@ public class MobileDashboardEntityJudgeService {
                                   String model,
                                   String rawJson) {
         upsertJudgeRow(candidate, COMPETITOR, competitor.id(), competitor.configVersion(), result, model, rawJson, "success", null);
+    }
+
+    private void upsertDeterministicNoEntityHit(PollCandidate candidate,
+                                                List<ProjectCompetitorConfigService.CompetitorEntity> competitors) {
+        EntityResult focus = deterministicNoEntityHit(0L);
+        String rawJson = """
+                {"reason":"no_tracked_entity_matched","source":"local_matcher"}
+                """;
+        upsertFocus(candidate, focus, "deterministic_no_entity_hit", rawJson);
+        if (competitors != null) {
+            for (ProjectCompetitorConfigService.CompetitorEntity competitor : competitors) {
+                upsertCompetitor(candidate, competitor, deterministicNoEntityHit(competitor.id()),
+                        "deterministic_no_entity_hit", rawJson);
+            }
+        }
+    }
+
+    private EntityResult deterministicNoEntityHit(Long entityRefId) {
+        return new EntityResult(entityRefId, false, false, null, "no_tracked_entity_matched", null, 1D);
     }
 
     private void upsertJudgeRow(PollCandidate candidate,

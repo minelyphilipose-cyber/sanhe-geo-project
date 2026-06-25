@@ -87,6 +87,24 @@ export function getMobileDashboardReport(sessionToken: string) {
   })
 }
 
+function isMobileSessionExpired(error: unknown) {
+  const err = error as MobileApiError | undefined
+  return err?.status === 401 || err?.code === 401
+}
+
+export async function withRenewedMobileDashboardSession<T>(
+  requestFn: (sessionToken: string) => Promise<T>,
+  store: { sessionToken: string; renewSession: () => Promise<string> },
+) {
+  try {
+    return await requestFn(store.sessionToken)
+  } catch (error) {
+    if (!isMobileSessionExpired(error)) throw error
+    const newSessionToken = await store.renewSession()
+    return requestFn(newSessionToken)
+  }
+}
+
 export function getMobileDashboardShares(projectId: number) {
   return request.get<R<MobileDashboardShare[]>>(`/projects/${projectId}/mobile-dashboard-share`)
 }
@@ -101,6 +119,10 @@ export function createMobileDashboardShare(projectId: number, payload?: { expire
 
 export function disableMobileDashboardShare(id: number) {
   return request.put<R<void>>(`/mobile-dashboard-shares/${id}/disable`)
+}
+
+export function deleteMobileDashboardShare(id: number) {
+  return request.delete<R<void>>(`/mobile-dashboard-shares/${id}`)
 }
 
 export interface ProjectCompetitorConfig {

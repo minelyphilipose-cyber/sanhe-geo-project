@@ -18,6 +18,11 @@ export default defineConfig({
         timeout: 120000,
         proxyTimeout: 120000,
       },
+      '/oss': {
+        target: 'http://192.168.112.175:9000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/oss/, ''),
+      },
     },
   },
   css: {

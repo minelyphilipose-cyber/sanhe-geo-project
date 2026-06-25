@@ -7,6 +7,11 @@
         <span>项目级移动 H5 看板</span>
         <h1>移动数据看板</h1>
         <p>集中管理客户侧分享链接与运行观测，项目详情页仅保留入口。</p>
+        <ul>
+          <li>分享链接</li>
+          <li>访问风险</li>
+          <li>裁判成本</li>
+        </ul>
       </div>
       <el-button type="primary" plain @click="goProjectDetail">返回项目详情</el-button>
     </section>
@@ -49,7 +54,8 @@ function goProjectDetail() {
 <style scoped>
 .mobile-dashboard-admin-page {
   display: grid;
-  gap: 18px;
+  gap: 20px;
+  padding-bottom: 24px;
 }
 
 .mobile-dashboard-admin-hero {
@@ -57,8 +63,12 @@ function goProjectDetail() {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 22px;
-  background: linear-gradient(135deg, #f8fbff 0%, #f3fff8 100%);
+  position: relative;
+  overflow: hidden;
+  padding: 22px 24px;
+  background:
+    radial-gradient(circle at 92% 18%, rgba(7, 166, 107, 0.16), transparent 28%),
+    linear-gradient(135deg, #f8fbff 0%, #f1fff8 100%);
   border: 1px solid #e5eef7;
   border-radius: 16px;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
@@ -87,6 +97,24 @@ function goProjectDetail() {
   margin: 0;
   color: #64748b;
   font-size: 14px;
+}
+
+.mobile-dashboard-admin-hero ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mobile-dashboard-admin-hero li {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(7, 166, 107, 0.1);
+  color: #047857;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 @media (max-width: 720px) {

@@ -41,4 +41,10 @@ public class MobileDashboardManageController {
         mobileDashboardShareService.disableShare(id);
         return R.ok();
     }
+
+    @DeleteMapping("/api/mobile-dashboard-shares/{id}")
+    public R<Void> deleteShare(@PathVariable Long id) {
+        mobileDashboardShareService.deleteShare(id);
+        return R.ok();
+    }
 }

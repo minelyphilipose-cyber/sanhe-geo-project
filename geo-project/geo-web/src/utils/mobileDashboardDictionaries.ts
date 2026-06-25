@@ -10,7 +10,7 @@ export const aiPlatformLabels: Record<string, string> = {
 }
 
 export const contentPlatformLabels: Record<string, string> = {
-  official_site: '官网',
+  official_site: 'Agent官网',
   douyin: '抖音',
   xiaohongshu: '小红书',
   wechat_mp: '公众号',

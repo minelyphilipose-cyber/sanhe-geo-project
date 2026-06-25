@@ -104,6 +104,7 @@ public final class MobileDashboardAggregateVO {
         private MobileDashboardMetricVO<Boolean> firstRecommend;
         private MobileDashboardMetricVO<Integer> rankPosition;
         private String evidence;
+        private String responseText;
         private List<String> tags = new ArrayList<>();
     }
 
@@ -151,6 +152,7 @@ public final class MobileDashboardAggregateVO {
         private String title;
         private List<String> keywords = new ArrayList<>();
         private List<String> platformCodes = new ArrayList<>();
+        private String publishUrl;
         private String status;
         private LocalDateTime date;
     }
