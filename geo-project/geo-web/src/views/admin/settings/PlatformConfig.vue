@@ -96,6 +96,12 @@
           <el-table-column prop="concurrencyLimit" label="并发上限" width="100">
             <template #default="scope">{{ scope.row.concurrencyLimit ?? 1 }}</template>
           </el-table-column>
+          <el-table-column prop="rpmLimit" label="RPM" width="90">
+            <template #default="scope">{{ scope.row.rpmLimit ?? 60 }}</template>
+          </el-table-column>
+          <el-table-column prop="tpmLimit" label="TPM" width="110">
+            <template #default="scope">{{ scope.row.tpmLimit ?? 60000 }}</template>
+          </el-table-column>
           <el-table-column label="能力开关" min-width="210">
             <template #default="scope">
               <div class="capability-tags">
@@ -254,6 +260,15 @@
             </el-form-item>
             <el-form-item class="model-low-field" label="低性能模型 ID" prop="lowModelId">
               <el-input v-model="form.lowModelId" placeholder="如: gpt-5.3" />
+            </el-form-item>
+          </div>
+          <div class="subgroup-title"><span />调用额度</div>
+          <div class="form-grid is-two compact-grid">
+            <el-form-item label="RPM 每分钟请求数" prop="rpmLimit">
+              <el-input-number v-model="form.rpmLimit" :min="1" :max="1000000" :step="10" />
+            </el-form-item>
+            <el-form-item label="TPM 每分钟 Token 数" prop="tpmLimit">
+              <el-input-number v-model="form.tpmLimit" :min="1" :max="100000000" :step="1000" />
             </el-form-item>
           </div>
           <div class="subgroup-title"><span />备用服务商（可选）</div>
@@ -537,6 +552,8 @@ const form = reactive({
   lowModelId: '',
   modelName: '',
   concurrencyLimit: 1,
+  rpmLimit: 60,
+  tpmLimit: 60000,
   enabled: true,
   enabledForPresale: true,
   enabledForArticle: true,
@@ -570,6 +587,8 @@ const rules: FormRules = {
   modelId: [{ required: true, message: '请输入Model ID', trigger: 'blur' }],
   modelName: [{ required: true, message: '请输入Model名称', trigger: 'blur' }],
   concurrencyLimit: [{ required: true, type: 'number', min: 1, message: '并发上限必须大于0', trigger: 'change' }],
+  rpmLimit: [{ required: true, type: 'number', min: 1, message: 'RPM 必须大于0', trigger: 'change' }],
+  tpmLimit: [{ required: true, type: 'number', min: 1, message: 'TPM 必须大于0', trigger: 'change' }],
 }
 
 watch(
@@ -609,6 +628,8 @@ function resetForm() {
   form.lowModelId = ''
   form.modelName = ''
   form.concurrencyLimit = 1
+  form.rpmLimit = 60
+  form.tpmLimit = 60000
   form.enabled = true
   form.enabledForPresale = true
   form.enabledForArticle = true
@@ -686,6 +707,8 @@ function openEdit(row: AIPlatformConfigItem) {
   form.lowModelId = row.lowModelId || ''
   form.modelName = row.modelName
   form.concurrencyLimit = row.concurrencyLimit || 1
+  form.rpmLimit = row.rpmLimit || 60
+  form.tpmLimit = row.tpmLimit || 60000
   form.enabled = row.enabled
   form.enabledForPresale = row.enabledForPresale ?? true
   form.enabledForArticle = !!row.enabledForArticle
@@ -724,6 +747,8 @@ async function submit() {
       lowModelId: form.lowModelId.trim() || undefined,
       modelName: form.modelName.trim(),
       concurrencyLimit: form.concurrencyLimit,
+      rpmLimit: form.rpmLimit,
+      tpmLimit: form.tpmLimit,
       enabled: form.enabled,
       enabledForPresale: form.enabledForPresale,
       enabledForArticle: form.enabledForArticle,
