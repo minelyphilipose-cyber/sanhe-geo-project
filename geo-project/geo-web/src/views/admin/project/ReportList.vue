@@ -352,8 +352,8 @@
                 <span class="platform-cell">
                   <i>
                     <img
-                      v-if="row.platformLogoUrl || platformLogo(row.platformCode, row.platform)"
-                      :src="row.platformLogoUrl || platformLogo(row.platformCode, row.platform)"
+                      v-if="platformLogoSrc(row.platformLogoUrl, row.platformCode, row.platform)"
+                      :src="platformLogoSrc(row.platformLogoUrl, row.platformCode, row.platform)"
                       :alt="row.platform"
                     />
                     <template v-else>{{ row.platform.slice(0, 1) }}</template>
@@ -466,12 +466,13 @@ import ai360Logo from '@/assets/ai-model-logos/ai360-color.png'
 import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
 import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
 import glmLogo from '@/assets/ai-model-logos/glm.png'
-import hunyuanLogo from '@/assets/ai-model-logos/hunyuan-color.png'
 import kimiLogo from '@/assets/ai-model-logos/kimi.png'
 import minimaxLogo from '@/assets/ai-model-logos/minimax-color.png'
 import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
 import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
 import xiaomiMimoLogo from '@/assets/ai-model-logos/xiaomimimo.png'
+import yuanbaoLogo from '@/assets/ai-model-logos/yuanbao-color.svg'
+import { normalizeObjectStorageUrl } from '@/utils/objectStorageUrl'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
@@ -715,9 +716,9 @@ const platformLogoMap: Record<string, string> = {
   wenxin: wenxinLogo,
   文心一言: wenxinLogo,
   baidu: wenxinLogo,
-  hunyuan: hunyuanLogo,
-  腾讯元宝: hunyuanLogo,
-  元宝: hunyuanLogo,
+  hunyuan: yuanbaoLogo,
+  腾讯元宝: yuanbaoLogo,
+  元宝: yuanbaoLogo,
   zhipu: glmLogo,
   智谱清言: glmLogo,
   chatglm: glmLogo,
@@ -748,6 +749,10 @@ function platformLogo(code?: string | null, name?: string | null) {
     || ''
 }
 
+function platformLogoSrc(value?: string | null, code?: string | null, name?: string | null) {
+  return normalizeObjectStorageUrl(value) || platformLogo(code, name)
+}
+
 const indexingSources = computed<IndexingSource[]>(() => {
   const platformStats = new Map((dashboardSummary.value?.platforms || []).map((item) => [normalizePlatformKey(item.platformCode), item]))
   const configuredPlatforms = allModelPlatforms.value.length
@@ -756,7 +761,7 @@ const indexingSources = computed<IndexingSource[]>(() => {
         id: 0,
         platformCode: item.platformCode,
         platformName: item.platformName,
-        platformLogoUrl: item.platformLogoUrl || null,
+        platformLogoUrl: normalizeObjectStorageUrl(item.platformLogoUrl) || null,
         priorityLevel: 'P2' as const,
         apiKey: '',
         apiUrl: '',
@@ -783,7 +788,7 @@ const indexingSources = computed<IndexingSource[]>(() => {
       name,
       code: item.platformCode,
       short: (name || '平').slice(0, 2),
-      logo: stat?.platformLogoUrl || item.platformLogoUrl || platformLogo(item.platformCode, name),
+      logo: normalizeObjectStorageUrl(stat?.platformLogoUrl || item.platformLogoUrl) || platformLogo(item.platformCode, name),
       value: formatCompactNumber(hitCount),
       percent: Math.round((hitCount / maxHit) * 1000) / 10,
       color: sourceColors[index % sourceColors.length].color,
@@ -1225,7 +1230,7 @@ function mapDetailRow(item: ProjectDashboardDetailItem): ReportRow {
     platform: item.platformName || item.platformCode || '-',
     platformCode: item.platformCode || '',
     platformUrl: item.platformUrl || null,
-    platformLogoUrl: item.platformLogoUrl || null,
+    platformLogoUrl: normalizeObjectStorageUrl(item.platformLogoUrl) || null,
     answerText: item.answerText || null,
     matchType: item.matchType || null,
     siteMentioned: !!item.siteMentioned,
