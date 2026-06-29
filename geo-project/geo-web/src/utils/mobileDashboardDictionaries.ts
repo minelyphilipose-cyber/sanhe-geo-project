@@ -1,4 +1,5 @@
 export const aiPlatformLabels: Record<string, string> = {
+  all: '全平台',
   doubao: '豆包',
   deepseek: 'DeepSeek',
   tongyi: '通义千问',

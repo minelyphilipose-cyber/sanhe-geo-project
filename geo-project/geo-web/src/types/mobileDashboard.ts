@@ -99,7 +99,15 @@ export interface MonitorDashboardData {
     firstRecommendCount: DashboardMetric<number>
   }
   platformFilters: string[]
-  questionList: { available: boolean; reason?: string; items: QuestionMonitorItem[] }
+  questionList: {
+    available: boolean
+    reason?: string
+    page?: number
+    size?: number
+    total?: number
+    totalPages?: number
+    items: QuestionMonitorItem[]
+  }
   scenePerformance: SceneMetric[]
   questionCoverage: {
     covered: DashboardMetric<number>
@@ -109,7 +117,8 @@ export interface MonitorDashboardData {
 }
 
 export interface QuestionMonitorItem {
-  pollResultId: number
+  keywordResultId?: number | null
+  pollResultId?: number | null
   platformCode: string
   platformCodes?: string[]
   questionTitle: string

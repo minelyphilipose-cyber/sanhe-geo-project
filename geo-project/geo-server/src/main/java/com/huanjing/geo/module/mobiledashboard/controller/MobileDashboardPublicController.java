@@ -55,10 +55,12 @@ public class MobileDashboardPublicController {
                                                          @RequestParam(required = false) LocalDate startDate,
                                                          @RequestParam(required = false) LocalDate endDate,
                                                          @RequestParam(required = false) String platformCode,
+                                                         @RequestParam(defaultValue = "1") Integer page,
+                                                         @RequestParam(defaultValue = "5") Integer size,
                                                          HttpServletRequest request) {
         return audited("monitor", authorization, request, () -> {
             Long projectId = mobileDashboardShareService.requireValidSession(authorization).projectId();
-            return R.ok(mobileDashboardAggregateService.monitor(projectId, startDate, endDate, platformCode));
+            return R.ok(mobileDashboardAggregateService.monitor(projectId, startDate, endDate, platformCode, page, size));
         });
     }
 

@@ -80,16 +80,9 @@ class MobileDashboardAggregateServiceTest {
     }
 
     @Test
-    void platformCompletionKeepsDisplayablePublishedCountWhenMonthlyChannelQuotaIsMissingAndHidesDouyin() {
+    void platformCompletionKeepsDisplayablePublishedCountWhenMonthlyChannelQuotaIsMissing() {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
-        jdbcTemplate.execute("""
-                CREATE TABLE project_channel_allocation (
-                    project_id BIGINT,
-                    channel_code VARCHAR(32),
-                    period_type_snapshot VARCHAR(32),
-                    allocated_count BIGINT
-                )
-                """);
+        createProjectChannelAllocationTable(jdbcTemplate);
         MobileDashboardAggregateService service = newService(jdbcTemplate);
 
         @SuppressWarnings("unchecked")
@@ -97,13 +90,47 @@ class MobileDashboardAggregateServiceTest {
                 (List<MobileDashboardAggregateVO.PlatformCompletion>) ReflectionTestUtils.invokeMethod(
                         service, "loadPlatformCompletion", 1L, Map.of("douyin", 5L, "xiaohongshu", 3L));
 
-        assertThat(rows).hasSize(1);
-        MobileDashboardAggregateVO.PlatformCompletion xiaohongshu = rows.get(0);
+        assertThat(rows).extracting(MobileDashboardAggregateVO.PlatformCompletion::getCode)
+                .containsExactly("douyin", "xiaohongshu");
+        MobileDashboardAggregateVO.PlatformCompletion xiaohongshu = rows.get(1);
         assertThat(xiaohongshu.getCode()).isEqualTo("xiaohongshu");
         assertThat(xiaohongshu.getPublished()).isEqualTo(3L);
         assertThat(xiaohongshu.getQuota()).isZero();
         assertThat(xiaohongshu.getCompletionRate().isAvailable()).isFalse();
         assertThat(xiaohongshu.getCompletionRate().getReason()).contains("暂无逐渠道月度配额");
+    }
+
+    @Test
+    void contentChannelsComeFromProjectPackageAllocationWhenConfigured() {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createProjectChannelAllocationTable(jdbcTemplate);
+        jdbcTemplate.update("""
+                INSERT INTO project_channel_allocation
+                    (project_id, channel_code, period_type_snapshot, allocated_count)
+                VALUES
+                    (1, 'self_media:zhihu', 'month', 4),
+                    (1, 'self_media:toutiao', 'month', 2),
+                    (1, 'self_media:xiaohongshu', 'week', 9),
+                    (1, 'self_media:baijiahao', 'month', 0),
+                    (2, 'self_media:wechat', 'month', 3)
+                """);
+        MobileDashboardAggregateService service = newService(jdbcTemplate);
+
+        @SuppressWarnings("unchecked")
+        List<String> channels = (List<String>) ReflectionTestUtils.invokeMethod(service,
+                "loadConfiguredContentChannels", 1L);
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.PlatformCompletion> completion =
+                (List<MobileDashboardAggregateVO.PlatformCompletion>) ReflectionTestUtils.invokeMethod(
+                        service, "loadPlatformCompletion", 1L,
+                        Map.of("zhihu", 1L, "toutiao", 2L, "xiaohongshu", 7L),
+                        channels);
+
+        assertThat(channels).containsExactly("toutiao", "zhihu");
+        assertThat(completion).extracting(MobileDashboardAggregateVO.PlatformCompletion::getCode)
+                .containsExactly("toutiao", "zhihu");
+        assertThat(completion.get(0).getQuota()).isEqualTo(2L);
+        assertThat(completion.get(0).getCompletionRate().getValue()).isEqualTo(100);
     }
 
     @Test
@@ -345,6 +372,52 @@ class MobileDashboardAggregateServiceTest {
     }
 
     @Test
+    void latestQuestionCoverageKeepsSevenDayStaggeredPollResults() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createQuestionCoverageTables(jdbcTemplate);
+        createPollResultsTable(jdbcTemplate);
+        jdbcTemplate.update("INSERT INTO keyword_group (id, deleted) VALUES (10, 0)");
+        jdbcTemplate.update("INSERT INTO project_keyword_group_rel (project_id, keyword_group_id) VALUES (1, 10)");
+        jdbcTemplate.update("""
+                INSERT INTO keyword_group_result (id, group_id, scene_code, question_tier)
+                VALUES
+                    (1001, 10, 'brand_awareness', 'A'),
+                    (1002, 10, 'qa', 'A')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_keyword_daily_summary
+                    (project_id, keyword_result_id, batch_date, question_tier, completed_count, hit_count, effective_hit_count)
+                VALUES
+                    (1, 1001, DATE '2026-06-20', 'A', 1, 0, 1),
+                    (1, 1002, DATE '2026-06-26', 'A', 1, 1, 0)
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, batch_date, question_tier, status, is_hit, effective_hit, updated_at)
+                VALUES
+                    (1, 1, 1001, 'q1', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, NULL, TIMESTAMP '2026-06-20 09:00:00'),
+                    (2, 1, 1002, 'q2', 'doubao', DATE '2026-06-26', 'A', 'completed', 1, NULL, TIMESTAMP '2026-06-26 09:00:00')
+                """);
+        MobileDashboardAggregateService service = newService(jdbcTemplate);
+
+        Object completeBatchDate = invoke(service, "loadLatestCompletePollBatchDate", 1L);
+        Object latestCoverage = invoke(service, "loadLatestQuestionCoverage", 1L);
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.SceneMetric> latestScenes =
+                (List<MobileDashboardAggregateVO.SceneMetric>) invoke(service, "loadLatestSceneCoverage", 1L);
+
+        assertThat(completeBatchDate).isNull();
+        assertThat(recordValue(latestCoverage, "total")).isEqualTo(2L);
+        assertThat(recordValue(latestCoverage, "covered")).isEqualTo(2L);
+        assertThat(latestScenes).filteredOn(row -> "brand_awareness".equals(row.getCode()))
+                .singleElement()
+                .satisfies(row -> assertThat(row.getCovered().getValue()).isEqualTo(1L));
+        assertThat(latestScenes).filteredOn(row -> "qa".equals(row.getCode()))
+                .singleElement()
+                .satisfies(row -> assertThat(row.getCovered().getValue()).isEqualTo(1L));
+    }
+
+    @Test
     void buildingContentExcludesDraftsThatAlreadyHaveCurrentVisiblePublishRecords() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         jdbcTemplate.execute("""
@@ -376,6 +449,72 @@ class MobileDashboardAggregateServiceTest {
 
         Object count = invoke(newService(jdbcTemplate), "countBuildingContent", 1L,
                 dateRange(LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30)));
+
+        assertThat(count).isEqualTo(2L);
+    }
+
+    @Test
+    void buildingQuestionCoverageCountsUncoveredQuestionsWithBuildingContentInSameScene() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createQuestionCoverageTables(jdbcTemplate);
+        createPollResultsTable(jdbcTemplate);
+        createPublishRecordTable(jdbcTemplate);
+        jdbcTemplate.execute("""
+                CREATE TABLE article_prompt_template (
+                    id BIGINT,
+                    question_scene_code VARCHAR(32)
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE article_draft (
+                    id BIGINT,
+                    project_id BIGINT,
+                    prompt_template_id BIGINT,
+                    status VARCHAR(32),
+                    allocation_mode VARCHAR(16)
+                )
+                """);
+        jdbcTemplate.update("INSERT INTO keyword_group (id, deleted) VALUES (10, 0)");
+        jdbcTemplate.update("INSERT INTO project_keyword_group_rel (project_id, keyword_group_id) VALUES (1, 10)");
+        jdbcTemplate.update("""
+                INSERT INTO keyword_group_result (id, group_id, scene_code, question_tier)
+                VALUES
+                    (1001, 10, 'brand', 'A'),
+                    (1002, 10, 'brand', 'A'),
+                    (1003, 10, 'deal', 'A'),
+                    (1004, 10, 'qa', 'A')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, batch_date, question_tier, status, is_hit, effective_hit, updated_at)
+                VALUES
+                    (1, 1, 1001, '问题1', 'doubao', DATE '2026-06-20', 'A', 'completed', 0, 0, TIMESTAMP '2026-06-20 10:00:00'),
+                    (2, 1, 1002, '问题2', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-20 10:00:00'),
+                    (3, 1, 1004, '问题4', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-20 10:00:00')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO article_prompt_template (id, question_scene_code)
+                VALUES
+                    (201, 'brand'),
+                    (202, 'deal'),
+                    (203, 'qa')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO article_draft (id, project_id, prompt_template_id, status, allocation_mode)
+                VALUES
+                    (301, 1, 201, 'approved', NULL),
+                    (302, 1, 202, 'approved', NULL),
+                    (303, 1, 203, 'approved', NULL),
+                    (304, 1, 202, 'approved', NULL)
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO article_publish_record
+                    (id, project_id, article_id, publish_status, target_channel, target_kind, published_at, verified_at, created_at)
+                VALUES
+                    (1, 1, 304, 'published', 'zhihu', NULL, TIMESTAMP '2026-06-21 10:00:00', NULL, TIMESTAMP '2026-06-21 10:00:00')
+                """);
+
+        Object count = invoke(newService(jdbcTemplate), "countBuildingQuestionCoverage", 1L);
 
         assertThat(count).isEqualTo(2L);
     }
@@ -448,6 +587,17 @@ class MobileDashboardAggregateServiceTest {
                 """);
     }
 
+    private static void createProjectChannelAllocationTable(JdbcTemplate jdbcTemplate) {
+        jdbcTemplate.execute("""
+                CREATE TABLE project_channel_allocation (
+                    project_id BIGINT,
+                    channel_code VARCHAR(64),
+                    period_type_snapshot VARCHAR(32),
+                    allocated_count BIGINT
+                )
+                """);
+    }
+
     private static void createQuestionCoverageTables(JdbcTemplate jdbcTemplate) {
         jdbcTemplate.execute("""
                 CREATE TABLE project_keyword_group_rel (
@@ -493,6 +643,7 @@ class MobileDashboardAggregateServiceTest {
                     batch_date DATE,
                     question_tier VARCHAR(8),
                     status VARCHAR(32),
+                    is_hit INT,
                     effective_hit INT,
                     detail_json CLOB,
                     updated_at TIMESTAMP

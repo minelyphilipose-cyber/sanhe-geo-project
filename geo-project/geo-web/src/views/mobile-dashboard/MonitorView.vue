@@ -36,11 +36,11 @@
       <div v-if="questionItems.length" class="question-list">
         <article
           v-for="item in displayedQuestionItems"
-          :key="item.pollResultId"
+          :key="item.keywordResultId || item.pollResultId || item.questionTitle"
           class="question-item"
-          :class="{ 'question-item--clickable': item.mentioned }"
-          :role="item.mentioned ? 'button' : undefined"
-          :tabindex="item.mentioned ? 0 : undefined"
+          :class="{ 'question-item--clickable': item.mentioned && item.pollResultId }"
+          :role="item.mentioned && item.pollResultId ? 'button' : undefined"
+          :tabindex="item.mentioned && item.pollResultId ? 0 : undefined"
           @click="openQuestionDetail(item)"
           @keyup.enter="openQuestionDetail(item)"
         >
@@ -72,12 +72,12 @@
           </div>
         </article>
         <nav v-if="questionPageCount > 1" class="question-pagination" aria-label="核心问题监测分页">
-          <button type="button" :disabled="questionPage <= 1" @click="questionPage -= 1">
+          <button type="button" :disabled="questionPage <= 1" @click="changeQuestionPage(questionPage - 1)">
             <MobileIcon name="chevronLeft" />
             上一页
           </button>
           <span>{{ questionPage }} / {{ questionPageCount }}</span>
-          <button type="button" :disabled="questionPage >= questionPageCount" @click="questionPage += 1">
+          <button type="button" :disabled="questionPage >= questionPageCount" @click="changeQuestionPage(questionPage + 1)">
             下一页
             <MobileIcon name="chevronRight" />
           </button>
@@ -174,12 +174,8 @@ const filterSummaryText = computed(() =>
     ? '当前展示全平台汇总。'
     : `当前展示 ${platformLabel(selectedPlatform.value)} 平台。`
 )
-const questionPageCount = computed(() => Math.max(1, Math.ceil(questionItems.value.length / questionPageSize)))
-const displayedQuestionItems = computed(() => {
-  const page = Math.min(questionPage.value, questionPageCount.value)
-  const start = (page - 1) * questionPageSize
-  return questionItems.value.slice(start, start + questionPageSize)
-})
+const questionPageCount = computed(() => Math.max(1, data.value?.questionList?.totalPages || 1))
+const displayedQuestionItems = computed(() => questionItems.value)
 const judgeNotice = computed(() => {
   const reason = questionItems.value.find((item) => !item.recommended?.available)?.recommended?.reason
   return reason ? '样本分析中，推荐与排名结果将在核心样本分析充分后展示。' : ''
@@ -277,7 +273,7 @@ function publicEvidence(value?: string | null) {
 }
 
 function openQuestionDetail(item: QuestionMonitorItem) {
-  if (!item.mentioned) return
+  if (!item.mentioned || !item.pollResultId) return
   sessionStorage.setItem(QUESTION_DETAIL_CACHE_KEY, JSON.stringify(item))
   router.push({
     name: 'MobileDashboardQuestionDetail',
@@ -291,6 +287,14 @@ function openQuestionDetail(item: QuestionMonitorItem) {
 async function changePlatform(code: string) {
   if (selectedPlatform.value === code) return
   selectedPlatform.value = code
+  questionPage.value = 1
+  await loadData()
+}
+
+async function changeQuestionPage(page: number) {
+  const nextPage = Math.min(Math.max(page, 1), questionPageCount.value)
+  if (nextPage === questionPage.value) return
+  questionPage.value = nextPage
   await loadData()
 }
 
@@ -309,11 +313,14 @@ function coveragePercent(metric?: DashboardMetric<number>) {
 async function loadData() {
   try {
     const res = await withRenewedMobileDashboardSession(
-      (sessionToken) => getMobileDashboardMonitor(sessionToken, selectedPlatform.value),
+      (sessionToken) => getMobileDashboardMonitor(sessionToken, selectedPlatform.value, {
+        page: questionPage.value,
+        size: questionPageSize,
+      }),
       store,
     )
     data.value = res.data.data
-    questionPage.value = 1
+    questionPage.value = data.value?.questionList?.page || questionPage.value
   } catch (error: any) {
     showToast(error?.message || '数据加载失败')
   }

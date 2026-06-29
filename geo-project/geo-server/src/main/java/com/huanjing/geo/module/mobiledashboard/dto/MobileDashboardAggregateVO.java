@@ -89,11 +89,16 @@ public final class MobileDashboardAggregateVO {
     public static class QuestionMonitorList {
         private boolean available;
         private String reason;
+        private Integer page;
+        private Integer size;
+        private Integer total;
+        private Integer totalPages;
         private List<QuestionMonitorItem> items = new ArrayList<>();
     }
 
     @Data
     public static class QuestionMonitorItem {
+        private Long keywordResultId;
         private Long pollResultId;
         private String platformCode;
         private List<String> platformCodes = new ArrayList<>();
