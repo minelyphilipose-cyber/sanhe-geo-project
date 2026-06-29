@@ -39,12 +39,12 @@ public class MobileDashboardAggregateService {
     private static final List<String> AI_PLATFORM_CODES = List.of("doubao", "deepseek", "tongyi", "yuanbao");
     private static final List<String> CONTENT_DETAIL_CHANNELS = List.of("official_site", "douyin", "xiaohongshu", "wechat_mp", "toutiao", "baijiahao", "zhihu");
     private static final Set<String> MEASURABLE_INDEX_CHANNELS = Set.of(
-            "official_site", "agent_site", "brand_official_site", "brand_geo_site", "agent_official_site",
+            "official_site", "agent_site", "brand_geo_site", "agent_official_site",
             "forum", "forum_site", "industry_site", "authority_media",
             "wechat", "wechat_mp", "douyin", "xiaohongshu", "toutiao", "baijiahao", "zhihu",
             "self_media:wechat", "self_media:wechat_mp", "self_media:douyin", "self_media:xiaohongshu",
             "self_media:toutiao", "self_media:baijiahao", "self_media:zhihu");
-    private static final String SELF_INDEX_CHANNEL_SQL = "'official_site','agent_site','brand_official_site','brand_geo_site','agent_official_site','forum','forum_site','industry_site','authority_media'";
+    private static final String SELF_INDEX_CHANNEL_SQL = "'official_site','agent_site','brand_geo_site','agent_official_site','forum','forum_site','industry_site','authority_media'";
 
     private final JdbcTemplate jdbcTemplate;
     private final MobileDashboardEntityJudgeService entityJudgeService;
@@ -1693,13 +1693,13 @@ public class MobileDashboardAggregateService {
             case "self_media:toutiao" -> "toutiao";
             case "self_media:baijiahao" -> "baijiahao";
             case "self_media:zhihu" -> "zhihu";
-            case "agent_site", "agent_site_article", "brand_official_site", "brand_geo_site", "agent_official_site" -> "official_site";
+            case "agent_site", "agent_site_article", "brand_geo_site", "agent_official_site" -> "official_site";
             default -> value;
         };
     }
 
     private String contentDetailChannelSql() {
-        return "'official_site','agent_site','agent_site_article','brand_official_site','brand_geo_site','agent_official_site',"
+        return "'official_site','agent_site','agent_site_article','brand_geo_site','agent_official_site',"
                 + "'wechat','wechat_mp','douyin','xiaohongshu','toutiao','baijiahao','zhihu',"
                 + "'self_media:wechat','self_media:wechat_mp','self_media:douyin','self_media:xiaohongshu',"
                 + "'self_media:toutiao','self_media:baijiahao','self_media:zhihu'";

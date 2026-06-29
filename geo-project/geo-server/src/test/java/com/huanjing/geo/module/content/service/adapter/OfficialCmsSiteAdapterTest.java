@@ -55,6 +55,20 @@ class OfficialCmsSiteAdapterTest {
     }
 
     @Test
+    void submitToTarget_success_readsNestedPublishedUrl() {
+        givenFramework();
+        adapter.nextPost = new HttpClientUtil.HttpResult(200,
+                "{\"code\":0,\"data\":{\"articleId\":\"cms-2\",\"publishedUrl\":\"https://site/a/2\"}}",
+                Map.of());
+
+        SubmitResult result = adapter.submitToTarget(article("Title", "qa"), "# body", target());
+
+        assertTrue(result.isSuccess());
+        assertEquals("https://site/a/2", result.getPublishedUrl());
+        assertEquals("cms-2", result.getPlatformArticleId());
+    }
+
+    @Test
     void submitToTarget_401_authExpired() {
         givenFramework();
         adapter.nextPost = new HttpClientUtil.HttpResult(401, "no", Map.of());

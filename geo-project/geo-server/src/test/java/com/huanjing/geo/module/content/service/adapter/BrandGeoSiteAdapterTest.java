@@ -42,6 +42,17 @@ class BrandGeoSiteAdapterTest {
     }
 
     @Test
+    void submitToTarget_success_prefersReturnedPublishedUrl() {
+        adapter.nextResponse = response(200,
+                "{\"code\":0,\"message\":\"ok\",\"published_url\":\"https://www.ok.com/knowledge/detail/12345\",\"data\":{\"id\":12345}}");
+
+        SubmitResult result = adapter.submitToTarget(article("Title", "industry_article"), "markdown", target("ok"));
+
+        assertTrue(result.isSuccess());
+        assertEquals("https://www.ok.com/knowledge/detail/12345", result.getPublishedUrl());
+    }
+
+    @Test
     void submitToTarget_articleTypeFAQ_mapsToFaqContentType() throws Exception {
         adapter.nextResponse = response(200, "{\"code\":0,\"data\":{\"id\":1}}");
 

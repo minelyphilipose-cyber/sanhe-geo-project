@@ -8,12 +8,14 @@ import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
+import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.BrandOfficialSite;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.PackagePublishConfig;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.PackagePublishConfigMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
@@ -45,6 +47,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -68,6 +71,7 @@ class ContentDistributionServiceTest {
     private ArticleDraftMapper articleDraftMapper;
     private ArticleDraftVersionMapper articleDraftVersionMapper;
     private DistributionTaskMapper distributionTaskMapper;
+    private ArticlePublishRecordMapper articlePublishRecordMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
     private PackagePublishConfigMapper packagePublishConfigMapper;
     private ProjectMapper projectMapper;
@@ -90,9 +94,11 @@ class ContentDistributionServiceTest {
     void setUp() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), DistributionTask.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraft.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticlePublishRecord.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
         distributionTaskMapper = mock(DistributionTaskMapper.class);
+        articlePublishRecordMapper = mock(ArticlePublishRecordMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
         packagePublishConfigMapper = mock(PackagePublishConfigMapper.class);
         projectMapper = mock(ProjectMapper.class);
@@ -114,6 +120,7 @@ class ContentDistributionServiceTest {
                 articleDraftMapper,
                 articleDraftVersionMapper,
                 distributionTaskMapper,
+                articlePublishRecordMapper,
                 selfMediaAccountMapper,
                 packagePublishConfigMapper,
                 projectMapper,
@@ -160,7 +167,7 @@ class ContentDistributionServiceTest {
     void distributeTo_brandOfficialSite_success_writesSubmittedAndQuotaIncreased() {
         givenCommonData();
         officialCmsSiteAdapter.result = SubmitResult.success(201, "{}", "{\"id\":\"pa-1\"}", "https://site/article", "pa-1");
-        when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));
+        when(distributionTaskMapper.selectById(300L)).thenReturn(ownedTask("submitted", DistributionTargetKind.BRAND_OFFICIAL_SITE));
 
         DistributionTask result = contentDistributionService.distributeTo(1L, target("active"));
 
@@ -174,7 +181,30 @@ class ContentDistributionServiceTest {
         assertEquals(10L, inserted.getValue().getBrandOfficialSiteId());
         assertNotNull(inserted.getValue().getLockedUntil());
         verify(distributionTaskMapper).update(eq(null), any());
-        assertArticleStatusTransitions("distributing", "published");
+        assertArticleStatusTransitions("distributing", "distributed");
+        verify(articlePublishRecordMapper, never()).insert(any());
+    }
+
+    @Test
+    void distributeTo_brandGeoSite_existingPublishRecord_refreshesUrlAndStatus() {
+        givenCommonData();
+        givenBrandGeoSite("ok", "active");
+        brandGeoSiteAdapter.result = SubmitResult.success(200, "{\"siteCode\":\"ok\"}", "{\"code\":200}", "https://site/article", "pa-1");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(ownedTask("submitted", DistributionTargetKind.BRAND_GEO_SITE));
+        when(articlePublishRecordMapper.insert(any())).thenThrow(new DuplicateKeyException("duplicate"));
+
+        contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ignored"));
+
+        ArgumentCaptor<ArticlePublishRecord> recordCaptor = ArgumentCaptor.forClass(ArticlePublishRecord.class);
+        verify(articlePublishRecordMapper).insert(recordCaptor.capture());
+        assertEquals("https://site/article", recordCaptor.getValue().getPublishedUrl());
+        ArgumentCaptor<LambdaUpdateWrapper<ArticlePublishRecord>> updateCaptor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(articlePublishRecordMapper).update(eq(null), updateCaptor.capture());
+        String sqlSet = updateCaptor.getValue().getSqlSet();
+        assertTrue(sqlSet.contains("published_url"));
+        assertTrue(sqlSet.contains("url_quality"));
+        assertTrue(sqlSet.contains("url_source"));
+        assertTrue(sqlSet.contains("publish_status"));
     }
 
     @Test
@@ -285,7 +315,7 @@ class ContentDistributionServiceTest {
         givenCommonData();
         givenBrandGeoSite("ok", "active");
         brandGeoSiteAdapter.result = SubmitResult.success(200, "{\"siteCode\":\"ok\"}", "{\"code\":200}", "https://www.ok.com/knowledge/detail/12345", "12345");
-        when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));
+        when(distributionTaskMapper.selectById(300L)).thenReturn(ownedTask("submitted", DistributionTargetKind.BRAND_GEO_SITE));
 
         DistributionTask result = contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ignored"));
 
@@ -300,7 +330,8 @@ class ContentDistributionServiceTest {
         assertEquals(30L, inserted.getValue().getTargetBrandId());
         assertEquals("ok Agent 官网", brandGeoSiteAdapter.capturedTarget.siteName());
         assertEquals("www.ok.com", brandGeoSiteAdapter.capturedTarget.domain());
-        assertArticleStatusTransitions("distributing", "published");
+        assertArticleStatusTransitions("distributing", "distributed");
+        assertOwnedPublishRecord("official_site");
     }
 
     @Test
@@ -649,10 +680,33 @@ class ContentDistributionServiceTest {
         assertTrue(wrapper.getParamNameValuePairs().values().contains(status));
     }
 
+    private void assertOwnedPublishRecord(String targetChannel) {
+        ArgumentCaptor<ArticlePublishRecord> recordCaptor = ArgumentCaptor.forClass(ArticlePublishRecord.class);
+        verify(articlePublishRecordMapper).insert(recordCaptor.capture());
+        ArticlePublishRecord record = recordCaptor.getValue();
+        assertEquals("distribution_task", record.getSourceType());
+        assertEquals(300L, record.getSourceId());
+        assertEquals(targetChannel, record.getTargetChannel());
+        assertEquals("https://site/article", record.getPublishedUrl());
+        assertEquals("public_url", record.getUrlQuality());
+        assertEquals("distribution_tasks.published_url", record.getUrlSource());
+        assertEquals("distributed", record.getPublishStatus());
+        assertNotNull(record.getVerifiedAt());
+    }
+
     private DistributionTask task(String status) {
         DistributionTask task = new DistributionTask();
         task.setId(300L);
         task.setStatus(status);
+        return task;
+    }
+
+    private DistributionTask ownedTask(String status, String targetKind) {
+        DistributionTask task = task(status);
+        task.setTargetKind(targetKind);
+        task.setArticleId(1L);
+        task.setProjectId(20L);
+        task.setPublishedUrl("https://site/article");
         return task;
     }
 

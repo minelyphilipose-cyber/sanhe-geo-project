@@ -205,15 +205,33 @@ public class OfficialCmsSiteAdapter implements SiteAdapter {
     private ResponseFields parseResponseFields(String body) {
         try {
             JsonNode root = objectMapper.readTree(body == null ? "{}" : body);
-            return new ResponseFields(text(root, "url"), text(root, "id"));
+            String publishedUrl = firstText(root, "url", "publishedUrl", "published_url", "publishUrl",
+                    "publish_url", "articleUrl", "article_url", "link", "permalink");
+            if (!StringUtils.hasText(publishedUrl)) {
+                publishedUrl = firstText(root.path("data"), "url", "publishedUrl", "published_url", "publishUrl",
+                        "publish_url", "articleUrl", "article_url", "link", "permalink");
+            }
+            String platformArticleId = firstText(root, "id", "articleId", "article_id", "contentId", "content_id");
+            if (!StringUtils.hasText(platformArticleId)) {
+                platformArticleId = firstText(root.path("data"), "id", "articleId", "article_id", "contentId", "content_id");
+            }
+            return new ResponseFields(publishedUrl, platformArticleId);
         } catch (Exception ex) {
             return new ResponseFields(null, null);
         }
     }
 
-    private String text(JsonNode node, String fieldName) {
-        JsonNode child = node == null ? null : node.get(fieldName);
-        return child == null || child.isNull() ? null : child.asText();
+    private String firstText(JsonNode node, String... fieldNames) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        for (String fieldName : fieldNames) {
+            JsonNode child = node.get(fieldName);
+            if (child != null && child.isValueNode() && StringUtils.hasText(child.asText())) {
+                return child.asText();
+            }
+        }
+        return null;
     }
 
     private String nullToEmpty(String value) {

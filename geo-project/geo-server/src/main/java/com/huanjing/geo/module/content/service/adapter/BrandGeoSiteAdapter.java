@@ -209,7 +209,12 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
         }
 
         long platformId = idNode.asLong();
-        String publishedUrl = firstText(root.path("data"), "url", "publishedUrl", "articleUrl", "link", "permalink");
+        String publishedUrl = firstText(root, "url", "publishedUrl", "published_url", "publishUrl", "publish_url",
+                "articleUrl", "article_url", "link", "permalink");
+        if (!StringUtils.hasText(publishedUrl)) {
+            publishedUrl = firstText(root.path("data"), "url", "publishedUrl", "published_url", "publishUrl",
+                    "publish_url", "articleUrl", "article_url", "link", "permalink");
+        }
         if (!StringUtils.hasText(publishedUrl)) {
             publishedUrl = publicBaseUrl(endpoint);
         }

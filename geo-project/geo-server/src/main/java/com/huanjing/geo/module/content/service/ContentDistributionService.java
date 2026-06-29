@@ -51,6 +51,7 @@ import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -101,6 +102,7 @@ public class ContentDistributionService {
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final DistributionTaskMapper distributionTaskMapper;
+    private final ArticlePublishRecordMapper articlePublishRecordMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final PackagePublishConfigMapper packagePublishConfigMapper;
     private final ProjectMapper projectMapper;
@@ -170,6 +172,7 @@ public class ContentDistributionService {
         requireDistributionAccess(operator, project.getBrandId());
         DistributionTask reusableTask = findReusableDistributionTask(article, target);
         if (reusableTask != null) {
+            recordOwnedSourcePublishIfVisible(article, reusableTask);
             return reusableTask;
         }
         if (LOCKED_ARTICLE_STATUS.contains(String.valueOf(article.getStatus()).toLowerCase(Locale.ROOT))) {
@@ -579,6 +582,7 @@ public class ContentDistributionService {
         finalizeAttemptForBrandOfficialSite(task.getId(), submitResult);
         finalizeArticleStatus(article, submitResult);
         if (submitResult.isSuccess()) {
+            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()));
             companyChannelQuotaService.confirmDistribution(task.getId());
         } else {
             companyChannelQuotaService.refundDistribution(task.getId());
@@ -641,6 +645,7 @@ public class ContentDistributionService {
         finalizeAttemptForBrandGeoSite(task.getId(), submitResult);
         finalizeArticleStatus(article, submitResult);
         if (submitResult.isSuccess()) {
+            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()));
             companyChannelQuotaService.confirmDistribution(task.getId());
         } else {
             companyChannelQuotaService.refundDistribution(task.getId());
@@ -899,6 +904,7 @@ public class ContentDistributionService {
         finalizeAttemptForIndustrySite(task.getId(), submitResult);
         finalizeArticleStatusForDraft(article, submitResult);
         if (submitResult.isSuccess()) {
+            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()));
             companyChannelQuotaService.confirmDistribution(task.getId());
         } else {
             companyChannelQuotaService.refundDistribution(task.getId());
@@ -945,6 +951,7 @@ public class ContentDistributionService {
         finalizeAttemptForForumSite(task.getId(), submitResult);
         finalizeArticleStatusForDraft(article, submitResult);
         if (submitResult.isSuccess()) {
+            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()));
             companyChannelQuotaService.confirmDistribution(task.getId());
         } else {
             companyChannelQuotaService.refundDistribution(task.getId());
@@ -1492,11 +1499,125 @@ public class ContentDistributionService {
     }
 
     private void finalizeArticleStatus(ArticleDraft article, SubmitResult result) {
-        transitionArticleStatus(article, "distributing", result.isSuccess() ? "published" : "approved", result.isSuccess());
+        transitionArticleStatus(article, "distributing", result.isSuccess() ? "distributed" : "approved", result.isSuccess());
     }
 
     private void finalizeArticleStatusForDraft(ArticleDraft article, SubmitResult result) {
         transitionArticleStatus(article, "distributing", result.isSuccess() ? "distributed" : "approved", result.isSuccess());
+    }
+
+    private void recordOwnedSourcePublishIfVisible(ArticleDraft article, DistributionTask task) {
+        if (task == null || !Set.of("submitted", "confirmed", "published").contains(task.getStatus())) {
+            return;
+        }
+        recordOwnedSourcePublish(article, task);
+    }
+
+    private void recordOwnedSourcePublish(ArticleDraft article, DistributionTask task) {
+        if (article == null || task == null || task.getId() == null || !isOwnedSourceTarget(task.getTargetKind())) {
+            return;
+        }
+        LocalDateTime verifiedAt = firstTime(task.getPublishedAt(), task.getFinishedAt(), article.getPublishedAt(), task.getCreatedAt(), LocalDateTime.now(SH_ZONE));
+        ArticlePublishRecord record = new ArticlePublishRecord();
+        record.setArticleId(article.getId());
+        record.setDistributionTaskId(task.getId());
+        record.setProjectId(task.getProjectId());
+        record.setSourceType("distribution_task");
+        record.setSourceId(task.getId());
+        record.setTargetKind(task.getTargetKind());
+        record.setTargetChannel(ownedSourceChannel(task));
+        record.setPublishedUrl(blankToNull(task.getPublishedUrl()));
+        record.setUrlQuality(urlQuality(task.getPublishedUrl()));
+        record.setUrlSource(urlSource(task));
+        record.setPlatformArticleId(blankToNull(task.getPlatformArticleId()));
+        record.setPlatformPublishId(blankToNull(task.getPlatformPublishId()));
+        record.setPublishStatus("distributed");
+        record.setPublishedAt(verifiedAt);
+        record.setVerifiedAt(verifiedAt);
+        try {
+            articlePublishRecordMapper.insert(record);
+        } catch (DuplicateKeyException ignored) {
+            refreshOwnedSourcePublishRecord(record);
+        }
+    }
+
+    private void refreshOwnedSourcePublishRecord(ArticlePublishRecord record) {
+        articlePublishRecordMapper.update(null, new LambdaUpdateWrapper<ArticlePublishRecord>()
+                .eq(ArticlePublishRecord::getSourceType, record.getSourceType())
+                .eq(ArticlePublishRecord::getSourceId, record.getSourceId())
+                .set(ArticlePublishRecord::getArticleId, record.getArticleId())
+                .set(ArticlePublishRecord::getDistributionTaskId, record.getDistributionTaskId())
+                .set(ArticlePublishRecord::getProjectId, record.getProjectId())
+                .set(ArticlePublishRecord::getTargetKind, record.getTargetKind())
+                .set(ArticlePublishRecord::getTargetChannel, record.getTargetChannel())
+                .set(ArticlePublishRecord::getPublishedUrl, record.getPublishedUrl())
+                .set(ArticlePublishRecord::getUrlQuality, record.getUrlQuality())
+                .set(ArticlePublishRecord::getUrlSource, record.getUrlSource())
+                .set(ArticlePublishRecord::getPlatformArticleId, record.getPlatformArticleId())
+                .set(ArticlePublishRecord::getPlatformPublishId, record.getPlatformPublishId())
+                .set(ArticlePublishRecord::getPublishStatus, record.getPublishStatus())
+                .set(ArticlePublishRecord::getPublishedAt, record.getPublishedAt())
+                .set(ArticlePublishRecord::getVerifiedAt, record.getVerifiedAt()));
+    }
+
+    private boolean isOwnedSourceTarget(String targetKind) {
+        if (!StringUtils.hasText(targetKind)) {
+            return false;
+        }
+        return Set.of(
+                DistributionTargetKind.BRAND_GEO_SITE,
+                DistributionTargetKind.INDUSTRY_SITE,
+                DistributionTargetKind.FORUM_SITE
+        ).contains(targetKind);
+    }
+
+    private String ownedSourceChannel(DistributionTask task) {
+        if (DistributionTargetKind.BRAND_GEO_SITE.equals(task.getTargetKind())) {
+            return "official_site";
+        }
+        if (DistributionTargetKind.INDUSTRY_SITE.equals(task.getTargetKind())) {
+            return "industry_site";
+        }
+        if (DistributionTargetKind.FORUM_SITE.equals(task.getTargetKind())) {
+            return "forum_site";
+        }
+        return task.getTargetKind();
+    }
+
+    private String urlQuality(String publishedUrl) {
+        String url = blankToNull(publishedUrl);
+        if (url == null) {
+            return "missing";
+        }
+        return url.toLowerCase(Locale.ROOT).startsWith("http://") || url.toLowerCase(Locale.ROOT).startsWith("https://")
+                ? "public_url"
+                : "manage_url";
+    }
+
+    private String urlSource(DistributionTask task) {
+        if (StringUtils.hasText(task.getPublishedUrl())) {
+            return "distribution_tasks.published_url";
+        }
+        if (StringUtils.hasText(task.getPlatformArticleId())) {
+            return "distribution_tasks.platform_article_id";
+        }
+        if (StringUtils.hasText(task.getPlatformPublishId())) {
+            return "distribution_tasks.platform_publish_id";
+        }
+        return "distribution_tasks.status";
+    }
+
+    private String blankToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private LocalDateTime firstTime(LocalDateTime... values) {
+        for (LocalDateTime value : values) {
+            if (value != null) {
+                return value;
+            }
+        }
+        return LocalDateTime.now(SH_ZONE);
     }
 
     private void transitionArticleStatus(ArticleDraft article, String expectedStatus, String newStatus, boolean setPublishedAt) {

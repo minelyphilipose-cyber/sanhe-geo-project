@@ -52,7 +52,12 @@ public class ArticlePublishRecordCompensationService {
                                t.article_id,
                                t.project_id,
                                t.target_kind,
-                               COALESCE(sma.platform, t.integration_method, t.target_kind) AS target_channel,
+                               CASE
+                                 WHEN t.target_kind = 'brand_geo_site' THEN 'official_site'
+                                 WHEN t.target_kind = 'industry_site' THEN 'industry_site'
+                                 WHEN t.target_kind = 'forum_site' THEN 'forum_site'
+                                 ELSE COALESCE(sma.platform, t.integration_method, t.target_kind)
+                               END AS target_channel,
                                NULLIF(TRIM(t.published_url), '') AS published_url,
                                CASE
                                  WHEN NULLIF(TRIM(t.published_url), '') REGEXP '^https?://' THEN 'public_url'
@@ -67,15 +72,19 @@ public class ArticlePublishRecordCompensationService {
                                END AS url_source,
                                t.platform_article_id,
                                t.platform_publish_id,
-                               t.status AS publish_status,
+                               CASE
+                                 WHEN t.target_kind IN ('brand_geo_site', 'industry_site', 'forum_site') THEN 'distributed'
+                                 ELSE t.status
+                               END AS publish_status,
                                COALESCE(t.published_at, t.finished_at, t.created_at) AS published_at,
                                COALESCE(t.published_at, t.finished_at, t.created_at) AS verified_at
                           FROM distribution_tasks t
                           LEFT JOIN self_media_account sma ON sma.id = t.self_media_account_id
-                          LEFT JOIN article_publish_record r
+                         LEFT JOIN article_publish_record r
                                  ON r.source_type = 'distribution_task'
                                 AND r.source_id = t.id
                          WHERE r.id IS NULL
+                           AND t.target_kind <> 'brand_official_site'
                            AND (
                                  t.status = 'published'
                               OR (t.status = 'submitted' AND t.finished_at IS NOT NULL)

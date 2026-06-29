@@ -81,6 +81,20 @@ class IndustryNewsSiteAdapterTest {
         assertThat(result.getPlatformArticleId()).isEqualTo("88");
     }
 
+    @Test
+    void acceptsTopLevelPublishedUrl() {
+        CapturingAdapter adapter = new CapturingAdapter(objectMapper,
+                new HttpClientUtil.HttpResult(200,
+                        "{\"code\":0,\"message\":\"success\",\"published_url\":\"https://site.test/a/top\",\"data\":{\"id\":89}}",
+                        Map.of()));
+
+        SubmitResult result = adapter.submitToTarget(article(), "# 标题\n\n正文", new TargetContext.IndustrySiteTarget(site(), project()));
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getPublishedUrl()).isEqualTo("https://site.test/a/top");
+        assertThat(result.getPlatformArticleId()).isEqualTo("89");
+    }
+
     private ArticleDraft article() {
         ArticleDraft article = new ArticleDraft();
         article.setId(100L);

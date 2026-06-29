@@ -90,8 +90,14 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
             return null;
         }
         try {
-            JsonNode data = objectMapper.readTree(responseBody).path("data");
-            return firstText(data, "url", "publishedUrl", "articleUrl", "link", "permalink");
+            JsonNode root = objectMapper.readTree(responseBody);
+            String publishedUrl = firstText(root, "url", "publishedUrl", "published_url", "publishUrl", "publish_url",
+                    "articleUrl", "article_url", "link", "permalink");
+            if (StringUtils.hasText(publishedUrl)) {
+                return publishedUrl;
+            }
+            return firstText(root.path("data"), "url", "publishedUrl", "published_url", "publishUrl", "publish_url",
+                    "articleUrl", "article_url", "link", "permalink");
         } catch (Exception ex) {
             return null;
         }

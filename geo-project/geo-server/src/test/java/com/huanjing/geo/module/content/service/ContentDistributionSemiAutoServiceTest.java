@@ -18,6 +18,7 @@ import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.PackagePublishConfigMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
@@ -111,6 +112,7 @@ class ContentDistributionSemiAutoServiceTest {
                 articleDraftMapper,
                 articleDraftVersionMapper,
                 distributionTaskMapper,
+                mock(ArticlePublishRecordMapper.class),
                 mock(SelfMediaAccountMapper.class),
                 mock(PackagePublishConfigMapper.class),
                 projectMapper,
