@@ -8,9 +8,6 @@
         </div>
         <div class="panel-actions">
           <el-button size="small" :loading="loading" @click="loadData">刷新</el-button>
-          <el-button v-if="editable" size="small" type="primary" plain :loading="savingBudget" @click="saveBudget">
-            保存预算
-          </el-button>
         </div>
       </div>
     </template>
@@ -39,39 +36,27 @@
     </div>
 
     <el-collapse class="ops-collapse">
-      <el-collapse-item title="裁判预算封顶" name="budget">
-        <el-form label-width="150px" class="budget-form">
-          <el-form-item label="启用预算闸">
-            <el-switch v-model="budgetForm.enabled" :disabled="!editable" />
-          </el-form-item>
-          <el-form-item label="每日调用上限">
-            <el-input-number v-model="budgetForm.dailyCallLimit" :disabled="!editable" :min="0" :step="10" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="每月调用上限">
-            <el-input-number v-model="budgetForm.monthlyCallLimit" :disabled="!editable" :min="0" :step="100" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="每日估算成本上限">
-            <el-input-number v-model="budgetForm.dailyEstimatedCostLimit" :disabled="!editable" :min="0" :step="1" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="每月估算成本上限">
-            <el-input-number v-model="budgetForm.monthlyEstimatedCostLimit" :disabled="!editable" :min="0" :step="10" controls-position="right" />
-          </el-form-item>
-        </el-form>
-        <el-alert
-          type="info"
-          :closable="false"
-          title="触顶后暂停新裁判，不写失败结果；未判候选会在后续周期继续等待。成本为基于 tokens 的估算值。"
-        />
-      </el-collapse-item>
       <el-collapse-item title="接口错误明细" name="api">
         <el-table :data="ops?.apiErrorStats.endpoints || []" border empty-text="暂无接口访问">
-          <el-table-column prop="eventType" label="接口" min-width="120" />
-          <el-table-column prop="total" label="总数" width="90" />
-          <el-table-column prop="failed" label="失败" width="90" />
+          <el-table-column label="访问内容" min-width="220">
+            <template #default="{ row }">
+              <div class="api-name">
+                <strong>{{ apiEventLabel(row.eventType) }}</strong>
+                <small>{{ apiEventDescription(row.eventType) }}</small>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="total" label="调用次数" width="100" />
+          <el-table-column prop="failed" label="失败次数" width="100" />
           <el-table-column label="错误率" width="100">
             <template #default="{ row }">{{ row.errorRatePercent }}%</template>
           </el-table-column>
-          <el-table-column prop="latestFailReason" label="最近失败原因" min-width="160" />
+          <el-table-column label="最近情况" min-width="220">
+            <template #default="{ row }">
+              <el-tag v-if="row.failed > 0" type="danger" size="small">{{ failReasonLabel(row.latestFailReason) }}</el-tag>
+              <el-tag v-else type="success" size="small">近 14 天没有失败</el-tag>
+            </template>
+          </el-table-column>
         </el-table>
       </el-collapse-item>
       <el-collapse-item title="分享访问风险" name="share">
@@ -95,13 +80,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import {
-  getProjectMobileDashboardJudgeBudget,
-  getProjectMobileDashboardOperations,
-  updateProjectMobileDashboardJudgeBudget,
-} from '@/api/mobileDashboard'
+import { getProjectMobileDashboardOperations } from '@/api/mobileDashboard'
 import type { MobileDashboardOperations } from '@/types/mobileDashboard'
 
 const props = defineProps<{
@@ -110,41 +91,55 @@ const props = defineProps<{
 }>()
 
 const loading = ref(false)
-const savingBudget = ref(false)
 const ops = ref<MobileDashboardOperations | null>(null)
-const budgetForm = reactive({
-  enabled: true,
-  dailyCallLimit: null as number | null,
-  monthlyCallLimit: null as number | null,
-  dailyEstimatedCostLimit: null as number | null,
-  monthlyEstimatedCostLimit: null as number | null,
-})
 
 const suspiciousShareCount = computed(() => (ops.value?.shareRisks || []).filter((item) => item.suspicious).length)
+
+const apiEventLabels: Record<string, { label: string; description: string }> = {
+  bootstrap: { label: '打开看板', description: '客户进入 H5 看板时读取项目和权限信息' },
+  home: { label: '首页概览', description: '读取曝光、推荐、情绪等首页汇总数据' },
+  monitor: { label: '运行监控页', description: '读取问题监测列表和筛选结果' },
+  question_detail: { label: '问题详情', description: '查看单条问题的 AI 回答和判断结果' },
+  content: { label: '内容列表', description: '读取文章生成和发布进度' },
+  report: { label: '报告页', description: '访问已停用的报告入口' },
+  exchange_session: { label: '兑换访问凭证', description: '使用分享短码换取 H5 看板访问权限' },
+}
+
+const failReasonLabels: Record<string, string> = {
+  BizException: '业务校验未通过',
+  UnauthorizedException: '访问凭证无效或已过期',
+  AccessDeniedException: '没有访问权限',
+  MissingRequestHeaderException: '缺少访问凭证',
+  MethodArgumentNotValidException: '提交参数不完整',
+  IllegalArgumentException: '提交参数格式不正确',
+  RuntimeException: '服务处理异常',
+}
 
 function formatTime(value?: string | null) {
   if (!value) return '-'
   return value.replace('T', ' ').slice(0, 19)
 }
 
-function nullablePositive(value: number | null) {
-  return value && value > 0 ? value : null
+function apiEventLabel(eventType?: string | null) {
+  if (!eventType) return '未知访问'
+  return apiEventLabels[eventType]?.label || eventType
+}
+
+function apiEventDescription(eventType?: string | null) {
+  if (!eventType) return '未记录具体访问内容'
+  return apiEventLabels[eventType]?.description || '系统记录的移动看板访问'
+}
+
+function failReasonLabel(reason?: string | null) {
+  if (!reason) return '最近失败原因未记录'
+  return failReasonLabels[reason] || reason
 }
 
 async function loadData() {
   loading.value = true
   try {
-    const [opsRes, budgetRes] = await Promise.all([
-      getProjectMobileDashboardOperations(props.projectId),
-      getProjectMobileDashboardJudgeBudget(props.projectId),
-    ])
+    const opsRes = await getProjectMobileDashboardOperations(props.projectId)
     ops.value = opsRes.data.data
-    const budget = budgetRes.data.data
-    budgetForm.enabled = budget?.enabled !== false
-    budgetForm.dailyCallLimit = budget?.dailyCallLimit || null
-    budgetForm.monthlyCallLimit = budget?.monthlyCallLimit || null
-    budgetForm.dailyEstimatedCostLimit = budget?.dailyEstimatedCostLimit == null ? null : Number(budget.dailyEstimatedCostLimit)
-    budgetForm.monthlyEstimatedCostLimit = budget?.monthlyEstimatedCostLimit == null ? null : Number(budget.monthlyEstimatedCostLimit)
   } catch (error: any) {
     ElMessage.error(error?.message || '运行观测加载失败')
   } finally {
@@ -152,29 +147,17 @@ async function loadData() {
   }
 }
 
-async function saveBudget() {
-  savingBudget.value = true
-  try {
-    await updateProjectMobileDashboardJudgeBudget(props.projectId, {
-      enabled: budgetForm.enabled,
-      dailyCallLimit: nullablePositive(budgetForm.dailyCallLimit),
-      monthlyCallLimit: nullablePositive(budgetForm.monthlyCallLimit),
-      dailyEstimatedCostLimit: nullablePositive(budgetForm.dailyEstimatedCostLimit),
-      monthlyEstimatedCostLimit: nullablePositive(budgetForm.monthlyEstimatedCostLimit),
-    })
-    ElMessage.success('预算配置已保存')
-    await loadData()
-  } catch (error: any) {
-    ElMessage.error(error?.message || '预算保存失败')
-  } finally {
-    savingBudget.value = false
-  }
-}
-
 onMounted(loadData)
 </script>
 
 <style scoped>
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .panel-title,
 .panel-actions {
   display: inline-flex;
@@ -221,8 +204,20 @@ onMounted(loadData)
   margin-top: 8px;
 }
 
-.budget-form {
-  max-width: 620px;
+.api-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.api-name strong {
+  color: #303133;
+  font-weight: 600;
+}
+
+.api-name small {
+  color: #909399;
 }
 
 @media (max-width: 1200px) {

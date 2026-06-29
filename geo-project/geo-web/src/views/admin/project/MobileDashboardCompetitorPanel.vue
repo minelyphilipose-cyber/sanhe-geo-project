@@ -211,6 +211,13 @@ onMounted(loadCompetitors)
   overflow: hidden;
 }
 
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .panel-title,
 .panel-actions {
   display: inline-flex;
