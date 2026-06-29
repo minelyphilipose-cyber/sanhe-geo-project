@@ -5,9 +5,16 @@ import path from 'node:path'
 
 const helperBase = (process.env.GEO_HELPER_BASE || 'http://127.0.0.1:17891').replace(/\/+$/, '')
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const sessionPath = path.join(rootDir, 'runtime', 'session.json')
+const runtimeDir = path.join(rootDir, 'runtime')
+const legacySessionPath = path.join(runtimeDir, 'session.json')
+const localConfigPath = path.join(rootDir, 'config.local.json')
+const exampleConfigPath = path.join(rootDir, 'config.example.json')
 const targetPath = '/v1/poc/tasks'
 const jsonOutput = process.argv.includes('--json')
+
+function parseJsonText(raw) {
+  return JSON.parse(String(raw || '').replace(/^\uFEFF/, ''))
+}
 
 function sha256Hex(value) {
   return crypto.createHash('sha256').update(value, 'utf8').digest('hex')
@@ -28,9 +35,38 @@ function canonicalRequest(method, requestPath, bodyHash, timestamp, nonce, helpe
   ].join('\n')
 }
 
+async function activeProfile() {
+  const fromEnv = String(process.env.GEO_HELPER_PROFILE || '').trim().toLowerCase()
+  if (fromEnv) return fromEnv
+  const fromConfig = await activeProfileFromConfig()
+  if (fromConfig) return fromConfig
+  return 'prod'
+}
+
+async function activeProfileFromConfig() {
+  for (const configPath of [localConfigPath, exampleConfigPath]) {
+    try {
+      const config = parseJsonText(await fs.readFile(configPath, 'utf8'))
+      const profile = String(config?.activeProfile || '').trim().toLowerCase()
+      if (profile) return profile.replace(/[^a-z0-9_-]/g, '') || 'prod'
+    } catch {
+      // Try the next config source.
+    }
+  }
+  return ''
+}
+
 async function loadSession() {
-  const raw = await fs.readFile(sessionPath, 'utf8')
-  const session = JSON.parse(raw)
+  const profile = await activeProfile()
+  const sessionPath = path.join(runtimeDir, 'sessions', `${profile}.json`)
+  let raw = ''
+  try {
+    raw = await fs.readFile(sessionPath, 'utf8')
+  } catch (error) {
+    if (profile !== 'prod') throw error
+    raw = await fs.readFile(legacySessionPath, 'utf8')
+  }
+  const session = parseJsonText(raw)
   if (!session?.sessionId || !session?.hmacSecret) {
     throw new Error(`runtime session is missing sessionId/hmacSecret: ${sessionPath}`)
   }

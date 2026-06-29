@@ -16,32 +16,73 @@ npm install
 Copy-Item config.example.json config.local.json
 ```
 
-3. 编辑 `config.local.json`，只保留本地服务、可信后台与 C2 开关等技术配置：
+3. 编辑 `config.local.json`，只保留本地服务、当前包环境、可信后台与 C2 开关等技术配置：
 
 ```json
 {
   "host": "127.0.0.1",
   "port": 17891,
-  "helperToken": "",
-  "trustedBackendBase": "https://www.huanjingaigeo.com",
+  "activeProfile": "dev",
+  "profiles": {
+    "dev": {
+      "label": "本地开发",
+      "trustedBackendBase": "http://127.0.0.1:8080",
+      "allowedOrigins": [
+        "http://127.0.0.1:17891",
+        "http://localhost:17891",
+        "http://127.0.0.1:8080",
+        "http://localhost:8080",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173"
+      ]
+    },
+    "prod": {
+      "label": "生产环境",
+      "trustedBackendBase": "https://www.huanjingaigeo.com",
+      "allowedOrigins": [
+        "http://127.0.0.1:17891",
+        "http://localhost:17891",
+        "https://www.huanjingaigeo.com"
+      ]
+    }
+  },
   "enableLegacyBackendTokenRoutes": false,
   "enableStaticHelperToken": false,
-  "allowedOrigins": [
-    "http://127.0.0.1:17891",
-    "http://localhost:17891",
-    "https://www.huanjingaigeo.com"
-  ],
+  "helperToken": "",
   "adspower": {
     "apiBase": "http://localhost:50325"
   }
 }
 ```
 
+本地助手按打包环境固定运行。生产交付包只包含生产环境配置，本地开发包只包含开发环境配置；页面只展示当前环境，不提供运行时切换。每个环境使用独立 C2 配对会话：
+
+- `runtime/sessions/dev.json`
+- `runtime/sessions/prod.json`
+
+旧版 `config.local.json` 仍可继续使用；没有 `profiles` 字段时会自动当作 `prod` 档案。旧版 `runtime/session.json` 会作为生产环境 session 读取，因此只在生产环境使用的同事升级后无需重新配对。
+
 如果生产后台页面报 `blocked by CORS policy` 或 `loopback address space`，优先确认同事本机助手已更新到最新包，并重启 `npm start`。新版助手会自动允许 `https://www.huanjingaigeo.com` 并响应浏览器 Private Network Access 预检所需的 `Access-Control-Allow-Private-Network`。
 
 `helperToken` 默认禁用。v1 主链路只使用 C2 配对后的签名请求；只有临时回归旧 PoC 时，才同时配置随机 `helperToken` 并把 `enableStaticHelperToken` 改为 `true`。
 
 AdsPower API Key 不写入 `config.local.json`。启动本地助手后在 `http://127.0.0.1:17891/` 页面保存 AdsPower API Key；AdsPower Local API 地址默认是 `http://localhost:50325`，通常无需修改。配置会保存在本机 `runtime/settings.json`。
+
+## 打包交付
+
+生产包：
+
+```powershell
+npm run package:delivery -- -Environment prod
+```
+
+本地开发包：
+
+```powershell
+npm run package:delivery -- -Environment dev
+```
+
+打包脚本会生成 `geo-local-helper-prod-v{version}.zip` 或 `geo-local-helper-dev-v{version}.zip`，并把包内 `config.example.json` 固定到对应后台环境。
 
 本地助手不保存品牌、自媒体账号、环境标识与 AdsPower 环境 ID 的业务映射。`providerProfileId` 由后台品牌详情中的指纹浏览器环境绑定关系传入；运营只在后台页面配置环境关系，不需要编辑 `config.local.json`。
 

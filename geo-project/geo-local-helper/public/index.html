@@ -44,6 +44,15 @@
         border: 1px solid #cbd5e1;
         border-radius: 6px;
       }
+      select {
+        box-sizing: border-box;
+        width: 100%;
+        height: 38px;
+        padding: 7px 9px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+      }
       button {
         height: 38px;
         padding: 0 16px;
@@ -114,6 +123,10 @@
             <span id="serviceVersion" class="status-value">-</span>
           </div>
           <div class="status-item">
+            <span class="status-label">当前环境</span>
+            <span id="profileState" class="status-value">-</span>
+          </div>
+          <div class="status-item">
             <span class="status-label">配对状态</span>
             <span id="pairingState" class="status-value">-</span>
           </div>
@@ -128,6 +141,20 @@
         </div>
         <div class="actions">
           <button id="healthBtn" class="secondary">刷新状态</button>
+        </div>
+      </section>
+
+      <section>
+        <p class="hint">运行环境由当前助手包和配置文件固定。生产包会固定使用生产后台，本地开发包会固定使用本地后台。</p>
+        <div class="grid">
+          <div>
+            <label for="profileDisplay">运行环境</label>
+            <input id="profileDisplay" readonly>
+          </div>
+          <div>
+            <label for="profileBackend">当前后台地址</label>
+            <input id="profileBackend" readonly>
+          </div>
         </div>
       </section>
 
@@ -177,6 +204,7 @@
       const logEl = $('log')
       let pairingPollTimer = null
       let pairingPollAttempts = 0
+      let activeProfile = ''
 
       function appendLog(value) {
         const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -199,12 +227,18 @@
       async function loadHealth() {
         const result = await c2Request('/health')
         $('serviceVersion').textContent = result.version || '-'
+        activeProfile = result.activeProfile || result.config?.activeProfile || 'prod'
+        $('profileState').textContent = `${result.activeProfileLabel || activeProfile}（${activeProfile}）`
+        $('profileDisplay').value = `${result.activeProfileLabel || activeProfile}（${activeProfile}）`
         $('pairingState').textContent = result.paired ? '已配对' : '未配对'
         $('sessionState').textContent = formatSession(result.session)
         $('adspowerState').textContent = result.adspower?.apiKeyConfigured ? '已配置 API Key' : '未配置 API Key'
+        $('profileBackend').value = result.config?.trustedBackendBase || ''
         appendLog({
           service: result.service,
           version: result.version,
+          activeProfile: result.activeProfile,
+          activeProfileLabel: result.activeProfileLabel,
           paired: result.paired,
           session: result.session,
           runtime: result.runtime,

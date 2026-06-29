@@ -14,13 +14,14 @@ const PUBLIC_DIR = new URL('../public/', import.meta.url)
 const RUNTIME_DIR = new URL('../runtime/', import.meta.url)
 const TASKS_PATH = new URL('tasks.json', RUNTIME_DIR)
 const SESSION_PATH = new URL('session.json', RUNTIME_DIR)
+const SESSIONS_DIR = new URL('sessions/', RUNTIME_DIR)
 const NONCES_PATH = new URL('nonces.json', RUNTIME_DIR)
 const SETTINGS_PATH = new URL('settings.json', RUNTIME_DIR)
 const TEMP_FILES_DIR = new URL('temp-files/', RUNTIME_DIR)
 const tasksById = new Map()
 const extensionBindIntentsByHash = new Map()
 const CLAIM_TIMEOUT_MS = 30_000
-const CLAIM_BACKEND_HEARTBEAT_MAX_MS = 2 * 60_000
+const CLAIM_BACKEND_HEARTBEAT_MAX_MS = 3 * 60_000
 const CLAIMABLE_STATUSES = new Set(['pending', 'requeued'])
 const SIGNATURE_MAX_SKEW_SECONDS = 300
 const NONCE_FLUSH_DELAY_MS = 1_000
@@ -28,7 +29,7 @@ const DEFAULT_FETCH_TIMEOUT_MS = 15_000
 const ADSPOWER_FETCH_TIMEOUT_MS = 20_000
 const BACKEND_FETCH_TIMEOUT_MS = 20_000
 const SCHEDULE_POLL_STEP_TIMEOUT_MS = 60_000
-const SCHEDULE_HEARTBEAT_INTERVAL_MS = 60_000
+const SCHEDULE_HEARTBEAT_INTERVAL_MS = 20_000
 const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
 const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
 const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
@@ -39,12 +40,17 @@ const DEFAULT_ALLOWED_WEB_ORIGINS = [
   'https://www.huanjingaigeo.com',
   'http://119.45.154.127',
 ]
+const DEFAULT_PROFILE_KEY = 'prod'
+const DEFAULT_PROFILE_LABELS = {
+  dev: '本地开发',
+  prod: '生产环境',
+}
 const EXIT_CODE_PORT_IN_USE = 2
 const STARTED_AT = new Date().toISOString()
 const nonceCache = new Map()
 let nonceFlushTimer = null
 let runtimeSession = null
-let runtimeSettings = { adspower: {} }
+let runtimeSettings = { activeProfile: '', adspower: {} }
 let packageInfoCache = null
 let pendingPairing = null
 let schedulePollInFlight = false
@@ -70,11 +76,15 @@ function nowIso() {
   return new Date().toISOString()
 }
 
+function parseJsonText(raw) {
+  return JSON.parse(String(raw || '').replace(/^\uFEFF/, ''))
+}
+
 async function readPackageInfo() {
   if (packageInfoCache) return packageInfoCache
   try {
     const raw = await fs.readFile(PACKAGE_JSON_PATH, 'utf8')
-    const pkg = JSON.parse(raw)
+    const pkg = parseJsonText(raw)
     packageInfoCache = {
       name: String(pkg.name || 'geo-local-helper'),
       version: pkg.version ? String(pkg.version) : null,
@@ -140,15 +150,80 @@ function constantTimeEqual(left, right) {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer)
 }
 
-async function loadConfig() {
+async function loadConfig(activeProfileOverride = '') {
   const path = existsSync(CONFIG_PATH) ? CONFIG_PATH : EXAMPLE_CONFIG_PATH
   const raw = await fs.readFile(path, 'utf8')
-  const config = JSON.parse(raw)
+  const rawConfig = parseJsonText(raw)
+  const config = normalizeProfiledConfig(rawConfig, activeProfileOverride)
+  applyActiveProfile(config, config.activeProfile)
+  return config
+}
+
+function normalizeProfiledConfig(rawConfig = {}, activeProfileOverride = '') {
+  const baseConfig = { ...(rawConfig || {}) }
+  const profiles = normalizeProfiles(rawConfig)
+  delete baseConfig.profiles
+  delete baseConfig.activeProfile
+  const requestedProfile = normalizeProfileKey(activeProfileOverride || rawConfig.activeProfile || DEFAULT_PROFILE_KEY)
+  const activeProfile = profiles[requestedProfile] ? requestedProfile : Object.keys(profiles)[0] || DEFAULT_PROFILE_KEY
+  return {
+    ...baseConfig,
+    _baseConfig: baseConfig,
+    profiles,
+    activeProfile,
+  }
+}
+
+function normalizeProfiles(rawConfig = {}) {
+  if (rawConfig.profiles && typeof rawConfig.profiles === 'object') {
+    const profiles = {}
+    for (const [key, profile] of Object.entries(rawConfig.profiles)) {
+      const normalizedKey = normalizeProfileKey(key)
+      if (!normalizedKey || !profile || typeof profile !== 'object') continue
+      profiles[normalizedKey] = normalizeProfile(normalizedKey, profile)
+    }
+    if (Object.keys(profiles).length) return profiles
+  }
+  return {
+    [DEFAULT_PROFILE_KEY]: normalizeProfile(DEFAULT_PROFILE_KEY, rawConfig),
+  }
+}
+
+function normalizeProfileKey(value) {
+  const text = String(value || '').trim().toLowerCase()
+  return text.replace(/[^a-z0-9_-]/g, '') || DEFAULT_PROFILE_KEY
+}
+
+function normalizeProfile(key, profile = {}) {
+  return {
+    label: String(profile.label || DEFAULT_PROFILE_LABELS[key] || key),
+    backendBase: String(profile.backendBase || '').trim(),
+    trustedBackendBase: String(profile.trustedBackendBase || profile.backendBase || '').trim(),
+    allowedOrigins: Array.isArray(profile.allowedOrigins) ? profile.allowedOrigins.filter(Boolean) : [],
+    helperName: String(profile.helperName || '').trim(),
+  }
+}
+
+function applyActiveProfile(config, profileKey) {
+  const key = normalizeProfileKey(profileKey)
+  const fallbackKey = config.profiles[DEFAULT_PROFILE_KEY] ? DEFAULT_PROFILE_KEY : Object.keys(config.profiles)[0] || DEFAULT_PROFILE_KEY
+  const activeKey = config.profiles[key] ? key : fallbackKey
+  const profile = config.profiles[activeKey] || {}
+  const base = config._baseConfig || {}
+
+  Object.assign(config, base)
+  config._baseConfig = base
+  config.profiles ||= {}
+  config.activeProfile = activeKey
+  config.activeProfileLabel = profile.label || DEFAULT_PROFILE_LABELS[config.activeProfile] || config.activeProfile
   config.adspower ||= {}
   config.adspower.apiBase ||= 'http://localhost:50325'
   config.host ||= '127.0.0.1'
   config.port ||= 17891
-  config.allowedOrigins ||= [
+  config.backendBase = profile.backendBase || base.backendBase || ''
+  config.trustedBackendBase = profile.trustedBackendBase || profile.backendBase || base.trustedBackendBase || base.backendBase || ''
+  config.helperName = profile.helperName || base.helperName || ''
+  config.allowedOrigins = [
     `http://${config.host}:${config.port}`,
     `http://localhost:${config.port}`,
     'http://127.0.0.1:3000',
@@ -159,6 +234,12 @@ async function loadConfig() {
     'http://localhost:8080',
     'http://119.45.154.127',
   ]
+  for (const origin of Array.isArray(base.allowedOrigins) ? base.allowedOrigins : []) {
+    appendAllowedOrigin(config, origin)
+  }
+  for (const origin of Array.isArray(profile.allowedOrigins) ? profile.allowedOrigins : []) {
+    appendAllowedOrigin(config, origin)
+  }
   config.trustedBackendBase ||= config.backendBase || ''
   config.enableLegacyBackendTokenRoutes = config.enableLegacyBackendTokenRoutes === true
   config.enableStaticHelperToken = config.enableStaticHelperToken === true
@@ -170,6 +251,15 @@ async function loadConfig() {
   return config
 }
 
+function publicProfiles(config) {
+  return Object.entries(config.profiles || {}).map(([key, profile]) => ({
+    key,
+    label: profile.label || DEFAULT_PROFILE_LABELS[key] || key,
+    trustedBackendBase: profile.trustedBackendBase || profile.backendBase || '',
+    active: key === config.activeProfile,
+  }))
+}
+
 function appendAllowedOrigin(config, origin) {
   if (!origin) return
   config.allowedOrigins ||= []
@@ -179,7 +269,7 @@ function appendAllowedOrigin(config, origin) {
 async function loadRuntimeSettings() {
   try {
     const raw = await fs.readFile(SETTINGS_PATH, 'utf8')
-    const settings = JSON.parse(raw)
+    const settings = parseJsonText(raw)
     runtimeSettings = normalizeRuntimeSettings(settings)
   } catch {
     runtimeSettings = { adspower: {} }
@@ -193,7 +283,9 @@ async function saveRuntimeSettings(settings) {
 }
 
 function normalizeRuntimeSettings(settings) {
+  const activeProfile = String(settings?.activeProfile || '').trim()
   return {
+    activeProfile: activeProfile ? normalizeProfileKey(activeProfile) : '',
     adspower: {
       apiBase: String(settings?.adspower?.apiBase || '').trim(),
       apiKey: String(settings?.adspower?.apiKey || '').trim(),
@@ -238,27 +330,48 @@ function safeOrigin(value) {
   }
 }
 
-async function loadRuntimeSession() {
-  try {
-    const raw = await fs.readFile(SESSION_PATH, 'utf8')
-    const session = JSON.parse(raw)
-    if (session?.sessionId && session?.hmacSecret) {
-      runtimeSession = session
-    }
-  } catch {
-    runtimeSession = null
-  }
+function runtimeSessionPath(profileKey = runtimeSettings.activeProfile || DEFAULT_PROFILE_KEY) {
+  return new URL(`${normalizeProfileKey(profileKey)}.json`, SESSIONS_DIR)
 }
 
-async function saveRuntimeSession(session) {
-  await fs.mkdir(RUNTIME_DIR, { recursive: true })
-  await fs.writeFile(SESSION_PATH, JSON.stringify(session, null, 2), 'utf8')
+async function loadRuntimeSession(profileKey = runtimeSettings.activeProfile || DEFAULT_PROFILE_KEY) {
+  runtimeSession = null
+  try {
+    const sessionPath = runtimeSessionPath(profileKey)
+    const raw = await fs.readFile(sessionPath, 'utf8')
+    const session = parseJsonText(raw)
+    if (session?.sessionId && session?.hmacSecret) {
+      runtimeSession = session
+      return
+    }
+  } catch {
+    runtimeSession = await loadLegacyRuntimeSession(profileKey)
+    return
+  }
+  runtimeSession = await loadLegacyRuntimeSession(profileKey)
+}
+
+async function loadLegacyRuntimeSession(profileKey) {
+  if (normalizeProfileKey(profileKey) !== DEFAULT_PROFILE_KEY) return null
+  try {
+    const raw = await fs.readFile(SESSION_PATH, 'utf8')
+    const session = parseJsonText(raw)
+    if (session?.sessionId && session?.hmacSecret) return session
+  } catch {
+    // Older helpers may not have a paired session yet.
+  }
+  return null
+}
+
+async function saveRuntimeSession(session, profileKey = runtimeSettings.activeProfile || DEFAULT_PROFILE_KEY) {
+  await fs.mkdir(SESSIONS_DIR, { recursive: true })
+  await fs.writeFile(runtimeSessionPath(profileKey), JSON.stringify(session, null, 2), 'utf8')
 }
 
 async function loadRuntimeTasks() {
   try {
     const raw = await fs.readFile(TASKS_PATH, 'utf8')
-    const tasks = JSON.parse(raw)
+    const tasks = parseJsonText(raw)
     for (const task of Array.isArray(tasks) ? tasks : []) {
       const normalized = normalizePersistedTask(task)
       if (normalized) tasksById.set(normalized.taskId, normalized)
@@ -280,7 +393,7 @@ function cleanupRuntimeExtensionBindIntents() {
 async function loadRuntimeNonces() {
   try {
     const raw = await fs.readFile(NONCES_PATH, 'utf8')
-    const records = JSON.parse(raw)
+    const records = parseJsonText(raw)
     nonceCache.clear()
     const min = Math.floor(Date.now() / 1000) - SIGNATURE_MAX_SKEW_SECONDS
     for (const record of Array.isArray(records) ? records : []) {
@@ -410,7 +523,7 @@ async function readJson(req) {
   const raw = Buffer.concat(chunks).toString('utf8').trim()
   req.rawBody = raw
   if (!raw) return {}
-  return JSON.parse(raw)
+  return parseJsonText(raw)
 }
 
 function requireToken(req, config) {
@@ -626,6 +739,15 @@ function publicSession() {
   }
 }
 
+async function handleProfiles(req, res, config) {
+  sendJson(req, res, config, 200, {
+    ok: true,
+    activeProfile: config.activeProfile,
+    activeProfileLabel: config.activeProfileLabel,
+    profiles: publicProfiles(config),
+  })
+}
+
 async function adspowerGet(config, path) {
   const adspower = effectiveAdspowerConfig(config)
   const url = new URL(path, adspower.apiBase)
@@ -721,6 +843,8 @@ function normalizeExtensionBindIntentPayload(config, body) {
   return {
     bindCode,
     brandId: Number.isFinite(Number(body.brandId)) ? Number(body.brandId) : null,
+    profileKey: config.activeProfile,
+    profileLabel: config.activeProfileLabel,
     apiBase: String(body.apiBase || config.trustedBackendBase || config.backendBase || '').replace(/\/+$/, ''),
     helperBase: String(body.helperBase || `http://${config.host || '127.0.0.1'}:${config.port || 17891}`).replace(/\/+$/, ''),
     environmentKey: environment.environmentKey,
@@ -750,6 +874,8 @@ async function handleCreateExtensionBindIntent(req, res, config) {
     environmentKey: intent.environmentKey,
     providerProfileId: intent.providerProfileId,
     environmentName: intent.environmentName,
+    profileKey: intent.profileKey,
+    profileLabel: intent.profileLabel,
   })
 }
 
@@ -791,6 +917,8 @@ async function handleConsumeExtensionBindIntent(req, res, config) {
     ok: true,
     bindCode: intent.bindCode,
     brandId: intent.brandId,
+    profileKey: intent.profileKey,
+    profileLabel: intent.profileLabel,
     apiBase: intent.apiBase || config.trustedBackendBase || config.backendBase || '',
     helperBase: intent.helperBase || `http://${config.host || '127.0.0.1'}:${config.port || 17891}`,
     environmentKey: intent.environmentKey,
@@ -860,7 +988,8 @@ async function trustedBackendRequest(config, path, init = {}) {
   }, BACKEND_FETCH_TIMEOUT_MS)
   const body = await response.json().catch(() => ({}))
   if (!response.ok || (body.code !== undefined && body.code !== 0)) {
-    const error = new Error(body.message || `trusted backend request failed: ${response.status}`)
+    const details = body && Object.keys(body).length ? `; details=${JSON.stringify(body).slice(0, 600)}` : ''
+    const error = new Error(body.message || `trusted backend request failed: ${response.status}${details}`)
     error.statusCode = response.status
     error.details = body
     throw error
@@ -1141,6 +1270,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     config,
     `/api/v1/browser/start?user_id=${profileId}&open_tabs=1&ip_tab=0`,
   )
+  let result
   try {
     const checkSchedule = {
       ...claim.schedule,
@@ -1155,28 +1285,31 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
         schedule: checkSchedule,
       },
     )
-    const result = await checkPublishResultInAdspowerPage(
+    result = await checkPublishResultInAdspowerPage(
       data?.ws?.puppeteer,
       checkUrl,
       checkSchedule,
     )
-    if (result.failed) {
-      await reportPublishCheckFailed(config, scheduleId, result)
-      return { ok: true, claimed: true, scheduleId, outcome: 'failed', result }
-    }
-    if (result.found) {
-      await reportPublishCheckPublished(config, scheduleId, result)
-      return { ok: true, claimed: true, scheduleId, outcome: 'published', result }
-    }
-    await reportPublishCheckUnknown(config, scheduleId, result)
-    return { ok: true, claimed: true, scheduleId, outcome: 'unknown', result }
   } catch (error) {
-    await reportPublishCheckFailed(config, scheduleId, {
+    const failureResult = {
       failureCode: 'PUBLISH_RESULT_CHECK_HELPER_FAILED',
       failureMessage: error instanceof Error ? error.message : String(error),
+    }
+    await reportPublishCheckFailed(config, scheduleId, failureResult).catch((reportError) => {
+      console.error('Failed to report publish check helper failure:', formatBackendError(reportError))
     })
     throw error
   }
+  if (result.failed) {
+    await reportPublishCheckFailed(config, scheduleId, result)
+    return { ok: true, claimed: true, scheduleId, outcome: 'failed', result }
+  }
+  if (result.found) {
+    await reportPublishCheckPublished(config, scheduleId, result)
+    return { ok: true, claimed: true, scheduleId, outcome: 'published', result }
+  }
+  await reportPublishCheckUnknown(config, scheduleId, result)
+  return { ok: true, claimed: true, scheduleId, outcome: 'unknown', result }
 }
 
 async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule) {
@@ -1239,7 +1372,11 @@ function publishCheckEvaluateTimeoutMs(platform) {
 
 function shouldReloadPublishCheckPage(platform, result, reloadCount) {
   const normalized = String(platform || '').trim().toLowerCase()
-  if (normalized !== 'douyin' || reloadCount >= 2 || result?.found) return false
+  if (reloadCount >= 2 || result?.found) return false
+  if (normalized === 'toutiao') {
+    return !result?.hasTitle || (!result?.hasPublishedSignal && !result?.hasScheduledSignal)
+  }
+  if (normalized !== 'douyin') return false
   const text = String(result?.textSample || '')
   if (/没有更多作品|暂无作品|共\s*0\s*个作品/.test(text)) return true
   const looksLikeManageShell = text.includes('作品管理')
@@ -1835,8 +1972,26 @@ function shouldHeartbeatScheduleTask(task) {
   if (!task || isTerminalStatus(task.status)) return false
   if (!scheduleIdOfTask(task)) return false
   if (!task.backendTask && !task.schedule) return false
-  if (task.status !== 'claimed' || !task.claimedAt) return false
-  return Date.now() - Date.parse(task.claimedAt) <= CLAIM_BACKEND_HEARTBEAT_MAX_MS
+  if (task.status !== 'pending' && task.status !== 'claimed') return false
+  const activeSince = Date.parse(task.claimedAt || task.createdAt || '')
+  if (!Number.isFinite(activeSince)) return false
+  return Date.now() - activeSince <= CLAIM_BACKEND_HEARTBEAT_MAX_MS
+}
+
+function activeScheduleHeartbeatTasks() {
+  return listTasks()
+    .filter((task) => shouldHeartbeatScheduleTask(task))
+    .map((task) => ({
+      taskId: task.taskId,
+      scheduleId: scheduleIdOfTask(task),
+      platform: task.platform || null,
+      environmentKey: task.environmentKey || null,
+      status: task.status || null,
+      createdAt: task.createdAt || null,
+      claimedAt: task.claimedAt || null,
+      backendHeartbeatAt: task.backendHeartbeatAt || null,
+      backendHeartbeatLastError: task.backendHeartbeatLastError || null,
+    }))
 }
 
 async function heartbeatActiveScheduleTasks(config) {
@@ -3139,6 +3294,9 @@ async function route(req, res, config) {
       time: nowIso(),
       paired: Boolean(runtimeSession?.sessionId && runtimeSession?.hmacSecret),
       session: publicSession(),
+      activeProfile: config.activeProfile,
+      activeProfileLabel: config.activeProfileLabel,
+      profiles: publicProfiles(config),
       adspower: publicAdspowerSettings(config),
       runtime: {
         pid: process.pid,
@@ -3161,18 +3319,22 @@ async function route(req, res, config) {
         inFlight: scheduleHeartbeatInFlight,
         last: lastScheduleHeartbeatStatus,
         intervalMs: Number(config.selfMediaScheduleHeartbeatIntervalMs || SCHEDULE_HEARTBEAT_INTERVAL_MS),
+        activeTasks: activeScheduleHeartbeatTasks(),
       },
       config: {
         host: config.host,
         port: config.port,
         backendBase: config.backendBase || null,
         trustedBackendBase: config.trustedBackendBase || null,
+        activeProfile: config.activeProfile,
+        activeProfileLabel: config.activeProfileLabel,
         allowedOrigins: config.allowedOrigins || [],
         privateNetworkAccess: true,
       },
     })
     return
   }
+  if (req.method === 'GET' && url.pathname === '/v1/profiles') return handleProfiles(req, res, config)
   if ((req.method === 'GET' || req.method === 'POST') && url.pathname === '/v1/settings/adspower') {
     return handleAdspowerSettings(req, res, config)
   }
@@ -3205,10 +3367,11 @@ async function route(req, res, config) {
   sendJson(req, res, config, 404, { ok: false, error: 'not found' })
 }
 
-const config = await loadConfig()
 await loadRuntimeSettings()
+const config = await loadConfig()
+runtimeSettings.activeProfile = config.activeProfile
 await loadRuntimeTasks()
-await loadRuntimeSession()
+await loadRuntimeSession(config.activeProfile)
 await loadRuntimeNonces()
 const server = http.createServer((req, res) => {
   route(req, res, config).catch((error) => {

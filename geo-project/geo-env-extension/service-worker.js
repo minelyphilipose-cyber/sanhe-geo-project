@@ -1,8 +1,29 @@
-importScripts('fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
+importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.1.5'
+const EXTENSION_VERSION = '0.1.6'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
+const ACTIVE_PROFILE_KEY = 'geoEnvActiveProfile'
+const PROFILES_KEY = 'geoEnvProfiles'
+const SESSIONS_KEY = 'geoEnvSessions'
+const LEGACY_CONFIG_KEY = 'geoEnvConfig'
+const LEGACY_SESSION_KEY = 'geoEnvSession'
+const DEFAULT_PROFILE_KEY = 'prod'
+const DEFAULT_PROFILE_CONFIGS = {
+  dev: {
+    label: '本地开发',
+    apiBase: 'http://127.0.0.1:8080',
+    helperBase: 'http://127.0.0.1:17891',
+  },
+  prod: {
+    label: '生产环境',
+    apiBase: 'https://www.huanjingaigeo.com',
+    helperBase: 'http://127.0.0.1:17891',
+  },
+}
+const BUILD_PROFILE_CONFIG = globalThis.GEO_ENV_BUILD_CONFIG || DEFAULT_PROFILE_CONFIGS.prod
+const BUILD_PROFILE_KEY = normalizeProfileKey(BUILD_PROFILE_CONFIG.profileKey || DEFAULT_PROFILE_KEY)
+const BUILD_PROFILE_LABEL = BUILD_PROFILE_CONFIG.profileLabel || BUILD_PROFILE_CONFIG.label || DEFAULT_PROFILE_CONFIGS[BUILD_PROFILE_KEY]?.label || BUILD_PROFILE_KEY
 const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 'baijiahao', 'douyin'])
 const autoLoginReportAtByKey = new Map()
 const autoPollTabUpdatedAtByKey = new Map()
@@ -55,21 +76,106 @@ async function getInstallId() {
   return installId
 }
 
-async function getConfig() {
-  const result = await storageGet(['geoEnvConfig', 'geoEnvSession'])
-  const config = {
-    apiBase: 'https://www.huanjingaigeo.com',
-    helperBase: 'http://127.0.0.1:17891',
-    environmentKey: 'geo_b',
+function normalizeProfileKey(value) {
+  const text = String(value || '').trim().toLowerCase()
+  return text.replace(/[^a-z0-9_-]/g, '') || DEFAULT_PROFILE_KEY
+}
+
+function defaultProfileConfig(profileKey) {
+  const key = normalizeProfileKey(profileKey)
+  const buildDefaults = key === BUILD_PROFILE_KEY ? BUILD_PROFILE_CONFIG : {}
+  return {
+    apiBase: buildDefaults.apiBase || DEFAULT_PROFILE_CONFIGS[key]?.apiBase || DEFAULT_PROFILE_CONFIGS.prod.apiBase,
+    helperBase: buildDefaults.helperBase || DEFAULT_PROFILE_CONFIGS[key]?.helperBase || DEFAULT_PROFILE_CONFIGS.prod.helperBase,
+    environmentKey: '',
     brandId: null,
     environmentAccountId: null,
     selfMediaAccountId: null,
     platform: '',
     autoRun: true,
-    ...(result.geoEnvConfig || {}),
+    profileKey: key,
+    profileLabel: buildDefaults.profileLabel || buildDefaults.label || DEFAULT_PROFILE_CONFIGS[key]?.label || key,
+  }
+}
+
+async function loadProfileStore() {
+  const stored = await storageGet([ACTIVE_PROFILE_KEY, PROFILES_KEY, SESSIONS_KEY, LEGACY_CONFIG_KEY, LEGACY_SESSION_KEY])
+  const profiles = {
+    dev: defaultProfileConfig('dev'),
+    prod: defaultProfileConfig('prod'),
+    ...(stored[PROFILES_KEY] || {}),
+  }
+  const sessions = { ...(stored[SESSIONS_KEY] || {}) }
+  const legacyConfig = stored[LEGACY_CONFIG_KEY]
+  const legacySession = stored[LEGACY_SESSION_KEY]
+  if (legacyConfig && !stored[PROFILES_KEY]?.prod) {
+    profiles.prod = {
+      ...profiles.prod,
+      ...legacyConfig,
+      profileKey: 'prod',
+      profileLabel: profiles.prod.profileLabel,
+    }
+  }
+  if (legacySession && !sessions.prod) {
+    sessions.prod = legacySession
+  }
+  profiles[BUILD_PROFILE_KEY] = {
+    ...defaultProfileConfig(BUILD_PROFILE_KEY),
+    ...(profiles[BUILD_PROFILE_KEY] || {}),
+    apiBase: BUILD_PROFILE_CONFIG.apiBase || profiles[BUILD_PROFILE_KEY]?.apiBase,
+    helperBase: BUILD_PROFILE_CONFIG.helperBase || profiles[BUILD_PROFILE_KEY]?.helperBase,
+    profileKey: BUILD_PROFILE_KEY,
+    profileLabel: BUILD_PROFILE_LABEL,
+  }
+  const effectiveActiveProfile = BUILD_PROFILE_KEY
+  return { activeProfile: effectiveActiveProfile, profiles, sessions }
+}
+
+async function saveProfileStore(store) {
+  const activeProfile = BUILD_PROFILE_KEY
+  const legacyConfig = store.profiles?.prod || defaultProfileConfig('prod')
+  const legacySession = store.sessions?.prod || null
+  await storageSet({
+    [ACTIVE_PROFILE_KEY]: activeProfile,
+    [PROFILES_KEY]: store.profiles || {},
+    [SESSIONS_KEY]: store.sessions || {},
+    [LEGACY_CONFIG_KEY]: legacyConfig,
+    [LEGACY_SESSION_KEY]: legacySession,
+  })
+}
+
+async function saveActiveConfig(config) {
+  const store = await loadProfileStore()
+  const activeProfile = BUILD_PROFILE_KEY
+  const previous = store.profiles[activeProfile] || defaultProfileConfig(activeProfile)
+  store.activeProfile = activeProfile
+  store.profiles[activeProfile] = {
+    ...previous,
+    ...config,
+    profileKey: activeProfile,
+    profileLabel: BUILD_PROFILE_LABEL || previous.profileLabel || DEFAULT_PROFILE_CONFIGS[activeProfile]?.label || activeProfile,
+  }
+  await saveProfileStore(store)
+  return store.profiles[activeProfile]
+}
+
+async function saveActiveSession(session) {
+  const store = await loadProfileStore()
+  store.sessions[store.activeProfile] = session || null
+  await saveProfileStore(store)
+  return session || null
+}
+
+async function getConfig() {
+  const store = await loadProfileStore()
+  const profileConfig = store.profiles[store.activeProfile] || defaultProfileConfig(store.activeProfile)
+  const config = {
+    ...defaultProfileConfig(store.activeProfile),
+    ...profileConfig,
+    profileKey: store.activeProfile,
   }
   config.platform = normalizePlatform(config.platform)
-  return { config, session: result.geoEnvSession || null }
+  return { config, session: store.sessions[store.activeProfile] || null, profileStore: store }
 }
 
 async function apiRequest(config, path, init = {}, extensionToken) {
@@ -100,12 +206,14 @@ function isExtensionUnauthorized(error) {
 }
 
 async function clearExtensionSession(expectedToken = null) {
+  const store = await loadProfileStore()
+  const currentSession = store.sessions[store.activeProfile] || null
   if (expectedToken) {
-    const current = await storageGet(['geoEnvSession'])
-    const currentToken = current.geoEnvSession?.extensionToken || ''
+    const currentToken = currentSession?.extensionToken || ''
     if (currentToken && currentToken !== expectedToken) return
   }
-  await storageSet({ geoEnvSession: null })
+  store.sessions[store.activeProfile] = null
+  await saveProfileStore(store)
 }
 
 async function refreshExtensionSession(config, session, options = {}) {
@@ -127,7 +235,7 @@ async function refreshExtensionSession(config, session, options = {}) {
       expiresAt: refreshed?.expiresAt || session.expiresAt,
       refreshedAt: new Date().toISOString(),
     }
-    await storageSet({ geoEnvSession: nextSession })
+    await saveActiveSession(nextSession)
     return nextSession
   } catch (error) {
     if (isExtensionUnauthorized(error)) {
@@ -239,7 +347,7 @@ async function bindExtension(bindCode) {
     boundAt: new Date().toISOString(),
   }
   if (!session.extensionToken) throw new Error('后台未返回 extensionToken')
-  await storageSet({ geoEnvSession: session })
+  await saveActiveSession(session)
   await refreshRuntimeConfig({ reason: 'bind' }).catch((error) => appendEventLog({
     type: 'runtime_config',
     ok: false,
@@ -304,24 +412,32 @@ async function bindFromLocalIntent(intent, source = {}) {
   bindIntentInFlight.add(intentToken)
   try {
     const payload = await consumeLocalBindIntent(helperBase, intent)
-    const stored = await storageGet(['geoEnvConfig'])
-    const nextConfig = {
-      ...(stored.geoEnvConfig || {}),
-      // apiBase: normalizeBaseUrl(payload.apiBase || stored.geoEnvConfig?.apiBase || 'https://www.huanjingaigeo.com'),
-      apiBase: normalizeBaseUrl(payload.apiBase || stored.geoEnvConfig?.apiBase || 'http://192.168.112.189:8080'),
-      helperBase: normalizeBaseUrl(payload.helperBase || helperBase),
-      brandId: payload.brandId || stored.geoEnvConfig?.brandId || null,
-      environmentKey: payload.environmentKey || stored.geoEnvConfig?.environmentKey || '',
-      providerProfileId: payload.providerProfileId || stored.geoEnvConfig?.providerProfileId || '',
-      platform: stored.geoEnvConfig?.platform || '',
-      autoRun: stored.geoEnvConfig?.autoRun !== false,
+    const store = await loadProfileStore()
+    const intentProfile = normalizeProfileKey(payload.profileKey || BUILD_PROFILE_KEY)
+    if (payload.profileKey && intentProfile !== BUILD_PROFILE_KEY) {
+      throw new Error(`绑定意图环境与扩展包环境不一致：intent=${intentProfile}, package=${BUILD_PROFILE_KEY}`)
     }
-    await storageSet({ geoEnvConfig: nextConfig })
+    const payloadProfile = BUILD_PROFILE_KEY
+    const storedConfig = store.profiles[payloadProfile] || defaultProfileConfig(payloadProfile)
+    const nextConfig = {
+      ...storedConfig,
+      profileKey: payloadProfile,
+      profileLabel: payload.profileLabel || storedConfig.profileLabel || DEFAULT_PROFILE_CONFIGS[payloadProfile]?.label || payloadProfile,
+      apiBase: normalizeBaseUrl(payload.apiBase || storedConfig.apiBase || DEFAULT_PROFILE_CONFIGS[payloadProfile]?.apiBase || DEFAULT_PROFILE_CONFIGS.prod.apiBase),
+      helperBase: normalizeBaseUrl(payload.helperBase || helperBase),
+      brandId: payload.brandId || storedConfig.brandId || null,
+      environmentKey: payload.environmentKey || storedConfig.environmentKey || '',
+      providerProfileId: payload.providerProfileId || storedConfig.providerProfileId || '',
+      platform: storedConfig.platform || '',
+      autoRun: storedConfig.autoRun !== false,
+    }
+    await saveActiveConfig(nextConfig)
     const session = await bindExtension(payload.bindCode)
     await appendEventLog({
       type: 'bind_intent',
       ok: true,
       source: source.reason || 'unknown',
+      profileKey: nextConfig.profileKey,
       environmentKey: nextConfig.environmentKey,
       brandId: nextConfig.brandId,
     })
@@ -456,19 +572,17 @@ async function pollOnce(options = {}) {
 }
 
 async function refreshRuntimeConfig(options = {}) {
-  const stored = await storageGet(['geoEnvConfig', 'geoEnvSession'])
-  const rawConfig = stored.geoEnvConfig || {}
-  const session = stored.geoEnvSession || null
+  const { config: currentConfig, session } = await getConfig()
+  const rawConfig = currentConfig || {}
   if (!session?.extensionToken) return { applied: false, reason: 'not_bound' }
-  const { config } = await getConfig()
-  const activeSession = await refreshExtensionSession(config, session)
+  const activeSession = await refreshExtensionSession(currentConfig, session)
   const query = new URLSearchParams()
   const environmentKeyFilter = rawConfig.environmentKey || options.environmentKey || ''
   const platformFilter = rawConfig.platform || options.platform || ''
   if (environmentKeyFilter) query.set('environmentKey', String(environmentKeyFilter))
   if (platformFilter) query.set('platform', normalizePlatform(platformFilter))
   const path = `/api/v1/extension/runtime-config${query.toString() ? `?${query}` : ''}`
-  const runtime = await apiRequest(config, path, { method: 'GET' }, activeSession.extensionToken)
+  const runtime = await apiRequest(currentConfig, path, { method: 'GET' }, activeSession.extensionToken)
   await storageSet({ geoEnvRuntimeConfig: { ...runtime, refreshedAt: new Date().toISOString() } })
 
   const selected = runtime?.selected
@@ -500,16 +614,17 @@ async function refreshRuntimeConfig(options = {}) {
 
   const nextConfig = {
     ...rawConfig,
-    apiBase: rawConfig.apiBase || config.apiBase,
-    helperBase: rawConfig.helperBase || runtime.helperBase || config.helperBase,
-    brandId: rawConfig.brandId || runtime.brandId || config.brandId || null,
-    environmentKey: selected.environmentKey || rawConfig.environmentKey || config.environmentKey,
+    apiBase: rawConfig.apiBase || currentConfig.apiBase,
+    helperBase: rawConfig.helperBase || runtime.helperBase || currentConfig.helperBase,
+    brandId: rawConfig.brandId || runtime.brandId || currentConfig.brandId || null,
+    environmentKey: selected.environmentKey || rawConfig.environmentKey || currentConfig.environmentKey,
     environmentAccountId: selected.browserEnvironmentAccountId || rawConfig.environmentAccountId || null,
     selfMediaAccountId: selected.selfMediaAccountId || rawConfig.selfMediaAccountId || null,
-    platform: selected.platform || rawConfig.platform || config.platform,
+    platform: selected.platform || rawConfig.platform || currentConfig.platform,
     autoRun: rawConfig.autoRun !== false,
   }
-  await storageSet({ geoEnvConfig: nextConfig, geoEnvSession: activeSession })
+  await saveActiveConfig(nextConfig)
+  await saveActiveSession(activeSession)
   await appendEventLog({
     type: 'runtime_config',
     ok: true,
@@ -831,10 +946,14 @@ async function handleTask(config, session, task, options = {}) {
     })
     fillResult = normalizeFillResult(fillResponse?.result || fillResponse, task)
   } catch (error) {
-    fillResult = normalizeFillResult(
-      await recoverPublishAfterFillError(tab.id, task, payload, error),
-      task,
-    )
+    try {
+      fillResult = normalizeFillResult(
+        await recoverPublishAfterFillError(tab.id, task, payload, error),
+        task,
+      )
+    } catch (recoverError) {
+      throw normalizeFillTransportError(recoverError, task, payload)
+    }
   }
 
   await apiRequest(taskApiConfig, `/api/v1/extension/tasks/${task.taskId}/ack`, {
@@ -873,6 +992,24 @@ async function ensureTaskIdentityTab(config, session, task, candidateTabId) {
     requireTaskEnvironment: true,
   })
   return tab.id
+}
+
+function normalizeFillTransportError(error, task = {}, payload = {}) {
+  const message = error?.message || String(error || '')
+  const platform = normalizePlatform(task?.platform || payload?.platform)
+  if (platform === 'douyin' && isMessageChannelClosedError(message)) {
+    const normalized = new Error(`抖音填充或发布过程中页面发生跳转，扩展消息通道已关闭；请点击“重新校验”确认平台作品状态。原始错误：${message}`)
+    normalized.code = 'DOUYIN_FILL_FAILED'
+    normalized.originalMessage = message
+    return normalized
+  }
+  if (isMessageChannelClosedError(message)) {
+    const normalized = new Error(`平台页面跳转导致扩展消息通道关闭；请重新校验发布状态。原始错误：${message}`)
+    normalized.code = error?.code || 'FILL_MESSAGE_CHANNEL_CLOSED'
+    normalized.originalMessage = message
+    return normalized
+  }
+  return error
 }
 
 function normalizeFillResult(fillResult, task = {}) {
@@ -1208,7 +1345,7 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
 async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload, error) {
   const message = error?.message || String(error || '')
   const platform = normalizePlatform(task?.platform || payload?.platform)
-  if (platform !== 'toutiao' || !isWorksListVerifyTimeout(error, message)) throw error
+  if (platform !== 'toutiao' || (!isWorksListVerifyTimeout(error, message) && !isMessageChannelClosedError(message))) throw error
 
   const context = buildToutiaoWorksListVerifyContext(payload)
   if (!context.scheduledAt) throw error
@@ -1229,9 +1366,12 @@ async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload,
           scheduled: true,
           published: false,
           publishVerification: latest,
-          message: `头条作品列表首次未命中，刷新${attempt + 1}次后确认定时发布`,
+          message: isMessageChannelClosedError(message)
+            ? `头条发布后页面跳转导致消息通道关闭，刷新${attempt + 1}次后确认定时发布`
+            : `头条作品列表首次未命中，刷新${attempt + 1}次后确认定时发布`,
         },
         recoveredAfterWorksListRefresh: true,
+        recoveredAfterMessageChannelClosed: isMessageChannelClosedError(message),
         worksListVerifyError: message,
       }
     }

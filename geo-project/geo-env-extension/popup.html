@@ -29,6 +29,14 @@
         border-radius: 6px;
         background: #fff;
       }
+      select {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 8px 9px;
+        border: 1px solid #cfd6e4;
+        border-radius: 6px;
+        background: #fff;
+      }
       .check {
         display: flex;
         align-items: center;
@@ -101,6 +109,7 @@
     <h1>GEO 自媒体助手</h1>
 
     <div class="status" id="status">未加载配置</div>
+    <p class="hint" id="profileHint">运行环境由扩展包固定。</p>
 
     <label class="check">
       <input id="autoRun" type="checkbox">
@@ -156,6 +165,7 @@
 
     <pre id="log"></pre>
 
+    <script src="env-config.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

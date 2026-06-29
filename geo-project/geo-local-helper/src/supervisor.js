@@ -14,6 +14,10 @@ let stopping = false
 let restartTimes = []
 let helperConfig = { host: '127.0.0.1', port: 17891 }
 
+function parseJsonText(raw) {
+  return JSON.parse(String(raw || '').replace(/^\uFEFF/, ''))
+}
+
 function nowIso() {
   return new Date().toISOString()
 }
@@ -31,7 +35,7 @@ function canRestart() {
 async function loadHelperConfig() {
   const configPath = existsSync(CONFIG_PATH) ? CONFIG_PATH : EXAMPLE_CONFIG_PATH
   const raw = await fs.readFile(configPath, 'utf8')
-  const config = JSON.parse(raw)
+  const config = parseJsonText(raw)
   return {
     host: config.host || '127.0.0.1',
     port: Number(config.port || 17891),

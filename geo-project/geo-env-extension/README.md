@@ -13,19 +13,28 @@
 
 ## 加载方式
 
-在 AdsPower 对应环境里打开扩展管理页，选择“加载已解压的扩展”，目录选择：
+先按目标环境打包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package-delivery.ps1 -Environment prod
+powershell -ExecutionPolicy Bypass -File scripts/package-delivery.ps1 -Environment dev
+```
+
+生产同事只分发 `geo-env-extension-prod-v{version}.zip`；本地联调使用 `geo-env-extension-dev-v{version}.zip`。
+
+在 AdsPower 对应环境里打开扩展管理页，选择“加载已解压的扩展”，目录选择解压后的包目录，例如：
 
 ```text
-D:\code\sanhe-geo-project\geo-project\geo-env-extension
+D:\code\sanhe-geo-project\geo-project\geo-env-extension\dist\geo-env-extension-prod-v0.1.6
 ```
 
 每个用于 PoC 的 AdsPower 环境都需要装一次。生产化时再做批量安装/更新。
 
 ## 配置
 
-打开扩展弹窗，填写：
+打开扩展弹窗，确认顶部显示的运行环境。运行环境由扩展包内 `env-config.js` 固定，弹窗不提供切换入口。
 
-- 后台地址：生产环境填 `https://www.huanjingaigeo.com`；本地联调必须填当前本地后端地址，例如 `http://127.0.0.1:8080`
+- 后台地址：生产包默认为 `https://www.huanjingaigeo.com`；开发包默认为 `http://127.0.0.1:8080`
 - 本地助手地址：`http://127.0.0.1:17891`
 - 本地助手 Token：PoC 兜底字段，可留空。扩展绑定后台且本地助手完成 C2 配对后，会优先使用后台签发的 `helper.session.{sessionId}` + HMAC 签名访问本地助手。
 - 环境标识：例如 `geo_b`
@@ -37,6 +46,8 @@ D:\code\sanhe-geo-project\geo-project\geo-env-extension
 - 自动领取：默认开启。AdsPower 环境打开平台页后，扩展会自动向本地助手领取当前环境任务并填充；关闭后可继续用弹窗按钮手动领取。
 
 点击“保存配置”，再点击“绑定后台”。
+
+升级兼容：旧版扩展只保存一份 `geoEnvConfig / geoEnvSession`。新版首次读取到旧配置时会自动归入 `prod` 生产环境档案，原有生产绑定继续可用；新版继续把旧 key 固定镜像为生产档案，便于必要时回退旧版扩展。本地开发请安装 DEV 包，不在生产包里切换。
 
 如果自动填充日志出现 `本地助手签名失败：Unauthorized`，通常说明 AdsPower 扩展保存的是旧的后台绑定，或“后台地址”指向了另一个后端环境。处理方式：
 
