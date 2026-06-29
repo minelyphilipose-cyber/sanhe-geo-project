@@ -5,7 +5,7 @@ import {
 } from '@/api/mobileDashboard'
 import type { MobileDashboardBootstrap, MobileDashboardSession } from '@/types/mobileDashboard'
 
-const LONG_TOKEN_KEY = 'geo_mobile_dashboard_long_token'
+const SHARE_CODE_KEY = 'geo_mobile_dashboard_share_code'
 const SESSION_TOKEN_KEY = 'geo_mobile_dashboard_session_token'
 const CONTEXT_KEY = 'geo_mobile_dashboard_context'
 
@@ -23,7 +23,7 @@ function readJson<T>(key: string): T | null {
 export const useMobileDashboardStore = defineStore('mobileDashboard', {
   state: () => ({
     sessionToken: sessionStorage.getItem(SESSION_TOKEN_KEY) || '',
-    longToken: sessionStorage.getItem(LONG_TOKEN_KEY) || '',
+    shareCode: sessionStorage.getItem(SHARE_CODE_KEY) || '',
     context: readJson<MobileDashboardSession | MobileDashboardBootstrap>(CONTEXT_KEY),
     initialized: false,
   }),
@@ -34,10 +34,10 @@ export const useMobileDashboardStore = defineStore('mobileDashboard', {
   },
 
   actions: {
-    async initialize(entryToken?: string) {
-      const tokenFromUrl = entryToken?.trim()
-      if (tokenFromUrl) {
-        await this.exchange(tokenFromUrl)
+    async initialize(entryShareCode?: string) {
+      const codeFromUrl = entryShareCode?.trim()
+      if (codeFromUrl) {
+        await this.exchange(codeFromUrl)
         this.initialized = true
         return
       }
@@ -52,8 +52,8 @@ export const useMobileDashboardStore = defineStore('mobileDashboard', {
         }
       }
 
-      if (this.longToken) {
-        await this.exchange(this.longToken)
+      if (this.shareCode) {
+        await this.exchange(this.shareCode)
         this.initialized = true
         return
       }
@@ -61,22 +61,22 @@ export const useMobileDashboardStore = defineStore('mobileDashboard', {
       throw new Error('请使用有效的数据看板分享链接访问')
     },
 
-    async exchange(longToken: string) {
-      const res = await exchangeMobileDashboardSession(longToken)
+    async exchange(shareCode: string) {
+      const res = await exchangeMobileDashboardSession(shareCode)
       const data = res.data.data
-      this.longToken = longToken
+      this.shareCode = shareCode
       this.sessionToken = data.sessionToken
       this.context = data
-      sessionStorage.setItem(LONG_TOKEN_KEY, longToken)
+      sessionStorage.setItem(SHARE_CODE_KEY, shareCode)
       sessionStorage.setItem(SESSION_TOKEN_KEY, data.sessionToken)
       sessionStorage.setItem(CONTEXT_KEY, JSON.stringify(data))
     },
 
     async renewSession() {
-      if (!this.longToken) {
+      if (!this.shareCode) {
         throw new Error('请使用有效的数据看板分享链接访问')
       }
-      await this.exchange(this.longToken)
+      await this.exchange(this.shareCode)
       return this.sessionToken
     },
 
@@ -93,11 +93,11 @@ export const useMobileDashboardStore = defineStore('mobileDashboard', {
 
     clearAll() {
       this.sessionToken = ''
-      this.longToken = ''
+      this.shareCode = ''
       this.context = null
       this.initialized = false
       sessionStorage.removeItem(SESSION_TOKEN_KEY)
-      sessionStorage.removeItem(LONG_TOKEN_KEY)
+      sessionStorage.removeItem(SHARE_CODE_KEY)
       sessionStorage.removeItem(CONTEXT_KEY)
     },
   },

@@ -14,16 +14,13 @@ const hideFilingPathPrefixes = [
   '/presale-print/',
   '/presale-print-poc/',
   '/baseline-print/',
-  '/home',
-  '/monitor',
-  '/content',
-  '/report',
+  '/m/',
 ]
 const hideFilingRouteNames = new Set([
   'MobileDashboardHome',
   'MobileDashboardMonitor',
   'MobileDashboardContent',
-  'MobileDashboardReport',
+  'MobileDashboardQuestionDetail',
 ])
 
 const showFilingFooter = computed(() => {

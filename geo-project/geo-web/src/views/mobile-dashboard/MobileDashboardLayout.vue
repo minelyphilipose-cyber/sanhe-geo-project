@@ -22,7 +22,14 @@
         :title-tone="currentHeaderConfig.titleTone"
         :subtitle-tone="currentHeaderConfig.subtitleTone"
       />
-      <section class="mobile-dashboard-content">
+      <section
+        ref="contentRef"
+        class="mobile-dashboard-content"
+        @touchstart.passive="handleTouchStart"
+        @touchmove="handleTouchMove"
+        @touchend.passive="handleTouchEnd"
+        @touchcancel.passive="resetTouchState"
+      >
         <router-view />
       </section>
       <BottomTabbar />
@@ -32,16 +39,18 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AppHeader from '@/components/mobile-dashboard/AppHeader.vue'
 import BottomTabbar from '@/components/mobile-dashboard/BottomTabbar.vue'
 import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 
 const route = useRoute()
+const router = useRouter()
 const mobileDashboardStore = useMobileDashboardStore()
 const loading = ref(true)
 const errorMessage = ref('')
+const contentRef = ref<HTMLElement | null>(null)
 
 type HeaderTone = 'default' | 'primary'
 type SubtitleTone = 'body' | 'label' | 'micro'
@@ -54,39 +63,132 @@ const pageConfig: Record<string, {
   titleTone: HeaderTone
   subtitleTone: SubtitleTone
 }> = {
-  '/home': { name: '客户总览', icon: 'dashboard', iconSize: 24, titleTone: 'default', subtitleTone: 'body' },
-  '/monitor': { name: 'AI监测', icon: 'dashboard', iconSize: 28, titleTone: 'default', subtitleTone: 'body' },
-  '/content': { name: '内容交付', icon: 'bubble', iconSize: 28, titleTone: 'primary', subtitleTone: 'label' },
-  '/report': { name: '阶段报告', icon: 'bubble', iconSize: 24, titleTone: 'primary', subtitleTone: 'micro' },
+  home: { name: '客户总览', icon: 'dashboard', iconSize: 24, titleTone: 'primary', subtitleTone: 'label' },
+  monitor: { name: 'AI监测', icon: 'dashboard', iconSize: 28, titleTone: 'primary', subtitleTone: 'label' },
+  content: { name: '内容交付', icon: 'bubble', iconSize: 28, titleTone: 'primary', subtitleTone: 'label' },
+  question: { name: '问答详情', icon: 'dashboard', iconSize: 28, titleTone: 'primary', subtitleTone: 'label' },
 }
 
 const currentPageKey = computed(() => {
-  if (route.path.startsWith('/monitor/question')) return '/monitor/question'
-  if (route.path.startsWith('/monitor')) return '/monitor'
-  return route.path
+  if (route.name === 'MobileDashboardQuestionDetail') return 'question'
+  if (route.name === 'MobileDashboardMonitor') return 'monitor'
+  if (route.name === 'MobileDashboardContent') return 'content'
+  return 'home'
 })
 const currentPageName = computed(() => {
-  if (currentPageKey.value === '/monitor/question') return '问答详情'
   return pageConfig[currentPageKey.value]?.name || '客户总览'
 })
 const currentFilterLabel = computed(() => pageConfig[currentPageKey.value]?.filter)
-const currentHeaderConfig = computed(() => pageConfig[currentPageKey.value] || pageConfig['/home'])
+const currentHeaderConfig = computed(() => pageConfig[currentPageKey.value] || pageConfig.home)
 
-function removeTokenFromAddressBar() {
-  if (!('t' in route.query)) return
-  const url = new URL(window.location.href)
-  url.searchParams.delete('t')
-  const clean = `${url.pathname}${url.search}${url.hash}`
-  window.history.replaceState(window.history.state, '', clean)
+const swipeTabRouteNames = ['MobileDashboardHome', 'MobileDashboardMonitor', 'MobileDashboardContent']
+const swipeGuardThreshold = 14
+const swipeThreshold = 56
+let touchState: {
+  startX: number
+  startY: number
+  currentX: number
+  currentY: number
+  scroller: HTMLElement | null
+} | null = null
+
+const shareCode = computed(() => String(route.params.shareCode || ''))
+const isSwipeTabPage = computed(() => swipeTabRouteNames.includes(String(route.name || '')))
+
+function findHorizontalScroller(target: EventTarget | null) {
+  const root = contentRef.value
+  if (!root || !(target instanceof HTMLElement)) return null
+
+  let element: HTMLElement | null = target
+  while (element && root.contains(element)) {
+    const style = window.getComputedStyle(element)
+    const canScrollX = element.scrollWidth > element.clientWidth + 4
+      && ['auto', 'scroll'].includes(style.overflowX)
+    if (canScrollX) return element
+    if (element === root) break
+    element = element.parentElement
+  }
+  return null
+}
+
+function canScrollerConsumeSwipe(scroller: HTMLElement | null, deltaX: number) {
+  if (!scroller) return false
+  if (deltaX < 0) {
+    return scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 2
+  }
+  return scroller.scrollLeft > 2
+}
+
+function handleTouchStart(event: TouchEvent) {
+  if (!isSwipeTabPage.value) {
+    resetTouchState()
+    return
+  }
+  if (event.touches.length !== 1) {
+    resetTouchState()
+    return
+  }
+  const touch = event.touches[0]
+  touchState = {
+    startX: touch.clientX,
+    startY: touch.clientY,
+    currentX: touch.clientX,
+    currentY: touch.clientY,
+    scroller: findHorizontalScroller(event.target),
+  }
+}
+
+function handleTouchMove(event: TouchEvent) {
+  if (!touchState || event.touches.length !== 1) return
+  const touch = event.touches[0]
+  touchState.currentX = touch.clientX
+  touchState.currentY = touch.clientY
+  const deltaX = touchState.currentX - touchState.startX
+  const deltaY = touchState.currentY - touchState.startY
+  const isHorizontalIntent = Math.abs(deltaX) >= swipeGuardThreshold && Math.abs(deltaX) > Math.abs(deltaY)
+
+  if (
+    isSwipeTabPage.value
+    && isHorizontalIntent
+    && !canScrollerConsumeSwipe(touchState.scroller, deltaX)
+  ) {
+    event.preventDefault()
+  }
+}
+
+function resetTouchState() {
+  touchState = null
+}
+
+function handleTouchEnd() {
+  if (!touchState) return
+
+  const deltaX = touchState.currentX - touchState.startX
+  const deltaY = touchState.currentY - touchState.startY
+  const isHorizontalSwipe = Math.abs(deltaX) >= swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY) * 1.2
+  const currentIndex = swipeTabRouteNames.indexOf(String(route.name || ''))
+
+  if (
+    isSwipeTabPage.value
+    && isHorizontalSwipe
+    && currentIndex >= 0
+    && !canScrollerConsumeSwipe(touchState.scroller, deltaX)
+  ) {
+    const targetIndex = deltaX < 0 ? currentIndex + 1 : currentIndex - 1
+    const targetName = swipeTabRouteNames[targetIndex]
+    if (targetName && shareCode.value) {
+      router.replace({ name: targetName, params: { shareCode: shareCode.value } })
+    }
+  }
+
+  resetTouchState()
 }
 
 onMounted(async () => {
   loading.value = true
   errorMessage.value = ''
   try {
-    const entryToken = typeof route.query.t === 'string' ? route.query.t : ''
-    await mobileDashboardStore.initialize(entryToken)
-    removeTokenFromAddressBar()
+    await mobileDashboardStore.initialize(shareCode.value)
   } catch (error: any) {
     mobileDashboardStore.clearAll()
     errorMessage.value = error?.message || '分享链接已失效或已过期，请联系交付顾问重新获取。'

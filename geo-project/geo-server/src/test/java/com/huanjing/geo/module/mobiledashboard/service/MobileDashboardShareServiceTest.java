@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
 class MobileDashboardShareServiceTest {
 
     @Test
-    void createShareStoresOnlyHashAndPrefixButReturnsRawTokenOnce() {
+    void createShareStoresOnlyHashAndPrefixButReturnsShortCodeUrl() {
         MobileDashboardShareMapper shareMapper = mock(MobileDashboardShareMapper.class);
         ProjectMapper projectMapper = mock(ProjectMapper.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
@@ -58,11 +58,12 @@ class MobileDashboardShareServiceTest {
         ArgumentCaptor<MobileDashboardShare> captor = ArgumentCaptor.forClass(MobileDashboardShare.class);
         verify(shareMapper).insert(captor.capture());
         MobileDashboardShare stored = captor.getValue();
-        assertThat(vo.getToken()).startsWith("mdb_");
-        assertThat(vo.getShareUrl()).contains("?t=" + vo.getToken());
+        assertThat(vo.getShareCode()).isNotBlank();
+        assertThat(vo.getShareUrl()).isEqualTo("https://example.test/m/" + vo.getShareCode());
+        assertThat(stored.getShareCode()).isEqualTo(vo.getShareCode());
         assertThat(stored.getTokenHash()).isNotBlank();
-        assertThat(stored.getTokenHash()).doesNotContain(vo.getToken());
-        assertThat(stored.getTokenPrefix()).isEqualTo(vo.getToken().substring(0, 12));
+        assertThat(stored.getTokenHash()).doesNotContain(stored.getTokenPrefix());
+        assertThat(stored.getTokenPrefix()).startsWith("mdb_");
     }
 
     @Test

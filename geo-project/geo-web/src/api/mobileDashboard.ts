@@ -53,8 +53,8 @@ mobileRequest.interceptors.response.use(
   },
 )
 
-export function exchangeMobileDashboardSession(token: string) {
-  return mobileRequest.post<R<MobileDashboardSession>>('/public/mobile-dashboard/session', { token })
+export function exchangeMobileDashboardSession(shareCode: string) {
+  return mobileRequest.post<R<MobileDashboardSession>>('/public/mobile-dashboard/session', { shareCode })
 }
 
 export function getMobileDashboardBootstrap(sessionToken: string) {

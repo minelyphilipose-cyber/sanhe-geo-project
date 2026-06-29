@@ -19,10 +19,6 @@
       <template #icon><MobileIcon name="content" /></template>
       内容
     </van-tabbar-item>
-    <van-tabbar-item name="report">
-      <template #icon><MobileIcon name="report" /></template>
-      报告
-    </van-tabbar-item>
   </van-tabbar>
 </template>
 
@@ -33,24 +29,23 @@ import MobileIcon from './MobileIcon.vue'
 
 const route = useRoute()
 const router = useRouter()
-const tabPathMap: Record<string, string> = {
-  home: '/home',
-  monitor: '/monitor',
-  content: '/content',
-  report: '/report',
+const tabRouteMap: Record<string, string> = {
+  home: 'MobileDashboardHome',
+  monitor: 'MobileDashboardMonitor',
+  content: 'MobileDashboardContent',
 }
 
 const activeName = computed(() => {
-  if (route.path.startsWith('/monitor')) return 'monitor'
-  if (route.path.startsWith('/content')) return 'content'
-  if (route.path.startsWith('/report')) return 'report'
+  if (route.name === 'MobileDashboardMonitor' || route.name === 'MobileDashboardQuestionDetail') return 'monitor'
+  if (route.name === 'MobileDashboardContent') return 'content'
   return 'home'
 })
 
 function handleChange(name: string) {
-  const path = tabPathMap[name]
-  if (path && path !== route.path) {
-    router.replace(path)
+  const routeName = tabRouteMap[name]
+  const shareCode = String(route.params.shareCode || '')
+  if (routeName && shareCode && routeName !== route.name) {
+    router.replace({ name: routeName, params: { shareCode } })
   }
 }
 </script>

@@ -26,7 +26,7 @@ const presalePrintPocRoutes = enablePresalePrintPoc
   : []
 const mobileDashboardRoutes = [
   {
-    path: '/home',
+    path: '/m/:shareCode',
     component: () => import('@/views/mobile-dashboard/MobileDashboardLayout.vue'),
     children: [
       {
@@ -35,46 +35,22 @@ const mobileDashboardRoutes = [
         component: () => import('@/views/mobile-dashboard/HomeView.vue'),
         meta: { title: '移动数据看板' },
       },
-    ],
-  },
-  {
-    path: '/monitor',
-    component: () => import('@/views/mobile-dashboard/MobileDashboardLayout.vue'),
-    children: [
       {
-        path: '',
+        path: 'monitor',
         name: 'MobileDashboardMonitor',
         component: () => import('@/views/mobile-dashboard/MonitorView.vue'),
         meta: { title: '移动数据看板' },
       },
       {
-        path: 'question/:pollResultId',
+        path: 'monitor/question/:pollResultId',
         name: 'MobileDashboardQuestionDetail',
         component: () => import('@/views/mobile-dashboard/QuestionDetailView.vue'),
         meta: { title: '移动数据看板' },
       },
-    ],
-  },
-  {
-    path: '/content',
-    component: () => import('@/views/mobile-dashboard/MobileDashboardLayout.vue'),
-    children: [
       {
-        path: '',
+        path: 'content',
         name: 'MobileDashboardContent',
         component: () => import('@/views/mobile-dashboard/ContentView.vue'),
-        meta: { title: '移动数据看板' },
-      },
-    ],
-  },
-  {
-    path: '/report',
-    component: () => import('@/views/mobile-dashboard/MobileDashboardLayout.vue'),
-    children: [
-      {
-        path: '',
-        name: 'MobileDashboardReport',
-        component: () => import('@/views/mobile-dashboard/ReportView.vue'),
         meta: { title: '移动数据看板' },
       },
     ],
@@ -85,10 +61,7 @@ const publicPathPrefixes = [
   '/r/',
   '/realtime-dashboard/',
   '/dashboard/',
-  '/home',
-  '/monitor',
-  '/content',
-  '/report',
+  '/m/',
   '/presale-print/',
   '/baseline-print/',
   ...(enablePresalePrintPoc ? ['/presale-print-poc/'] : []),

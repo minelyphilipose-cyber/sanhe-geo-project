@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 public class MobileDashboardShareVO {
     private Long id;
     private Long projectId;
+    private String shareCode;
     private String tokenPrefix;
     private String status;
     private LocalDateTime expiresAt;
@@ -17,5 +18,4 @@ public class MobileDashboardShareVO {
     private LocalDateTime lastAccessAt;
     private Long accessCount;
     private String shareUrl;
-    private String token;
 }

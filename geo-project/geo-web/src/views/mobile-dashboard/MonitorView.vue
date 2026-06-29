@@ -120,7 +120,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { getMobileDashboardMonitor, withRenewedMobileDashboardSession } from '@/api/mobileDashboard'
 import DashboardCard from '@/components/mobile-dashboard/DashboardCard.vue'
@@ -137,6 +137,7 @@ import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
 
 const store = useMobileDashboardStore()
 const router = useRouter()
+const route = useRoute()
 const data = ref<MonitorDashboardData>()
 const questionPage = ref(1)
 const selectedPlatform = ref('all')
@@ -278,7 +279,13 @@ function publicEvidence(value?: string | null) {
 function openQuestionDetail(item: QuestionMonitorItem) {
   if (!item.mentioned) return
   sessionStorage.setItem(QUESTION_DETAIL_CACHE_KEY, JSON.stringify(item))
-  router.push({ name: 'MobileDashboardQuestionDetail', params: { pollResultId: String(item.pollResultId) } })
+  router.push({
+    name: 'MobileDashboardQuestionDetail',
+    params: {
+      shareCode: String(route.params.shareCode || ''),
+      pollResultId: String(item.pollResultId),
+    },
+  })
 }
 
 async function changePlatform(code: string) {

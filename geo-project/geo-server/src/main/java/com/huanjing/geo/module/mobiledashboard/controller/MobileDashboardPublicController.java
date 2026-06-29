@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.mobiledashboard.controller;
 
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardAggregateVO;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardBootstrapVO;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardSessionRequest;
@@ -29,7 +30,7 @@ public class MobileDashboardPublicController {
     @PostMapping("/session")
     public R<MobileDashboardSessionVO> exchangeSession(@Valid @RequestBody MobileDashboardSessionRequest request,
                                                        HttpServletRequest httpServletRequest) {
-        return R.ok(mobileDashboardShareService.exchangeSession(request.getToken(), httpServletRequest));
+        return R.ok(mobileDashboardShareService.exchangeSession(request.getShareCode(), httpServletRequest));
     }
 
     @GetMapping("/bootstrap")
@@ -86,8 +87,8 @@ public class MobileDashboardPublicController {
     public R<MobileDashboardAggregateVO.Report> report(@RequestHeader(value = "Authorization", required = false) String authorization,
                                                        HttpServletRequest request) {
         return audited("report", authorization, request, () -> {
-            Long projectId = mobileDashboardShareService.requireValidSession(authorization).projectId();
-            return R.ok(mobileDashboardAggregateService.report(projectId));
+            mobileDashboardShareService.requireValidSession(authorization);
+            throw new BizException(404, "Mobile dashboard report page is disabled");
         });
     }
 

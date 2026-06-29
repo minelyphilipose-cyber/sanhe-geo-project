@@ -6,5 +6,5 @@ import lombok.Data;
 @Data
 public class MobileDashboardSessionRequest {
     @NotBlank
-    private String token;
+    private String shareCode;
 }

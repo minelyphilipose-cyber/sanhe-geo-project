@@ -172,6 +172,7 @@ export interface ReportDashboardData {
 export interface MobileDashboardShare {
   id: number
   projectId: number
+  shareCode?: string | null
   tokenPrefix: string
   status: 'active' | 'disabled' | string
   expiresAt: string
@@ -181,7 +182,6 @@ export interface MobileDashboardShare {
   lastAccessAt?: string | null
   accessCount?: number | null
   shareUrl?: string | null
-  token?: string | null
 }
 
 export interface MobileDashboardShareAccessSummary {

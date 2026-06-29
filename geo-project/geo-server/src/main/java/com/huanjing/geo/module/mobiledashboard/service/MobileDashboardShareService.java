@@ -31,6 +31,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -39,6 +40,7 @@ public class MobileDashboardShareService {
 
     private static final String ACTIVE = "active";
     private static final String DISABLED = "disabled";
+    private static final char[] SHARE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final MobileDashboardShareMapper shareMapper;
@@ -64,7 +66,7 @@ public class MobileDashboardShareService {
                 new LambdaQueryWrapper<MobileDashboardShare>()
                         .eq(MobileDashboardShare::getProjectId, project.getId())
                         .orderByDesc(MobileDashboardShare::getCreatedAt, MobileDashboardShare::getId)
-        ).stream().map(share -> toVO(share, null)).toList();
+        ).stream().map(this::toVO).toList();
     }
 
     @Transactional
@@ -73,6 +75,7 @@ public class MobileDashboardShareService {
         int disabledActiveCount = disableActiveShares(project.getId());
 
         String token = generateLongToken();
+        String shareCode = generateUniqueShareCode();
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expiresAt = request != null && request.getExpiresAt() != null
                 ? request.getExpiresAt()
@@ -83,6 +86,7 @@ public class MobileDashboardShareService {
 
         MobileDashboardShare share = new MobileDashboardShare();
         share.setProjectId(project.getId());
+        share.setShareCode(shareCode);
         share.setTokenHash(hashToken(token));
         share.setTokenPrefix(token.substring(0, Math.min(12, token.length())));
         share.setStatus(ACTIVE);
@@ -92,11 +96,12 @@ public class MobileDashboardShareService {
         shareMapper.insert(share);
         Map<String, Object> shareAfter = new LinkedHashMap<>();
         shareAfter.put("shareId", share.getId());
+        shareAfter.put("shareCode", share.getShareCode());
         shareAfter.put("tokenPrefix", share.getTokenPrefix());
         shareAfter.put("expiresAt", share.getExpiresAt());
         activityLogService.logAction(share.getCreatedBy(), "mobile_dashboard_share.create", "project", project.getId(),
                 null, shareAfter, Map.of("disabledActiveCount", disabledActiveCount));
-        return toVO(share, token);
+        return toVO(share);
     }
 
     @Transactional
@@ -137,20 +142,19 @@ public class MobileDashboardShareService {
     }
 
     @Transactional
-    public MobileDashboardSessionVO exchangeSession(String token, HttpServletRequest request) {
-        if (!StringUtils.hasText(token)) {
-            logAccess(null, null, "exchange_session", false, "missing_token", request);
-            throw new BizException(401, "Mobile dashboard token is required");
+    public MobileDashboardSessionVO exchangeSession(String shareCode, HttpServletRequest request) {
+        if (!StringUtils.hasText(shareCode)) {
+            logAccess(null, null, "exchange_session", false, "missing_share_code", request);
+            throw new BizException(401, "Mobile dashboard share code is required");
         }
-        String normalized = token.trim();
-        String tokenHash = hashToken(normalized);
+        String normalized = normalizeShareCode(shareCode);
         MobileDashboardShare share = shareMapper.selectOne(
                 new LambdaQueryWrapper<MobileDashboardShare>()
-                        .eq(MobileDashboardShare::getTokenHash, tokenHash)
+                        .eq(MobileDashboardShare::getShareCode, normalized)
                         .last("LIMIT 1")
         );
-        if (share == null || !constantTimeEquals(tokenHash, share.getTokenHash())) {
-            logAccess(null, null, "exchange_session", false, "invalid_token", request);
+        if (share == null) {
+            logAccess(null, null, "exchange_session", false, "invalid_share_code", request);
             throw new BizException(401, "Mobile dashboard link is invalid");
         }
         if (!ACTIVE.equalsIgnoreCase(share.getStatus())) {
@@ -195,7 +199,7 @@ public class MobileDashboardShareService {
                 "home", true,
                 "monitor", true,
                 "content", true,
-                "report", true
+                "report", false
         ));
         vo.setMessage("Dashboard aggregation APIs are available. Judge-derived metrics remain unavailable until judge pipeline launch.");
         return vo;
@@ -228,10 +232,11 @@ public class MobileDashboardShareService {
         return shares.size();
     }
 
-    private MobileDashboardShareVO toVO(MobileDashboardShare share, String rawToken) {
+    private MobileDashboardShareVO toVO(MobileDashboardShare share) {
         MobileDashboardShareVO vo = new MobileDashboardShareVO();
         vo.setId(share.getId());
         vo.setProjectId(share.getProjectId());
+        vo.setShareCode(share.getShareCode());
         vo.setTokenPrefix(share.getTokenPrefix());
         vo.setStatus(share.getStatus());
         vo.setExpiresAt(share.getExpiresAt());
@@ -240,9 +245,8 @@ public class MobileDashboardShareService {
         vo.setDisabledAt(share.getDisabledAt());
         vo.setLastAccessAt(share.getLastAccessAt());
         vo.setAccessCount(share.getAccessCount());
-        if (StringUtils.hasText(rawToken)) {
-            vo.setToken(rawToken);
-            vo.setShareUrl(trimTrailingSlash(webBaseUrl) + "/home?t=" + rawToken);
+        if (StringUtils.hasText(share.getShareCode())) {
+            vo.setShareUrl(trimTrailingSlash(webBaseUrl) + "/m/" + share.getShareCode());
         }
         return vo;
     }
@@ -285,6 +289,32 @@ public class MobileDashboardShareService {
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
         return "mdb_" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private String generateUniqueShareCode() {
+        for (int i = 0; i < 12; i++) {
+            String code = generateShareCode();
+            Long count = shareMapper.selectCount(
+                    new LambdaQueryWrapper<MobileDashboardShare>()
+                            .eq(MobileDashboardShare::getShareCode, code)
+            );
+            if (count == null || count == 0) {
+                return code;
+            }
+        }
+        throw new BizException(500, "Unable to generate mobile dashboard share code");
+    }
+
+    private String generateShareCode() {
+        char[] code = new char[8];
+        for (int i = 0; i < code.length; i++) {
+            code[i] = SHARE_CODE_ALPHABET[RANDOM.nextInt(SHARE_CODE_ALPHABET.length)];
+        }
+        return new String(code);
+    }
+
+    private String normalizeShareCode(String shareCode) {
+        return shareCode.trim().toUpperCase(Locale.ROOT);
     }
 
     private String hashToken(String token) {

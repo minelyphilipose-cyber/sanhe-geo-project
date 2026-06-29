@@ -54,9 +54,9 @@
     </div>
 
     <el-table :data="shares" class="share-table" border empty-text="暂无分享链接">
-      <el-table-column label="Token 前缀" width="128">
+      <el-table-column label="分享短码" width="128">
         <template #default="{ row }">
-          <code class="token-prefix">{{ row.tokenPrefix }}</code>
+          <code class="token-prefix">{{ row.shareCode || '-' }}</code>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="96">
@@ -81,9 +81,17 @@
       <el-table-column label="最后访问" min-width="160">
         <template #default="{ row }">{{ formatTime(summaryOf(row.id)?.lastAccessAt || row.lastAccessAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="110" fixed="right">
+      <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
           <div class="row-actions">
+            <el-button
+              v-if="row.shareUrl"
+              link
+              type="primary"
+              @click="copyUrl(row.shareUrl)"
+            >
+              复制
+            </el-button>
             <el-popconfirm
               v-if="editable && row.status === 'active'"
               title="确认停用这条移动看板链接？"

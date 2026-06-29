@@ -13,6 +13,7 @@ public class MobileDashboardShare {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long projectId;
+    private String shareCode;
     private String tokenHash;
     private String tokenPrefix;
     private String status;
