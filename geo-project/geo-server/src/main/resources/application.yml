@@ -305,6 +305,7 @@ geo:
       publish-window-end: ${CONTENT_AUTO_DISTRIBUTION_PUBLISH_WINDOW_END:23:00}
       publish-time-jitter-minutes: ${CONTENT_AUTO_DISTRIBUTION_JITTER_MINUTES:15}
       operator-user-id: ${CONTENT_AUTO_DISTRIBUTION_OPERATOR_USER_ID:0}
+      stale-generation-timeout-hours: ${CONTENT_AUTO_DISTRIBUTION_STALE_GENERATION_TIMEOUT_HOURS:24}
   presale-export:
     browser:
       enabled: ${PRESALE_EXPORT_BROWSER_ENABLED:true}

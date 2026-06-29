@@ -73,7 +73,7 @@ public class ContentAutoDistributionService {
 
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final int GENERATION_BATCH_LIMIT = 30;
-    private static final Set<String> ACTIVE_BATCH_STATUSES = Set.of("created", "generating", "publish_scheduled", "partial_failed");
+    private static final Set<String> ACTIVE_BATCH_STATUSES = Set.of("created", "generating", "publish_scheduled");
     private static final Map<String, String> QUOTA_TO_GENERATION_GROUP = Map.of(
             "official_site", ArticlePromptChannels.AGENT_SITE,
             "industry_site", ArticlePromptChannels.INDUSTRY_SITE,
@@ -119,6 +119,8 @@ public class ContentAutoDistributionService {
     private int jitterMinutes;
     @Value("${geo.content.auto-distribution.operator-user-id:0}")
     private long configuredOperatorUserId;
+    @Value("${geo.content.auto-distribution.stale-generation-timeout-hours:24}")
+    private long staleGenerationTimeoutHours;
 
     @Scheduled(cron = "${geo.content.auto-distribution.cron:0 0 1 * * ?}", zone = "Asia/Shanghai")
     public void runDailyPlan() {
@@ -310,17 +312,69 @@ public class ContentAutoDistributionService {
             }
         }
 
-        List<ContentAutoDistributionBatch> batches = batchMapper.selectList(
+        Map<Long, ContentAutoDistributionBatch> batches = new LinkedHashMap<>();
+        List<ContentAutoDistributionBatch> oldestActiveBatches = batchMapper.selectList(
                 new LambdaQueryWrapper<ContentAutoDistributionBatch>()
                         .in(ContentAutoDistributionBatch::getStatus, ACTIVE_BATCH_STATUSES)
                         .orderByAsc(ContentAutoDistributionBatch::getId)
                         .last("LIMIT 50")
         );
-        for (ContentAutoDistributionBatch batch : batches) {
-            scheduleGeneratedItems(batch);
-            refreshPublishedItems(batch.getId());
-            refreshSelfMediaScheduledItems(batch.getId());
-            refreshBatchCounters(batch.getId());
+        oldestActiveBatches.forEach(batch -> batches.put(batch.getId(), batch));
+
+        List<ContentAutoDistributionItem> readyGeneratedItems = itemMapper.selectList(
+                new LambdaQueryWrapper<ContentAutoDistributionItem>()
+                        .eq(ContentAutoDistributionItem::getStatus, "generated")
+                        .isNotNull(ContentAutoDistributionItem::getArticleId)
+                        .orderByDesc(ContentAutoDistributionItem::getPlanDate)
+                        .orderByAsc(ContentAutoDistributionItem::getBatchId, ContentAutoDistributionItem::getId)
+                        .last("LIMIT 500")
+        );
+        for (ContentAutoDistributionItem item : readyGeneratedItems) {
+            if (item.getBatchId() == null || batches.containsKey(item.getBatchId())) {
+                continue;
+            }
+            ContentAutoDistributionBatch batch = batchMapper.selectById(item.getBatchId());
+            if (batch != null && ACTIVE_BATCH_STATUSES.contains(batch.getStatus())) {
+                batches.put(batch.getId(), batch);
+            }
+        }
+
+        for (ContentAutoDistributionBatch batch : batches.values()) {
+            try {
+                scheduleGeneratedItems(batch);
+                refreshPublishedItems(batch.getId());
+                refreshSelfMediaScheduledItems(batch.getId());
+                expireStaleGenerationItems(batch);
+                refreshBatchCounters(batch.getId());
+            } catch (Exception ex) {
+                log.warn("auto distribution batch progress failed batchId={} projectId={} planDate={} status={} error={}",
+                        batch.getId(), batch.getProjectId(), batch.getPlanDate(), batch.getStatus(), ex.getMessage(), ex);
+            }
+        }
+    }
+
+    private void expireStaleGenerationItems(ContentAutoDistributionBatch batch) {
+        if (batch == null || batch.getUpdatedAt() == null) {
+            return;
+        }
+        LocalDateTime expireBefore = LocalDateTime.now().minusHours(Math.max(1, staleGenerationTimeoutHours));
+        if (!batch.getUpdatedAt().isBefore(expireBefore)) {
+            return;
+        }
+        List<ContentAutoDistributionItem> items = itemMapper.selectList(
+                new LambdaQueryWrapper<ContentAutoDistributionItem>()
+                        .eq(ContentAutoDistributionItem::getBatchId, batch.getId())
+                        .in(ContentAutoDistributionItem::getStatus, "pending_generation", "generating")
+                        .isNull(ContentAutoDistributionItem::getArticleId)
+        );
+        if (items.isEmpty()) {
+            return;
+        }
+        log.warn("auto distribution stale generation items expired batchId={} projectId={} planDate={} count={} timeoutHours={}",
+                batch.getId(), batch.getProjectId(), batch.getPlanDate(), items.size(), Math.max(1, staleGenerationTimeoutHours));
+        for (ContentAutoDistributionItem item : items) {
+            String reason = "自动分发生成任务超过 " + Math.max(1, staleGenerationTimeoutHours) + " 小时未完成，已终止旧计划项";
+            markItemFailed(item.getId(), reason);
         }
     }
 
