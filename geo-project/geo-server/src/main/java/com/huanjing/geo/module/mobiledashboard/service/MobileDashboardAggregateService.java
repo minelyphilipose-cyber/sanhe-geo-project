@@ -1246,19 +1246,11 @@ public class MobileDashboardAggregateService {
     private MobileDashboardAggregateVO.TaskList loadContentTaskList(Long projectId, DateRange range, Integer page, Integer size) {
         int resolvedSize = Math.max(1, Math.min(size == null ? 4 : size, 20));
         int requestedPage = Math.max(1, page == null ? 1 : page);
+        String publicationAggregateSql = contentTaskPublicationAggregateSql();
         Long totalValue = jdbcTemplate.queryForObject("""
                 SELECT COUNT(DISTINCT ad.id)
                   FROM article_draft ad
-                  LEFT JOIN (
-                        SELECT article_id,
-                               COUNT(DISTINCT id) AS visible_count,
-                               MAX(COALESCE(published_at, verified_at, created_at)) AS latest_publish_at
-                         FROM article_publish_record
-                         WHERE project_id = ?
-                           AND publish_status IN (%s)
-                           AND COALESCE(target_channel, target_kind, '') IN (%s)
-                         GROUP BY article_id
-                 ) pub ON pub.article_id = ad.id
+                  LEFT JOIN (%s) pub ON pub.article_id = ad.id
                  WHERE ad.project_id = ?
                    AND DATE(COALESCE(pub.latest_publish_at, ad.updated_at, ad.created_at)) BETWEEN ? AND ?
                    AND (
@@ -1268,8 +1260,8 @@ public class MobileDashboardAggregateService {
                             AND COALESCE(ad.target_channel, '') IN (%s)
                         )
                    )
-                """.formatted(CURRENT_VISIBLE_PUBLISH_STATUS_SQL, contentDetailChannelSql(), deliveryDraftPredicate("ad"), contentDetailChannelSql()),
-                Long.class, projectId, projectId, Date.valueOf(range.start()), Date.valueOf(range.end()));
+                """.formatted(publicationAggregateSql, deliveryDraftPredicate("ad"), contentDetailChannelSql()),
+                Long.class, projectId, projectId, projectId, Date.valueOf(range.start()), Date.valueOf(range.end()));
         int total = totalValue == null ? 0 : Math.toIntExact(totalValue);
         int totalPages = total == 0 ? 0 : (int) Math.ceil(total / (double) resolvedSize);
         int resolvedPage = totalPages == 0 ? 1 : Math.min(requestedPage, totalPages);
@@ -1290,33 +1282,7 @@ public class MobileDashboardAggregateService {
                        pub.latest_publish_at,
                        pub.publish_url
                   FROM article_draft ad
-                  LEFT JOIN (
-                        SELECT article_id,
-                               GROUP_CONCAT(DISTINCT COALESCE(target_channel, target_kind, '') ORDER BY COALESCE(target_channel, target_kind, '') SEPARATOR ',') AS platform_codes,
-                               COUNT(DISTINCT id) AS visible_count,
-                               COUNT(DISTINCT CASE
-                                   WHEN COALESCE(target_channel, target_kind, '') IN (%s)
-                                    AND (
-                                        COALESCE(target_channel, target_kind, '') IN (%s)
-                                        OR verified_at IS NOT NULL
-                                    )
-                                   THEN id END) AS indexed_count,
-                               MAX(COALESCE(published_at, verified_at, created_at)) AS latest_publish_at,
-                               SUBSTRING_INDEX(
-                                   GROUP_CONCAT(
-                                       %s
-                                       ORDER BY COALESCE(published_at, verified_at, created_at) DESC, id DESC
-                                       SEPARATOR '\n'
-                                   ),
-                                   '\n',
-                                   1
-                               ) AS publish_url
-                         FROM article_publish_record
-                         WHERE project_id = ?
-                           AND publish_status IN (%s)
-                           AND COALESCE(target_channel, target_kind, '') IN (%s)
-                         GROUP BY article_id
-                 ) pub ON pub.article_id = ad.id
+                  LEFT JOIN (%s) pub ON pub.article_id = ad.id
                  WHERE ad.project_id = ?
                    AND DATE(COALESCE(pub.latest_publish_at, ad.updated_at, ad.created_at)) BETWEEN ? AND ?
                    AND (
@@ -1334,7 +1300,7 @@ public class MobileDashboardAggregateService {
                           COALESCE(pub.latest_publish_at, ad.updated_at, ad.created_at) DESC,
                           ad.id DESC
                  LIMIT ? OFFSET ?
-                """.formatted(quoted(MEASURABLE_INDEX_CHANNELS), SELF_INDEX_CHANNEL_SQL, PUBLIC_CONTENT_PUBLISH_URL_SQL, CURRENT_VISIBLE_PUBLISH_STATUS_SQL, contentDetailChannelSql(), deliveryDraftPredicate("ad"), contentDetailChannelSql()), (rs, rowNum) -> {
+                """.formatted(publicationAggregateSql, deliveryDraftPredicate("ad"), contentDetailChannelSql()), (rs, rowNum) -> {
                     long visibleCount = rs.getLong("visible_count");
                     long indexedCount = rs.getLong("indexed_count");
                     String status = indexedCount > 0 ? "indexed" : (visibleCount > 0 ? "published" : "building");
@@ -1354,7 +1320,7 @@ public class MobileDashboardAggregateService {
                     }
                     item.setDate(date);
                     return item;
-                }, projectId, projectId, Date.valueOf(range.start()), Date.valueOf(range.end()), resolvedSize, offset);
+                }, projectId, projectId, projectId, Date.valueOf(range.start()), Date.valueOf(range.end()), resolvedSize, offset);
         MobileDashboardAggregateVO.TaskList list = new MobileDashboardAggregateVO.TaskList();
         list.setPage(resolvedPage);
         list.setSize(resolvedSize);
@@ -1366,6 +1332,67 @@ public class MobileDashboardAggregateService {
             list.setReason("暂无内容任务数据");
         }
         return list;
+    }
+
+    private String contentTaskPublicationAggregateSql() {
+        return """
+                SELECT article_id,
+                       GROUP_CONCAT(DISTINCT COALESCE(target_channel, target_kind, '') ORDER BY COALESCE(target_channel, target_kind, '') SEPARATOR ',') AS platform_codes,
+                       COUNT(DISTINCT source_key) AS visible_count,
+                       COUNT(DISTINCT CASE
+                           WHEN COALESCE(target_channel, target_kind, '') IN (%s)
+                            AND (
+                                COALESCE(target_channel, target_kind, '') IN (%s)
+                                OR verified_at IS NOT NULL
+                            )
+                           THEN source_key END) AS indexed_count,
+                       MAX(COALESCE(published_at, verified_at, created_at)) AS latest_publish_at,
+                       SUBSTRING_INDEX(
+                           GROUP_CONCAT(
+                               %s
+                               ORDER BY COALESCE(published_at, verified_at, created_at) DESC, source_key DESC
+                               SEPARATOR '\n'
+                           ),
+                           '\n',
+                           1
+                       ) AS publish_url
+                  FROM (
+                        SELECT CONCAT('record:', id) AS source_key,
+                               article_id,
+                               target_kind,
+                               target_channel,
+                               published_url,
+                               url_quality,
+                               published_at,
+                               verified_at,
+                               created_at
+                          FROM article_publish_record
+                         WHERE project_id = ?
+                           AND publish_status IN (%s)
+                           AND COALESCE(target_channel, target_kind, '') IN (%s)
+                        UNION ALL
+                        SELECT CONCAT('self_media_schedule:', s.id) AS source_key,
+                               s.article_id,
+                               'self_media' AS target_kind,
+                               s.platform AS target_channel,
+                               NULLIF(TRIM(s.platform_published_url), '') AS published_url,
+                               CASE
+                                 WHEN NULLIF(TRIM(s.platform_published_url), '') REGEXP '^https?://' THEN 'public_url'
+                                 WHEN NULLIF(TRIM(s.platform_published_url), '') IS NOT NULL THEN 'manage_url'
+                                 ELSE 'missing'
+                               END AS url_quality,
+                               COALESCE(s.published_confirmed_at, s.updated_at, s.created_at) AS published_at,
+                               COALESCE(s.published_confirmed_at, s.updated_at, s.created_at) AS verified_at,
+                               s.created_at
+                          FROM self_media_publish_schedule s
+                          JOIN article_draft sad ON sad.id = s.article_id
+                         WHERE sad.project_id = ?
+                           AND s.status = 'published_confirmed'
+                           AND s.platform IN (%s)
+                       ) publication
+                 GROUP BY article_id
+                """.formatted(quoted(MEASURABLE_INDEX_CHANNELS), SELF_INDEX_CHANNEL_SQL, PUBLIC_CONTENT_PUBLISH_URL_SQL,
+                CURRENT_VISIBLE_PUBLISH_STATUS_SQL, contentDetailChannelSql(), contentDetailChannelSql());
     }
 
     private List<MobileDashboardAggregateVO.ContentTaskItem> loadRelatedBuildingContentTasks(Long projectId, Long keywordResultId) {

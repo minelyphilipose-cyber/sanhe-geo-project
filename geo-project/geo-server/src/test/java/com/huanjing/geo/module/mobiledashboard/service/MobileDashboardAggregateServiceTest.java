@@ -16,7 +16,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
-class MobileDashboardAggregateServiceTest {
+public class MobileDashboardAggregateServiceTest {
 
     @Test
     void mentionAggregateUsesRowLevelEffectiveHitFallbackAcrossTransitionWindow() throws Exception {
@@ -630,6 +630,62 @@ class MobileDashboardAggregateServiceTest {
     }
 
     @Test
+    void contentTaskListIncludesConfirmedSelfMediaSchedulesWithoutPublishRecord() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        jdbcTemplate.execute("""
+                CREATE ALIAS IF NOT EXISTS SUBSTRING_INDEX FOR
+                "com.huanjing.geo.module.mobiledashboard.service.MobileDashboardAggregateServiceTest.substringIndex"
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE article_draft (
+                    id BIGINT,
+                    project_id BIGINT,
+                    title VARCHAR(255),
+                    topic VARCHAR(255),
+                    topic_as_question VARCHAR(255),
+                    target_channel VARCHAR(64),
+                    status VARCHAR(32),
+                    allocation_mode VARCHAR(16),
+                    updated_at TIMESTAMP,
+                    created_at TIMESTAMP
+                )
+                """);
+        createPublishRecordTable(jdbcTemplate);
+        createSelfMediaPublishScheduleTable(jdbcTemplate);
+        jdbcTemplate.update("""
+                INSERT INTO article_draft
+                    (id, project_id, title, topic, topic_as_question, target_channel, status, allocation_mode, updated_at, created_at)
+                VALUES
+                    (301, 1, '知乎已确认发布稿', '阜阳全屋智能', '阜阳全屋智能哪家好', NULL, 'published', NULL, TIMESTAMP '2026-06-30 16:56:00', TIMESTAMP '2026-06-30 16:50:00'),
+                    (302, 1, '官网稿', '官网问题', '官网怎么选', 'official_site', 'approved', NULL, TIMESTAMP '2026-06-30 15:00:00', TIMESTAMP '2026-06-30 15:00:00')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO self_media_publish_schedule
+                    (id, article_id, platform, status, platform_published_url, published_confirmed_at, updated_at, created_at)
+                VALUES
+                    (222, 301, 'zhihu', 'published_confirmed', 'https://zhuanlan.zhihu.com/p/2055333874897511162', TIMESTAMP '2026-06-30 16:56:30', TIMESTAMP '2026-06-30 16:56:26', TIMESTAMP '2026-06-30 16:50:00')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO article_publish_record
+                    (id, project_id, article_id, publish_status, target_channel, target_kind, published_url, url_quality, published_at, verified_at, created_at)
+                VALUES
+                    (1, 1, 302, 'distributed', 'official_site', NULL, 'https://example.com/a', 'public_url', TIMESTAMP '2026-06-30 15:05:00', TIMESTAMP '2026-06-30 15:05:00', TIMESTAMP '2026-06-30 15:05:00')
+                """);
+
+        MobileDashboardAggregateVO.TaskList list =
+                (MobileDashboardAggregateVO.TaskList) invoke(newService(jdbcTemplate), "loadContentTaskList",
+                        1L, dateRange(LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30)), 1, 4);
+
+        assertThat(list.getTotal()).isEqualTo(2);
+        assertThat(list.getItems()).extracting(MobileDashboardAggregateVO.ContentTaskItem::getDraftId)
+                .containsExactly(301L, 302L);
+        MobileDashboardAggregateVO.ContentTaskItem selfMedia = list.getItems().get(0);
+        assertThat(selfMedia.getStatus()).isEqualTo("indexed");
+        assertThat(selfMedia.getPlatformCodes()).containsExactly("zhihu");
+        assertThat(selfMedia.getPublishUrl()).isEqualTo("https://zhuanlan.zhihu.com/p/2055333874897511162");
+    }
+
+    @Test
     void sceneCoverageShowsDealAsPurchaseConsultationInsteadOfHiddenConversion() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         createQuestionCoverageTables(jdbcTemplate);
@@ -690,8 +746,25 @@ class MobileDashboardAggregateServiceTest {
                     publish_status VARCHAR(32),
                     target_channel VARCHAR(64),
                     target_kind VARCHAR(64),
+                    published_url VARCHAR(1000),
+                    url_quality VARCHAR(32),
                     published_at TIMESTAMP,
                     verified_at TIMESTAMP,
+                    created_at TIMESTAMP
+                )
+                """);
+    }
+
+    private static void createSelfMediaPublishScheduleTable(JdbcTemplate jdbcTemplate) {
+        jdbcTemplate.execute("""
+                CREATE TABLE self_media_publish_schedule (
+                    id BIGINT,
+                    article_id BIGINT,
+                    platform VARCHAR(32),
+                    status VARCHAR(32),
+                    platform_published_url VARCHAR(1000),
+                    published_confirmed_at TIMESTAMP,
+                    updated_at TIMESTAMP,
                     created_at TIMESTAMP
                 )
                 """);
@@ -789,6 +862,19 @@ class MobileDashboardAggregateServiceTest {
         constructor.setAccessible(true);
         return constructor.newInstance(totalPublished, monthPublished, monthContent, monthBuilding,
                 totalIndexed, monthIndexed, Map.of(), Map.of());
+    }
+
+    public static String substringIndex(String value, String delimiter, int count) {
+        if (value == null || delimiter == null || delimiter.isEmpty() || count == 0) {
+            return "";
+        }
+        String[] parts = value.split(java.util.regex.Pattern.quote(delimiter), -1);
+        if (count > 0) {
+            int length = Math.min(count, parts.length);
+            return String.join(delimiter, java.util.Arrays.copyOfRange(parts, 0, length));
+        }
+        int length = Math.min(-count, parts.length);
+        return String.join(delimiter, java.util.Arrays.copyOfRange(parts, parts.length - length, parts.length));
     }
 
     private static Object invoke(Object target, String methodName, Object... args) throws Exception {

@@ -9,12 +9,14 @@ import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
@@ -73,6 +75,7 @@ class SelfMediaPublishScheduleServiceTest {
     private SelfMediaPublishScheduleMapper scheduleMapper;
     private SelfMediaPublishScheduleRequestMapper requestMapper;
     private ArticleDraftMapper articleDraftMapper;
+    private ArticlePublishRecordMapper articlePublishRecordMapper;
     private DistributionTaskMapper distributionTaskMapper;
     private SelfMediaAccountMapper accountMapper;
     private ProjectMapper projectMapper;
@@ -96,6 +99,7 @@ class SelfMediaPublishScheduleServiceTest {
         scheduleMapper = mock(SelfMediaPublishScheduleMapper.class);
         requestMapper = mock(SelfMediaPublishScheduleRequestMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
+        articlePublishRecordMapper = mock(ArticlePublishRecordMapper.class);
         distributionTaskMapper = mock(DistributionTaskMapper.class);
         accountMapper = mock(SelfMediaAccountMapper.class);
         projectMapper = mock(ProjectMapper.class);
@@ -132,6 +136,7 @@ class SelfMediaPublishScheduleServiceTest {
                 scheduleMapper,
                 requestMapper,
                 articleDraftMapper,
+                articlePublishRecordMapper,
                 distributionTaskMapper,
                 accountMapper,
                 projectMapper,
@@ -926,7 +931,7 @@ class SelfMediaPublishScheduleServiceTest {
         when(articleDraftMapper.selectById(10L)).thenReturn(article);
 
         Page<SelfMediaPublishScheduleVO> response = service.pageSchedules(
-                null, "toutiao", SelfMediaPublishScheduleConstants.STATUS_PENDING, null, null, null, 1L, 20L);
+                null, null, "toutiao", SelfMediaPublishScheduleConstants.STATUS_PENDING, null, null, null, null, null, 1L, 20L);
 
         assertEquals(1, response.getTotal());
         assertEquals(30L, response.getRecords().get(0).getId());
@@ -941,7 +946,7 @@ class SelfMediaPublishScheduleServiceTest {
     void pageSchedulesWithoutAccessibleBrandReturnsEmptyPage() {
         when(brandAccessService.listAccessibleBrandIds(99L, BrandAccessAction.OPERATE)).thenReturn(List.of());
 
-        Page<SelfMediaPublishScheduleVO> response = service.pageSchedules(null, null, null, null, null, null, 1L, 20L);
+        Page<SelfMediaPublishScheduleVO> response = service.pageSchedules(null, null, null, null, null, null, null, null, null, 1L, 20L);
 
         assertEquals(0, response.getTotal());
         assertTrue(response.getRecords().isEmpty());
@@ -1004,6 +1009,36 @@ class SelfMediaPublishScheduleServiceTest {
         verify(scheduleMapper).updateById(row);
         verify(companyChannelQuotaService).confirmSelfMediaSchedule(93L);
         verify(environmentLockService).release(93L);
+    }
+
+    @Test
+    void confirmPublished_syncsArticlePublishRecord() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
+        row.setId(93L);
+        row.setPlatform("zhihu");
+        row.setPlatformPublishId("2055333874897511162");
+        ArticleDraft article = article();
+        when(scheduleMapper.selectById(93L)).thenReturn(row);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+
+        service.confirmPublished(93L, "https://zhuanlan.zhihu.com/p/2055333874897511162");
+
+        ArgumentCaptor<ArticlePublishRecord> recordCaptor = ArgumentCaptor.forClass(ArticlePublishRecord.class);
+        verify(articlePublishRecordMapper).insert(recordCaptor.capture());
+        ArticlePublishRecord record = recordCaptor.getValue();
+        assertEquals(10L, record.getArticleId());
+        assertEquals(7L, record.getProjectId());
+        assertEquals("self_media_publish_schedule", record.getSourceType());
+        assertEquals(93L, record.getSourceId());
+        assertEquals("self_media", record.getTargetKind());
+        assertEquals("zhihu", record.getTargetChannel());
+        assertEquals("https://zhuanlan.zhihu.com/p/2055333874897511162", record.getPublishedUrl());
+        assertEquals("public_url", record.getUrlQuality());
+        assertEquals("self_media_publish_schedule.platform_published_url", record.getUrlSource());
+        assertEquals("2055333874897511162", record.getPlatformPublishId());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED, record.getPublishStatus());
+        assertNotNull(record.getPublishedAt());
+        assertNotNull(record.getVerifiedAt());
     }
 
     @Test
@@ -1122,6 +1157,65 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void claimNextPublishResultCheckClaimsScheduledOfficialApiSchedule() {
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED);
+        candidate.setId(121L);
+        candidate.setPlatform("wechat_mp");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        SelfMediaPublishSchedule claimed = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        claimed.setId(121L);
+        claimed.setPlatform("wechat_mp");
+        claimed.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        when(scheduleAdapterRouter.contract("wechat_mp")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "wechat_mp",
+                "微信公众号",
+                SelfMediaPlatformPublishChannel.OFFICIAL_API,
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+        when(scheduleMapper.selectDueQueueCandidatesByPlatforms(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK),
+                eq(List.of(
+                        SelfMediaPublishScheduleConstants.STATUS_SCHEDULED,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
+                )),
+                any(),
+                eq(10),
+                eq(Set.of("wechat_mp"))
+        )).thenReturn(List.of(candidate));
+        when(scheduleMapper.claimQueueSchedule(
+                eq(121L),
+                eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK),
+                eq(List.of(
+                        SelfMediaPublishScheduleConstants.STATUS_SCHEDULED,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
+                )),
+                eq(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT),
+                any(),
+                any()
+        )).thenReturn(1);
+        when(scheduleMapper.selectById(121L)).thenReturn(claimed);
+
+        SelfMediaPublishScheduleVO response = service.claimNext(
+                SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK,
+                10,
+                Set.of("wechat_mp")
+        );
+
+        assertEquals(121L, response.getId());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT, response.getStatus());
+        verify(environmentLockService, never()).tryAcquire(anyLong(), anyLong(), any(), any());
+    }
+
+    @Test
     void claimNextTaskForLocalAgentPersistsQuotaFailureWhenDistributionTaskPrepareFails() {
         stubCurrentTimeInsideBusinessWindow();
         SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
@@ -1181,6 +1275,7 @@ class SelfMediaPublishScheduleServiceTest {
                 eq(List.of(
                         SelfMediaPublishScheduleConstants.STATUS_SCHEDULED,
                         SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING,
                         SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
                 )),
                 any(),
@@ -1196,6 +1291,7 @@ class SelfMediaPublishScheduleServiceTest {
                 eq(List.of(
                         SelfMediaPublishScheduleConstants.STATUS_SCHEDULED,
                         SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING,
                         SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
                 )),
                 eq(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT),
@@ -1517,7 +1613,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
         assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
         assertEquals("PLATFORM_SCHEDULED_WAITING", response.getFailureCode());
-        assertEquals("平台已定时，等待发布时间后复查", response.getFailureMessage());
+        assertEquals("平台已定时，等待发布时间后至少 1 小时复查", response.getFailureMessage());
         assertTrue(response.getNextAttemptAt().isAfter(row.getPlatformScheduledAt()));
         verify(scheduleMapper).updateById(row);
         verify(environmentLockService).release(108L);
@@ -1869,7 +1965,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("https://example.test/scheduled/117", response.getPlatformPublishedUrl());
         assertEquals("https://cdn.test/cover-117.jpg", response.getPublishCheckCoverUrl());
         assertEquals(LocalDateTime.of(2026, 6, 12, 9, 30), response.getPlatformScheduledAt());
-        assertEquals(LocalDateTime.of(2026, 6, 12, 9, 30), response.getNextAttemptAt());
+        assertEquals(LocalDateTime.of(2026, 6, 12, 10, 30), response.getNextAttemptAt());
         verify(companyChannelQuotaService).confirmSelfMediaSchedule(117L);
         verify(companyChannelQuotaService).confirmDistribution(317L);
         verify(environmentLockService).release(117L);
@@ -1904,6 +2000,36 @@ class SelfMediaPublishScheduleServiceTest {
         verify(companyChannelQuotaService).confirmSelfMediaSchedule(118L);
         verify(companyChannelQuotaService).confirmDistribution(318L);
         verify(environmentLockService).release(118L);
+    }
+
+    @Test
+    void markLocalAgentExecutionPublishedConfirmedKeepsUrlPendingWhenPublishedUrlMissing() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        row.setId(122L);
+        row.setDistributionTaskId(322L);
+        row.setLockedUntil(LocalDateTime.now().plusMinutes(5));
+        ArticleDraft article = article();
+        when(scheduleMapper.selectById(122L)).thenReturn(row);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+
+        SelfMediaPublishScheduleVO response = service.markLocalAgentExecutionPublishedConfirmed(
+                122L,
+                null,
+                "{\"found\":true,\"platformPublishId\":\"publish-122\",\"coverImageUrl\":\"https://cdn.test/cover-122.jpg\"}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals("publish-122", response.getPlatformPublishId());
+        assertEquals("https://cdn.test/cover-122.jpg", response.getPublishCheckCoverUrl());
+        assertEquals("PUBLISHED_URL_PENDING", response.getFailureCode());
+        assertEquals("平台已确认发布，等待发布链接回写", response.getFailureMessage());
+        assertNull(response.getLockedUntil());
+        assertTrue(response.getNextAttemptAt().isAfter(LocalDateTime.now().plusMinutes(30)));
+        assertEquals("published", article.getStatus());
+        verify(articleDraftMapper).updateById(article);
+        verify(companyChannelQuotaService).confirmDistribution(322L);
+        verify(environmentLockService).release(122L);
     }
 
     @Test
@@ -1963,6 +2089,31 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("https://p.example.test/cover.jpg", response.getPublishCheckCoverUrl());
         assertEquals("published", article.getStatus());
         verify(distributionTaskMapper).update(eq(null), any());
+    }
+
+    @Test
+    void markClaimedPublishedConfirmedQueuesUrlBackfillWhenUrlMissing() {
+        SelfMediaPublishSchedule checking = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        checking.setId(123L);
+        checking.setDistributionTaskId(323L);
+        ArticleDraft article = article();
+        when(scheduleMapper.selectById(123L)).thenReturn(checking);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedPublishedConfirmed(
+                123L,
+                null,
+                "{\"found\":true,\"platformPublishId\":\"2247484434\"}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals("2247484434", response.getPlatformPublishId());
+        assertEquals("PUBLISHED_URL_PENDING", response.getFailureCode());
+        assertTrue(response.getNextAttemptAt().isAfter(LocalDateTime.now().plusMinutes(30)));
+        assertEquals("published", article.getStatus());
+        verify(distributionTaskMapper).update(eq(null), any());
+        verify(environmentLockService).release(123L);
     }
 
     @Test
