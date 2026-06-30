@@ -13,6 +13,7 @@ import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleSave
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.BatchTraceVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.GenerationHistoryVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleCategoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.WorkbenchOverviewVO;
@@ -49,6 +50,12 @@ public class MedicalArticleConfigController {
                                              @RequestParam(defaultValue = "1") long current,
                                              @RequestParam(defaultValue = "10") long size) {
         return R.ok(service.pageTopicAngles(industryCode, categoryCode, enabled, keyword, current, size));
+    }
+
+    @GetMapping("/topic-angle-categories")
+    public R<java.util.List<TopicAngleCategoryVO>> topicAngleCategories(@RequestParam(required = false) String industryCode,
+                                                                        @RequestParam(required = false) Boolean enabled) {
+        return R.ok(service.listTopicAngleCategories(industryCode, enabled == null ? true : enabled));
     }
 
     @PostMapping("/topic-angles")
@@ -131,13 +138,17 @@ public class MedicalArticleConfigController {
                                                @RequestParam(required = false) Long taskId,
                                                @RequestParam(required = false) Long projectId,
                                                @RequestParam(required = false) Long brandId,
+                                               @RequestParam(required = false) String projectName,
+                                               @RequestParam(required = false) String brandName,
+                                               @RequestParam(required = false) String articleTitle,
                                                @RequestParam(required = false) String ruleType,
                                                @RequestParam(required = false) String action,
                                                @RequestParam(required = false) String createdStartDate,
                                                @RequestParam(required = false) String createdEndDate,
                                                @RequestParam(defaultValue = "1") long current,
                                                @RequestParam(defaultValue = "10") long size) {
-        return R.ok(service.pageHitLogs(articleId, batchId, taskId, projectId, brandId, ruleType, action,
+        return R.ok(service.pageHitLogs(articleId, batchId, taskId, projectId, brandId,
+                projectName, brandName, articleTitle, ruleType, action,
                 createdStartDate, createdEndDate, current, size));
     }
 
@@ -146,16 +157,24 @@ public class MedicalArticleConfigController {
                                                           @RequestParam(required = false) Long brandId,
                                                           @RequestParam(required = false) Long articleId,
                                                           @RequestParam(required = false) Long topicAngleId,
+                                                          @RequestParam(required = false) String projectName,
+                                                          @RequestParam(required = false) String brandName,
+                                                          @RequestParam(required = false) String articleTitle,
+                                                          @RequestParam(required = false) String topicKeyword,
                                                           @RequestParam(defaultValue = "1") long current,
                                                           @RequestParam(defaultValue = "10") long size) {
-        return R.ok(service.pageGenerationHistory(projectId, brandId, articleId, topicAngleId, current, size));
+        return R.ok(service.pageGenerationHistory(projectId, brandId, articleId, topicAngleId,
+                projectName, brandName, articleTitle, topicKeyword, current, size));
     }
 
     @GetMapping("/batches")
     public R<Page<BatchTraceVO>> batches(@RequestParam(required = false) String status,
                                          @RequestParam(required = false) String industryCode,
+                                         @RequestParam(required = false) String projectName,
+                                         @RequestParam(required = false) String brandName,
+                                         @RequestParam(required = false) String topicKeyword,
                                          @RequestParam(defaultValue = "1") long current,
                                          @RequestParam(defaultValue = "10") long size) {
-        return R.ok(service.pageBatches(status, industryCode, current, size));
+        return R.ok(service.pageBatches(status, industryCode, projectName, brandName, topicKeyword, current, size));
     }
 }

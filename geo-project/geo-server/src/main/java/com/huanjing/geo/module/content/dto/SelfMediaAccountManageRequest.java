@@ -16,6 +16,9 @@ public record SelfMediaAccountManageRequest(
         @Size(max = 128)
         String platformAccountId,
 
+        @Pattern(regexp = "personal|enterprise", message = "accountIdentity must be personal or enterprise")
+        String accountIdentity,
+
         @Pattern(regexp = "active|disabled", message = "status must be active or disabled")
         String status
 ) {

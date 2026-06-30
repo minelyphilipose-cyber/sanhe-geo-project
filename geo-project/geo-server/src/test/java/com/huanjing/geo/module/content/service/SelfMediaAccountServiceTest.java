@@ -81,6 +81,7 @@ class SelfMediaAccountServiceTest {
                 "toutiao",
                 "头条运营号",
                 null,
+                null,
                 "active"
         );
 
@@ -102,6 +103,7 @@ class SelfMediaAccountServiceTest {
         SelfMediaAccountManageRequest request = new SelfMediaAccountManageRequest(
                 "baijiahao",
                 "百家号运营号",
+                null,
                 null,
                 "active"
         );
@@ -126,6 +128,7 @@ class SelfMediaAccountServiceTest {
         SelfMediaAccountManageRequest request = new SelfMediaAccountManageRequest(
                 "toutiao",
                 "新账号",
+                null,
                 null,
                 "disabled"
         );

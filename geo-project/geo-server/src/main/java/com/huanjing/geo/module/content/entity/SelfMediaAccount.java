@@ -18,6 +18,7 @@ public class SelfMediaAccount {
     private String platform;
     private String platformAccountId;
     private String accountName;
+    private String accountIdentity;
     private String status;
     private String authMode;
     private String scopeJson;

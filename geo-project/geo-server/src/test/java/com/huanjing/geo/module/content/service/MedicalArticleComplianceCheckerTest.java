@@ -71,6 +71,20 @@ class MedicalArticleComplianceCheckerTest {
     }
 
     @Test
+    void highRiskChannelAcceptsMedicalAssessmentDecisionWording() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of());
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("牙齿矫正前评估",
+                        "牙齿矫正前需要完整口腔检查和影像评估，结合个体情况判断适应条件，同时关注风险和禁忌。",
+                        true,
+                        2)
+        );
+
+        assertThat(result.passed()).isTrue();
+    }
+
+    @Test
     void everyMedicalArticleRequiresRiskHintEvenWhenChannelIsNotHighRisk() {
         when(ruleMapper.selectList(any())).thenReturn(List.of());
 
@@ -191,10 +205,47 @@ class MedicalArticleComplianceCheckerTest {
                 .contains("brand_exposure_exceeded");
     }
 
+    @Test
+    void brandExposureLimitCountsBodyRatherThanTitle() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of());
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("星链口腔科普", "需要先评估风险并理性权衡。", false, 0)
+        );
+
+        assertThat(result.passed()).isTrue();
+    }
+
+    @Test
+    void personalSelfMediaBlocksOfficialToneConversionExperienceAndMissingBrand() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of());
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("种植牙怎么了解", "我们机构可以预约咨询，亲测案例很多，但仍需关注风险、禁忌和个体差异。", false, 2, "xiaohongshu")
+        );
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                .contains(
+                        "personal_account_official_tone",
+                        "personal_account_conversion_hint",
+                        "personal_account_experience_seeding",
+                        "personal_account_brand_exposure_missing"
+                );
+    }
+
     private MedicalArticleComplianceChecker.CheckInput input(String title,
                                                             String content,
                                                             boolean highRisk,
                                                             int brandExposureLimit) {
+        return input(title, content, highRisk, brandExposureLimit, "baijiahao");
+    }
+
+    private MedicalArticleComplianceChecker.CheckInput input(String title,
+                                                            String content,
+                                                            boolean highRisk,
+                                                            int brandExposureLimit,
+                                                            String channelSubCode) {
         Brand brand = new Brand();
         brand.setId(3L);
         brand.setBrandName("星链口腔");
@@ -224,7 +275,7 @@ class MedicalArticleComplianceCheckerTest {
                 4L,
                 3L,
                 "self_media",
-                "xiaohongshu",
+                channelSubCode,
                 title,
                 content,
                 brand,

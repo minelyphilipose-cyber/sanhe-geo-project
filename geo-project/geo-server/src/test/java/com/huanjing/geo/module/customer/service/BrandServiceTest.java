@@ -60,7 +60,7 @@ class BrandServiceTest {
     }
 
     @Test
-    void create_withGeoSiteCode_successDefaultsActive() {
+    void create_withGeoSiteDomain_successDefaultsActive() {
         when(brandMapper.selectOne(any())).thenReturn(null);
         when(brandMapper.insert(any())).thenAnswer(invocation -> {
             Brand brand = invocation.getArgument(0);
@@ -68,14 +68,16 @@ class BrandServiceTest {
             return 1;
         });
 
-        Brand result = brandService.create(createReq("ok", null));
+        Brand result = brandService.create(createReq("官网", "https://www.example.com/path", null));
 
-        assertEquals("ok", result.getGeoSiteCode());
+        assertNull(result.getGeoSiteCode());
+        assertEquals("官网", result.getGeoSiteName());
+        assertEquals("www.example.com", result.getGeoSiteDomain());
         assertEquals("active", result.getGeoSiteStatus());
     }
 
     @Test
-    void create_geoSiteCodeWithUnderscore_success() {
+    void create_geoSiteNameDefaultsWhenMissing_success() {
         when(brandMapper.selectOne(any())).thenReturn(null);
         when(brandMapper.insert(any())).thenAnswer(invocation -> {
             Brand brand = invocation.getArgument(0);
@@ -83,42 +85,43 @@ class BrandServiceTest {
             return 1;
         });
 
-        Brand result = brandService.create(createReq("agent_official_site", null));
+        Brand result = brandService.create(createReq(null, "www.example.com", null));
 
-        assertEquals("agent_official_site", result.getGeoSiteCode());
+        assertEquals("Agent 官网", result.getGeoSiteName());
+        assertEquals("www.example.com", result.getGeoSiteDomain());
         assertEquals("active", result.getGeoSiteStatus());
     }
 
     @Test
-    void create_duplicateGeoSiteCode_fails() {
+    void create_duplicateGeoSiteDomain_fails() {
         Brand duplicate = new Brand();
         duplicate.setId(2L);
         when(brandMapper.selectOne(any())).thenReturn(null, duplicate);
 
-        BizException ex = assertThrows(BizException.class, () -> brandService.create(createReq("ok", null)));
+        BizException ex = assertThrows(BizException.class, () -> brandService.create(createReq("官网", "www.example.com", null)));
 
         assertEquals(400, ex.getCode());
-        assertEquals("geo_site_code already exists", ex.getMessage());
+        assertEquals("geo_site_domain already exists", ex.getMessage());
     }
 
     @Test
-    void create_invalidGeoSiteCodeFormat_fails() {
+    void create_invalidGeoSiteDomainFormat_fails() {
         when(brandMapper.selectOne(any())).thenReturn(null);
 
-        BizException ex = assertThrows(BizException.class, () -> brandService.create(createReq("-bad", null)));
+        BizException ex = assertThrows(BizException.class, () -> brandService.create(createReq("官网", "://bad", null)));
 
         assertEquals(400, ex.getCode());
-        assertEquals("Invalid geo_site_code", ex.getMessage());
+        assertEquals("Invalid geo_site_domain", ex.getMessage());
     }
 
     @Test
-    void create_geoSiteStatusWithoutCode_fails() {
+    void create_geoSiteStatusWithoutDomain_fails() {
         when(brandMapper.selectOne(any())).thenReturn(null);
 
-        BizException ex = assertThrows(BizException.class, () -> brandService.create(createReq(null, "active")));
+        BizException ex = assertThrows(BizException.class, () -> brandService.create(createReq(null, null, "active")));
 
         assertEquals(400, ex.getCode());
-        assertEquals("geo_site_status requires geo_site_code", ex.getMessage());
+        assertEquals("geo_site_status requires geo_site_domain", ex.getMessage());
     }
 
     @Test
@@ -129,7 +132,7 @@ class BrandServiceTest {
             brand.setId(1L);
             return 1;
         });
-        BrandCreateRequest req = createReq(null, null);
+        BrandCreateRequest req = createReq(null, null, null);
         req.setIndustrySiteName(" 火锅资讯站 ");
         req.setIndustrySiteCode(" hotpot_news ");
 
@@ -142,7 +145,7 @@ class BrandServiceTest {
     @Test
     void create_industrySiteNameWithoutCode_fails() {
         when(brandMapper.selectOne(any())).thenReturn(null);
-        BrandCreateRequest req = createReq(null, null);
+        BrandCreateRequest req = createReq(null, null, null);
         req.setIndustrySiteName("火锅资讯站");
 
         BizException ex = assertThrows(BizException.class, () -> brandService.create(req));
@@ -154,7 +157,7 @@ class BrandServiceTest {
     @Test
     void create_invalidIndustrySiteCode_fails() {
         when(brandMapper.selectOne(any())).thenReturn(null);
-        BrandCreateRequest req = createReq(null, null);
+        BrandCreateRequest req = createReq(null, null, null);
         req.setIndustrySiteName("火锅资讯站");
         req.setIndustrySiteCode("-bad");
 
@@ -165,32 +168,36 @@ class BrandServiceTest {
     }
 
     @Test
-    void update_changeGeoSiteCode_uniqueCheck() {
+    void update_changeGeoSiteDomain_uniqueCheck() {
         Brand existing = existingBrand();
         when(brandMapper.selectById(1L)).thenReturn(existing);
         when(brandMapper.selectOne(any())).thenReturn(null);
 
-        brandService.update(1L, updateReq("next", "disabled"));
+        brandService.update(1L, updateReq("新官网", "https://next.example.com/a", "disabled"));
 
         ArgumentCaptor<Brand> captor = ArgumentCaptor.forClass(Brand.class);
         verify(brandMapper).updateById(captor.capture());
-        assertEquals("next", captor.getValue().getGeoSiteCode());
+        assertEquals("新官网", captor.getValue().getGeoSiteName());
+        assertEquals("next.example.com", captor.getValue().getGeoSiteDomain());
         assertEquals("disabled", captor.getValue().getGeoSiteStatus());
     }
 
     @Test
-    void update_blankGeoSiteCode_clearsConfig() {
+    void update_blankGeoSiteDomain_clearsConfig() {
         Brand existing = existingBrand();
-        existing.setGeoSiteCode("old");
+        existing.setGeoSiteName("旧官网");
+        existing.setGeoSiteDomain("old.example.com");
         existing.setGeoSiteStatus("active");
         when(brandMapper.selectById(1L)).thenReturn(existing);
         when(brandMapper.selectOne(any())).thenReturn(null);
 
-        brandService.update(1L, updateReq("", null));
+        brandService.update(1L, updateReq("", "", null));
 
         ArgumentCaptor<Brand> captor = ArgumentCaptor.forClass(Brand.class);
         verify(brandMapper).updateById(captor.capture());
         assertNull(captor.getValue().getGeoSiteCode());
+        assertNull(captor.getValue().getGeoSiteName());
+        assertNull(captor.getValue().getGeoSiteDomain());
         assertNull(captor.getValue().getGeoSiteStatus());
     }
 
@@ -201,7 +208,7 @@ class BrandServiceTest {
         existing.setIndustrySiteCode("old_site");
         when(brandMapper.selectById(1L)).thenReturn(existing);
         when(brandMapper.selectOne(any())).thenReturn(null);
-        BrandUpdateRequest req = updateReq(null, null);
+        BrandUpdateRequest req = updateReq(null, null, null);
         req.setIndustrySiteName("");
         req.setIndustrySiteCode("");
 
@@ -213,24 +220,26 @@ class BrandServiceTest {
         assertNull(captor.getValue().getIndustrySiteCode());
     }
 
-    private BrandCreateRequest createReq(String geoSiteCode, String geoSiteStatus) {
+    private BrandCreateRequest createReq(String geoSiteName, String geoSiteDomain, String geoSiteStatus) {
         BrandCreateRequest req = new BrandCreateRequest();
         req.setCompanyId(10L);
         req.setIndustry("retail");
         req.setBrandName("Brand");
         req.setBrandSlug("brand");
-        req.setGeoSiteCode(geoSiteCode);
+        req.setGeoSiteName(geoSiteName);
+        req.setGeoSiteDomain(geoSiteDomain);
         req.setGeoSiteStatus(geoSiteStatus);
         req.setStatus("active");
         return req;
     }
 
-    private BrandUpdateRequest updateReq(String geoSiteCode, String geoSiteStatus) {
+    private BrandUpdateRequest updateReq(String geoSiteName, String geoSiteDomain, String geoSiteStatus) {
         BrandUpdateRequest req = new BrandUpdateRequest();
         req.setIndustry("retail");
         req.setBrandName("Brand");
         req.setBrandSlug("brand");
-        req.setGeoSiteCode(geoSiteCode);
+        req.setGeoSiteName(geoSiteName);
+        req.setGeoSiteDomain(geoSiteDomain);
         req.setGeoSiteStatus(geoSiteStatus);
         req.setStatus("active");
         return req;

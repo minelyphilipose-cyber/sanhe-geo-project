@@ -11,6 +11,7 @@ public class SelfMediaAccountVO {
     private Long brandId;
     private String platform;
     private String accountName;
+    private String accountIdentity;
     private String platformAccountId;
     private String avatarUrl;
     private String qrcodeUrl;
@@ -30,6 +31,7 @@ public class SelfMediaAccountVO {
         vo.setBrandId(account.getBrandId());
         vo.setPlatform(account.getPlatform());
         vo.setAccountName(account.getAccountName());
+        vo.setAccountIdentity(account.getAccountIdentity());
         vo.setPlatformAccountId(account.getPlatformAccountId());
         vo.setAvatarUrl(account.getAvatarUrl());
         vo.setQrcodeUrl(account.getQrcodeUrl());

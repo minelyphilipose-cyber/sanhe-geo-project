@@ -37,7 +37,8 @@ class MedicalArticleGenerationServiceTest {
                 mock(MedicalComplianceKernelMapper.class),
                 mock(MedicalChannelStyleModuleMapper.class),
                 mock(MedicalGenerationHistoryMapper.class),
-                new ObjectMapper()
+                new ObjectMapper(),
+                new SpecialIndustryService()
         );
     }
 
@@ -53,7 +54,7 @@ class MedicalArticleGenerationServiceTest {
                 topicConfig("implant")
         ));
 
-        assertThat(ex.getMessage()).contains("医疗项目未配置已启用的资质项目");
+        assertThat(ex.getMessage()).contains("特殊行业项目未配置已启用的资质项目");
     }
 
     @Test
@@ -75,7 +76,15 @@ class MedicalArticleGenerationServiceTest {
                 topicConfig("implant")
         ));
 
-        assertThat(ex.getMessage()).contains("医疗品类不属于该品牌已启用资质项目");
+        assertThat(ex.getMessage()).contains("特殊行业品类不属于该品牌已启用资质项目");
+    }
+
+    @Test
+    void authorityMediaUsesEducationTier() {
+        assertThat(service.resolveChannelTier("authority_media", null))
+                .isEqualTo(MedicalArticleConstants.TIER_EDUCATION);
+        assertThat(service.resolveChannelTier("authority_media", "industry_media"))
+                .isEqualTo(MedicalArticleConstants.TIER_EDUCATION);
     }
 
     private Project project() {

@@ -36,6 +36,15 @@ public class MedicalArticleDtos {
     ) {
     }
 
+    public record TopicAngleCategoryVO(
+            String industryCode,
+            String industryName,
+            String categoryCode,
+            String categoryName,
+            Long topicAngleCount
+    ) {
+    }
+
     public record ComplianceRuleSaveRequest(
             @NotBlank @Size(max = 64) String ruleType,
             @Size(max = 32) String industryCode,

@@ -76,6 +76,7 @@ class BatchArticleGenerationServiceTest {
     private ArticleGenerationEngine articleGenerationEngine;
     private ArticleModelResolver articleModelResolver;
     private MedicalArticleGenerationService medicalArticleGenerationService;
+    private SpecialIndustryTemplateRouteService specialIndustryTemplateRouteService;
     private MedicalArticleComplianceChecker medicalComplianceChecker;
     private BatchArticleQualityChecker qualityChecker;
     private ArticleTemplateAllocationService allocationService;
@@ -103,6 +104,7 @@ class BatchArticleGenerationServiceTest {
         articleGenerationEngine = mock(ArticleGenerationEngine.class);
         articleModelResolver = mock(ArticleModelResolver.class);
         medicalArticleGenerationService = mock(MedicalArticleGenerationService.class);
+        specialIndustryTemplateRouteService = mock(SpecialIndustryTemplateRouteService.class);
         medicalComplianceChecker = mock(MedicalArticleComplianceChecker.class);
         qualityChecker = mock(BatchArticleQualityChecker.class);
         allocationService = mock(ArticleTemplateAllocationService.class);
@@ -141,6 +143,8 @@ class BatchArticleGenerationServiceTest {
                 promptBuilder,
                 promptContextFactory,
                 medicalArticleGenerationService,
+                new SpecialIndustryService(),
+                specialIndustryTemplateRouteService,
                 medicalComplianceChecker,
                 mock(SpecialIndustryComplianceAlertService.class),
                 qualityChecker,
@@ -547,6 +551,54 @@ class BatchArticleGenerationServiceTest {
         assertEquals("custom_template_skipped", notices.get(0).type());
         assertThat(notices.get(0).items()).hasSize(1);
         assertThat(notices.get(0).items().get(0).reason()).contains("未配置启用模板");
+    }
+
+    @Test
+    void validateAutoPlatformPrefersSpecialIndustryPersonalSelfMediaTemplate() {
+        BatchArticleGenerateRequest.PlatformCount platform = platform("self_media", "toutiao", 2);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setComplianceIndustryCode(MedicalArticleConstants.INDUSTRY_ORAL);
+        when(brandMapper.selectById(2L)).thenReturn(brand);
+        when(perspectiveService.resolve(2L, "self_media", "toutiao"))
+                .thenReturn(TemplatePerspectiveService.ResolvedPerspective.customer());
+        when(specialIndustryTemplateRouteService.resolveTemplateName(
+                MedicalArticleConstants.INDUSTRY_ORAL,
+                "self_media",
+                "toutiao",
+                "personal"
+        )).thenReturn(java.util.Optional.of("特殊行业今日头条个人号搜索科普模板"));
+        ArticlePromptTemplate template = template(91L, "self_media", "toutiao", "industry_article",
+                TemplatePerspectiveCodes.CUSTOMER);
+        template.setName("特殊行业今日头条个人号搜索科普模板");
+        template.setContactDisclosureMode("none");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(92L);
+        version.setTemplateId(91L);
+        when(allocationService.activeTemplates("self_media", "toutiao", "problem_solution",
+                TemplatePerspectiveCodes.CUSTOMER)).thenReturn(List.of());
+        when(allocationService.activeTemplates("self_media", "toutiao", null,
+                TemplatePerspectiveCodes.CUSTOMER))
+                .thenReturn(List.of(new ArticleTemplateAllocationService.TemplateWithVersion(template, version)));
+
+        List<?> result = ReflectionTestUtils.invokeMethod(
+                service,
+                "validateAutoPlatform",
+                "0:0",
+                2L,
+                "topic",
+                platform,
+                "problem_solution",
+                new java.util.ArrayList<>(),
+                Map.of(),
+                new java.util.HashMap<>()
+        );
+
+        assertThat(result).hasSize(1);
+        Object validated = result.get(0);
+        assertEquals(91L, ReflectionTestUtils.getField(validated, "templateId"));
+        assertEquals("special_industry", ReflectionTestUtils.getField(validated, "templateSource"));
+        assertEquals(2, ReflectionTestUtils.getField(validated, "count"));
     }
 
     @Test

@@ -28,7 +28,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -48,27 +47,10 @@ public class MedicalArticleGenerationService {
     private final MedicalChannelStyleModuleMapper channelStyleMapper;
     private final MedicalGenerationHistoryMapper historyMapper;
     private final ObjectMapper objectMapper;
+    private final SpecialIndustryService specialIndustryService;
 
     public Optional<String> detectIndustryCode(Brand brand) {
-        if (brand == null) {
-            return Optional.empty();
-        }
-        String complianceIndustry = trimToNull(brand.getComplianceIndustryCode());
-        if (MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY.equals(complianceIndustry)
-                || MedicalArticleConstants.INDUSTRY_ORAL.equals(complianceIndustry)) {
-            return Optional.of(complianceIndustry);
-        }
-        if (!StringUtils.hasText(brand.getIndustry())) {
-            return Optional.empty();
-        }
-        String value = brand.getIndustry().trim().toLowerCase(Locale.ROOT);
-        if (value.contains("医美") || value.contains("医疗美容") || value.contains("medical_beauty")) {
-            return Optional.of(MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY);
-        }
-        if (value.contains("口腔") || value.contains("牙科") || value.contains("oral")) {
-            return Optional.of(MedicalArticleConstants.INDUSTRY_ORAL);
-        }
-        return Optional.empty();
+        return specialIndustryService.detectMedicalIndustryCode(brand);
     }
 
     public String resolveChannelTier(String channelGroupCode, String channelSubCode) {
@@ -102,7 +84,7 @@ public class MedicalArticleGenerationService {
         String channelTier = resolveChannelTier(channelGroupCode, channelSubCode);
         List<BrandOffering> enabledOfferings = enabledMedicalOfferings(brand.getId(), industryCode);
         if (enabledOfferings.isEmpty()) {
-            throw new BizException(400, "医疗项目未配置已启用的资质项目，不能生成医疗文章");
+            throw new BizException(400, "特殊行业项目未配置已启用的资质项目，不能生成特殊行业文章");
         }
 
         MedicalTopicAngle topicAngle = resolveTopicAngle(project, topicConfig, industryCode, enabledOfferings);
@@ -228,11 +210,11 @@ public class MedicalArticleGenerationService {
             }
         }
         if (allowedCategories.isEmpty()) {
-            throw new BizException(400, "医疗项目未配置项目品类，不能生成医疗文章");
+            throw new BizException(400, "特殊行业项目未配置项目品类，不能生成特殊行业文章");
         }
         String requestedCategory = topicConfig == null ? null : trimToNull(topicConfig.getMedicalCategoryCode());
         if (requestedCategory != null && !allowedCategories.contains(requestedCategory)) {
-            throw new BizException(400, "医疗品类不属于该品牌已启用资质项目");
+            throw new BizException(400, "特殊行业品类不属于该品牌已启用资质项目");
         }
         if (topicConfig != null && topicConfig.getTopicAngleId() != null) {
             MedicalTopicAngle angle = topicAngleMapper.selectById(topicConfig.getTopicAngleId());

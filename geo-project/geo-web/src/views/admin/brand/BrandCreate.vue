@@ -98,22 +98,11 @@
 
         <div class="brand-section-bar"><span />发布阵地<i /></div>
         <div class="brand-form-grid">
-          <el-form-item label="Agent 官网">
-            <el-select
-              v-model="form.geoSiteCode"
-              clearable
-              filterable
-              placeholder="选择 Agent 官网，自动带出站点标识"
-              style="width: 100%"
-              @change="handleAgentSiteChange"
-            >
-              <el-option
-                v-for="site in agentSiteOptions"
-                :key="site.siteCode || site.id"
-                :label="site.siteName"
-                :value="site.siteCode"
-              />
-            </el-select>
+          <el-form-item label="Agent 官网名称">
+            <el-input v-model="form.geoSiteName" placeholder="如：品牌 Agent 官网" />
+          </el-form-item>
+          <el-form-item label="Agent 官网域名">
+            <el-input v-model="form.geoSiteDomain" placeholder="如：www.example.com" />
           </el-form-item>
           <el-form-item label="行业资讯站">
             <el-select
@@ -147,7 +136,7 @@
             type="warning"
             show-icon
             :closable="false"
-            title="保存品牌后，请在品牌详情的产品信息中至少启用一个医疗项目；否则医疗文章生成会被项目资质闸门拦截。"
+            title="保存品牌后，请在品牌详情的产品信息中至少启用一个特殊行业项目；否则特殊行业文章生成会被项目资质闸门拦截。"
           />
           <div class="brand-form-grid">
             <el-form-item label="机构类型"><el-input v-model="form.institutionType" maxlength="128" /></el-form-item>
@@ -268,6 +257,7 @@ import { regionPayloadFromCodes } from '@/constants/region'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import { nullableText } from '@/utils/form'
+import { specialIndustryCodesFromOptions } from '@/utils/specialIndustry'
 
 GlobalWorkerOptions.workerSrc = pdfWorkerSrc
 
@@ -306,7 +296,8 @@ const form = reactive({
   officialAccount: '',
   videoAccount: '',
   douyinAccount: '',
-  geoSiteCode: '',
+  geoSiteName: '',
+  geoSiteDomain: '',
   geoSiteStatus: 'active',
   industrySiteName: '',
   industrySiteCode: '',
@@ -332,42 +323,23 @@ const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的�
 const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
 
 const availableBrandIndustries = computed(() => companyIndustryTags.value)
+const specialIndustryCodes = computed(() => specialIndustryCodesFromOptions(dictStore.options('compliance_industry')))
 const isMedicalComplianceIndustry = computed(() =>
-  ['medical_beauty', 'oral'].includes(form.complianceIndustryCode),
+  specialIndustryCodes.value.includes(form.complianceIndustryCode),
 )
 
 const materials = ref<BrandMaterial[]>([])
 const versions = ref<BrandProfileVersion[]>([])
 const publishSites = ref<PublishSite[]>([])
-const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 const uploadCategory = ref('brand_image')
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 
-const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
-  isValidGeoSiteCode(site.siteCode)
-  && (site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'),
-))
 const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
   site.integrationMethod !== 'brand_geo_site'
   && site.integrationMethod !== 'forum_playwright'
   && site.integrationMethod !== 'discuz_http'
   && site.siteCode !== 'agent_official_site',
 ))
-
-function handleAgentSiteChange(value: string) {
-  form.geoSiteCode = normalizeGeoSiteCode(value)
-  const site = agentSiteOptions.value.find((item) => item.siteCode === form.geoSiteCode)
-  form.geoSiteStatus = site ? 'active' : ''
-}
-
-function normalizeGeoSiteCode(code?: string | null) {
-  const normalized = code?.trim().toLowerCase() || ''
-  return GEO_SITE_CODE_PATTERN.test(normalized) ? normalized : ''
-}
-
-function isValidGeoSiteCode(code?: string | null) {
-  return !!normalizeGeoSiteCode(code)
-}
 
 function handleIndustrySiteChange(value: string) {
   const site = industrySiteOptions.value.find((item) => item.siteCode === value)
@@ -529,8 +501,9 @@ async function submitBrand() {
       selfMediaPublishLocationName: nullableText(form.selfMediaPublishLocationName),
       wechat: nullableText(form.wechat),
       website: nullableText(form.website),
-      geoSiteCode: normalizeGeoSiteCode(form.geoSiteCode) || null,
-      geoSiteStatus: normalizeGeoSiteCode(form.geoSiteCode) ? form.geoSiteStatus || 'active' : null,
+      geoSiteName: nullableText(form.geoSiteName),
+      geoSiteDomain: nullableText(form.geoSiteDomain),
+      geoSiteStatus: nullableText(form.geoSiteDomain) ? form.geoSiteStatus || 'active' : null,
       industrySiteName: nullableText(form.industrySiteName),
       industrySiteCode: nullableText(form.industrySiteCode),
       brandQualificationDescription: nullableText(form.brandQualificationDescription),

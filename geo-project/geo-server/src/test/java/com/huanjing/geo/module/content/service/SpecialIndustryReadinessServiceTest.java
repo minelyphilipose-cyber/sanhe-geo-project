@@ -50,7 +50,8 @@ class SpecialIndustryReadinessServiceTest {
                 topicAngleMapper,
                 kernelMapper,
                 channelStyleMapper,
-                channelAllocationMapper
+                channelAllocationMapper,
+                new SpecialIndustryService()
         );
     }
 

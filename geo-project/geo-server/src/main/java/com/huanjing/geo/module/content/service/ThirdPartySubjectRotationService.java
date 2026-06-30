@@ -34,6 +34,7 @@ public class ThirdPartySubjectRotationService {
 
     private final BrandMapper brandMapper;
     private final BatchArticleGenerationTaskMapper taskMapper;
+    private final SpecialIndustryService specialIndustryService;
 
     public ThirdPartySubjectPoolPreviewResponse previewPool(Long sourceBrandId) {
         return previewPool(sourceBrandId, DEFAULT_CANDIDATE_LIMIT, DEFAULT_EXCLUDED_LIMIT);
@@ -218,16 +219,10 @@ public class ThirdPartySubjectRotationService {
     }
 
     private boolean isMedicalOrOral(ThirdPartySubjectPoolBrandRow row) {
-        String code = row.getComplianceIndustryCode();
-        if ("medical_beauty".equals(code) || "oral".equals(code)) {
-            return true;
-        }
-        String industry = row.getIndustry();
-        return StringUtils.hasText(industry)
-                && (industry.contains("医美")
-                || industry.contains("口腔")
-                || industry.contains("medical_beauty")
-                || industry.contains("oral"));
+        return specialIndustryService.detectMedicalIndustryCode(
+                row.getComplianceIndustryCode(),
+                row.getIndustry()
+        ).isPresent();
     }
 
     private PoolDecision excluded(String code, String reason) {

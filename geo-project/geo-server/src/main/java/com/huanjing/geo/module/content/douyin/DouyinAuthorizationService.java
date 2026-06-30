@@ -6,6 +6,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.DouyinClientProperties;
 import com.huanjing.geo.module.content.config.DouyinFeatureProperties;
 import com.huanjing.geo.module.content.config.DouyinOpenPlatformProperties;
+import com.huanjing.geo.module.content.constant.SelfMediaAccountIdentity;
 import com.huanjing.geo.module.content.douyin.client.DouyinClient;
 import com.huanjing.geo.module.content.douyin.client.dto.DouyinCodeTokenRequest;
 import com.huanjing.geo.module.content.douyin.client.dto.DouyinTokenResponse;
@@ -195,6 +196,7 @@ public class DouyinAuthorizationService {
         account.setPlatform(PLATFORM);
         account.setPlatformAccountId(openId);
         account.setAccountName("Douyin " + openId);
+        account.setAccountIdentity(SelfMediaAccountIdentity.PERSONAL);
         account.setAccessTokenCipher(cipherService.encryptForStorage(token.getAccessToken()));
         account.setRefreshTokenCipher(cipherService.encryptForStorage(token.getRefreshToken()));
         account.setCredentialKeyVersion("v1");

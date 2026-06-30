@@ -6,6 +6,7 @@ import cn.hutool.json.JSONUtil;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatMpClientProperties;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
+import com.huanjing.geo.module.content.constant.SelfMediaAccountIdentity;
 import com.huanjing.geo.module.content.credential.dto.CookieCredentialMeta;
 import com.huanjing.geo.module.content.credential.service.CredentialVaultService;
 import com.huanjing.geo.module.content.dto.SelfMediaAccountManageRequest;
@@ -196,6 +197,7 @@ public class SelfMediaAccountService {
         account.setPlatform(request.platform());
         account.setPlatformAccountId(platformAccountId);
         account.setAccountName(request.accountName().trim());
+        account.setAccountIdentity(normalizeAccountIdentity(request.platform(), request.accountIdentity()));
         account.setStatus(normalizeStatus(request.status()));
         account.setAuthMode("COOKIE");
         account.setCreatedBy(operator.getId());
@@ -228,6 +230,7 @@ public class SelfMediaAccountService {
         account.setPlatform(request.platform());
         account.setPlatformAccountId(platformAccountId);
         account.setAccountName(request.accountName().trim());
+        account.setAccountIdentity(normalizeAccountIdentity(request.platform(), request.accountIdentity()));
         account.setStatus(normalizeStatus(request.status()));
         account.setUpdatedAt(LocalDateTime.now());
         selfMediaAccountMapper.updateById(account);
@@ -307,6 +310,7 @@ public class SelfMediaAccountService {
         account.setBrandId(request.getBrandId());
         account.setPlatform("wechat_mp");
         account.setAccountName(request.getAccountName());
+        account.setAccountIdentity(SelfMediaAccountIdentity.ENTERPRISE);
         account.setPlatformAccountId(request.getAuthorizerAppid());
         account.setRefreshTokenCipher(cipherService.encryptForStorage("mock_authorizer_refresh_token"));
         account.setCredentialKeyVersion("v1");
@@ -428,6 +432,13 @@ public class SelfMediaAccountService {
 
     private String normalizeStatus(String status) {
         return StringUtils.hasText(status) ? status.trim() : "active";
+    }
+
+    private String normalizeAccountIdentity(String platform, String accountIdentity) {
+        String fallback = "baijiahao".equals(platform)
+                ? SelfMediaAccountIdentity.ENTERPRISE
+                : SelfMediaAccountIdentity.PERSONAL;
+        return SelfMediaAccountIdentity.normalize(accountIdentity, fallback);
     }
 
 }

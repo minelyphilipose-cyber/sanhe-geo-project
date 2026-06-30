@@ -24,7 +24,6 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
@@ -32,38 +31,16 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class SpecialIndustryReadinessService {
 
-    private static final Set<String> SUPPORTED_MEDICAL_INDUSTRIES = Set.of(
-            MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY,
-            MedicalArticleConstants.INDUSTRY_ORAL
-    );
-
     private final BrandMapper brandMapper;
     private final BrandOfferingMapper brandOfferingMapper;
     private final MedicalTopicAngleMapper topicAngleMapper;
     private final MedicalComplianceKernelMapper kernelMapper;
     private final MedicalChannelStyleModuleMapper channelStyleMapper;
     private final ProjectChannelAllocationMapper channelAllocationMapper;
+    private final SpecialIndustryService specialIndustryService;
 
     public Optional<String> detectMedicalIndustryCode(Brand brand) {
-        if (brand == null) {
-            return Optional.empty();
-        }
-        String configured = trimToNull(brand.getComplianceIndustryCode());
-        if (configured != null && SUPPORTED_MEDICAL_INDUSTRIES.contains(configured)) {
-            return Optional.of(configured);
-        }
-        String industry = trimToNull(brand.getIndustry());
-        if (industry == null) {
-            return Optional.empty();
-        }
-        String value = industry.toLowerCase(Locale.ROOT);
-        if (value.contains("医美") || value.contains("医疗美容") || value.contains("medical_beauty")) {
-            return Optional.of(MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY);
-        }
-        if (value.contains("口腔") || value.contains("牙科") || value.contains("oral")) {
-            return Optional.of(MedicalArticleConstants.INDUSTRY_ORAL);
-        }
-        return Optional.empty();
+        return specialIndustryService.detectMedicalIndustryCode(brand);
     }
 
     public void validateProjectActivation(Project project) {
@@ -86,11 +63,7 @@ public class SpecialIndustryReadinessService {
         if (industry.isEmpty()) {
             return "";
         }
-        String industryName = switch (industry.get()) {
-            case MedicalArticleConstants.INDUSTRY_ORAL -> "口腔医疗";
-            case MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY -> "医美";
-            default -> "医疗";
-        };
+        String industryName = specialIndustryService.industryLabel(industry.get());
         return """
 
                 ## 特殊行业合规约束

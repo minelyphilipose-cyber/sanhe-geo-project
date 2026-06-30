@@ -112,7 +112,7 @@
         type="warning"
         show-icon
         :closable="false"
-        title="当前品牌已标记为特殊医疗行业，但尚未启用匹配的医疗项目。医疗文章生成会被项目资质闸门拦截，请至少维护一个启用状态的医疗项目。"
+        title="当前品牌已标记为特殊行业，但尚未启用匹配的特殊行业项目。特殊行业文章生成会被项目资质闸门拦截，请至少维护一个启用状态的项目。"
       />
       <el-table v-loading="offeringsLoading" :data="offerings" border empty-text="暂无产品信息">
         <el-table-column prop="offeringName" label="产品名称" min-width="160" />
@@ -125,7 +125,7 @@
         <el-table-column prop="useScenarios" label="适用场景" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">{{ row.useScenarios || '-' }}</template>
         </el-table-column>
-        <el-table-column label="医疗项目" min-width="160">
+        <el-table-column label="特殊行业项目" min-width="160">
           <template #default="{ row }">
             <el-tag v-if="row.medicalProjectEnabled" size="small" type="warning">
               {{ row.medicalCategoryName || row.medicalCategoryCode || '已启用' }}
@@ -340,7 +340,16 @@
         <el-table-column prop="platform" label="平台" width="120">
           <template #default="{ row }">{{ selfMediaPlatformLabel(row.platform) }}</template>
         </el-table-column>
-        <el-table-column prop="accountName" label="账号名称" min-width="180" />
+        <el-table-column prop="accountName" label="账号名称" min-width="180">
+          <template #default="{ row }">
+            <div class="flex items-center gap-2">
+              <span>{{ row.accountName }}</span>
+              <el-tag size="small" :type="selfMediaAccountIdentityTag(row.accountIdentity)">
+                {{ selfMediaAccountIdentityLabel(row.accountIdentity) }}
+              </el-tag>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="授权状态" width="120">
           <template #default="{ row }">
             <el-tag size="small" :type="officialAccountStatusTag(row)">
@@ -428,7 +437,12 @@
         </el-table-column>
         <el-table-column prop="accountName" label="账号名称" min-width="180">
           <template #default="{ row }">
-            <div>{{ row.accountName }}</div>
+            <div class="flex items-center gap-2">
+              <span>{{ row.accountName }}</span>
+              <el-tag size="small" :type="selfMediaAccountIdentityTag(row.accountIdentity)">
+                {{ selfMediaAccountIdentityLabel(row.accountIdentity) }}
+              </el-tag>
+            </div>
             <div v-if="row.platformAccountId" class="table-subtext">
               {{ row.platform === 'baijiahao' ? '百家号 ID / app_id' : '平台账号 ID' }}：{{ row.platformAccountId }}
             </div>
@@ -943,26 +957,45 @@
 
         <div class="brand-section-bar"><span />内容资料<i /></div>
         <div class="brand-form-grid">
-          <el-form-item v-if="isMedicalComplianceIndustry" label="医疗项目闸门">
+          <el-form-item v-if="isMedicalComplianceIndustry" label="特殊行业项目闸门">
             <el-switch v-model="offeringForm.medicalProjectEnabled" active-text="启用" inactive-text="关闭" />
           </el-form-item>
-          <el-form-item v-if="isMedicalComplianceIndustry" label="医疗行业">
-            <el-select v-model="offeringForm.medicalIndustryCode" clearable style="width: 100%">
+          <el-form-item v-if="isMedicalComplianceIndustry" label="特殊行业">
+            <el-select v-model="offeringForm.medicalIndustryCode" clearable style="width: 100%" @change="handleOfferingMedicalIndustryChange">
               <el-option
-                v-for="item in dictStore.options('compliance_industry')"
+                v-for="item in specialIndustryComplianceOptions"
                 :key="item.dictKey"
                 :label="item.dictValue"
                 :value="item.dictKey"
               />
             </el-select>
           </el-form-item>
-          <el-form-item v-if="isMedicalComplianceIndustry" label="医疗品类编码">
-            <el-input v-model="offeringForm.medicalCategoryCode" maxlength="64" placeholder="如 skin_laser" />
+          <el-form-item v-if="isMedicalComplianceIndustry" label="特殊行业品类">
+            <el-select
+              v-model="offeringForm.medicalCategoryCode"
+              :loading="specialIndustryCategoriesLoading"
+              :disabled="!offeringForm.medicalIndustryCode"
+              clearable
+              filterable
+              placeholder="请选择与选题角度一致的品类"
+              style="width: 100%"
+              @change="handleOfferingMedicalCategoryChange"
+            >
+              <el-option
+                v-for="item in specialIndustryCategorySelectOptions"
+                :key="`${item.industryCode}-${item.categoryCode}`"
+                :label="item.categoryName || item.categoryCode"
+                :value="item.categoryCode"
+              >
+                <div class="special-category-option">
+                  <span>{{ item.categoryName || item.categoryCode }}</span>
+                  <small>{{ item.categoryCode }} · {{ item.topicAngleCount }} 个选题角度</small>
+                </div>
+              </el-option>
+            </el-select>
+            <div class="brand-field-help">品类来自特殊行业合规选题角度配置，保存后用于自动匹配可用选题角度。</div>
           </el-form-item>
-          <el-form-item v-if="isMedicalComplianceIndustry" label="医疗品类名称">
-            <el-input v-model="offeringForm.medicalCategoryName" maxlength="128" placeholder="如 皮肤光电" />
-          </el-form-item>
-          <el-form-item v-if="isMedicalComplianceIndustry" class="is-wide" label="项目资质引用">
+          <el-form-item v-if="isMedicalComplianceIndustry" class="is-wide" label="特殊行业资质引用">
             <el-input v-model="offeringForm.qualificationRef" type="textarea" :rows="2" maxlength="500" show-word-limit />
           </el-form-item>
           <el-form-item class="is-wide" label="目标人群">
@@ -1035,6 +1068,16 @@
         />
         <el-form-item label="账号名称" prop="accountName" required>
           <el-input v-model="selfMediaAccountForm.accountName" placeholder="运营可识别的账号名称" maxlength="128" />
+        </el-form-item>
+        <el-form-item label="账号主体" prop="accountIdentity" required>
+          <el-segmented
+            v-model="selfMediaAccountForm.accountIdentity"
+            :options="selfMediaAccountIdentityOptions"
+            style="width: 100%"
+          />
+          <div class="form-tip">
+            特殊行业自媒体会按账号主体匹配企业号或个人号文章模板。
+          </div>
         </el-form-item>
         <el-form-item :label="selfMediaPlatformAccountIdLabel" prop="platformAccountId">
           <el-input
@@ -1118,7 +1161,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
@@ -1130,8 +1173,10 @@ import {
   saveBrandTemplatePerspectiveConfig,
   getSelfMediaAccountsByBrand,
   getWechatMpAuthUrl,
+  getSpecialIndustryTopicAngleCategories,
   updateSelfMediaAccount,
   type BrandChannelTemplatePerspective,
+  type SpecialIndustryTopicAngleCategory,
   type TemplatePerspective,
 } from '@/api/content'
 import {
@@ -1185,6 +1230,7 @@ import { useDictStore } from '@/stores/dict'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { nullableText } from '@/utils/form'
+import { specialIndustryCodesFromOptions } from '@/utils/specialIndustry'
 
 const route = useRoute()
 const router = useRouter()
@@ -1220,6 +1266,8 @@ const offeringsLoading = ref(false)
 const offeringSaving = ref(false)
 const offeringVisible = ref(false)
 const editingOffering = ref<BrandOffering | null>(null)
+const specialIndustryCategoriesLoading = ref(false)
+const specialIndustryCategoryOptions = ref<SpecialIndustryTopicAngleCategory[]>([])
 const perspectiveConfigLoading = ref(false)
 const perspectiveConfigSaving = ref(false)
 const perspectiveConfigVisible = ref(false)
@@ -1305,6 +1353,7 @@ const brandForm = reactive({
 const selfMediaAccountForm = reactive({
   platform: '',
   accountName: '',
+  accountIdentity: 'personal' as 'personal' | 'enterprise',
   platformAccountId: '',
   status: 'active' as 'active' | 'disabled',
 })
@@ -1354,6 +1403,10 @@ const brandRules: FormRules = {
 
 const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
 const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
+const selfMediaAccountIdentityOptions = [
+  { label: '个人号', value: 'personal' },
+  { label: '企业号', value: 'enterprise' },
+]
 
 function validateSelfMediaPlatformAccountId(_rule: unknown, value: string, callback: (error?: Error) => void) {
   if (selfMediaAccountForm.platform === 'baijiahao') {
@@ -1373,6 +1426,7 @@ function validateSelfMediaPlatformAccountId(_rule: unknown, value: string, callb
 const selfMediaAccountRules: FormRules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   accountName: [{ required: true, message: '请输入账号名称', trigger: 'blur' }],
+  accountIdentity: [{ required: true, message: '请选择账号主体', trigger: 'change' }],
   platformAccountId: [{ validator: validateSelfMediaPlatformAccountId, trigger: ['blur', 'change'] }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
 }
@@ -1559,12 +1613,34 @@ const regionText = computed(() => {
 })
 
 const availableBrandIndustries = computed(() => companyIndustryTags.value)
+const specialIndustryCodes = computed(() => specialIndustryCodesFromOptions(dictStore.options('compliance_industry')))
+const specialIndustryComplianceOptions = computed(() =>
+  dictStore.options('compliance_industry').filter((item) => specialIndustryCodes.value.includes(item.dictKey)),
+)
 const isMedicalComplianceIndustry = computed(() =>
-  ['medical_beauty', 'oral'].includes(brandForm.complianceIndustryCode),
+  specialIndustryCodes.value.includes(brandForm.complianceIndustryCode),
 )
 const hasEnabledMedicalProject = computed(() =>
   offerings.value.some((item) => item.status === 'active' && item.medicalProjectEnabled),
 )
+const specialIndustryCategorySelectOptions = computed(() => {
+  const selectedCode = offeringForm.medicalCategoryCode
+  const selectedName = offeringForm.medicalCategoryName
+  const options = specialIndustryCategoryOptions.value
+  if (!selectedCode || options.some((item) => item.categoryCode === selectedCode)) {
+    return options
+  }
+  return [
+    {
+      industryCode: offeringForm.medicalIndustryCode,
+      industryName: complianceIndustryLabel(offeringForm.medicalIndustryCode),
+      categoryCode: selectedCode,
+      categoryName: selectedName || selectedCode,
+      topicAngleCount: 0,
+    },
+    ...options,
+  ]
+})
 const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
   site.integrationMethod !== 'brand_geo_site'
   && site.integrationMethod !== 'forum_playwright'
@@ -1700,6 +1776,45 @@ function optionLabel(option: SelfMediaAccountPlatformOption) {
 
 function offeringAliasesText(row: BrandOffering) {
   return row.offeringAliases?.filter(Boolean).join('、') || '-'
+}
+
+async function loadSpecialIndustryCategoryOptions(industryCode?: string | null) {
+  const code = industryCode || ''
+  if (!code) {
+    specialIndustryCategoryOptions.value = []
+    return
+  }
+  specialIndustryCategoriesLoading.value = true
+  try {
+    const { data } = await getSpecialIndustryTopicAngleCategories({ industryCode: code, enabled: true })
+    specialIndustryCategoryOptions.value = data.data || []
+  } catch {
+    specialIndustryCategoryOptions.value = []
+  } finally {
+    specialIndustryCategoriesLoading.value = false
+  }
+}
+
+function handleOfferingMedicalIndustryChange() {
+  offeringForm.medicalCategoryCode = ''
+  offeringForm.medicalCategoryName = ''
+  loadSpecialIndustryCategoryOptions(offeringForm.medicalIndustryCode)
+}
+
+function handleOfferingMedicalCategoryChange(value?: string) {
+  const selected = specialIndustryCategorySelectOptions.value.find((item) => item.categoryCode === value)
+  offeringForm.medicalCategoryName = selected?.categoryName || ''
+}
+
+function syncOfferingMedicalCategoryName() {
+  if (!offeringForm.medicalCategoryCode) {
+    offeringForm.medicalCategoryName = ''
+    return
+  }
+  const selected = specialIndustryCategorySelectOptions.value.find((item) => item.categoryCode === offeringForm.medicalCategoryCode)
+  if (selected) {
+    offeringForm.medicalCategoryName = selected.categoryName || selected.categoryCode
+  }
 }
 
 function browserEnvironmentAccountOf(account: SelfMediaAccount) {
@@ -2590,6 +2705,7 @@ function openOfferingCreate() {
   editingOffering.value = null
   resetOfferingForm()
   offeringVisible.value = true
+  loadSpecialIndustryCategoryOptions(offeringForm.medicalIndustryCode)
 }
 
 function openOfferingEdit(offering: BrandOffering) {
@@ -2604,16 +2720,28 @@ function openOfferingEdit(offering: BrandOffering) {
   offeringForm.priority = offering.priority ?? 50
   offeringForm.useScenarios = offering.useScenarios || ''
   offeringForm.medicalProjectEnabled = !!offering.medicalProjectEnabled
-  offeringForm.medicalIndustryCode = offering.medicalIndustryCode || ''
+  offeringForm.medicalIndustryCode = offering.medicalIndustryCode || (isMedicalComplianceIndustry.value ? brandForm.complianceIndustryCode : '')
   offeringForm.medicalCategoryCode = offering.medicalCategoryCode || ''
   offeringForm.medicalCategoryName = offering.medicalCategoryName || ''
   offeringForm.qualificationRef = offering.qualificationRef || ''
   offeringVisible.value = true
+  loadSpecialIndustryCategoryOptions(offeringForm.medicalIndustryCode)
 }
 
 async function submitOffering() {
   const valid = await offeringFormRef.value?.validate().catch(() => false)
   if (!valid) return
+  syncOfferingMedicalCategoryName()
+  if (isMedicalComplianceIndustry.value && offeringForm.medicalProjectEnabled) {
+    if (!nullableText(offeringForm.medicalIndustryCode)) {
+      ElMessage.warning('请选择特殊行业')
+      return
+    }
+    if (!nullableText(offeringForm.medicalCategoryCode)) {
+      ElMessage.warning('请选择特殊行业品类')
+      return
+    }
+  }
   offeringSaving.value = true
   try {
     const payload = {
@@ -2674,6 +2802,7 @@ function openSelfMediaAccountCreate() {
   editingSelfMediaAccount.value = null
   selfMediaAccountForm.platform = firstPlatform
   selfMediaAccountForm.accountName = ''
+  selfMediaAccountForm.accountIdentity = defaultSelfMediaAccountIdentity(firstPlatform)
   selfMediaAccountForm.platformAccountId = ''
   selfMediaAccountForm.status = 'active'
   selfMediaAccountVisible.value = true
@@ -2683,13 +2812,33 @@ function openSelfMediaAccountEdit(account: SemiAutoSelfMediaAccount) {
   editingSelfMediaAccount.value = account
   selfMediaAccountForm.platform = account.platform || eligibleSelfMediaPlatformOptions.value[0]?.platform || ''
   selfMediaAccountForm.accountName = account.accountName || ''
+  selfMediaAccountForm.accountIdentity = normalizeSelfMediaAccountIdentity(account.accountIdentity, selfMediaAccountForm.platform)
   selfMediaAccountForm.platformAccountId = account.platformAccountId || ''
   selfMediaAccountForm.status = account.status === 'disabled' ? 'disabled' : 'active'
   selfMediaAccountVisible.value = true
 }
 
 function handleSelfMediaPlatformChange() {
+  selfMediaAccountForm.accountIdentity = defaultSelfMediaAccountIdentity(selfMediaAccountForm.platform)
   selfMediaAccountFormRef.value?.validateField('platformAccountId').catch(() => undefined)
+}
+
+function defaultSelfMediaAccountIdentity(platform?: string | null): 'personal' | 'enterprise' {
+  return platform === 'baijiahao' ? 'enterprise' : 'personal'
+}
+
+function normalizeSelfMediaAccountIdentity(identity?: string | null, platform?: string | null): 'personal' | 'enterprise' {
+  return identity === 'enterprise' || identity === 'personal'
+    ? identity
+    : defaultSelfMediaAccountIdentity(platform)
+}
+
+function selfMediaAccountIdentityLabel(identity?: string | null) {
+  return normalizeSelfMediaAccountIdentity(identity) === 'enterprise' ? '企业号' : '个人号'
+}
+
+function selfMediaAccountIdentityTag(identity?: string | null): 'success' | 'info' {
+  return normalizeSelfMediaAccountIdentity(identity) === 'enterprise' ? 'success' : 'info'
 }
 
 function isSemiAutoPlatform(platform?: string | null): platform is SemiAutoPlatform {
@@ -2713,6 +2862,7 @@ async function submitSelfMediaAccount() {
     const payload = {
       platform: selfMediaAccountForm.platform,
       accountName: selfMediaAccountForm.accountName.trim(),
+      accountIdentity: selfMediaAccountForm.accountIdentity,
       platformAccountId: selfMediaAccountForm.platformAccountId.trim() || undefined,
       status: selfMediaAccountForm.status,
     }
@@ -2923,6 +3073,21 @@ function goCompanyDetail() {
   router.push(`/admin/customers/${brand.value.companyId}`)
 }
 
+watch(
+  () => brandForm.complianceIndustryCode,
+  (code) => {
+    if (!isMedicalComplianceIndustry.value) {
+      specialIndustryCategoryOptions.value = []
+      return
+    }
+    if (!offeringVisible.value || editingOffering.value) return
+    offeringForm.medicalIndustryCode = code
+    offeringForm.medicalCategoryCode = ''
+    offeringForm.medicalCategoryName = ''
+    loadSpecialIndustryCategoryOptions(code)
+  },
+)
+
 onMounted(async () => {
   if (!hasValidId) {
     ElMessage.error('品牌参数无效')
@@ -3062,6 +3227,29 @@ onMounted(async () => {
   color: #64748b;
   font-size: 12px;
   line-height: 1.55;
+}
+
+.special-category-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.special-category-option span {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.special-category-option small {
+  flex: none;
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 .form-item-hint {

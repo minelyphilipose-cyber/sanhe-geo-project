@@ -16,6 +16,7 @@ import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleSave
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.GenerationHistoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.RuleHitSummaryVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleCategoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.WorkbenchOverviewVO;
@@ -52,6 +53,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -127,6 +129,29 @@ public class MedicalArticleConfigService {
         Page<TopicAngleVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(page.getRecords().stream().map(this::toVO).toList());
         return result;
+    }
+
+    public List<TopicAngleCategoryVO> listTopicAngleCategories(String industryCode, Boolean enabled) {
+        currentUserService.ensurePermission("project.read");
+        List<MedicalTopicAngle> rows = topicAngleMapper.selectList(new LambdaQueryWrapper<MedicalTopicAngle>()
+                .eq(StringUtils.hasText(industryCode), MedicalTopicAngle::getIndustryCode, trim(industryCode))
+                .eq(enabled != null, MedicalTopicAngle::getEnabled, enabled)
+                .isNull(MedicalTopicAngle::getDeletedAt)
+                .orderByAsc(MedicalTopicAngle::getIndustryCode, MedicalTopicAngle::getSortOrder, MedicalTopicAngle::getId));
+        Map<String, TopicAngleCategoryAccumulator> categories = new LinkedHashMap<>();
+        for (MedicalTopicAngle row : rows) {
+            if (!StringUtils.hasText(row.getIndustryCode()) || !StringUtils.hasText(row.getCategoryCode())) {
+                continue;
+            }
+            String key = row.getIndustryCode().trim() + "::" + row.getCategoryCode().trim();
+            categories.computeIfAbsent(key, ignored -> new TopicAngleCategoryAccumulator(
+                    row.getIndustryCode(),
+                    row.getIndustryName(),
+                    row.getCategoryCode(),
+                    row.getCategoryName()
+            )).increment();
+        }
+        return categories.values().stream().map(TopicAngleCategoryAccumulator::toVO).toList();
     }
 
     @Transactional
@@ -264,6 +289,9 @@ public class MedicalArticleConfigService {
                                                 Long taskId,
                                                 Long projectId,
                                                 Long brandId,
+                                                String projectName,
+                                                String brandName,
+                                                String articleTitle,
                                                 String ruleType,
                                                 String action,
                                                 String createdStartDate,
@@ -271,12 +299,20 @@ public class MedicalArticleConfigService {
                                                 long current,
                                                 long size) {
         currentUserService.ensurePermission("project.read");
+        List<Long> projectIds = projectId == null ? idsByProjectName(projectName) : List.of(projectId);
+        List<Long> brandIds = brandId == null ? idsByBrandName(brandName) : List.of(brandId);
+        List<Long> articleIds = articleId == null ? idsByArticleTitle(articleTitle) : List.of(articleId);
+        if ((StringUtils.hasText(projectName) && projectIds.isEmpty())
+                || (StringUtils.hasText(brandName) && brandIds.isEmpty())
+                || (StringUtils.hasText(articleTitle) && articleIds.isEmpty())) {
+            return emptyPage(current, size);
+        }
         LambdaQueryWrapper<MedicalComplianceHitLog> wrapper = new LambdaQueryWrapper<MedicalComplianceHitLog>()
-                .eq(articleId != null, MedicalComplianceHitLog::getArticleId, articleId)
+                .in(!articleIds.isEmpty(), MedicalComplianceHitLog::getArticleId, articleIds)
                 .eq(batchId != null, MedicalComplianceHitLog::getBatchId, batchId)
                 .eq(taskId != null, MedicalComplianceHitLog::getTaskId, taskId)
-                .eq(projectId != null, MedicalComplianceHitLog::getProjectId, projectId)
-                .eq(brandId != null, MedicalComplianceHitLog::getBrandId, brandId)
+                .in(!projectIds.isEmpty(), MedicalComplianceHitLog::getProjectId, projectIds)
+                .in(!brandIds.isEmpty(), MedicalComplianceHitLog::getBrandId, brandIds)
                 .eq(StringUtils.hasText(ruleType), MedicalComplianceHitLog::getRuleType, trim(ruleType))
                 .eq(StringUtils.hasText(action), MedicalComplianceHitLog::getAction, trim(action))
                 .orderByDesc(MedicalComplianceHitLog::getCreatedAt, MedicalComplianceHitLog::getId);
@@ -293,14 +329,28 @@ public class MedicalArticleConfigService {
                                                            Long brandId,
                                                            Long articleId,
                                                            Long topicAngleId,
+                                                           String projectName,
+                                                           String brandName,
+                                                           String articleTitle,
+                                                           String topicKeyword,
                                                            long current,
                                                            long size) {
         currentUserService.ensurePermission("project.read");
+        List<Long> projectIds = projectId == null ? idsByProjectName(projectName) : List.of(projectId);
+        List<Long> brandIds = brandId == null ? idsByBrandName(brandName) : List.of(brandId);
+        List<Long> articleIds = articleId == null ? idsByArticleTitle(articleTitle) : List.of(articleId);
+        List<Long> topicAngleIds = topicAngleId == null ? idsByTopicKeyword(topicKeyword) : List.of(topicAngleId);
+        if ((StringUtils.hasText(projectName) && projectIds.isEmpty())
+                || (StringUtils.hasText(brandName) && brandIds.isEmpty())
+                || (StringUtils.hasText(articleTitle) && articleIds.isEmpty())
+                || (StringUtils.hasText(topicKeyword) && topicAngleIds.isEmpty())) {
+            return emptyPage(current, size);
+        }
         LambdaQueryWrapper<MedicalGenerationHistory> wrapper = new LambdaQueryWrapper<MedicalGenerationHistory>()
-                .eq(projectId != null, MedicalGenerationHistory::getProjectId, projectId)
-                .eq(brandId != null, MedicalGenerationHistory::getBrandId, brandId)
-                .eq(articleId != null, MedicalGenerationHistory::getArticleId, articleId)
-                .eq(topicAngleId != null, MedicalGenerationHistory::getTopicAngleId, topicAngleId)
+                .in(!projectIds.isEmpty(), MedicalGenerationHistory::getProjectId, projectIds)
+                .in(!brandIds.isEmpty(), MedicalGenerationHistory::getBrandId, brandIds)
+                .in(!articleIds.isEmpty(), MedicalGenerationHistory::getArticleId, articleIds)
+                .in(!topicAngleIds.isEmpty(), MedicalGenerationHistory::getTopicAngleId, topicAngleIds)
                 .orderByDesc(MedicalGenerationHistory::getCreatedAt, MedicalGenerationHistory::getId);
         Page<MedicalGenerationHistory> page = generationHistoryMapper.selectPage(new Page<>(current, size), wrapper);
         Page<GenerationHistoryVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
@@ -313,12 +363,27 @@ public class MedicalArticleConfigService {
         return result;
     }
 
-    public Page<BatchTraceVO> pageBatches(String status, String industryCode, long current, long size) {
+    public Page<BatchTraceVO> pageBatches(String status,
+                                          String industryCode,
+                                          String projectName,
+                                          String brandName,
+                                          String topicKeyword,
+                                          long current,
+                                          long size) {
         currentUserService.ensurePermission("project.read");
+        List<Long> projectIds = idsByProjectName(projectName);
+        List<Long> brandIds = idsByBrandName(brandName);
+        if ((StringUtils.hasText(projectName) && projectIds.isEmpty())
+                || (StringUtils.hasText(brandName) && brandIds.isEmpty())) {
+            return emptyPage(current, size);
+        }
         LambdaQueryWrapper<BatchArticleGenerationBatch> wrapper = new LambdaQueryWrapper<BatchArticleGenerationBatch>()
                 .isNotNull(BatchArticleGenerationBatch::getMedicalIndustryCode)
                 .eq(StringUtils.hasText(status), BatchArticleGenerationBatch::getStatus, trim(status))
                 .eq(StringUtils.hasText(industryCode), BatchArticleGenerationBatch::getMedicalIndustryCode, trim(industryCode))
+                .in(!projectIds.isEmpty(), BatchArticleGenerationBatch::getProjectId, projectIds)
+                .in(!brandIds.isEmpty(), BatchArticleGenerationBatch::getBrandId, brandIds)
+                .like(StringUtils.hasText(topicKeyword), BatchArticleGenerationBatch::getTopic, trim(topicKeyword))
                 .orderByDesc(BatchArticleGenerationBatch::getCreatedAt, BatchArticleGenerationBatch::getId);
         Page<BatchArticleGenerationBatch> page = batchMapper.selectPage(new Page<>(current, size), wrapper);
         List<BatchArticleGenerationBatch> records = page.getRecords();
@@ -574,6 +639,72 @@ public class MedicalArticleConfigService {
                 com.huanjing.geo.module.content.entity.ArticleDraft::getTitle);
     }
 
+    private List<Long> idsByProjectName(String projectName) {
+        String keyword = trimToNull(projectName);
+        if (keyword == null) {
+            return List.of();
+        }
+        return projectMapper.selectList(new LambdaQueryWrapper<Project>()
+                        .like(Project::getProjectName, keyword))
+                .stream()
+                .map(Project::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
+    private List<Long> idsByBrandName(String brandName) {
+        String keyword = trimToNull(brandName);
+        if (keyword == null) {
+            return List.of();
+        }
+        return brandMapper.selectList(new LambdaQueryWrapper<Brand>()
+                        .like(Brand::getBrandName, keyword))
+                .stream()
+                .map(Brand::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
+    private List<Long> idsByArticleTitle(String articleTitle) {
+        String keyword = trimToNull(articleTitle);
+        if (keyword == null) {
+            return List.of();
+        }
+        return articleDraftMapper.selectList(new LambdaQueryWrapper<ArticleDraft>()
+                        .like(ArticleDraft::getTitle, keyword))
+                .stream()
+                .map(ArticleDraft::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
+    private List<Long> idsByTopicKeyword(String topicKeyword) {
+        String keyword = trimToNull(topicKeyword);
+        if (keyword == null) {
+            return List.of();
+        }
+        return topicAngleMapper.selectList(new LambdaQueryWrapper<MedicalTopicAngle>()
+                        .isNull(MedicalTopicAngle::getDeletedAt)
+                        .and(wrapper -> wrapper
+                                .like(MedicalTopicAngle::getTopicAngle, keyword)
+                                .or()
+                                .like(MedicalTopicAngle::getCategoryName, keyword)))
+                .stream()
+                .map(MedicalTopicAngle::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
+    private <T> Page<T> emptyPage(long current, long size) {
+        Page<T> page = new Page<>(current, size, 0);
+        page.setRecords(List.of());
+        return page;
+    }
+
     private <T> Map<Long, String> entityMap(List<Long> ids,
                                            Function<List<Long>, List<T>> loader,
                                            Function<T, Long> idGetter,
@@ -592,5 +723,35 @@ public class MedicalArticleConfigService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private static final class TopicAngleCategoryAccumulator {
+        private final String industryCode;
+        private final String industryName;
+        private final String categoryCode;
+        private final String categoryName;
+        private long topicAngleCount;
+
+        private TopicAngleCategoryAccumulator(String industryCode,
+                                              String industryName,
+                                              String categoryCode,
+                                              String categoryName) {
+            this.industryCode = trimStatic(industryCode);
+            this.industryName = trimStatic(industryName);
+            this.categoryCode = trimStatic(categoryCode);
+            this.categoryName = trimStatic(categoryName);
+        }
+
+        private void increment() {
+            topicAngleCount++;
+        }
+
+        private TopicAngleCategoryVO toVO() {
+            return new TopicAngleCategoryVO(industryCode, industryName, categoryCode, categoryName, topicAngleCount);
+        }
+
+        private static String trimStatic(String value) {
+            return StringUtils.hasText(value) ? value.trim() : "";
+        }
     }
 }

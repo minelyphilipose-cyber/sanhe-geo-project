@@ -24,7 +24,7 @@ public interface SelfMediaAccountMapper extends BaseMapper<SelfMediaAccount> {
 
     @Select("""
             <script>
-            SELECT id, brand_id, platform, account_name, status
+            SELECT id, brand_id, platform, account_name, account_identity, status
             FROM self_media_account
             WHERE deleted_at IS NULL
               AND brand_id IN
@@ -39,7 +39,7 @@ public interface SelfMediaAccountMapper extends BaseMapper<SelfMediaAccount> {
                                                              @Param("limit") int limit);
 
     @Select("""
-            SELECT id, brand_id, platform, platform_account_id, account_name, status, auth_mode,
+            SELECT id, brand_id, platform, platform_account_id, account_name, account_identity, status, auth_mode,
                    scope_json, refresh_token_cipher, credential_key_version, avatar_url, qrcode_url,
                    last_auth_checked_at, last_auth_error, created_at, updated_at, deleted_at, deleted_by
             FROM self_media_account
@@ -56,6 +56,7 @@ public interface SelfMediaAccountMapper extends BaseMapper<SelfMediaAccount> {
                 platform = #{account.platform},
                 platform_account_id = #{account.platformAccountId},
                 account_name = #{account.accountName},
+                account_identity = #{account.accountIdentity},
                 status = #{account.status},
                 auth_mode = #{account.authMode},
                 scope_json = #{account.scopeJson},

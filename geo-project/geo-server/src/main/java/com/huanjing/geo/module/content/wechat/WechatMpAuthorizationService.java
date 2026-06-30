@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.wechat;
 
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
+import com.huanjing.geo.module.content.constant.SelfMediaAccountIdentity;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.vo.WechatMpAuthUrlVO;
@@ -98,6 +99,7 @@ public class WechatMpAuthorizationService {
         }
         account.setPlatform("wechat_mp");
         account.setAccountName(StringUtils.hasText(info.accountName()) ? info.accountName() : queryAuth.authorizerAppid());
+        account.setAccountIdentity(SelfMediaAccountIdentity.ENTERPRISE);
         account.setPlatformAccountId(queryAuth.authorizerAppid());
         account.setRefreshTokenCipher(cipherService.encryptForStorage(queryAuth.authorizerRefreshToken()));
         account.setCredentialKeyVersion("v1");

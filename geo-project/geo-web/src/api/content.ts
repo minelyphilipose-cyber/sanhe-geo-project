@@ -845,12 +845,21 @@ export function publishArticlePromptTemplateVersion(id: number, versionId: numbe
 export interface MedicalTopicAngle {
   id: number
   industryCode: string
+  industryName?: string | null
   categoryCode: string
   categoryName: string
   topicAngle: string
   recommendedFocus?: string | null
   enabled: boolean
   sortOrder: number
+}
+
+export interface SpecialIndustryTopicAngleCategory {
+  industryCode: string
+  industryName?: string | null
+  categoryCode: string
+  categoryName: string
+  topicAngleCount: number
 }
 
 export interface MedicalComplianceRule {
@@ -993,6 +1002,13 @@ export type SpecialIndustryGenerationHistory = MedicalGenerationHistory
 
 export function getSpecialIndustryTopicAngles(params?: Record<string, any>) {
   return request.get<R<PageResult<SpecialIndustryTopicAngle>>>('/content/special-industry/topic-angles', { params })
+}
+
+export function getSpecialIndustryTopicAngleCategories(params?: {
+  industryCode?: string | null
+  enabled?: boolean
+}) {
+  return request.get<R<SpecialIndustryTopicAngleCategory[]>>('/content/special-industry/topic-angle-categories', { params })
 }
 
 export function createSpecialIndustryTopicAngle(data: Partial<SpecialIndustryTopicAngle>) {
@@ -1339,6 +1355,7 @@ export function updateSelfMediaScheduleCapability(platform: string, data: {
 export function createSelfMediaAccount(brandId: number, data: {
   platform: string
   accountName: string
+  accountIdentity?: 'personal' | 'enterprise'
   platformAccountId?: string
   status?: 'active' | 'disabled'
 }) {
@@ -1348,6 +1365,7 @@ export function createSelfMediaAccount(brandId: number, data: {
 export function updateSelfMediaAccount(id: number, data: {
   platform: string
   accountName: string
+  accountIdentity?: 'personal' | 'enterprise'
   platformAccountId?: string
   status?: 'active' | 'disabled'
 }) {

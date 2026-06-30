@@ -25,7 +25,7 @@ class ThirdPartySubjectRotationServiceTest {
     private final BrandMapper brandMapper = mock(BrandMapper.class);
     private final BatchArticleGenerationTaskMapper taskMapper = mock(BatchArticleGenerationTaskMapper.class);
     private final ThirdPartySubjectRotationService service =
-            new ThirdPartySubjectRotationService(brandMapper, taskMapper);
+            new ThirdPartySubjectRotationService(brandMapper, taskMapper, new SpecialIndustryService());
 
     @Test
     void resolveKeepsSourceWhenPerspectiveIsCustomer() {

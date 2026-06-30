@@ -1424,6 +1424,7 @@ export interface SelfMediaAccount {
   brandId: number
   platform: 'wechat_mp' | string
   accountName: string
+  accountIdentity?: 'personal' | 'enterprise' | string | null
   platformAccountId: string
   avatarUrl?: string | null
   qrcodeUrl?: string | null

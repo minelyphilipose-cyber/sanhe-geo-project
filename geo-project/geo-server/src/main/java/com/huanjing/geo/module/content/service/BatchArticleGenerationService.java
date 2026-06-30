@@ -13,6 +13,7 @@ import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
+import com.huanjing.geo.module.content.constant.SelfMediaAccountIdentity;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
@@ -65,6 +66,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
@@ -88,7 +90,21 @@ public class BatchArticleGenerationService {
     private static final String TEMPLATE_SOURCE_SMART = "smart";
     private static final String TEMPLATE_SOURCE_WEIGHTED = "weighted";
     private static final String TEMPLATE_SOURCE_CUSTOM = "custom";
+    private static final String TEMPLATE_SOURCE_SPECIAL_INDUSTRY = "special_industry";
     private static final String TEMPLATE_SOURCE_FALLBACK_DEFAULT_PROMPT = "fallback_default_prompt";
+    private static final String SPECIAL_INDUSTRY_FORUM_TEMPLATE = "特殊行业论坛理性讨论模板";
+    private static final String SPECIAL_INDUSTRY_SITE_TEMPLATE = "特殊行业行业资讯站科普模板";
+    private static final String SPECIAL_INDUSTRY_AGENT_SITE_TEMPLATE = "特殊行业 Agent 官网合规科普模板";
+    private static final String SPECIAL_INDUSTRY_BAIJIAHAO_TEMPLATE = "特殊行业百家号企业号搜索科普模板";
+    private static final Map<String, String> SPECIAL_INDUSTRY_PERSONAL_SELF_MEDIA_TEMPLATES = Map.of(
+            "wechat", "特殊行业公众号个人号克制科普模板",
+            "douyin", "特殊行业抖音图文个人号克制科普模板",
+            "zhihu", "特殊行业知乎个人号深度问答模板",
+            "xiaohongshu", "特殊行业小红书个人号清单笔记模板",
+            "toutiao", "特殊行业今日头条个人号搜索科普模板",
+            "netease", "特殊行业网易个人号门户科普模板",
+            "sohu", "特殊行业搜狐个人号搜索科普模板"
+    );
     private static final int DEFAULT_TASK_SUBMIT_LIMIT = 5;
     private static final int DEFAULT_RECOVERY_RESUBMIT_LIMIT = 5;
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
@@ -142,6 +158,8 @@ public class BatchArticleGenerationService {
     private final BatchArticlePromptBuilder promptBuilder;
     private final ArticleGenerationPromptContextFactory promptContextFactory;
     private final MedicalArticleGenerationService medicalArticleGenerationService;
+    private final SpecialIndustryService specialIndustryService;
+    private final SpecialIndustryTemplateRouteService specialIndustryTemplateRouteService;
     private final MedicalArticleComplianceChecker medicalComplianceChecker;
     private final SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService;
     private final BatchArticleQualityChecker qualityChecker;
@@ -185,6 +203,8 @@ public class BatchArticleGenerationService {
                                          BatchArticlePromptBuilder promptBuilder,
                                          ArticleGenerationPromptContextFactory promptContextFactory,
                                          MedicalArticleGenerationService medicalArticleGenerationService,
+                                         SpecialIndustryService specialIndustryService,
+                                         SpecialIndustryTemplateRouteService specialIndustryTemplateRouteService,
                                          MedicalArticleComplianceChecker medicalComplianceChecker,
                                          SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService,
                                          BatchArticleQualityChecker qualityChecker,
@@ -221,6 +241,8 @@ public class BatchArticleGenerationService {
         this.promptBuilder = promptBuilder;
         this.promptContextFactory = promptContextFactory;
         this.medicalArticleGenerationService = medicalArticleGenerationService;
+        this.specialIndustryService = specialIndustryService;
+        this.specialIndustryTemplateRouteService = specialIndustryTemplateRouteService;
         this.medicalComplianceChecker = medicalComplianceChecker;
         this.specialIndustryComplianceAlertService = specialIndustryComplianceAlertService;
         this.qualityChecker = qualityChecker;
@@ -1384,13 +1406,19 @@ public class BatchArticleGenerationService {
         }
         ChannelRef channel = resolveChannel(platform);
         TemplatePerspectiveService.ResolvedPerspective perspective = resolvePerspective(brandId, channel, perspectiveMemo);
-        AutoTemplateAllocation allocation = allocateAutoTemplates(unitKey, channel, questionSceneCode, perspective, count, smartSelections);
+        Optional<String> expectedSpecialTemplateName = expectedSpecialIndustryTemplateName(brandId, channel);
+        AutoTemplateAllocation allocation = allocateAutoTemplates(
+                unitKey, channel, questionSceneCode, perspective, count, smartSelections, expectedSpecialTemplateName.orElse(null));
         if (allocation.templates().isEmpty()) {
             if (TemplatePerspectiveCodes.isThirdParty(perspective.perspectiveCode())) {
                 throw missingTemplateException(topic, channel, questionSceneCode, perspective.perspectiveCode());
             }
             addSkippedNotice(notices, topic, channel, null, null, count, "未配置启用模板");
             return List.of();
+        }
+        if (expectedSpecialTemplateName.isPresent() && !TEMPLATE_SOURCE_SPECIAL_INDUSTRY.equals(allocation.templateSource())) {
+            addSkippedNotice(notices, topic, channel, null, null, count,
+                    "特殊行业平台专属模板缺失，已回退到普通模板：" + expectedSpecialTemplateName.get());
         }
         maybeAddAllocationChangedNotice(topic, channel, platform.getPreviewTemplateCounts(), allocation.templates(), notices);
         return allocation.templates().stream()
@@ -1405,7 +1433,13 @@ public class BatchArticleGenerationService {
             String questionSceneCode,
             TemplatePerspectiveService.ResolvedPerspective perspective,
             int count,
-            Map<String, SmartTemplateSelection> smartSelections) {
+            Map<String, SmartTemplateSelection> smartSelections,
+            String expectedSpecialTemplateName) {
+        AutoTemplateAllocation specialIndustryAllocation = allocateSpecialIndustryTemplate(
+                channel, questionSceneCode, perspective, count, expectedSpecialTemplateName);
+        if (!specialIndustryAllocation.templates().isEmpty()) {
+            return specialIndustryAllocation;
+        }
         SmartTemplateSelection selection = smartSelections == null ? null : smartSelections.get(unitKey);
         if (selection == null || selection.templateIds().isEmpty()) {
             return new AutoTemplateAllocation(
@@ -1425,6 +1459,103 @@ public class BatchArticleGenerationService {
                 allocationService.allocate(channel.groupCode(), channel.subCode(), questionSceneCode, perspective.perspectiveCode(), count),
                 TEMPLATE_SOURCE_WEIGHTED
         );
+    }
+
+    private AutoTemplateAllocation allocateSpecialIndustryTemplate(ChannelRef channel,
+                                                                  String questionSceneCode,
+                                                                  TemplatePerspectiveService.ResolvedPerspective perspective,
+                                                                  int count,
+                                                                  String templateName) {
+        if (count <= 0 || !StringUtils.hasText(templateName)) {
+            return new AutoTemplateAllocation(List.of(), TEMPLATE_SOURCE_SPECIAL_INDUSTRY);
+        }
+        return specialIndustryTemplateCandidate(channel, questionSceneCode, perspective, templateName).stream()
+                .filter(item -> templateName.equals(item.template().getName()))
+                .findFirst()
+                .map(item -> new AutoTemplateAllocation(
+                        List.of(new ArticleTemplateAllocationService.AllocatedTemplate(item.template(), item.version(), count)),
+                        TEMPLATE_SOURCE_SPECIAL_INDUSTRY
+                ))
+                .orElseGet(() -> new AutoTemplateAllocation(List.of(), TEMPLATE_SOURCE_SPECIAL_INDUSTRY));
+    }
+
+    private List<ArticleTemplateAllocationService.TemplateWithVersion> specialIndustryTemplateCandidate(
+            ChannelRef channel,
+            String questionSceneCode,
+            TemplatePerspectiveService.ResolvedPerspective perspective,
+            String templateName) {
+        List<ArticleTemplateAllocationService.TemplateWithVersion> candidates = allocationService.activeTemplates(
+                channel.groupCode(), channel.subCode(), questionSceneCode, perspective.perspectiveCode());
+        if (hasTemplate(candidates, templateName)) {
+            return candidates;
+        }
+        if (!TemplatePerspectiveCodes.CUSTOMER.equals(TemplatePerspectiveCodes.normalize(perspective.perspectiveCode()))) {
+            candidates = allocationService.activeTemplates(
+                    channel.groupCode(), channel.subCode(), questionSceneCode, TemplatePerspectiveCodes.CUSTOMER);
+            if (hasTemplate(candidates, templateName)) {
+                return candidates;
+            }
+        }
+        candidates = allocationService.activeTemplates(
+                channel.groupCode(), channel.subCode(), null, perspective.perspectiveCode());
+        if (hasTemplate(candidates, templateName)) {
+            return candidates;
+        }
+        if (!TemplatePerspectiveCodes.CUSTOMER.equals(TemplatePerspectiveCodes.normalize(perspective.perspectiveCode()))) {
+            return allocationService.activeTemplates(
+                    channel.groupCode(), channel.subCode(), null, TemplatePerspectiveCodes.CUSTOMER);
+        }
+        return candidates;
+    }
+
+    private boolean hasTemplate(List<ArticleTemplateAllocationService.TemplateWithVersion> candidates, String templateName) {
+        return candidates.stream().anyMatch(item -> templateName.equals(item.template().getName()));
+    }
+
+    private Optional<String> expectedSpecialIndustryTemplateName(Long brandId, ChannelRef channel) {
+        if (brandId == null) {
+            return Optional.empty();
+        }
+        Brand brand = brandMapper.selectById(brandId);
+        Optional<String> industryCode = specialIndustryService.detectSpecialIndustryCode(brand);
+        if (industryCode.isEmpty()) {
+            return Optional.empty();
+        }
+        String subCode = ArticlePromptChannels.canonicalSubCode(channel.groupCode(), channel.subCode());
+        String accountIdentity = defaultAccountIdentity(channel.groupCode(), subCode);
+        Optional<String> configured = specialIndustryTemplateRouteService.resolveTemplateName(
+                industryCode.get(), channel.groupCode(), subCode, accountIdentity);
+        if (configured != null && configured.isPresent()) {
+            return configured;
+        }
+        return Optional.ofNullable(fallbackSpecialIndustryTemplateName(channel));
+    }
+
+    private String defaultAccountIdentity(String groupCode, String subCode) {
+        if (ArticlePromptChannels.SELF_MEDIA.equals(groupCode) && !"baijiahao".equals(subCode)) {
+            return SelfMediaAccountIdentity.PERSONAL;
+        }
+        return SelfMediaAccountIdentity.ENTERPRISE;
+    }
+
+    private String fallbackSpecialIndustryTemplateName(ChannelRef channel) {
+        if (ArticlePromptChannels.FORUM.equals(channel.groupCode())) {
+            return SPECIAL_INDUSTRY_FORUM_TEMPLATE;
+        }
+        if (ArticlePromptChannels.INDUSTRY_SITE.equals(channel.groupCode())) {
+            return SPECIAL_INDUSTRY_SITE_TEMPLATE;
+        }
+        if (ArticlePromptChannels.AGENT_SITE.equals(channel.groupCode())) {
+            return SPECIAL_INDUSTRY_AGENT_SITE_TEMPLATE;
+        }
+        if (ArticlePromptChannels.SELF_MEDIA.equals(channel.groupCode())) {
+            String subCode = ArticlePromptChannels.canonicalSubCode(channel.groupCode(), channel.subCode());
+            if ("baijiahao".equals(subCode)) {
+                return SPECIAL_INDUSTRY_BAIJIAHAO_TEMPLATE;
+            }
+            return SPECIAL_INDUSTRY_PERSONAL_SELF_MEDIA_TEMPLATES.get(subCode);
+        }
+        return null;
     }
 
     private List<ValidatedPlatform> validateCustomPlatform(Long brandId,

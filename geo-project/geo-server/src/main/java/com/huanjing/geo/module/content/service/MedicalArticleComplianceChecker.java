@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
 import com.huanjing.geo.module.content.entity.MedicalComplianceHitLog;
 import com.huanjing.geo.module.content.entity.MedicalComplianceRule;
@@ -24,7 +25,20 @@ import java.util.regex.PatternSyntaxException;
 public class MedicalArticleComplianceChecker {
 
     private static final List<String> RISK_HINTS = List.of("风险", "禁忌", "不适合", "个体差异", "医生评估", "专业评估");
-    private static final List<String> RATIONAL_HINTS = List.of("理性", "不要盲目", "不建议盲目", "需结合", "先评估", "权衡");
+    private static final List<String> RATIONAL_HINTS = List.of(
+            "理性", "不要盲目", "不建议盲目", "需结合", "结合自身", "结合具体", "先评估", "权衡",
+            "医生评估", "专业评估", "综合判断", "个体情况", "个体差异", "适应条件", "完整检查", "口腔检查", "影像评估"
+    );
+    private static final List<String> PERSONAL_ACCOUNT_OFFICIAL_TONE_HINTS = List.of(
+            "我们机构", "本院", "我院", "本机构", "官方推荐", "官方指定", "官方建议"
+    );
+    private static final List<String> PERSONAL_ACCOUNT_CONVERSION_HINTS = List.of(
+            "预约咨询", "私信了解", "私信咨询", "点击咨询", "到店", "来院", "联系电话", "加微信", "扫码",
+            "优惠", "套餐", "名额", "限时", "活动价"
+    );
+    private static final List<String> PERSONAL_ACCOUNT_EXPERIENCE_HINTS = List.of(
+            "亲测", "我做过", "朋友做过", "真实案例", "前后对比", "术前术后"
+    );
 
     private final MedicalComplianceRuleMapper ruleMapper;
     private final MedicalComplianceHitLogMapper hitLogMapper;
@@ -114,10 +128,51 @@ public class MedicalArticleComplianceChecker {
         }
         Integer limit = context.brandExposureLimit();
         if (limit != null && limit >= 0 && input.brand() != null && StringUtils.hasText(input.brand().getBrandName())) {
-            int count = countOccurrences(content, input.brand().getBrandName().trim());
+            int count = countOccurrences(normalize(input.content()), input.brand().getBrandName().trim());
             if (count > limit) {
                 issues.add(new ComplianceIssue(null, "brand_exposure_exceeded", "block", input.brand().getBrandName(),
-                        "品牌露出次数超过医疗渠道档位限制：" + count + "/" + limit));
+                        "正文品牌露出次数超过医疗渠道档位限制：" + count + "/" + limit));
+            }
+        }
+        collectPersonalSelfMediaIssues(input, content, issues);
+    }
+
+    private void collectPersonalSelfMediaIssues(CheckInput input, String content, List<ComplianceIssue> issues) {
+        if (!ArticlePromptChannels.SELF_MEDIA.equals(input.channelGroupCode())
+                || "baijiahao".equals(input.channelSubCode())) {
+            return;
+        }
+        addFirstHitIssue(content, PERSONAL_ACCOUNT_OFFICIAL_TONE_HINTS, issues,
+                "personal_account_official_tone", "特殊行业个人号内容出现官方/机构身份口吻");
+        addFirstHitIssue(content, PERSONAL_ACCOUNT_CONVERSION_HINTS, issues,
+                "personal_account_conversion_hint", "特殊行业个人号内容出现咨询、到店、优惠或其他转化引导");
+        addFirstHitIssue(content, PERSONAL_ACCOUNT_EXPERIENCE_HINTS, issues,
+                "personal_account_experience_seeding", "特殊行业个人号内容出现亲测、案例或前后对比表达");
+
+        if (input.brand() == null || !StringUtils.hasText(input.brand().getBrandName())) {
+            return;
+        }
+        String brandName = input.brand().getBrandName().trim();
+        int count = countOccurrences(content, brandName);
+        if (count < 1) {
+            issues.add(new ComplianceIssue(null, "personal_account_brand_exposure_missing", "block", brandName,
+                    "特殊行业个人号内容缺少品牌/机构名露出：0/1"));
+        } else if (count > 2) {
+            issues.add(new ComplianceIssue(null, "personal_account_brand_exposure_exceeded", "block", brandName,
+                    "特殊行业个人号内容品牌/机构名露出超过限制：" + count + "/2"));
+        }
+    }
+
+    private void addFirstHitIssue(String content,
+                                  List<String> hints,
+                                  List<ComplianceIssue> issues,
+                                  String ruleType,
+                                  String message) {
+        String normalizedContent = normalizeForMatch(content);
+        for (String hint : hints) {
+            if (normalizedContent.contains(normalizeForMatch(hint))) {
+                issues.add(new ComplianceIssue(null, ruleType, "block", hint, message));
+                return;
             }
         }
     }
