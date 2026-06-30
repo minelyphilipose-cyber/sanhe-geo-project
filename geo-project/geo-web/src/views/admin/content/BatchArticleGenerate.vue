@@ -1011,6 +1011,15 @@ function toTemplateCount(row: BatchArticleGenerateTemplateCount): BatchArticleGe
   }
 }
 
+function shouldSubmitPlatform(topic: SelectedTopic, platform: ContentStyleOption) {
+  const mode = topic.platformAllocationModes[platform.value] || 'auto'
+  if (mode === 'custom') {
+    return (topic.platformTemplateCounts[platform.value] || [])
+      .some((item) => Number(item.count || 0) > 0)
+  }
+  return Number(topic.platformCounts[platform.value] || 0) > 0
+}
+
 function agentSiteModuleText(value?: string | null) {
   if (!value) return '-'
   return ({ faq: 'FAQ', knowledge: '知识库', product: '产品服务' } as Record<string, string>)[value] || value
@@ -1456,27 +1465,32 @@ async function submitBatchGeneration() {
     if (!confirmedPlatformWarnings) {
       return
     }
-    const payloadTopics = selectedTopics.value.map((topic) => ({
-      topic: topic.topic,
-      topicAsQuestion: topic.topicAsQuestion,
-      questionSceneCode: topic.questionSceneCode || undefined,
-      keywordGroupId: topic.keywordGroupId,
-      keywordGroupName: topic.keywordGroupName,
-      readinessWarningConfirmed: Boolean(confirmedReadinessWarnings[topic.id]?.length),
-      readinessWarningCodes: confirmedReadinessWarnings[topic.id]?.length ? confirmedReadinessWarnings[topic.id] : undefined,
-      platforms: activePlatformOptions.value.map((platform) => {
-        const mode = topic.platformAllocationModes[platform.value] || 'auto'
-        return {
-          contentStyle: platform.contentStyle,
-          channelGroupCode: platform.channelGroupCode,
-          channelSubCode: platform.channelSubCode || undefined,
-          allocationMode: mode,
-          count: Number(topic.platformCounts[platform.value] || 0),
-          templateCounts: mode === 'custom' ? topic.platformTemplateCounts[platform.value] || [] : undefined,
-          previewTemplateCounts: mode === 'auto' ? topic.platformPreviewCounts[platform.value] || [] : undefined,
-        }
-      }),
-    }))
+    const payloadTopics = selectedTopics.value.map((topic) => {
+      const platforms = activePlatformOptions.value
+        .filter((platform) => shouldSubmitPlatform(topic, platform))
+        .map((platform) => {
+          const mode = topic.platformAllocationModes[platform.value] || 'auto'
+          return {
+            contentStyle: platform.contentStyle,
+            channelGroupCode: platform.channelGroupCode,
+            channelSubCode: platform.channelSubCode || undefined,
+            allocationMode: mode,
+            count: Number(topic.platformCounts[platform.value] || 0),
+            templateCounts: mode === 'custom' ? topic.platformTemplateCounts[platform.value] || [] : undefined,
+            previewTemplateCounts: mode === 'auto' ? topic.platformPreviewCounts[platform.value] || [] : undefined,
+          }
+        })
+      return {
+        topic: topic.topic,
+        topicAsQuestion: topic.topicAsQuestion,
+        questionSceneCode: topic.questionSceneCode || undefined,
+        keywordGroupId: topic.keywordGroupId,
+        keywordGroupName: topic.keywordGroupName,
+        readinessWarningConfirmed: Boolean(confirmedReadinessWarnings[topic.id]?.length),
+        readinessWarningCodes: confirmedReadinessWarnings[topic.id]?.length ? confirmedReadinessWarnings[topic.id] : undefined,
+        platforms,
+      }
+    }).filter((topic) => topic.platforms.length > 0)
     const { data } = await createBatchContentArticles({
       projectId: batchForm.projectId!,
       topicSource: selectedTopics.value.some((topic) => topic.source === 'keyword_group') ? 'keyword_group' : 'manual',
