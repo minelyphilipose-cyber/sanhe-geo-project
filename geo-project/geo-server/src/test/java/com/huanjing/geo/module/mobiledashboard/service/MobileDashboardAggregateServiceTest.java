@@ -50,6 +50,38 @@ class MobileDashboardAggregateServiceTest {
     }
 
     @Test
+    void mentionTrendUsesNullForMissingOrEmptySummaryDays() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        jdbcTemplate.execute("""
+                CREATE TABLE poll_platform_daily_summary (
+                    project_id BIGINT,
+                    batch_date DATE,
+                    platform_code VARCHAR(32),
+                    question_tier VARCHAR(8),
+                    completed_count BIGINT,
+                    hit_count BIGINT,
+                    effective_hit_count BIGINT
+                )
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_platform_daily_summary
+                    (project_id, batch_date, platform_code, question_tier, completed_count, hit_count, effective_hit_count)
+                VALUES
+                    (1, DATE '2026-06-10', 'doubao', 'A', 10, 5, 0),
+                    (1, DATE '2026-06-12', 'doubao', 'A', 0, 0, 0),
+                    (1, DATE '2026-06-13', 'doubao', 'A', 10, 0, 0)
+                """);
+
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.TrendPoint> points =
+                (List<MobileDashboardAggregateVO.TrendPoint>) invoke(newService(jdbcTemplate), "loadMentionTrend",
+                        1L, dateRange(LocalDate.of(2026, 6, 10), LocalDate.of(2026, 6, 13)));
+
+        assertThat(points).extracting(MobileDashboardAggregateVO.TrendPoint::getValue)
+                .containsExactly(50, null, null, 0);
+    }
+
+    @Test
     void publishedAndIndexedCountsExcludeOfflineAndOnlyCountMeasuredIndexedChannels() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         createPublishRecordTable(jdbcTemplate);
@@ -517,6 +549,71 @@ class MobileDashboardAggregateServiceTest {
         Object count = invoke(newService(jdbcTemplate), "countBuildingQuestionCoverage", 1L);
 
         assertThat(count).isEqualTo(2L);
+    }
+
+    @Test
+    void relatedBuildingContentTasksUseNormalizedQuestionSceneAndChannelCatalog() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        jdbcTemplate.execute("""
+                CREATE TABLE keyword_group_result (
+                    id BIGINT,
+                    scene_code VARCHAR(64)
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE article_prompt_template (
+                    id BIGINT,
+                    question_scene_code VARCHAR(32)
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE article_draft (
+                    id BIGINT,
+                    project_id BIGINT,
+                    prompt_template_id BIGINT,
+                    title VARCHAR(255),
+                    topic VARCHAR(255),
+                    topic_as_question VARCHAR(255),
+                    target_channel VARCHAR(64),
+                    status VARCHAR(32),
+                    allocation_mode VARCHAR(16),
+                    updated_at TIMESTAMP,
+                    created_at TIMESTAMP
+                )
+                """);
+        createPublishRecordTable(jdbcTemplate);
+        jdbcTemplate.update("INSERT INTO keyword_group_result (id, scene_code) VALUES (1001, 'brand_awareness')");
+        jdbcTemplate.update("""
+                INSERT INTO article_prompt_template (id, question_scene_code)
+                VALUES
+                    (201, 'brand'),
+                    (202, 'deal')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO article_draft
+                    (id, project_id, prompt_template_id, title, topic, topic_as_question, target_channel, status, allocation_mode, updated_at, created_at)
+                VALUES
+                    (301, 1, 201, '品牌认知建设稿', '品牌问题', '品牌怎么选', 'self_media:douyin', 'approved', NULL, TIMESTAMP '2026-06-22 10:00:00', TIMESTAMP '2026-06-21 10:00:00'),
+                    (302, 1, 202, '交易场景稿', '购买问题', '怎么买', 'self_media:zhihu', 'approved', NULL, TIMESTAMP '2026-06-22 09:00:00', TIMESTAMP '2026-06-21 09:00:00'),
+                    (303, 1, 201, '已发布品牌稿', '品牌问题', '品牌已发布', 'self_media:zhihu', 'approved', NULL, TIMESTAMP '2026-06-22 08:00:00', TIMESTAMP '2026-06-21 08:00:00')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO article_publish_record
+                    (id, project_id, article_id, publish_status, target_channel, target_kind, published_at, verified_at, created_at)
+                VALUES
+                    (1, 1, 303, 'published', 'zhihu', NULL, TIMESTAMP '2026-06-23 10:00:00', NULL, TIMESTAMP '2026-06-23 10:00:00')
+                """);
+
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.ContentTaskItem> tasks =
+                (List<MobileDashboardAggregateVO.ContentTaskItem>) invoke(newService(jdbcTemplate),
+                        "loadRelatedBuildingContentTasks", 1L, 1001L);
+
+        assertThat(tasks).singleElement().satisfies(task -> {
+            assertThat(task.getDraftId()).isEqualTo(301L);
+            assertThat(task.getPlatformCodes()).containsExactly("douyin");
+            assertThat(task.getStatus()).isEqualTo("building");
+        });
     }
 
     @Test

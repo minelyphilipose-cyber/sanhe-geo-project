@@ -89,9 +89,13 @@ export function getMobileDashboardQuestionDetail(sessionToken: string, pollResul
   })
 }
 
-export function getMobileDashboardContent(sessionToken: string) {
+export function getMobileDashboardContent(
+  sessionToken: string,
+  taskPagination?: { taskPage?: number; taskSize?: number },
+) {
   return mobileRequest.get<R<ContentDashboardData>>('/public/mobile-dashboard/content', {
     headers: { Authorization: `Bearer ${sessionToken}` },
+    params: taskPagination || {},
   })
 }
 

@@ -77,11 +77,13 @@ public class MobileDashboardPublicController {
     @GetMapping("/content")
     public R<MobileDashboardAggregateVO.Content> content(@RequestHeader(value = "Authorization", required = false) String authorization,
                                                          @RequestParam(required = false) String month,
+                                                         @RequestParam(defaultValue = "1") Integer taskPage,
+                                                         @RequestParam(defaultValue = "4") Integer taskSize,
                                                          HttpServletRequest request) {
         return audited("content", authorization, request, () -> {
             Long projectId = mobileDashboardShareService.requireValidSession(authorization).projectId();
             YearMonth yearMonth = month == null || month.isBlank() ? null : YearMonth.parse(month);
-            return R.ok(mobileDashboardAggregateService.content(projectId, yearMonth));
+            return R.ok(mobileDashboardAggregateService.content(projectId, yearMonth, taskPage, taskSize));
         });
     }
 

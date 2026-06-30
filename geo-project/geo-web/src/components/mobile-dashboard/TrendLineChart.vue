@@ -14,8 +14,19 @@ use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 const props = defineProps<{
   labels?: string[]
-  values?: number[]
+  values?: Array<number | null>
 }>()
+
+const chartData = computed(() => {
+  const labels = props.labels || []
+  const values = props.values || []
+  return values.reduce<{ labels: string[]; values: number[] }>((acc, value, index) => {
+    if (value === null || value === undefined) return acc
+    acc.labels.push(labels[index] || '')
+    acc.values.push(value)
+    return acc
+  }, { labels: [], values: [] })
+})
 
 const chartOption = computed(() => ({
   grid: { left: 6, right: 8, top: 10, bottom: 6, containLabel: false },
@@ -24,7 +35,7 @@ const chartOption = computed(() => ({
     type: 'category',
     boundaryGap: false,
     show: false,
-    data: props.labels || [],
+    data: chartData.value.labels,
   },
   yAxis: {
     type: 'value',
@@ -35,7 +46,7 @@ const chartOption = computed(() => ({
   series: [
     {
       type: 'line',
-      data: props.values || [],
+      data: chartData.value.values,
       smooth: true,
       symbol: 'circle',
       symbolSize: 6,

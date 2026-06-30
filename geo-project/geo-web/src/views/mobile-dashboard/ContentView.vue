@@ -17,19 +17,19 @@
             <img
               v-if="contentPlatformLogo(item.code)"
               :src="contentPlatformLogo(item.code)"
-              :alt="contentPlatformLabel(item.code)"
+              :alt="platformLabel(item.code)"
             >
-            <MobileIcon v-else :name="contentPlatformIcon(item.code)" />
+            <MobileIcon v-else :name="platformIcon(item.code)" />
           </div>
           <div class="completion-copy">
-            <span>{{ contentPlatformLabel(item.code) }}</span>
+            <span>{{ platformLabel(item.code) }}</span>
             <strong>{{ completionMainText(item) }}</strong>
             <i :style="{ width: completionBarWidth(item) }" />
           </div>
         </div>
       </div>
       <p v-if="completionScopeNote" class="module-note">{{ completionScopeNote }}</p>
-      <EmptyState v-else description="暂无本月发布数据或逐渠道月度配额。" />
+      <EmptyState v-if="!data?.platformCompletion?.length" description="暂无本月发布数据或逐渠道月度配额。" />
     </DashboardCard>
 
     <DashboardCard title="内容任务列表" icon="document">
@@ -64,22 +64,33 @@
             </div>
           </div>
         </article>
+        <nav v-if="taskPageCount > 1" class="task-pagination" aria-label="内容任务分页">
+          <button type="button" :disabled="taskPage <= 1" @click="changeTaskPage(taskPage - 1)">
+            <MobileIcon name="chevronLeft" />
+            上一页
+          </button>
+          <span>{{ taskPage }} / {{ taskPageCount }}</span>
+          <button type="button" :disabled="taskPage >= taskPageCount" @click="changeTaskPage(taskPage + 1)">
+            下一页
+            <MobileIcon name="chevronRight" />
+          </button>
+        </nav>
       </div>
       <EmptyState v-else :description="data?.taskList?.reason || '暂无内容任务数据'" />
     </DashboardCard>
 
-    <DashboardCard title="自有平台发布情况" icon="grid">
+    <DashboardCard title="代运营平台发布情况" icon="grid">
       <section v-if="data?.ownedPublish?.length" class="owned-grid">
         <div v-for="item in data.ownedPublish" :key="item.code" class="owned-item">
           <div class="platform-symbol" :class="`platform-symbol--${item.code}`">
             <img
               v-if="contentPlatformLogo(item.code)"
               :src="contentPlatformLogo(item.code)"
-              :alt="contentPlatformLabel(item.code)"
+              :alt="platformLabel(item.code)"
             >
-            <MobileIcon v-else :name="contentPlatformIcon(item.code)" />
+            <MobileIcon v-else :name="platformIcon(item.code)" />
           </div>
-          <span>{{ contentPlatformLabel(item.code) }}</span>
+          <span>{{ platformLabel(item.code) }}</span>
           <strong>{{ metricText(item.published, false) }}/{{ metricText(item.indexed, false) }}</strong>
           <small>已发布 / 已收录</small>
         </div>
@@ -118,6 +129,8 @@ import zhihuLogo from '@/assets/self-media-platform-logos/知乎.svg'
 
 const store = useMobileDashboardStore()
 const data = ref<ContentDashboardData>()
+const taskPage = ref(1)
+const taskPageSize = 4
 const selfMediaPlatformLogos: Record<string, string> = {
   official_site: officialSiteLogo,
   douyin: douyinLogo,
@@ -138,17 +151,21 @@ const overviewCards = computed(() => {
     { label: '建设中', icon: 'tools', metric: overview.building },
   ]
 })
+const contentPlatforms = computed(() => data.value?.contentPlatforms?.length
+  ? data.value.contentPlatforms
+  : store.contentPlatforms)
 const ecoCards = computed(() => {
   const eco = data.value?.ecoAssets
   if (!eco) return []
   return [
     { label: '累计资产', icon: 'document', metric: eco.totalAssets },
     { label: '本月新增', icon: 'plus', metric: eco.monthNew },
-    { label: '已收录', icon: 'eye', metric: eco.indexed },
+    { label: '累计收录', icon: 'eye', metric: eco.indexed },
     { label: '核心问题覆盖', icon: 'check', metric: eco.coveredQuestions },
   ]
 })
 const taskItems = computed(() => data.value?.taskList?.items || [])
+const taskPageCount = computed(() => Math.max(1, data.value?.taskList?.totalPages || 1))
 const platformCompletionTitle = computed(() =>
   data.value?.platformCompletion?.some((item) => item.completionRate?.available)
     ? '平台完成度'
@@ -163,13 +180,21 @@ const completionScopeNote = computed(() => {
 })
 const shortIndexScope = computed(() => {
   if (!data.value?.ecoAssets?.indexMeasurementScope) return ''
-  return '已收录仅统计可测量渠道，未回查渠道不计入。'
+  return '累计收录仅统计可测量渠道，未回查渠道不计入。'
 })
 
 function metricText(metric?: DashboardMetric, includeUnit = true) {
   if (!metric?.available) return '暂未统计'
   const value = metric.value ?? 0
   return includeUnit && metric.unit ? `${value}${metric.unit}` : `${value}`
+}
+
+function platformLabel(code?: string | null) {
+  return contentPlatformLabel(code, contentPlatforms.value)
+}
+
+function platformIcon(code?: string | null) {
+  return contentPlatformIcon(code, contentPlatforms.value)
 }
 
 function completionMainText(item: PlatformCompletion) {
@@ -195,12 +220,12 @@ function taskStatusLabel(status: string) {
 
 function taskPlatforms(codes: string[]) {
   if (!codes?.length) return '待分发'
-  return codes.map((code) => contentPlatformLabel(code)).join(' / ')
+  return codes.map((code) => platformLabel(code)).join(' / ')
 }
 
 function taskIconText(codes: string[]) {
   if (!codes?.length) return '待'
-  return contentPlatformLabel(codes[0]).slice(0, 1)
+  return platformLabel(codes[0]).slice(0, 1)
 }
 
 function firstTaskPlatformCode(codes: string[]) {
@@ -231,17 +256,29 @@ function openTask(item: ContentTaskItem) {
   window.open(item.publishUrl!, '_blank', 'noopener,noreferrer')
 }
 
-onMounted(async () => {
+async function loadData() {
   try {
     const res = await withRenewedMobileDashboardSession(
-      (sessionToken) => getMobileDashboardContent(sessionToken),
+      (sessionToken) => getMobileDashboardContent(sessionToken, {
+        taskPage: taskPage.value,
+        taskSize: taskPageSize,
+      }),
       store,
     )
     data.value = res.data.data
   } catch (error: any) {
     showToast(error?.message || '数据加载失败')
   }
-})
+}
+
+async function changeTaskPage(page: number) {
+  const nextPage = Math.min(Math.max(page, 1), taskPageCount.value)
+  if (nextPage === taskPage.value) return
+  taskPage.value = nextPage
+  await loadData()
+}
+
+onMounted(loadData)
 </script>
 
 <style scoped>
@@ -636,6 +673,44 @@ onMounted(async () => {
 .task-meta time {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.task-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.task-pagination button {
+  min-width: 116px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  border: 1px solid #d7f0e5;
+  border-radius: 999px;
+  background: #fff;
+  color: #006D44;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 400;
+  line-height: var(--mobile-leading-md, 20px);
+}
+
+.task-pagination button:disabled {
+  border-color: #eef0f2;
+  background: #f8fafc;
+  color: #cbd5e1;
+}
+
+.task-pagination span {
+  min-width: 48px;
+  color: #64748b;
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 700;
+  text-align: center;
 }
 
 .owned-grid {

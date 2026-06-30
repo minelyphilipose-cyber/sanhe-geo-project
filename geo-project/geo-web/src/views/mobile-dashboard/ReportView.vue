@@ -84,7 +84,7 @@ const deliveryCards = computed(() => {
   const summary = data.value?.deliverySummary
   if (!summary) return []
   return [
-    { label: '自有平台发布', icon: 'publish', metric: summary.published },
+    { label: '代运营平台发布', icon: 'publish', metric: summary.published },
     { label: '生态资产新增', icon: 'cluster', metric: summary.assetNew },
     { label: '已收录', icon: 'eye', metric: summary.indexed },
     { label: '核心问题覆盖', icon: 'check', metric: summary.coveredQuestions },

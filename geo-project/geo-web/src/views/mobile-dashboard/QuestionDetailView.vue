@@ -66,6 +66,25 @@
           <p v-else class="empty-answer">该核心问题相关场景内容正在持续建设与覆盖，暂无命中平台问答详情。</p>
         </section>
 
+        <section v-if="relatedContentTasks.length" class="detail-block">
+          <div class="block-title">
+            <MobileIcon name="content" />
+            <h3>内容建设依据</h3>
+          </div>
+          <div class="related-task-list">
+            <article v-for="task in relatedContentTasks" :key="task.draftId" class="related-task">
+              <div>
+                <strong>{{ task.title }}</strong>
+                <p v-if="task.keywords?.length">关键词：{{ task.keywords[0] }}</p>
+              </div>
+              <div class="related-task__meta">
+                <span>{{ contentTaskPlatforms(task.platformCodes) }}</span>
+                <time>{{ formatDate(task.date) }}</time>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <section class="detail-block">
           <div class="block-title">
             <MobileIcon name="document" />
@@ -115,7 +134,7 @@ import EmptyState from '@/components/mobile-dashboard/EmptyState.vue'
 import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { DashboardMetric, QuestionMonitorItem } from '@/types/mobileDashboard'
-import { aiPlatformLabel } from '@/utils/mobileDashboardDictionaries'
+import { aiPlatformLabel, contentPlatformLabel } from '@/utils/mobileDashboardDictionaries'
 import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
 import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
 import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
@@ -135,6 +154,7 @@ const markdown = new MarkdownIt({
   breaks: true,
 })
 const renderedResponse = computed(() => renderMarkdown(item.value?.responseText))
+const relatedContentTasks = computed(() => item.value?.relatedContentTasks || [])
 
 const aiPlatformLogos: Record<string, string> = {
   doubao: doubaoLogo,
@@ -167,6 +187,11 @@ function platformLogo(code?: string | null) {
 function renderMarkdown(value?: string | null) {
   const raw = value?.trim() || ''
   return raw ? markdown.render(raw) : ''
+}
+
+function contentTaskPlatforms(codes?: string[]) {
+  if (!codes?.length) return '待分发'
+  return codes.map((code) => contentPlatformLabel(code, store.contentPlatforms)).join(' / ')
 }
 
 function hitPlatformLabel(row: QuestionMonitorItem) {
@@ -228,6 +253,11 @@ function analysisRows(row: QuestionMonitorItem) {
 function formatDateTime(value?: string | null) {
   if (!value) return '暂无'
   return value.replace('T', ' ').slice(0, 16)
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return '暂无'
+  return value.slice(5, 10)
 }
 
 function readCachedItem() {
@@ -580,6 +610,51 @@ onMounted(loadItem)
   color: #006D44;
   font-weight: 700;
   word-break: break-all;
+}
+
+.related-task-list {
+  display: grid;
+  gap: 8px;
+}
+
+.related-task {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #eef0f2;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.related-task strong {
+  display: block;
+  color: #131b2e;
+  font-size: var(--mobile-text-md, 14px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-md, 20px);
+  word-break: break-word;
+}
+
+.related-task p,
+.related-task__meta {
+  margin: 0;
+  color: #52625C;
+  font-size: var(--mobile-text-xs, 12px);
+  line-height: var(--mobile-leading-label, 16px);
+}
+
+.related-task__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.related-task__meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .analysis-list {

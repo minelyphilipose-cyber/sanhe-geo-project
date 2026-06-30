@@ -111,6 +111,7 @@ public final class MobileDashboardAggregateVO {
         private String evidence;
         private String responseText;
         private List<String> tags = new ArrayList<>();
+        private List<ContentTaskItem> relatedContentTasks = new ArrayList<>();
     }
 
     @Data
@@ -148,6 +149,10 @@ public final class MobileDashboardAggregateVO {
     public static class TaskList {
         private boolean available;
         private String reason;
+        private Integer page;
+        private Integer size;
+        private Integer total;
+        private Integer totalPages;
         private List<ContentTaskItem> items = new ArrayList<>();
     }
 
@@ -165,6 +170,7 @@ public final class MobileDashboardAggregateVO {
     @Data
     public static class Content {
         private ContentProgress overview;
+        private List<MobileDashboardContentPlatformVO> contentPlatforms = new ArrayList<>();
         private List<PlatformCompletion> platformCompletion = new ArrayList<>();
         private TaskList taskList;
         private List<OwnedPublish> ownedPublish = new ArrayList<>();

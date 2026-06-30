@@ -90,7 +90,7 @@
               <strong>{{ item.firstRecommendCount }}</strong>
             </div>
             <div>
-              <span>裁判覆盖</span>
+              <span>智能分析</span>
               <strong>{{ item.coveragePercent }}%</strong>
             </div>
           </div>

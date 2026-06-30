@@ -6,6 +6,7 @@ export interface MobileDashboardSession {
   projectId: number
   projectName: string
   brandName: string
+  contentPlatforms?: ContentPlatform[]
 }
 
 export interface MobileDashboardBootstrap {
@@ -13,6 +14,7 @@ export interface MobileDashboardBootstrap {
   projectName: string
   brandName: string
   availablePages: Record<string, boolean>
+  contentPlatforms?: ContentPlatform[]
   message?: string
 }
 
@@ -27,7 +29,7 @@ export interface DashboardMetric<T = unknown> {
 
 export interface TrendPoint {
   date: string
-  value: number
+  value: number | null
 }
 
 export interface KeyMetric {
@@ -55,6 +57,12 @@ export interface ContentProgress {
   indexed: DashboardMetric<number>
   building: DashboardMetric<number>
   indexMeasurementScope?: string
+}
+
+export interface ContentPlatform {
+  code: string
+  label: string
+  icon: string
 }
 
 export interface EcoAssets {
@@ -130,6 +138,7 @@ export interface QuestionMonitorItem {
   evidence?: string | null
   responseText?: string | null
   tags: string[]
+  relatedContentTasks?: ContentTaskItem[]
 }
 
 export interface PlatformCompletion {
@@ -147,8 +156,17 @@ export interface OwnedPublish {
 
 export interface ContentDashboardData {
   overview: ContentProgress
+  contentPlatforms?: ContentPlatform[]
   platformCompletion: PlatformCompletion[]
-  taskList: { available: boolean; reason?: string; items: ContentTaskItem[] }
+  taskList: {
+    available: boolean
+    reason?: string
+    page?: number
+    size?: number
+    total?: number
+    totalPages?: number
+    items: ContentTaskItem[]
+  }
   ownedPublish: OwnedPublish[]
   ecoAssets: EcoAssets
 }

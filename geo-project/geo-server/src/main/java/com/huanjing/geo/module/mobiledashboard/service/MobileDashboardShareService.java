@@ -185,6 +185,7 @@ public class MobileDashboardShareService {
         vo.setProjectId(project.getId());
         vo.setProjectName(project.getProjectName());
         vo.setBrandName(project.getBrandName());
+        vo.setContentPlatforms(MobileDashboardContentChannelCatalog.platformOptions());
         return vo;
     }
 
@@ -201,6 +202,7 @@ public class MobileDashboardShareService {
                 "content", true,
                 "report", false
         ));
+        vo.setContentPlatforms(MobileDashboardContentChannelCatalog.platformOptions());
         vo.setMessage("Dashboard aggregation APIs are available. Judge-derived metrics remain unavailable until judge pipeline launch.");
         return vo;
     }

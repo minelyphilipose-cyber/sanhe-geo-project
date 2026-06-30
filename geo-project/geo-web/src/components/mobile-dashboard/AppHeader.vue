@@ -2,12 +2,10 @@
   <header class="mobile-header">
     <div class="mobile-header__main">
       <div class="mobile-header__brand">
-        <MobileIcon
-          :name="iconName"
-          class="mobile-header__mark"
-          :style="{ fontSize: `${iconSize}px` }"
-        />
-        <h1 :class="{ primary: titleTone === 'primary' }">幻境AI·数据看板</h1>
+        <h1 class="mobile-header__title">
+          <img class="mobile-header__brand-logo" :src="systemLogo" alt="幻境AI" />
+          <span class="mobile-header__suffix">数据看板</span>
+        </h1>
       </div>
       <button v-if="filterLabel" class="mobile-header__filter" type="button">
         <MobileIcon name="calendar" />
@@ -20,6 +18,7 @@
 </template>
 
 <script setup lang="ts">
+import systemLogo from '@/assets/brand/fantasy-logo-light.png'
 import MobileIcon from './MobileIcon.vue'
 
 withDefaults(defineProps<{
@@ -63,26 +62,40 @@ withDefaults(defineProps<{
 .mobile-header__brand {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
 }
 
-.mobile-header__mark {
-  flex: 0 0 auto;
-  color: var(--mobile-primary, #006D44);
-}
-
-.mobile-header h1 {
+.mobile-header__title {
   margin: 0;
-  color: var(--mobile-text, #131b2e);
-  font-size: var(--mobile-title-lg, 20px);
-  font-weight: 700;
-  line-height: var(--mobile-leading-title-lg, 26px);
-  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  line-height: 1;
 }
 
-.mobile-header h1.primary {
-  color: var(--mobile-primary, #006D44);
+.mobile-header__brand-logo {
+  flex: 0 0 auto;
+  width: 112px;
+  height: 38px;
+  display: block;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.mobile-header__suffix {
+  flex: 0 1 auto;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: #f0f1f3;
+  color: #4a4d52;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 2px;
+  white-space: nowrap;
 }
 
 .mobile-header p {

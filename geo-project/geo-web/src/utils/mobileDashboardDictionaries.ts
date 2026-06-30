@@ -1,3 +1,5 @@
+import type { ContentPlatform } from '@/types/mobileDashboard'
+
 export const aiPlatformLabels: Record<string, string> = {
   all: '全平台',
   doubao: '豆包',
@@ -44,13 +46,22 @@ export function aiPlatformLabel(code?: string | null) {
   return aiPlatformLabels[code] || '未知平台'
 }
 
-export function contentPlatformLabel(code?: string | null) {
+function contentPlatformEntry(code?: string | null, platforms?: ContentPlatform[]) {
+  if (!code || !platforms?.length) return undefined
+  return platforms.find((item) => item.code === code)
+}
+
+export function contentPlatformLabel(code?: string | null, platforms?: ContentPlatform[]) {
   if (!code) return '平台待定'
+  const entry = contentPlatformEntry(code, platforms)
+  if (entry?.label) return entry.label
   return contentPlatformLabels[code] || '平台待定'
 }
 
-export function contentPlatformIcon(code?: string | null) {
+export function contentPlatformIcon(code?: string | null, platforms?: ContentPlatform[]) {
   if (!code) return 'globe'
+  const entry = contentPlatformEntry(code, platforms)
+  if (entry?.icon) return entry.icon
   return contentPlatformIcons[code] || 'globe'
 }
 

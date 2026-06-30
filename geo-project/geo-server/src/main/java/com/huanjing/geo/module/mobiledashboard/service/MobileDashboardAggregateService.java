@@ -37,7 +37,6 @@ public class MobileDashboardAggregateService {
             )
             """;
     private static final List<String> AI_PLATFORM_CODES = List.of("doubao", "deepseek", "tongyi", "yuanbao");
-    private static final List<String> CONTENT_DETAIL_CHANNELS = List.of("official_site", "douyin", "xiaohongshu", "wechat_mp", "toutiao", "baijiahao", "zhihu");
     private static final Set<String> MEASURABLE_INDEX_CHANNELS = Set.of(
             "official_site", "agent_site", "brand_geo_site", "agent_official_site",
             "forum", "forum_site", "industry_site", "authority_media",
@@ -151,10 +150,16 @@ public class MobileDashboardAggregateService {
         if (rows.isEmpty()) {
             throw new BizException(404, "未找到该问题监测记录");
         }
-        return mergeQuestionMonitorRows(rows, judgeReady, judgeReason).get(0);
+        MobileDashboardAggregateVO.QuestionMonitorItem item = mergeQuestionMonitorRows(rows, judgeReady, judgeReason).get(0);
+        item.setRelatedContentTasks(loadRelatedBuildingContentTasks(projectId, item.getKeywordResultId()));
+        return item;
     }
 
     public MobileDashboardAggregateVO.Content content(Long projectId, YearMonth month) {
+        return content(projectId, month, 1, 4);
+    }
+
+    public MobileDashboardAggregateVO.Content content(Long projectId, YearMonth month, Integer taskPage, Integer taskSize) {
         YearMonth safeMonth = month == null ? YearMonth.now() : month;
         ContentFacts content = loadContentFacts(projectId, safeMonth);
         QuestionCoverage coverage = loadLatestQuestionCoverage(projectId);
@@ -162,8 +167,9 @@ public class MobileDashboardAggregateService {
 
         MobileDashboardAggregateVO.Content vo = new MobileDashboardAggregateVO.Content();
         vo.setOverview(toContentProgress(content));
+        vo.setContentPlatforms(MobileDashboardContentChannelCatalog.platformOptions());
         vo.setPlatformCompletion(loadPlatformCompletion(projectId, content.monthPublishedByChannel(), contentChannels));
-        vo.setTaskList(loadContentTaskList(projectId, DateRange.month(safeMonth)));
+        vo.setTaskList(loadContentTaskList(projectId, DateRange.month(safeMonth), taskPage, taskSize));
         vo.setOwnedPublish(loadOwnedPublish(content, contentChannels));
         vo.setEcoAssets(toEcoAssets(content, coverage.covered()));
         return vo;
@@ -286,10 +292,12 @@ public class MobileDashboardAggregateService {
                         )), projectId, Date.valueOf(range.start()), Date.valueOf(range.end()), MOBILE_QUESTION_TIER);
         List<MobileDashboardAggregateVO.TrendPoint> points = new ArrayList<>();
         for (LocalDate date = range.start(); !date.isAfter(range.end()); date = date.plusDays(1)) {
-            MentionAggregate aggregate = byDate.getOrDefault(date, new MentionAggregate(0, 0, 0));
+            MentionAggregate aggregate = byDate.get(date);
             MobileDashboardAggregateVO.TrendPoint point = new MobileDashboardAggregateVO.TrendPoint();
             point.setDate(date);
-            point.setValue(percent(aggregate.mentions(), aggregate.completed()));
+            point.setValue(aggregate == null || aggregate.completed() <= 0
+                    ? null
+                    : percent(aggregate.mentions(), aggregate.completed()));
             points.add(point);
         }
         return points;
@@ -1142,11 +1150,11 @@ public class MobileDashboardAggregateService {
                    AND allocated_count > 0
                 """, (rs, rowNum) -> normalizeContentChannelCode(rs.getString("channel_code")), projectId).stream()
                 .filter(StringUtils::hasText)
-                .filter(CONTENT_DETAIL_CHANNELS::contains)
+                .filter(MobileDashboardContentChannelCatalog.canonicalCodes()::contains)
                 .distinct()
-                .sorted(Comparator.comparingInt(CONTENT_DETAIL_CHANNELS::indexOf))
+                .sorted(Comparator.comparingInt(MobileDashboardContentChannelCatalog.canonicalCodes()::indexOf))
                 .toList();
-        return channels.isEmpty() ? CONTENT_DETAIL_CHANNELS : channels;
+        return channels.isEmpty() ? MobileDashboardContentChannelCatalog.canonicalCodes() : channels;
     }
 
     private List<MobileDashboardAggregateVO.PlatformCompletion> loadPlatformCompletion(Long projectId, Map<String, Long> publishedByChannel) {
@@ -1181,7 +1189,7 @@ public class MobileDashboardAggregateService {
     }
 
     private List<MobileDashboardAggregateVO.OwnedPublish> loadOwnedPublish(ContentFacts facts) {
-        return loadOwnedPublish(facts, CONTENT_DETAIL_CHANNELS);
+        return loadOwnedPublish(facts, MobileDashboardContentChannelCatalog.canonicalCodes());
     }
 
     private List<MobileDashboardAggregateVO.OwnedPublish> loadOwnedPublish(ContentFacts facts, List<String> contentChannels) {
@@ -1220,6 +1228,41 @@ public class MobileDashboardAggregateService {
     }
 
     private MobileDashboardAggregateVO.TaskList loadContentTaskList(Long projectId, DateRange range) {
+        return loadContentTaskList(projectId, range, 1, 4);
+    }
+
+    private MobileDashboardAggregateVO.TaskList loadContentTaskList(Long projectId, DateRange range, Integer page, Integer size) {
+        int resolvedSize = Math.max(1, Math.min(size == null ? 4 : size, 20));
+        int requestedPage = Math.max(1, page == null ? 1 : page);
+        Long totalValue = jdbcTemplate.queryForObject("""
+                SELECT COUNT(DISTINCT ad.id)
+                  FROM article_draft ad
+                  LEFT JOIN (
+                        SELECT article_id,
+                               COUNT(DISTINCT id) AS visible_count,
+                               MAX(COALESCE(published_at, verified_at, created_at)) AS latest_publish_at
+                         FROM article_publish_record
+                         WHERE project_id = ?
+                           AND publish_status IN (%s)
+                           AND COALESCE(target_channel, target_kind, '') IN (%s)
+                         GROUP BY article_id
+                 ) pub ON pub.article_id = ad.id
+                 WHERE ad.project_id = ?
+                   AND DATE(COALESCE(pub.latest_publish_at, ad.updated_at, ad.created_at)) BETWEEN ? AND ?
+                   AND (
+                        COALESCE(pub.visible_count, 0) > 0
+                        OR (
+                            %s
+                            AND COALESCE(ad.target_channel, '') IN (%s)
+                        )
+                   )
+                """.formatted(CURRENT_VISIBLE_PUBLISH_STATUS_SQL, contentDetailChannelSql(), deliveryDraftPredicate("ad"), contentDetailChannelSql()),
+                Long.class, projectId, projectId, Date.valueOf(range.start()), Date.valueOf(range.end()));
+        int total = totalValue == null ? 0 : Math.toIntExact(totalValue);
+        int totalPages = total == 0 ? 0 : (int) Math.ceil(total / (double) resolvedSize);
+        int resolvedPage = totalPages == 0 ? 1 : Math.min(requestedPage, totalPages);
+        int offset = total == 0 ? 0 : (resolvedPage - 1) * resolvedSize;
+
         List<MobileDashboardAggregateVO.ContentTaskItem> items = jdbcTemplate.query("""
                 SELECT ad.id,
                        ad.title,
@@ -1278,7 +1321,7 @@ public class MobileDashboardAggregateService {
                           END,
                           COALESCE(pub.latest_publish_at, ad.updated_at, ad.created_at) DESC,
                           ad.id DESC
-                 LIMIT 4
+                 LIMIT ? OFFSET ?
                 """.formatted(quoted(MEASURABLE_INDEX_CHANNELS), SELF_INDEX_CHANNEL_SQL, CURRENT_VISIBLE_PUBLISH_STATUS_SQL, contentDetailChannelSql(), deliveryDraftPredicate("ad"), contentDetailChannelSql()), (rs, rowNum) -> {
                     long visibleCount = rs.getLong("visible_count");
                     long indexedCount = rs.getLong("indexed_count");
@@ -1299,14 +1342,78 @@ public class MobileDashboardAggregateService {
                     }
                     item.setDate(date);
                     return item;
-                }, projectId, projectId, Date.valueOf(range.start()), Date.valueOf(range.end()));
+                }, projectId, projectId, Date.valueOf(range.start()), Date.valueOf(range.end()), resolvedSize, offset);
         MobileDashboardAggregateVO.TaskList list = new MobileDashboardAggregateVO.TaskList();
+        list.setPage(resolvedPage);
+        list.setSize(resolvedSize);
+        list.setTotal(total);
+        list.setTotalPages(totalPages);
         list.setItems(items);
         list.setAvailable(!items.isEmpty());
         if (items.isEmpty()) {
             list.setReason("暂无内容任务数据");
         }
         return list;
+    }
+
+    private List<MobileDashboardAggregateVO.ContentTaskItem> loadRelatedBuildingContentTasks(Long projectId, Long keywordResultId) {
+        if (keywordResultId == null || keywordResultId <= 0) {
+            return List.of();
+        }
+        String questionScene = jdbcTemplate.query("""
+                SELECT scene_code
+                  FROM keyword_group_result
+                 WHERE id = ?
+                """, rs -> rs.next() ? normalizeSceneCode(rs.getString("scene_code")) : "", keywordResultId);
+        if (!StringUtils.hasText(questionScene)) {
+            return List.of();
+        }
+
+        List<RelatedContentTaskCandidate> candidates = jdbcTemplate.query("""
+                SELECT ad.id,
+                       ad.title,
+                       ad.topic,
+                       ad.topic_as_question,
+                       ad.target_channel,
+                       ad.updated_at,
+                       ad.created_at,
+                       t.question_scene_code
+                  FROM article_draft ad
+                  JOIN article_prompt_template t ON t.id = ad.prompt_template_id
+                 WHERE ad.project_id = ?
+                   AND t.question_scene_code IS NOT NULL
+                   AND t.question_scene_code <> ''
+                   AND %s
+                   AND COALESCE(ad.target_channel, '') IN (%s)
+                   AND NOT EXISTS (
+                        SELECT 1
+                          FROM article_publish_record pr
+                         WHERE pr.article_id = ad.id
+                           AND pr.project_id = ad.project_id
+                           AND pr.publish_status IN (%s)
+                   )
+                 ORDER BY COALESCE(ad.updated_at, ad.created_at) DESC, ad.id DESC
+                 LIMIT 12
+                """.formatted(deliveryDraftPredicate("ad"), contentDetailChannelSql(), CURRENT_VISIBLE_PUBLISH_STATUS_SQL), (rs, rowNum) -> {
+                    MobileDashboardAggregateVO.ContentTaskItem item = new MobileDashboardAggregateVO.ContentTaskItem();
+                    item.setDraftId(rs.getLong("id"));
+                    item.setTitle(rs.getString("title"));
+                    item.setKeywords(taskKeywords(rs.getString("topic_as_question"), rs.getString("topic")));
+                    item.setPlatformCodes(taskPlatformCodes(null, rs.getString("target_channel")));
+                    item.setStatus("building");
+                    LocalDateTime date = nullableDateTime(rs, "updated_at");
+                    if (date == null) {
+                        date = nullableDateTime(rs, "created_at");
+                    }
+                    item.setDate(date);
+                    return new RelatedContentTaskCandidate(normalizeSceneCode(rs.getString("question_scene_code")), item);
+                }, projectId);
+        return candidates.stream()
+                .filter(candidate -> questionScene.equals(candidate.sceneCode()))
+                .map(RelatedContentTaskCandidate::item)
+                .filter(item -> item.getPlatformCodes() != null && !item.getPlatformCodes().isEmpty())
+                .limit(3)
+                .toList();
     }
 
     private long countBuildingContent(Long projectId, DateRange range) {
@@ -1685,24 +1792,11 @@ public class MobileDashboardAggregateService {
     }
 
     private String normalizeContentChannelCode(String code) {
-        String value = normalize(code);
-        return switch (value) {
-            case "wechat", "self_media:wechat", "self_media:wechat_mp" -> "wechat_mp";
-            case "self_media:douyin" -> "douyin";
-            case "self_media:xiaohongshu" -> "xiaohongshu";
-            case "self_media:toutiao" -> "toutiao";
-            case "self_media:baijiahao" -> "baijiahao";
-            case "self_media:zhihu" -> "zhihu";
-            case "agent_site", "agent_site_article", "brand_geo_site", "agent_official_site" -> "official_site";
-            default -> value;
-        };
+        return MobileDashboardContentChannelCatalog.normalize(code);
     }
 
     private String contentDetailChannelSql() {
-        return "'official_site','agent_site','agent_site_article','brand_geo_site','agent_official_site',"
-                + "'wechat','wechat_mp','douyin','xiaohongshu','toutiao','baijiahao','zhihu',"
-                + "'self_media:wechat','self_media:wechat_mp','self_media:douyin','self_media:xiaohongshu',"
-                + "'self_media:toutiao','self_media:baijiahao','self_media:zhihu'";
+        return MobileDashboardContentChannelCatalog.quotedSql(MobileDashboardContentChannelCatalog.detailChannelCodesWithAliases());
     }
 
     private String normalizeSceneCode(String code) {
@@ -1796,6 +1890,9 @@ public class MobileDashboardAggregateService {
     }
 
     private record QuestionSceneCoverageRow(Long keywordResultId, String sceneCode, boolean covered) {
+    }
+
+    private record RelatedContentTaskCandidate(String sceneCode, MobileDashboardAggregateVO.ContentTaskItem item) {
     }
 
     private record QuestionMonitorRow(Long keywordResultId,

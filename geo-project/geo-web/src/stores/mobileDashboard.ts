@@ -31,6 +31,7 @@ export const useMobileDashboardStore = defineStore('mobileDashboard', {
   getters: {
     brandName: (state) => state.context?.brandName || '月娇家居',
     projectName: (state) => state.context?.projectName || '',
+    contentPlatforms: (state) => state.context?.contentPlatforms || [],
   },
 
   actions: {
