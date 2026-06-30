@@ -44,6 +44,18 @@ public class MobileDashboardAggregateService {
             "self_media:wechat", "self_media:wechat_mp", "self_media:douyin", "self_media:xiaohongshu",
             "self_media:toutiao", "self_media:baijiahao", "self_media:zhihu");
     private static final String SELF_INDEX_CHANNEL_SQL = "'official_site','agent_site','brand_geo_site','agent_official_site','forum','forum_site','industry_site','authority_media'";
+    private static final String PUBLIC_CONTENT_PUBLISH_URL_SQL = """
+            CASE
+              WHEN url_quality = 'public_url'
+               AND NULLIF(TRIM(published_url), '') IS NOT NULL
+               AND LOWER(TRIM(published_url)) NOT LIKE '%%/preview%%'
+               AND LOWER(TRIM(published_url)) NOT LIKE '%%/edit%%'
+               AND LOWER(TRIM(published_url)) NOT LIKE '%%creator.xiaohongshu.com%%'
+               AND LOWER(TRIM(published_url)) NOT LIKE '%%mp.toutiao.com/profile_v4/graphic/preview%%'
+               AND LOWER(TRIM(published_url)) NOT LIKE '%%baijiahao.baidu.com/builder/preview%%'
+              THEN NULLIF(TRIM(published_url), '')
+            END
+            """;
 
     private final JdbcTemplate jdbcTemplate;
     private final MobileDashboardEntityJudgeService entityJudgeService;
@@ -1292,7 +1304,7 @@ public class MobileDashboardAggregateService {
                                MAX(COALESCE(published_at, verified_at, created_at)) AS latest_publish_at,
                                SUBSTRING_INDEX(
                                    GROUP_CONCAT(
-                                       NULLIF(TRIM(published_url), '')
+                                       %s
                                        ORDER BY COALESCE(published_at, verified_at, created_at) DESC, id DESC
                                        SEPARATOR '\n'
                                    ),
@@ -1322,7 +1334,7 @@ public class MobileDashboardAggregateService {
                           COALESCE(pub.latest_publish_at, ad.updated_at, ad.created_at) DESC,
                           ad.id DESC
                  LIMIT ? OFFSET ?
-                """.formatted(quoted(MEASURABLE_INDEX_CHANNELS), SELF_INDEX_CHANNEL_SQL, CURRENT_VISIBLE_PUBLISH_STATUS_SQL, contentDetailChannelSql(), deliveryDraftPredicate("ad"), contentDetailChannelSql()), (rs, rowNum) -> {
+                """.formatted(quoted(MEASURABLE_INDEX_CHANNELS), SELF_INDEX_CHANNEL_SQL, PUBLIC_CONTENT_PUBLISH_URL_SQL, CURRENT_VISIBLE_PUBLISH_STATUS_SQL, contentDetailChannelSql(), deliveryDraftPredicate("ad"), contentDetailChannelSql()), (rs, rowNum) -> {
                     long visibleCount = rs.getLong("visible_count");
                     long indexedCount = rs.getLong("indexed_count");
                     String status = indexedCount > 0 ? "indexed" : (visibleCount > 0 ? "published" : "building");

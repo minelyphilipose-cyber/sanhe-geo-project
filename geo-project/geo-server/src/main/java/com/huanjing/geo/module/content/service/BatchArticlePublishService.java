@@ -85,6 +85,8 @@ public class BatchArticlePublishService {
     private String schedulerLockKey;
     @Value("${geo.content.batch-publish.lock-ttl-seconds:120}")
     private long schedulerLockTtlSeconds;
+    @Value("${geo.content.batch-publish.running-timeout-minutes:120}")
+    private long runningTimeoutMinutes;
 
     @Transactional
     public BatchArticlePublishResponse submit(BatchArticlePublishRequest request) {
@@ -224,6 +226,7 @@ public class BatchArticlePublishService {
     }
 
     public void executeDueItems(int limit) {
+        recoverStaleRunningItems();
         if (hasAnyRunningItem()) {
             return;
         }
@@ -770,6 +773,23 @@ public class BatchArticlePublishService {
                         .eq(BatchArticlePublishItem::getStatus, "running")
         );
         return running != null && running > 0;
+    }
+
+    private void recoverStaleRunningItems() {
+        if (runningTimeoutMinutes <= 0) {
+            return;
+        }
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(Math.max(1, runningTimeoutMinutes));
+        int recovered = itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
+                .eq(BatchArticlePublishItem::getStatus, "running")
+                .lt(BatchArticlePublishItem::getUpdatedAt, cutoff)
+                .set(BatchArticlePublishItem::getStatus, "failed")
+                .set(BatchArticlePublishItem::getErrorMessage,
+                        "批量发布任务运行超过 " + Math.max(1, runningTimeoutMinutes) + " 分钟，已自动释放以恢复队列"));
+        if (recovered > 0) {
+            log.warn("batch article publish stale running items recovered count={} timeoutMinutes={}",
+                    recovered, Math.max(1, runningTimeoutMinutes));
+        }
     }
 
     private boolean hasOtherRunningItem(BatchArticlePublishItem item) {
