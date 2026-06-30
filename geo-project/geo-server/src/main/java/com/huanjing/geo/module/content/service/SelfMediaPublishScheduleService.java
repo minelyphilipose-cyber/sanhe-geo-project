@@ -72,6 +72,7 @@ import java.util.Set;
 public class SelfMediaPublishScheduleService {
     private static final int ERROR_CODE = 70040;
     private static final int DEFAULT_INTERVAL_MINUTES = 30;
+    private static final int MAX_ACTIVE_SCHEDULES_PER_BRAND = 10;
     private static final int QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES = 3;
     private static final int QUICK_SCHEDULE_SLOT_LOOKAHEAD_HOURS = 12;
     private static final int QUICK_DISPATCH_MANUAL_START_DELAY_MINUTES = 2;
@@ -344,6 +345,7 @@ public class SelfMediaPublishScheduleService {
         LocalDateTime plannedCursor = validated.windowStart();
         LocalDateTime executionCursor = validated.executionWindowStart();
         QuotaPrecheck quotaPrecheck = quotaPrecheck(validated.brandId());
+        int activeBrandSchedules = activeScheduleCount(validated.brandId());
         List<ScheduleQuotaReservation> quotaReservations = new ArrayList<>();
         for (Long articleId : validated.articleIds()) {
             ArticleDraft article = articleDraftMapper.selectById(articleId);
@@ -361,6 +363,15 @@ public class SelfMediaPublishScheduleService {
                 if (executionCursor.isAfter(validated.executionWindowEnd())) {
                     response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
                             "SCHEDULE_EXECUTION_WINDOW_FULL", "执行填充时间窗口已满，请扩大时间窗口或减少排期数量", null));
+                    continue;
+                }
+                if (activeBrandSchedules + quotaReservations.size() >= MAX_ACTIVE_SCHEDULES_PER_BRAND) {
+                    response.getRejectedItems().add(brandQueueFullRejected(
+                            articleId,
+                            accountId,
+                            candidate.account().getPlatform(),
+                            activeBrandSchedules + quotaReservations.size()
+                    ));
                     continue;
                 }
                 int requiredLeadMinutes = requiredPlatformScheduleCreateLeadMinutes(
@@ -475,6 +486,12 @@ public class SelfMediaPublishScheduleService {
         LocalDateTime now = LocalDateTime.now();
         PeriodWindow month = currentMonth(now);
         if (!quotaReplacementAlreadyApplied) {
+            SelfMediaPublishScheduleRejectedItemVO queueRejected = brandQueuePrecheck(
+                    article.getId(), account.getId(), platform, brandId);
+            if (queueRejected != null) {
+                return quickResponse("queue_full", queueRejected.getCode(), queueRejected.getMessage(),
+                        article.getId(), brandId, platform, account.getId(), null, null, null);
+            }
             SelfMediaPublishScheduleRejectedItemVO quotaRejected = quotaPrecheck(brandId)
                     .check(article.getId(), account.getId(), platform);
             if (quotaRejected != null) {
@@ -525,6 +542,19 @@ public class SelfMediaPublishScheduleService {
         SelfMediaPublishScheduleCreateResponse response = new SelfMediaPublishScheduleCreateResponse();
         response.setRequestId(requestRow.getId());
         response.setRequestIdempotencyKey(requestKey);
+        SelfMediaPublishScheduleRejectedItemVO queueRejected = brandQueuePrecheck(
+                plan.response().getArticleId(),
+                plan.response().getSelfMediaAccountId(),
+                plan.response().getPlatform(),
+                plan.response().getBrandId()
+        );
+        if (queueRejected != null) {
+            response.getRejectedItems().add(queueRejected);
+            requestRow.setScheduleCount(0);
+            requestRow.setStatus("completed");
+            requestMapper.updateById(requestRow);
+            return response;
+        }
         SelfMediaPublishSchedule inserted = createScheduleRow(requestRow, operatorId, data.candidate(),
                 data.plannedPublishAt(), data.nextAttemptAt(), data.strategy(), true);
         if (inserted == null) {
@@ -2619,6 +2649,39 @@ public class SelfMediaPublishScheduleService {
 
     public boolean hasActiveSelfMediaSchedule(Long articleId) {
         return hasActiveSelfMediaSchedule(articleId, null);
+    }
+
+    private int activeScheduleCount(Long brandId) {
+        if (brandId == null || brandId <= 0) {
+            return 0;
+        }
+        long count = scheduleMapper.countActiveByBrandId(
+                brandId,
+                new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
+        );
+        return count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count;
+    }
+
+    private SelfMediaPublishScheduleRejectedItemVO brandQueuePrecheck(Long articleId,
+                                                                      Long accountId,
+                                                                      String platform,
+                                                                      Long brandId) {
+        int activeCount = activeScheduleCount(brandId);
+        if (activeCount < MAX_ACTIVE_SCHEDULES_PER_BRAND) {
+            return null;
+        }
+        return brandQueueFullRejected(articleId, accountId, platform, activeCount);
+    }
+
+    private SelfMediaPublishScheduleRejectedItemVO brandQueueFullRejected(Long articleId,
+                                                                          Long accountId,
+                                                                          String platform,
+                                                                          int activeCount) {
+        return rejected(articleId, accountId, platform,
+                "BRAND_SELF_MEDIA_QUEUE_FULL",
+                "当前品牌已有 " + activeCount + " 个自媒体任务正在排队或处理中，最多允许 "
+                        + MAX_ACTIVE_SCHEDULES_PER_BRAND + " 个。请等待部分任务完成后再继续分发。",
+                "内容分发 > 自媒体排期");
     }
 
     private void refundDistributionQuotaIfPresent(SelfMediaPublishSchedule row) {

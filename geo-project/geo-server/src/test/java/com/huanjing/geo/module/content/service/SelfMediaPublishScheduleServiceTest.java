@@ -225,6 +225,22 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void createSchedules_rejectsWhenBrandActiveQueueFull() {
+        prepareValidArticleAndAccount();
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(scheduleMapper.countActiveByBrandId(eq(8L), anyList())).thenReturn(10L);
+        stubRequestInsert();
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(validRequest(), "new-key");
+
+        assertTrue(response.getCreatedSchedules().isEmpty());
+        assertEquals(1, response.getRejectedItems().size());
+        assertEquals("BRAND_SELF_MEDIA_QUEUE_FULL", response.getRejectedItems().get(0).getCode());
+        verify(scheduleMapper, never()).insert(any());
+        verify(companyChannelQuotaService, never()).reserveSelfMediaSchedules(anyLong(), anyList());
+    }
+
+    @Test
     void createSchedules_marksArticleDistributingWhenScheduleCreated() {
         ArticleDraft article = article();
         when(articleDraftMapper.selectById(10L)).thenReturn(article);
@@ -591,6 +607,21 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("replace_required", response.getAction());
         assertEquals(70L, response.getReplaceScheduleId());
         assertEquals("该平台本月文章已做排期处理，若继续发布将替换已排期文章，是否继续？", response.getMessage());
+        verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void dispatchPlatformQuickScheduleRejectsWhenBrandActiveQueueFull() {
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(scheduleMapper.countActiveByBrandId(eq(8L), anyList())).thenReturn(10L);
+
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("toutiao", false), "dispatch-key");
+
+        assertEquals("queue_full", response.getAction());
+        assertEquals("BRAND_SELF_MEDIA_QUEUE_FULL", response.getCode());
+        verify(requestMapper, never()).insert(any());
         verify(scheduleMapper, never()).insert(any());
     }
 

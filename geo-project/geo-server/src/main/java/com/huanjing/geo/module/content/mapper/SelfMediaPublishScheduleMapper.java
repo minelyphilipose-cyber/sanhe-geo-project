@@ -318,6 +318,20 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
 
     @Select("""
             <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE brand_id = #{brandId}
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    long countActiveByBrandId(@Param("brandId") Long brandId,
+                              @Param("statuses") List<String> statuses);
+
+    @Select("""
+            <script>
             SELECT DISTINCT article_id
             FROM self_media_publish_schedule
             WHERE article_id IN
