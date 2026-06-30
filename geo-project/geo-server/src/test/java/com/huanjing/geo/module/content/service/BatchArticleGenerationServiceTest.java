@@ -85,6 +85,7 @@ class BatchArticleGenerationServiceTest {
     private ArticleGenerationReadinessService readinessService;
     private CurrentUserService currentUserService;
     private BrandAccessService brandAccessService;
+    private LlmCallFacade llmCallFacade;
     private ArticleCoverSelectionService coverSelectionService;
     private BatchArticleGenerationService service;
 
@@ -113,6 +114,7 @@ class BatchArticleGenerationServiceTest {
         readinessService = mock(ArticleGenerationReadinessService.class);
         currentUserService = mock(CurrentUserService.class);
         brandAccessService = mock(BrandAccessService.class);
+        llmCallFacade = mock(LlmCallFacade.class);
         coverSelectionService = mock(ArticleCoverSelectionService.class);
         when(readinessService.detectTaskReadinessWarningCodes(any(), any(), any())).thenReturn(List.of());
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
@@ -133,7 +135,7 @@ class BatchArticleGenerationServiceTest {
                 currentUserService,
                 brandAccessService,
                 mock(PlatformCredentialService.class),
-                mock(LlmCallFacade.class),
+                llmCallFacade,
                 mock(MarkdownImageReferenceValidator.class),
                 mock(ArticleAiDraftPromptFilter.class),
                 articleGenerationEngine,
@@ -414,6 +416,54 @@ class BatchArticleGenerationServiceTest {
         assertEquals(3000L, task.getSubjectProjectId());
         assertEquals(TemplatePerspectiveCodes.INDUSTRY_NEUTRAL, task.getPerspectiveCode());
         assertEquals(31L, task.getPerspectiveMatchedConfigId());
+    }
+
+    @Test
+    void createSystemBatchDoesNotRunSmartTemplateMatchingSynchronously() throws Exception {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+
+        Project project = new Project();
+        project.setId(10L);
+        project.setCompanyId(20L);
+        project.setBrandId(30L);
+        project.setStatus("active");
+        Brand brand = new Brand();
+        brand.setId(30L);
+        when(projectMapper.selectById(10L)).thenReturn(project);
+        when(brandMapper.selectById(30L)).thenReturn(brand);
+        when(perspectiveService.resolve(30L, "self_media", "wechat"))
+                .thenReturn(TemplatePerspectiveService.ResolvedPerspective.customer());
+        when(subjectRotationService.resolve(project, brand, "self_media", TemplatePerspectiveCodes.CUSTOMER))
+                .thenReturn(new ThirdPartySubjectRotationService.RotationResult(30L, 10L, 30L, 10L, false));
+
+        ArticlePromptTemplate firstTemplate = template(101L, "self_media", "wechat", "industry_article",
+                TemplatePerspectiveCodes.CUSTOMER);
+        ArticlePromptTemplateVersion firstVersion = new ArticlePromptTemplateVersion();
+        firstVersion.setId(201L);
+        firstVersion.setTemplateId(101L);
+        when(allocationService.allocate(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(List.of(new ArticleTemplateAllocationService.AllocatedTemplate(firstTemplate, firstVersion, 1)));
+        when(batchMapper.insert(any(BatchArticleGenerationBatch.class))).thenAnswer(invocation -> {
+            BatchArticleGenerationBatch batch = invocation.getArgument(0);
+            batch.setId(500L);
+            return 1;
+        });
+
+        BatchArticleGenerateRequest req = new BatchArticleGenerateRequest();
+        req.setProjectId(10L);
+        req.setTopicSource("manual");
+        BatchArticleGenerateRequest.TopicConfig topic = new BatchArticleGenerateRequest.TopicConfig();
+        topic.setTopic("行业观察");
+        topic.setQuestionSceneCode("problem_solution");
+        topic.setPlatforms(List.of(platform("self_media", "wechat", 1)));
+        req.setTopics(List.of(topic));
+
+        BatchArticleGenerateResponse response = service.createSystemBatch(req, null);
+
+        assertEquals(500L, response.batchId());
+        assertThat(executor.commands).hasSize(1);
+        verify(llmCallFacade, never()).execute(any());
     }
 
     @Test

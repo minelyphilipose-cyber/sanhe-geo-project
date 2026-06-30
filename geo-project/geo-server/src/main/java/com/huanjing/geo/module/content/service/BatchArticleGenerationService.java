@@ -289,9 +289,8 @@ public class BatchArticleGenerationService {
                     "Single batch article generation count must be <= " + MAX_BATCH_ARTICLE_COUNT);
         }
         Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo = new HashMap<>();
-        Map<String, SmartTemplateSelection> smartSelections = selectSmartTemplates(req, project.getBrandId(), perspectiveMemo);
         List<ValidatedTopic> topics = validateTopics(project.getId(), project.getBrandId(), topicSource, req.getTopics(),
-                notices, smartSelections, perspectiveMemo);
+                notices, Map.of(), perspectiveMemo);
         int totalCount = topics.stream()
                 .flatMap(topic -> topic.platforms().stream())
                 .mapToInt(platform -> platform.count() == null ? 0 : platform.count())
@@ -348,6 +347,7 @@ public class BatchArticleGenerationService {
                         task.setChannelSubCode(platform.channelSubCode());
                         task.setAgentSiteModule(platform.agentSiteModule());
                         task.setArticleTypeCode(platform.articleTypeCode());
+                        task.setQuestionSceneCode(topic.questionSceneCode());
                         task.setPromptTemplateId(platform.templateId());
                         task.setPromptTemplateVersionId(platform.templateVersionId());
                         task.setPerspectiveCode(platform.perspectiveCode());
@@ -564,6 +564,7 @@ public class BatchArticleGenerationService {
                         .eq(BatchArticleGenerationTask::getBatchId, batchId)
                         .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
         );
+        applyAsyncSmartTemplateMatching(batch, tasks);
         submitBatchTasks(batch, tasks);
     }
 
@@ -582,7 +583,135 @@ public class BatchArticleGenerationService {
                         .in(BatchArticleGenerationTask::getId, taskIds)
                         .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
         );
+        applyAsyncSmartTemplateMatching(batch, tasks);
         submitBatchTasks(batch, tasks);
+    }
+
+    private void applyAsyncSmartTemplateMatching(BatchArticleGenerationBatch batch, List<BatchArticleGenerationTask> tasks) {
+        List<TaskTemplateMatchGroup> groups = collectAsyncSmartTemplateMatchGroups(batch, tasks);
+        if (groups.isEmpty()) {
+            return;
+        }
+        Map<String, SmartTemplateSelection> selections = selectSmartTemplates(groups.stream()
+                .map(TaskTemplateMatchGroup::unit)
+                .toList());
+        if (selections.isEmpty()) {
+            return;
+        }
+        for (TaskTemplateMatchGroup group : groups) {
+            SmartTemplateSelection selection = selections.get(group.unitKey());
+            if (selection == null || selection.templateIds().isEmpty()) {
+                continue;
+            }
+            List<ArticleTemplateAllocationService.TemplateWithVersion> candidates = group.unit().candidates().stream()
+                    .filter(item -> selection.templateIds().contains(item.template().getId()))
+                    .toList();
+            List<ArticleTemplateAllocationService.AllocatedTemplate> allocated =
+                    allocationService.allocateCandidates(candidates, group.tasks().size());
+            if (allocated.isEmpty()) {
+                continue;
+            }
+            applySmartTemplateAllocation(group.tasks(), allocated);
+        }
+    }
+
+    private List<TaskTemplateMatchGroup> collectAsyncSmartTemplateMatchGroups(BatchArticleGenerationBatch batch,
+                                                                             List<BatchArticleGenerationTask> tasks) {
+        if (batch == null || tasks == null || tasks.isEmpty()) {
+            return List.of();
+        }
+        Map<String, List<BatchArticleGenerationTask>> groupedTasks = new LinkedHashMap<>();
+        for (BatchArticleGenerationTask task : tasks) {
+            if (!isAsyncSmartTemplateCandidate(task)) {
+                continue;
+            }
+            ChannelRef channel = new ChannelRef(
+                    trim(task.getChannelGroupCode()),
+                    ArticlePromptChannels.canonicalSubCode(task.getChannelGroupCode(), task.getChannelSubCode()),
+                    ArticlePromptChannels.contentStyle(task.getChannelGroupCode(), task.getChannelSubCode())
+            );
+            String questionSceneCode = resolveTaskQuestionSceneCode(task);
+            String key = String.join("::",
+                    String.valueOf(task.getRowNo()),
+                    Objects.toString(task.getTopic(), ""),
+                    Objects.toString(task.getTopicAsQuestion(), ""),
+                    Objects.toString(questionSceneCode, ""),
+                    Objects.toString(channel.groupCode(), ""),
+                    Objects.toString(channel.subCode(), ""),
+                    TemplatePerspectiveCodes.normalize(task.getPerspectiveCode()));
+            groupedTasks.computeIfAbsent(key, ignored -> new ArrayList<>()).add(task);
+        }
+        List<TaskTemplateMatchGroup> groups = new ArrayList<>();
+        int index = 0;
+        for (List<BatchArticleGenerationTask> groupTasks : groupedTasks.values()) {
+            BatchArticleGenerationTask first = groupTasks.get(0);
+            ChannelRef channel = new ChannelRef(
+                    trim(first.getChannelGroupCode()),
+                    ArticlePromptChannels.canonicalSubCode(first.getChannelGroupCode(), first.getChannelSubCode()),
+                    ArticlePromptChannels.contentStyle(first.getChannelGroupCode(), first.getChannelSubCode())
+            );
+            String questionSceneCode = resolveTaskQuestionSceneCode(first);
+            List<ArticleTemplateAllocationService.TemplateWithVersion> candidates = allocationService.activeTemplates(
+                            channel.groupCode(), channel.subCode(), questionSceneCode,
+                            TemplatePerspectiveCodes.normalize(first.getPerspectiveCode())).stream()
+                    .filter(item -> item.template().getWeight() != null && item.template().getWeight() > 0)
+                    .toList();
+            if (candidates.size() <= 1) {
+                continue;
+            }
+            SmartTemplateMatchUnit unit = new SmartTemplateMatchUnit(
+                    "async_" + index++,
+                    trim(first.getTopic()),
+                    trimToNull(first.getTopicAsQuestion()),
+                    questionSceneCode,
+                    channel,
+                    groupTasks.size(),
+                    candidates
+            );
+            groups.add(new TaskTemplateMatchGroup(unit.unitKey(), groupTasks, unit));
+        }
+        return groups;
+    }
+
+    private boolean isAsyncSmartTemplateCandidate(BatchArticleGenerationTask task) {
+        return task != null
+                && STATUS_PENDING.equals(task.getStatus())
+                && "auto".equals(trim(task.getAllocationMode()))
+                && TEMPLATE_SOURCE_WEIGHTED.equals(trim(task.getTemplateSource()))
+                && StringUtils.hasText(task.getChannelGroupCode())
+                && StringUtils.hasText(task.getPerspectiveCode());
+    }
+
+    private String resolveTaskQuestionSceneCode(BatchArticleGenerationTask task) {
+        String questionSceneCode = normalizeQuestionScene(task == null ? null : task.getQuestionSceneCode());
+        if (StringUtils.hasText(questionSceneCode)) {
+            return questionSceneCode;
+        }
+        ArticlePromptTemplate template = task == null || task.getPromptTemplateId() == null
+                ? null
+                : promptTemplateMapper.selectById(task.getPromptTemplateId());
+        return normalizeQuestionScene(template == null ? null : template.getQuestionSceneCode());
+    }
+
+    private void applySmartTemplateAllocation(List<BatchArticleGenerationTask> tasks,
+                                              List<ArticleTemplateAllocationService.AllocatedTemplate> allocated) {
+        int taskIndex = 0;
+        for (ArticleTemplateAllocationService.AllocatedTemplate item : allocated) {
+            for (int i = 0; i < item.count() && taskIndex < tasks.size(); i++) {
+                BatchArticleGenerationTask task = tasks.get(taskIndex++);
+                ArticlePromptTemplate template = item.template();
+                ArticlePromptTemplateVersion version = item.version();
+                task.setPromptTemplateId(template.getId());
+                task.setPromptTemplateVersionId(version.getId());
+                task.setArticleType(resolveTaskArticleType(template.getArticleTypeCode()));
+                task.setArticleTypeCode(template.getArticleTypeCode());
+                task.setAgentSiteModule(template.getAgentSiteModule());
+                task.setContentStyle(ArticlePromptChannels.contentStyle(template.getChannelGroupCode(), template.getChannelSubCode()));
+                task.setQuestionSceneCode(template.getQuestionSceneCode());
+                task.setTemplateSource(TEMPLATE_SOURCE_SMART);
+                taskMapper.updateById(task);
+            }
+        }
     }
 
     private boolean submitBatchRunner(Long batchId) {
@@ -1599,7 +1728,10 @@ public class BatchArticleGenerationService {
             BatchArticleGenerateRequest req,
             Long brandId,
             Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo) {
-        List<SmartTemplateMatchUnit> units = collectSmartTemplateMatchUnits(req, brandId, perspectiveMemo);
+        return selectSmartTemplates(collectSmartTemplateMatchUnits(req, brandId, perspectiveMemo));
+    }
+
+    private Map<String, SmartTemplateSelection> selectSmartTemplates(List<SmartTemplateMatchUnit> units) {
         if (units.isEmpty()) {
             return Map.of();
         }
@@ -2364,15 +2496,20 @@ public class BatchArticleGenerationService {
     }
 
     private record SmartTemplateMatchUnit(String unitKey,
-                                          String topic,
-                                          String topicAsQuestion,
-                                          String questionSceneCode,
-                                          ChannelRef channel,
-                                          int count,
-                                          List<ArticleTemplateAllocationService.TemplateWithVersion> candidates) {
+                                           String topic,
+                                           String topicAsQuestion,
+                                           String questionSceneCode,
+                                           ChannelRef channel,
+                                           int count,
+                                           List<ArticleTemplateAllocationService.TemplateWithVersion> candidates) {
+    }
+
+    private record TaskTemplateMatchGroup(String unitKey,
+                                          List<BatchArticleGenerationTask> tasks,
+                                          SmartTemplateMatchUnit unit) {
     }
 
     private record SmartTemplateSelection(List<Long> templateIds,
-                                          String reason) {
+                                           String reason) {
     }
 }

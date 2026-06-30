@@ -29,6 +29,7 @@ public class BatchArticleGenerationTask {
     private String channelSubCode;
     private String agentSiteModule;
     private String articleTypeCode;
+    private String questionSceneCode;
     private String medicalIndustryCode;
     private String medicalCategoryCode;
     private String medicalCategoryName;
