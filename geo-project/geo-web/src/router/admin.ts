@@ -418,6 +418,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '字典中心', permissions: ['user.manage'] },
     },
     {
+      path: 'settings/business-calendar',
+      name: 'BusinessCalendarManagement',
+      component: () => import('@/views/admin/settings/BusinessCalendarManagement.vue'),
+      meta: { title: '工作日历', permissions: ['user.manage'] },
+    },
+    {
       path: 'settings/affix-words',
       name: 'KeywordAffixWordManage',
       component: () => import('@/views/admin/settings/KeywordAffixWordManage.vue'),

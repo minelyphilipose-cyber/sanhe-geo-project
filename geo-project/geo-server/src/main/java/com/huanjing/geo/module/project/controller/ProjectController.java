@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaAutoScheduleRequest;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleConfigRequest;
+import com.huanjing.geo.module.content.service.BusinessCalendarService;
 import com.huanjing.geo.module.content.service.ProjectSelfMediaScheduleService;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchVO;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchDetailVO;
@@ -93,6 +94,12 @@ public class ProjectController {
         return R.ok(projectSelfMediaScheduleService.getBatchDetail(id, targetMonth));
     }
 
+    @GetMapping("/{id:\\d+}/self-media-schedule-calendar-status")
+    public R<BusinessCalendarService.CalendarFileStatus> selfMediaScheduleCalendarStatus(@PathVariable Long id,
+                                                                                         @RequestParam String targetMonth) {
+        return R.ok(projectSelfMediaScheduleService.calendarStatus(id, targetMonth));
+    }
+
     @PostMapping("/{id:\\d+}/self-media-schedule-batches/{targetMonth}/retry-failed")
     public R<ProjectSelfMediaScheduleBatchDetailVO> retryFailedSelfMediaScheduleBatchItems(@PathVariable Long id,
                                                                                            @PathVariable String targetMonth) {
@@ -136,11 +143,13 @@ public class ProjectController {
     @PostMapping("/{id:\\d+}/self-media-schedules/auto-create")
     public R<SelfMediaPublishAutoScheduleResponse> createSelfMediaAutoSchedules(
             @PathVariable Long id,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody ProjectSelfMediaAutoScheduleRequest request) {
         return R.ok(projectSelfMediaScheduleService.createForProject(
                 id,
                 request,
-                ProjectSelfMediaScheduleService.TRIGGER_MANUAL
+                ProjectSelfMediaScheduleService.TRIGGER_MANUAL,
+                idempotencyKey
         ));
     }
 

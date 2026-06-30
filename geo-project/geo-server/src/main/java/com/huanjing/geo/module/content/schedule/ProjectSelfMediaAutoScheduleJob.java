@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.ZoneId;
 import java.time.YearMonth;
 
 @Slf4j
@@ -22,10 +23,15 @@ public class ProjectSelfMediaAutoScheduleJob {
     private int progressLimit;
     @Value("${geo.self-media.auto-schedule.job.compensation-limit:20}")
     private int compensationLimit;
+    @Value("${geo.self-media.auto-schedule.job.timezone:Asia/Shanghai}")
+    private String timezone;
 
-    @Scheduled(cron = "${geo.self-media.auto-schedule.job.cron:0 15 2 1 * *}")
+    @Scheduled(
+            cron = "${geo.self-media.auto-schedule.job.cron:0 15 2 1 * *}",
+            zone = "${geo.self-media.auto-schedule.job.timezone:Asia/Shanghai}"
+    )
     public void createMonthlySchedules() {
-        String targetMonth = YearMonth.now().toString();
+        String targetMonth = YearMonth.now(ZoneId.of(timezone)).toString();
         try {
             int processed = projectSelfMediaScheduleService.createDueEnabledProjects(targetMonth, limit);
             log.info("project self-media auto schedule job completed targetMonth={} processed={}", targetMonth, processed);

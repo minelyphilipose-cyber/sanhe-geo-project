@@ -133,3 +133,35 @@ export function getKeywordAffixWordOptions(params?: string | {
     },
   })
 }
+
+export interface BusinessCalendarFileStatus {
+  year: number
+  exists: boolean
+  activeSource: 'runtime' | 'classpath' | 'missing' | string
+  runtimePath: string
+  classpathLocation: string
+  sourceUrl: string | null
+  updatedAt: string | null
+  publishAllowedDays: number
+  adjustedWorkdays: number
+  holidays: number
+}
+
+export interface BusinessCalendarAdminStatus {
+  targetYear: number
+  today: string
+  generationWindow: string
+  generationAllowed: boolean
+  superAdmin: boolean
+  forceAvailable: boolean
+  message: string
+  calendar: BusinessCalendarFileStatus
+}
+
+export function getNextYearBusinessCalendarStatus() {
+  return request.get<R<BusinessCalendarAdminStatus>>('/admin/business-calendar/next-year/status')
+}
+
+export function generateNextYearBusinessCalendar(force = false) {
+  return request.post<R<BusinessCalendarAdminStatus>>('/admin/business-calendar/next-year/generate', { force })
+}

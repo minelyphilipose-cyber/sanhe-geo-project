@@ -238,7 +238,7 @@
                     format="YYYY-MM"
                     placeholder="选择月份"
                     class="auto-schedule-month"
-                    @change="loadSelfMediaScheduleBatch"
+                    @change="handleSelfMediaScheduleMonthChange"
                   />
                 </label>
                 <label class="auto-schedule-filter-field is-account">
@@ -278,6 +278,13 @@
                   </span>
                 </template>
               </div>
+
+              <el-alert
+                :type="selfMediaCalendarMissing ? 'warning' : 'success'"
+                :closable="false"
+                class="auto-schedule-alert"
+                :title="selfMediaCalendarStatusText"
+              />
             </div>
 
             <div v-loading="selfMediaAutomationOverviewLoading" class="auto-schedule-health">
@@ -403,6 +410,14 @@
             </div>
             <div class="auto-schedule-submit">
               <el-button :loading="selfMediaPreviewLoading" @click="previewSelfMediaSchedule">预检排期</el-button>
+              <el-button
+                v-if="selfMediaPreviewHasInsufficientSlots && isSelfMediaScheduleCurrentMonth"
+                plain
+                type="primary"
+                @click="switchSelfMediaScheduleToNextMonth"
+              >
+                切到 {{ nextSelfMediaScheduleMonth }}
+              </el-button>
               <el-button
                 type="primary"
                 :disabled="!canCreateSelfMediaSchedule"
@@ -937,6 +952,7 @@ import {
   getProjectDetail,
   getProjectSelfMediaScheduleBatch,
   getProjectSelfMediaScheduleBatchDetail,
+  getProjectSelfMediaScheduleCalendarStatus,
   getProjectSelfMediaScheduleConfig,
   ignoreProjectSelfMediaScheduleBatchAbnormalSchedules,
   getKeywordGroupQuestions,
@@ -955,6 +971,7 @@ import {
 import type {
   ProjectSelfMediaAutoSchedulePayload,
   ProjectSelfMediaAutoScheduleResponse,
+  ProjectBusinessCalendarStatus,
   ProjectSelfMediaScheduleBatch,
   ProjectSelfMediaScheduleBatchDetail,
   ProjectSelfMediaScheduleBatchDetailItem,
@@ -1047,6 +1064,7 @@ const selfMediaScheduleConfig = ref<ProjectSelfMediaScheduleConfig | null>(null)
 const selfMediaScheduleBatch = ref<ProjectSelfMediaScheduleBatch | null>(null)
 const selfMediaBatchDetail = ref<ProjectSelfMediaScheduleBatchDetail | null>(null)
 const selfMediaPreview = ref<ProjectSelfMediaAutoScheduleResponse | null>(null)
+const selfMediaCalendarStatus = ref<ProjectBusinessCalendarStatus | null>(null)
 const selfMediaAutomationOverview = ref<SelfMediaAutomationOverview | null>(null)
 const selfMediaScheduleMonth = ref(currentMonthText())
 const selfMediaDetailFilter = ref('all')
@@ -1187,7 +1205,7 @@ const selfMediaAutomationCompensation = computed(() => selfMediaAutomationOvervi
 const selfMediaDetailItems = computed(() => selfMediaBatchDetail.value?.items || [])
 const selfMediaFailureSummaries = computed(() => selfMediaBatchDetail.value?.failureSummaries || [])
 const selfMediaStatusRules = computed(() => (selfMediaBatchDetail.value?.statusRules || []).filter((rule) =>
-  ['pending', 'schedule_failed', 'publish_failed', 'manual_required', 'cancelled', 'published_confirmed'].includes(rule.status),
+  ['pending', 'schedule_failed', 'publish_failed', 'manual_required', 'cancelled', 'published_url_pending', 'published_confirmed'].includes(rule.status),
 ))
 const selfMediaActionPreview = computed(() => selfMediaBatchDetail.value?.actionPreview || null)
 const selfMediaActionPreviewMessages = computed(() => {
@@ -1231,8 +1249,18 @@ const selfMediaDetailManualMarkableCount = computed(() =>
 const selfMediaPreviewHasInsufficientSlots = computed(() =>
   (selfMediaPreview.value?.slotGroups || []).some((group) => group.enough === false),
 )
+const selfMediaCalendarMissing = computed(() => selfMediaCalendarStatus.value?.exists === false)
+const selfMediaCalendarStatusText = computed(() => {
+  const status = selfMediaCalendarStatus.value
+  if (!status) return '正在读取工作日历'
+  if (!status.exists) return `${status.year} 年工作日历缺失`
+  const source = status.activeSource === 'runtime' ? '运行目录' : status.activeSource === 'classpath' ? '内置资源' : status.activeSource
+  return `${status.year} 年工作日历已可用（${source || '未知来源'}）`
+})
+const isSelfMediaScheduleCurrentMonth = computed(() => selfMediaScheduleMonth.value === currentMonthText())
+const nextSelfMediaScheduleMonth = computed(() => addMonthsText(selfMediaScheduleMonth.value || currentMonthText(), 1))
 const selfMediaDetailCompletedCount = computed(() =>
-  selfMediaDetailItems.value.filter((item) => item.scheduleStatus === 'scheduled' || item.scheduleStatus === 'published_confirmed').length,
+  selfMediaDetailItems.value.filter((item) => item.scheduleStatus === 'scheduled' || item.scheduleStatus === 'published_url_pending' || item.scheduleStatus === 'published_confirmed').length,
 )
 const selfMediaDetailFilterOptions = computed(() => [
   { value: 'all', label: '全部', count: selfMediaDetailItems.value.length },
@@ -1248,7 +1276,7 @@ const filteredSelfMediaDetailItems = computed(() => {
     return selfMediaDetailItems.value.filter((item) => canRetrySelfMediaDetailRow(item))
   }
   if (selfMediaDetailFilter.value === 'completed') {
-    return selfMediaDetailItems.value.filter((item) => item.scheduleStatus === 'scheduled' || item.scheduleStatus === 'published_confirmed')
+    return selfMediaDetailItems.value.filter((item) => item.scheduleStatus === 'scheduled' || item.scheduleStatus === 'published_url_pending' || item.scheduleStatus === 'published_confirmed')
   }
   return selfMediaDetailItems.value
 })
@@ -1306,9 +1334,10 @@ const selfMediaDetailPlatformGroups = computed(() => {
   return Array.from(groups.values())
 })
 const canCreateSelfMediaSchedule = computed(() => {
-  if (!canUpdateProject.value || !selfMediaScheduleForm.autoScheduleEnabled) return false
+  if (!canUpdateProject.value || !selfMediaScheduleConfig.value?.autoScheduleEnabled) return false
   if (!selfMediaScheduleMonth.value) return false
   if (!activeSelfMediaAccounts.value.length) return false
+  if (selfMediaCalendarMissing.value) return false
   if (selfMediaPreviewHasInsufficientSlots.value) return false
   const status = selfMediaScheduleBatch.value?.status
   return !['processing', 'created', 'partial_failed'].includes(status || '')
@@ -1439,6 +1468,22 @@ function currentMonthText() {
   return `${now.getFullYear()}-${month}`
 }
 
+function addMonthsText(value: string, offset: number) {
+  const [yearText, monthText] = value.split('-')
+  const year = Number(yearText)
+  const month = Number(monthText)
+  if (!year || !month) return currentMonthText()
+  const date = new Date(year, month - 1 + offset, 1)
+  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}`
+}
+
+function createIdempotencyKey(prefix: string) {
+  const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return `${prefix}-${random}`
+}
+
 function selfMediaAccountLabel(account: SelfMediaAccount) {
   return `${selfMediaPlatformLabel(account.platform)} / ${account.accountName || account.platformAccountId || account.id}`
 }
@@ -1466,6 +1511,7 @@ function selfMediaBatchStatusLabel(status?: string | null) {
     created: '已创建',
     partial_failed: '部分失败',
     failed: '失败',
+    skipped: '已跳过',
     cancelled: '已取消',
   }
   return status ? (labels[status] || status) : '未创建'
@@ -1476,6 +1522,7 @@ function selfMediaBatchTagType(status?: string | null) {
   if (status === 'processing') return 'primary'
   if (status === 'partial_failed') return 'warning'
   if (status === 'failed') return 'danger'
+  if (status === 'skipped') return 'info'
   return 'info'
 }
 
@@ -1508,6 +1555,7 @@ function scheduleStatusLabel(status?: string | null) {
     publish_due: '到点待核验',
     checking_publish_result: '发布结果核验中',
     publish_unknown: '发布待确认',
+    published_url_pending: '已发布待补链接',
     published_confirmed: '已确认发布',
     schedule_failed: '定时失败',
     publish_failed: '发布失败',
@@ -1523,6 +1571,7 @@ function scheduleStatusTagType(status?: string | null) {
   if (status === 'scheduled' || status === 'published_confirmed') return 'success'
   if (status === 'rejected' || status === 'schedule_failed' || status === 'publish_failed' || status === 'manual_required') return 'danger'
   if (status === 'filling' || status === 'filled_verified' || status === 'scheduling' || status === 'checking_publish_result') return 'primary'
+  if (status === 'published_url_pending') return 'warning'
   if (status === 'cancelled' || status === 'routed_to_semi_auto') return 'info'
   return status ? 'warning' : 'info'
 }
@@ -1628,6 +1677,29 @@ async function loadSelfMediaScheduleBatch() {
     selfMediaScheduleBatch.value = null
     selfMediaBatchDetail.value = null
   }
+}
+
+async function loadSelfMediaScheduleCalendarStatus() {
+  if (!project.value || !selfMediaScheduleMonth.value) {
+    selfMediaCalendarStatus.value = null
+    return
+  }
+  try {
+    const { data } = await getProjectSelfMediaScheduleCalendarStatus(project.value.id, selfMediaScheduleMonth.value)
+    selfMediaCalendarStatus.value = data.data || null
+  } catch {
+    selfMediaCalendarStatus.value = null
+  }
+}
+
+async function handleSelfMediaScheduleMonthChange() {
+  selfMediaPreview.value = null
+  await Promise.all([loadSelfMediaScheduleBatch(), loadSelfMediaScheduleCalendarStatus()])
+}
+
+async function switchSelfMediaScheduleToNextMonth() {
+  selfMediaScheduleMonth.value = nextSelfMediaScheduleMonth.value
+  await handleSelfMediaScheduleMonthChange()
 }
 
 async function openSelfMediaBatchDetail() {
@@ -1828,7 +1900,7 @@ async function loadSelfMediaSchedulePanel() {
     ])
     applySelfMediaScheduleConfig(configRes.data.data)
     selfMediaAccounts.value = accountsRes.data.data || []
-    await Promise.all([loadSelfMediaScheduleBatch(), loadSelfMediaAutomationOverview()])
+    await Promise.all([loadSelfMediaScheduleBatch(), loadSelfMediaScheduleCalendarStatus(), loadSelfMediaAutomationOverview()])
     selfMediaPreview.value = null
   } finally {
     selfMediaScheduleLoading.value = false
@@ -1898,8 +1970,8 @@ async function createSelfMediaSchedule() {
       { type: 'warning', confirmButtonText: '确认创建', cancelButtonText: '取消' },
     )
     selfMediaScheduleCreating.value = true
-    await persistSelfMediaScheduleConfig(false)
-    const { data } = await createProjectSelfMediaAutoSchedule(current.id, selfMediaSchedulePayload())
+    const idempotencyKey = createIdempotencyKey(`project-self-media-${current.id}-${selfMediaScheduleMonth.value}`)
+    const { data } = await createProjectSelfMediaAutoSchedule(current.id, selfMediaSchedulePayload(), idempotencyKey)
     selfMediaPreview.value = data.data
     ElMessage.success('自动排期已提交，后台正在生成文章并安排发布时间')
     await loadSelfMediaScheduleBatch()

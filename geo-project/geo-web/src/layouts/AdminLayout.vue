@@ -103,6 +103,7 @@ const sidebarGroups: MenuGroup[] = [
       { path: '/admin/settings/platforms', name: 'PlatformConfig', title: 'AI平台配置', icon: 'Setting', permissions: ['user.manage'] },
       { path: '/admin/settings/packages', name: 'PackageConfig', title: '套餐配置', icon: 'CollectionTag', permissions: ['user.manage'] },
       { path: '/admin/settings/dicts', name: 'DictCenter', title: '字典中心', icon: 'Tickets', permissions: ['user.manage'] },
+      { path: '/admin/settings/business-calendar', name: 'BusinessCalendarManagement', title: '工作日历', icon: 'Calendar', permissions: ['user.manage'] },
       { path: '/admin/settings/users', name: 'UserManage', title: '用户与权限', icon: 'Setting', permissions: ['user.manage'] },
     ],
   },

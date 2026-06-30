@@ -23,8 +23,10 @@ public interface ProjectSelfMediaScheduleConfigMapper extends BaseMapper<Project
             SELECT *
             FROM project_self_media_schedule_config
             WHERE auto_schedule_enabled = 1
+              AND project_id > #{lastProjectId}
             ORDER BY project_id ASC
             LIMIT #{limit}
             """)
-    List<ProjectSelfMediaScheduleConfig> selectEnabled(@Param("limit") int limit);
+    List<ProjectSelfMediaScheduleConfig> selectEnabledPage(@Param("lastProjectId") Long lastProjectId,
+                                                           @Param("limit") int limit);
 }

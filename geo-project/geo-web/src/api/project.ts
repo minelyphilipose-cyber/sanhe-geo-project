@@ -37,7 +37,6 @@ export interface ProjectSelfMediaScheduleConfig {
   brandId?: number
   companyId?: number
   autoScheduleEnabled: boolean
-  defaultScheduleStrategy: string
   includeAdjustedWorkdays: boolean
   remark?: string | null
   createdAt?: string
@@ -192,13 +191,25 @@ export interface ProjectSelfMediaAutoSchedulePayload {
   includeAdjustedWorkdays?: boolean
 }
 
+export interface ProjectBusinessCalendarStatus {
+  year: number
+  exists: boolean
+  activeSource: 'runtime' | 'classpath' | 'missing' | string
+  runtimePath: string
+  classpathLocation: string
+  sourceUrl: string | null
+  updatedAt: string | null
+  publishAllowedDays: number
+  adjustedWorkdays: number
+  holidays: number
+}
+
 export function getProjectSelfMediaScheduleConfig(id: number) {
   return request.get<R<ProjectSelfMediaScheduleConfig>>(`/projects/${id}/self-media-schedule-config`)
 }
 
 export function updateProjectSelfMediaScheduleConfig(id: number, data: {
   autoScheduleEnabled?: boolean
-  defaultScheduleStrategy?: string
   includeAdjustedWorkdays?: boolean
   remark?: string | null
 }) {
@@ -211,6 +222,12 @@ export function getProjectSelfMediaScheduleBatch(id: number, targetMonth: string
 
 export function getProjectSelfMediaScheduleBatchDetail(id: number, targetMonth: string) {
   return request.get<R<ProjectSelfMediaScheduleBatchDetail | null>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/detail`)
+}
+
+export function getProjectSelfMediaScheduleCalendarStatus(id: number, targetMonth: string) {
+  return request.get<R<ProjectBusinessCalendarStatus>>(`/projects/${id}/self-media-schedule-calendar-status`, {
+    params: { targetMonth },
+  })
 }
 
 export function retryProjectSelfMediaScheduleBatchFailedItems(id: number, targetMonth: string) {
@@ -237,8 +254,10 @@ export function previewProjectSelfMediaAutoSchedule(id: number, data: ProjectSel
   return request.post<R<ProjectSelfMediaAutoScheduleResponse>>(`/projects/${id}/self-media-schedules/auto-preview`, data)
 }
 
-export function createProjectSelfMediaAutoSchedule(id: number, data: ProjectSelfMediaAutoSchedulePayload) {
-  return request.post<R<ProjectSelfMediaAutoScheduleResponse>>(`/projects/${id}/self-media-schedules/auto-create`, data)
+export function createProjectSelfMediaAutoSchedule(id: number, data: ProjectSelfMediaAutoSchedulePayload, idempotencyKey?: string) {
+  return request.post<R<ProjectSelfMediaAutoScheduleResponse>>(`/projects/${id}/self-media-schedules/auto-create`, data, {
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+  })
 }
 
 export function getProjectChannelAllocationQuota(params: { companyId: number; excludeProjectId?: number }) {

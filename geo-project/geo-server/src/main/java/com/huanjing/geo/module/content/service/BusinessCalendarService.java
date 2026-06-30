@@ -4,11 +4,16 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.YearMonth;
@@ -27,6 +32,12 @@ public class BusinessCalendarService {
     );
 
     private final ObjectMapper objectMapper;
+    private String runtimeDir;
+
+    @Value("${geo.business-calendar.runtime-dir:}")
+    public void setRuntimeDir(String runtimeDir) {
+        this.runtimeDir = runtimeDir;
+    }
 
     public List<BusinessDay> publishDays(YearMonth month, boolean includeAdjustedWorkdays) {
         if (month == null) {
@@ -128,16 +139,103 @@ public class BusinessCalendarService {
         );
     }
 
-    private JsonNode loadCalendar(int year) {
-        ClassPathResource resource = new ClassPathResource(RESOURCE_PATTERN.formatted(year));
-        if (!resource.exists()) {
-            throw new BizException(ERROR_CODE, "缺少 " + year + " 年工作日历文件");
+    public CalendarFileStatus fileStatus(int year) {
+        CalendarSource source = findCalendarSource(year);
+        if (source == null) {
+            return new CalendarFileStatus(
+                    year,
+                    false,
+                    "missing",
+                    runtimeFile(year).toString(),
+                    RESOURCE_PATTERN.formatted(year),
+                    null,
+                    null,
+                    0,
+                    0,
+                    0
+            );
         }
-        try {
-            return objectMapper.readTree(resource.getInputStream());
+        try (InputStream inputStream = source.inputStream()) {
+            JsonNode root = objectMapper.readTree(inputStream);
+            return buildStatus(year, source.kind(), root);
         } catch (IOException ex) {
             throw new BizException(ERROR_CODE, year + " 年工作日历文件读取失败");
         }
+    }
+
+    public CalendarFileStatus writeRuntimeCalendar(int year, JsonNode root) {
+        Path file = runtimeFile(year);
+        try {
+            Files.createDirectories(file.getParent());
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), root);
+            return buildStatus(year, "runtime", root);
+        } catch (IOException ex) {
+            throw new BizException(ERROR_CODE, year + " 年工作日历文件写入失败");
+        }
+    }
+
+    private JsonNode loadCalendar(int year) {
+        CalendarSource source = findCalendarSource(year);
+        if (source == null) {
+            throw new BizException(ERROR_CODE, "缺少 " + year + " 年工作日历文件");
+        }
+        try (InputStream inputStream = source.inputStream()) {
+            return objectMapper.readTree(inputStream);
+        } catch (IOException ex) {
+            throw new BizException(ERROR_CODE, year + " 年工作日历文件读取失败");
+        }
+    }
+
+    private CalendarSource findCalendarSource(int year) {
+        Path runtimeFile = runtimeFile(year);
+        if (Files.isRegularFile(runtimeFile)) {
+            return new CalendarSource("runtime", () -> Files.newInputStream(runtimeFile));
+        }
+        ClassPathResource resource = new ClassPathResource(RESOURCE_PATTERN.formatted(year));
+        if (resource.exists()) {
+            return new CalendarSource("classpath", resource::getInputStream);
+        }
+        return null;
+    }
+
+    private CalendarFileStatus buildStatus(int year, String activeSource, JsonNode root) {
+        int publishAllowedDays = 0;
+        int adjustedWorkdays = 0;
+        int holidays = 0;
+        for (JsonNode dayNode : root.path("days")) {
+            if (dayNode.path("publishAllowed").asBoolean(false)) {
+                publishAllowedDays++;
+            }
+            if (dayNode.path("isAdjustedWorkday").asBoolean(false)) {
+                adjustedWorkdays++;
+            }
+            if (dayNode.path("isHoliday").asBoolean(false)) {
+                holidays++;
+            }
+        }
+        return new CalendarFileStatus(
+                year,
+                true,
+                activeSource,
+                runtimeFile(year).toString(),
+                RESOURCE_PATTERN.formatted(year),
+                root.path("sourceUrl").asText(null),
+                root.path("updatedAt").asText(null),
+                publishAllowedDays,
+                adjustedWorkdays,
+                holidays
+        );
+    }
+
+    private Path runtimeFile(int year) {
+        return runtimeDirectory().resolve("business-calendar-%d.json".formatted(year));
+    }
+
+    private Path runtimeDirectory() {
+        if (StringUtils.hasText(runtimeDir)) {
+            return Paths.get(runtimeDir.trim()).toAbsolutePath().normalize();
+        }
+        return Paths.get(System.getProperty("user.dir"), "data", "calendar").toAbsolutePath().normalize();
     }
 
     private List<PublishWindow> readWindows(JsonNode windowsNode) {
@@ -200,5 +298,28 @@ public class BusinessCalendarService {
                               String dayName,
                               int week,
                               boolean adjustedWorkday) {
+    }
+
+    public record CalendarFileStatus(int year,
+                                     boolean exists,
+                                     String activeSource,
+                                     String runtimePath,
+                                     String classpathLocation,
+                                     String sourceUrl,
+                                     String updatedAt,
+                                     int publishAllowedDays,
+                                     int adjustedWorkdays,
+                                     int holidays) {
+    }
+
+    private record CalendarSource(String kind, InputStreamFactory inputStreamFactory) {
+        InputStream inputStream() throws IOException {
+            return inputStreamFactory.open();
+        }
+    }
+
+    @FunctionalInterface
+    private interface InputStreamFactory {
+        InputStream open() throws IOException;
     }
 }

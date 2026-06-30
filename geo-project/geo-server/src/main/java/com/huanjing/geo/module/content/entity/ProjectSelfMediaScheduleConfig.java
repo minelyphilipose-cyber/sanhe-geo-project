@@ -16,7 +16,6 @@ public class ProjectSelfMediaScheduleConfig {
     private Long brandId;
     private Long companyId;
     private Boolean autoScheduleEnabled;
-    private String defaultScheduleStrategy;
     private Boolean includeAdjustedWorkdays;
     private String remark;
     private Long createdBy;

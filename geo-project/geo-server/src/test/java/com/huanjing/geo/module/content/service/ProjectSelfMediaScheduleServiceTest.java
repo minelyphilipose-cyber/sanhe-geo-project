@@ -46,6 +46,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -285,7 +286,8 @@ class ProjectSelfMediaScheduleServiceTest {
         first.setProjectId(1L);
         ProjectSelfMediaScheduleConfig second = config(true);
         second.setProjectId(2L);
-        when(configMapper.selectEnabled(2)).thenReturn(List.of(first, second));
+        when(configMapper.selectEnabledPage(0L, 2)).thenReturn(List.of(first, second));
+        when(configMapper.selectEnabledPage(2L, 2)).thenReturn(List.of());
         when(batchMapper.selectByProjectAndMonth(1L, "2026-06")).thenThrow(new RuntimeException("broken project"));
         ProjectSelfMediaScheduleBatch existing = new ProjectSelfMediaScheduleBatch();
         existing.setId(22L);
@@ -294,6 +296,25 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals(0, service.createDueEnabledProjects("2026-06", 2));
         verify(batchMapper).selectByProjectAndMonth(1L, "2026-06");
         verify(batchMapper).selectByProjectAndMonth(2L, "2026-06");
+    }
+
+    @Test
+    void createDueEnabledProjectsRecordsSkippedBatchForInactiveProject() {
+        ProjectSelfMediaScheduleConfig config = config(true);
+        when(configMapper.selectEnabledPage(0L, 2)).thenReturn(List.of(config));
+        when(configMapper.selectEnabledPage(7L, 2)).thenReturn(List.of());
+        Project paused = project();
+        paused.setStatus("paused");
+        when(projectMapper.selectById(7L)).thenReturn(paused);
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
+
+        assertEquals(0, service.createDueEnabledProjects("2026-06", 2));
+
+        ArgumentCaptor<ProjectSelfMediaScheduleBatch> captor = ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
+        verify(batchMapper).insert(captor.capture());
+        assertEquals("skipped", captor.getValue().getStatus());
+        assertTrue(captor.getValue().getFailureMessage().contains("active"));
+        verify(generationService, never()).createSystemBatch(any(), any());
     }
 
     @Test
@@ -1074,7 +1095,6 @@ class ProjectSelfMediaScheduleServiceTest {
         config.setBrandId(8L);
         config.setCompanyId(6L);
         config.setAutoScheduleEnabled(enabled);
-        config.setDefaultScheduleStrategy("platform_schedule");
         config.setIncludeAdjustedWorkdays(false);
         return config;
     }
@@ -1084,6 +1104,8 @@ class ProjectSelfMediaScheduleServiceTest {
         project.setId(7L);
         project.setBrandId(8L);
         project.setCompanyId(6L);
+        project.setStatus("active");
+        project.setEndDate(LocalDate.of(2026, 12, 31));
         project.setCreatedBy(99L);
         return project;
     }
