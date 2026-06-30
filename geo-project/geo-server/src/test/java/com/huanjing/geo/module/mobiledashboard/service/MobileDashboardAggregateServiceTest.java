@@ -201,6 +201,19 @@ class MobileDashboardAggregateServiceTest {
     }
 
     @Test
+    void ecoAssetsMonthNewUsesMonthContentInsteadOfMonthPublished() throws Exception {
+        MobileDashboardAggregateService service = newService(jdbcTemplate());
+        Object facts = contentFacts(24L, 24L, 46L, 22L, 24L, 24L);
+
+        MobileDashboardAggregateVO.EcoAssets ecoAssets =
+                (MobileDashboardAggregateVO.EcoAssets) invoke(service, "toEcoAssets", facts, 12L);
+
+        assertThat(ecoAssets.getTotalAssets().getValue()).isEqualTo(24L);
+        assertThat(ecoAssets.getMonthNew().getValue()).isEqualTo(46L);
+        assertThat(ecoAssets.getIndexed().getValue()).isEqualTo(24L);
+    }
+
+    @Test
     void cumulativeQuestionCoverageUsesOnlyTierAAndDoesNotDriftWithPageWindow() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         createQuestionCoverageTables(jdbcTemplate);
@@ -754,6 +767,28 @@ class MobileDashboardAggregateServiceTest {
         Constructor<?> constructor = dateRangeClass.getDeclaredConstructor(LocalDate.class, LocalDate.class);
         constructor.setAccessible(true);
         return constructor.newInstance(start, end);
+    }
+
+    private static Object contentFacts(long totalPublished,
+                                       long monthPublished,
+                                       long monthContent,
+                                       long monthBuilding,
+                                       long totalIndexed,
+                                       long monthIndexed) throws Exception {
+        Class<?> contentFactsClass = Class.forName(
+                "com.huanjing.geo.module.mobiledashboard.service.MobileDashboardAggregateService$ContentFacts");
+        Constructor<?> constructor = contentFactsClass.getDeclaredConstructor(
+                long.class,
+                long.class,
+                long.class,
+                long.class,
+                long.class,
+                long.class,
+                Map.class,
+                Map.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(totalPublished, monthPublished, monthContent, monthBuilding,
+                totalIndexed, monthIndexed, Map.of(), Map.of());
     }
 
     private static Object invoke(Object target, String methodName, Object... args) throws Exception {

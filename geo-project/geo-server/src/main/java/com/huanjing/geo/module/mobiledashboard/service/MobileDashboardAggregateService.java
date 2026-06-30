@@ -1592,7 +1592,7 @@ public class MobileDashboardAggregateService {
     private MobileDashboardAggregateVO.EcoAssets toEcoAssets(ContentFacts facts, long coveredQuestions) {
         MobileDashboardAggregateVO.EcoAssets vo = new MobileDashboardAggregateVO.EcoAssets();
         vo.setTotalAssets(MobileDashboardMetricVO.available(facts.totalPublished()));
-        vo.setMonthNew(MobileDashboardMetricVO.available(facts.monthPublished()));
+        vo.setMonthNew(MobileDashboardMetricVO.available(facts.monthContent()));
         vo.setIndexed(MobileDashboardMetricVO.available(facts.totalIndexed()));
         vo.setCoveredQuestions(MobileDashboardMetricVO.available(coveredQuestions));
         vo.setIndexMeasurementScope(INDEX_SCOPE);
