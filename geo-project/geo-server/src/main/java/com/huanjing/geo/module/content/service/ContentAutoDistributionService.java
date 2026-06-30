@@ -56,6 +56,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -409,6 +410,7 @@ public class ContentAutoDistributionService {
             return;
         }
         String jobName = buildAutoDistributionJobName(batch);
+        Map<Long, LocalDateTime> plannedAtByArticleId = smoothSitePublishTimes(publishable);
         List<BatchArticlePublishService.SystemPublishPlan> plans = publishable.stream()
                 .map(item -> new BatchArticlePublishService.SystemPublishPlan(
                         item.getArticleId(),
@@ -417,19 +419,124 @@ public class ContentAutoDistributionService {
                         DistributionTargetKind.BRAND_GEO_SITE.equals(item.getTargetKind()) ? null : item.getTargetId(),
                         item.getTargetBrandId(),
                         item.getTargetForumFid(),
-                        item.getPlannedPublishAt()
+                        plannedAtByArticleId.getOrDefault(item.getArticleId(), item.getPlannedPublishAt())
                 ))
                 .toList();
         BatchArticlePublishService.SystemPublishJobResult result =
                 publishService.createSystemScheduledJob(jobName, resolveOperatorUserId(batch.getProjectId()), plans);
         Map<Long, Long> publishItemIds = result.itemIdsByArticleId();
         for (ContentAutoDistributionItem item : publishable) {
+            LocalDateTime plannedAt = plannedAtByArticleId.getOrDefault(item.getArticleId(), item.getPlannedPublishAt());
             itemMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionItem>()
                     .eq(ContentAutoDistributionItem::getId, item.getId())
+                    .set(ContentAutoDistributionItem::getPlannedPublishAt, plannedAt)
                     .set(ContentAutoDistributionItem::getPublishJobId, result.jobId())
                     .set(ContentAutoDistributionItem::getPublishItemId, publishItemIds.get(item.getArticleId()))
                     .set(ContentAutoDistributionItem::getStatus, "publish_scheduled"));
         }
+    }
+
+    private Map<Long, LocalDateTime> smoothSitePublishTimes(List<ContentAutoDistributionItem> publishable) {
+        Map<Long, LocalDateTime> result = new HashMap<>();
+        Map<SitePublishScheduleKey, List<ContentAutoDistributionItem>> groups = new LinkedHashMap<>();
+        for (ContentAutoDistributionItem item : publishable) {
+            if (!"forum_site".equals(platformKey(item))) {
+                continue;
+            }
+            groups.computeIfAbsent(sitePublishScheduleKey(item), ignored -> new ArrayList<>()).add(item);
+        }
+        for (Map.Entry<SitePublishScheduleKey, List<ContentAutoDistributionItem>> entry : groups.entrySet()) {
+            List<ContentAutoDistributionItem> items = new ArrayList<>(entry.getValue());
+            items.sort(Comparator
+                    .comparing(ContentAutoDistributionItem::getPlannedPublishAt, Comparator.nullsLast(LocalDateTime::compareTo))
+                    .thenComparing(ContentAutoDistributionItem::getId));
+            LocalDateTime now = LocalDateTime.now();
+            List<LocalDateTime> occupied = existingSitePublishTimes(entry.getKey(), now);
+            List<LocalDateTime> slots = evenlyDistributedSlots(entry.getKey().planDate(), occupied.size() + items.size(), now);
+            Set<Integer> occupiedIndexes = nearestSlotIndexes(slots, occupied);
+            int slotIndex = 0;
+            for (ContentAutoDistributionItem item : items) {
+                while (slotIndex < slots.size() && occupiedIndexes.contains(slotIndex)) {
+                    slotIndex++;
+                }
+                LocalDateTime plannedAt = slotIndex < slots.size()
+                        ? slots.get(slotIndex++)
+                        : item.getPlannedPublishAt();
+                result.put(item.getArticleId(), plannedAt);
+            }
+        }
+        return result;
+    }
+
+    private SitePublishScheduleKey sitePublishScheduleKey(ContentAutoDistributionItem item) {
+        String platform = platformKey(item);
+        Long targetId = "agent_site".equals(platform) ? item.getTargetBrandId() : item.getTargetId();
+        return new SitePublishScheduleKey(item.getPlanDate(), platform, targetId);
+    }
+
+    private List<LocalDateTime> existingSitePublishTimes(SitePublishScheduleKey key, LocalDateTime now) {
+        List<ContentAutoDistributionItem> existing = itemMapper.selectList(
+                new LambdaQueryWrapper<ContentAutoDistributionItem>()
+                        .eq(ContentAutoDistributionItem::getPlanDate, key.planDate())
+                        .eq(ContentAutoDistributionItem::getStatus, "publish_scheduled")
+                        .eq(ContentAutoDistributionItem::getTargetKind, DistributionTargetKind.FORUM_SITE)
+                        .eq(ContentAutoDistributionItem::getTargetId, key.targetId())
+                        .isNotNull(ContentAutoDistributionItem::getPublishItemId)
+                        .orderByAsc(ContentAutoDistributionItem::getPlannedPublishAt, ContentAutoDistributionItem::getId)
+        );
+        return existing.stream()
+                .map(ContentAutoDistributionItem::getPlannedPublishAt)
+                .filter(Objects::nonNull)
+                .filter(time -> !time.isBefore(now))
+                .toList();
+    }
+
+    private List<LocalDateTime> evenlyDistributedSlots(LocalDate planDate, int count, LocalDateTime now) {
+        if (count <= 0) {
+            return List.of();
+        }
+        LocalTime configuredStart = parseTime(publishWindowStart, LocalTime.of(1, 0));
+        LocalTime configuredEnd = parseTime(publishWindowEnd, LocalTime.of(23, 0));
+        if (!configuredEnd.isAfter(configuredStart)) {
+            configuredEnd = LocalTime.of(23, 0);
+        }
+        LocalDateTime start = LocalDateTime.of(planDate, configuredStart);
+        LocalDateTime end = LocalDateTime.of(planDate, configuredEnd);
+        if (planDate.equals(now.toLocalDate()) && now.isAfter(start)) {
+            start = now.plusMinutes(1).withSecond(0).withNano(0);
+        }
+        if (start.isAfter(end)) {
+            start = end;
+        }
+        List<LocalDateTime> result = new ArrayList<>();
+        long windowMinutes = java.time.Duration.between(start, end).toMinutes();
+        for (int i = 0; i < count; i++) {
+            long offset = count <= 1 ? 0 : Math.round((double) windowMinutes * i / (count - 1));
+            result.add(start.plusMinutes(offset));
+        }
+        return result;
+    }
+
+    private Set<Integer> nearestSlotIndexes(List<LocalDateTime> slots, List<LocalDateTime> occupied) {
+        Set<Integer> indexes = new HashSet<>();
+        for (LocalDateTime time : occupied) {
+            int nearest = -1;
+            long nearestDistance = Long.MAX_VALUE;
+            for (int i = 0; i < slots.size(); i++) {
+                if (indexes.contains(i)) {
+                    continue;
+                }
+                long distance = Math.abs(java.time.Duration.between(slots.get(i), time).toSeconds());
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = i;
+                }
+            }
+            if (nearest >= 0) {
+                indexes.add(nearest);
+            }
+        }
+        return indexes;
     }
 
     private void scheduleSelfMediaGeneratedItems(ContentAutoDistributionBatch batch,
@@ -1107,5 +1214,10 @@ public class ContentAutoDistributionService {
                                  Long targetBrandId,
                                  Integer targetForumFid,
                                  int count) {
+    }
+
+    private record SitePublishScheduleKey(LocalDate planDate,
+                                          String platformKey,
+                                          Long targetId) {
     }
 }

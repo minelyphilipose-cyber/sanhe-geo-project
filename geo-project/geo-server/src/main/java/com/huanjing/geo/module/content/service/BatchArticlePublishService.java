@@ -42,6 +42,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -87,6 +88,10 @@ public class BatchArticlePublishService {
     private long schedulerLockTtlSeconds;
     @Value("${geo.content.batch-publish.running-timeout-minutes:120}")
     private long runningTimeoutMinutes;
+    @Value("${geo.content.batch-publish.forum-site-min-execution-interval-ms:1000}")
+    private long forumSiteMinExecutionIntervalMs;
+    @Value("${geo.content.batch-publish.due-candidate-scan-size:100}")
+    private int dueCandidateScanSize;
 
     @Transactional
     public BatchArticlePublishResponse submit(BatchArticlePublishRequest request) {
@@ -227,18 +232,24 @@ public class BatchArticlePublishService {
 
     public void executeDueItems(int limit) {
         recoverStaleRunningItems();
-        if (hasAnyRunningItem()) {
-            return;
-        }
+        int submitLimit = Math.max(1, limit);
+        int candidateLimit = Math.max(submitLimit, Math.min(Math.max(1, dueCandidateScanSize), 500));
         List<BatchArticlePublishItem> items = itemMapper.selectList(
                 new LambdaQueryWrapper<BatchArticlePublishItem>()
                         .eq(BatchArticlePublishItem::getStatus, "pending")
                         .le(BatchArticlePublishItem::getPlannedAt, LocalDateTime.now())
                         .orderByAsc(BatchArticlePublishItem::getPlannedAt, BatchArticlePublishItem::getId)
-                        .last("LIMIT " + Math.max(1, Math.min(limit, 1)))
+                        .last("LIMIT " + candidateLimit)
         );
+        Set<String> submittedLanes = new HashSet<>();
         for (BatchArticlePublishItem item : items) {
-            executeOne(item);
+            if (submittedLanes.size() >= submitLimit) {
+                break;
+            }
+            if (!submittedLanes.add(publishLaneKey(item))) {
+                continue;
+            }
+            batchPublishExecutor.execute(() -> executeOne(item));
         }
     }
 
@@ -320,26 +331,29 @@ public class BatchArticlePublishService {
     }
 
     private void executeOne(BatchArticlePublishItem item) {
-        if (hasAnyRunningItem()) {
+        LockLease laneLock = tryAcquirePublishLane(item);
+        if (laneLock == null) {
             return;
         }
-        int locked = itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
-                .eq(BatchArticlePublishItem::getId, item.getId())
-                .eq(BatchArticlePublishItem::getStatus, "pending")
-                .set(BatchArticlePublishItem::getStatus, "running")
-                .set(BatchArticlePublishItem::getErrorMessage, null));
-        if (locked == 0) {
-            return;
-        }
-        if (hasOtherRunningItem(item)) {
-            itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
-                    .eq(BatchArticlePublishItem::getId, item.getId())
-                    .eq(BatchArticlePublishItem::getStatus, "running")
-                    .set(BatchArticlePublishItem::getStatus, "pending"));
-            return;
-        }
-        markJobRunning(item.getJobId());
+        boolean refreshJob = false;
         try {
+            int locked = itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
+                    .eq(BatchArticlePublishItem::getId, item.getId())
+                    .eq(BatchArticlePublishItem::getStatus, "pending")
+                    .set(BatchArticlePublishItem::getStatus, "running")
+                    .set(BatchArticlePublishItem::getErrorMessage, null));
+            if (locked == 0) {
+                return;
+            }
+            if (!tryAcquirePublishThrottle(item)) {
+                itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
+                        .eq(BatchArticlePublishItem::getId, item.getId())
+                        .eq(BatchArticlePublishItem::getStatus, "running")
+                        .set(BatchArticlePublishItem::getStatus, "pending"));
+                return;
+            }
+            markJobRunning(item.getJobId());
+            refreshJob = true;
             BatchArticlePublishJob job = jobMapper.selectById(item.getJobId());
             DistributionTask task = executeDistribution(item, job);
             if ("failed".equals(task.getStatus())) {
@@ -359,9 +373,62 @@ public class BatchArticlePublishService {
                     .set(BatchArticlePublishItem::getStatus, "failed")
                     .set(BatchArticlePublishItem::getErrorMessage, trimError(ex.getMessage())));
         } finally {
-            refreshJobStatus(item.getJobId());
+            if (refreshJob) {
+                refreshJobStatus(item.getJobId());
+            }
+            releasePublishLane(laneLock);
             triggerAsyncExecutionSoon();
         }
+    }
+
+    private LockLease tryAcquirePublishLane(BatchArticlePublishItem item) {
+        String lockValue = UUID.randomUUID().toString();
+        String lockKey = schedulerLockKey + ":lane:" + publishLaneKey(item);
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
+                lockKey,
+                lockValue,
+                Math.max(5, runningTimeoutMinutes + 5),
+                TimeUnit.MINUTES
+        );
+        return Boolean.TRUE.equals(acquired) ? new LockLease(lockKey, lockValue) : null;
+    }
+
+    private void releasePublishLane(LockLease lease) {
+        if (lease == null) {
+            return;
+        }
+        try {
+            if (lease.value().equals(redisTemplate.opsForValue().get(lease.key()))) {
+                redisTemplate.delete(lease.key());
+            }
+        } catch (Exception ex) {
+            log.warn("batch article publish lane lock release failed key={} error={}", lease.key(), ex.getMessage());
+        }
+    }
+
+    private boolean tryAcquirePublishThrottle(BatchArticlePublishItem item) {
+        if (!"forum_site".equals(item.getPlatformKey()) || item.getTargetSiteId() == null
+                || forumSiteMinExecutionIntervalMs <= 0) {
+            return true;
+        }
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
+                schedulerLockKey + ":forum-site:" + item.getTargetSiteId() + ":throttle",
+                UUID.randomUUID().toString(),
+                Math.max(1, forumSiteMinExecutionIntervalMs),
+                TimeUnit.MILLISECONDS
+        );
+        return Boolean.TRUE.equals(acquired);
+    }
+
+    private String publishLaneKey(BatchArticlePublishItem item) {
+        String platform = StringUtils.hasText(item.getPlatformKey()) ? item.getPlatformKey() : "unknown";
+        if ("forum_site".equals(platform) || "industry_site".equals(platform)) {
+            return platform + ":site:" + item.getTargetSiteId();
+        }
+        if ("agent_site".equals(platform)) {
+            return platform + ":brand:" + item.getTargetBrandId();
+        }
+        return platform + ":item:" + item.getId();
     }
 
     private DistributionTask executeDistribution(BatchArticlePublishItem item, BatchArticlePublishJob job) {
@@ -767,14 +834,6 @@ public class BatchArticlePublishService {
         return requireIndustrySite(site.getId());
     }
 
-    private boolean hasAnyRunningItem() {
-        Long running = itemMapper.selectCount(
-                new LambdaQueryWrapper<BatchArticlePublishItem>()
-                        .eq(BatchArticlePublishItem::getStatus, "running")
-        );
-        return running != null && running > 0;
-    }
-
     private void recoverStaleRunningItems() {
         if (runningTimeoutMinutes <= 0) {
             return;
@@ -790,15 +849,6 @@ public class BatchArticlePublishService {
             log.warn("batch article publish stale running items recovered count={} timeoutMinutes={}",
                     recovered, Math.max(1, runningTimeoutMinutes));
         }
-    }
-
-    private boolean hasOtherRunningItem(BatchArticlePublishItem item) {
-        Long running = itemMapper.selectCount(
-                new LambdaQueryWrapper<BatchArticlePublishItem>()
-                        .eq(BatchArticlePublishItem::getStatus, "running")
-                        .ne(BatchArticlePublishItem::getId, item.getId())
-        );
-        return running != null && running > 0;
     }
 
     private void triggerAsyncExecutionAfterCommit() {
@@ -845,5 +895,8 @@ public class BatchArticlePublishService {
     }
 
     public record SystemPublishJobResult(Long jobId, Map<Long, Long> itemIdsByArticleId) {
+    }
+
+    private record LockLease(String key, String value) {
     }
 }

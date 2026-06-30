@@ -294,6 +294,8 @@ geo:
       poll-ms: ${CONTENT_BATCH_PUBLISH_POLL_MS:30000}
       lock-key: ${CONTENT_BATCH_PUBLISH_LOCK_KEY:geo:content:batch-publish:scheduler:lock}
       lock-ttl-seconds: ${CONTENT_BATCH_PUBLISH_LOCK_TTL_SECONDS:120}
+      forum-site-min-execution-interval-ms: ${CONTENT_BATCH_PUBLISH_FORUM_SITE_MIN_EXECUTION_INTERVAL_MS:1000}
+      due-candidate-scan-size: ${CONTENT_BATCH_PUBLISH_DUE_CANDIDATE_SCAN_SIZE:100}
     auto-distribution:
       enabled: ${CONTENT_AUTO_DISTRIBUTION_ENABLED:true}
       cron: "${CONTENT_AUTO_DISTRIBUTION_CRON:0 0 1 * * ?}"
