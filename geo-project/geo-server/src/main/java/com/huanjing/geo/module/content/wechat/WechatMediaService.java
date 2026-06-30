@@ -26,6 +26,8 @@ import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +38,8 @@ public class WechatMediaService {
     private static final Duration CONTENT_IMAGE_LOCK_TTL = Duration.ofSeconds(60);
     private static final long MAX_IMAGE_BYTES = 10L * 1024 * 1024;
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "gif", "bmp");
+    private static final Pattern PUBLIC_MATERIAL_PATH_PATTERN =
+            Pattern.compile(".*/api/public/brand-materials/(\\d+)/stream$");
 
     private final BrandMaterialMapper brandMaterialMapper;
     private final BrandImageFolderService brandImageFolderService;
@@ -80,15 +84,15 @@ public class WechatMediaService {
         if (normalized.startsWith("https://mmbiz.qpic.cn/") || normalized.startsWith("http://mmbiz.qpic.cn/")) {
             return normalized;
         }
-        byte[] bytes = downloadImage(normalized);
-        validateImageSize(bytes, "content_image_too_large");
-        String hash = sha256(bytes);
+        ContentImageSource source = resolveContentImageSource(account, normalized);
+        validateImageSize(source.bytes(), "content_image_too_large");
+        String hash = sha256(source.bytes());
         SelfMediaMaterialMapping existed = findMappingByHash(account.getId(), hash, TYPE_IMAGE);
         if (existed != null && StringUtils.hasText(existed.getPlatformUrl())) {
             return existed.getPlatformUrl();
         }
 
-        return uploadContentImageWithLock(account, normalized, bytes, hash);
+        return uploadContentImageWithLock(account, source, hash);
     }
 
     private BrandMaterial requireImageMaterial(Long brandId, Long materialId) {
@@ -109,12 +113,47 @@ public class WechatMediaService {
             return minioStorageService.getObjectBytes(material.getObjectKey());
         }
         if (StringUtils.hasText(material.getFileUrl())) {
-            return downloadImage(material.getFileUrl());
+            return downloadImage(material.getFileUrl()).bytes();
         }
         throw new BizException(400, "cover_file_missing");
     }
 
-    private byte[] downloadImage(String url) {
+    private ContentImageSource resolveContentImageSource(SelfMediaAccount account, String normalizedUrl) {
+        ContentImageSource materialSource = managedMaterialSource(account, normalizedUrl);
+        if (materialSource != null) {
+            return materialSource;
+        }
+        return downloadImage(normalizedUrl);
+    }
+
+    private ContentImageSource managedMaterialSource(SelfMediaAccount account, String url) {
+        try {
+            URI uri = URI.create(url);
+            Matcher matcher = PUBLIC_MATERIAL_PATH_PATTERN.matcher(uri.getPath());
+            if (!matcher.matches()) {
+                return null;
+            }
+            Long materialId = Long.valueOf(matcher.group(1));
+            BrandMaterial material = brandMaterialMapper.selectById(materialId);
+            if (material == null
+                    || account == null
+                    || account.getBrandId() == null
+                    || !account.getBrandId().equals(material.getBrandId())
+                    || !"brand_image".equals(material.getCategory())
+                    || !StringUtils.hasText(material.getObjectKey())) {
+                return null;
+            }
+            byte[] bytes = minioStorageService.getObjectBytes(material.getObjectKey());
+            String imageType = supportedImageType(firstText(material.getFileType(), extension(material.getFileName())), bytes);
+            return new ContentImageSource(bytes, safeImageFilename(material.getFileName(), imageType));
+        } catch (BizException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private ContentImageSource downloadImage(String url) {
         try {
             URI uri = URI.create(url);
             String scheme = uri.getScheme();
@@ -131,7 +170,10 @@ public class WechatMediaService {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new BizException(400, "content_image_download_failed");
             }
-            return response.body();
+            byte[] bytes = response.body();
+            String imageType = supportedImageType(contentTypeImageType(
+                    response.headers().firstValue("Content-Type").orElse(null)), bytes);
+            return new ContentImageSource(bytes, safeImageFilename(filenameFromUrl(url), imageType));
         } catch (BizException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -164,7 +206,7 @@ public class WechatMediaService {
                 || "::1".equals(hostAddress);
     }
 
-    private String uploadContentImageWithLock(SelfMediaAccount account, String normalizedUrl, byte[] bytes, String hash) {
+    private String uploadContentImageWithLock(SelfMediaAccount account, ContentImageSource source, String hash) {
         String lockKey = CONTENT_IMAGE_LOCK_PREFIX + account.getId() + ":" + hash;
         String lockValue = UUID.randomUUID().toString();
         Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, lockValue, CONTENT_IMAGE_LOCK_TTL);
@@ -181,10 +223,9 @@ public class WechatMediaService {
             if (existed != null && StringUtils.hasText(existed.getPlatformUrl())) {
                 return existed.getPlatformUrl();
             }
-            String filename = filenameFromUrl(normalizedUrl);
             WechatMpClient.UploadImageResult result =
                     tokenAwareExecutor.execute(account, accessToken ->
-                            wechatMpClient.uploadContentImage(accessToken, bytes, filename));
+                            wechatMpClient.uploadContentImage(accessToken, source.bytes(), source.filename()));
             SelfMediaMaterialMapping row = new SelfMediaMaterialMapping();
             row.setSelfMediaAccountId(account.getId());
             // MySQL unique indexes treat NULL brand_material_id values as distinct, so content
@@ -240,6 +281,103 @@ public class WechatMediaService {
         }
     }
 
+    private String safeImageFilename(String filename, String imageType) {
+        String type = normalizeImageType(imageType);
+        String fallback = "image." + type;
+        if (!StringUtils.hasText(filename)) {
+            return fallback;
+        }
+        String trimmed = filename.trim();
+        String extension = extension(trimmed);
+        if (type.equals(normalizeImageType(extension))) {
+            return trimmed;
+        }
+        int dot = trimmed.lastIndexOf('.');
+        String base = dot > 0 ? trimmed.substring(0, dot) : trimmed;
+        if (!StringUtils.hasText(base)) {
+            base = "image";
+        }
+        return base + "." + type;
+    }
+
+    private String supportedImageType(String hint, byte[] bytes) {
+        String normalized = normalizeImageType(hint);
+        if (IMAGE_TYPES.contains(normalized)) {
+            return normalized;
+        }
+        String detected = detectImageType(bytes);
+        if (IMAGE_TYPES.contains(detected)) {
+            return detected;
+        }
+        throw new BizException(400, "content_image_type_invalid");
+    }
+
+    private String normalizeImageType(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if ("jpg".equals(normalized)) {
+            return "jpeg";
+        }
+        return normalized;
+    }
+
+    private String contentTypeImageType(String contentType) {
+        if (!StringUtils.hasText(contentType)) {
+            return null;
+        }
+        String normalized = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "image/jpeg" -> "jpeg";
+            case "image/png" -> "png";
+            case "image/gif" -> "gif";
+            case "image/bmp" -> "bmp";
+            default -> null;
+        };
+    }
+
+    private String detectImageType(byte[] bytes) {
+        if (bytes == null || bytes.length < 4) {
+            return "";
+        }
+        int b0 = bytes[0] & 0xff;
+        int b1 = bytes[1] & 0xff;
+        int b2 = bytes[2] & 0xff;
+        int b3 = bytes[3] & 0xff;
+        if (b0 == 0xff && b1 == 0xd8 && b2 == 0xff) {
+            return "jpeg";
+        }
+        if (b0 == 0x89 && b1 == 0x50 && b2 == 0x4e && b3 == 0x47) {
+            return "png";
+        }
+        if (b0 == 0x47 && b1 == 0x49 && b2 == 0x46) {
+            return "gif";
+        }
+        if (b0 == 0x42 && b1 == 0x4d) {
+            return "bmp";
+        }
+        return "";
+    }
+
+    private String extension(String filename) {
+        if (!StringUtils.hasText(filename)) {
+            return null;
+        }
+        int dot = filename.lastIndexOf('.');
+        if (dot < 0 || dot == filename.length() - 1) {
+            return null;
+        }
+        return filename.substring(dot + 1);
+    }
+
+    private String firstText(String first, String second) {
+        if (StringUtils.hasText(first)) {
+            return first.trim();
+        }
+        return StringUtils.hasText(second) ? second.trim() : null;
+    }
+
     private String sha256(byte[] bytes) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -259,5 +397,8 @@ public class WechatMediaService {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private record ContentImageSource(byte[] bytes, String filename) {
     }
 }
