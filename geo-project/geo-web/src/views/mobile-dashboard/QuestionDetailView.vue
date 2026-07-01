@@ -13,9 +13,10 @@
         <section class="detail-hero">
           <div class="detail-avatar">
             <img
-              v-if="platformLogo(item.platformCode)"
-              :src="platformLogo(item.platformCode)"
+              v-if="aiPlatformLogoSrc(item)"
+              :src="aiPlatformLogoSrc(item)"
               :alt="platformLabel(item.platformCode)"
+              @error="fallbackAiPlatformLogo($event, item)"
             >
             <span v-else>{{ platformInitial(item.platformCode) }}</span>
           </div>
@@ -135,11 +136,7 @@ import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { DashboardMetric, QuestionMonitorItem } from '@/types/mobileDashboard'
 import { aiPlatformLabel, contentPlatformLabel } from '@/utils/mobileDashboardDictionaries'
-import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
-import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
-import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
-import yuanbaoLogo from '@/assets/ai-model-logos/yuanbao-color.svg'
-import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
+import { aiPlatformLogoSrc, fallbackAiPlatformLogo } from '@/utils/aiPlatformLogo'
 
 const QUESTION_DETAIL_CACHE_KEY = 'mobile_dashboard_question_detail'
 const route = useRoute()
@@ -156,17 +153,6 @@ const markdown = new MarkdownIt({
 const renderedResponse = computed(() => renderMarkdown(item.value?.responseText))
 const relatedContentTasks = computed(() => item.value?.relatedContentTasks || [])
 
-const aiPlatformLogos: Record<string, string> = {
-  doubao: doubaoLogo,
-  deepseek: deepseekLogo,
-  tongyi: qwenLogo,
-  qwen: qwenLogo,
-  wenxin: wenxinLogo,
-  ernie: wenxinLogo,
-  yuanbao: yuanbaoLogo,
-  hunyuan: yuanbaoLogo,
-}
-
 function metricBool(metric?: DashboardMetric<boolean>) {
   return metric?.available && metric.value === true
 }
@@ -177,11 +163,6 @@ function platformLabel(code: string) {
 
 function platformInitial(code: string) {
   return platformLabel(code).slice(0, 1)
-}
-
-function platformLogo(code?: string | null) {
-  if (!code) return ''
-  return aiPlatformLogos[code] || ''
 }
 
 function renderMarkdown(value?: string | null) {

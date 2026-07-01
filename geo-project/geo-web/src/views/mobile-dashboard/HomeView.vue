@@ -32,7 +32,12 @@
           >
             <div class="progress-row__meta">
               <span class="platform-name">
-                <img v-if="aiPlatformLogo(item.code)" :src="aiPlatformLogo(item.code)" :alt="aiPlatformLabel(item.code)">
+                <img
+                  v-if="aiPlatformLogoSrc(item)"
+                  :src="aiPlatformLogoSrc(item)"
+                  :alt="aiPlatformLabel(item.code)"
+                  @error="fallbackAiPlatformLogo($event, item)"
+                >
                 <i v-else>{{ aiPlatformLabel(item.code).slice(0, 1) }}</i>
                 <b>{{ aiPlatformLabel(item.code) }}</b>
               </span>
@@ -137,11 +142,7 @@ import TrendLineChart from '@/components/mobile-dashboard/TrendLineChart.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { DashboardMetric, HomeDashboardData } from '@/types/mobileDashboard'
 import { aiPlatformLabel, sceneLabel } from '@/utils/mobileDashboardDictionaries'
-import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
-import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
-import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
-import yuanbaoLogo from '@/assets/ai-model-logos/yuanbao-color.svg'
-import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
+import { aiPlatformLogoSrc, fallbackAiPlatformLogo } from '@/utils/aiPlatformLogo'
 
 const store = useMobileDashboardStore()
 const data = ref<HomeDashboardData>()
@@ -157,16 +158,6 @@ const metricIcons: Record<string, string> = {
   first_recommend_count: 'bars',
   covered_question_count: 'check',
   total_asset_count: 'document',
-}
-const aiPlatformLogos: Record<string, string> = {
-  doubao: doubaoLogo,
-  deepseek: deepseekLogo,
-  tongyi: qwenLogo,
-  qwen: qwenLogo,
-  wenxin: wenxinLogo,
-  ernie: wenxinLogo,
-  yuanbao: yuanbaoLogo,
-  hunyuan: yuanbaoLogo,
 }
 const sceneIcons: Record<string, string> = {
   brand_awareness: 'document',
@@ -225,11 +216,6 @@ function metricNumber(metric?: DashboardMetric<number>) {
 function metricPercent(metric?: DashboardMetric<number>) {
   if (!metric?.available) return '0%'
   return `${metric.value ?? 0}%`
-}
-
-function aiPlatformLogo(code?: string | null) {
-  if (!code) return ''
-  return aiPlatformLogos[code] || ''
 }
 
 function scenePercent(item: { covered?: DashboardMetric<number>; total?: DashboardMetric<number> }) {

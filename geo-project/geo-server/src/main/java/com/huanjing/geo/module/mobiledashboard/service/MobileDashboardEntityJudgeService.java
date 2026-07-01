@@ -139,6 +139,7 @@ public class MobileDashboardEntityJudgeService {
     public List<CompetitorSummary> competitorSummaries(Long projectId, LocalDate startDate, LocalDate endDate) {
         return jdbcTemplate.query("""
                 SELECT c.id AS entity_ref_id,
+                       c.competitor_name,
                        c.display_order,
                        c.qa_status,
                        COALESCE(SUM(s.expected_count), 0) AS expected_count,
@@ -156,10 +157,11 @@ public class MobileDashboardEntityJudgeService {
                    AND s.judge_prompt_version = ?
                  WHERE c.project_id = ?
                    AND c.status = 'active'
-                 GROUP BY c.id, c.display_order, c.qa_status
+                 GROUP BY c.id, c.competitor_name, c.display_order, c.qa_status
                  ORDER BY c.display_order ASC, c.id ASC
                 """, (rs, rowNum) -> new CompetitorSummary(
                 rs.getLong("entity_ref_id"),
+                rs.getString("competitor_name"),
                 rs.getInt("display_order"),
                 rs.getString("qa_status"),
                 new JudgeCoverage(
@@ -191,6 +193,7 @@ public class MobileDashboardEntityJudgeService {
                      WHERE rn = 1
                 )
                 SELECT c.id AS entity_ref_id,
+                       c.competitor_name,
                        c.display_order,
                        c.qa_status,
                        COALESCE(MAX(lc.expected_count), 0) AS expected_count,
@@ -209,10 +212,11 @@ public class MobileDashboardEntityJudgeService {
                    AND j.judge_prompt_version = ?
                  WHERE c.project_id = ?
                    AND c.status = 'active'
-                 GROUP BY c.id, c.display_order, c.qa_status
+                 GROUP BY c.id, c.competitor_name, c.display_order, c.qa_status
                  ORDER BY c.display_order ASC, c.id ASC
                 """, (rs, rowNum) -> new CompetitorSummary(
                 rs.getLong("entity_ref_id"),
+                rs.getString("competitor_name"),
                 rs.getInt("display_order"),
                 rs.getString("qa_status"),
                 new JudgeCoverage(
@@ -716,13 +720,13 @@ public class MobileDashboardEntityJudgeService {
                 row.firstRecommendCount(), sha256(row.ids()));
     }
 
-    boolean coverageReady(JudgeCoverage coverage) {
+    public boolean coverageReady(JudgeCoverage coverage) {
         return coverage != null
                 && coverage.expectedCount() > 0
                 && coverage.successCount() * 100 >= coverage.expectedCount() * COVERAGE_THRESHOLD_PERCENT;
     }
 
-    int coverageThresholdPercent() {
+    public int coverageThresholdPercent() {
         return COVERAGE_THRESHOLD_PERCENT;
     }
 
@@ -827,6 +831,7 @@ public class MobileDashboardEntityJudgeService {
     }
 
     public record CompetitorSummary(Long entityRefId,
+                                    String competitorName,
                                     int displayOrder,
                                     String qaStatus,
                                     JudgeCoverage coverage) {

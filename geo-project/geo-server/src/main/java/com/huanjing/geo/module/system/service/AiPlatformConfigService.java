@@ -188,6 +188,7 @@ public class AiPlatformConfigService {
         String objectKey = buildLogoObjectKey(entity.getId(), image.fileName());
         String logoUrl = minioStorageService.uploadBytes(image.bytes(), objectKey, image.contentType());
 
+        entity.setPlatformLogoObjectKey(objectKey);
         entity.setPlatformLogoUrl(logoUrl);
         aiPlatformConfigMapper.updateById(entity);
         activityLogService.logAction(
@@ -200,6 +201,13 @@ public class AiPlatformConfigService {
                 null
         );
         return entity;
+    }
+
+    public PlatformLogoResource loadLogoResource(Long id) {
+        AiPlatformConfig entity = requireById(id);
+        String objectKey = resolveLogoObjectKey(entity);
+        byte[] bytes = minioStorageService.getObjectBytes(objectKey);
+        return new PlatformLogoResource(bytes, contentTypeByObjectKey(objectKey));
     }
 
     public void delete(Long id) {
@@ -326,6 +334,7 @@ public class AiPlatformConfigService {
         entity.setPlatformName(req.getPlatformName().trim());
         entity.setPlatformHomeUrl(StringUtils.hasText(req.getPlatformHomeUrl()) ? req.getPlatformHomeUrl().trim() : null);
         entity.setPlatformLogoUrl(StringUtils.hasText(req.getPlatformLogoUrl()) ? req.getPlatformLogoUrl().trim() : null);
+        entity.setPlatformLogoObjectKey(null);
         entity.setPriorityLevel(req.getPriorityLevel().trim());
         entity.setRpmLimit(req.getRpmLimit() != null ? req.getRpmLimit() : 60);
         entity.setTpmLimit(req.getTpmLimit() != null ? req.getTpmLimit() : 60000);
@@ -360,6 +369,9 @@ public class AiPlatformConfigService {
         entity.setPlatformName(req.getPlatformName().trim());
         entity.setPlatformHomeUrl(StringUtils.hasText(req.getPlatformHomeUrl()) ? req.getPlatformHomeUrl().trim() : null);
         entity.setPlatformLogoUrl(StringUtils.hasText(req.getPlatformLogoUrl()) ? req.getPlatformLogoUrl().trim() : null);
+        if (!StringUtils.hasText(req.getPlatformLogoUrl())) {
+            entity.setPlatformLogoObjectKey(null);
+        }
         entity.setPriorityLevel(req.getPriorityLevel().trim());
         entity.setRpmLimit(req.getRpmLimit() != null ? req.getRpmLimit() : entity.getRpmLimit());
         entity.setTpmLimit(req.getTpmLimit() != null ? req.getTpmLimit() : entity.getTpmLimit());
@@ -394,6 +406,7 @@ public class AiPlatformConfigService {
         snapshot.put("platformName", entity.getPlatformName());
         snapshot.put("platformHomeUrl", entity.getPlatformHomeUrl());
         snapshot.put("platformLogoUrl", entity.getPlatformLogoUrl());
+        snapshot.put("platformLogoObjectKey", entity.getPlatformLogoObjectKey());
         snapshot.put("priorityLevel", entity.getPriorityLevel());
         snapshot.put("rpmLimit", entity.getRpmLimit());
         snapshot.put("tpmLimit", entity.getTpmLimit());
@@ -428,9 +441,25 @@ public class AiPlatformConfigService {
             throw new BizException(400, "Upload file exceeds 10MB limit");
         }
         String contentType = file.getContentType();
-        if (!StringUtils.hasText(contentType) || !contentType.toLowerCase(Locale.ROOT).startsWith("image/")) {
+        String fileName = file.getOriginalFilename();
+        boolean imageContentType = StringUtils.hasText(contentType) && contentType.toLowerCase(Locale.ROOT).startsWith("image/");
+        boolean imageExtension = hasImageExtension(fileName);
+        if (!imageContentType && !imageExtension) {
             throw new BizException(400, "Platform logo must be an image file");
         }
+    }
+
+    private boolean hasImageExtension(String fileName) {
+        if (!StringUtils.hasText(fileName)) {
+            return false;
+        }
+        String lower = fileName.trim().toLowerCase(Locale.ROOT);
+        return lower.endsWith(".jpg")
+                || lower.endsWith(".jpeg")
+                || lower.endsWith(".png")
+                || lower.endsWith(".gif")
+                || lower.endsWith(".webp")
+                || lower.endsWith(".svg");
     }
 
     private String buildLogoObjectKey(Long platformId, String originalName) {
@@ -442,5 +471,63 @@ public class AiPlatformConfigService {
             ext = originalName.substring(dot);
         }
         return "ai-platform/logo/" + platformId + "/" + date + "/" + random + ext;
+    }
+
+    private String extractLogoObjectKey(Long platformId, String logoUrl) {
+        if (!StringUtils.hasText(logoUrl)) {
+            throw new BizException(404, "Platform logo not found");
+        }
+
+        String raw = logoUrl.trim();
+        String path = raw;
+        try {
+            java.net.URI uri = java.net.URI.create(raw);
+            if (StringUtils.hasText(uri.getPath())) {
+                path = uri.getPath();
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Legacy relative values are handled below.
+        }
+
+        String bucket = minioStorageService.bucketName();
+        String bucketPrefix = "/" + bucket + "/";
+        String ossBucketPrefix = "/oss" + bucketPrefix;
+        String objectKey = null;
+        if (path.startsWith(ossBucketPrefix)) {
+            objectKey = path.substring(ossBucketPrefix.length());
+        } else if (path.startsWith(bucketPrefix)) {
+            objectKey = path.substring(bucketPrefix.length());
+        } else if (path.startsWith(bucket + "/")) {
+            objectKey = path.substring(bucket.length() + 1);
+        } else if (path.startsWith("ai-platform/logo/")) {
+            objectKey = path;
+        }
+
+        String expectedPrefix = "ai-platform/logo/" + platformId + "/";
+        if (!StringUtils.hasText(objectKey) || !objectKey.startsWith(expectedPrefix)) {
+            throw new BizException(404, "Platform logo not found");
+        }
+        return objectKey;
+    }
+
+    private String resolveLogoObjectKey(AiPlatformConfig entity) {
+        String objectKey = entity.getPlatformLogoObjectKey();
+        String expectedPrefix = "ai-platform/logo/" + entity.getId() + "/";
+        if (StringUtils.hasText(objectKey) && objectKey.trim().startsWith(expectedPrefix)) {
+            return objectKey.trim();
+        }
+        return extractLogoObjectKey(entity.getId(), entity.getPlatformLogoUrl());
+    }
+
+    private String contentTypeByObjectKey(String objectKey) {
+        String normalized = objectKey == null ? "" : objectKey.toLowerCase(Locale.ROOT);
+        if (normalized.endsWith(".svg")) return "image/svg+xml";
+        if (normalized.endsWith(".png")) return "image/png";
+        if (normalized.endsWith(".gif")) return "image/gif";
+        if (normalized.endsWith(".webp")) return "image/webp";
+        return "image/jpeg";
+    }
+
+    public record PlatformLogoResource(byte[] bytes, String contentType) {
     }
 }

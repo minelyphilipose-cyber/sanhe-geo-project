@@ -46,9 +46,10 @@
         >
           <div class="question-avatar">
             <img
-              v-if="platformLogo(item.platformCode)"
-              :src="platformLogo(item.platformCode)"
+              v-if="aiPlatformLogoSrc(item)"
+              :src="aiPlatformLogoSrc(item)"
               :alt="platformLabel(item.platformCode)"
+              @error="fallbackAiPlatformLogo($event, item)"
             >
             <span v-else>{{ platformInitial(item.platformCode) }}</span>
           </div>
@@ -129,11 +130,7 @@ import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { DashboardMetric, MonitorDashboardData, QuestionMonitorItem } from '@/types/mobileDashboard'
 import { aiPlatformLabel, sceneLabel } from '@/utils/mobileDashboardDictionaries'
-import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
-import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
-import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
-import yuanbaoLogo from '@/assets/ai-model-logos/yuanbao-color.svg'
-import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
+import { aiPlatformLogoSrc, fallbackAiPlatformLogo } from '@/utils/aiPlatformLogo'
 
 const store = useMobileDashboardStore()
 const router = useRouter()
@@ -143,16 +140,6 @@ const questionPage = ref(1)
 const selectedPlatform = ref('all')
 const questionPageSize = 5
 const QUESTION_DETAIL_CACHE_KEY = 'mobile_dashboard_question_detail'
-const aiPlatformLogos: Record<string, string> = {
-  doubao: doubaoLogo,
-  deepseek: deepseekLogo,
-  tongyi: qwenLogo,
-  qwen: qwenLogo,
-  wenxin: wenxinLogo,
-  ernie: wenxinLogo,
-  yuanbao: yuanbaoLogo,
-  hunyuan: yuanbaoLogo,
-}
 
 const overviewCards = computed(() => {
   const overview = data.value?.overview
@@ -208,11 +195,6 @@ function platformLabel(code: string) {
 function platformInitial(code: string) {
   const label = platformLabel(code)
   return label.slice(0, 1)
-}
-
-function platformLogo(code?: string | null) {
-  if (!code) return ''
-  return aiPlatformLogos[code] || ''
 }
 
 function rightStatus(item: QuestionMonitorItem) {

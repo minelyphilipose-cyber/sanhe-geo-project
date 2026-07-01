@@ -48,14 +48,14 @@ public class DispatchPlannerService {
         );
 
         for (Project project : projects) {
-            planBiDaily(project, today);
+            planQuestionPoll(project, today);
             planContentGeneration(project, today);
             planMonthly(project, today);
             planQuarterly(project, today);
         }
     }
 
-    private void planBiDaily(Project project, LocalDate today) {
+    private void planQuestionPoll(Project project, LocalDate today) {
         LocalDate activatedDate = project.getActivatedAt().toLocalDate();
         planQuestionTierPoll(project, today, activatedDate, "A", 1);
     }

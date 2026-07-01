@@ -163,6 +163,7 @@ public class MobileDashboardAggregateService {
             throw new BizException(404, "未找到该问题监测记录");
         }
         MobileDashboardAggregateVO.QuestionMonitorItem item = mergeQuestionMonitorRows(rows, judgeReady, judgeReason).get(0);
+        enrichQuestionMonitorItems(List.of(item));
         item.setRelatedContentTasks(loadRelatedBuildingContentTasks(projectId, item.getKeywordResultId()));
         return item;
     }
@@ -316,7 +317,7 @@ public class MobileDashboardAggregateService {
     }
 
     private List<MobileDashboardAggregateVO.PlatformMetric> loadPlatformPerformance(Long projectId, DateRange range) {
-        return jdbcTemplate.query("""
+        return enrichPlatformMetrics(jdbcTemplate.query("""
                 SELECT %s AS platform_code,
                        COALESCE(SUM(completed_count), 0) AS completed_count,
                        COALESCE(SUM(CASE WHEN effective_hit_count > 0 THEN effective_hit_count ELSE hit_count END), 0) AS mention_count
@@ -345,11 +346,11 @@ public class MobileDashboardAggregateService {
                 .sorted(Comparator
                         .comparingInt((MobileDashboardAggregateVO.PlatformMetric row) -> metricValue(row.getRate())).reversed()
                         .thenComparingInt(row -> aiPlatformOrder(row.getCode())))
-                .toList();
+                .toList());
     }
 
     private List<MobileDashboardAggregateVO.PlatformMetric> loadLatestPlatformPerformance(Long projectId) {
-        return jdbcTemplate.query("""
+        return enrichPlatformMetrics(jdbcTemplate.query("""
                 WITH latest AS (
                     SELECT pr.id,
                            %1$s AS platform_code,
@@ -390,7 +391,7 @@ public class MobileDashboardAggregateService {
                 .sorted(Comparator
                         .comparingInt((MobileDashboardAggregateVO.PlatformMetric row) -> metricValue(row.getRate())).reversed()
                         .thenComparingInt(row -> aiPlatformOrder(row.getCode())))
-                .toList();
+                .toList());
     }
 
     private List<MobileDashboardAggregateVO.PlatformMetric> loadCompleteBatchPlatformPerformance(Long projectId,
@@ -907,6 +908,7 @@ public class MobileDashboardAggregateService {
                 StringUtils.hasText(platformCode) ? normalizeAiPlatformCode(platformCode) : "all",
                 MobileDashboardEntityJudgeService.PROMPT_VERSION);
         List<MobileDashboardAggregateVO.QuestionMonitorItem> items = mergeQuestionMonitorRows(rows, judgeReady, judgeReason);
+        enrichQuestionMonitorItems(items);
         return toQuestionMonitorList(items, resolvedPage, resolvedSize, "暂无重点问题监测数据");
     }
 
@@ -984,6 +986,7 @@ public class MobileDashboardAggregateService {
             );
         }, projectId, Date.valueOf(completeBatchDate), MOBILE_QUESTION_TIER, MobileDashboardEntityJudgeService.PROMPT_VERSION);
         List<MobileDashboardAggregateVO.QuestionMonitorItem> items = mergeQuestionMonitorRows(rows, judgeReady, judgeReason);
+        enrichQuestionMonitorItems(items);
         return toQuestionMonitorList(items, 1, 20, "暂无完整批次监测数据");
     }
 
@@ -1094,6 +1097,70 @@ public class MobileDashboardAggregateService {
             list.setReason(emptyReason);
         }
         return list;
+    }
+
+    private void enrichQuestionMonitorItems(List<MobileDashboardAggregateVO.QuestionMonitorItem> items) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        Map<String, PlatformLogoMeta> metaMap = loadAiPlatformLogoMeta();
+        for (MobileDashboardAggregateVO.QuestionMonitorItem item : items) {
+            if (item == null || !StringUtils.hasText(item.getPlatformCode())) {
+                continue;
+            }
+            PlatformLogoMeta meta = metaMap.get(normalizeAiPlatformCode(item.getPlatformCode()));
+            if (meta == null) {
+                continue;
+            }
+            item.setPlatformId(meta.id());
+            item.setPlatformLogoUrl(meta.logoUrl());
+            item.setPlatformLogoObjectKey(meta.logoObjectKey());
+        }
+    }
+
+    private List<MobileDashboardAggregateVO.PlatformMetric> enrichPlatformMetrics(List<MobileDashboardAggregateVO.PlatformMetric> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return rows;
+        }
+        Map<String, PlatformLogoMeta> metaMap = loadAiPlatformLogoMeta();
+        for (MobileDashboardAggregateVO.PlatformMetric row : rows) {
+            if (row == null || !StringUtils.hasText(row.getCode())) {
+                continue;
+            }
+            PlatformLogoMeta meta = metaMap.get(normalizeAiPlatformCode(row.getCode()));
+            if (meta == null) {
+                continue;
+            }
+            row.setPlatformId(meta.id());
+            row.setPlatformLogoUrl(meta.logoUrl());
+            row.setPlatformLogoObjectKey(meta.logoObjectKey());
+        }
+        return rows;
+    }
+
+    private Map<String, PlatformLogoMeta> loadAiPlatformLogoMeta() {
+        List<PlatformLogoMeta> rows = jdbcTemplate.query("""
+                SELECT id,
+                       platform_code,
+                       platform_logo_url,
+                       platform_logo_object_key
+                  FROM ai_platform_config
+                 WHERE platform_code IS NOT NULL
+                 ORDER BY CASE WHEN enabled = 1 THEN 0 ELSE 1 END, id ASC
+                """, (rs, rowNum) -> new PlatformLogoMeta(
+                rs.getLong("id"),
+                normalizeAiPlatformCode(rs.getString("platform_code")),
+                rs.getString("platform_logo_url"),
+                rs.getString("platform_logo_object_key")
+        ));
+        Map<String, PlatformLogoMeta> metaMap = new HashMap<>();
+        for (PlatformLogoMeta row : rows) {
+            if (!StringUtils.hasText(row.code())) {
+                continue;
+            }
+            metaMap.putIfAbsent(row.code(), row);
+        }
+        return metaMap;
     }
 
     private int normalizePage(Integer page) {
@@ -1932,6 +1999,9 @@ public class MobileDashboardAggregateService {
     }
 
     private record RelatedContentTaskCandidate(String sceneCode, MobileDashboardAggregateVO.ContentTaskItem item) {
+    }
+
+    private record PlatformLogoMeta(Long id, String code, String logoUrl, String logoObjectKey) {
     }
 
     private record QuestionMonitorRow(Long keywordResultId,

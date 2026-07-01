@@ -215,7 +215,7 @@ public class DispatchTaskService {
         if (tasks == null || tasks.isEmpty()) {
             return;
         }
-        if (!isStaggerEnabledFor(DispatchTaskType.BI_DAILY_POLL)) {
+        if (!isStaggerEnabledFor(DispatchTaskType.QUESTION_POLL)) {
             tasks.forEach(this::enqueueIfNeeded);
             return;
         }
@@ -357,7 +357,7 @@ public class DispatchTaskService {
 
     private void alertStaggerOverflow(String platformCode, int taskCount, long windowMs, long maxDelayMs) {
         Map<String, Object> context = new HashMap<>();
-        context.put("taskType", DispatchTaskType.BI_DAILY_POLL.name());
+        context.put("taskType", DispatchTaskType.QUESTION_POLL.name());
         context.put("platformCode", platformCode);
         context.put("taskCount", taskCount);
         context.put("windowMinutes", Duration.ofMillis(windowMs).toMinutes());
@@ -385,7 +385,13 @@ public class DispatchTaskService {
             return false;
         }
         for (String item : raw.split(",")) {
-            if (taskType.name().equalsIgnoreCase(item.trim())) {
+            DispatchTaskType configuredType;
+            try {
+                configuredType = DispatchTaskType.fromValue(item.trim());
+            } catch (IllegalArgumentException ignored) {
+                continue;
+            }
+            if (taskType == configuredType) {
                 return true;
             }
         }
@@ -467,7 +473,7 @@ public class DispatchTaskService {
         task.setNextRetryAt(null);
         task.setFinishedAt(null);
         task.setLastError(null);
-        if (DispatchTaskType.BI_DAILY_POLL.name().equalsIgnoreCase(task.getTaskType())
+        if (DispatchTaskType.isQuestionPoll(task.getTaskType())
                 || DispatchTaskType.CONTENT_GENERATION.name().equalsIgnoreCase(task.getTaskType())) {
             Map<String, Object> payload = new HashMap<>();
             if (task.getPayloadJson() != null && !task.getPayloadJson().isBlank()) {

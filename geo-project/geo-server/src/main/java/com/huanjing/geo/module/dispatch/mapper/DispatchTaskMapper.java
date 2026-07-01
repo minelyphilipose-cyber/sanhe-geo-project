@@ -91,7 +91,10 @@ public interface DispatchTaskMapper extends BaseMapper<DispatchTask> {
               FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(due_time) / (#{bucketMinutes} * 60)) * (#{bucketMinutes} * 60)) AS bucketStart,
               COUNT(1) AS taskCount
             FROM dispatch_task
-            WHERE task_type = #{taskType}
+            WHERE task_type IN
+              <foreach collection="taskTypes" item="taskType" open="(" separator="," close=")">
+                #{taskType}
+              </foreach>
               AND due_time &gt;= #{rangeStart}
               AND due_time &lt; #{rangeEnd}
               AND status IN
@@ -105,7 +108,7 @@ public interface DispatchTaskMapper extends BaseMapper<DispatchTask> {
             ORDER BY platformCode ASC, status ASC, bucketStart ASC
             </script>
             """)
-    List<DispatchDueTimeBucketRow> aggregateDueTimeDistribution(@Param("taskType") String taskType,
+    List<DispatchDueTimeBucketRow> aggregateDueTimeDistribution(@Param("taskTypes") List<String> taskTypes,
                                                                 @Param("rangeStart") LocalDateTime rangeStart,
                                                                 @Param("rangeEnd") LocalDateTime rangeEnd,
                                                                 @Param("bucketMinutes") int bucketMinutes,

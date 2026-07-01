@@ -52,7 +52,7 @@
               @change="onFilterChange"
             />
             <el-select v-model="filters.taskType" clearable placeholder="任务类型" size="small" style="width: 170px" @change="onFilterChange">
-              <el-option label="问题池跑批" value="BI_DAILY_POLL" />
+              <el-option label="问题池跑批" value="QUESTION_POLL" />
               <el-option label="双周报" value="BIWEEKLY_REPORT" />
               <el-option label="月报" value="MONTHLY_REPORT" />
               <el-option label="季报" value="QUARTERLY_REPORT" />
@@ -232,6 +232,7 @@ function taskTypeLabel(task?: DispatchTaskItem | string) {
   const type = typeof task === 'string' ? task : task?.taskType
   if (typeof task !== 'string' && task?.taskDisplayName) return task.taskDisplayName
   const map: Record<string, string> = {
+    QUESTION_POLL: '问题池跑批',
     BI_DAILY_POLL: '问题池跑批',
     BRAND_STATEMENT_GENERATION: '品牌标准表达生成',
     BIWEEKLY_REPORT: '双周报',

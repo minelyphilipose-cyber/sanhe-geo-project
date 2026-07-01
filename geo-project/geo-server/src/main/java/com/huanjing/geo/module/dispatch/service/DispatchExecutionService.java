@@ -135,8 +135,8 @@ public class DispatchExecutionService {
             }
             throw new BizException(400, "No enabled platform configured for task type " + task.getTaskType());
         }
-        if (type == DispatchTaskType.BI_DAILY_POLL) {
-            executeBiDailyPoll(task, platformConfigs);
+        if (type == DispatchTaskType.QUESTION_POLL) {
+            executeQuestionPoll(task, platformConfigs);
             return;
         }
         if (type == DispatchTaskType.CONTENT_GENERATION) {
@@ -163,7 +163,7 @@ public class DispatchExecutionService {
         throw new BizException(500, "All provider paths failed");
     }
 
-    private void executeBiDailyPoll(DispatchTask task, List<AiPlatformConfig> platformConfigs) {
+    private void executeQuestionPoll(DispatchTask task, List<AiPlatformConfig> platformConfigs) {
         Project project = projectMapper.selectById(task.getProjectId());
         if (project == null) {
             throw new BizException(404, "Project not found");
@@ -297,11 +297,16 @@ public class DispatchExecutionService {
         JudgeInfo judge = invokeResult.success
                 ? judgeEffectiveHitIfNeeded(judgeBrandNames, brand, siteDomains, normalizedPhones, contactTerms, keyword.keywordText(), invokeResult.responseText)
                 : JudgeInfo.skipped("model invocation failed");
+        boolean hit = match.hit || Boolean.TRUE.equals(judge.effectiveHit);
+        boolean contactMentioned = match.contactMentioned || Boolean.TRUE.equals(judge.contactMentioned);
+        int contactMentionCount = match.contactMentionCount > 0
+                ? match.contactMentionCount
+                : (Boolean.TRUE.equals(judge.contactMentioned) ? 1 : 0);
 
         String recordType;
         if (!invokeResult.success) {
             recordType = "error";
-        } else if (match.hit) {
+        } else if (hit) {
             recordType = "hit";
         } else {
             recordType = "miss";
@@ -315,11 +320,12 @@ public class DispatchExecutionService {
         if (invokeResult.success) {
             detail.put("platform_response", redactSensitive(invokeResult.responseText));
             Map<String, Object> matchDetails = new LinkedHashMap<>();
-            matchDetails.put("is_hit", match.hit);
+            matchDetails.put("is_hit", hit);
+            matchDetails.put("rule_hit", match.hit);
             matchDetails.put("match_type", match.matchType);
             matchDetails.put("site_mentioned", match.siteMentioned);
-            matchDetails.put("contact_mentioned", match.contactMentioned);
-            matchDetails.put("contact_mention_count", match.contactMentionCount);
+            matchDetails.put("contact_mentioned", contactMentioned);
+            matchDetails.put("contact_mention_count", contactMentionCount);
             detail.put("match_details", matchDetails);
             detail.put("judge_details", judge.toPayload());
         } else {
@@ -344,12 +350,12 @@ public class DispatchExecutionService {
         result.setStatus(invokeResult.success ? "completed" : "failed");
         result.setRequestCount(invokeResult.requestCount);
         result.setResponseTimeMs(invokeResult.responseTimeMs);
-        result.setIsHit(match.hit);
+        result.setIsHit(hit);
         result.setEffectiveHit(judge.effectiveHit);
         result.setMatchType(match.matchType);
         result.setSiteMentioned(match.siteMentioned);
-        result.setContactMentioned(match.contactMentioned);
-        result.setContactMentionCount(match.contactMentionCount);
+        result.setContactMentioned(contactMentioned);
+        result.setContactMentionCount(contactMentionCount);
         result.setJudgeStatus(judge.status);
         result.setHitLevel(judge.hitLevel);
         result.setHitSentiment(judge.sentiment);
@@ -603,7 +609,7 @@ public class DispatchExecutionService {
             ))).routeResult();
             task.setPlatformCode(routed.platformCode());
             task.setCurrentChannel(routed.channel());
-            log.info("BI_DAILY_POLL task {} executed by platform={}, model={}, channel={}",
+            log.info("QUESTION_POLL task {} executed by platform={}, model={}, channel={}",
                     task.getId(), routed.platformCode(), routed.modelId(), routed.channel());
             return InvocationResult.success(
                     routed.platformCode(),
@@ -918,7 +924,7 @@ public class DispatchExecutionService {
         Object value = payload.get("questionTier");
         String tier = value == null ? "A" : String.valueOf(value).trim().toUpperCase(Locale.ROOT);
         if (!QUESTION_TIERS.contains(tier)) {
-            throw new BizException(400, "Invalid question tier for BI_DAILY_POLL: " + value);
+            throw new BizException(400, "Invalid question tier for QUESTION_POLL: " + value);
         }
         return tier;
     }
@@ -1113,9 +1119,6 @@ public class DispatchExecutionService {
                                                 Set<String> contactTerms,
                                                 String questionText,
                                                 String responseText) {
-        if (!questionContainsBrandName(questionText, judgeBrandNames)) {
-            return JudgeInfo.skipped("question does not contain current brand name");
-        }
         if (!StringUtils.hasText(responseText)) {
             return JudgeInfo.failed("ANSWER_EMPTY", "大模型回答为空");
         }
@@ -1244,12 +1247,22 @@ public class DispatchExecutionService {
                 mentionType 只能是：
                 recommendation / list_inclusion / factual_mention / contact_mention / question_echo / negative_mention / irrelevant / not_mentioned。
 
+                【联系方式曝光判断】
+                contactMentioned 只能是 true 或 false。
+                当回答在当前品牌上下文中提到电话、地址、官网、在线客服、门店咨询、联系商家、预约咨询、到店咨询、官方渠道咨询等联系方式或联系渠道时，contactMentioned=true。
+                如果回答只是泛泛说“可以了解”“可以比较”，没有联系动作、联系渠道、联系方式或咨询入口，则 contactMentioned=false。
+                contactMentionType 只能是：phone / address / website / online_service / store_visit / generic_contact / none。
+                contactEvidence 用一句话说明判定依据；没有联系方式曝光时返回空字符串。
+
                 【输出 JSON 格式】
                 {
                   "effectiveHit": true,
                   "hitLevel": "strong",
                   "sentiment": "positive",
                   "mentionType": "recommendation",
+                  "contactMentioned": true,
+                  "contactMentionType": "generic_contact",
+                  "contactEvidence": "回答中提到可咨询当前品牌的官方渠道。",
                   "evidence": "回答中将当前品牌列为推荐厂家，并说明了可咨询或可选择的理由。",
                   "riskReason": ""
                 }
@@ -1275,11 +1288,18 @@ public class DispatchExecutionService {
         String mentionType = normalizeEnum(payload.getStr("mentionType"),
                 Set.of("recommendation", "list_inclusion", "factual_mention", "contact_mention", "question_echo", "negative_mention", "irrelevant", "not_mentioned"),
                 effectiveHit ? "factual_mention" : "irrelevant");
+        boolean contactMentioned = Boolean.TRUE.equals(payload.getBool("contactMentioned"));
+        String contactMentionType = normalizeEnum(payload.getStr("contactMentionType"),
+                Set.of("phone", "address", "website", "online_service", "store_visit", "generic_contact", "none"),
+                contactMentioned ? "generic_contact" : "none");
         return JudgeInfo.success(
                 effectiveHit,
                 effectiveHit ? hitLevel : "invalid",
                 sentiment,
                 mentionType,
+                contactMentioned,
+                contactMentionType,
+                trimToLength(payload.getStr("contactEvidence"), 500),
                 trimToLength(payload.getStr("evidence"), 500),
                 trimToLength(payload.getStr("riskReason"), 500),
                 judgeModel
@@ -1464,7 +1484,7 @@ public class DispatchExecutionService {
         if (type == DispatchTaskType.BRAND_STATEMENT_GENERATION) {
             return resolveRandomEnabledPlatformCandidates();
         }
-        if (type == DispatchTaskType.BI_DAILY_POLL) {
+        if (type == DispatchTaskType.QUESTION_POLL) {
             return resolveQuestionPollPlatformCandidates();
         }
 
@@ -1912,6 +1932,9 @@ public class DispatchExecutionService {
         private final String hitLevel;
         private final String sentiment;
         private final String mentionType;
+        private final Boolean contactMentioned;
+        private final String contactMentionType;
+        private final String contactEvidence;
         private final String evidence;
         private final String riskReason;
         private final String judgeModel;
@@ -1923,6 +1946,9 @@ public class DispatchExecutionService {
                           String hitLevel,
                           String sentiment,
                           String mentionType,
+                          Boolean contactMentioned,
+                          String contactMentionType,
+                          String contactEvidence,
                           String evidence,
                           String riskReason,
                           String judgeModel,
@@ -1933,6 +1959,9 @@ public class DispatchExecutionService {
             this.hitLevel = hitLevel;
             this.sentiment = sentiment;
             this.mentionType = mentionType;
+            this.contactMentioned = contactMentioned;
+            this.contactMentionType = contactMentionType;
+            this.contactEvidence = contactEvidence;
             this.evidence = evidence;
             this.riskReason = riskReason;
             this.judgeModel = judgeModel;
@@ -1944,15 +1973,18 @@ public class DispatchExecutionService {
                                  String hitLevel,
                                  String sentiment,
                                  String mentionType,
+                                 boolean contactMentioned,
+                                 String contactMentionType,
+                                 String contactEvidence,
                                  String evidence,
                                  String riskReason,
                                  String judgeModel) {
             return new JudgeInfo(effectiveHit, "success", hitLevel, sentiment, mentionType,
-                    evidence, riskReason, judgeModel, LocalDateTime.now(), null);
+                    contactMentioned, contactMentionType, contactEvidence, evidence, riskReason, judgeModel, LocalDateTime.now(), null);
         }
 
         static JudgeInfo skipped(String reason) {
-            return new JudgeInfo(null, "skipped", null, null, null, "", "", null, null, reason);
+            return new JudgeInfo(null, "skipped", null, null, null, null, null, "", "", "", null, null, reason);
         }
 
         static JudgeInfo failed(String code, String message) {
@@ -1960,7 +1992,7 @@ public class DispatchExecutionService {
             if (StringUtils.hasText(error) && error.length() > 500) {
                 error = error.substring(0, 500);
             }
-            return new JudgeInfo(null, "failed", null, null, null, "", "", null, LocalDateTime.now(), error);
+            return new JudgeInfo(null, "failed", null, null, null, null, null, "", "", "", null, LocalDateTime.now(), error);
         }
 
         Map<String, Object> toPayload() {
@@ -1970,6 +2002,9 @@ public class DispatchExecutionService {
             payload.put("hit_level", hitLevel);
             payload.put("sentiment", sentiment);
             payload.put("mention_type", mentionType);
+            payload.put("contact_mentioned", contactMentioned);
+            payload.put("contact_mention_type", contactMentionType);
+            payload.put("contact_evidence", contactEvidence);
             payload.put("evidence", evidence);
             payload.put("risk_reason", riskReason);
             payload.put("judge_model", judgeModel);

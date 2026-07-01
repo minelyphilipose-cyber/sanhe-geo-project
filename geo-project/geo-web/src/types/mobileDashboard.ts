@@ -38,7 +38,10 @@ export interface KeyMetric {
 }
 
 export interface PlatformMetric {
+  platformId?: number | null
   code: string
+  platformLogoUrl?: string | null
+  platformLogoObjectKey?: string | null
   rate: DashboardMetric<number>
   completedCount?: number
   mentionCount?: number
@@ -127,7 +130,10 @@ export interface MonitorDashboardData {
 export interface QuestionMonitorItem {
   keywordResultId?: number | null
   pollResultId?: number | null
+  platformId?: number | null
   platformCode: string
+  platformLogoUrl?: string | null
+  platformLogoObjectKey?: string | null
   platformCodes?: string[]
   questionTitle: string
   completedAt?: string | null

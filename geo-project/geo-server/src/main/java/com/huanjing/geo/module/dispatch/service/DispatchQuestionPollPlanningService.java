@@ -209,7 +209,7 @@ public class DispatchQuestionPollPlanningService {
                 payload.put("shardId", shard.getId());
                 DispatchTask task = dispatchTaskService.createTaskWithoutEnqueue(
                         project.getId(),
-                        DispatchTaskType.BI_DAILY_POLL,
+                        DispatchTaskType.QUESTION_POLL,
                         windowStart,
                         batchDate,
                         LocalDateTime.now(),

@@ -264,7 +264,7 @@
         <div class="mb-3 table-toolbar">
           <el-input v-model="taskQuery.keyword" placeholder="项目名称关键字" clearable style="width: 220px" @keyup.enter="loadTasks" />
           <el-select v-model="taskQuery.taskType" clearable placeholder="任务类型" style="width: 180px" @change="loadTasks">
-            <el-option label="问题池跑批" value="BI_DAILY_POLL" />
+            <el-option label="问题池跑批" value="QUESTION_POLL" />
             <el-option label="品牌标准表达生成" value="BRAND_STATEMENT_GENERATION" />
             <el-option label="内容生成" value="CONTENT_GENERATION" />
           </el-select>
@@ -734,6 +734,7 @@ function taskTypeLabel(task?: DispatchTaskItem | string | null) {
   const taskType = typeof task === 'string' ? task : task?.taskType
   if (typeof task !== 'string' && task?.taskDisplayName) return task.taskDisplayName
   const map: Record<string, string> = {
+    QUESTION_POLL: '问题池跑批',
     BI_DAILY_POLL: '问题池跑批',
     BRAND_STATEMENT_GENERATION: '品牌标准表达生成',
     CONTENT_GENERATION: '内容生成',

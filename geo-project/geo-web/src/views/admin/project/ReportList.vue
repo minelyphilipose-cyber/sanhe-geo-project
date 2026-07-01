@@ -53,7 +53,7 @@
           <div class="signal-list">
             <article v-for="source in indexingSources" :key="source.name" class="signal-row">
               <i>
-                <img v-if="source.logo" :src="source.logo" :alt="source.name" />
+                <img v-if="source.logo" :src="source.logo" :alt="source.name" @error="fallbackLogo($event, source)" />
                 <template v-else>{{ source.short }}</template>
               </i>
               <span>{{ source.name }}</span>
@@ -92,7 +92,7 @@
                 :class="{ 'lissa-chip--small': !item.big }"
               >
                 <span :data-tip="`${item.name} · ${item.value}`">
-                  <img v-if="item.logo" :src="item.logo" :alt="item.name" />
+                  <img v-if="item.logo" :src="item.logo" :alt="item.name" @error="fallbackLogo($event, item)" />
                   <template v-else>{{ item.short }}</template>
                 </span>
               </div>
@@ -196,6 +196,42 @@
       </article>
     </section>
 
+    <section class="panel competitor-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>品牌与竞品推荐对比</h2>
+          <span>同一问题池轮询结果 · 实体裁判统计</span>
+        </div>
+        <div class="judge-badge" :class="{ ready: competitorComparison?.available }">
+          {{ competitorComparison?.available ? '已接入裁判' : '待分析' }}
+        </div>
+      </div>
+      <div v-if="competitorRows.length" class="competitor-board">
+        <article
+          v-for="row in competitorRows"
+          :key="`${row.entityType}-${row.displayName}`"
+          class="competitor-card"
+          :class="{ focus: row.highlight }"
+        >
+          <div class="competitor-identity">
+            <i>{{ row.highlight ? '本' : shortCompetitorName(row.displayName) }}</i>
+            <div>
+              <strong>{{ row.displayName }}</strong>
+              <span>{{ row.highlight ? '本品牌' : '竞品' }}</span>
+            </div>
+          </div>
+          <div class="competitor-metrics">
+            <span>推荐次数 <strong>{{ formatInt(row.recommendedCount) }}</strong></span>
+            <span>首推次数 <strong>{{ formatInt(row.firstRecommendCount) }}</strong></span>
+            <span>裁判覆盖 <strong>{{ row.coveragePercent }}%</strong></span>
+          </div>
+        </article>
+      </div>
+      <div v-else class="competitor-empty">
+        {{ competitorEmptyReason }}
+      </div>
+    </section>
+
     <section class="insight-grid">
       <article class="panel keyword-panel">
         <div class="panel-heading">
@@ -246,6 +282,13 @@
             </div>
           </article>
           <article>
+            <span class="dot teal"></span>
+            <div>
+              <small>近30日收录总量</small>
+              <strong>{{ trendArticleIndexedTotal }} <em>条</em></strong>
+            </div>
+          </article>
+          <article>
             <small>发布率</small>
             <strong>{{ publishRate }}<em>{{ publishRate === '-' ? '' : '%' }}</em></strong>
           </article>
@@ -290,7 +333,7 @@
             @click="togglePlatform(platform.name)"
           >
             <span class="chip-mark">
-              <img v-if="platform.logo" :src="platform.logo" :alt="platform.name" />
+              <img v-if="platform.logo" :src="platform.logo" :alt="platform.name" @error="fallbackLogo($event, platform)" />
               <template v-else>{{ platform.short }}</template>
             </span>
             {{ platform.name }}
@@ -352,9 +395,10 @@
                 <span class="platform-cell">
                   <i>
                     <img
-                      v-if="platformLogoSrc(row.platformLogoUrl, row.platformCode, row.platform)"
-                      :src="platformLogoSrc(row.platformLogoUrl, row.platformCode, row.platform)"
+                      v-if="platformLogoSrc(row)"
+                      :src="platformLogoSrc(row)"
                       :alt="row.platform"
+                      @error="fallbackLogo($event, row)"
                     />
                     <template v-else>{{ row.platform.slice(0, 1) }}</template>
                   </i>
@@ -385,7 +429,8 @@
       <footer class="table-footer">
         <span>共 <strong>{{ detailTotal }}</strong> 条数据 · 每页展示 {{ pageSize }} 条</span>
         <div v-if="totalPages > 1" class="pager">
-          <button type="button" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">‹</button>
+          <button type="button" :disabled="currentPage === 1" @click="changePage(1)">首页</button>
+          <button type="button" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">上一页</button>
           <button
             v-for="page in pageNumbers"
             :key="page"
@@ -395,7 +440,21 @@
           >
             {{ page }}
           </button>
-          <button type="button" :disabled="currentPage === totalPages" @click="changePage(currentPage + 1)">›</button>
+          <button type="button" :disabled="currentPage === totalPages" @click="changePage(currentPage + 1)">下一页</button>
+          <button type="button" :disabled="currentPage === totalPages" @click="changePage(totalPages)">尾页</button>
+          <form class="pager-jump" @submit.prevent="jumpToPage">
+            <span>跳至</span>
+            <input
+              v-model.trim="jumpPageInput"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              :placeholder="String(currentPage)"
+              :aria-label="`输入页码，范围 1 到 ${totalPages}`"
+            />
+            <span>页</span>
+            <button type="submit">确定</button>
+          </form>
         </div>
       </footer>
     </section>
@@ -457,6 +516,7 @@ import type {
   KeywordGroup,
   KeywordGroupQuestion,
   Project,
+  ProjectDashboardCompetitorRow,
   ProjectDashboardDetailItem,
   ProjectDashboardShare,
   ProjectDashboardSummaryResponse,
@@ -496,9 +556,11 @@ interface ReportRow {
   question: string
   type: string
   platform: string
+  platformId?: number | null
   platformCode: string
   platformUrl?: string | null
   platformLogoUrl?: string | null
+  platformLogoObjectKey?: string | null
   answerText?: string | null
   matchType?: string | null
   siteMentioned?: boolean
@@ -512,6 +574,7 @@ interface ReportRow {
 interface IndexingSource {
   name: string
   code: string
+  platformId?: number | null
   short: string
   logo: string
   value: string
@@ -519,6 +582,17 @@ interface IndexingSource {
   color: string
   bg: string
   gradient: string
+}
+
+interface PlatformLogoPayload {
+  platformId?: number | null
+  platformCode?: string | null
+  platformName?: string | null
+  platform?: string | null
+  platformLogoUrl?: string | null
+  platformLogoObjectKey?: string | null
+  logo?: string | null
+  name?: string | null
 }
 
 interface AiExposurePlatform {
@@ -575,6 +649,8 @@ const searchKeyword = ref('')
 const selectedPlatforms = ref(['全部'])
 const currentPage = ref(1)
 const pageSize = 5
+const jumpPageInput = ref('')
+const maxVisiblePageButtons = 10
 const dateRange = reactive({
   start: '',
   end: '',
@@ -674,6 +750,11 @@ function formatCompactNumber(value?: number | null) {
   return formatInt(num)
 }
 
+function shortCompetitorName(value?: string | null) {
+  const text = String(value || '').trim()
+  return text ? text.slice(0, 1) : '竞'
+}
+
 function normalizePlatformKey(value?: string | null) {
   return String(value || '').trim().toLowerCase()
 }
@@ -749,8 +830,26 @@ function platformLogo(code?: string | null, name?: string | null) {
     || ''
 }
 
-function platformLogoSrc(value?: string | null, code?: string | null, name?: string | null) {
-  return normalizeObjectStorageUrl(value) || platformLogo(code, name)
+function uploadedPlatformLogoSrc(platform: PlatformLogoPayload) {
+  const logoVersion = platform.platformLogoObjectKey || normalizeObjectStorageUrl(platform.platformLogoUrl || platform.logo)
+  if (!logoVersion || !platform.platformId) return ''
+  return `/api/public/platform-configs/${platform.platformId}/logo?v=${encodeURIComponent(logoVersion)}`
+}
+
+function platformLogoSrc(platform: PlatformLogoPayload) {
+  return uploadedPlatformLogoSrc(platform)
+    || platformLogo(platform.platformCode, platform.platformName || platform.platform || platform.name)
+}
+
+function fallbackLogo(event: Event, platform: PlatformLogoPayload) {
+  const image = event.target as HTMLImageElement
+  const fallback = platformLogo(platform.platformCode, platform.platformName || platform.platform || platform.name)
+  if (fallback && image.dataset.logoFallbackApplied !== 'true') {
+    image.dataset.logoFallbackApplied = 'true'
+    image.src = fallback
+  } else {
+    image.style.display = 'none'
+  }
 }
 
 const indexingSources = computed<IndexingSource[]>(() => {
@@ -758,10 +857,11 @@ const indexingSources = computed<IndexingSource[]>(() => {
   const configuredPlatforms = allModelPlatforms.value.length
     ? allModelPlatforms.value
     : (dashboardSummary.value?.platforms || []).map((item) => ({
-        id: 0,
+        id: item.platformId || 0,
         platformCode: item.platformCode,
         platformName: item.platformName,
         platformLogoUrl: normalizeObjectStorageUrl(item.platformLogoUrl) || null,
+        platformLogoObjectKey: item.platformLogoObjectKey || null,
         priorityLevel: 'P2' as const,
         apiKey: '',
         apiUrl: '',
@@ -784,11 +884,21 @@ const indexingSources = computed<IndexingSource[]>(() => {
   const maxHit = Math.max(...orderedPlatforms.map((item) => item.hitCount), 1)
   return orderedPlatforms.map(({ item, stat, hitCount }, index) => {
     const name = stat?.platformName || platformDisplayName(item)
+    const platformId = stat?.platformId || item.id || null
+    const platformLogoUrl = stat?.platformLogoUrl || item.platformLogoUrl || null
+    const platformLogoObjectKey = stat?.platformLogoObjectKey || item.platformLogoObjectKey || null
     return {
       name,
       code: item.platformCode,
+      platformId,
       short: (name || '平').slice(0, 2),
-      logo: normalizeObjectStorageUrl(stat?.platformLogoUrl || item.platformLogoUrl) || platformLogo(item.platformCode, name),
+      logo: platformLogoSrc({
+        platformId,
+        platformCode: item.platformCode,
+        platformName: name,
+        platformLogoUrl,
+        platformLogoObjectKey,
+      }),
       value: formatCompactNumber(hitCount),
       percent: Math.round((hitCount / maxHit) * 1000) / 10,
       color: sourceColors[index % sourceColors.length].color,
@@ -813,6 +923,9 @@ const sourceColors = [
 
 const lissajousPlatforms = computed(() => indexingSources.value.map((source, index) => ({
   name: source.name,
+  platformName: source.name,
+  platformCode: source.code,
+  platformId: source.platformId,
   short: source.short,
   logo: source.logo,
   value: source.value,
@@ -897,6 +1010,9 @@ const trendArticleCreatedTotal = computed(() => formatInt(
 const trendArticlePublishedTotal = computed(() => formatInt(
   dashboardTrend.value.reduce((total, item) => total + Number(item.articlePublished || 0), 0),
 ))
+const trendArticleIndexedTotal = computed(() => formatInt(
+  dashboardTrend.value.reduce((total, item) => total + Number(item.articleIndexed || 0), 0),
+))
 const publishRate = computed(() => {
   const created = dashboardTrend.value.reduce((total, item) => total + Number(item.articleCreated || 0), 0)
   const published = dashboardTrend.value.reduce((total, item) => total + Number(item.articlePublished || 0), 0)
@@ -904,7 +1020,7 @@ const publishRate = computed(() => {
   return ((published / created) * 100).toFixed(1)
 })
 
-type ComparisonKey = 'hitTotal' | 'contactTotal' | 'siteTotal' | 'platformCount' | 'monitorQuestionCount' | 'articleCreated' | 'articlePublished'
+type ComparisonKey = 'hitTotal' | 'contactTotal' | 'siteTotal' | 'platformCount' | 'monitorQuestionCount' | 'articleCreated' | 'articlePublished' | 'articleIndexed'
 
 function comparisonTrend(key: ComparisonKey) {
   const comparison = dashboardSummary.value?.comparison
@@ -922,6 +1038,12 @@ function comparisonTrendType(key: ComparisonKey): TrendType {
   const metric = dashboardSummary.value?.comparison?.[key]
   return metric && metric.delta < 0 ? 'down' : 'up'
 }
+
+const competitorComparison = computed(() => dashboardSummary.value?.competitorComparison || null)
+const competitorRows = computed<ProjectDashboardCompetitorRow[]>(() => competitorComparison.value?.rows || [])
+const competitorEmptyReason = computed(() => (
+  competitorComparison.value?.reason || '竞品裁判数据完成后展示'
+))
 
 const metricCards = computed<MetricCard[]>(() => [
   {
@@ -999,6 +1121,7 @@ const trendData = computed(() => {
     return {
       create: Number(source?.articleCreated || 0),
       publish: Number(source?.articlePublished || 0),
+      indexed: Number(source?.articleIndexed || 0),
       date: formatMonthDay(current),
     }
   })
@@ -1006,7 +1129,7 @@ const trendData = computed(() => {
 
 const trendChartOption = computed(() => ({
   animation: false,
-  color: ['#7db7ff', '#b39cff'],
+  color: ['#7db7ff', '#b39cff', '#3dd6b5'],
   grid: {
     top: 28,
     right: 16,
@@ -1069,14 +1192,28 @@ const trendChartOption = computed(() => ({
       itemStyle: { color: '#b39cff', borderColor: '#ffffff', borderWidth: 2 },
       areaStyle: { color: 'rgba(179, 156, 255, 0.1)' },
     },
+    {
+      name: '近30日收录总量',
+      type: 'line',
+      data: trendData.value.map((item) => item.indexed),
+      smooth: false,
+      showSymbol: true,
+      symbolSize: 7,
+      lineStyle: { width: 3, color: '#3dd6b5' },
+      itemStyle: { color: '#3dd6b5', borderColor: '#ffffff', borderWidth: 2 },
+      areaStyle: { color: 'rgba(61, 214, 181, 0.1)' },
+    },
   ],
 }))
 
 const platformChips = computed(() => [
-  { name: '全部', code: '', short: '✓', logo: '', count: indexedSubtotal.value },
+  { name: '全部', code: '', platformCode: '', platformName: '全部', platformId: null, short: '✓', logo: '', count: indexedSubtotal.value },
   ...indexingSources.value.map((platform) => ({
     name: platform.name,
     code: platform.code,
+    platformCode: platform.code,
+    platformName: platform.name,
+    platformId: platform.platformId,
     short: platform.short,
     logo: platform.logo,
     count: platform.value,
@@ -1094,7 +1231,12 @@ const selectedDetailAnswerHtml = computed(() => {
 })
 const totalPages = computed(() => Math.max(1, Math.ceil(detailTotal.value / pageSize)))
 const displayedRows = computed(() => filteredRows.value)
-const pageNumbers = computed(() => Array.from({ length: totalPages.value }, (_, index) => index + 1))
+const pageNumbers = computed(() => {
+  const total = totalPages.value
+  const start = Math.floor((currentPage.value - 1) / maxVisiblePageButtons) * maxVisiblePageButtons + 1
+  const end = Math.min(start + maxVisiblePageButtons - 1, total)
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+})
 
 watch([activeTab, searchKeyword, selectedPlatforms], () => {
   currentPage.value = 1
@@ -1106,6 +1248,10 @@ watch(filteredRows, () => {
     currentPage.value = totalPages.value
   }
 })
+
+watch(currentPage, (page) => {
+  jumpPageInput.value = String(page)
+}, { immediate: true })
 
 function questionReportType(question: KeywordGroupQuestion) {
   if (question.questionTier === 'A') return '品牌报表'
@@ -1134,8 +1280,38 @@ function buildReportRowsFromQuestions(questions: KeywordGroupQuestion[]): Report
 }
 
 function changePage(page: number) {
+  if (!Number.isInteger(page)) {
+    ElMessage.warning('页码必须是整数')
+    return
+  }
   currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
   void loadDashboardDetails()
+}
+
+function jumpToPage() {
+  const raw = jumpPageInput.value.trim()
+  if (!raw) {
+    ElMessage.warning('请输入要跳转的页码')
+    jumpPageInput.value = String(currentPage.value)
+    return
+  }
+  if (!/^\d+$/.test(raw)) {
+    ElMessage.warning('页码只能输入正整数')
+    jumpPageInput.value = String(currentPage.value)
+    return
+  }
+  const target = Number(raw)
+  if (!Number.isSafeInteger(target)) {
+    ElMessage.warning('页码数值过大')
+    jumpPageInput.value = String(currentPage.value)
+    return
+  }
+  if (target < 1 || target > totalPages.value) {
+    ElMessage.warning(`页码范围为 1-${totalPages.value}`)
+    jumpPageInput.value = String(currentPage.value)
+    return
+  }
+  changePage(target)
 }
 
 function togglePlatform(name: string) {
@@ -1228,9 +1404,11 @@ function mapDetailRow(item: ProjectDashboardDetailItem): ReportRow {
     question: item.questionText || '-',
     type: detailTypeLabel(item),
     platform: item.platformName || item.platformCode || '-',
+    platformId: item.platformId || null,
     platformCode: item.platformCode || '',
     platformUrl: item.platformUrl || null,
     platformLogoUrl: normalizeObjectStorageUrl(item.platformLogoUrl) || null,
+    platformLogoObjectKey: item.platformLogoObjectKey || null,
     answerText: item.answerText || null,
     matchType: item.matchType || null,
     siteMentioned: !!item.siteMentioned,
@@ -2788,6 +2966,128 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
+.competitor-panel {
+  margin-bottom: 18px;
+}
+
+.judge-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  color: #7c8798;
+  font-size: 12px;
+  font-weight: 700;
+  background: #f4f7fb;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.judge-badge.ready {
+  color: #0f9f7d;
+  background: var(--teal-soft);
+  border-color: rgba(77, 212, 172, 0.35);
+}
+
+.competitor-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.competitor-card {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  background: #fbfcff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.competitor-card.focus {
+  background: linear-gradient(135deg, #f6f9ff 0%, #ffffff 100%);
+  border-color: rgba(47, 107, 255, 0.22);
+}
+
+.competitor-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.competitor-identity i {
+  display: grid;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: #2f6bff;
+  font-style: normal;
+  font-weight: 800;
+  background: var(--primary-soft);
+  border-radius: 10px;
+}
+
+.competitor-card:not(.focus) .competitor-identity i {
+  color: #0f9f7d;
+  background: var(--teal-soft);
+}
+
+.competitor-identity div {
+  min-width: 0;
+}
+
+.competitor-identity strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.competitor-identity span {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.competitor-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.competitor-metrics span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.competitor-metrics strong {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.competitor-empty {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 600;
+  background: #fbfcff;
+  border: 1px dashed var(--line-2);
+  border-radius: 12px;
+}
+
 .insight-grid {
   display: grid;
   grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
@@ -2907,6 +3207,10 @@ onBeforeUnmount(() => {
 
 .dot.purple {
   background: #b39cff;
+}
+
+.dot.teal {
+  background: #3dd6b5;
 }
 
 .trend-summary strong {
@@ -3447,22 +3751,53 @@ tbody tr:hover {
 
 .pager {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 5px;
 }
 
 .pager button {
-  width: 32px;
+  min-width: 32px;
   height: 32px;
+  padding: 0 10px;
   color: var(--text-2);
   background: #fff;
   border: 1px solid var(--line-2);
   border-radius: 9px;
+  white-space: nowrap;
 }
 
 .pager button.active {
   color: #fff;
   background: var(--primary);
   border-color: var(--primary);
+}
+
+.pager-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.pager-jump input {
+  box-sizing: border-box;
+  width: 56px;
+  height: 32px;
+  padding: 0 8px;
+  color: var(--text);
+  text-align: center;
+  background: #fff;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  outline: none;
+}
+
+.pager-jump input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.1);
 }
 
 @keyframes statusPulse {
@@ -3577,6 +3912,10 @@ tbody tr:hover {
   .table-footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .competitor-metrics {
+    grid-template-columns: 1fr;
   }
 
   .trend-summary article:last-child {

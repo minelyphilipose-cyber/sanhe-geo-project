@@ -71,8 +71,16 @@
           <el-table-column label="平台" min-width="220" show-overflow-tooltip>
             <template #default="scope">
               <div class="admin-entity-cell">
-                <div class="admin-entity-avatar platform-avatar" :class="enabledClass(scope.row.enabled)">
-                  <img v-if="scope.row.platformLogoUrl" :src="scope.row.platformLogoUrl" :alt="scope.row.platformName" />
+                <div
+                  class="admin-entity-avatar platform-avatar"
+                  :class="[enabledClass(scope.row.enabled), { 'has-logo': platformLogoSrc(scope.row) }]"
+                >
+                  <img
+                    v-if="platformLogoSrc(scope.row)"
+                    :src="platformLogoSrc(scope.row)"
+                    :alt="scope.row.platformName"
+                    @error="fallbackPlatformLogo($event, scope.row)"
+                  />
                   <template v-else>{{ platformInitial(scope.row.platformName) }}</template>
                 </div>
                 <div class="min-w-0">
@@ -202,8 +210,16 @@
             </el-form-item>
           </div>
           <div class="platform-logo-row">
-            <div class="platform-logo-preview platform-avatar" :class="enabledClass(form.enabled)">
-              <img v-if="form.platformLogoUrl" :src="form.platformLogoUrl" :alt="form.platformName || '平台Logo'" />
+            <div
+              class="platform-logo-preview platform-avatar"
+              :class="[enabledClass(form.enabled), { 'has-logo': formPlatformLogoSrc }]"
+            >
+              <img
+                v-if="formPlatformLogoSrc"
+                :src="formPlatformLogoSrc"
+                :alt="form.platformName || '平台Logo'"
+                @error="fallbackFormPlatformLogo"
+              />
               <template v-else>{{ platformInitial(form.platformName) }}</template>
             </div>
             <div class="platform-logo-actions">
@@ -510,6 +526,18 @@ import {
   uploadPlatformLogo,
 } from '@/api/platformConfig'
 import type { AIPlatformConfigItem } from '@/types'
+import { normalizeObjectStorageUrl } from '@/utils/objectStorageUrl'
+import ai360Logo from '@/assets/ai-model-logos/ai360-color.png'
+import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
+import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
+import glmLogo from '@/assets/ai-model-logos/glm.png'
+import hunyuanLogo from '@/assets/ai-model-logos/hunyuan-color.png'
+import kimiLogo from '@/assets/ai-model-logos/kimi.png'
+import minimaxLogo from '@/assets/ai-model-logos/minimax-color.png'
+import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
+import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
+import xiaomiMimoLogo from '@/assets/ai-model-logos/xiaomimimo.png'
+import yuanbaoLogo from '@/assets/ai-model-logos/yuanbao-color.svg'
 
 const dictStore = useDictStore()
 const userStore = useUserStore()
@@ -529,6 +557,28 @@ const query = reactive<{ keyword: string; priorityLevel: string; enabled: boolea
 const enabledCount = computed(() => rows.value.filter((item) => item.enabled).length)
 const degradedCount = computed(() => rows.value.filter((item) => item.degraded).length)
 const questionCount = computed(() => rows.value.filter((item) => item.enabledForGeoQuestion).length)
+const builtinPlatformLogos: Record<string, string> = {
+  ai360: ai360Logo,
+  '360': ai360Logo,
+  deepseek: deepseekLogo,
+  doubao: doubaoLogo,
+  豆包: doubaoLogo,
+  glm: glmLogo,
+  zhipu: glmLogo,
+  智谱: glmLogo,
+  hunyuan: hunyuanLogo,
+  kimi: kimiLogo,
+  minimax: minimaxLogo,
+  qwen: qwenLogo,
+  tongyi: qwenLogo,
+  通义千问: qwenLogo,
+  wenxin: wenxinLogo,
+  文心一言: wenxinLogo,
+  mimo: xiaomiMimoLogo,
+  xiaomimimo: xiaomiMimoLogo,
+  小米mimo: xiaomiMimoLogo,
+  yuanbao: yuanbaoLogo,
+}
 
 const dialogVisible = ref(false)
 const formRef = ref<FormInstance>()
@@ -564,6 +614,13 @@ const form = reactive({
   degradedReason: '',
   remark: '',
 })
+const formPlatformLogoSrc = computed(() => platformLogoSrc({
+  id: editingId.value || 0,
+  platformCode: form.platformCode,
+  platformName: form.platformName,
+  platformLogoUrl: form.platformLogoUrl,
+  platformLogoObjectKey: rows.value.find((item) => item.id === editingId.value)?.platformLogoObjectKey || null,
+}))
 
 const rules: FormRules = {
   platformCode: [
@@ -651,7 +708,11 @@ async function load() {
       priorityLevel: query.priorityLevel || undefined,
       enabled: query.enabled,
     })
-    rows.value = data.data.records || []
+    rows.value = (data.data.records || []).map((item) => ({
+      ...item,
+      platformLogoUrl: normalizeObjectStorageUrl(item.platformLogoUrl) || item.platformLogoUrl,
+      platformLogoObjectKey: item.platformLogoObjectKey || null,
+    }))
     page.total = data.data.total || 0
   } catch {
     rows.value = []
@@ -681,6 +742,38 @@ function platformInitial(value?: string | null) {
   return text ? Array.from(text)[0] : '平'
 }
 
+function builtinPlatformLogo(platformCode?: string | null, platformName?: string | null) {
+  const code = String(platformCode || '').trim()
+  const name = String(platformName || '').trim()
+  return builtinPlatformLogos[code] || builtinPlatformLogos[code.toLowerCase()] || builtinPlatformLogos[name] || ''
+}
+
+function platformLogoSrc(platform: Pick<AIPlatformConfigItem, 'id' | 'platformCode' | 'platformName' | 'platformLogoUrl' | 'platformLogoObjectKey'>) {
+  const logoVersion = platform.platformLogoObjectKey || normalizeObjectStorageUrl(platform.platformLogoUrl)
+  if (logoVersion && platform.id) {
+    return `/api/public/platform-configs/${platform.id}/logo?v=${encodeURIComponent(logoVersion)}`
+  }
+  return builtinPlatformLogo(platform.platformCode, platform.platformName)
+}
+
+function fallbackPlatformLogo(event: Event, platform: Pick<AIPlatformConfigItem, 'platformCode' | 'platformName'>) {
+  const image = event.target as HTMLImageElement
+  const fallback = builtinPlatformLogo(platform.platformCode, platform.platformName)
+  if (fallback && image.dataset.logoFallbackApplied !== 'true') {
+    image.dataset.logoFallbackApplied = 'true'
+    image.src = fallback
+  } else {
+    image.style.display = 'none'
+  }
+}
+
+function fallbackFormPlatformLogo(event: Event) {
+  fallbackPlatformLogo(event, {
+    platformCode: form.platformCode,
+    platformName: form.platformName,
+  })
+}
+
 function openCreate() {
   mode.value = 'create'
   editingId.value = null
@@ -694,7 +787,7 @@ function openEdit(row: AIPlatformConfigItem) {
   form.platformCode = row.platformCode
   form.platformName = row.platformName
   form.platformHomeUrl = row.platformHomeUrl || ''
-  form.platformLogoUrl = row.platformLogoUrl || ''
+  form.platformLogoUrl = normalizeObjectStorageUrl(row.platformLogoUrl) || row.platformLogoUrl || ''
   form.priorityLevel = row.priorityLevel
   form.apiKey = row.apiKey
   form.primaryKeyRef = row.primaryKeyRef || ''
@@ -734,7 +827,7 @@ async function submit() {
       platformCode: form.platformCode.trim(),
       platformName: form.platformName.trim(),
       platformHomeUrl: form.platformHomeUrl.trim() || undefined,
-      platformLogoUrl: form.platformLogoUrl.trim() || undefined,
+      platformLogoUrl: normalizeObjectStorageUrl(form.platformLogoUrl) || undefined,
       priorityLevel: form.priorityLevel,
       apiKey: form.apiKey.trim(),
       primaryKeyRef: form.primaryKeyRef.trim() || undefined,
@@ -781,10 +874,14 @@ async function handleLogoUpload(file: UploadRawFile) {
   try {
     const { data } = await uploadPlatformLogo(editingId.value, file as File)
     const updated = data.data
-    form.platformLogoUrl = updated.platformLogoUrl || ''
+    form.platformLogoUrl = normalizeObjectStorageUrl(updated.platformLogoUrl) || updated.platformLogoUrl || ''
     const index = rows.value.findIndex((item) => item.id === updated.id)
     if (index >= 0) {
-      rows.value[index] = updated
+      rows.value[index] = {
+        ...updated,
+        platformLogoUrl: normalizeObjectStorageUrl(updated.platformLogoUrl) || updated.platformLogoUrl,
+        platformLogoObjectKey: updated.platformLogoObjectKey || null,
+      }
     }
     ElMessage.success('平台Logo已更新')
   } finally {
@@ -922,6 +1019,12 @@ onMounted(async () => {
 
 .platform-avatar.is-muted {
   background: linear-gradient(135deg, #64748b, #94a3b8);
+}
+
+.platform-avatar.has-logo {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 .platform-avatar img {

@@ -16,6 +16,7 @@ import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardSnapshotMapper;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
+import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardEntityJudgeService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.service.KeywordGroupService;
@@ -56,6 +57,7 @@ public class ProjectDashboardService {
     private final CurrentUserService currentUserService;
     private final InternalScopeService internalScopeService;
     private final ProjectDashboardSnapshotService snapshotService;
+    private final MobileDashboardEntityJudgeService entityJudgeService;
 
     public ProjectDashboardAdviceVO getAdvice(Long projectId) {
         Project project = requireReadableProject(projectId);
@@ -163,6 +165,7 @@ public class ProjectDashboardService {
         payload.put("platforms", readPlatformSnapshots(project.getId(), safeDays));
         payload.put("wordCloud", readWordCloud(project.getId()));
         payload.put("contentProgress", readContentProgress(project.getId()));
+        payload.put("competitorComparison", readCompetitorComparison(project));
         payload.put("advice", readPublishedAdvice(project.getId()));
         payload.put("refreshedAt", resolveRefreshedAt(project.getId()));
         return payload;
@@ -248,6 +251,8 @@ public class ProjectDashboardService {
         Map<String, String> platformNameMap = loadPlatformNameMap(records);
         Map<String, String> platformUrlMap = loadPlatformUrlMap(records);
         Map<String, String> platformLogoMap = loadPlatformLogoMap(records);
+        Map<String, String> platformLogoObjectKeyMap = loadPlatformLogoObjectKeyMap(records);
+        Map<String, Long> platformIdMap = loadPlatformIdMap(records);
 
         List<Map<String, Object>> items = records.stream().map(record -> {
             Map<String, Object> detail = parseObject(record.getDetailJson());
@@ -261,6 +266,8 @@ public class ProjectDashboardService {
             row.put("hasSnapshot", false);
             row.put("platformUrl", platformUrlMap.get(record.getPlatformCode()));
             row.put("platformLogoUrl", platformLogoMap.get(record.getPlatformCode()));
+            row.put("platformLogoObjectKey", platformLogoObjectKeyMap.get(record.getPlatformCode()));
+            row.put("platformId", platformIdMap.get(record.getPlatformCode()));
             row.put("answerText", stringValue(detail.get("platform_response")));
             row.put("matchType", record.getMatchType());
             row.put("effectiveHit", record.getEffectiveHit());
@@ -389,7 +396,106 @@ public class ProjectDashboardService {
         payload.put("monitorQuestionCount", compareMetric(current, previous, "monitorQuestionCount"));
         payload.put("articleCreated", compareMetric(current, previous, "articleCreated"));
         payload.put("articlePublished", compareMetric(current, previous, "articlePublished"));
+        payload.put("articleIndexed", compareMetric(current, previous, "articleIndexed"));
         return payload;
+    }
+
+    private Map<String, Object> readCompetitorComparison(Project project) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("coverageThresholdPercent", entityJudgeService.coverageThresholdPercent());
+        List<Map<String, Object>> rows = new ArrayList<>();
+        payload.put("rows", rows);
+
+        MobileDashboardEntityJudgeService.JudgeCoverage focusCoverage =
+                entityJudgeService.latestFocusCoverage(project.getId());
+        List<MobileDashboardEntityJudgeService.CompetitorSummary> summaries =
+                entityJudgeService.latestCompetitorSummaries(project.getId());
+        if (summaries.isEmpty()) {
+            payload.put("available", false);
+            payload.put("reason", "当前项目未配置竞品");
+            return payload;
+        }
+
+        List<MobileDashboardEntityJudgeService.CompetitorSummary> qaPassed = summaries.stream()
+                .filter(row -> "passed".equalsIgnoreCase(row.qaStatus()))
+                .toList();
+        if (qaPassed.isEmpty()) {
+            payload.put("available", false);
+            payload.put("reason", "竞品裁判准确率尚未通过生产 QA");
+            return payload;
+        }
+        if (!entityJudgeService.coverageReady(focusCoverage)) {
+            payload.put("available", false);
+            payload.put("reason", judgeNotReadyReason(focusCoverage));
+            return payload;
+        }
+
+        List<MobileDashboardEntityJudgeService.CompetitorSummary> readyCompetitors = qaPassed.stream()
+                .filter(row -> entityJudgeService.coverageReady(row.coverage()))
+                .toList();
+        if (readyCompetitors.isEmpty()) {
+            payload.put("available", false);
+            payload.put("reason", "竞品裁判样本分析中，覆盖率未达" + entityJudgeService.coverageThresholdPercent() + "%");
+            return payload;
+        }
+
+        payload.put("available", true);
+        rows.add(Map.of(
+                "displayName", projectDisplayName(project),
+                "entityType", "focus_brand",
+                "recommendedCount", focusCoverage.recommendedCount(),
+                "firstRecommendCount", focusCoverage.firstRecommendCount(),
+                "coveragePercent", percent(focusCoverage.successCount(), focusCoverage.expectedCount()),
+                "highlight", true
+        ));
+        for (MobileDashboardEntityJudgeService.CompetitorSummary row : readyCompetitors) {
+            rows.add(Map.of(
+                    "displayName", competitorDisplayName(row),
+                    "entityType", "competitor",
+                    "recommendedCount", row.coverage().recommendedCount(),
+                    "firstRecommendCount", row.coverage().firstRecommendCount(),
+                    "coveragePercent", percent(row.coverage().successCount(), row.coverage().expectedCount()),
+                    "qaStatus", row.qaStatus(),
+                    "highlight", false
+            ));
+        }
+        return payload;
+    }
+
+    private String judgeNotReadyReason(MobileDashboardEntityJudgeService.JudgeCoverage coverage) {
+        if (coverage == null || coverage.expectedCount() <= 0) {
+            return "暂无裁判样本";
+        }
+        int current = percent(coverage.successCount(), coverage.expectedCount());
+        return "裁判样本分析中，覆盖率" + current + "%未达" + entityJudgeService.coverageThresholdPercent() + "%";
+    }
+
+    private String projectDisplayName(Project project) {
+        if (StringUtils.hasText(project.getBrandName())) {
+            return project.getBrandName();
+        }
+        if (StringUtils.hasText(project.getProjectName())) {
+            return project.getProjectName();
+        }
+        return "本品牌";
+    }
+
+    private String competitorDisplayName(MobileDashboardEntityJudgeService.CompetitorSummary row) {
+        if (StringUtils.hasText(row.competitorName())) {
+            return row.competitorName();
+        }
+        int index = Math.max(1, row.displayOrder());
+        if (index <= 26) {
+            return "竞品" + (char) ('A' + index - 1);
+        }
+        return "竞品" + index;
+    }
+
+    private int percent(long numerator, long denominator) {
+        if (denominator <= 0) {
+            return 0;
+        }
+        return (int) Math.round(numerator * 100.0 / denominator);
     }
 
     private Map<String, Object> compareMetric(Map<String, Object> current, Map<String, Object> previous, String key) {
@@ -449,7 +555,9 @@ public class ProjectDashboardService {
             row.put("platformName", StringUtils.hasText(stringValue(row.get("platformName")))
                     ? stringValue(row.get("platformName"))
                     : platform.getPlatformName());
+            row.put("platformId", platform.getId());
             row.put("platformLogoUrl", platform.getPlatformLogoUrl());
+            row.put("platformLogoObjectKey", platform.getPlatformLogoObjectKey());
         }
         return merged.values().stream()
                 .sorted((a, b) -> Long.compare(longValue(b.get("hitCount")), longValue(a.get("hitCount"))))
@@ -758,6 +866,32 @@ public class ProjectDashboardService {
         ).stream().collect(Collectors.toMap(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoUrl, (a, b) -> a));
     }
 
+    private Map<String, String> loadPlatformLogoObjectKeyMap(List<PollResult> records) {
+        List<String> platformCodes = records.stream().map(PollResult::getPlatformCode).filter(StringUtils::hasText).distinct().toList();
+        if (platformCodes.isEmpty()) {
+            return Map.of();
+        }
+        return aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .in(AiPlatformConfig::getPlatformCode, platformCodes)
+                        .select(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoObjectKey)
+        ).stream()
+                .filter(item -> StringUtils.hasText(item.getPlatformLogoObjectKey()))
+                .collect(Collectors.toMap(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoObjectKey, (a, b) -> a));
+    }
+
+    private Map<String, Long> loadPlatformIdMap(List<PollResult> records) {
+        List<String> platformCodes = records.stream().map(PollResult::getPlatformCode).filter(StringUtils::hasText).distinct().toList();
+        if (platformCodes.isEmpty()) {
+            return Map.of();
+        }
+        return aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .in(AiPlatformConfig::getPlatformCode, platformCodes)
+                        .select(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getId)
+        ).stream().collect(Collectors.toMap(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getId, (a, b) -> a));
+    }
+
     private List<AiPlatformConfig> loadQuestionPollPlatforms() {
         return aiPlatformConfigMapper.selectList(
                 new LambdaQueryWrapper<AiPlatformConfig>()
@@ -767,9 +901,11 @@ public class ProjectDashboardService {
                         .orderByAsc(AiPlatformConfig::getPlatformName)
                         .orderByAsc(AiPlatformConfig::getId)
                         .select(
+                                AiPlatformConfig::getId,
                                 AiPlatformConfig::getPlatformCode,
                                 AiPlatformConfig::getPlatformName,
-                                AiPlatformConfig::getPlatformLogoUrl
+                                AiPlatformConfig::getPlatformLogoUrl,
+                                AiPlatformConfig::getPlatformLogoObjectKey
                         )
         );
     }

@@ -162,9 +162,9 @@ public class DispatchMonitorService {
                 .ge(DispatchTask::getDueTime, range.getStartAt())
                 .lt(DispatchTask::getDueTime, range.getEndAtExclusive())
                 .eq(projectId != null, DispatchTask::getProjectId, projectId)
-                .eq(StringUtils.hasText(taskType), DispatchTask::getTaskType, taskType)
                 .eq(StringUtils.hasText(status), DispatchTask::getStatus, status)
                 .orderByDesc(DispatchTask::getCreatedAt), user);
+        applyTaskTypeFilter(wrapper, taskType);
 
         if (StringUtils.hasText(keyword)) {
             List<Long> matchedProjectIds = projectMapper.selectList(
@@ -187,6 +187,17 @@ public class DispatchMonitorService {
         return result;
     }
 
+    private void applyTaskTypeFilter(LambdaQueryWrapper<DispatchTask> wrapper, String taskType) {
+        if (!StringUtils.hasText(taskType)) {
+            return;
+        }
+        if (DispatchTaskType.isQuestionPoll(taskType)) {
+            wrapper.in(DispatchTask::getTaskType, DispatchTaskType.QUESTION_POLL.name(), DispatchTaskType.BI_DAILY_POLL.name());
+            return;
+        }
+        wrapper.eq(DispatchTask::getTaskType, taskType);
+    }
+
     public DispatchDueTimeDistributionVO dueTimeDistribution(int bucketMinutes, String platformCode) {
         ensureMonitorAccess();
         int safeBucketMinutes = Math.max(5, Math.min(bucketMinutes, 240));
@@ -198,7 +209,7 @@ public class DispatchMonitorService {
                 DispatchTaskStatus.RUNNING.value()
         );
         List<DispatchDueTimeBucketRow> rows = dispatchTaskMapper.aggregateDueTimeDistribution(
-                DispatchTaskType.BI_DAILY_POLL.name(),
+                List.of(DispatchTaskType.QUESTION_POLL.name(), DispatchTaskType.BI_DAILY_POLL.name()),
                 now,
                 rangeEnd,
                 safeBucketMinutes,
@@ -206,7 +217,7 @@ public class DispatchMonitorService {
                 normalizeFilter(platformCode)
         );
         DispatchDueTimeDistributionVO vo = new DispatchDueTimeDistributionVO();
-        vo.setTaskType(DispatchTaskType.BI_DAILY_POLL.name());
+        vo.setTaskType(DispatchTaskType.QUESTION_POLL.name());
         vo.setRangeStart(now);
         vo.setRangeEnd(rangeEnd);
         vo.setBucketMinutes(safeBucketMinutes);
@@ -647,7 +658,7 @@ public class DispatchMonitorService {
                 && StringUtils.hasText(stringValue(context.get("batchDate")))) {
             return "question_poll_daily:" + alert.getProjectId() + ":" + stringValue(context.get("batchDate"));
         }
-        if (task != null && DispatchTaskType.BI_DAILY_POLL.name().equalsIgnoreCase(task.getTaskType())
+        if (task != null && DispatchTaskType.isQuestionPoll(task.getTaskType())
                 && alert.getProjectId() != null) {
             Map<String, Object> payload = parsePayload(task.getPayloadJson());
             String batchDate = stringValue(payload.get("batchDate"));
@@ -836,7 +847,7 @@ public class DispatchMonitorService {
     }
 
     private String resolveTaskDisplayName(DispatchTask task) {
-        if (task == null || !DispatchTaskType.BI_DAILY_POLL.name().equalsIgnoreCase(task.getTaskType())) {
+        if (task == null || !DispatchTaskType.isQuestionPoll(task.getTaskType())) {
             return null;
         }
         String tier = resolveQuestionTier(task);

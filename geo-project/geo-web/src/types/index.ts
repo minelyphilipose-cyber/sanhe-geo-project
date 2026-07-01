@@ -455,6 +455,7 @@ export interface AIPlatformConfigItem {
   platformName: string
   platformHomeUrl?: string | null
   platformLogoUrl?: string | null
+  platformLogoObjectKey?: string | null
   priorityLevel: 'P0' | 'P1' | 'P2'
   rpmLimit?: number | null
   tpmLimit?: number | null
@@ -552,9 +553,11 @@ export interface ProjectDashboardComparison {
 }
 
 export interface ProjectDashboardPlatformItem {
+  platformId?: number | null
   platformCode: string
   platformName: string
   platformLogoUrl?: string | null
+  platformLogoObjectKey?: string | null
   hitCount: number
   contactCount: number
   siteCount: number
@@ -608,12 +611,14 @@ export interface ProjectDashboardTrendItem {
 export interface ProjectDashboardDetailItem {
   id: number
   questionText: string
+  platformId?: number | null
   platformCode: string
   platformName: string
   batchDate: string
   hasSnapshot: boolean
   platformUrl?: string | null
   platformLogoUrl?: string | null
+  platformLogoObjectKey?: string | null
   answerText?: string | null
   matchType?: string | null
   effectiveHit?: boolean | null
@@ -626,6 +631,23 @@ export interface ProjectDashboardDetailItem {
   siteMentioned?: boolean
   contactMentioned?: boolean
   contactMentionCount?: number
+}
+
+export interface ProjectDashboardCompetitorRow {
+  displayName: string
+  entityType: 'focus_brand' | 'competitor' | string
+  recommendedCount: number
+  firstRecommendCount: number
+  coveragePercent: number
+  qaStatus?: string | null
+  highlight?: boolean
+}
+
+export interface ProjectDashboardCompetitorComparison {
+  available: boolean
+  reason?: string
+  coverageThresholdPercent?: number
+  rows: ProjectDashboardCompetitorRow[]
 }
 
 export interface ProjectDashboardSummaryResponse {
@@ -642,6 +664,7 @@ export interface ProjectDashboardSummaryResponse {
   platforms: ProjectDashboardPlatformItem[]
   wordCloud: ProjectDashboardWordItem[]
   contentProgress?: ProjectDashboardContentProgress
+  competitorComparison?: ProjectDashboardCompetitorComparison
   advice?: ProjectDashboardAdvice | null
   refreshedAt?: string | null
 }

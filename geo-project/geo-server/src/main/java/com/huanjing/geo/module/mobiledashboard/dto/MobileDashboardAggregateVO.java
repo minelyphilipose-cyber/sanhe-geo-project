@@ -20,7 +20,10 @@ public final class MobileDashboardAggregateVO {
 
     @Data
     public static class PlatformMetric {
+        private Long platformId;
         private String code;
+        private String platformLogoUrl;
+        private String platformLogoObjectKey;
         private MobileDashboardMetricVO<Integer> rate;
         private Long completedCount;
         private Long mentionCount;
@@ -100,7 +103,10 @@ public final class MobileDashboardAggregateVO {
     public static class QuestionMonitorItem {
         private Long keywordResultId;
         private Long pollResultId;
+        private Long platformId;
         private String platformCode;
+        private String platformLogoUrl;
+        private String platformLogoObjectKey;
         private List<String> platformCodes = new ArrayList<>();
         private String questionTitle;
         private LocalDateTime completedAt;
