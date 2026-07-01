@@ -2,10 +2,12 @@ package com.huanjing.geo.module.content.service;
 
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
+import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.ContentAutoDistributionBatch;
 import com.huanjing.geo.module.content.entity.ContentAutoDistributionItem;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticlePublishItemMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionBatchMapper;
@@ -25,6 +27,7 @@ import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,10 +36,13 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -49,7 +55,9 @@ class ContentAutoDistributionServiceTest {
     private KeywordGroupResultMapper keywordGroupResultMapper;
     private ContentAutoDistributionBatchMapper batchMapper;
     private ContentAutoDistributionItemMapper itemMapper;
+    private ArticleDraftMapper articleDraftMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
+    private BatchArticlePublishService publishService;
     private SelfMediaScheduleCapabilityService scheduleCapabilityService;
     private BrowserEnvironmentService browserEnvironmentService;
     private ContentAutoDistributionService service;
@@ -58,11 +66,14 @@ class ContentAutoDistributionServiceTest {
     void setUp() {
         initTableInfo(ContentAutoDistributionBatch.class);
         initTableInfo(ContentAutoDistributionItem.class);
+        initTableInfo(ArticleDraft.class);
         allocationMapper = mock(ProjectChannelAllocationMapper.class);
         keywordGroupResultMapper = mock(KeywordGroupResultMapper.class);
         batchMapper = mock(ContentAutoDistributionBatchMapper.class);
         itemMapper = mock(ContentAutoDistributionItemMapper.class);
+        articleDraftMapper = mock(ArticleDraftMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
+        publishService = mock(BatchArticlePublishService.class);
         scheduleCapabilityService = mock(SelfMediaScheduleCapabilityService.class);
         browserEnvironmentService = mock(BrowserEnvironmentService.class);
         service = new ContentAutoDistributionService(
@@ -77,10 +88,11 @@ class ContentAutoDistributionServiceTest {
                 itemMapper,
                 mock(BatchArticleGenerationTaskMapper.class),
                 mock(BatchArticlePublishItemMapper.class),
+                articleDraftMapper,
                 selfMediaAccountMapper,
                 mock(SelfMediaPublishScheduleMapper.class),
                 mock(BatchArticleGenerationService.class),
-                mock(BatchArticlePublishService.class),
+                publishService,
                 mock(SelfMediaPublishScheduleService.class),
                 scheduleCapabilityService,
                 browserEnvironmentService,
@@ -156,6 +168,56 @@ class ContentAutoDistributionServiceTest {
         assertEquals("skipped", batch.getStatus());
         assertEquals("自媒体平台 / 知乎 无可用账号，请先在品牌下配置并启用账号", batch.getErrorMessage());
         verify(itemMapper, never()).insert(any(ContentAutoDistributionItem.class));
+    }
+
+    @Test
+    void progressActivePlansFailsGeneratedItemWhenArticleAlreadyDistributed() {
+        ContentAutoDistributionBatch batch = new ContentAutoDistributionBatch();
+        batch.setId(70L);
+        batch.setProjectId(990006017L);
+        batch.setPlanDate(LocalDate.of(2026, 6, 25));
+        batch.setStatus("created");
+
+        ContentAutoDistributionItem generated = new ContentAutoDistributionItem();
+        generated.setId(1176L);
+        generated.setBatchId(70L);
+        generated.setProjectId(990006017L);
+        generated.setArticleId(990006884L);
+        generated.setStatus("generated");
+        generated.setTargetKind(DistributionTargetKind.BRAND_GEO_SITE);
+        generated.setContentStyle("linkedin");
+        generated.setPlannedPublishAt(LocalDateTime.of(2026, 6, 25, 15, 30));
+
+        ContentAutoDistributionItem failed = new ContentAutoDistributionItem();
+        failed.setId(1176L);
+        failed.setBatchId(70L);
+        failed.setArticleId(990006884L);
+        failed.setStatus("failed");
+
+        ArticleDraft article = new ArticleDraft();
+        article.setId(990006884L);
+        article.setStatus("distributed");
+
+        when(batchMapper.selectList(any())).thenReturn(List.of(batch));
+        when(itemMapper.selectList(any())).thenReturn(
+                List.of(),
+                List.of(),
+                List.of(generated),
+                List.of(),
+                List.of(),
+                List.of(failed)
+        );
+        when(articleDraftMapper.selectById(990006884L)).thenReturn(article);
+
+        service.progressActivePlans();
+
+        ArgumentCaptor<LambdaUpdateWrapper<ContentAutoDistributionItem>> updateCaptor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(itemMapper).update(eq(null), updateCaptor.capture());
+        String params = updateCaptor.getValue().getParamNameValuePairs().values().toString();
+        assertTrue(params.contains("failed"));
+        assertTrue(params.contains("文章当前状态不可发布：distributed"));
+        verify(publishService, never()).createSystemScheduledJob(any(), any(), any());
     }
 
     private SelfMediaAccount account(Long id, String platform) {

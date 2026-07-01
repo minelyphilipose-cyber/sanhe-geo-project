@@ -9,6 +9,7 @@ import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
+import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.entity.BatchArticlePublishItem;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
@@ -18,6 +19,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticlePublishItemMapper;
+import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionBatchMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionItemMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
@@ -75,6 +77,7 @@ public class ContentAutoDistributionService {
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final int GENERATION_BATCH_LIMIT = 30;
     private static final Set<String> ACTIVE_BATCH_STATUSES = Set.of("created", "generating", "publish_scheduled");
+    private static final Set<String> ACTIVE_ARTICLE_STATUSES = Set.of("approved", "unpublished");
     private static final Map<String, String> QUOTA_TO_GENERATION_GROUP = Map.of(
             "official_site", ArticlePromptChannels.AGENT_SITE,
             "industry_site", ArticlePromptChannels.INDUSTRY_SITE,
@@ -93,6 +96,7 @@ public class ContentAutoDistributionService {
     private final ContentAutoDistributionItemMapper itemMapper;
     private final BatchArticleGenerationTaskMapper generationTaskMapper;
     private final BatchArticlePublishItemMapper publishItemMapper;
+    private final ArticleDraftMapper articleDraftMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final SelfMediaPublishScheduleMapper selfMediaPublishScheduleMapper;
     private final BatchArticleGenerationService generationService;
@@ -392,6 +396,7 @@ public class ContentAutoDistributionService {
         }
         List<ContentAutoDistributionItem> publishable = generated.stream()
                 .filter(this::markFailedIfTargetStale)
+                .filter(this::markFailedIfArticleUnavailable)
                 .toList();
         if (publishable.isEmpty()) {
             return;
@@ -593,6 +598,20 @@ public class ContentAutoDistributionService {
             return true;
         }
         markItemFailed(item.getId(), "品牌行业资讯站配置已取消或变更，跳过旧自动分发计划");
+        return false;
+    }
+
+    private boolean markFailedIfArticleUnavailable(ContentAutoDistributionItem item) {
+        ArticleDraft article = item.getArticleId() == null ? null : articleDraftMapper.selectById(item.getArticleId());
+        if (article == null) {
+            markItemFailed(item.getId(), "文章不存在，跳过旧自动分发计划");
+            return false;
+        }
+        String status = article.getStatus();
+        if (ACTIVE_ARTICLE_STATUSES.contains(status)) {
+            return true;
+        }
+        markItemFailed(item.getId(), "文章当前状态不可发布：" + (StringUtils.hasText(status) ? status : "unknown"));
         return false;
     }
 
