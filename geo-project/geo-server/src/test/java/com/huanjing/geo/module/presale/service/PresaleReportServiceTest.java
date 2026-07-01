@@ -3,7 +3,9 @@ package com.huanjing.geo.module.presale.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.partner.service.PartnerPresaleReportQuotaService;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
+import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
@@ -60,6 +62,8 @@ class PresaleReportServiceTest {
     private PromptTemplateDraftValidator promptTemplateDraftValidator;
     @Mock
     private LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator;
+    @Mock
+    private PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
 
     private PresaleReportService service;
 
@@ -78,8 +82,26 @@ class PresaleReportServiceTest {
                 versionPromptTemplateMapper,
                 promptTemplateDraftValidator,
                 llmPromptQuestionDraftValidator,
+                partnerPresaleReportQuotaService,
                 new ObjectMapper()
         );
+    }
+
+    @Test
+    void createReport_returnsExistingReportWhenPartnerRequestIsIdempotent() {
+        CreateReportRequest req = createRequest();
+        when(currentUserService.requireCurrentUser()).thenReturn(user());
+        when(partnerPresaleReportQuotaService.reserveIfPartner(any(), any()))
+                .thenReturn(new PartnerPresaleReportQuotaService.Reservation(
+                        true, REPORT_ID, null, null, null, null, null, null
+                ));
+
+        Long reportId = service.createReport(req);
+
+        assertEquals(REPORT_ID, reportId);
+        verify(currentUserService).ensurePermission("presale.report.create");
+        verify(reportMapper, never()).insert(any());
+        verify(versionMapper, never()).insert(any());
     }
 
     @Test
@@ -157,5 +179,15 @@ class PresaleReportServiceTest {
         user.setId(USER_ID);
         user.setIsActive(true);
         return user;
+    }
+
+    private static CreateReportRequest createRequest() {
+        CreateReportRequest req = new CreateReportRequest();
+        req.setRequestId("REQ-1");
+        req.setBrandName("三和口腔");
+        req.setIndustry("healthcare");
+        req.setIndustryRole("chain_brand");
+        req.setRegion("上海");
+        return req;
     }
 }

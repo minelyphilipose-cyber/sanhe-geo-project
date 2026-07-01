@@ -12,6 +12,7 @@ import com.huanjing.geo.module.project.entity.PackageChannelQuotaConfig;
 import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.mapper.PackageChannelQuotaConfigMapper;
 import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,12 @@ import java.util.stream.Stream;
 public class PackagePlanService {
 
     private static final Pattern PACKAGE_TYPE_PATTERN = Pattern.compile("^[a-z][a-z0-9_]{2,31}$");
+    public static final String AUDIENCE_INTERNAL = "internal";
+    public static final String AUDIENCE_PARTNER = "partner";
+    public static final String STATUS_DRAFT = "draft";
+    public static final String STATUS_ACTIVE = "active";
+    public static final String STATUS_INACTIVE = "inactive";
+    private static final Set<String> AUDIENCE_TYPES = Set.of(AUDIENCE_INTERNAL, AUDIENCE_PARTNER);
     private static final Set<String> INTENSITY_LEVELS = Set.of("L1", "L2", "L3");
     private static final List<String> SELF_MEDIA_CHANNEL_CODES = ArticlePromptChannels.SELF_MEDIA_SUB_CODES.stream()
             .map(PackagePlanService::selfMediaChannelCode)
@@ -51,8 +58,13 @@ public class PackagePlanService {
     private final CurrentUserService currentUserService;
 
     public Page<PackagePlan> page(long current, long size, String keyword, Boolean enabled) {
+        return page(current, size, keyword, enabled, null);
+    }
+
+    public Page<PackagePlan> page(long current, long size, String keyword, Boolean enabled, String audienceType) {
         currentUserService.ensurePermission("user.manage");
         LambdaQueryWrapper<PackagePlan> wrapper = new LambdaQueryWrapper<PackagePlan>()
+                .isNull(PackagePlan::getDeletedAt)
                 .orderByAsc(PackagePlan::getSortOrder)
                 .orderByAsc(PackagePlan::getId);
         if (StringUtils.hasText(keyword)) {
@@ -62,6 +74,9 @@ public class PackagePlanService {
         if (enabled != null) {
             wrapper.eq(PackagePlan::getEnabled, enabled);
         }
+        if (StringUtils.hasText(audienceType)) {
+            wrapper.eq(PackagePlan::getAudienceType, normalizeAudienceType(audienceType));
+        }
         Page<PackagePlan> result = packagePlanMapper.selectPage(new Page<>(current, size), wrapper);
         normalizeLegacyPrices(result.getRecords());
         attachChannelQuotaConfigs(result.getRecords());
@@ -70,9 +85,14 @@ public class PackagePlanService {
 
     public List<PackagePlan> listEnabled() {
         currentUserService.ensurePermission("project.read");
+        SysUser currentUser = currentUserService.requireCurrentUser();
+        String audienceType = currentUserService.isPartnerUser(currentUser) ? AUDIENCE_PARTNER : AUDIENCE_INTERNAL;
         List<PackagePlan> plans = packagePlanMapper.selectList(
                 new LambdaQueryWrapper<PackagePlan>()
                         .eq(PackagePlan::getEnabled, true)
+                        .eq(PackagePlan::getPackageStatus, STATUS_ACTIVE)
+                        .eq(PackagePlan::getAudienceType, audienceType)
+                        .isNull(PackagePlan::getDeletedAt)
                         .orderByAsc(PackagePlan::getSortOrder)
                         .orderByAsc(PackagePlan::getId)
         );
@@ -107,10 +127,17 @@ public class PackagePlanService {
         if (existed != null) {
             throw new BizException(400, "package_type already exists");
         }
+        String audienceType = normalizeAudienceType(req.getAudienceType());
+        validatePartnerPackageFields(audienceType, req.getPartnerPoints());
         PackagePlan plan = new PackagePlan();
         plan.setPackageType(req.getPackageType().trim());
         plan.setPackageName(req.getPackageName().trim());
+        plan.setAudienceType(audienceType);
+        plan.setPackageStatus(STATUS_DRAFT);
         plan.setStandardPrice(req.getStandardPrice());
+        plan.setPartnerPoints(req.getPartnerPoints());
+        plan.setPartnerVisibleConfigJson(req.getPartnerVisibleConfigJson());
+        plan.setInternalDeliveryConfigJson(req.getInternalDeliveryConfigJson());
         plan.setServiceMonths(req.getServiceMonths());
         plan.setKeywordGroupLimit(req.getKeywordGroupLimit());
         plan.setKeywordGroupLimitA(req.getKeywordGroupLimitA());
@@ -125,7 +152,7 @@ public class PackagePlanService {
         plan.setTargetMetricType(req.getTargetMetricType().trim());
         plan.setTargetMetricValue(req.getTargetMetricValue());
         plan.setTargetWindowDays(req.getTargetWindowDays());
-        plan.setEnabled(req.getEnabled());
+        plan.setEnabled(false);
         plan.setSortOrder(req.getSortOrder());
         plan.setRemark(req.getRemark());
         packagePlanMapper.insert(plan);
@@ -154,8 +181,16 @@ public class PackagePlanService {
                 req.getTargetWindowDays()
         );
         PackagePlan plan = requireById(id);
+        ensurePackagePlanMutable(plan.getId(), "Package plan already bound to customer, create a new package instead");
+        ensurePackagePlanDraft(plan);
+        String audienceType = normalizeAudienceType(req.getAudienceType());
+        validatePartnerPackageFields(audienceType, req.getPartnerPoints());
         plan.setPackageName(req.getPackageName().trim());
+        plan.setAudienceType(audienceType);
         plan.setStandardPrice(req.getStandardPrice());
+        plan.setPartnerPoints(req.getPartnerPoints());
+        plan.setPartnerVisibleConfigJson(req.getPartnerVisibleConfigJson());
+        plan.setInternalDeliveryConfigJson(req.getInternalDeliveryConfigJson());
         plan.setServiceMonths(req.getServiceMonths());
         plan.setKeywordGroupLimit(req.getKeywordGroupLimit());
         plan.setKeywordGroupLimitA(req.getKeywordGroupLimitA());
@@ -174,7 +209,6 @@ public class PackagePlanService {
         plan.setRemark(req.getRemark());
         packagePlanMapper.updateById(plan);
         saveChannelQuotaConfigs(plan.getId(), req.getChannelQuotaConfigs());
-        companyPackageBindingService.syncActiveBindingsForPackagePlan(plan.getId());
         attachChannelQuotaConfigs(List.of(plan));
         return plan;
     }
@@ -182,7 +216,20 @@ public class PackagePlanService {
     public void updateStatus(Long id, Boolean enabled) {
         currentUserService.ensurePermission("user.manage");
         PackagePlan plan = requireById(id);
+        String nextStatus = resolveNextPackageStatus(plan, enabled);
         plan.setEnabled(enabled);
+        plan.setPackageStatus(nextStatus);
+        packagePlanMapper.updateById(plan);
+    }
+
+    public void delete(Long id) {
+        currentUserService.ensurePermission("user.manage");
+        PackagePlan plan = requireById(id);
+        ensurePackagePlanMutable(plan.getId(), "Package plan already bound to customer, disable it instead");
+        plan.setDeletedAt(java.time.LocalDateTime.now());
+        plan.setDeletedBy(com.huanjing.geo.common.util.SecurityUtils.getCurrentUserId());
+        plan.setEnabled(false);
+        plan.setPackageStatus(STATUS_INACTIVE);
         packagePlanMapper.updateById(plan);
     }
 
@@ -191,6 +238,8 @@ public class PackagePlanService {
                 new LambdaQueryWrapper<PackagePlan>()
                         .eq(PackagePlan::getPackageType, packageType)
                         .eq(PackagePlan::getEnabled, true)
+                        .eq(PackagePlan::getPackageStatus, STATUS_ACTIVE)
+                        .isNull(PackagePlan::getDeletedAt)
         );
         if (plan == null) {
             throw new BizException(400, "Package plan not found or disabled: " + packageType);
@@ -209,8 +258,9 @@ public class PackagePlanService {
     public List<PackageChannelQuotaConfig> saveChannelQuotaConfigsByPlanId(Long packagePlanId, List<PackageChannelQuotaConfigRequest> configs) {
         currentUserService.ensurePermission("user.manage");
         PackagePlan plan = requireById(packagePlanId);
+        ensurePackagePlanMutable(plan.getId(), "Package plan already bound to customer, create a new package instead");
+        ensurePackagePlanDraft(plan);
         saveChannelQuotaConfigs(plan.getId(), configs);
-        companyPackageBindingService.syncActiveBindingsForPackagePlan(plan.getId());
         return findChannelQuotaConfigs(plan.getId());
     }
 
@@ -244,10 +294,59 @@ public class PackagePlanService {
 
     private PackagePlan requireById(Long id) {
         PackagePlan plan = packagePlanMapper.selectById(id);
-        if (plan == null) {
+        if (plan == null || plan.getDeletedAt() != null) {
             throw new BizException(404, "Package plan not found");
         }
         return plan;
+    }
+
+    private void ensurePackagePlanMutable(Long packagePlanId, String message) {
+        if (companyPackageBindingService.hasBindingsForPackagePlan(packagePlanId)) {
+            throw new BizException(400, message);
+        }
+    }
+
+    private void ensurePackagePlanDraft(PackagePlan plan) {
+        if (plan == null || !STATUS_DRAFT.equals(plan.getPackageStatus())) {
+            throw new BizException(400, "Only draft package plan can be edited, create a new package instead");
+        }
+    }
+
+    private String resolveNextPackageStatus(PackagePlan plan, Boolean enabled) {
+        if (plan == null || enabled == null) {
+            throw new BizException(400, "Invalid package status update");
+        }
+        String current = StringUtils.hasText(plan.getPackageStatus())
+                ? plan.getPackageStatus()
+                : (Boolean.TRUE.equals(plan.getEnabled()) ? STATUS_ACTIVE : STATUS_INACTIVE);
+        if (STATUS_DRAFT.equals(current)) {
+            if (!Boolean.TRUE.equals(enabled)) {
+                throw new BizException(400, "Draft package can only be published");
+            }
+            return STATUS_ACTIVE;
+        }
+        if (STATUS_ACTIVE.equals(current)) {
+            return Boolean.TRUE.equals(enabled) ? STATUS_ACTIVE : STATUS_INACTIVE;
+        }
+        if (STATUS_INACTIVE.equals(current)) {
+            return Boolean.TRUE.equals(enabled) ? STATUS_ACTIVE : STATUS_INACTIVE;
+        }
+        throw new BizException(400, "Invalid package status: " + current);
+    }
+
+    private String normalizeAudienceType(String audienceType) {
+        String value = StringUtils.hasText(audienceType) ? audienceType.trim().toLowerCase(Locale.ROOT) : AUDIENCE_INTERNAL;
+        if (!AUDIENCE_TYPES.contains(value)) {
+            throw new BizException(400, "Invalid audience_type");
+        }
+        return value;
+    }
+
+    private void validatePartnerPackageFields(String audienceType, BigDecimal partnerPoints) {
+        if (AUDIENCE_PARTNER.equals(audienceType)
+                && (partnerPoints == null || partnerPoints.compareTo(BigDecimal.ZERO) <= 0)) {
+            throw new BizException(400, "partner_points must be positive for partner package");
+        }
     }
 
     private void validateType(String packageType) {

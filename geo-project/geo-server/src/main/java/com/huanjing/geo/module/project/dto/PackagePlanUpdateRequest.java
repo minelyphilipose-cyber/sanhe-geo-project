@@ -12,8 +12,12 @@ import java.util.List;
 public class PackagePlanUpdateRequest {
     @NotBlank
     private String packageName;
+    private String audienceType;
     @NotNull
     private BigDecimal standardPrice;
+    private BigDecimal partnerPoints;
+    private String partnerVisibleConfigJson;
+    private String internalDeliveryConfigJson;
     @NotNull
     @Min(1)
     private Integer serviceMonths;

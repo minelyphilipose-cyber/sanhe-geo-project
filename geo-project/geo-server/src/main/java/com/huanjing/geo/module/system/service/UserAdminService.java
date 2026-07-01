@@ -26,7 +26,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class UserAdminService {
 
-    private static final Set<String> PARTNER_ROLE_KEYS = Set.of("partner", "partner_staff", "partner_viewer");
+    private static final String REMOVED_PARTNER_VIEWER_ROLE = "partner_viewer";
+    private static final Set<String> PARTNER_ROLE_KEYS = Set.of("partner", "partner_staff");
     private static final String REFRESH_KEY_PREFIX = "refresh:";
 
     private final CurrentUserService currentUserService;
@@ -132,6 +133,9 @@ public class UserAdminService {
         user.setIsActive(isActive);
         user.setTokenVersion(nextTokenVersion(user));
         sysUserMapper.updateById(user);
+        if (Boolean.FALSE.equals(isActive) && "partner".equals(user.getRole()) && user.getPartnerId() != null) {
+            deactivatePartnerStaffAccounts(user.getPartnerId());
+        }
         revokeRefreshToken(userId);
     }
 
@@ -190,6 +194,9 @@ public class UserAdminService {
     }
 
     private SysRole requireRole(String roleKey) {
+        if (REMOVED_PARTNER_VIEWER_ROLE.equals(roleKey)) {
+            throw new BizException(400, "role not found or inactive");
+        }
         SysRole role = sysRoleMapper.selectOne(
                 new LambdaQueryWrapper<SysRole>()
                         .eq(SysRole::getRoleKey, roleKey)
@@ -210,6 +217,9 @@ public class UserAdminService {
     }
 
     private void validateRolePartnerBinding(String roleKey, Long partnerId) {
+        if (REMOVED_PARTNER_VIEWER_ROLE.equals(roleKey)) {
+            throw new BizException(400, "partner_viewer role has been removed");
+        }
         if (PARTNER_ROLE_KEYS.contains(roleKey) && partnerId == null) {
             throw new BizException(400, "partner role must bind partnerId");
         }
@@ -245,6 +255,19 @@ public class UserAdminService {
     private int nextTokenVersion(SysUser user) {
         int current = user.getTokenVersion() == null ? 0 : user.getTokenVersion();
         return current + 1;
+    }
+
+    private void deactivatePartnerStaffAccounts(Long partnerId) {
+        List<SysUser> staffUsers = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getPartnerId, partnerId)
+                .eq(SysUser::getRole, "partner_staff")
+                .eq(SysUser::getIsActive, true));
+        for (SysUser staff : staffUsers) {
+            staff.setIsActive(false);
+            staff.setTokenVersion(nextTokenVersion(staff));
+            sysUserMapper.updateById(staff);
+            revokeRefreshToken(staff.getId());
+        }
     }
 
     private void revokeRefreshToken(Long userId) {

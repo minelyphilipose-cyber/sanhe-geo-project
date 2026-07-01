@@ -16,6 +16,7 @@ import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
 import com.huanjing.geo.module.dispatch.service.DispatchAlertService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.service.ProjectFlowPolicy;
 import com.huanjing.geo.module.report.entity.Report;
 import com.huanjing.geo.module.report.mapper.ReportMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -38,7 +39,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DeliveryDashboardService {
 
-    private static final Set<String> ACTIVE_PROJECT_STATUSES = Set.of("active", "pending_start", "paused");
     private static final Set<String> FAILED_TASK_STATUSES = Set.of("failed", "dead_letter");
 
     private final CurrentUserService currentUserService;
@@ -149,7 +149,7 @@ public class DeliveryDashboardService {
     }
 
     private LambdaQueryWrapper<Project> activeProjectWrapper(Long ownerId) {
-        return projectScopeWrapper(ownerId).in(Project::getStatus, ACTIVE_PROJECT_STATUSES);
+        return projectScopeWrapper(ownerId).in(Project::getStatus, ProjectFlowPolicy.DELIVERY_PROGRESS_STATUS_SET);
     }
 
     private LambdaQueryWrapper<Project> projectScopeWrapper(Long ownerId) {

@@ -19,6 +19,7 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.service.ProjectFlowPolicy;
 import com.huanjing.geo.module.report.entity.Report;
 import com.huanjing.geo.module.report.mapper.ReportMapper;
 import com.huanjing.geo.module.system.dto.SystemAlertTodoVO;
@@ -59,7 +60,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class WorkbenchService {
 
-    private static final Set<String> ACTIVE_PROJECT_STATUSES = Set.of("active", "pending_start", "paused");
     private static final Set<String> COMPLETED_DISTRIBUTION_STATUSES = Set.of("submitted", "confirmed", "published");
     private static final Set<String> IN_FLIGHT_EXTENSION_STATUSES = Set.of("token_issued", "filling", "filled");
     private static final Set<String> PRESALE_IN_FLIGHT_STATUSES = Set.of("INIT", "QUEUED", "RUNNING");
@@ -96,7 +96,7 @@ public class WorkbenchService {
                 .inSql(Brand::getCompanyId, ownerCompanyIdSql(operatorId))));
         vo.setProjectCount(projectMapper.selectCount(ownerProjectWrapper(operatorId)));
         vo.setActiveProjectCount(projectMapper.selectCount(ownerProjectWrapper(operatorId)
-                .in(Project::getStatus, ACTIVE_PROJECT_STATUSES)));
+                .in(Project::getStatus, ProjectFlowPolicy.DELIVERY_PROGRESS_STATUS_SET)));
         vo.setHighRiskProjectCount(projectMapper.selectCount(ownerProjectWrapper(operatorId)
                 .eq(Project::getStage, "high_risk")));
         vo.setMonthlyReportCount(reportMapper.selectCount(new LambdaQueryWrapper<Report>()

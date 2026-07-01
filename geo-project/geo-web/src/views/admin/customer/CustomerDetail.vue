@@ -35,6 +35,10 @@
         <div class="flex items-center justify-between">
           <span>客户信息</span>
           <div class="space-x-2">
+            <el-button v-if="canTransferOwner" type="primary" link @click="openOwnerTransfer">移交负责人</el-button>
+            <el-button v-if="canTransferOwner && company?.partnerId" type="primary" link @click="openPartnerStaffAssign">
+              分配合伙人员工
+            </el-button>
             <el-button v-if="canUpdateCompany" type="primary" link @click="editVisible = true">编辑</el-button>
             <el-button v-if="canDeleteCompany" type="danger" link @click="removeCurrentCompany">删除客户</el-button>
           </div>
@@ -445,6 +449,52 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="ownerTransferVisible" title="移交运营负责人" width="520px" class="admin-editor-dialog">
+      <el-form class="admin-dialog-form" label-width="100px">
+        <el-form-item label="当前负责人">{{ company?.ownerName || '未分配' }}</el-form-item>
+        <el-form-item class="is-full" label="新负责人" required>
+          <el-select v-model="ownerTransferForm.newOwnerId" filterable placeholder="选择内部交付人员" style="width: 100%">
+            <el-option
+              v-for="item in deliveryOwnerOptions"
+              :key="item.id"
+              :label="`${item.displayName} (${item.username})`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item class="is-full" label="移交原因">
+          <el-input v-model="ownerTransferForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="ownerTransferVisible = false">取消</el-button>
+        <el-button type="primary" :loading="ownerTransferSubmitting" @click="submitOwnerTransfer">确认移交</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="partnerStaffAssignVisible" title="分配合伙人员工" width="520px" class="admin-editor-dialog">
+      <el-form class="admin-dialog-form" label-width="110px">
+        <el-form-item label="当前员工">{{ partnerStaffOwnerName }}</el-form-item>
+        <el-form-item class="is-full" label="分配给">
+          <el-select v-model="partnerStaffAssignForm.staffUserId" clearable filterable placeholder="不分配" style="width: 100%">
+            <el-option
+              v-for="item in partnerStaffOptions"
+              :key="item.id"
+              :label="`${item.displayName} (${item.username})`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item class="is-full" label="处理原因">
+          <el-input v-model="partnerStaffAssignForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="partnerStaffAssignVisible = false">取消</el-button>
+        <el-button type="primary" :loading="partnerStaffAssignSubmitting" @click="submitPartnerStaffAssign">保存分配</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 <script setup lang="ts">
@@ -456,6 +506,7 @@ import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import {
   createBrand,
+  assignCompanyPartnerStaffOwner,
   bindCompanyPackage,
   deleteBrand,
   deleteCompany,
@@ -463,9 +514,12 @@ import {
   getBrandList,
   getCompanyDetail,
   getCompanyDistributionQuotas,
+  getCompanyPartnerStaffOptions,
   getCompanyPackageBindings,
   getCompanyKeywordGroupQuota,
+  getDeliveryOwnerOptions,
   getSalesOwnerOptions,
+  transferCompanyOwner,
   unbindCompanyPackage,
   updateBrand,
   updateCompany,
@@ -494,6 +548,7 @@ const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
 const canCreateProject = computed(() => userStore.hasPermission('project.create'))
 const canManagePackageBinding = computed(() => userStore.hasPermission('user.manage'))
 const canSelectSalesOwner = computed(() => userStore.role !== 'sales' && canUpdateCompany.value)
+const canTransferOwner = computed(() => userStore.hasPermission('delivery.assignment.manage'))
 const companyId = Number(route.params.id)
 const hasValidId = Number.isFinite(companyId) && companyId > 0
 
@@ -505,11 +560,15 @@ const distributionQuotaLoading = ref(false)
 const saving = ref(false)
 const brandSaving = ref(false)
 const packageSubmitting = ref(false)
+const ownerTransferSubmitting = ref(false)
+const partnerStaffAssignSubmitting = ref(false)
 
 const company = ref<Company | null>(null)
 const brands = ref<Brand[]>([])
 const partnerOptions = ref<PartnerItem[]>([])
 const salesOwnerOptions = ref<SalesOwnerOption[]>([])
+const deliveryOwnerOptions = ref<SalesOwnerOption[]>([])
+const partnerStaffOptions = ref<SalesOwnerOption[]>([])
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
 const keywordGroupQuota = ref<CompanyKeywordGroupQuota | null>(null)
 const distributionQuota = ref<CompanyDistributionQuota | null>(null)
@@ -521,8 +580,18 @@ const brandFormRef = ref<FormInstance>()
 
 const editVisible = ref(false)
 const packageBindVisible = ref(false)
+const ownerTransferVisible = ref(false)
+const partnerStaffAssignVisible = ref(false)
 const packageBindForm = reactive({
   packagePlanId: null as number | null,
+})
+const ownerTransferForm = reactive({
+  newOwnerId: null as number | null,
+  reason: '',
+})
+const partnerStaffAssignForm = reactive({
+  staffUserId: null as number | null,
+  reason: '',
 })
 const companyForm = reactive({
   companyName: '',
@@ -569,8 +638,6 @@ const brandRules: FormRules = {
 
 const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
 const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
-const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
-
 function packageStatusLabel(value?: string | null) {
   const mapping: Record<string, string> = { active: '生效中', inactive: '已解绑' }
   return value ? mapping[value] || value : '-'
@@ -764,11 +831,6 @@ function normalizeIndustryTags(tags: string[]) {
     }
   }
   return normalized
-}
-
-function normalizeGeoSiteCode(code?: string | null) {
-  const normalized = code?.trim().toLowerCase() || ''
-  return GEO_SITE_CODE_PATTERN.test(normalized) ? normalized : ''
 }
 
 function fillCompanyForm(data: Company) {
@@ -1007,6 +1069,86 @@ async function loadSalesOwners() {
   }
 }
 
+async function loadDeliveryOwners() {
+  if (!canTransferOwner.value) {
+    deliveryOwnerOptions.value = []
+    return
+  }
+  try {
+    const { data } = await getDeliveryOwnerOptions()
+    deliveryOwnerOptions.value = data.data || []
+  } catch {
+    deliveryOwnerOptions.value = []
+  }
+}
+
+async function loadPartnerStaffOptions() {
+  if (!canTransferOwner.value || !company.value?.partnerId) {
+    partnerStaffOptions.value = []
+    return
+  }
+  try {
+    const { data } = await getCompanyPartnerStaffOptions(companyId)
+    partnerStaffOptions.value = data.data || []
+  } catch {
+    partnerStaffOptions.value = []
+  }
+}
+
+async function openOwnerTransfer() {
+  ownerTransferForm.newOwnerId = null
+  ownerTransferForm.reason = ''
+  if (!deliveryOwnerOptions.value.length) {
+    await loadDeliveryOwners()
+  }
+  ownerTransferVisible.value = true
+}
+
+async function submitOwnerTransfer() {
+  if (!ownerTransferForm.newOwnerId) {
+    ElMessage.warning('请选择新负责人')
+    return
+  }
+  ownerTransferSubmitting.value = true
+  try {
+    await transferCompanyOwner(companyId, {
+      newOwnerId: ownerTransferForm.newOwnerId,
+      reason: nullableText(ownerTransferForm.reason) || undefined,
+    })
+    ElMessage.success('负责人已移交')
+    ownerTransferVisible.value = false
+    await loadCompany()
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '移交负责人失败'))
+  } finally {
+    ownerTransferSubmitting.value = false
+  }
+}
+
+async function openPartnerStaffAssign() {
+  partnerStaffAssignForm.staffUserId = company.value?.partnerStaffOwnerId || null
+  partnerStaffAssignForm.reason = ''
+  await loadPartnerStaffOptions()
+  partnerStaffAssignVisible.value = true
+}
+
+async function submitPartnerStaffAssign() {
+  partnerStaffAssignSubmitting.value = true
+  try {
+    await assignCompanyPartnerStaffOwner(companyId, {
+      staffUserId: partnerStaffAssignForm.staffUserId,
+      reason: nullableText(partnerStaffAssignForm.reason) || undefined,
+    })
+    ElMessage.success('合伙人员工分配已更新')
+    partnerStaffAssignVisible.value = false
+    await Promise.all([loadCompany(), loadPartnerStaffOptions()])
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '更新合伙人员工分配失败'))
+  } finally {
+    partnerStaffAssignSubmitting.value = false
+  }
+}
+
 function openBrandEdit(row: Brand) {
   brandMode.value = 'edit'
   brandEditingId.value = row.id
@@ -1070,8 +1212,9 @@ async function submitBrand() {
       forbiddenPhrases: Array.isArray(existingBrand?.forbiddenPhrases)
         ? existingBrand?.forbiddenPhrases.join('，')
         : nullableText(existingBrand?.forbiddenPhrases as string | null | undefined),
-      geoSiteCode: normalizeGeoSiteCode(existingBrand?.geoSiteCode) || null,
-      geoSiteStatus: normalizeGeoSiteCode(existingBrand?.geoSiteCode) ? existingBrand?.geoSiteStatus || 'active' : null,
+      geoSiteName: nullableText(existingBrand?.geoSiteName),
+      geoSiteDomain: nullableText(existingBrand?.geoSiteDomain),
+      geoSiteStatus: nullableText(existingBrand?.geoSiteDomain) ? existingBrand?.geoSiteStatus || 'active' : null,
       industrySiteName: nullableText(existingBrand?.industrySiteName),
       industrySiteCode: nullableText(existingBrand?.industrySiteCode),
     }
@@ -1121,6 +1264,17 @@ function goBrandDetail(brandId: number) {
 }
 
 const availableBrandIndustries = computed(() => companyForm.industryTags || [])
+const partnerStaffOwnerName = computed(() => {
+  const staffOwnerId = company.value?.partnerStaffOwnerId
+  if (!staffOwnerId) return '未分配'
+  if (company.value?.partnerStaffOwnerName) {
+    const suffix = company.value.partnerStaffOwnerUsername ? ` (${company.value.partnerStaffOwnerUsername})` : ''
+    const status = company.value.partnerStaffOwnerActive === false ? '（已停用）' : ''
+    return `${company.value.partnerStaffOwnerName}${suffix}${status}`
+  }
+  const staff = partnerStaffOptions.value.find((item) => item.id === staffOwnerId)
+  return staff ? `${staff.displayName} (${staff.username})` : `员工 ${staffOwnerId}`
+})
 
 const companyIndustryText = computed(() => {
   const tags = companyForm.industryTags || []
@@ -1133,6 +1287,7 @@ const customerBasicInfoItems = computed(() => [
   { label: '地区', value: companyRegion(company.value) },
   { label: '归属', value: dictStore.label('owner_type', company.value?.ownerType) || '-' },
   { label: '运营负责人', value: company.value?.ownerName || '未分配' },
+  { label: '合伙人员工', value: partnerStaffOwnerName.value },
   { label: '合伙人', value: (company.value as any)?.partnerName || '-' },
   { label: '状态', value: dictStore.label('company_status', (company.value as any)?.status) || '-' },
   { label: '创建时间', value: formatDateTimeSeconds(company.value?.createdAt) },
@@ -1144,9 +1299,9 @@ onMounted(async () => {
     return
   }
   await dictStore.ensureLoaded()
-  await Promise.all([loadPartners(), loadSalesOwners()])
+  await Promise.all([loadPartners(), loadSalesOwners(), loadDeliveryOwners()])
   await loadCompany()
-  await Promise.all([loadBrands(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
+  await Promise.all([loadBrands(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas(), loadPartnerStaffOptions()])
 })
 </script>
 

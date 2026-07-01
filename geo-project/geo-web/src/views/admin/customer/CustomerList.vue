@@ -267,7 +267,7 @@ const rules: FormRules = {
   ownerType: [{ required: true, message: '请选择归属类型', trigger: 'change' }],
 }
 
-const isPartnerOperator = computed(() => ['partner', 'partner_staff', 'partner_viewer'].includes(userStore.role || ''))
+const isPartnerOperator = computed(() => ['partner', 'partner_staff'].includes(userStore.role || ''))
 const createSourceType = computed<'internal' | 'partner'>(() => (isPartnerOperator.value ? 'partner' : 'internal'))
 const createSourceTypeLabel = computed(() => dictStore.label('company_source_type', createSourceType.value) || (createSourceType.value === 'partner' ? '合伙人' : '本部'))
 const directCount = computed(() => rows.value.filter((row) => row.ownerType === 'direct').length)

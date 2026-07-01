@@ -18,8 +18,13 @@ public class ProjectStateGuard {
 
     public void ensureCanEditBasicInfo(Project project, SysUser operator) {
         currentUserService.ensurePermission("project.update");
-        ensureVisiblePartnerResource(project, operator);
+        ensureCanEditPartnerProjectData(project, operator);
         ensureNotTerminal(project);
+    }
+
+    public void ensureCanEditPartnerProjectData(Project project, SysUser operator) {
+        ensureVisiblePartnerResource(project, operator);
+        ensurePartnerEditableStatus(project, operator);
     }
 
     public void ensureCanChangePackage(Project project, SysUser operator) {
@@ -38,16 +43,10 @@ public class ProjectStateGuard {
         currentUserService.ensurePermission("project.start");
         ensureVisiblePartnerResource(project, operator);
         if (currentUserService.isPartnerUser(operator)) {
-            if (!"partner".equals(operator.getRole())) {
-                throw new BizException(403, "Only partner administrator can start partner project");
-            }
-            if (project.getPartnerId() == null || !project.getPartnerId().equals(operator.getPartnerId())) {
-                throw new BizException(403, "No permission to start this project");
-            }
-            return;
+            throw new BizException(403, "Partner users cannot start projects directly");
         }
-        if (isPartnerOwned(project)) {
-            throw new BizException(403, "Internal users cannot start partner projects");
+        if (isPartnerOwned(project) && !"setup_ready".equals(project.getStatus()) && !"paused".equals(project.getStatus())) {
+            throw new BizException(400, "Partner project can only start after setup is ready");
         }
     }
 
@@ -92,6 +91,18 @@ public class ProjectStateGuard {
         if ("completed".equals(project.getStatus()) || "terminated".equals(project.getStatus()) || "expired".equals(project.getStatus())) {
             throw new BizException(400, "Terminal project cannot be edited");
         }
+    }
+
+    private void ensurePartnerEditableStatus(Project project, SysUser operator) {
+        if (!currentUserService.isPartnerUser(operator) || !isPartnerOwned(project)) {
+            return;
+        }
+        if ("draft".equals(project.getStatus())
+                || "pending_start".equals(project.getStatus())
+                || "rejected".equals(project.getStatus())) {
+            return;
+        }
+        throw new BizException(400, "Partner project can only be edited before submission or after rejection");
     }
 
     private boolean isPartnerOwned(Project project) {

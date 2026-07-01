@@ -32,9 +32,25 @@ class ProjectStateGuardTest {
     void partnerStaff_canEditDraftProject() {
         SysUser operator = partnerStaff(100L);
         Project project = partnerProject(100L);
-        project.setStatus("paused");
+        project.setStatus("draft");
+
+        when(currentUserService.isPartnerUser(operator)).thenReturn(true);
 
         assertDoesNotThrow(() -> projectStateGuard.ensureCanEditBasicInfo(project, operator));
+    }
+
+    @Test
+    void partnerStaff_cannotEditSubmittedProject() {
+        SysUser operator = partnerStaff(100L);
+        Project project = partnerProject(100L);
+        project.setStatus("submitted");
+
+        when(currentUserService.isPartnerUser(operator)).thenReturn(true);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> projectStateGuard.ensureCanEditBasicInfo(project, operator));
+
+        assertEquals("Partner project can only be edited before submission or after rejection", ex.getMessage());
     }
 
     @Test
@@ -50,7 +66,7 @@ class ProjectStateGuardTest {
         );
 
         assertEquals(403, ex.getCode());
-        assertEquals("Only partner administrator can start partner project", ex.getMessage());
+        assertEquals("Partner users cannot start projects directly", ex.getMessage());
     }
 
     @Test
@@ -71,6 +87,45 @@ class ProjectStateGuardTest {
         assertEquals("No permission to access this project", ex.getMessage());
     }
 
+    @Test
+    void internalUser_cannotStartPartnerProjectBeforeSetupReady() {
+        SysUser operator = internalUser();
+        Project project = partnerProject(100L);
+        project.setStatus("approved_pending_setup");
+
+        when(currentUserService.isPartnerUser(operator)).thenReturn(false);
+
+        BizException ex = assertThrows(
+                BizException.class,
+                () -> projectStateGuard.ensureCanStart(project, operator)
+        );
+
+        assertEquals(400, ex.getCode());
+        assertEquals("Partner project can only start after setup is ready", ex.getMessage());
+    }
+
+    @Test
+    void internalUser_canStartPartnerProjectWhenSetupReady() {
+        SysUser operator = internalUser();
+        Project project = partnerProject(100L);
+        project.setStatus("setup_ready");
+
+        when(currentUserService.isPartnerUser(operator)).thenReturn(false);
+
+        assertDoesNotThrow(() -> projectStateGuard.ensureCanStart(project, operator));
+    }
+
+    @Test
+    void internalUser_canResumePausedPartnerProject() {
+        SysUser operator = internalUser();
+        Project project = partnerProject(100L);
+        project.setStatus("paused");
+
+        when(currentUserService.isPartnerUser(operator)).thenReturn(false);
+
+        assertDoesNotThrow(() -> projectStateGuard.ensureCanStart(project, operator));
+    }
+
     private SysUser partnerStaff(Long partnerId) {
         SysUser user = new SysUser();
         user.setId(10L);
@@ -86,5 +141,12 @@ class ProjectStateGuardTest {
         project.setPartnerId(partnerId);
         project.setStatus("paused");
         return project;
+    }
+
+    private SysUser internalUser() {
+        SysUser user = new SysUser();
+        user.setId(11L);
+        user.setRole("delivery_manager");
+        return user;
     }
 }

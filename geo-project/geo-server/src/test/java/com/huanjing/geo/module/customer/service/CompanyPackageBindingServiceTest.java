@@ -17,6 +17,7 @@ import com.huanjing.geo.module.project.mapper.PackageChannelQuotaConfigMapper;
 import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
 import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,11 +29,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -181,6 +182,17 @@ class CompanyPackageBindingServiceTest {
     }
 
     @Test
+    void unbindRejectsLockedCustomerPackage() {
+        CompanyPackageBinding binding = activeBinding();
+        binding.setLockedAt(LocalDateTime.now());
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+
+        BizException ex = assertThrows(BizException.class, () -> service.unbind(7L));
+
+        assertEquals("Customer package is locked and cannot be changed", ex.getMessage());
+    }
+
+    @Test
     void bindRepairsInactiveActiveFlagsBeforeInsertingNewBinding() {
         Company company = new Company();
         company.setId(7L);
@@ -284,36 +296,52 @@ class CompanyPackageBindingServiceTest {
     }
 
     @Test
-    void syncActiveBindingsForPackagePlanRefreshesBindingSnapshotAndUsageLimits() {
-        PackagePlan plan = enabledPlan();
-        plan.setPackageName("Updated");
-        plan.setKeywordGroupLimit(30);
-        plan.setKeywordGroupLimitA(10);
-        plan.setKeywordGroupLimitB(12);
-        plan.setKeywordGroupLimitC(8);
-        CompanyPackageBinding binding = activeBinding();
-        binding.setPackagePlanId(3L);
-        when(packagePlanMapper.selectById(3L)).thenReturn(plan);
-        when(channelQuotaConfigMapper.selectList(any())).thenReturn(List.of(
-                quota("official_site", 5),
-                totalQuota("authority_media", 9)
-        ));
-        when(bindingMapper.selectList(any())).thenReturn(List.of(binding));
-
+    void syncActiveBindingsForPackagePlanDoesNotRefreshHistoricalSnapshot() {
         service.syncActiveBindingsForPackagePlan(3L);
 
-        org.mockito.ArgumentCaptor<CompanyPackageBinding> captor = forClass(CompanyPackageBinding.class);
-        verify(bindingMapper).updateById(captor.capture());
-        CompanyPackageBinding updated = captor.getValue();
-        assertEquals("Updated", updated.getPackageName());
-        assertEquals(30, updated.getKeywordGroupLimit());
-        assertEquals(10, updated.getKeywordGroupLimitA());
-        assertEquals(12, updated.getKeywordGroupLimitB());
-        assertEquals(8, updated.getKeywordGroupLimitC());
-        org.junit.jupiter.api.Assertions.assertTrue(updated.getChannelQuotaSnapshot().contains("\"quotaLimit\":5"));
-        org.junit.jupiter.api.Assertions.assertTrue(updated.getChannelQuotaSnapshot().contains("\"quotaLimit\":9"));
-        verify(quotaUsageMapper).updateQuotaLimit(eq(7L), eq("official_site"), eq("month"), anyString(), eq(5));
-        verify(quotaUsageMapper).updateQuotaLimit(eq(7L), eq("authority_media"), eq("total"), eq("TOTAL"), eq(9));
+        verify(packagePlanMapper, never()).selectById(3L);
+        verify(bindingMapper, never()).updateById(any());
+        verify(quotaUsageMapper, never()).updateQuotaLimit(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void partnerStaffCanReadAssignedCustomerPackageBinding() {
+        SysUser staff = partnerStaffUser(20L);
+        Company company = company(7L, 9L);
+        company.setPartnerStaffOwnerId(20L);
+        CompanyPackageBinding binding = activeBinding();
+        when(currentUserService.requireCurrentUser()).thenReturn(staff);
+        when(currentUserService.isPartnerUser(staff)).thenReturn(true);
+        when(companyMapper.selectById(7L)).thenReturn(company);
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+
+        assertEquals(binding, service.activeBindingForCurrentUser(7L));
+    }
+
+    @Test
+    void partnerStaffCannotReadUnassignedCustomerPackageBinding() {
+        SysUser staff = partnerStaffUser(20L);
+        Company company = company(7L, 9L);
+        company.setPartnerStaffOwnerId(21L);
+        when(currentUserService.requireCurrentUser()).thenReturn(staff);
+        when(currentUserService.isPartnerUser(staff)).thenReturn(true);
+        when(companyMapper.selectById(7L)).thenReturn(company);
+
+        assertThrows(BizException.class, () -> service.activeBindingForCurrentUser(7L));
+    }
+
+    @Test
+    void partnerStaffCannotBindCustomerPackage() {
+        SysUser staff = partnerStaffUser(20L);
+        Company company = company(7L, 9L);
+        company.setPartnerStaffOwnerId(20L);
+        when(currentUserService.requireCurrentUser()).thenReturn(staff);
+        when(currentUserService.isPartnerUser(staff)).thenReturn(true);
+        when(companyMapper.selectById(7L)).thenReturn(company);
+
+        BizException ex = assertThrows(BizException.class, () -> service.bind(7L, 3L));
+
+        assertEquals("Only partner owner can manage customer package", ex.getMessage());
     }
 
     private CompanyPackageBinding activeBinding() {
@@ -346,6 +374,21 @@ class CompanyPackageBindingServiceTest {
         return task;
     }
 
+    private Company company(Long id, Long partnerId) {
+        Company company = new Company();
+        company.setId(id);
+        company.setPartnerId(partnerId);
+        return company;
+    }
+
+    private SysUser partnerStaffUser(Long userId) {
+        SysUser user = new SysUser();
+        user.setId(userId);
+        user.setRole("partner_staff");
+        user.setPartnerId(9L);
+        return user;
+    }
+
     private PackagePlan enabledPlan() {
         PackagePlan plan = new PackagePlan();
         plan.setId(3L);
@@ -355,6 +398,8 @@ class CompanyPackageBindingServiceTest {
         plan.setServiceMonths(3);
         plan.setKeywordGroupLimit(100);
         plan.setEnabled(true);
+        plan.setAudienceType("internal");
+        plan.setPackageStatus("active");
         return plan;
     }
 

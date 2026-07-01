@@ -10,6 +10,10 @@ import com.huanjing.geo.module.partner.dto.PartnerCreateResult;
 import com.huanjing.geo.module.partner.dto.PartnerRechargeApplyRequest;
 import com.huanjing.geo.module.partner.dto.PartnerRechargeAuditRequest;
 import com.huanjing.geo.module.partner.dto.PartnerRechargeRequest;
+import com.huanjing.geo.module.partner.dto.PartnerStaffCreateRequest;
+import com.huanjing.geo.module.partner.dto.PartnerStaffCreateResult;
+import com.huanjing.geo.module.partner.dto.PartnerStaffResetPasswordResult;
+import com.huanjing.geo.module.partner.dto.PartnerStaffVO;
 import com.huanjing.geo.module.partner.dto.PartnerUpdateRequest;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
@@ -30,6 +34,7 @@ import com.huanjing.geo.module.system.mapper.SysUserRoleMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -41,11 +46,16 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class PartnerService {
+
+    private static final String ROLE_PARTNER = "partner";
+    private static final String ROLE_PARTNER_STAFF = "partner_staff";
 
     private final PartnerMapper partnerMapper;
     private final PartnerAccountMapper partnerAccountMapper;
@@ -95,18 +105,23 @@ public class PartnerService {
     public PartnerCreateResult create(PartnerCreateRequest req) {
         currentUserService.ensurePermission("partner.create");
 
+        String partnerCode = StringUtils.hasText(req.getPartnerCode())
+                ? req.getPartnerCode().trim()
+                : generatePartnerCode();
         Partner existed = partnerMapper.selectOne(
-                new LambdaQueryWrapper<Partner>().eq(Partner::getPartnerCode, req.getPartnerCode())
+                new LambdaQueryWrapper<Partner>().eq(Partner::getPartnerCode, partnerCode)
         );
         if (existed != null) {
             throw new BizException(400, "partner_code already exists");
         }
 
         Partner partner = new Partner();
-        partner.setPartnerCode(req.getPartnerCode());
+        partner.setPartnerCode(partnerCode);
         partner.setPartnerName(req.getPartnerName());
         partner.setPartnerLevel(req.getPartnerLevel());
         partner.setDiscountRate(req.getDiscountRate());
+        partner.setPresaleReportFreeQuotaLimit(normalizePresaleReportFreeQuotaLimit(req.getPresaleReportFreeQuotaLimit()));
+        partner.setPresaleReportExtraPoints(normalizePresaleReportExtraPoints(req.getPresaleReportExtraPoints()));
         partner.setStatus("active");
         partner.setContactName(req.getContactName());
         partner.setContactPhone(req.getContactPhone());
@@ -144,13 +159,13 @@ public class PartnerService {
             partnerAccountTxnMapper.insert(txn);
         }
 
-        String username = buildPartnerUsername(req.getPartnerCode());
+        String username = buildPartnerUsername(partnerCode);
         String initialPassword = RandomUtil.randomString(10);
         SysUser user = new SysUser();
         user.setUsername(username);
         user.setPasswordHash(passwordEncoder.encode(initialPassword));
         user.setDisplayName(partner.getPartnerName());
-        user.setRole("partner");
+        user.setRole(ROLE_PARTNER);
         user.setPartnerId(partner.getId());
         user.setPhone(partner.getContactPhone());
         user.setIsActive(true);
@@ -162,13 +177,21 @@ public class PartnerService {
     }
 
     private void bindPartnerOwnerRole(Long userId) {
+        bindRole(userId, ROLE_PARTNER);
+    }
+
+    private void bindPartnerStaffRole(Long userId) {
+        bindRole(userId, ROLE_PARTNER_STAFF);
+    }
+
+    private void bindRole(Long userId, String roleKey) {
         SysRole role = sysRoleMapper.selectOne(
                 new LambdaQueryWrapper<SysRole>()
-                        .eq(SysRole::getRoleKey, "partner")
+                        .eq(SysRole::getRoleKey, roleKey)
                         .eq(SysRole::getStatus, "active")
         );
         if (role == null) {
-            throw new BizException(500, "partner role is not configured");
+            throw new BizException(500, roleKey + " role is not configured");
         }
         SysUserRole relation = new SysUserRole();
         relation.setUserId(userId);
@@ -187,12 +210,17 @@ public class PartnerService {
         partner.setPartnerName(req.getPartnerName());
         partner.setPartnerLevel(req.getPartnerLevel());
         partner.setDiscountRate(req.getDiscountRate());
+        partner.setPresaleReportFreeQuotaLimit(normalizePresaleReportFreeQuotaLimit(req.getPresaleReportFreeQuotaLimit()));
+        partner.setPresaleReportExtraPoints(normalizePresaleReportExtraPoints(req.getPresaleReportExtraPoints()));
         partner.setStatus(req.getStatus());
         partner.setContactName(req.getContactName());
         partner.setContactPhone(req.getContactPhone());
         partner.setCity(req.getCity());
         partner.setRemark(req.getRemark());
         partnerMapper.updateById(partner);
+        if (!"active".equals(req.getStatus())) {
+            deactivatePartnerStaffAccounts(partner.getId());
+        }
         if (isDiscountChanged(oldDiscountRate, req.getDiscountRate())) {
             logDiscountHistory(partner.getId(), oldDiscountRate, req.getDiscountRate(), "partner.update");
         }
@@ -204,6 +232,123 @@ public class PartnerService {
         Partner partner = requirePartner(id);
         partner.setStatus(status);
         partnerMapper.updateById(partner);
+        if (!"active".equals(status)) {
+            deactivatePartnerStaffAccounts(id);
+        }
+    }
+
+    public List<PartnerStaffVO> myStaff() {
+        SysUser partnerOwner = requireCurrentPartnerOwner();
+        currentUserService.ensurePermission("partner.staff.manage");
+        return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getPartnerId, partnerOwner.getPartnerId())
+                        .eq(SysUser::getRole, ROLE_PARTNER_STAFF)
+                        .orderByDesc(SysUser::getCreatedAt))
+                .stream()
+                .map(this::toPartnerStaffVO)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public PartnerStaffCreateResult createMyStaff(PartnerStaffCreateRequest req) {
+        SysUser partnerOwner = requireCurrentPartnerOwner();
+        currentUserService.ensurePermission("partner.staff.manage");
+        lockActivePartner(partnerOwner.getPartnerId());
+
+        Long existingStaffCount = sysUserMapper.selectCount(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getPartnerId, partnerOwner.getPartnerId())
+                .eq(SysUser::getRole, ROLE_PARTNER_STAFF));
+        if (existingStaffCount != null && existingStaffCount > 0) {
+            throw new BizException(400, "Only one partner staff account is allowed");
+        }
+        SysUser existed = sysUserMapper.selectOne(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, req.getUsername())
+        );
+        if (existed != null) {
+            throw new BizException(400, "username already exists");
+        }
+
+        String initialPassword = RandomUtil.randomString(10);
+        SysUser staff = new SysUser();
+        staff.setUsername(req.getUsername());
+        staff.setPasswordHash(passwordEncoder.encode(initialPassword));
+        staff.setDisplayName(req.getDisplayName());
+        staff.setRole(ROLE_PARTNER_STAFF);
+        staff.setPartnerId(partnerOwner.getPartnerId());
+        staff.setPhone(req.getPhone());
+        staff.setEmail(req.getEmail());
+        staff.setIsActive(true);
+        staff.setTokenVersion(0);
+        try {
+            sysUserMapper.insert(staff);
+        } catch (DuplicateKeyException ex) {
+            throw new BizException(409, "Only one partner staff account is allowed");
+        }
+        bindPartnerStaffRole(staff.getId());
+        activityLogService.logAction(
+                partnerOwner.getId(),
+                "partner.staff.create",
+                "sys_user",
+                staff.getId(),
+                null,
+                partnerStaffSnapshot(staff),
+                java.util.Map.of("partnerId", partnerOwner.getPartnerId())
+        );
+        return new PartnerStaffCreateResult(toPartnerStaffVO(staff), initialPassword);
+    }
+
+    @Transactional
+    public PartnerStaffVO updateMyStaffStatus(Long staffUserId, Boolean isActive) {
+        SysUser partnerOwner = requireCurrentPartnerOwner();
+        currentUserService.ensurePermission("partner.staff.manage");
+        if (Boolean.TRUE.equals(isActive)) {
+            ensurePartnerActive(partnerOwner.getPartnerId());
+        }
+        SysUser staff = requireOwnedPartnerStaff(partnerOwner.getPartnerId(), staffUserId);
+        Map<String, Object> before = partnerStaffSnapshot(staff);
+        staff.setIsActive(isActive);
+        staff.setTokenVersion(nextTokenVersion(staff));
+        sysUserMapper.updateById(staff);
+        activityLogService.logAction(
+                partnerOwner.getId(),
+                "partner.staff.status.update",
+                "sys_user",
+                staff.getId(),
+                before,
+                partnerStaffSnapshot(staff),
+                java.util.Map.of("partnerId", partnerOwner.getPartnerId())
+        );
+        return toPartnerStaffVO(staff);
+    }
+
+    @Transactional
+    public PartnerStaffResetPasswordResult resetMyStaffPassword(Long staffUserId) {
+        SysUser partnerOwner = requireCurrentPartnerOwner();
+        currentUserService.ensurePermission("partner.staff.manage");
+        SysUser staff = requireOwnedPartnerStaff(partnerOwner.getPartnerId(), staffUserId);
+        String newPassword = RandomUtil.randomString(10);
+        Map<String, Object> before = partnerStaffSnapshot(staff);
+        staff.setPasswordHash(passwordEncoder.encode(newPassword));
+        staff.setTokenVersion(nextTokenVersion(staff));
+        sysUserMapper.updateById(staff);
+        activityLogService.logAction(
+                partnerOwner.getId(),
+                "partner.staff.password.reset",
+                "sys_user",
+                staff.getId(),
+                before,
+                partnerStaffSnapshot(staff),
+                java.util.Map.of("partnerId", partnerOwner.getPartnerId())
+        );
+        return new PartnerStaffResetPasswordResult(toPartnerStaffVO(staff), newPassword);
+    }
+
+    private Integer normalizePresaleReportFreeQuotaLimit(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private BigDecimal normalizePresaleReportExtraPoints(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 
     public PartnerAccount account(Long partnerId) {
@@ -413,6 +558,81 @@ public class PartnerService {
         return partner;
     }
 
+    private SysUser requireCurrentPartnerOwner() {
+        SysUser user = currentUserService.requireCurrentUser();
+        if (!ROLE_PARTNER.equals(user.getRole()) || user.getPartnerId() == null) {
+            throw new BizException(403, "Only partner owner can manage partner staff");
+        }
+        return user;
+    }
+
+    private SysUser requireOwnedPartnerStaff(Long partnerId, Long staffUserId) {
+        SysUser staff = sysUserMapper.selectById(staffUserId);
+        if (staff == null
+                || !ROLE_PARTNER_STAFF.equals(staff.getRole())
+                || staff.getPartnerId() == null
+                || !staff.getPartnerId().equals(partnerId)) {
+            throw new BizException(404, "Partner staff not found");
+        }
+        return staff;
+    }
+
+    private void ensurePartnerActive(Long partnerId) {
+        Partner partner = requirePartner(partnerId);
+        if (!"active".equals(partner.getStatus())) {
+            throw new BizException(400, "Partner is not active");
+        }
+    }
+
+    private void lockActivePartner(Long partnerId) {
+        Partner partner = partnerMapper.selectByIdForUpdate(partnerId);
+        if (partner == null) {
+            throw new BizException(404, "Partner not found");
+        }
+        if (!"active".equals(partner.getStatus())) {
+            throw new BizException(400, "Partner is not active");
+        }
+    }
+
+    private void deactivatePartnerStaffAccounts(Long partnerId) {
+        List<SysUser> staffUsers = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getPartnerId, partnerId)
+                .eq(SysUser::getRole, ROLE_PARTNER_STAFF)
+                .eq(SysUser::getIsActive, true));
+        for (SysUser staff : staffUsers) {
+            staff.setIsActive(false);
+            staff.setTokenVersion(nextTokenVersion(staff));
+            sysUserMapper.updateById(staff);
+        }
+    }
+
+    private PartnerStaffVO toPartnerStaffVO(SysUser user) {
+        PartnerStaffVO vo = new PartnerStaffVO();
+        vo.setId(user.getId());
+        vo.setUsername(user.getUsername());
+        vo.setDisplayName(user.getDisplayName());
+        vo.setPartnerId(user.getPartnerId());
+        vo.setPhone(user.getPhone());
+        vo.setEmail(user.getEmail());
+        vo.setIsActive(user.getIsActive());
+        vo.setCreatedAt(user.getCreatedAt());
+        vo.setUpdatedAt(user.getUpdatedAt());
+        return vo;
+    }
+
+    private Map<String, Object> partnerStaffSnapshot(SysUser user) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("id", user.getId());
+        snapshot.put("username", user.getUsername());
+        snapshot.put("displayName", user.getDisplayName());
+        snapshot.put("partnerId", user.getPartnerId());
+        snapshot.put("phone", user.getPhone());
+        snapshot.put("email", user.getEmail());
+        snapshot.put("isActive", user.getIsActive());
+        snapshot.put("tokenVersion", user.getTokenVersion());
+        return snapshot;
+    }
+
     private Partner requireAccessiblePartnerAccount(Long partnerId) {
         SysUser operator = currentUserService.requireCurrentUser();
         Partner partner = requirePartner(partnerId);
@@ -444,6 +664,18 @@ public class PartnerService {
 
     private String buildRechargeOrderNo() {
         return "PRO" + System.currentTimeMillis() + RandomUtil.randomNumbers(6);
+    }
+
+    private String generatePartnerCode() {
+        String prefix = "P" + LocalDate.now().format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+        String candidate;
+        do {
+            candidate = prefix + RandomUtil.randomNumbers(6);
+            Long existing = partnerMapper.selectCount(new LambdaQueryWrapper<Partner>().eq(Partner::getPartnerCode, candidate));
+            if (existing == null || existing == 0) {
+                return candidate;
+            }
+        } while (true);
     }
 
     private String buildPartnerUsername(String partnerCode) {
@@ -485,6 +717,11 @@ public class PartnerService {
             return true;
         }
         return oldRate.compareTo(newRate) != 0;
+    }
+
+    private int nextTokenVersion(SysUser user) {
+        int current = user.getTokenVersion() == null ? 0 : user.getTokenVersion();
+        return current + 1;
     }
 
     private PartnerAccountTxn rechargeAccount(Long partnerId, BigDecimal amount, String offlineReference, String remark,

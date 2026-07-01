@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.partner.service.PartnerPresaleReportQuotaService;
 import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport;
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
 import com.huanjing.geo.module.presale.export.service.PresaleExportStatuses;
@@ -93,6 +94,7 @@ public class PresaleReportService {
     private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     private final PromptTemplateDraftValidator promptTemplateDraftValidator;
     private final LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator;
+    private final PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
     private final ObjectMapper objectMapper;
     @Value("${presale.prompt.active-version:v2}")
     private String activePromptTemplateVersion;
@@ -109,6 +111,7 @@ public class PresaleReportService {
                                 PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper,
                                 PromptTemplateDraftValidator promptTemplateDraftValidator,
                                 LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator,
+                                PartnerPresaleReportQuotaService partnerPresaleReportQuotaService,
                                 ObjectMapper objectMapper) {
         this.reportMapper = reportMapper;
         this.versionMapper = versionMapper;
@@ -122,6 +125,7 @@ public class PresaleReportService {
         this.versionPromptTemplateMapper = versionPromptTemplateMapper;
         this.promptTemplateDraftValidator = promptTemplateDraftValidator;
         this.llmPromptQuestionDraftValidator = llmPromptQuestionDraftValidator;
+        this.partnerPresaleReportQuotaService = partnerPresaleReportQuotaService;
         this.objectMapper = objectMapper;
     }
 
@@ -133,7 +137,13 @@ public class PresaleReportService {
     @Transactional
     public Long createReport(CreateReportRequest req) {
         currentUserService.ensurePermission(PERM_CREATE);
-        Long userId = currentUserService.requireCurrentUser().getId();
+        var currentUser = currentUserService.requireCurrentUser();
+        Long userId = currentUser.getId();
+        PartnerPresaleReportQuotaService.Reservation reservation =
+                partnerPresaleReportQuotaService.reserveIfPartner(currentUser, req);
+        if (reservation.existingReportId() != null) {
+            return reservation.existingReportId();
+        }
         LocalDateTime now = LocalDateTime.now();
         List<String> brandFormerNames = normalizeBrandFormerNames(req.getBrandFormerNames(), req.getBrandName());
         List<String> specifiedCompetitors = normalizeSpecifiedCompetitors(
@@ -151,7 +161,9 @@ public class PresaleReportService {
         report.setCreatedAt(now);
         report.setUpdatedAt(now);
         report.setCreatedBy(userId);
+        applyPartnerReservation(report, reservation);
         reportMapper.insert(report);
+        partnerPresaleReportQuotaService.confirm(reservation, report.getId());
 
         PresaleReportVersion version = new PresaleReportVersion();
         version.setReportId(report.getId());
@@ -184,6 +196,20 @@ public class PresaleReportService {
         triggerGenerateAfterCommit(version.getId(), userId, accessService.canManageCurrentUser());
 
         return report.getId();
+    }
+
+    private void applyPartnerReservation(PresaleReport report, PartnerPresaleReportQuotaService.Reservation reservation) {
+        if (reservation == null || !reservation.partnerReservation()) {
+            return;
+        }
+        report.setPartnerId(reservation.partnerId());
+        report.setPartnerPresaleChargeType(reservation.quotaTxn().getBizType());
+        report.setPartnerPresalePoints(reservation.quotaTxn().getPointsAmount());
+        report.setPartnerPresaleQuotaTxnId(reservation.quotaTxn().getId());
+        report.setPartnerPresalePointsTxnId(reservation.pointsTxn() == null ? null : reservation.pointsTxn().getId());
+        report.setRequestId(reservation.requestId());
+        report.setRequestHash(reservation.requestHash());
+        report.setRequestPayloadSnapshotJson(reservation.requestPayloadJson());
     }
 
     private List<PresaleReportVersionPromptTemplate> buildPromptSnapshots(CreateReportRequest req,

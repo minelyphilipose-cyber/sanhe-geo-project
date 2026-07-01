@@ -3,6 +3,7 @@ package com.huanjing.geo.module.project.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
@@ -32,6 +33,7 @@ import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupWordMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Cell;
@@ -95,11 +97,14 @@ public class KeywordGroupService {
     private final ProjectMapper projectMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
     private final KeywordTypeConfigService keywordTypeConfigService;
     private final KeywordLlmQuestionService keywordLlmQuestionService;
+    private final ProjectStateGuard projectStateGuard;
 
     public Page<KeywordGroupListItemVO> page(long current, long size, String keyword, Long companyId, Long projectId, String type) {
         currentUserService.ensurePermission("keyword_group.read");
+        SysUser user = currentUserService.requireCurrentUser();
         LambdaQueryWrapper<KeywordGroup> wrapper = new LambdaQueryWrapper<KeywordGroup>()
                 .eq(KeywordGroup::getDeleted, false)
                 .orderByDesc(KeywordGroup::getUpdatedAt)
@@ -116,6 +121,7 @@ public class KeywordGroupService {
         if (StringUtils.hasText(type)) {
             wrapper.eq(KeywordGroup::getType, normalizeType(type));
         }
+        applyKeywordGroupScope(wrapper, user);
 
         Page<KeywordGroup> page = keywordGroupMapper.selectPage(new Page<>(current, size), wrapper);
         List<Long> groupIds = page.getRecords().stream().map(KeywordGroup::getId).toList();
@@ -134,6 +140,8 @@ public class KeywordGroupService {
     public KeywordGroupVO detail(Long id) {
         currentUserService.ensurePermission("keyword_group.read");
         KeywordGroup group = requireGroup(id);
+        Company company = requireCompany(group.getCompanyId());
+        internalScopeService.ensureCompanyAccess(currentUserService.requireCurrentUser(), company, "keyword group");
         String companyName = resolveCompanyName(group.getCompanyId());
         Project project = group.getProjectId() == null ? null : projectMapper.selectById(group.getProjectId());
         hydrateProjectPackageTypes(project == null ? Collections.emptyList() : List.of(project));
@@ -146,6 +154,7 @@ public class KeywordGroupService {
     @Transactional
     public KeywordGroupVO create(KeywordGroupPayloadRequest req) {
         currentUserService.ensurePermission("keyword_group.write");
+        SysUser currentUser = currentUserService.requireCurrentUser();
         if (!StringUtils.hasText(req.getName())) {
             throw new BizException(400, "name is required");
         }
@@ -154,6 +163,7 @@ public class KeywordGroupService {
         Scope scope = resolveScope(req, true);
         Company company = scope.company();
         Project project = scope.project();
+        ensureProjectEditableForKeywordGroup(project, currentUser);
         validateProjectKeywordCountLimit(project, req.getCount());
         ensureNameUnique(company.getId(), req.getName().trim(), null);
 
@@ -182,14 +192,19 @@ public class KeywordGroupService {
     @Transactional
     public KeywordGroupVO update(Long id, KeywordGroupPayloadRequest req) {
         currentUserService.ensurePermission("keyword_group.write");
+        SysUser currentUser = currentUserService.requireCurrentUser();
         if (!StringUtils.hasText(req.getName())) {
             throw new BizException(400, "name is required");
         }
         KeywordGroup group = requireGroup(id);
+        Company currentCompany = requireCompany(group.getCompanyId());
+        internalScopeService.ensureCompanyAccess(currentUser, currentCompany, "keyword group");
+        ensureProjectEditableForKeywordGroup(group.getProjectId(), currentUser);
         String type = normalizeType(req.getType());
         Scope scope = resolveScope(req, true);
         Company company = scope.company();
         Project project = scope.project();
+        ensureProjectEditableForKeywordGroup(project, currentUser);
         validateProjectKeywordCountLimit(project, req.getCount());
         ensureNameUnique(company.getId(), req.getName().trim(), id);
 
@@ -217,6 +232,10 @@ public class KeywordGroupService {
     public void delete(Long id) {
         currentUserService.ensurePermission("keyword_group.write");
         KeywordGroup group = requireGroup(id);
+        Company company = requireCompany(group.getCompanyId());
+        SysUser currentUser = currentUserService.requireCurrentUser();
+        internalScopeService.ensureCompanyAccess(currentUser, company, "keyword group");
+        ensureProjectEditableForKeywordGroup(group.getProjectId(), currentUser);
         projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>().eq(ProjectKeywordGroupRel::getKeywordGroupId, id));
         group.setDeleted(true);
         group.setName(deletedGroupName(group));
@@ -228,6 +247,9 @@ public class KeywordGroupService {
     public KeywordGroupImportResultVO importProjectKeywordGroup(Long projectId, MultipartFile file) {
         currentUserService.ensurePermission("keyword_group.write");
         Project project = requireProject(projectId);
+        SysUser currentUser = currentUserService.requireCurrentUser();
+        internalScopeService.ensureProjectAccess(currentUser, project, "project");
+        ensureProjectEditableForKeywordGroup(project, currentUser);
         if (!isProjectPrepareStatus(project.getStatus())) {
             throw new BizException(400, "只有未启动项目可以导入拓词组");
         }
@@ -270,7 +292,10 @@ public class KeywordGroupService {
 
     public Page<KeywordGroupQuestionVO> questions(Long groupId, long current, long size, String tier) {
         currentUserService.ensurePermission("keyword_group.read");
-        requireGroup(groupId);
+        KeywordGroup group = requireGroup(groupId);
+        Company company = requireCompany(group.getCompanyId());
+        SysUser currentUser = currentUserService.requireCurrentUser();
+        internalScopeService.ensureCompanyAccess(currentUser, company, "keyword group");
         long safeCurrent = Math.max(1L, current);
         long safeSize = Math.max(1L, Math.min(size <= 0 ? 20L : size, 100L));
         LambdaQueryWrapper<KeywordGroupResult> wrapper = new LambdaQueryWrapper<KeywordGroupResult>()
@@ -278,7 +303,9 @@ public class KeywordGroupService {
                 .orderByAsc(KeywordGroupResult::getQuestionTier)
                 .orderByAsc(KeywordGroupResult::getSortOrder)
                 .orderByAsc(KeywordGroupResult::getId);
-        if (StringUtils.hasText(tier) && !"all".equalsIgnoreCase(tier)) {
+        if (currentUserService.isPartnerUser(currentUser)) {
+            wrapper.eq(KeywordGroupResult::getQuestionTier, DEFAULT_QUESTION_TIER);
+        } else if (StringUtils.hasText(tier) && !"all".equalsIgnoreCase(tier)) {
             wrapper.eq(KeywordGroupResult::getQuestionTier, normalizeQuestionTier(tier));
         }
         Page<KeywordGroupResult> page = keywordGroupResultMapper.selectPage(new Page<>(safeCurrent, safeSize), wrapper);
@@ -291,8 +318,12 @@ public class KeywordGroupService {
     public KeywordGroupQuestionVO updateQuestion(Long groupId, Long questionId, KeywordGroupQuestionUpdateRequest req) {
         currentUserService.ensurePermission("keyword_group.write");
         KeywordGroup group = requireGroup(groupId);
+        Company company = requireCompany(group.getCompanyId());
+        SysUser currentUser = currentUserService.requireCurrentUser();
+        internalScopeService.ensureCompanyAccess(currentUser, company, "keyword group");
         if (group.getProjectId() != null) {
             Project project = requireProject(group.getProjectId());
+            ensureProjectEditableForKeywordGroup(project, currentUser);
             if (!isProjectPrepareStatus(project.getStatus())) {
                 throw new BizException(400, "项目已启动，不能编辑拓词组问题");
             }
@@ -300,6 +331,9 @@ public class KeywordGroupService {
         KeywordGroupResult result = keywordGroupResultMapper.selectById(questionId);
         if (result == null || !groupId.equals(result.getGroupId())) {
             throw new BizException(404, "Question not found");
+        }
+        if (currentUserService.isPartnerUser(currentUser) && !DEFAULT_QUESTION_TIER.equals(normalizeQuestionTier(result.getQuestionTier()))) {
+            throw new BizException(403, "Partners can only edit core questions");
         }
         result.setKeywordText(req.getQuestionText().trim());
         result.setSceneCode(normalizeSceneCode(req.getSceneCode()));
@@ -723,7 +757,29 @@ public class KeywordGroupService {
             throw new BizException(400, "projectId is required");
         }
         Company company = requireCompany(companyId);
+        internalScopeService.ensureCompanyAccess(currentUserService.requireCurrentUser(), company, "keyword group");
         return new Scope(company, project);
+    }
+
+    private void ensureProjectEditableForKeywordGroup(Long projectId, SysUser currentUser) {
+        if (projectId == null || !currentUserService.isPartnerUser(currentUser)) {
+            return;
+        }
+        ensureProjectEditableForKeywordGroup(requireProject(projectId), currentUser);
+    }
+
+    private void ensureProjectEditableForKeywordGroup(Project project, SysUser currentUser) {
+        if (project == null || !currentUserService.isPartnerUser(currentUser)) {
+            return;
+        }
+        projectStateGuard.ensureCanEditPartnerProjectData(project, currentUser);
+    }
+
+    private void applyKeywordGroupScope(LambdaQueryWrapper<KeywordGroup> wrapper, SysUser user) {
+        String companyScopeSql = internalScopeService.visibleCompanyIdSql(user);
+        if (companyScopeSql != null) {
+            wrapper.inSql(KeywordGroup::getCompanyId, companyScopeSql);
+        }
     }
 
     private void validateProjectKeywordCountLimit(Project project, Integer requestedCount) {
@@ -1028,7 +1084,7 @@ public class KeywordGroupService {
     }
 
     private boolean isProjectPrepareStatus(String status) {
-        return "pending_start".equals(status) || "paused".equals(status);
+        return "draft".equals(status) || "pending_start".equals(status) || "rejected".equals(status) || "paused".equals(status);
     }
 
     private void ensureProjectHasNoKeywordGroup(Project project) {

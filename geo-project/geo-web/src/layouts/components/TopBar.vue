@@ -61,7 +61,6 @@ const ROLE_LABELS: Record<RoleType, string> = {
   sales: '销售',
   partner: '合伙人主账号',
   partner_staff: '合伙人员工',
-  partner_viewer: '合伙人只读',
 }
 
 const route = useRoute()

@@ -140,6 +140,28 @@ public class ProjectDistributionChannelAllocationService {
         validateRequestedCounts(project, requested, snapshot);
     }
 
+    public String partnerVisibleAllocationSnapshot(Project project) {
+        if (project == null || project.getId() == null) {
+            return "[]";
+        }
+        Map<String, ProjectChannelAllocation> current = currentAllocations(project.getId());
+        JSONArray arr = new JSONArray();
+        for (ChannelDefinition channel : CHANNELS) {
+            if (!isPartnerVisibleChannel(channel.code())) {
+                continue;
+            }
+            ProjectChannelAllocation row = current.get(channel.code());
+            cn.hutool.json.JSONObject item = JSONUtil.createObj();
+            item.set("channelCode", channel.code());
+            item.set("channelName", partnerChannelName(channel.code(), channel.name()));
+            item.set("periodType", row == null ? null : row.getPeriodTypeSnapshot());
+            item.set("quotaLimit", row == null || row.getPackageQuotaLimitSnapshot() == null ? 0 : row.getPackageQuotaLimitSnapshot());
+            item.set("allocatedCount", row == null || row.getAllocatedCount() == null ? 0 : row.getAllocatedCount());
+            arr.add(item);
+        }
+        return arr.toString();
+    }
+
     public void attachAllocations(List<Project> projects) {
         if (projects == null || projects.isEmpty()) {
             return;
@@ -401,5 +423,33 @@ public class ProjectDistributionChannelAllocationService {
         }
         channels.add(new ChannelDefinition(AUTHORITY_MEDIA, "权威媒体"));
         return List.copyOf(channels);
+    }
+
+    private boolean isPartnerVisibleChannel(String channelCode) {
+        if (!StringUtils.hasText(channelCode)) {
+            return false;
+        }
+        if (OFFICIAL_SITE.equals(channelCode)) {
+            return true;
+        }
+        if (!channelCode.startsWith(ArticlePromptChannels.SELF_MEDIA + ":")) {
+            return false;
+        }
+        String platform = channelCode.substring((ArticlePromptChannels.SELF_MEDIA + ":").length());
+        return Set.of("wechat", "douyin", "toutiao", "zhihu", "baijiahao", "xiaohongshu")
+                .contains(ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(platform));
+    }
+
+    private String partnerChannelName(String channelCode, String fallback) {
+        return switch (channelCode) {
+            case OFFICIAL_SITE -> "Agent官网";
+            case "self_media:wechat" -> "公众号";
+            case "self_media:douyin" -> "抖音";
+            case "self_media:toutiao" -> "头条";
+            case "self_media:zhihu" -> "知乎";
+            case "self_media:baijiahao" -> "百家号";
+            case "self_media:xiaohongshu" -> "小红书";
+            default -> fallback;
+        };
     }
 }

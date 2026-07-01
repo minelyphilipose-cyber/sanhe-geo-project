@@ -75,6 +75,105 @@ class InternalScopeServiceTest {
     }
 
     @Test
+    void partnerOwnerUsesPartnerCompanyScope() {
+        SysUser user = user(3L, "partner");
+        user.setPartnerId(900L);
+        LambdaQueryWrapper<Company> wrapper = new LambdaQueryWrapper<>();
+
+        service.applyCompanyScope(wrapper, user);
+
+        String sql = wrapper.getTargetSql();
+        assertTrue(sql.contains("partner_id ="));
+        assertFalse(sql.contains("partner_staff_owner_id"));
+    }
+
+    @Test
+    void partnerStaffUsesAssignedCompanyScope() {
+        SysUser user = user(4L, "partner_staff");
+        user.setPartnerId(900L);
+        LambdaQueryWrapper<Company> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<Project> projectWrapper = new LambdaQueryWrapper<>();
+
+        service.applyCompanyScope(wrapper, user);
+        service.applyProjectScope(projectWrapper, user);
+
+        assertTrue(wrapper.getTargetSql().contains("partner_id ="));
+        assertTrue(wrapper.getTargetSql().contains("partner_staff_owner_id ="));
+        assertTrue(projectWrapper.getTargetSql().contains("partner_staff_owner_id = 4"));
+    }
+
+    @Test
+    void partnerStaffAccessesOnlyAssignedCompanyOfOwnPartner() {
+        SysUser staff = user(4L, "partner_staff");
+        staff.setPartnerId(900L);
+
+        assertDoesNotThrow(() -> service.ensureCompanyAccess(staff, partnerCompany(900L, 4L), "company"));
+        assertThrows(BizException.class, () -> service.ensureCompanyAccess(staff, partnerCompany(900L, null), "company"));
+        assertThrows(BizException.class, () -> service.ensureCompanyAccess(staff, partnerCompany(900L, 5L), "company"));
+        assertThrows(BizException.class, () -> service.ensureCompanyAccess(staff, partnerCompany(901L, 4L), "company"));
+    }
+
+    @Test
+    void partnerOwnerAccessesAllOwnPartnerCompaniesOnly() {
+        SysUser owner = user(3L, "partner");
+        owner.setPartnerId(900L);
+
+        assertDoesNotThrow(() -> service.ensureCompanyAccess(owner, partnerCompany(900L, null), "company"));
+        assertDoesNotThrow(() -> service.ensureCompanyAccess(owner, partnerCompany(900L, 4L), "company"));
+        assertThrows(BizException.class, () -> service.ensureCompanyAccess(owner, partnerCompany(901L, 4L), "company"));
+    }
+
+    @Test
+    void partnerStaffCannotAccessUnassignedProject() {
+        SysUser staff = user(4L, "partner_staff");
+        staff.setPartnerId(900L);
+        Project project = project(30L, 40L);
+        when(companyMapper.selectById(40L)).thenReturn(partnerCompany(900L, 5L));
+
+        assertThrows(BizException.class, () -> service.ensureProjectAccess(staff, project, "project"));
+    }
+
+    @Test
+    void partnerStaffCannotAccessUnassignedBrand() {
+        SysUser staff = user(4L, "partner_staff");
+        staff.setPartnerId(900L);
+        Brand brand = new Brand();
+        brand.setId(30L);
+        brand.setCompanyId(40L);
+        when(companyMapper.selectById(40L)).thenReturn(partnerCompany(900L, null));
+
+        assertThrows(BizException.class, () -> service.ensureBrandAccess(staff, brand, "brand"));
+    }
+
+    @Test
+    void partnerOwnerCanAccessOwnPartnerProject() {
+        SysUser owner = user(3L, "partner");
+        owner.setPartnerId(900L);
+        Project project = project(30L, 40L);
+        when(companyMapper.selectById(40L)).thenReturn(partnerCompany(900L, 4L));
+
+        assertDoesNotThrow(() -> service.ensureProjectAccess(owner, project, "project"));
+    }
+
+    @Test
+    void globalInternalStillBypassesProjectScope() {
+        SysUser manager = user(3L, "manager");
+        Project project = project(30L, 40L);
+        when(companyMapper.selectById(40L)).thenReturn(partnerCompany(900L, 4L));
+
+        assertDoesNotThrow(() -> service.ensureProjectAccess(manager, project, "project"));
+    }
+
+    @Test
+    void partnerViewerUsesOwnerScopeInsteadOfPartnerScope() {
+        SysUser user = user(5L, "partner_viewer");
+        when(sysUserRoleMapper.selectRoleKeysByUserId(5L)).thenReturn(List.of("partner_viewer"));
+
+        assertFalse(service.isPartnerUser(user));
+        assertTrue(service.requiresOwnerScope(user));
+    }
+
+    @Test
     void salesListScopeDefaultsToNoRowsWhenNoDedicatedSalesScopeExists() {
         SysUser sales = user(4L, "sales");
         LambdaQueryWrapper<Brand> brandWrapper = new LambdaQueryWrapper<>();
@@ -88,14 +187,16 @@ class InternalScopeServiceTest {
     }
 
     @Test
-    void partnerListScopeIsLeftForPartnerSpecificFilters() {
+    void partnerBrandScopeUsesPartnerCompanyFilter() {
         SysUser partner = user(5L, "partner_staff");
+        partner.setPartnerId(900L);
         LambdaQueryWrapper<Brand> wrapper = new LambdaQueryWrapper<>();
 
         service.applyBrandScope(wrapper, partner);
 
         assertFalse(wrapper.getTargetSql().contains("1 = 0"));
-        assertFalse(wrapper.getTargetSql().contains("owner_id"));
+        assertTrue(wrapper.getTargetSql().contains("partner_id = 900"));
+        assertTrue(wrapper.getTargetSql().contains("partner_staff_owner_id = 5"));
     }
 
     @Test
@@ -134,6 +235,20 @@ class InternalScopeServiceTest {
         company.setId(40L);
         company.setOwnerId(ownerId);
         return company;
+    }
+
+    private Company partnerCompany(Long partnerId, Long partnerStaffOwnerId) {
+        Company company = company(null);
+        company.setPartnerId(partnerId);
+        company.setPartnerStaffOwnerId(partnerStaffOwnerId);
+        return company;
+    }
+
+    private Project project(Long id, Long companyId) {
+        Project project = new Project();
+        project.setId(id);
+        project.setCompanyId(companyId);
+        return project;
     }
 
     private void initTableInfo(Class<?> entityType) {

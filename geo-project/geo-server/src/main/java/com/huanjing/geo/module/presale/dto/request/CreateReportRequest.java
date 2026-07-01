@@ -12,6 +12,10 @@ import java.util.List;
 @Data
 public class CreateReportRequest {
 
+    /** 合伙人侧幂等请求号。合伙人创建诊断报告时必填；内部创建可为空。 */
+    @Size(max = 128, message = "请求号最多 128 字")
+    private String requestId;
+
     @NotBlank(message = "品牌名不能为空")
     @Size(max = 100, message = "品牌名最多 100 字")
     private String brandName;

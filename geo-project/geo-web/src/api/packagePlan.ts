@@ -17,6 +17,7 @@ export function getAdminPackagePlans(params: {
   size?: number
   keyword?: string
   enabled?: boolean
+  audienceType?: 'internal' | 'partner' | string
 }) {
   return request.get<R<PageResult<PackagePlan>>>('/admin/package-plans', { params })
 }
@@ -24,7 +25,11 @@ export function getAdminPackagePlans(params: {
 export function createPackagePlan(data: {
   packageType: string
   packageName: string
+  audienceType?: 'internal' | 'partner' | string
   standardPrice: number
+  partnerPoints?: number | null
+  partnerVisibleConfigJson?: string
+  internalDeliveryConfigJson?: string
   serviceMonths: number
   keywordGroupLimit: number
   keywordGroupLimitA: number
@@ -39,7 +44,6 @@ export function createPackagePlan(data: {
   targetMetricType: string
   targetMetricValue: number
   targetWindowDays: number
-  enabled: boolean
   sortOrder: number
   remark?: string
   channelQuotaConfigs?: PackageChannelQuotaPayload[]
@@ -49,7 +53,11 @@ export function createPackagePlan(data: {
 
 export function updatePackagePlan(id: number, data: {
   packageName: string
+  audienceType?: 'internal' | 'partner' | string
   standardPrice: number
+  partnerPoints?: number | null
+  partnerVisibleConfigJson?: string
+  internalDeliveryConfigJson?: string
   serviceMonths: number
   keywordGroupLimit: number
   keywordGroupLimitA: number

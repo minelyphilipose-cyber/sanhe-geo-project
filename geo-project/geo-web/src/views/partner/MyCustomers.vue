@@ -24,9 +24,28 @@
           <el-table-column label="状态" width="120">
             <template #default="scope">{{ dictStore.label('company_status', scope.row.status) }}</template>
           </el-table-column>
-          <el-table-column v-if="canUpdateCompany" label="操作" width="100" fixed="right">
+          <el-table-column v-if="canManageStaff" label="交付员工" width="150">
+            <template #default="scope">{{ staffName(scope.row.partnerStaffOwnerId) }}</template>
+          </el-table-column>
+          <el-table-column v-if="canUpdateCompany || canManageStaff" label="操作" width="220" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+              <el-button v-if="canUpdateCompany" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+              <el-button
+                v-if="canManageStaff && activeStaff && scope.row.partnerStaffOwnerId !== activeStaff.id"
+                link
+                type="primary"
+                @click="assignStaff(scope.row)"
+              >
+                分配员工
+              </el-button>
+              <el-button
+                v-if="canManageStaff && scope.row.partnerStaffOwnerId"
+                link
+                type="danger"
+                @click="unassignStaff(scope.row)"
+              >
+                取消分配
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -65,8 +84,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { createCompany, getCompanyList, updateCompany } from '@/api/customer'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { assignCompanyPartnerStaffOwner, createCompany, getCompanyList, updateCompany } from '@/api/customer'
+import { getMyPartnerStaff, type PartnerStaff } from '@/api/partner'
 import type { Company } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
@@ -79,11 +99,13 @@ const dictStore = useDictStore()
 const userStore = useUserStore()
 const canCreateCompany = computed(() => userStore.hasPermission('company.create'))
 const canUpdateCompany = computed(() => userStore.hasPermission('company.update'))
+const canManageStaff = computed(() => userStore.hasPermission('partner.staff.manage'))
 
 const loading = ref(false)
 const saving = ref(false)
 const keyword = ref('')
 const rows = ref<Company[]>([])
+const staffList = ref<PartnerStaff[]>([])
 const formVisible = ref(false)
 const formRef = ref<FormInstance>()
 const formMode = ref<'create' | 'edit'>('create')
@@ -103,6 +125,8 @@ const form = reactive({
 const rules: FormRules = {
   companyName: [{ required: true, message: '请输入公司名称', trigger: 'blur' }],
 }
+
+const activeStaff = computed(() => staffList.value.find((item) => item.isActive) || null)
 
 function resetForm() {
   form.companyName = ''
@@ -140,6 +164,12 @@ function openEdit(row: Company) {
 
 function region(company: Company) {
   return regionDisplayFromPayload(company) || company.city || '-'
+}
+
+function staffName(staffUserId?: number | null) {
+  if (!staffUserId) return '未分配'
+  const staff = staffList.value.find((item) => item.id === staffUserId)
+  return staff ? staff.displayName || staff.username : `员工 ${staffUserId}`
 }
 
 async function submit() {
@@ -183,18 +213,52 @@ async function submit() {
 async function load() {
   loading.value = true
   try {
-    const { data } = await getCompanyList({
+    const [companyRes, staffRes] = await Promise.all([
+      getCompanyList({
       current: 1,
       size: 200,
       keyword: keyword.value || undefined,
-    })
-    rows.value = data.data.records || []
+      }),
+      canManageStaff.value ? getMyPartnerStaff() : Promise.resolve(null),
+    ])
+    rows.value = companyRes.data.data.records || []
+    if (staffRes) {
+      staffList.value = staffRes.data.data || []
+    }
   } catch {
     rows.value = []
     ElMessage.error('加载客户失败')
   } finally {
     loading.value = false
   }
+}
+
+async function assignStaff(company: Company) {
+  if (!activeStaff.value) {
+    ElMessage.warning('请先创建并启用交付员工')
+    return
+  }
+  await ElMessageBox.confirm(`确认将「${company.companyName}」分配给「${activeStaff.value.displayName || activeStaff.value.username}」？`, '分配确认', {
+    type: 'warning',
+  })
+  await assignCompanyPartnerStaffOwner(company.id, {
+    staffUserId: activeStaff.value.id,
+    reason: 'partner owner assignment',
+  })
+  ElMessage.success('已分配')
+  await load()
+}
+
+async function unassignStaff(company: Company) {
+  await ElMessageBox.confirm(`确认取消「${company.companyName}」的交付员工分配？`, '取消分配', {
+    type: 'warning',
+  })
+  await assignCompanyPartnerStaffOwner(company.id, {
+    staffUserId: null,
+    reason: 'partner owner unassignment',
+  })
+  ElMessage.success('已取消分配')
+  await load()
 }
 
 onMounted(async () => {

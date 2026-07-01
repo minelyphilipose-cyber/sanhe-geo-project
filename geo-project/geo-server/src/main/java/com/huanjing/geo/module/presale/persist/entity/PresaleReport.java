@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -65,4 +66,20 @@ public class PresaleReport {
 
     /** 软删除操作人。 */
     private Long deletedBy;
+
+    private Long partnerId;
+
+    private String partnerPresaleChargeType;
+
+    private BigDecimal partnerPresalePoints;
+
+    private Long partnerPresaleQuotaTxnId;
+
+    private Long partnerPresalePointsTxnId;
+
+    private String requestId;
+
+    private String requestHash;
+
+    private String requestPayloadSnapshotJson;
 }

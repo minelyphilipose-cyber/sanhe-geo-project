@@ -2,6 +2,7 @@ package com.huanjing.geo.module.partner.dto;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
@@ -9,7 +10,6 @@ import java.math.BigDecimal;
 
 @Data
 public class PartnerCreateRequest {
-    @NotBlank
     private String partnerCode;
     @NotBlank
     private String partnerName;
@@ -20,6 +20,10 @@ public class PartnerCreateRequest {
     private BigDecimal discountRate;
     @DecimalMin("0.00")
     private BigDecimal initialAmount;
+    @Min(0)
+    private Integer presaleReportFreeQuotaLimit;
+    @DecimalMin("0.00")
+    private BigDecimal presaleReportExtraPoints;
     private String contactName;
     private String contactPhone;
     private String city;

@@ -19,7 +19,7 @@ public interface ProjectChannelAllocationMapper extends BaseMapper<ProjectChanne
             WHERE a.company_id = #{companyId}
               AND a.channel_code = #{channelCode}
               AND p.deleted_at IS NULL
-              AND p.status = 'active'
+              AND p.status IN ('submitted', 'approved_pending_setup', 'setup_ready', 'active', 'paused')
               AND (#{excludeProjectId} IS NULL OR p.id <> #{excludeProjectId})
             """)
     long sumActiveAllocatedByCompanyAndChannel(@Param("companyId") Long companyId,
@@ -35,7 +35,7 @@ public interface ProjectChannelAllocationMapper extends BaseMapper<ProjectChanne
             WHERE a.company_id = #{companyId}
               AND a.channel_code = #{channelCode}
               AND p.deleted_at IS NULL
-              AND p.status = 'active'
+              AND p.status IN ('submitted', 'approved_pending_setup', 'setup_ready', 'active', 'paused')
               AND a.allocated_count > 0
               AND (#{excludeProjectId} IS NULL OR p.id <> #{excludeProjectId})
             ORDER BY p.id ASC
@@ -61,7 +61,7 @@ public interface ProjectChannelAllocationMapper extends BaseMapper<ProjectChanne
             WHERE a.company_id = #{companyId}
               AND a.channel_code = #{channelCode}
               AND p.deleted_at IS NULL
-              AND p.status = 'active'
+              AND p.status IN ('submitted', 'approved_pending_setup', 'setup_ready', 'active', 'paused')
               AND a.allocated_count > 0
             ORDER BY p.id ASC
             """)

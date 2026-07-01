@@ -76,7 +76,7 @@
               <el-option
                 v-for="kg in keywordGroupOptions"
                 :key="kg.id"
-                :label="`${kg.name}（已入库${kg.savedKeywordCount || 0}条）`"
+                :label="`${kg.name}（核心问题${keywordGroupCoreCount(kg)}条）`"
                 :value="kg.id"
               />
             </el-select>
@@ -85,21 +85,11 @@
         </el-form-item>
         <el-form-item label="问题额度">
           <div class="keyword-quota-panel">
-            <div class="channel-note">默认填入当前客户套餐 A/B/C 剩余额度，单档最大不可超过可分配数量</div>
+            <div class="channel-note">默认填入当前客户套餐核心问题剩余额度，最大不可超过可分配数量</div>
             <div class="quota-row">
-              <span>A档</span>
-              <el-input-number v-model="form.keywordGroupLimitA" :min="0" :max="keywordTierMax('A')" controls-position="right" />
-              <small>可分配 {{ keywordQuota?.inputMaxA ?? 0 }}</small>
-            </div>
-            <div class="quota-row">
-              <span>B档</span>
-              <el-input-number v-model="form.keywordGroupLimitB" :min="0" :max="keywordTierMax('B')" controls-position="right" />
-              <small>可分配 {{ keywordQuota?.inputMaxB ?? 0 }}</small>
-            </div>
-            <div class="quota-row">
-              <span>C档</span>
-              <el-input-number v-model="form.keywordGroupLimitC" :min="0" :max="keywordTierMax('C')" controls-position="right" />
-              <small>可分配 {{ keywordQuota?.inputMaxC ?? 0 }}</small>
+              <span>核心问题</span>
+              <el-input-number v-model="form.coreQuestionLimit" :min="0" :max="coreQuestionMax" controls-position="right" />
+              <small>可分配 {{ coreQuestionMax }}</small>
             </div>
           </div>
         </el-form-item>
@@ -239,9 +229,7 @@ const form = reactive({
   companyId: null as number | null,
   brandId: null as number | null,
   keywordGroupIds: [] as number[],
-  keywordGroupLimitA: 0,
-  keywordGroupLimitB: 0,
-  keywordGroupLimitC: 0,
+  coreQuestionLimit: 0,
   channelAllocations: {} as Record<string, number>,
   regionCodes: [] as string[],
   targetRegions: [] as string[],
@@ -272,11 +260,17 @@ const keywordGroupSummary = computed(() => {
   let saved = 0
   for (const group of keywordGroupOptions.value) {
     if (selected.has(group.id)) {
-      saved += group.savedKeywordCount || 0
+      saved += keywordGroupCoreCount(group)
     }
   }
-  return `已选 ${form.keywordGroupIds.length} 个拓词组，已入库 ${saved} 条关键词`
+  return `已选 ${form.keywordGroupIds.length} 个拓词组，核心问题 ${saved} 条`
 })
+
+const coreQuestionMax = computed(() => Math.max(keywordQuota.value?.inputMaxCoreQuestionCount ?? 0, 0))
+
+function keywordGroupCoreCount(group: KeywordGroup) {
+  return group.savedCoreQuestionCount ?? 0
+}
 
 function projectStatusLabel(status?: string | null) {
   if (!status) return '-'
@@ -312,9 +306,7 @@ function resetForm() {
   form.companyId = null
   form.brandId = null
   form.keywordGroupIds = []
-  form.keywordGroupLimitA = 0
-  form.keywordGroupLimitB = 0
-  form.keywordGroupLimitC = 0
+  form.coreQuestionLimit = 0
   keywordQuota.value = null
   form.channelAllocations = {}
   channelQuotaItems.value = []
@@ -350,9 +342,7 @@ async function onCompanyChange() {
 async function loadKeywordGroupQuota(companyId?: number | null, excludeProjectId?: number | null, applyDefault = true) {
   if (!companyId) {
     keywordQuota.value = null
-    form.keywordGroupLimitA = 0
-    form.keywordGroupLimitB = 0
-    form.keywordGroupLimitC = 0
+    form.coreQuestionLimit = 0
     return
   }
   const { data } = await getProjectKeywordGroupQuota({
@@ -361,17 +351,8 @@ async function loadKeywordGroupQuota(companyId?: number | null, excludeProjectId
   })
   keywordQuota.value = data.data
   if (applyDefault) {
-    form.keywordGroupLimitA = data.data.remainingCountA || 0
-    form.keywordGroupLimitB = data.data.remainingCountB || 0
-    form.keywordGroupLimitC = data.data.remainingCountC || 0
+    form.coreQuestionLimit = data.data.remainingCoreQuestionCount ?? 0
   }
-}
-
-function keywordTierMax(tier: 'A' | 'B' | 'C') {
-  if (!keywordQuota.value) return 0
-  if (tier === 'A') return Math.max(keywordQuota.value.inputMaxA || 0, 0)
-  if (tier === 'B') return Math.max(keywordQuota.value.inputMaxB || 0, 0)
-  return Math.max(keywordQuota.value.inputMaxC || 0, 0)
 }
 
 async function loadChannelAllocationQuota(companyId?: number | null, excludeProjectId?: number | null) {
@@ -421,9 +402,7 @@ async function openEdit(row: Project) {
   form.companyId = row.companyId || null
   form.brandId = row.brandId
   form.keywordGroupIds = [...(row.selectedKeywordGroupIds || [])]
-  form.keywordGroupLimitA = row.planKeywordGroupLimitA ?? row.planKeywordGroupLimit ?? 0
-  form.keywordGroupLimitB = row.planKeywordGroupLimitB ?? 0
-  form.keywordGroupLimitC = row.planKeywordGroupLimitC ?? 0
+  form.coreQuestionLimit = row.planCoreQuestionLimit ?? 0
   form.regionCodes = regionCodesFromPayload(row)
   form.targetRegions = parseStringArray(row.targetRegions)
   form.coreKeywords = row.coreKeywords || ''
@@ -457,9 +436,9 @@ async function submit() {
       companyId: form.companyId,
       brandId: form.brandId,
       keywordGroupIds: form.keywordGroupIds,
-      keywordGroupLimitA: form.keywordGroupLimitA,
-      keywordGroupLimitB: form.keywordGroupLimitB,
-      keywordGroupLimitC: form.keywordGroupLimitC,
+      keywordGroupLimitA: form.coreQuestionLimit,
+      keywordGroupLimitB: 0,
+      keywordGroupLimitC: 0,
       allocationVersion: allocationVersion.value,
       channelAllocations: Object.entries(form.channelAllocations).map(([channelCode, allocatedCount]) => ({
         channelCode,

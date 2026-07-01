@@ -443,6 +443,7 @@ public class ProjectService {
     public void updateStatus(Long id, ProjectStatusUpdateRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
         validateStatus(req.getStatus());
+        validateExternalStatus(req.getStatus());
         Project project = requireProject(id);
         internalScopeService.ensureProjectAccess(operator, project, "project");
         ensureStatusOperatePermission(project, req.getStatus(), operator);
@@ -477,6 +478,7 @@ public class ProjectService {
     public void updateFlow(Long id, ProjectFlowUpdateRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
         validateStatus(req.getStatus());
+        validateExternalStatus(req.getStatus());
         validateStage(req.getStage());
 
         Project project = requireProject(id);
@@ -700,6 +702,12 @@ public class ProjectService {
     private void validateStatus(String status) {
         if (!ProjectFlowPolicy.STATUS_SET.contains(status)) {
             throw new BizException(400, "Invalid project status");
+        }
+    }
+
+    private void validateExternalStatus(String status) {
+        if (!ProjectFlowPolicy.isExternalStatus(status)) {
+            throw new BizException(400, "Project workflow status must be changed by the approval workflow");
         }
     }
 

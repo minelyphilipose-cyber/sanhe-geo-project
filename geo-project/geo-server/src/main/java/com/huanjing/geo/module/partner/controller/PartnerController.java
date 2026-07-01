@@ -8,6 +8,11 @@ import com.huanjing.geo.module.partner.dto.PartnerCreateResult;
 import com.huanjing.geo.module.partner.dto.PartnerRechargeApplyRequest;
 import com.huanjing.geo.module.partner.dto.PartnerRechargeAuditRequest;
 import com.huanjing.geo.module.partner.dto.PartnerRechargeRequest;
+import com.huanjing.geo.module.partner.dto.PartnerStaffCreateRequest;
+import com.huanjing.geo.module.partner.dto.PartnerStaffCreateResult;
+import com.huanjing.geo.module.partner.dto.PartnerStaffResetPasswordResult;
+import com.huanjing.geo.module.partner.dto.PartnerStaffStatusRequest;
+import com.huanjing.geo.module.partner.dto.PartnerStaffVO;
 import com.huanjing.geo.module.partner.dto.PartnerStatusUpdateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerUpdateRequest;
 import com.huanjing.geo.module.partner.entity.Partner;
@@ -19,6 +24,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @Tag(name = "Partner")
 @RestController
@@ -41,6 +48,29 @@ public class PartnerController {
     @GetMapping("/{id}")
     public R<Partner> detail(@PathVariable Long id) {
         return R.ok(partnerService.detail(id));
+    }
+
+    @GetMapping("/me/staff")
+    public R<List<PartnerStaffVO>> myStaff() {
+        return R.ok(partnerService.myStaff());
+    }
+
+    @PostMapping("/me/staff")
+    public R<PartnerStaffCreateResult> createMyStaff(@Valid @RequestBody PartnerStaffCreateRequest req) {
+        return R.ok(partnerService.createMyStaff(req));
+    }
+
+    @PutMapping("/me/staff/{staffUserId}/status")
+    public R<PartnerStaffVO> updateMyStaffStatus(
+            @PathVariable Long staffUserId,
+            @Valid @RequestBody PartnerStaffStatusRequest req
+    ) {
+        return R.ok(partnerService.updateMyStaffStatus(staffUserId, req.getIsActive()));
+    }
+
+    @PostMapping("/me/staff/{staffUserId}/reset-password")
+    public R<PartnerStaffResetPasswordResult> resetMyStaffPassword(@PathVariable Long staffUserId) {
+        return R.ok(partnerService.resetMyStaffPassword(staffUserId));
     }
 
     @PostMapping

@@ -29,9 +29,10 @@ public class PackagePlanAdminController {
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "20") long size,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) Boolean enabled
+            @RequestParam(required = false) Boolean enabled,
+            @RequestParam(required = false) String audienceType
     ) {
-        return R.ok(packagePlanService.page(current, size, keyword, enabled));
+        return R.ok(packagePlanService.page(current, size, keyword, enabled, audienceType));
     }
 
     @PostMapping
@@ -47,6 +48,12 @@ public class PackagePlanAdminController {
     @PutMapping("/{id}/status")
     public R<Void> updateStatus(@PathVariable Long id, @Valid @RequestBody PackagePlanStatusUpdateRequest req) {
         packagePlanService.updateStatus(id, req.getEnabled());
+        return R.ok();
+    }
+
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        packagePlanService.delete(id);
         return R.ok();
     }
 

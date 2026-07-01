@@ -17,6 +17,8 @@ public class Partner {
     private String partnerName;
     private String partnerLevel;
     private BigDecimal discountRate;
+    private Integer presaleReportFreeQuotaLimit;
+    private BigDecimal presaleReportExtraPoints;
     private String status;
     private String contactName;
     private String contactPhone;

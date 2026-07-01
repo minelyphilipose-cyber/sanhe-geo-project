@@ -4,10 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
-import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.LlmProperties;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
@@ -52,17 +54,23 @@ public class KeywordLlmQuestionService {
     private final ProjectMapper projectMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
-    private final LlmInvoker llmInvoker;
+    private final LlmCallFacade llmCallFacade;
     private final LlmProperties llmProperties;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
 
     public KeywordLlmQuestionGenerateVO generate(Long companyId, Long projectId, String seedText, String currentToken, Integer count, Integer currentLlmCount, Integer targetCount) {
         currentUserService.ensurePermission("keyword_group.read");
         Project project = resolveProject(projectId, companyId);
         Long resolvedCompanyId = project == null ? companyId : project.getCompanyId();
-        requireCompany(resolvedCompanyId);
+        Company company = requireCompany(resolvedCompanyId);
+        if (project != null) {
+            internalScopeService.ensureProjectAccess(currentUserService.requireCurrentUser(), project, "project");
+        } else {
+            internalScopeService.ensureCompanyAccess(currentUserService.requireCurrentUser(), company, "company");
+        }
         String seed = parseSeed(seedText);
         int actualTarget = targetCount == null ? DEFAULT_TARGET_COUNT : targetCount;
         if (actualTarget < MIN_TARGET_COUNT || actualTarget > MAX_TARGET_COUNT) {
@@ -173,7 +181,8 @@ public class KeywordLlmQuestionService {
             throw new IllegalStateException("Missing API key");
         }
 
-        LlmInvokeResult response = llmInvoker.invoke(renderPrompt(seed, targetCount), new LlmModelConfig(
+        String prompt = renderPrompt(seed, targetCount);
+        LlmInvokeResult response = llmCallFacade.execute(LlmCallRequest.direct(prompt, new LlmModelConfig(
                 config.getPlatformCode(),
                 config.getPlatformName(),
                 modelId,
@@ -188,7 +197,7 @@ public class KeywordLlmQuestionService {
                 Math.max(1, config.getRateLimitQps() == null ? 1 : config.getRateLimitQps()),
                 null,
                 false
-        ));
+        ))).invokeResult();
         return normalizeQuestions(response.responseText());
     }
 
@@ -247,7 +256,7 @@ public class KeywordLlmQuestionService {
         return trimmed;
     }
 
-    private void requireCompany(Long companyId) {
+    private Company requireCompany(Long companyId) {
         if (companyId == null) {
             throw new BizException(400, "companyId or projectId is required");
         }
@@ -255,6 +264,7 @@ public class KeywordLlmQuestionService {
         if (company == null) {
             throw new BizException(404, "Company not found");
         }
+        return company;
     }
 
     private Project resolveProject(Long projectId, Long companyId) {

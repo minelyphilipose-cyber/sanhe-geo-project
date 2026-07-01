@@ -1,0 +1,71 @@
+package com.huanjing.geo.module.partner.dto;
+
+import lombok.Data;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Data
+public class PartnerProjectVO {
+    private Long id;
+    private String projectCode;
+    private Long companyId;
+    private String companyName;
+    private Long brandId;
+    private String brandName;
+    private String projectName;
+    private String projectAliases;
+    private String packageType;
+    private BigDecimal packagePrice;
+    private Integer serviceMonths;
+    private Boolean thirdPartySource;
+    private Integer planCoreQuestionLimit;
+    private String planMonthlyReportDepth;
+    private String planQuarterlyReportDepth;
+    private String planConsultantIntensity;
+    private String planCompetitorInsightDepth;
+    private String planMediaDistributionIntensity;
+    private String planCommitmentTargetIntensity;
+    private String planTargetMetricType;
+    private BigDecimal planTargetMetricValue;
+    private Integer planTargetWindowDays;
+    private String status;
+    private String stage;
+    private String ownerType;
+    private String sourceType;
+    private Long partnerId;
+    private String provinceCode;
+    private String provinceName;
+    private String cityCode;
+    private String cityName;
+    private String districtCode;
+    private String districtName;
+    private String targetRegions;
+    private String coreKeywords;
+    private String targetAudience;
+    private String customStatement;
+    private String contentTone;
+    private String preferredAngles;
+    private String extraForbiddenPhrases;
+    private String contentNote;
+    private BigDecimal discountRateSnapshot;
+    private LocalDateTime signedAt;
+    private LocalDate startDate;
+    private LocalDate endDate;
+    private String primaryGoal;
+    private String remark;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+    private List<String> selectedPlatformCodesP0;
+    private List<String> selectedPlatformCodesP1;
+    private List<String> selectedPlatformCodesP2;
+    private List<Long> selectedKeywordGroupIds;
+    private List<String> customerRequirements;
+    private Integer selectedKeywordGroupCount;
+    private Long selectedCoreQuestionSavedKeywords;
+    private List<PartnerKeywordGroupListItemVO> selectedKeywordGroups;
+    private List<PartnerChannelQuotaVO> channelAllocations;
+    private Long allocationVersion;
+}

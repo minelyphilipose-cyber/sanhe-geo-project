@@ -23,6 +23,8 @@ import com.huanjing.geo.module.project.mapper.PackageChannelQuotaConfigMapper;
 import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
 import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.service.PackagePlanService;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -75,12 +77,16 @@ public class CompanyPackageBindingService {
                         .eq(CompanyPackageBinding::getActiveFlag, 1)
                         .last("LIMIT 1")
         );
-        hydrateKeywordLimitsFromCurrentPlan(binding);
         return binding;
     }
 
+    public CompanyPackageBinding activeBindingForCurrentUser(Long companyId) {
+        ensurePackageBindingAccess(companyId, false);
+        return activeBinding(companyId);
+    }
+
     public List<CompanyPackageBinding> bindings(Long companyId) {
-        currentUserService.ensurePermission("user.manage");
+        ensurePackageBindingAccess(companyId, false);
         return bindingMapper.selectList(
                 new LambdaQueryWrapper<CompanyPackageBinding>()
                         .eq(CompanyPackageBinding::getCompanyId, companyId)
@@ -90,30 +96,13 @@ public class CompanyPackageBindingService {
 
     @Transactional
     public void syncActiveBindingsForPackagePlan(Long packagePlanId) {
-        if (packagePlanId == null) {
-            return;
-        }
-        PackagePlan plan = packagePlanMapper.selectById(packagePlanId);
-        if (plan == null) {
-            return;
-        }
-        List<PackageChannelQuotaConfig> channelQuotas = activeChannelQuotas(packagePlanId);
-        List<CompanyPackageBinding> bindings = bindingMapper.selectList(
-                new LambdaQueryWrapper<CompanyPackageBinding>()
-                        .eq(CompanyPackageBinding::getPackagePlanId, packagePlanId)
-                        .eq(CompanyPackageBinding::getStatus, CompanyPackageBinding.STATUS_ACTIVE)
-                        .eq(CompanyPackageBinding::getActiveFlag, 1)
-        );
-        for (CompanyPackageBinding binding : bindings) {
-            applyPlanSnapshot(binding, plan, channelQuotas);
-            bindingMapper.updateById(binding);
-            syncCurrentUsageQuotaLimits(binding, channelQuotas);
-        }
+        // Package plans are immutable after customer binding in partner phase 1.
+        // Kept as a no-op for legacy callers that still invoke sync after package edits.
     }
 
     @Transactional
     public CompanyPackageBinding bind(Long companyId, Long packagePlanId) {
-        currentUserService.ensurePermission("user.manage");
+        SysUser currentUser = ensurePackageBindingAccess(companyId, true);
         lockCompany(companyId);
         bindingMapper.clearInactiveActiveFlags(companyId);
         Company company = companyMapper.selectById(companyId);
@@ -124,9 +113,11 @@ public class CompanyPackageBindingService {
             throw new BizException(400, "Customer already has active package binding");
         }
         PackagePlan plan = packagePlanMapper.selectById(packagePlanId);
-        if (plan == null || !Boolean.TRUE.equals(plan.getEnabled())) {
+        if (plan == null || plan.getDeletedAt() != null || !Boolean.TRUE.equals(plan.getEnabled())
+                || !PackagePlanService.STATUS_ACTIVE.equals(plan.getPackageStatus())) {
             throw new BizException(400, "Package plan not found or disabled");
         }
+        validatePackageAudienceForCompany(currentUser, company, plan);
         List<PackageChannelQuotaConfig> channelQuotas = activeChannelQuotas(packagePlanId);
         validateActiveProjectAllocationsAgainstPackage(companyId, channelQuotas);
         validateActiveProjectKeywordAllocationsAgainstPackage(companyId, plan);
@@ -139,9 +130,12 @@ public class CompanyPackageBindingService {
 
     @Transactional
     public void unbind(Long companyId) {
-        currentUserService.ensurePermission("user.manage");
+        ensurePackageBindingAccess(companyId, true);
         lockCompany(companyId);
         CompanyPackageBinding binding = requireActiveBinding(companyId);
+        if (binding.getLockedAt() != null) {
+            throw new BizException(400, "Customer package is locked and cannot be changed");
+        }
         reconcileReservedDistributionQuota(companyId);
         long reserved = quotaLedgerMapper.countReservedByCompany(companyId);
         if (reserved > 0) {
@@ -235,20 +229,9 @@ public class CompanyPackageBindingService {
         binding.setKeywordGroupLimitB(defaultInt(plan.getKeywordGroupLimitB(), 0));
         binding.setKeywordGroupLimitC(defaultInt(plan.getKeywordGroupLimitC(), 0));
         binding.setChannelQuotaSnapshot(JSONUtil.toJsonStr(toSnapshot(channelQuotas)));
-    }
-
-    private void hydrateKeywordLimitsFromCurrentPlan(CompanyPackageBinding binding) {
-        if (binding == null || binding.getPackagePlanId() == null) {
-            return;
-        }
-        PackagePlan plan = packagePlanMapper.selectById(binding.getPackagePlanId());
-        if (plan == null) {
-            return;
-        }
-        binding.setKeywordGroupLimit(defaultInt(plan.getKeywordGroupLimit(), binding.getKeywordGroupLimit()));
-        binding.setKeywordGroupLimitA(defaultInt(plan.getKeywordGroupLimitA(), binding.getKeywordGroupLimit()));
-        binding.setKeywordGroupLimitB(defaultInt(plan.getKeywordGroupLimitB(), 0));
-        binding.setKeywordGroupLimitC(defaultInt(plan.getKeywordGroupLimitC(), 0));
+        binding.setPackageSnapshotJson(JSONUtil.toJsonStr(packageSnapshot(plan, channelQuotas, false)));
+        binding.setPartnerVisibleSnapshotJson(JSONUtil.toJsonStr(packageSnapshot(plan, channelQuotas, true)));
+        binding.setInternalDeliverySnapshotJson(JSONUtil.toJsonStr(packageSnapshot(plan, channelQuotas, false)));
     }
 
     private List<PackageChannelQuotaConfig> activeChannelQuotas(Long packagePlanId) {
@@ -351,6 +334,96 @@ public class CompanyPackageBindingService {
 
     private int defaultInt(Integer value, Integer fallback) {
         return value == null ? (fallback == null ? 0 : fallback) : value;
+    }
+
+    public boolean hasBindingsForPackagePlan(Long packagePlanId) {
+        if (packagePlanId == null) {
+            return false;
+        }
+        Long count = bindingMapper.selectCount(
+                new LambdaQueryWrapper<CompanyPackageBinding>()
+                        .eq(CompanyPackageBinding::getPackagePlanId, packagePlanId)
+        );
+        return count != null && count > 0;
+    }
+
+    private SysUser ensurePackageBindingAccess(Long companyId, boolean write) {
+        SysUser currentUser = currentUserService.requireCurrentUser();
+        if (!currentUserService.isPartnerUser(currentUser)) {
+            currentUserService.ensurePermission(write ? "user.manage" : "company.read");
+            return currentUser;
+        }
+        Company company = companyMapper.selectById(companyId);
+        if (company == null || company.getDeletedAt() != null) {
+            throw new BizException(404, "Company not found");
+        }
+        currentUserService.ensurePartnerResourceAccess(currentUser, company.getPartnerId(), "company");
+        if (isPartnerOwner(currentUser)) {
+            return currentUser;
+        }
+        if (write) {
+            throw new BizException(403, "Only partner owner can manage customer package");
+        }
+        if (company.getPartnerStaffOwnerId() == null || !company.getPartnerStaffOwnerId().equals(currentUser.getId())) {
+            throw new BizException(403, "No permission to access this customer package");
+        }
+        return currentUser;
+    }
+
+    private void validatePackageAudienceForCompany(SysUser currentUser, Company company, PackagePlan plan) {
+        String audienceType = plan.getAudienceType() == null ? PackagePlanService.AUDIENCE_INTERNAL : plan.getAudienceType();
+        if (currentUserService.isPartnerUser(currentUser)) {
+            if (!PackagePlanService.AUDIENCE_PARTNER.equals(audienceType)) {
+                throw new BizException(400, "Partner customers can only bind partner packages");
+            }
+            currentUserService.ensurePartnerResourceAccess(currentUser, company.getPartnerId(), "company");
+            return;
+        }
+        if (!PackagePlanService.AUDIENCE_INTERNAL.equals(audienceType)) {
+            throw new BizException(400, "Internal customers can only bind internal packages");
+        }
+    }
+
+    private boolean isPartnerOwner(SysUser user) {
+        return user != null && "partner".equalsIgnoreCase(user.getRole());
+    }
+
+    private Map<String, Object> packageSnapshot(PackagePlan plan, List<PackageChannelQuotaConfig> channelQuotas, boolean partnerVisible) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("packagePlanId", plan.getId());
+        snapshot.put("packageType", plan.getPackageType());
+        snapshot.put("packageName", plan.getPackageName());
+        snapshot.put("audienceType", plan.getAudienceType());
+        snapshot.put("standardPrice", plan.getStandardPrice());
+        snapshot.put("partnerPoints", plan.getPartnerPoints());
+        snapshot.put("serviceMonths", plan.getServiceMonths());
+        snapshot.put("keywordGroupLimit", plan.getKeywordGroupLimit());
+        snapshot.put("keywordGroupLimitA", plan.getKeywordGroupLimitA());
+        snapshot.put("keywordGroupLimitB", plan.getKeywordGroupLimitB());
+        snapshot.put("keywordGroupLimitC", plan.getKeywordGroupLimitC());
+        snapshot.put("channelQuotaSnapshot", partnerVisible ? partnerVisibleChannelSnapshot(channelQuotas) : toSnapshot(channelQuotas));
+        if (!partnerVisible) {
+            snapshot.put("partnerVisibleConfigJson", plan.getPartnerVisibleConfigJson());
+            snapshot.put("internalDeliveryConfigJson", plan.getInternalDeliveryConfigJson());
+        }
+        return snapshot;
+    }
+
+    private List<ChannelQuotaSnapshotItem> partnerVisibleChannelSnapshot(List<PackageChannelQuotaConfig> channelQuotas) {
+        Set<String> allowedSelfMedia = Set.of("wechat", "douyin", "toutiao", "zhihu", "baijiahao", "xiaohongshu");
+        return toSnapshot(channelQuotas).stream()
+                .filter(item -> {
+                    String code = item.getChannelCode();
+                    if ("official_site".equals(code)) {
+                        return true;
+                    }
+                    if (code != null && code.startsWith(ArticlePromptChannels.SELF_MEDIA + ":")) {
+                        String platform = code.substring((ArticlePromptChannels.SELF_MEDIA + ":").length());
+                        return allowedSelfMedia.contains(ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(platform));
+                    }
+                    return false;
+                })
+                .toList();
     }
 
     private static List<String> projectAllocationChannels() {

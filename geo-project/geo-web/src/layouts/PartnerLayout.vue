@@ -36,6 +36,7 @@ const partnerGroups = [
     menus: [
       { path: '/partner/home', name: 'PartnerHome', title: '首页', icon: 'HomeFilled', permissions: ['partner.read'] },
       { path: '/partner/my-customers', name: 'MyCustomers', title: '我的客户', icon: 'User', permissions: ['company.read'] },
+      { path: '/partner/staff', name: 'PartnerStaffManage', title: '交付员工', icon: 'UserFilled', permissions: ['partner.staff.manage'] },
       { path: '/partner/my-projects', name: 'MyProjects', title: '我的项目', icon: 'Folder', permissions: ['project.read'] },
       { path: '/partner/balance', name: 'PartnerBalance', title: '余额与扣款', icon: 'Wallet', permissions: ['partner.read'] },
       { path: '/partner/training', name: 'TrainingCenter', title: '培训中心', icon: 'Reading', permissions: ['partner.read'] },

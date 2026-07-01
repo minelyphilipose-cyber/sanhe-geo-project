@@ -17,7 +17,12 @@ public class PackagePlan {
     private Long id;
     private String packageType;
     private String packageName;
+    private String audienceType;
+    private String packageStatus;
     private BigDecimal standardPrice;
+    private BigDecimal partnerPoints;
+    private String partnerVisibleConfigJson;
+    private String internalDeliveryConfigJson;
     private Integer serviceMonths;
     private Integer keywordGroupLimit;
     private Integer keywordGroupLimitA;
@@ -35,6 +40,8 @@ public class PackagePlan {
     private Boolean enabled;
     private Integer sortOrder;
     private String remark;
+    private LocalDateTime deletedAt;
+    private Long deletedBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

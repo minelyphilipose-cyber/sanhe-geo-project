@@ -22,6 +22,10 @@ public class PartnerAccountTxn {
     private BigDecimal balanceBefore;
     private BigDecimal balanceAfter;
     private Long relatedProjectId;
+    private Long relatedCompanyId;
+    private Long relatedStartRequestId;
+    private Long relatedPresaleReportId;
+    private String packageSnapshotJson;
     private Long rechargeOrderId;
     private Long operatorUserId;
     private String offlineReference;

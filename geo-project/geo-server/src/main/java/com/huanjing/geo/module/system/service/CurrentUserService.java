@@ -21,7 +21,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CurrentUserService {
 
-    private static final Set<String> PARTNER_ROLES = Set.of("partner", "partner_staff", "partner_viewer");
+    private static final Set<String> PARTNER_ROLES = Set.of("partner", "partner_staff");
     private final SysUserMapper sysUserMapper;
     private final PermissionService permissionService;
     private final BrandMapper brandMapper;

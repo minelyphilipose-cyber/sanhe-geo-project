@@ -2,6 +2,7 @@ package com.huanjing.geo.module.partner.dto;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
@@ -16,6 +17,10 @@ public class PartnerUpdateRequest {
     @DecimalMin("0.0001")
     @DecimalMax("1.0000")
     private BigDecimal discountRate;
+    @Min(0)
+    private Integer presaleReportFreeQuotaLimit;
+    @DecimalMin("0.00")
+    private BigDecimal presaleReportExtraPoints;
     @NotBlank
     private String status;
     private String contactName;

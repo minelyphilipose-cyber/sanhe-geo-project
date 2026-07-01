@@ -5,7 +5,7 @@
         <div class="admin-page-kicker">合伙人</div>
         <h1 class="admin-page-title">{{ partner?.partnerName || '合伙人详情' }}</h1>
         <div class="admin-page-subtitle">
-          {{ partner?.partnerCode || '查看合伙人基础信息、虚拟账户、充值申请与资金流水。' }}
+          {{ partner?.partnerCode || '查看合伙人基础信息、虚拟账户、充值申请与积分流水。' }}
         </div>
       </div>
       <div class="admin-page-actions">
@@ -18,9 +18,9 @@
 
     <div class="admin-metric-grid partner-account-grid">
       <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
-        <span class="admin-metric-label">当前余额</span>
+        <span class="admin-metric-label">当前积分</span>
         <strong class="admin-metric-value">{{ centsToYuan(account?.currentBalance) }}</strong>
-        <span class="admin-metric-hint">虚拟账户可用余额</span>
+        <span class="admin-metric-hint">虚拟账户可用积分</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
         <span class="admin-metric-label">累计充值</span>
@@ -61,6 +61,14 @@
             <strong>{{ partner ? `${(partner.discountRate * 100).toFixed(1)}%` : '-' }}</strong>
           </div>
           <div class="profile-item">
+            <span>诊断免费次数</span>
+            <strong>{{ partner?.presaleReportFreeQuotaLimit ?? 0 }} 次</strong>
+          </div>
+          <div class="profile-item">
+            <span>超额诊断积分</span>
+            <strong>{{ formatPoints(partner?.presaleReportExtraPoints) }} / 次</strong>
+          </div>
+          <div class="profile-item">
             <span>联系人</span>
             <strong>{{ partner?.contactName || '-' }}</strong>
           </div>
@@ -83,7 +91,7 @@
         <div class="section-head">
           <div>
             <div class="section-kicker">虚拟账户</div>
-            <h2 class="section-title">资金操作</h2>
+            <h2 class="section-title">积分操作</h2>
           </div>
           <span class="admin-status-tag" :class="partnerStatusClass(account?.status)">
             {{ dictStore.label('partner_status', account?.status) }}
@@ -97,7 +105,7 @@
             @click="rechargeVisible = true"
           >
             <strong>直接入账</strong>
-            <span>线下确认后直接增加账户余额</span>
+            <span>线下确认后直接增加账户积分</span>
           </button>
           <button
             v-if="canAdjustPartnerAccount"
@@ -116,7 +124,7 @@
       <div class="table-header">
         <div>
           <div class="table-title">账户流水</div>
-          <div class="table-subtitle">筛选交易类型、业务类型和时间范围，核对余额变更链路。</div>
+          <div class="table-subtitle">筛选交易类型、业务类型和时间范围，核对积分变更链路。</div>
         </div>
         <div class="compact-filters">
           <el-select v-model="txnQuery.txnType" clearable placeholder="流水类型" class="filter-small" @change="reloadTxns">
@@ -159,15 +167,15 @@
           <el-table-column label="业务" width="140">
             <template #default="scope">{{ dictStore.label('partner_biz_type', scope.row.bizType) }}</template>
           </el-table-column>
-          <el-table-column label="金额(元)" width="120">
+          <el-table-column label="积分" width="120">
             <template #default="scope">
               <span :class="amountClass(scope.row.amount)">{{ centsToYuan(scope.row.amount) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="余额前" width="120">
+          <el-table-column label="变更前积分" width="120">
             <template #default="scope">{{ centsToYuan(scope.row.balanceBefore) }}</template>
           </el-table-column>
-          <el-table-column label="余额后" width="120">
+          <el-table-column label="变更后积分" width="120">
             <template #default="scope">{{ centsToYuan(scope.row.balanceAfter) }}</template>
           </el-table-column>
           <el-table-column prop="offlineReference" label="线下凭证" width="160" show-overflow-tooltip />
@@ -213,7 +221,7 @@
       <DataState :loading="orderLoading" :empty="!orderLoading && rechargeOrders.length === 0" empty-text="暂无充值申请">
         <el-table :data="rechargeOrders" border table-layout="fixed" :row-class-name="orderRowClassName">
           <el-table-column prop="orderNo" label="申请单号" min-width="210" show-overflow-tooltip />
-          <el-table-column label="金额(元)" width="120">
+          <el-table-column label="积分" width="120">
             <template #default="scope">{{ centsToYuan(scope.row.amount) }}</template>
           </el-table-column>
           <el-table-column label="状态" width="120">
@@ -269,7 +277,7 @@
 
     <el-dialog v-model="rechargeVisible" title="直接入账" width="560px" class="admin-editor-dialog">
       <el-form :model="rechargeForm" label-width="100px" class="admin-dialog-form">
-        <el-form-item label="金额(元)" required>
+        <el-form-item label="积分" required>
           <el-input-number v-model="rechargeForm.amountYuan" :min="0.01" :precision="2" :step="100" style="width: 100%" />
         </el-form-item>
         <el-form-item label="线下凭证"><el-input v-model="rechargeForm.offlineReference" /></el-form-item>
@@ -283,7 +291,7 @@
 
     <el-dialog v-model="adjustVisible" title="手工调整" width="560px" class="admin-editor-dialog">
       <el-form :model="adjustForm" label-width="100px" class="admin-dialog-form">
-        <el-form-item label="金额(元)" required>
+        <el-form-item label="积分" required>
           <el-input-number v-model="adjustForm.amountYuan" :precision="2" :step="10" style="width: 100%" />
         </el-form-item>
         <el-form-item label="备注" class="is-full"><el-input v-model="adjustForm.remark" type="textarea" :rows="3" /></el-form-item>
@@ -297,7 +305,7 @@
     <el-dialog v-model="auditVisible" :title="auditForm.action === 'approve' ? '通过充值申请' : '驳回充值申请'" width="560px" class="admin-editor-dialog">
       <el-form :model="auditForm" label-width="100px" class="admin-dialog-form">
         <el-form-item label="申请单号">{{ currentOrder?.orderNo }}</el-form-item>
-        <el-form-item label="金额(元)">{{ centsToYuan(currentOrder?.amount) }}</el-form-item>
+        <el-form-item label="积分">{{ centsToYuan(currentOrder?.amount) }}</el-form-item>
         <el-form-item v-if="auditForm.action === 'reject'" label="驳回原因" required class="is-full">
           <el-input v-model="auditForm.rejectReason" type="textarea" :rows="3" maxlength="500" show-word-limit />
         </el-form-item>
@@ -379,6 +387,10 @@ const pendingOrderCount = computed(() => rechargeOrders.value.filter((item) => i
 function centsToYuan(v?: number | null) {
   if (v == null) return '-'
   return Number(v).toFixed(2)
+}
+
+function formatPoints(v?: number | null) {
+  return `${Number(v || 0).toFixed(2)} 积分`
 }
 
 function yuanToCents(v: number) {
@@ -484,7 +496,7 @@ function reloadOrders() {
 
 async function submitRecharge() {
   if (!rechargeForm.amountYuan || rechargeForm.amountYuan <= 0) {
-    ElMessage.warning('充值金额需大于0')
+    ElMessage.warning('充值积分需大于0')
     return
   }
   submitting.value = true
@@ -536,14 +548,14 @@ async function submitAudit() {
 
 async function submitAdjust() {
   if (!adjustForm.amountYuan) {
-    ElMessage.warning('请输入调整金额')
+    ElMessage.warning('请输入调整积分')
     return
   }
   submitting.value = true
   try {
     await ElMessageBox.confirm(
-      `确认执行余额调整 ${adjustForm.amountYuan > 0 ? '+' : ''}${adjustForm.amountYuan.toFixed(2)} 元？`,
-      '余额调整确认',
+      `确认执行积分调整 ${adjustForm.amountYuan > 0 ? '+' : ''}${adjustForm.amountYuan.toFixed(2)}？`,
+      '积分调整确认',
       { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
     )
     await adjustPartnerAccount(partnerId, {

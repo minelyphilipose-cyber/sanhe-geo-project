@@ -18,6 +18,7 @@ import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyOwnerTransferRequest;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
+import com.huanjing.geo.module.customer.dto.CompanyPartnerStaffAssignRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
 import com.huanjing.geo.module.customer.dto.SalesOwnerOptionVO;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -128,7 +129,7 @@ public class CompanyService {
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
         internalScopeService.ensureCompanyAccess(user, company, "company");
         ensureSalesCompanyAccess(user, company);
-        attachOwnerName(company);
+        attachOwnerInfo(company);
         return company;
     }
 
@@ -198,6 +199,18 @@ public class CompanyService {
                             .orderByAsc(SysUser::getId)
             );
         }
+        return users.stream().map(this::toSalesOwnerOption).collect(Collectors.toList());
+    }
+
+    public List<SalesOwnerOptionVO> deliveryOwnerOptions() {
+        currentUserService.ensurePermission("delivery.assignment.manage");
+        List<SysUser> users = sysUserMapper.selectList(
+                new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getRole, "operator")
+                        .eq(SysUser::getIsActive, true)
+                        .orderByAsc(SysUser::getDisplayName)
+                        .orderByAsc(SysUser::getId)
+        );
         return users.stream().map(this::toSalesOwnerOption).collect(Collectors.toList());
     }
 
@@ -280,7 +293,7 @@ public class CompanyService {
                 snapshotCompany(company),
                 null
         );
-        attachOwnerName(company);
+        attachOwnerInfo(company);
         return company;
     }
 
@@ -333,7 +346,7 @@ public class CompanyService {
                 snapshotCompany(company),
                 null
         );
-        attachOwnerName(company);
+        attachOwnerInfo(company);
         return company;
     }
 
@@ -366,8 +379,77 @@ public class CompanyService {
                 snapshotCompany(company),
                 extra
         );
-        attachOwnerName(company);
+        attachOwnerInfo(company);
         return company;
+    }
+
+    @Transactional
+    public Company assignPartnerStaffOwner(Long id, CompanyPartnerStaffAssignRequest req) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        Company company = requireCompany(id);
+        boolean internalAssignment = currentUserService.hasPermission("delivery.assignment.manage");
+        boolean partnerAssignment = "partner".equals(operator.getRole())
+                && currentUserService.hasPermission("partner.staff.manage");
+        if (!internalAssignment && !partnerAssignment) {
+            throw new BizException(403, "No permission to assign partner staff");
+        }
+        if (partnerAssignment && (company.getPartnerId() == null || !company.getPartnerId().equals(operator.getPartnerId()))) {
+            throw new BizException(403, "No permission to assign staff for this company");
+        }
+
+        Long oldStaffOwnerId = company.getPartnerStaffOwnerId();
+        SysUser newStaff = req.getStaffUserId() == null ? null : requireActivePartnerStaff(req.getStaffUserId(), company.getPartnerId());
+        Long newStaffOwnerId = newStaff == null ? null : newStaff.getId();
+        if (oldStaffOwnerId == null ? newStaffOwnerId == null : oldStaffOwnerId.equals(newStaffOwnerId)) {
+            throw new BizException(400, "Partner staff owner is unchanged");
+        }
+
+        Map<String, Object> before = snapshotCompany(company);
+        company.setPartnerStaffOwnerId(newStaffOwnerId);
+        companyMapper.updateById(company);
+
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("oldPartnerStaffOwnerId", oldStaffOwnerId);
+        extra.put("newPartnerStaffOwnerId", newStaffOwnerId);
+        extra.put("newPartnerStaffOwnerName", displayName(newStaff));
+        extra.put("reason", trimToNull(req.getReason()));
+        activityLogService.logActionRequired(
+                operator.getId(),
+                "company.partner_staff.assign",
+                "company",
+                company.getId(),
+                before,
+                snapshotCompany(company),
+                extra
+        );
+        attachOwnerInfo(company);
+        return company;
+    }
+
+    public List<SalesOwnerOptionVO> partnerStaffOptions(Long companyId) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        Company company = requireCompany(companyId);
+        boolean internalAssignment = currentUserService.hasPermission("delivery.assignment.manage");
+        boolean partnerAssignment = "partner".equals(operator.getRole())
+                && currentUserService.hasPermission("partner.staff.manage");
+        if (!internalAssignment && !partnerAssignment) {
+            throw new BizException(403, "No permission to query partner staff");
+        }
+        if (partnerAssignment && (company.getPartnerId() == null || !company.getPartnerId().equals(operator.getPartnerId()))) {
+            throw new BizException(403, "No permission to query staff for this company");
+        }
+        if (company.getPartnerId() == null) {
+            return List.of();
+        }
+        List<SysUser> users = sysUserMapper.selectList(
+                new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getPartnerId, company.getPartnerId())
+                        .eq(SysUser::getRole, "partner_staff")
+                        .eq(SysUser::getIsActive, true)
+                        .orderByAsc(SysUser::getDisplayName)
+                        .orderByAsc(SysUser::getId)
+        );
+        return users.stream().map(this::toSalesOwnerOption).collect(Collectors.toList());
     }
 
     public CompanyAccount account(Long companyId) {
@@ -728,6 +810,7 @@ public class CompanyService {
         snapshot.put("sourceType", company.getSourceType());
         snapshot.put("createdBy", company.getCreatedBy());
         snapshot.put("ownerId", company.getOwnerId());
+        snapshot.put("partnerStaffOwnerId", company.getPartnerStaffOwnerId());
         return snapshot;
     }
 
@@ -740,12 +823,14 @@ public class CompanyService {
         }
     }
 
-    private void attachOwnerName(Company company) {
+    private void attachOwnerInfo(Company company) {
         if (company == null || company.getOwnerId() == null) {
+            attachPartnerStaffOwnerInfo(company, null);
             return;
         }
         SysUser owner = sysUserMapper.selectById(company.getOwnerId());
         company.setOwnerName(displayName(owner));
+        attachPartnerStaffOwnerInfo(company, null);
     }
 
     private void attachOwnerNames(List<Company> companies) {
@@ -756,13 +841,43 @@ public class CompanyService {
                 .map(Company::getOwnerId)
                 .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
-        if (ownerIds.isEmpty()) {
+        if (!ownerIds.isEmpty()) {
+            Map<Long, String> ownerNameById = sysUserMapper.selectBatchIds(ownerIds).stream()
+                    .collect(Collectors.toMap(SysUser::getId, this::displayName, (left, right) -> left));
+            for (Company company : companies) {
+                company.setOwnerName(ownerNameById.get(company.getOwnerId()));
+            }
+        }
+        attachPartnerStaffOwnerInfos(companies);
+    }
+
+    private void attachPartnerStaffOwnerInfo(Company company, Map<Long, SysUser> userById) {
+        if (company == null || company.getPartnerStaffOwnerId() == null) {
             return;
         }
-        Map<Long, String> ownerNameById = sysUserMapper.selectBatchIds(ownerIds).stream()
-                .collect(Collectors.toMap(SysUser::getId, this::displayName, (left, right) -> left));
+        SysUser staff = userById == null
+                ? sysUserMapper.selectById(company.getPartnerStaffOwnerId())
+                : userById.get(company.getPartnerStaffOwnerId());
+        company.setPartnerStaffOwnerName(displayName(staff));
+        company.setPartnerStaffOwnerUsername(staff == null ? null : staff.getUsername());
+        company.setPartnerStaffOwnerActive(staff == null ? null : staff.getIsActive());
+    }
+
+    private void attachPartnerStaffOwnerInfos(List<Company> companies) {
+        if (companies == null || companies.isEmpty()) {
+            return;
+        }
+        Set<Long> staffOwnerIds = companies.stream()
+                .map(Company::getPartnerStaffOwnerId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (staffOwnerIds.isEmpty()) {
+            return;
+        }
+        Map<Long, SysUser> userById = sysUserMapper.selectBatchIds(staffOwnerIds).stream()
+                .collect(Collectors.toMap(SysUser::getId, user -> user, (left, right) -> left));
         for (Company company : companies) {
-            company.setOwnerName(ownerNameById.get(company.getOwnerId()));
+            attachPartnerStaffOwnerInfo(company, userById);
         }
     }
 
@@ -964,6 +1079,21 @@ public class CompanyService {
         SysUser user = sysUserMapper.selectById(userId);
         if (user == null || !Boolean.TRUE.equals(user.getIsActive()) || !"operator".equals(user.getRole())) {
             throw new BizException(400, "New owner must be an active operator");
+        }
+        return user;
+    }
+
+    private SysUser requireActivePartnerStaff(Long userId, Long partnerId) {
+        if (partnerId == null) {
+            throw new BizException(400, "Company is not a partner customer");
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null
+                || !Boolean.TRUE.equals(user.getIsActive())
+                || !"partner_staff".equals(user.getRole())
+                || user.getPartnerId() == null
+                || !user.getPartnerId().equals(partnerId)) {
+            throw new BizException(400, "Partner staff must be active and belong to this partner");
         }
         return user;
     }

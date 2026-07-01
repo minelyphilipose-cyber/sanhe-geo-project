@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.presale.access;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
@@ -32,6 +33,8 @@ class PresaleAccessServiceTest {
     private PresaleReportVersionMapper versionMapper;
     @Mock
     private CurrentUserService currentUserService;
+    @Mock
+    private InternalScopeService internalScopeService;
 
     @InjectMocks
     private PresaleAccessService accessService;
@@ -94,6 +97,21 @@ class PresaleAccessServiceTest {
         PresaleReport actual = accessService.requireReportWithAccess(REPORT_ID);
 
         assertEquals(REPORT_ID, actual.getId());
+    }
+
+    @Test
+    void requireReportWithAccess_partnerStaffForbiddenEvenWhenOwner() {
+        SysUser staff = user(OWNER_USER_ID);
+        staff.setRole("partner_staff");
+        PresaleReport report = report(REPORT_ID, OWNER_USER_ID);
+        when(reportMapper.selectById(REPORT_ID)).thenReturn(report);
+        when(currentUserService.requireCurrentUser()).thenReturn(staff);
+        when(internalScopeService.isPartnerStaff(staff)).thenReturn(true);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> accessService.requireReportWithAccess(REPORT_ID));
+
+        assertEquals(403, ex.getCode());
     }
 
     @Test

@@ -4,12 +4,23 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 
 @Mapper
 public interface CompanyPackageBindingMapper extends BaseMapper<CompanyPackageBinding> {
+
+    @Select("""
+            SELECT *
+            FROM company_package_binding
+            WHERE company_id = #{companyId}
+              AND status = 'active'
+              AND active_flag = 1
+            LIMIT 1
+            """)
+    CompanyPackageBinding selectActiveByCompanyId(@Param("companyId") Long companyId);
 
     @Update("""
             UPDATE company_package_binding

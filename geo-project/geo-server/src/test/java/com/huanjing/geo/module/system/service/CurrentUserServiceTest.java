@@ -16,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -104,6 +105,15 @@ class CurrentUserServiceTest {
         when(companyMapper.selectById(100L)).thenReturn(company);
 
         assertDoesNotThrow(() -> currentUserService.ensureBrandAccess(operator, 10L, "brand"));
+    }
+
+    @Test
+    void partnerViewer_isNotPartnerUser() {
+        SysUser user = new SysUser();
+        user.setRole("partner_viewer");
+        user.setPartnerId(900L);
+
+        assertFalse(currentUserService.isPartnerUser(user));
     }
 
     private SysUser internalOperator() {

@@ -27,6 +27,12 @@ public class CompanyPackageBinding {
     private Integer keywordGroupLimitB;
     private Integer keywordGroupLimitC;
     private String channelQuotaSnapshot;
+    private String packageSnapshotJson;
+    private String partnerVisibleSnapshotJson;
+    private String internalDeliverySnapshotJson;
+    private LocalDateTime lockedAt;
+    private Long lockedByProjectId;
+    private Long lockedByApprovalId;
     private String status;
     private Integer activeFlag;
     private LocalDateTime boundAt;

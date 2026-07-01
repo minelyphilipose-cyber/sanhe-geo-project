@@ -51,11 +51,22 @@ export type RoleType =
   | 'manager'
   | 'partner'
   | 'partner_staff'
-  | 'partner_viewer'
 
 export type PackageType = 'trial_6980' | 'standard_12800' | 'growth_26800'
 
-export type ProjectStatus = 'pending_start' | 'active' | 'paused' | 'expired'
+export type ProjectStatus =
+  | 'draft'
+  | 'pending_start'
+  | 'submitted'
+  | 'rejected'
+  | 'approved_pending_setup'
+  | 'setup_ready'
+  | 'active'
+  | 'paused'
+  | 'completed'
+  | 'archived'
+  | 'cancelled'
+  | 'expired'
 
 export type ProjectStage =
   | 'pending_start'
@@ -119,6 +130,10 @@ export interface Company {
   salesOwnerId: number | null
   ownerId?: number | null
   ownerName?: string | null
+  partnerStaffOwnerId?: number | null
+  partnerStaffOwnerName?: string | null
+  partnerStaffOwnerUsername?: string | null
+  partnerStaffOwnerActive?: boolean | null
   status?: string
   remark?: string | null
   createdBy?: number | null
@@ -263,6 +278,7 @@ export interface Project {
   planKeywordGroupLimitA?: number | null
   planKeywordGroupLimitB?: number | null
   planKeywordGroupLimitC?: number | null
+  planCoreQuestionLimit?: number | null
   planMonthlyReportDepth?: string | null
   planQuarterlyReportDepth?: string | null
   planConsultantIntensity?: string | null
@@ -309,6 +325,7 @@ export interface Project {
   selectedKeywordSavedKeywordsA?: number
   selectedKeywordSavedKeywordsB?: number
   selectedKeywordSavedKeywordsC?: number
+  selectedCoreQuestionSavedKeywords?: number
   selectedKeywordGroups?: KeywordGroup[]
   channelAllocations?: ProjectChannelAllocationItem[]
   allocationVersion?: number
@@ -360,6 +377,11 @@ export interface ProjectKeywordGroupQuota {
   inputMaxA: number
   inputMaxB: number
   inputMaxC: number
+  coreQuestionQuotaLimit?: number
+  activeAllocatedCoreQuestionCount?: number
+  currentProjectAllocatedCoreQuestionCount?: number
+  remainingCoreQuestionCount?: number
+  inputMaxCoreQuestionCount?: number
 }
 
 export interface CompanyAccount {
@@ -526,6 +548,7 @@ export interface ProjectDashboardComparison {
   monitorQuestionCount?: ProjectDashboardComparisonMetric
   articleCreated?: ProjectDashboardComparisonMetric
   articlePublished?: ProjectDashboardComparisonMetric
+  articleIndexed?: ProjectDashboardComparisonMetric
 }
 
 export interface ProjectDashboardPlatformItem {
@@ -576,6 +599,7 @@ export interface ProjectDashboardTrendItem {
   date: string
   articleCreated: number
   articlePublished: number
+  articleIndexed?: number
   hitCount: number
   contactCount?: number
   siteCount?: number
@@ -778,6 +802,7 @@ export interface KeywordGroup {
   savedKeywordCountA?: number
   savedKeywordCountB?: number
   savedKeywordCountC?: number
+  savedCoreQuestionCount?: number
   columns?: KeywordGroupColumns
   llmQuestions?: LlmQuestionItem[]
   createdAt: string
@@ -1745,7 +1770,12 @@ export interface PackagePlan {
   id: number
   packageType: string
   packageName: string
+  audienceType?: 'internal' | 'partner' | string | null
+  packageStatus?: 'draft' | 'active' | 'inactive' | string | null
   standardPrice: number
+  partnerPoints?: number | null
+  partnerVisibleConfigJson?: string | null
+  internalDeliveryConfigJson?: string | null
   serviceMonths: number
   keywordGroupLimit: number
   keywordGroupLimitA: number

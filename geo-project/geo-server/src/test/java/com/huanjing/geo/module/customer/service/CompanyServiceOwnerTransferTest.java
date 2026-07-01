@@ -4,6 +4,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaUsageMapper;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.dto.CompanyOwnerTransferRequest;
+import com.huanjing.geo.module.customer.dto.CompanyPartnerStaffAssignRequest;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyAccountMapper;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -139,9 +141,132 @@ class CompanyServiceOwnerTransferTest {
         verify(companyMapper).updateById(any());
     }
 
+    @Test
+    void assignPartnerStaffOwner_allowsPartnerOwnerForOwnCompany() {
+        SysUser partnerOwner = user(50L, "partner", true);
+        partnerOwner.setPartnerId(7L);
+        when(currentUserService.requireCurrentUser()).thenReturn(partnerOwner);
+        when(currentUserService.hasPermission("delivery.assignment.manage")).thenReturn(false);
+        when(currentUserService.hasPermission("partner.staff.manage")).thenReturn(true);
+        Company company = company(1L, 10L);
+        company.setPartnerId(7L);
+        company.setPartnerStaffOwnerId(null);
+        SysUser staff = user(60L, "partner_staff", true);
+        staff.setPartnerId(7L);
+        staff.setDisplayName("Staff");
+        when(companyMapper.selectById(1L)).thenReturn(company);
+        when(sysUserMapper.selectById(60L)).thenReturn(staff);
+        CompanyPartnerStaffAssignRequest req = staffAssignRequest(60L, "assign");
+
+        Company result = companyService.assignPartnerStaffOwner(1L, req);
+
+        assertEquals(60L, result.getPartnerStaffOwnerId());
+        ArgumentCaptor<Company> companyCaptor = ArgumentCaptor.forClass(Company.class);
+        verify(companyMapper).updateById(companyCaptor.capture());
+        assertEquals(60L, companyCaptor.getValue().getPartnerStaffOwnerId());
+        verify(activityLogService).logActionRequired(
+                eq(50L),
+                eq("company.partner_staff.assign"),
+                eq("company"),
+                eq(1L),
+                any(),
+                any(),
+                any()
+        );
+    }
+
+    @Test
+    void assignPartnerStaffOwner_rejectsOtherPartnerCompany() {
+        SysUser partnerOwner = user(50L, "partner", true);
+        partnerOwner.setPartnerId(7L);
+        when(currentUserService.requireCurrentUser()).thenReturn(partnerOwner);
+        when(currentUserService.hasPermission("delivery.assignment.manage")).thenReturn(false);
+        when(currentUserService.hasPermission("partner.staff.manage")).thenReturn(true);
+        Company company = company(1L, 10L);
+        company.setPartnerId(8L);
+        when(companyMapper.selectById(1L)).thenReturn(company);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> companyService.assignPartnerStaffOwner(1L, staffAssignRequest(60L, null)));
+
+        assertEquals(403, ex.getCode());
+        verify(companyMapper, never()).updateById(any());
+    }
+
+    @Test
+    void assignPartnerStaffOwner_rejectsInactiveOrOtherPartnerStaff() {
+        when(currentUserService.hasPermission("delivery.assignment.manage")).thenReturn(true);
+        Company company = company(1L, 10L);
+        company.setPartnerId(7L);
+        when(companyMapper.selectById(1L)).thenReturn(company);
+        SysUser staff = user(60L, "partner_staff", true);
+        staff.setPartnerId(8L);
+        when(sysUserMapper.selectById(60L)).thenReturn(staff);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> companyService.assignPartnerStaffOwner(1L, staffAssignRequest(60L, null)));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("Partner staff must be active and belong to this partner", ex.getMessage());
+        verify(companyMapper, never()).updateById(any());
+    }
+
+    @Test
+    void assignPartnerStaffOwner_allowsUnassign() {
+        when(currentUserService.hasPermission("delivery.assignment.manage")).thenReturn(true);
+        Company company = company(1L, 10L);
+        company.setPartnerId(7L);
+        company.setPartnerStaffOwnerId(60L);
+        when(companyMapper.selectById(1L)).thenReturn(company);
+
+        Company result = companyService.assignPartnerStaffOwner(1L, staffAssignRequest(null, "unassign"));
+
+        assertEquals(null, result.getPartnerStaffOwnerId());
+        verify(companyMapper).updateById(any());
+    }
+
+    @Test
+    void deliveryOwnerOptionsReturnsActiveOperators() {
+        SysUser operator = user(20L, "operator", true);
+        operator.setDisplayName("Operator");
+        when(sysUserMapper.selectList(any())).thenReturn(List.of(operator));
+
+        var options = companyService.deliveryOwnerOptions();
+
+        verify(currentUserService).ensurePermission("delivery.assignment.manage");
+        assertEquals(1, options.size());
+        assertEquals(20L, options.get(0).getId());
+        assertEquals("Operator", options.get(0).getDisplayName());
+    }
+
+    @Test
+    void partnerStaffOptionsReturnsActiveStaffForCompanyPartner() {
+        when(currentUserService.hasPermission("delivery.assignment.manage")).thenReturn(true);
+        Company company = company(1L, 10L);
+        company.setPartnerId(7L);
+        when(companyMapper.selectById(1L)).thenReturn(company);
+        SysUser staff = user(60L, "partner_staff", true);
+        staff.setPartnerId(7L);
+        staff.setDisplayName("Staff");
+        when(sysUserMapper.selectList(any())).thenReturn(List.of(staff));
+
+        var options = companyService.partnerStaffOptions(1L);
+
+        assertEquals(1, options.size());
+        assertEquals(60L, options.get(0).getId());
+        assertEquals("Staff", options.get(0).getDisplayName());
+    }
+
     private CompanyOwnerTransferRequest request(Long newOwnerId, String reason) {
         CompanyOwnerTransferRequest req = new CompanyOwnerTransferRequest();
         req.setNewOwnerId(newOwnerId);
+        req.setReason(reason);
+        return req;
+    }
+
+    private CompanyPartnerStaffAssignRequest staffAssignRequest(Long staffUserId, String reason) {
+        CompanyPartnerStaffAssignRequest req = new CompanyPartnerStaffAssignRequest();
+        req.setStaffUserId(staffUserId);
         req.setReason(reason);
         return req;
     }

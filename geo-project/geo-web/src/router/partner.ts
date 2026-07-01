@@ -6,7 +6,7 @@ const partnerRoutes: RouteRecordRaw = {
   redirect: '/partner/home',
   meta: {
     requiresAuth: true,
-    roles: ['partner', 'partner_staff', 'partner_viewer'],
+    roles: ['partner', 'partner_staff'],
   },
   children: [
     {
@@ -26,6 +26,12 @@ const partnerRoutes: RouteRecordRaw = {
       name: 'MyCustomers',
       component: () => import('@/views/partner/MyCustomers.vue'),
       meta: { title: '我的客户', icon: 'User', permissions: ['company.read'] },
+    },
+    {
+      path: 'staff',
+      name: 'PartnerStaffManage',
+      component: () => import('@/views/partner/PartnerStaffManage.vue'),
+      meta: { title: '交付员工', icon: 'UserFilled', permissions: ['partner.staff.manage'] },
     },
     {
       path: 'my-projects',

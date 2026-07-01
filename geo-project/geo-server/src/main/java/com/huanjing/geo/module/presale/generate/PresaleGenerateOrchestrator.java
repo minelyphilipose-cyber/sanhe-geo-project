@@ -8,6 +8,7 @@ import com.huanjing.geo.common.llm.capacity.LlmCapacityFailure;
 import com.huanjing.geo.common.llm.capacity.LlmCapacityFailureClassifier;
 import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.partner.service.PartnerPresaleReportQuotaService;
 import com.huanjing.geo.module.presale.generate.llm.AnalyzeParseException;
 import com.huanjing.geo.module.presale.generate.llm.AnalyzePromptTemplates;
 import com.huanjing.geo.module.presale.generate.llm.CallStatus;
@@ -132,6 +133,7 @@ public class PresaleGenerateOrchestrator {
     private final PresaleJudgeService presaleJudgeService;
     private final PresaleEvaluationModelRouter evaluationModelRouter;
     private final PresaleGenerateCancellationRegistry cancellationRegistry;
+    private final PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
     private final ObjectMapper objectMapper;
     private final Executor platformExecutor;
     private final Map<Long, AtomicLong> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
@@ -187,6 +189,7 @@ public class PresaleGenerateOrchestrator {
                                        PresaleJudgeService presaleJudgeService,
                                        PresaleEvaluationModelRouter evaluationModelRouter,
                                        PresaleGenerateCancellationRegistry cancellationRegistry,
+                                       PartnerPresaleReportQuotaService partnerPresaleReportQuotaService,
                                        ObjectMapper objectMapper,
                                        @Qualifier("presalePlatformExecutor") Executor platformExecutor) {
         this.versionMapper = versionMapper;
@@ -209,6 +212,7 @@ public class PresaleGenerateOrchestrator {
         this.presaleJudgeService = presaleJudgeService;
         this.evaluationModelRouter = evaluationModelRouter;
         this.cancellationRegistry = cancellationRegistry;
+        this.partnerPresaleReportQuotaService = partnerPresaleReportQuotaService;
         this.objectMapper = objectMapper;
         this.platformExecutor = Objects.requireNonNull(platformExecutor, "presalePlatformExecutor must not be null");
     }
@@ -1422,6 +1426,7 @@ public class PresaleGenerateOrchestrator {
         update.setUpdatedAt(LocalDateTime.now());
         updateVersionById(update, "presale.version.update");
         syncReportGenerationStatus(versionId, PresaleGenerateStatus.FAILED.name());
+        refundPartnerPresaleQuota(versionId, failureCategory, reason);
         lastProgressUpdateAtByVersion.remove(versionId);
         logTerminalStageDuration(versionId, PresaleGenerateStatus.FAILED.name());
     }
@@ -1984,7 +1989,33 @@ public class PresaleGenerateOrchestrator {
         update.setUpdatedAt(LocalDateTime.now());
         updateVersionById(update, "presale.version.update");
         syncReportGenerationStatus(versionId, PresaleGenerateStatus.FAILED.name());
+        refundPartnerPresaleQuota(versionId, FAILURE_CATEGORY_TOO_MANY_DEGRADED, FAILURE_CATEGORY_TOO_MANY_DEGRADED);
         lastProgressUpdateAtByVersion.remove(versionId);
+    }
+
+    private void refundPartnerPresaleQuota(Long versionId, String failureCategory, String reason) {
+        try {
+            PresaleReportVersion version = versionMapper.selectById(versionId);
+            if (version == null || version.getReportId() == null) {
+                return;
+            }
+            partnerPresaleReportQuotaService.refundForReportFailure(version.getReportId(), failureCategory, reason);
+        } catch (Exception ex) {
+            log.error("Failed to refund partner presale report quota, versionId={}", versionId, ex);
+            markPartnerPresaleQuotaManualReview(versionId, failureCategory, reason);
+        }
+    }
+
+    private void markPartnerPresaleQuotaManualReview(Long versionId, String failureCategory, String reason) {
+        try {
+            PresaleReportVersion version = versionMapper.selectById(versionId);
+            if (version == null || version.getReportId() == null) {
+                return;
+            }
+            partnerPresaleReportQuotaService.markManualReviewForReportFailure(version.getReportId(), failureCategory, reason);
+        } catch (Exception ex) {
+            log.error("Failed to mark partner presale report quota manual review, versionId={}", versionId, ex);
+        }
     }
 
     private PresaleAiCall insertCall(Long versionId,

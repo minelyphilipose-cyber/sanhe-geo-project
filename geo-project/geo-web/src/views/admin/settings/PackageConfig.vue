@@ -18,6 +18,10 @@
           <el-option label="启用" :value="true" />
           <el-option label="停用" :value="false" />
         </el-select>
+        <el-select v-model="query.audienceType" class="filter-audience" placeholder="适用对象" clearable @change="load">
+          <el-option label="总部直营" value="internal" />
+          <el-option label="合伙人" value="partner" />
+        </el-select>
         <el-button type="primary" plain @click="load">查询</el-button>
       </div>
     </el-card>
@@ -75,6 +79,16 @@
           <el-table-column label="标准价(元)" width="120">
             <template #default="scope">{{ Number(scope.row.standardPrice || 0).toFixed(2) }}</template>
           </el-table-column>
+          <el-table-column label="适用对象" width="110">
+            <template #default="scope">
+              <el-tag size="small" :type="scope.row.audienceType === 'partner' ? 'warning' : 'info'">
+                {{ audienceLabel(scope.row.audienceType) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="合伙人积分" width="120">
+            <template #default="scope">{{ scope.row.audienceType === 'partner' ? Number(scope.row.partnerPoints || 0).toFixed(2) : '-' }}</template>
+          </el-table-column>
           <el-table-column prop="serviceMonths" label="服务月数" width="100" />
           <el-table-column label="拓词问题额度" min-width="190">
             <template #default="scope">
@@ -87,16 +101,16 @@
           <el-table-column prop="sortOrder" label="排序" width="80" />
           <el-table-column label="状态" width="90">
             <template #default="scope">
-              <span class="admin-status-tag" :class="scope.row.enabled ? 'is-success' : 'is-muted'">
-                {{ scope.row.enabled ? '启用' : '停用' }}
+              <span class="admin-status-tag" :class="packageStatusClass(scope.row)">
+                {{ packageStatusLabel(scope.row) }}
               </span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-              <el-button link :type="scope.row.enabled ? 'warning' : 'success'" @click="toggleStatus(scope.row)">
-                {{ scope.row.enabled ? '停用' : '启用' }}
+              <el-button link type="primary" @click="openEdit(scope.row)">{{ canEditPackage(scope.row) ? '编辑' : '查看' }}</el-button>
+              <el-button link :type="scope.row.packageStatus === 'active' ? 'warning' : 'success'" @click="toggleStatus(scope.row)">
+                {{ statusActionLabel(scope.row) }}
               </el-button>
             </template>
           </el-table-column>
@@ -117,7 +131,7 @@
     </el-card>
 
     <el-dialog v-model="formVisible" :title="formMode === 'create' ? '新增套餐' : '编辑套餐'" width="960px" class="admin-editor-dialog package-editor-dialog">
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="package-config-form">
+      <el-form ref="formRef" :model="form" :rules="rules" :disabled="!formEditable" label-position="top" class="package-config-form">
         <section class="form-section">
           <div class="form-section-head">
             <div>
@@ -131,6 +145,15 @@
             </el-form-item>
             <el-form-item label="套餐名称" prop="packageName" required>
               <el-input v-model="form.packageName" />
+            </el-form-item>
+            <el-form-item label="适用对象" prop="audienceType" required>
+              <el-segmented
+                v-model="form.audienceType"
+                :options="[
+                  { label: '总部直营', value: 'internal' },
+                  { label: '合伙人', value: 'partner' },
+                ]"
+              />
             </el-form-item>
           </div>
         </section>
@@ -148,6 +171,9 @@
           <div class="form-grid is-three">
             <el-form-item label="标准价(元)" prop="standardPrice" required>
               <el-input-number v-model="form.standardPrice" :min="0.01" :precision="2" />
+            </el-form-item>
+            <el-form-item v-if="form.audienceType === 'partner'" label="合伙人套餐积分" prop="partnerPoints" required>
+              <el-input-number v-model="form.partnerPoints" :min="0.01" :precision="2" />
             </el-form-item>
             <el-form-item label="服务月数" prop="serviceMonths" required>
               <el-input-number v-model="form.serviceMonths" :min="1" />
@@ -230,15 +256,12 @@
           <div class="form-section-head">
             <div>
               <span>发布状态</span>
-              <strong>排序、启用状态与备注</strong>
+              <strong>排序与备注</strong>
             </div>
           </div>
           <div class="form-grid is-two">
             <el-form-item label="排序" prop="sortOrder" required>
               <el-input-number v-model="form.sortOrder" :min="0" />
-            </el-form-item>
-            <el-form-item label="状态" prop="enabled" required>
-              <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
             </el-form-item>
             <el-form-item label="备注" class="is-full">
               <el-input v-model="form.remark" type="textarea" :rows="3" />
@@ -249,7 +272,7 @@
 
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+        <el-button v-if="formEditable" type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -276,13 +299,20 @@ const formVisible = ref(false)
 const formRef = ref<FormInstance>()
 const formMode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
+const editingPackageStatus = ref<'draft' | 'active' | 'inactive' | string>('draft')
 const page = reactive({ current: 1, size: 20, total: 0 })
-const query = reactive({ keyword: '', enabled: undefined as boolean | undefined })
+const query = reactive({
+  keyword: '',
+  enabled: undefined as boolean | undefined,
+  audienceType: undefined as 'internal' | 'partner' | undefined,
+})
 
 const form = reactive({
   packageType: '',
   packageName: '',
+  audienceType: 'internal' as 'internal' | 'partner',
   standardPrice: 0,
+  partnerPoints: 0,
   serviceMonths: 12,
   keywordGroupLimit: 100,
   keywordGroupLimitA: 100,
@@ -297,7 +327,6 @@ const form = reactive({
   targetMetricType: 'visibility_rate',
   targetMetricValue: 0.05,
   targetWindowDays: 90,
-  enabled: true,
   sortOrder: 10,
   remark: '',
   channelQuotaConfigs: defaultChannelQuotas() as PackageChannelQuotaConfig[],
@@ -306,7 +335,9 @@ const form = reactive({
 const rules: FormRules = {
   packageType: [{ required: true, message: '请输入套餐类型', trigger: 'blur' }],
   packageName: [{ required: true, message: '请输入套餐名称', trigger: 'blur' }],
+  audienceType: [{ required: true, message: '请选择适用对象', trigger: 'change' }],
   standardPrice: [{ required: true, message: '请输入标准价', trigger: 'change' }],
+  partnerPoints: [{ required: true, message: '请输入合伙人套餐积分', trigger: 'change' }],
   serviceMonths: [{ required: true, message: '请输入服务月数', trigger: 'change' }],
   keywordGroupLimit: [{ required: true, message: '请输入拓词问题总数', trigger: 'change' }],
   keywordGroupLimitA: [{ required: true, message: '请输入 A 档问题数', trigger: 'change' }],
@@ -328,6 +359,7 @@ const avgServiceMonths = computed(() => {
 })
 const baseChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => !isSelfMediaQuotaChannel(item.channelCode)))
 const selfMediaChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => isSelfMediaQuotaChannel(item.channelCode)))
+const formEditable = computed(() => formMode.value === 'create' || editingPackageStatus.value === 'draft')
 
 function defaultChannelQuotas(): PackageChannelQuotaConfig[] {
   return DISTRIBUTION_CHANNELS.map((item) => ({
@@ -377,6 +409,32 @@ function packageInitial(value?: string | null) {
   return text ? Array.from(text)[0] : '套'
 }
 
+function audienceLabel(value?: string | null) {
+  return value === 'partner' ? '合伙人' : '总部直营'
+}
+
+function canEditPackage(row: PackagePlan) {
+  return row.packageStatus === 'draft'
+}
+
+function packageStatusLabel(row: PackagePlan) {
+  if (row.packageStatus === 'draft') return '草稿'
+  if (row.packageStatus === 'active') return '已上架'
+  if (row.packageStatus === 'inactive') return '已停用'
+  return row.enabled ? '已上架' : '已停用'
+}
+
+function packageStatusClass(row: PackagePlan) {
+  if (row.packageStatus === 'active') return 'is-success'
+  if (row.packageStatus === 'draft') return 'is-warning'
+  return 'is-muted'
+}
+
+function statusActionLabel(row: PackagePlan) {
+  if (row.packageStatus === 'draft') return '上架'
+  return row.packageStatus === 'active' ? '停用' : '启用'
+}
+
 function normalizeChannelQuotas(configs?: PackageChannelQuotaConfig[]) {
   const existing = new Map((configs || []).map((item) => [item.channelCode, item]))
   return defaultChannelQuotas().map((item) => ({
@@ -389,13 +447,14 @@ function normalizeChannelQuotas(configs?: PackageChannelQuotaConfig[]) {
 function resetForm() {
   form.packageType = ''
   form.packageName = ''
+  form.audienceType = 'internal'
   form.standardPrice = 0
+  form.partnerPoints = 0
   form.serviceMonths = 12
   form.keywordGroupLimit = 100
   form.keywordGroupLimitA = 100
   form.keywordGroupLimitB = 0
   form.keywordGroupLimitC = 0
-  form.enabled = true
   form.sortOrder = 10
   form.remark = ''
   form.channelQuotaConfigs = defaultChannelQuotas()
@@ -409,6 +468,7 @@ async function load() {
       size: page.size,
       keyword: query.keyword || undefined,
       enabled: query.enabled,
+      audienceType: query.audienceType,
     })
     rows.value = data.data.records || []
     page.total = data.data.total || 0
@@ -425,6 +485,7 @@ function onPageChange(v: number) {
 function openCreate() {
   formMode.value = 'create'
   editingId.value = null
+  editingPackageStatus.value = 'draft'
   resetForm()
   formVisible.value = true
 }
@@ -432,9 +493,12 @@ function openCreate() {
 function openEdit(row: PackagePlan) {
   formMode.value = 'edit'
   editingId.value = row.id
+  editingPackageStatus.value = row.packageStatus || (row.enabled ? 'active' : 'inactive')
   form.packageType = row.packageType
   form.packageName = row.packageName
+  form.audienceType = row.audienceType === 'partner' ? 'partner' : 'internal'
   form.standardPrice = Number(row.standardPrice || 0)
+  form.partnerPoints = Number(row.partnerPoints || 0)
   form.serviceMonths = row.serviceMonths
   form.keywordGroupLimit = row.keywordGroupLimit
   form.keywordGroupLimitA = row.keywordGroupLimitA ?? row.keywordGroupLimit
@@ -449,7 +513,6 @@ function openEdit(row: PackagePlan) {
   form.targetMetricType = row.targetMetricType
   form.targetMetricValue = row.targetMetricValue
   form.targetWindowDays = row.targetWindowDays
-  form.enabled = row.enabled
   form.sortOrder = row.sortOrder
   form.remark = row.remark || ''
   form.channelQuotaConfigs = normalizeChannelQuotas(row.channelQuotaConfigs)
@@ -460,7 +523,9 @@ function buildPayload() {
   return {
     packageType: form.packageType,
     packageName: form.packageName,
+    audienceType: form.audienceType,
     standardPrice: form.standardPrice,
+    partnerPoints: form.audienceType === 'partner' ? form.partnerPoints : null,
     serviceMonths: form.serviceMonths,
     keywordGroupLimit: form.keywordGroupLimit,
     keywordGroupLimitA: form.keywordGroupLimitA,
@@ -475,7 +540,6 @@ function buildPayload() {
     targetMetricType: form.targetMetricType,
     targetMetricValue: form.targetMetricValue,
     targetWindowDays: form.targetWindowDays,
-    enabled: form.enabled,
     sortOrder: form.sortOrder,
     remark: form.remark || undefined,
     channelQuotaConfigs: form.channelQuotaConfigs.map((item) => ({
@@ -511,8 +575,8 @@ async function submit() {
 }
 
 async function toggleStatus(row: PackagePlan) {
-  const target = !row.enabled
-  await ElMessageBox.confirm(`确认${target ? '启用' : '停用'}套餐「${row.packageName}」？`, '状态变更确认', {
+  const target = row.packageStatus !== 'active'
+  await ElMessageBox.confirm(`确认${statusActionLabel(row)}套餐「${row.packageName}」？`, '状态变更确认', {
     type: 'warning',
     confirmButtonText: '确认',
     cancelButtonText: '取消',
@@ -547,6 +611,10 @@ onMounted(load)
 
 .filter-status {
   width: 130px;
+}
+
+.filter-audience {
+  width: 140px;
 }
 
 .package-metric-grid {
@@ -732,6 +800,7 @@ onMounted(load)
 
   .filter-keyword,
   .filter-status,
+  .filter-audience,
   .package-toolbar .el-button {
     width: 100%;
   }

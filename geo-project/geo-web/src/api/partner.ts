@@ -7,6 +7,8 @@ export interface PartnerItem {
   partnerName: string
   partnerLevel: string
   discountRate: number
+  presaleReportFreeQuotaLimit?: number | null
+  presaleReportExtraPoints?: number | null
   status: string
   contactName?: string | null
   contactPhone?: string | null
@@ -60,6 +62,28 @@ export interface PartnerRechargeOrder {
   updatedAt: string
 }
 
+export interface PartnerStaff {
+  id: number
+  username: string
+  displayName: string
+  partnerId: number
+  phone?: string | null
+  email?: string | null
+  isActive: boolean
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface PartnerStaffCreateResult {
+  staff: PartnerStaff
+  initialPassword: string
+}
+
+export interface PartnerStaffResetPasswordResult {
+  staff: PartnerStaff
+  newPassword: string
+}
+
 export interface PartnerCreateResult {
   partner: PartnerItem
   username: string
@@ -80,11 +104,12 @@ export function getPartnerDetail(id: number) {
 }
 
 export function createPartner(data: {
-  partnerCode: string
   partnerName: string
   partnerLevel: string
   discountRate: number
   initialAmount?: number
+  presaleReportFreeQuotaLimit?: number
+  presaleReportExtraPoints?: number
   contactName?: string
   contactPhone?: string
   city?: string
@@ -97,6 +122,8 @@ export function updatePartner(id: number, data: {
   partnerName: string
   partnerLevel: string
   discountRate: number
+  presaleReportFreeQuotaLimit?: number
+  presaleReportExtraPoints?: number
   status: string
   contactName?: string
   contactPhone?: string
@@ -166,5 +193,26 @@ export function adjustPartnerAccount(id: number, data: {
   remark?: string
 }) {
   return request.post<R<PartnerTxn>>(`/partners/${id}/account/adjust`, data)
+}
+
+export function getMyPartnerStaff() {
+  return request.get<R<PartnerStaff[]>>('/partners/me/staff')
+}
+
+export function createMyPartnerStaff(data: {
+  username: string
+  displayName: string
+  phone?: string
+  email?: string
+}) {
+  return request.post<R<PartnerStaffCreateResult>>('/partners/me/staff', data)
+}
+
+export function updateMyPartnerStaffStatus(staffUserId: number, isActive: boolean) {
+  return request.put<R<PartnerStaff>>(`/partners/me/staff/${staffUserId}/status`, { isActive })
+}
+
+export function resetMyPartnerStaffPassword(staffUserId: number) {
+  return request.post<R<PartnerStaffResetPasswordResult>>(`/partners/me/staff/${staffUserId}/reset-password`)
 }
 

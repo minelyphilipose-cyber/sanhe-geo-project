@@ -194,6 +194,12 @@ class WorkbenchServiceTest {
         verify(reportMapper).selectCount(reportScope.capture());
         assertTrue(reportScope.getValue().getSqlSegment().contains("owner_id = 77"));
 
+        ArgumentCaptor<LambdaQueryWrapper<Project>> projectScope = wrapperCaptor();
+        verify(projectMapper, org.mockito.Mockito.times(3)).selectCount(projectScope.capture());
+        LambdaQueryWrapper<Project> activeProjectScope = projectScope.getAllValues().get(1);
+        assertTrue(activeProjectScope.getSqlSegment().contains("status"));
+        assertTrue(activeProjectScope.getSqlSegment().contains("IN"));
+
         ArgumentCaptor<LambdaQueryWrapper<DistributionTask>> taskScope = wrapperCaptor();
         verify(distributionTaskMapper, org.mockito.Mockito.times(7)).selectCount(taskScope.capture());
         for (LambdaQueryWrapper<DistributionTask> wrapper : taskScope.getAllValues()) {

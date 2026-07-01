@@ -14,12 +14,15 @@ public class PackagePlanCreateRequest {
     private String packageType;
     @NotBlank
     private String packageName;
+    private String audienceType;
     @NotNull
     private BigDecimal standardPrice;
+    private BigDecimal partnerPoints;
+    private String partnerVisibleConfigJson;
+    private String internalDeliveryConfigJson;
     @NotNull
     @Min(1)
     private Integer serviceMonths;
-    @NotNull
     private Boolean enabled;
     @NotNull
     private Integer sortOrder;

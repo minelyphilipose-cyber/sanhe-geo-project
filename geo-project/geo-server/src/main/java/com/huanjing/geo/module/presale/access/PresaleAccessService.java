@@ -2,6 +2,7 @@ package com.huanjing.geo.module.presale.access;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
@@ -19,6 +20,7 @@ public class PresaleAccessService {
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
 
     public AccessScope getAccessScope() {
         currentUserService.requireCurrentUser();
@@ -31,6 +33,9 @@ public class PresaleAccessService {
             throw new BizException(404, "Report not found: " + reportId);
         }
         SysUser current = currentUserService.requireCurrentUser();
+        if (internalScopeService.isPartnerStaff(current)) {
+            throw new BizException(403, "Partner staff cannot access presale reports");
+        }
         if (getAccessScope() == AccessScope.ALL || current.getId().equals(report.getCreatedBy())) {
             return report;
         }

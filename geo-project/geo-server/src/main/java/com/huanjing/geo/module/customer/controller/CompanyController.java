@@ -4,19 +4,18 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
 import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
-import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyOwnerTransferRequest;
 import com.huanjing.geo.module.customer.dto.CompanyPackageBindRequest;
+import com.huanjing.geo.module.customer.dto.CompanyPartnerStaffAssignRequest;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
 import com.huanjing.geo.module.customer.dto.SalesOwnerOptionVO;
 import com.huanjing.geo.module.customer.entity.CompanyAccount;
 import com.huanjing.geo.module.customer.entity.CompanyAccountTxn;
-import com.huanjing.geo.module.customer.entity.Company;
-import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.customer.service.CompanyService;
+import com.huanjing.geo.module.partner.service.PartnerResponseSanitizer;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,21 +31,22 @@ public class CompanyController {
 
     private final CompanyService companyService;
     private final CompanyPackageBindingService companyPackageBindingService;
+    private final PartnerResponseSanitizer partnerResponseSanitizer;
 
     @GetMapping
-    public R<Page<Company>> page(
+    public R<?> page(
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "20") long size,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String ownerType,
             @RequestParam(required = false) Long partnerId
     ) {
-        return R.ok(companyService.page(current, size, keyword, ownerType, partnerId));
+        return R.ok(partnerResponseSanitizer.companyPage(companyService.page(current, size, keyword, ownerType, partnerId)));
     }
 
     @GetMapping("/{id}")
-    public R<Company> detail(@PathVariable Long id) {
-        return R.ok(companyService.detail(id));
+    public R<?> detail(@PathVariable Long id) {
+        return R.ok(partnerResponseSanitizer.company(companyService.detail(id)));
     }
 
     @GetMapping("/sales-owner-options")
@@ -54,19 +54,34 @@ public class CompanyController {
         return R.ok(companyService.salesOwnerOptions());
     }
 
+    @GetMapping("/delivery-owner-options")
+    public R<List<SalesOwnerOptionVO>> deliveryOwnerOptions() {
+        return R.ok(companyService.deliveryOwnerOptions());
+    }
+
     @PostMapping
-    public R<Company> create(@Valid @RequestBody CompanyCreateRequest req) {
-        return R.ok(companyService.create(req));
+    public R<?> create(@Valid @RequestBody CompanyCreateRequest req) {
+        return R.ok(partnerResponseSanitizer.company(companyService.create(req)));
     }
 
     @PutMapping("/{id}")
-    public R<Company> update(@PathVariable Long id, @Valid @RequestBody CompanyUpdateRequest req) {
-        return R.ok(companyService.update(id, req));
+    public R<?> update(@PathVariable Long id, @Valid @RequestBody CompanyUpdateRequest req) {
+        return R.ok(partnerResponseSanitizer.company(companyService.update(id, req)));
     }
 
     @PostMapping("/{id}/owner-transfer")
-    public R<Company> transferOwner(@PathVariable Long id, @Valid @RequestBody CompanyOwnerTransferRequest req) {
-        return R.ok(companyService.transferOwner(id, req));
+    public R<?> transferOwner(@PathVariable Long id, @Valid @RequestBody CompanyOwnerTransferRequest req) {
+        return R.ok(partnerResponseSanitizer.company(companyService.transferOwner(id, req)));
+    }
+
+    @PostMapping("/{id}/partner-staff-owner")
+    public R<?> assignPartnerStaffOwner(@PathVariable Long id, @Valid @RequestBody CompanyPartnerStaffAssignRequest req) {
+        return R.ok(partnerResponseSanitizer.company(companyService.assignPartnerStaffOwner(id, req)));
+    }
+
+    @GetMapping("/{id}/partner-staff-options")
+    public R<List<SalesOwnerOptionVO>> partnerStaffOptions(@PathVariable Long id) {
+        return R.ok(companyService.partnerStaffOptions(id));
     }
 
     @DeleteMapping("/{id}")
@@ -81,13 +96,13 @@ public class CompanyController {
     }
 
     @GetMapping("/{id}/keyword-group-quota")
-    public R<CompanyKeywordGroupQuotaVO> keywordGroupQuota(@PathVariable Long id) {
-        return R.ok(companyService.keywordGroupQuota(id));
+    public R<?> keywordGroupQuota(@PathVariable Long id) {
+        return R.ok(partnerResponseSanitizer.companyKeywordGroupQuota(companyService.keywordGroupQuota(id)));
     }
 
     @GetMapping("/{id}/distribution-quotas")
-    public R<CompanyDistributionQuotaVO> distributionQuotas(@PathVariable Long id) {
-        return R.ok(companyService.distributionQuotas(id));
+    public R<?> distributionQuotas(@PathVariable Long id) {
+        return R.ok(partnerResponseSanitizer.companyDistributionQuotas(companyService.distributionQuotas(id)));
     }
 
     @GetMapping("/{id}/account/txns")
@@ -114,18 +129,18 @@ public class CompanyController {
     }
 
     @GetMapping("/{id}/package-bindings")
-    public R<java.util.List<CompanyPackageBinding>> packageBindings(@PathVariable Long id) {
-        return R.ok(companyPackageBindingService.bindings(id));
+    public R<?> packageBindings(@PathVariable Long id) {
+        return R.ok(partnerResponseSanitizer.companyPackageBindings(companyPackageBindingService.bindings(id)));
     }
 
     @GetMapping("/{id}/package-binding/active")
-    public R<CompanyPackageBinding> activePackageBinding(@PathVariable Long id) {
-        return R.ok(companyPackageBindingService.activeBinding(id));
+    public R<?> activePackageBinding(@PathVariable Long id) {
+        return R.ok(partnerResponseSanitizer.companyPackageBinding(companyPackageBindingService.activeBindingForCurrentUser(id)));
     }
 
     @PostMapping("/{id}/package-binding")
-    public R<CompanyPackageBinding> bindPackage(@PathVariable Long id, @Valid @RequestBody CompanyPackageBindRequest req) {
-        return R.ok(companyPackageBindingService.bind(id, req.getPackagePlanId()));
+    public R<?> bindPackage(@PathVariable Long id, @Valid @RequestBody CompanyPackageBindRequest req) {
+        return R.ok(partnerResponseSanitizer.companyPackageBinding(companyPackageBindingService.bind(id, req.getPackagePlanId())));
     }
 
     @DeleteMapping("/{id}/package-binding")

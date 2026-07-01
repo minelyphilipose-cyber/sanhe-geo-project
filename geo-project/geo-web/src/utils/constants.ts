@@ -1,5 +1,5 @@
 import type {
-  PackageType, ProjectStage,
+  PackageType, ProjectStage, ProjectStatus,
   PlatformPriority, ReportType, ReportStatus, RoleType,
   PlatformHealth, PartnerLevel, TrainingStatus, AlertSeverity,
 } from '@/types'
@@ -44,6 +44,25 @@ export const PROJECT_STAGE_MAP: Record<ProjectStage, {
   high_risk: { label: '高风险', color: '#EF4444', order: 7 },
   dispute_handling: { label: '争议处理中', color: '#DC2626', order: 8 },
   completed: { label: '已结束', color: '#6B7280', order: 9 },
+}
+
+export const PROJECT_STATUS_MAP: Record<ProjectStatus, {
+  label: string
+  color: string
+  order: number
+}> = {
+  draft: { label: '草稿', color: '#94A3B8', order: 1 },
+  pending_start: { label: '待启动', color: '#94A3B8', order: 2 },
+  submitted: { label: '已提交', color: '#60A5FA', order: 3 },
+  rejected: { label: '已驳回', color: '#EF4444', order: 4 },
+  approved_pending_setup: { label: '已审批待配置', color: '#F59E0B', order: 5 },
+  setup_ready: { label: '配置完成待启动', color: '#10B981', order: 6 },
+  active: { label: '已启动', color: '#2563EB', order: 7 },
+  paused: { label: '已暂停', color: '#F97316', order: 8 },
+  completed: { label: '已完成', color: '#64748B', order: 9 },
+  archived: { label: '已归档', color: '#6B7280', order: 10 },
+  cancelled: { label: '已取消', color: '#6B7280', order: 11 },
+  expired: { label: '已过期', color: '#6B7280', order: 12 },
 }
 
 export interface PlatformMeta {
@@ -100,7 +119,6 @@ export const ROLE_MAP: Record<RoleType, { label: string; desc: string; isPartner
   sales: { label: '销售', desc: '客户管理与签约', isPartner: false },
   partner: { label: '合伙人', desc: '城市合伙人主账号', isPartner: true },
   partner_staff: { label: '合伙人员工', desc: '合伙人团队成员', isPartner: true },
-  partner_viewer: { label: '合伙人只读', desc: '合伙人查看权限', isPartner: true },
 }
 
 export function isPartnerRole(role: RoleType): boolean {

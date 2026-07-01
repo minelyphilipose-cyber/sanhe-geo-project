@@ -4,7 +4,7 @@
       <div>
         <div class="admin-page-kicker">合伙人</div>
         <h1 class="admin-page-title">合伙人管理</h1>
-        <div class="admin-page-subtitle">维护合伙人档案、账户折扣和合作状态，快速进入资金与充值审核视图。</div>
+        <div class="admin-page-subtitle">维护合伙人档案、账户折扣和合作状态，快速进入积分与充值审核视图。</div>
       </div>
       <div class="admin-page-actions">
         <el-button v-if="canCreatePartner" type="primary" @click="openCreate">新建合伙人</el-button>
@@ -93,6 +93,14 @@
           <el-table-column label="折扣" width="100">
             <template #default="scope">{{ formatDiscount(scope.row.discountRate) }}</template>
           </el-table-column>
+          <el-table-column label="诊断权益" width="170">
+            <template #default="scope">
+              <div class="quota-cell">
+                <span>免费 {{ scope.row.presaleReportFreeQuotaLimit || 0 }} 次</span>
+                <span>超额 {{ formatPoints(scope.row.presaleReportExtraPoints) }} 积分/次</span>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="110">
             <template #default="scope">
               <span class="admin-status-tag" :class="statusClass(scope.row.status)">
@@ -141,8 +149,8 @@
       class="admin-editor-dialog partner-editor-dialog"
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" class="admin-dialog-form">
-        <el-form-item label="合伙人编号" required>
-          <el-input v-model="form.partnerCode" :disabled="formMode === 'edit'" />
+        <el-form-item v-if="formMode === 'edit'" label="合伙人编号">
+          <el-input v-model="form.partnerCode" disabled />
         </el-form-item>
         <el-form-item label="合伙人名称" required>
           <el-input v-model="form.partnerName" />
@@ -168,7 +176,7 @@
             style="width: 100%"
           />
         </el-form-item>
-        <el-form-item label="金额(元)" required>
+        <el-form-item label="初始积分" required>
           <el-input-number
             v-model="form.initialAmount"
             :precision="2"
@@ -177,6 +185,26 @@
             :controls="false"
             style="width: 100%"
             :disabled="formMode === 'edit'"
+          />
+        </el-form-item>
+        <el-form-item label="诊断免费次数" required>
+          <el-input-number
+            v-model="form.presaleReportFreeQuotaLimit"
+            :precision="0"
+            :step="1"
+            :min="0"
+            :controls="false"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="超额诊断积分" required>
+          <el-input-number
+            v-model="form.presaleReportExtraPoints"
+            :precision="2"
+            :step="1"
+            :min="0"
+            :controls="false"
+            style="width: 100%"
           />
         </el-form-item>
         <el-form-item v-if="formMode === 'edit'" label="状态" required>
@@ -253,6 +281,8 @@ const form = reactive({
   partnerLevel: 'level_29800',
   discountRate: 0.3,
   initialAmount: 29800,
+  presaleReportFreeQuotaLimit: 0,
+  presaleReportExtraPoints: 0,
   status: 'active',
   contactName: '',
   contactPhone: '',
@@ -275,14 +305,12 @@ const partnerLevelProfiles: Record<string, { discountRate: number; initialAmount
   level_99800: { discountRate: 0.2, initialAmount: 99800 },
 }
 const rules: FormRules = {
-  partnerCode: [
-    { required: true, message: '请输入合伙人编号', trigger: 'blur' },
-    { pattern: /^[A-Za-z0-9_-]{2,32}$/, message: '编号仅支持字母数字下划线中划线', trigger: 'blur' },
-  ],
   partnerName: [{ required: true, message: '请输入合伙人名称', trigger: 'blur' }],
   partnerLevel: [{ required: true, message: '请选择等级', trigger: 'change' }],
   discountRate: [{ required: true, message: '请输入折扣率', trigger: 'change' }],
-  initialAmount: [{ required: true, message: '请输入金额', trigger: 'change' }],
+  initialAmount: [{ required: true, message: '请输入初始积分', trigger: 'change' }],
+  presaleReportFreeQuotaLimit: [{ required: true, message: '请输入诊断免费次数', trigger: 'change' }],
+  presaleReportExtraPoints: [{ required: true, message: '请输入超额诊断积分', trigger: 'change' }],
   contactPhone: [{ pattern: /^[0-9-+() ]{0,20}$/, message: '联系电话格式不正确', trigger: 'blur' }],
 }
 
@@ -292,6 +320,8 @@ function resetForm() {
   form.partnerLevel = 'level_29800'
   form.discountRate = 0.3
   form.initialAmount = 29800
+  form.presaleReportFreeQuotaLimit = 0
+  form.presaleReportExtraPoints = 0
   form.status = 'active'
   form.contactName = ''
   form.contactPhone = ''
@@ -310,6 +340,10 @@ function onPartnerLevelChange(level: string) {
 function formatDiscount(value?: number | null) {
   if (value == null) return '-'
   return `${(Number(value) * 100).toFixed(1)}%`
+}
+
+function formatPoints(value?: number | null) {
+  return Number(value || 0).toFixed(2)
 }
 
 function partnerInitial(value?: string | null) {
@@ -369,6 +403,8 @@ function openEdit(row: PartnerItem) {
   form.partnerLevel = row.partnerLevel
   form.discountRate = row.discountRate
   form.initialAmount = 0
+  form.presaleReportFreeQuotaLimit = row.presaleReportFreeQuotaLimit || 0
+  form.presaleReportExtraPoints = Number(row.presaleReportExtraPoints || 0)
   form.status = row.status
   form.contactName = row.contactName || ''
   form.contactPhone = row.contactPhone || ''
@@ -415,11 +451,12 @@ async function submit() {
     let createdId: number | null = null
     if (formMode.value === 'create') {
       const { data } = await createPartner({
-        partnerCode: form.partnerCode,
         partnerName: form.partnerName,
         partnerLevel: form.partnerLevel,
         discountRate: form.discountRate,
         initialAmount: Number(form.initialAmount.toFixed(2)),
+        presaleReportFreeQuotaLimit: form.presaleReportFreeQuotaLimit,
+        presaleReportExtraPoints: Number(form.presaleReportExtraPoints.toFixed(2)),
         contactName: form.contactName || undefined,
         contactPhone: form.contactPhone || undefined,
         city: resolveCityForSubmit(),
@@ -437,6 +474,8 @@ async function submit() {
         partnerName: form.partnerName,
         partnerLevel: form.partnerLevel,
         discountRate: form.discountRate,
+        presaleReportFreeQuotaLimit: form.presaleReportFreeQuotaLimit,
+        presaleReportExtraPoints: Number(form.presaleReportExtraPoints.toFixed(2)),
         status: form.status,
         contactName: form.contactName || undefined,
         contactPhone: form.contactPhone || undefined,
@@ -613,6 +652,16 @@ const cityDisplayPreview = computed(() => {
 
 .status-action {
   margin-left: 10px;
+}
+
+.quota-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .city-preview {

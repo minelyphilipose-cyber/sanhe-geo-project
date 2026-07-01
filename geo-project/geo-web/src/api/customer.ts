@@ -39,6 +39,13 @@ export function updateCompany(id: number, data: Record<string, any>) {
   return request.put<R<Company>>(`/companies/${id}`, data)
 }
 
+export function assignCompanyPartnerStaffOwner(
+  id: number,
+  data: { staffUserId?: number | null; reason?: string },
+) {
+  return request.post<R<Company>>(`/companies/${id}/partner-staff-owner`, data)
+}
+
 export function deleteCompany(id: number) {
   return request.delete<R<void>>(`/companies/${id}`)
 }
@@ -51,6 +58,18 @@ export interface SalesOwnerOption {
 
 export function getSalesOwnerOptions() {
   return request.get<R<SalesOwnerOption[]>>('/companies/sales-owner-options')
+}
+
+export function getDeliveryOwnerOptions() {
+  return request.get<R<SalesOwnerOption[]>>('/companies/delivery-owner-options')
+}
+
+export function transferCompanyOwner(id: number, data: { newOwnerId: number; reason?: string }) {
+  return request.post<R<Company>>(`/companies/${id}/owner-transfer`, data)
+}
+
+export function getCompanyPartnerStaffOptions(id: number) {
+  return request.get<R<SalesOwnerOption[]>>(`/companies/${id}/partner-staff-options`)
 }
 
 export function getCompanyAccount(id: number) {
