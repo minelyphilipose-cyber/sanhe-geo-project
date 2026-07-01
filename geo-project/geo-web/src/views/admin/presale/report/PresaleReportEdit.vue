@@ -196,7 +196,7 @@
               <EditableText
                 label="卡片标签"
                 :model-value="draft.market_battleground.national_card.label"
-                :maxlength="fieldMax('market_battleground.national_card.label', 24)"
+                :maxlength="fieldMax('market_battleground.national_card.label', 36)"
                 :warn-length="fieldWarn('market_battleground.national_card.label')"
                 @update:model-value="draft.market_battleground.national_card.label = $event"
               />
@@ -267,7 +267,7 @@
               <EditableText
                 label="卡片标签"
                 :model-value="draft.market_battleground.regional_card.label"
-                :maxlength="fieldMax('market_battleground.regional_card.label', 24)"
+                :maxlength="fieldMax('market_battleground.regional_card.label', 36)"
                 :warn-length="fieldWarn('market_battleground.regional_card.label')"
                 @update:model-value="draft.market_battleground.regional_card.label = $event"
               />

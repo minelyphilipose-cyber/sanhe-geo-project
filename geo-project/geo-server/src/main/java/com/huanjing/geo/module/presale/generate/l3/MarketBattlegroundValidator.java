@@ -20,6 +20,7 @@ public class MarketBattlegroundValidator {
     static final String PLATFORM_LABEL = "TOP 平台";
     static final String PLATFORM_SUFFIX = "元宝 / Kimi 等";
     static final String BRAND_LINE_PREFIX = "→";
+    static final int CALCULATION_CARD_LABEL_MAX_LENGTH = 36;
 
     public void validateRawJson(JsonNode marketNode) {
         if (marketNode == null || marketNode.isNull()) {
@@ -99,7 +100,7 @@ public class MarketBattlegroundValidator {
         if (value == null) {
             throw new BizException(400, field + " must not be null");
         }
-        requireText(field + ".label", value.getLabel(), 24);
+        requireText(field + ".label", value.getLabel(), CALCULATION_CARD_LABEL_MAX_LENGTH);
         requireText(field + ".value_prefix", value.getValuePrefix(), 6);
         requireText(field + ".value", value.getValue(), 12);
         requireText(field + ".unit", value.getUnit(), 8);

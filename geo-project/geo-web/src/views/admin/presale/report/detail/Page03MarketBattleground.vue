@@ -509,13 +509,15 @@ const CalculationCardView = defineComponent({
 }
 
 .calc-card-label {
-  height: 16px;
-  margin-bottom: 25px;
+  height: 32px;
+  margin-bottom: 9px;
   overflow: hidden;
   color: #6b6456;
   font-size: 10px;
   letter-spacing: 2.5px;
+  line-height: 1.45;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .p03-calc-number {

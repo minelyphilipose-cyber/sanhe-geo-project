@@ -290,7 +290,7 @@ function validateMarketBattleground(errors: EditableValidationError[], value: Ma
 }
 
 function validateCalculationCard(errors: EditableValidationError[], label: string, value: MarketBattleground['national_card']) {
-  checkText(errors, `${label} 标签`, value.label, 24)
+  checkText(errors, `${label} 标签`, value.label, 36)
   checkText(errors, `${label} 大数字前缀`, value.value_prefix, 6)
   checkText(errors, `${label} 大数字`, value.value, 12)
   checkText(errors, `${label} 大数字单位`, value.unit, 8)

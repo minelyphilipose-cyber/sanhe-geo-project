@@ -106,7 +106,8 @@ public class PresaleL3Defaults {
     }
 
     private void cardMeta(List<EditableFieldMetaVO> out, String card, String block) {
-        meta(out, "market_battleground." + card + ".label", "卡片标签", block, 24, 19);
+        meta(out, "market_battleground." + card + ".label", "卡片标签", block,
+                MarketBattlegroundValidator.CALCULATION_CARD_LABEL_MAX_LENGTH, 30);
         meta(out, "market_battleground." + card + ".value_prefix", "大数字前缀", block, 6, 4);
         meta(out, "market_battleground." + card + ".value", "大数字", block, 12, 10);
         meta(out, "market_battleground." + card + ".unit", "大数字单位", block, 8, 6);

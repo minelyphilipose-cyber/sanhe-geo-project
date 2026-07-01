@@ -30,6 +30,13 @@ class MarketBattlegroundValidatorTest {
     }
 
     @Test
+    void validate_acceptsTenCharacterRegionAndIndustryInCalculationLabels() throws Exception {
+        MarketBattleground market = defaultMarket("一二三四五六七八九十", "甲乙丙丁戊己庚辛壬癸");
+
+        assertDoesNotThrow(() -> validator.validate(market));
+    }
+
+    @Test
     void validate_rejectsChangedFixedKicker() throws Exception {
         MarketBattleground market = defaultMarket();
         market.setPageKicker("A different English line");
@@ -61,12 +68,16 @@ class MarketBattlegroundValidatorTest {
     }
 
     private MarketBattleground defaultMarket() throws Exception {
+        return defaultMarket("阜阳", "medical_beauty");
+    }
+
+    private MarketBattleground defaultMarket(String region, String industry) throws Exception {
         RawSnapshotDTO raw = RawSnapshotDTO.builder()
                 .clientInfo(ClientInfo.builder()
                         .brandName("Acme")
-                        .industry("medical_beauty")
+                        .industry(industry)
                         .industryRole("brand")
-                        .region("阜阳")
+                        .region(region)
                         .build())
                 .build();
         String normalized = defaults.normalizeJson("{}", objectMapper.writeValueAsString(raw), "{}");
