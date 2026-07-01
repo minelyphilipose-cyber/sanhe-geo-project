@@ -354,6 +354,17 @@ public class BatchArticlePublishService {
             }
             markJobRunning(item.getJobId());
             refreshJob = true;
+            if (hasSuccessfulPublishForSameTarget(item)) {
+                log.warn("batch article publish duplicate target skipped itemId={} articleId={} platform={} targetSiteId={} targetBrandId={} targetForumFid={}",
+                        item.getId(), item.getArticleId(), item.getPlatformKey(), item.getTargetSiteId(),
+                        item.getTargetBrandId(), item.getTargetForumFid());
+                itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
+                        .eq(BatchArticlePublishItem::getId, item.getId())
+                        .eq(BatchArticlePublishItem::getStatus, "running")
+                        .set(BatchArticlePublishItem::getStatus, "success")
+                        .set(BatchArticlePublishItem::getErrorMessage, "重复发布保护：同一文章已成功发布到相同目标"));
+                return;
+            }
             BatchArticlePublishJob job = jobMapper.selectById(item.getJobId());
             DistributionTask task = executeDistribution(item, job);
             if ("failed".equals(task.getStatus())) {
@@ -378,6 +389,35 @@ public class BatchArticlePublishService {
             }
             releasePublishLane(laneLock);
             triggerAsyncExecutionSoon();
+        }
+    }
+
+    private boolean hasSuccessfulPublishForSameTarget(BatchArticlePublishItem item) {
+        LambdaQueryWrapper<BatchArticlePublishItem> wrapper = new LambdaQueryWrapper<BatchArticlePublishItem>()
+                .eq(BatchArticlePublishItem::getArticleId, item.getArticleId())
+                .eq(BatchArticlePublishItem::getPlatformKey, item.getPlatformKey())
+                .eq(BatchArticlePublishItem::getStatus, "success")
+                .ne(BatchArticlePublishItem::getId, item.getId());
+        applyTargetMatch(wrapper, item);
+        Long count = itemMapper.selectCount(wrapper);
+        return count != null && count > 0;
+    }
+
+    private void applyTargetMatch(LambdaQueryWrapper<BatchArticlePublishItem> wrapper, BatchArticlePublishItem item) {
+        if (item.getTargetSiteId() == null) {
+            wrapper.isNull(BatchArticlePublishItem::getTargetSiteId);
+        } else {
+            wrapper.eq(BatchArticlePublishItem::getTargetSiteId, item.getTargetSiteId());
+        }
+        if (item.getTargetBrandId() == null) {
+            wrapper.isNull(BatchArticlePublishItem::getTargetBrandId);
+        } else {
+            wrapper.eq(BatchArticlePublishItem::getTargetBrandId, item.getTargetBrandId());
+        }
+        if (item.getTargetForumFid() == null) {
+            wrapper.isNull(BatchArticlePublishItem::getTargetForumFid);
+        } else {
+            wrapper.eq(BatchArticlePublishItem::getTargetForumFid, item.getTargetForumFid());
         }
     }
 
