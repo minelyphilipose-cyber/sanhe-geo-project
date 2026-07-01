@@ -45,7 +45,7 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                    SUM(CASE WHEN (
                      status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now})
                    ) OR (
-                     status IN ('publish_due', 'publish_unknown') AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now})
+                     status IN ('publish_due', 'published_url_pending', 'publish_unknown') AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now})
                    ) OR (
                      status = 'scheduled' AND next_attempt_at IS NULL AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now}
                    ) THEN 1 ELSE 0 END) AS due_total
@@ -68,7 +68,7 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
             FROM self_media_publish_schedule
             WHERE failure_code IS NOT NULL
               AND failure_code != ''
-              AND status IN ('schedule_failed', 'publish_failed', 'manual_required', 'publish_unknown', 'pending')
+              AND status IN ('schedule_failed', 'publish_failed', 'manual_required', 'published_url_pending', 'publish_unknown', 'pending')
             GROUP BY failure_code
             ORDER BY total DESC
             LIMIT #{limit}
@@ -88,7 +88,7 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                 (#{queueKind} != 'publish_result_check' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now}))
                 OR (#{queueKind} = 'publish_result_check' AND (
                   next_attempt_at &lt;= #{now}
-                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'publish_unknown'))
+                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'published_url_pending', 'publish_unknown'))
                   OR (next_attempt_at IS NULL AND status = 'scheduled' AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now})
                 ))
               )
@@ -192,7 +192,7 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                 (#{queueKind} != 'publish_result_check' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now}))
                 OR (#{queueKind} = 'publish_result_check' AND (
                   next_attempt_at &lt;= #{now}
-                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'publish_unknown'))
+                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'published_url_pending', 'publish_unknown'))
                   OR (next_attempt_at IS NULL AND status = 'scheduled' AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now})
                 ))
               )
@@ -223,7 +223,7 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                 (#{queueKind} != 'publish_result_check' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now}))
                 OR (#{queueKind} = 'publish_result_check' AND (
                   next_attempt_at &lt;= #{now}
-                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'publish_unknown'))
+                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'published_url_pending', 'publish_unknown'))
                   OR (next_attempt_at IS NULL AND status = 'scheduled' AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now})
                 ))
               )
@@ -261,7 +261,7 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                 (#{queueKind} != 'publish_result_check' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now}))
                 OR (#{queueKind} = 'publish_result_check' AND (
                   next_attempt_at &lt;= #{now}
-                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'publish_unknown'))
+                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'published_url_pending', 'publish_unknown'))
                   OR (next_attempt_at IS NULL AND status = 'scheduled' AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now})
                 ))
               )
@@ -290,6 +290,7 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                 'scheduled',
                 'publish_due',
                 'checking_publish_result',
+                'published_url_pending',
                 'publish_unknown',
                 'cancel_pending_platform'
               )
@@ -375,7 +376,7 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                 (next_attempt_at IS NOT NULL AND next_attempt_at &lt;= #{monitorUntil})
                 OR (locked_until IS NOT NULL AND locked_until &lt; #{now})
                 OR (platform_scheduled_at IS NOT NULL AND platform_scheduled_at &lt;= #{monitorUntil})
-                OR status IN ('manual_required', 'schedule_failed', 'publish_failed', 'publish_unknown')
+                OR status IN ('manual_required', 'schedule_failed', 'publish_failed', 'published_url_pending', 'publish_unknown')
                 OR (status = 'published_confirmed' AND (platform_published_url IS NULL OR platform_published_url = ''))
               )
             ORDER BY COALESCE(next_attempt_at, platform_scheduled_at, planned_publish_at, updated_at) ASC, id ASC
@@ -505,10 +506,10 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
             FROM self_media_publish_schedule
             WHERE brand_id = #{brandId}
               AND platform = #{platform}
-              AND planned_publish_at &gt;= #{periodStart}
-              AND planned_publish_at &lt; #{periodEnd}
+              AND planned_publish_at >= #{periodStart}
+              AND planned_publish_at < #{periodEnd}
               AND status = 'pending'
-              AND (locked_until IS NULL OR locked_until &lt; #{now})
+              AND (locked_until IS NULL OR locked_until < #{now})
             ORDER BY planned_publish_at ASC, id ASC
             LIMIT 1
             """)
@@ -553,10 +554,10 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
             WHERE id = #{scheduleId}
               AND brand_id = #{brandId}
               AND platform = #{platform}
-              AND planned_publish_at &gt;= #{periodStart}
-              AND planned_publish_at &lt; #{periodEnd}
+              AND planned_publish_at >= #{periodStart}
+              AND planned_publish_at < #{periodEnd}
               AND status = 'pending'
-              AND (locked_until IS NULL OR locked_until &lt; #{now})
+              AND (locked_until IS NULL OR locked_until < #{now})
             """)
     int cancelReplaceablePendingSchedule(@Param("scheduleId") Long scheduleId,
                                          @Param("brandId") Long brandId,

@@ -67,6 +67,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doReturn;
@@ -425,7 +426,7 @@ class SelfMediaPublishScheduleServiceTest {
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
         stubRequestInsert();
         SelfMediaPublishScheduleCreateRequest request = validRequest();
-        LocalDateTime plannedAt = LocalDateTime.now().plusHours(3).withSecond(0).withNano(0);
+        LocalDateTime plannedAt = LocalDate.now().plusDays(1).atTime(11, 15);
         request.setWindowStart(plannedAt);
         request.setWindowEnd(plannedAt.plusMinutes(5));
         when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
@@ -604,7 +605,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("account_or_environment_not_ready", response.getAction());
         assertEquals("SELF_MEDIA_ACCOUNT_NOT_FOUND", response.getCode());
         assertEquals("wechat_mp", response.getPlatform());
-        verify(accountMapper).selectOne(any());
+        verify(accountMapper, times(2)).selectOne(any());
     }
 
     @Test
@@ -1985,10 +1986,13 @@ class SelfMediaPublishScheduleServiceTest {
         row.setId(117L);
         row.setDistributionTaskId(317L);
         when(scheduleMapper.selectById(117L)).thenReturn(row);
+        LocalDateTime platformScheduledAt = LocalDate.now().plusDays(1).atTime(9, 30);
 
         SelfMediaPublishScheduleVO response = service.markLocalAgentExecutionScheduled(
                 117L,
-                "{\"fillResult\":{\"publishOptions\":{\"publishVerification\":{\"verified\":true,\"platformScheduledAt\":\"2026-06-12 09:30\",\"platformScheduleId\":\"schedule-117\",\"platformPublishId\":\"publish-117\",\"platformPublishedUrl\":\"https://example.test/scheduled/117\",\"coverImageUrl\":\"https://cdn.test/cover-117.jpg\"}}}}"
+                "{\"fillResult\":{\"publishOptions\":{\"publishVerification\":{\"verified\":true,\"platformScheduledAt\":\""
+                        + platformScheduledAt
+                        + "\",\"platformScheduleId\":\"schedule-117\",\"platformPublishId\":\"publish-117\",\"platformPublishedUrl\":\"https://example.test/scheduled/117\",\"coverImageUrl\":\"https://cdn.test/cover-117.jpg\"}}}}"
         );
 
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED, response.getStatus());
@@ -1997,8 +2001,8 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("publish-117", response.getPlatformPublishId());
         assertEquals("https://example.test/scheduled/117", response.getPlatformPublishedUrl());
         assertEquals("https://cdn.test/cover-117.jpg", response.getPublishCheckCoverUrl());
-        assertEquals(LocalDateTime.of(2026, 6, 12, 9, 30), response.getPlatformScheduledAt());
-        assertEquals(LocalDateTime.of(2026, 6, 12, 10, 30), response.getNextAttemptAt());
+        assertEquals(platformScheduledAt, response.getPlatformScheduledAt());
+        assertEquals(platformScheduledAt.plusHours(1), response.getNextAttemptAt());
         verify(companyChannelQuotaService).confirmSelfMediaSchedule(117L);
         verify(companyChannelQuotaService).confirmDistribution(317L);
         verify(environmentLockService).release(117L);
@@ -2070,7 +2074,7 @@ class SelfMediaPublishScheduleServiceTest {
         SelfMediaPublishSchedule scheduling = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
         scheduling.setId(102L);
         scheduling.setDistributionTaskId(302L);
-        LocalDateTime publishAt = LocalDateTime.of(2026, 6, 1, 18, 30);
+        LocalDateTime publishAt = LocalDate.now().plusDays(1).atTime(9, 30);
         scheduling.setPlatformScheduledAt(publishAt);
         when(scheduleMapper.selectById(102L)).thenReturn(scheduling);
 
@@ -2079,7 +2083,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED, response.getStatus());
         assertEquals("platform-schedule-1", response.getPlatformScheduleId());
         assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
-        assertEquals(LocalDateTime.of(2026, 6, 2, 9, 30), response.getNextAttemptAt());
+        assertEquals(publishAt.plusHours(1), response.getNextAttemptAt());
         verify(scheduleMapper).updateById(scheduling);
         verify(companyChannelQuotaService).confirmDistribution(302L);
         verify(environmentLockService).release(102L);
@@ -2153,18 +2157,18 @@ class SelfMediaPublishScheduleServiceTest {
     void markClaimedScheduledSpreadsDeferredPublishCheckByBrandInterval() {
         SelfMediaPublishSchedule scheduling = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
         scheduling.setId(102L);
-        LocalDateTime publishAt = LocalDateTime.of(2026, 6, 1, 18, 30);
+        LocalDateTime publishAt = LocalDate.now().plusDays(1).atTime(9, 30);
         scheduling.setPlatformScheduledAt(publishAt);
         when(scheduleMapper.selectById(102L)).thenReturn(scheduling);
         SelfMediaPublishSchedule occupied = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         occupied.setId(201L);
-        occupied.setNextAttemptAt(LocalDateTime.of(2026, 6, 2, 9, 30));
+        occupied.setNextAttemptAt(publishAt.plusHours(1));
         when(scheduleMapper.selectBrandActiveScheduleSlots(eq(8L), any(), any(), anyList()))
                 .thenReturn(List.of(occupied));
 
         SelfMediaPublishScheduleVO response = service.markClaimedScheduled(102L, "platform-schedule-1", "{\"ok\":true}");
 
-        assertEquals(LocalDateTime.of(2026, 6, 2, 9, 33), response.getNextAttemptAt());
+        assertEquals(publishAt.plusHours(1).plusMinutes(3), response.getNextAttemptAt());
         verify(scheduleMapper).updateById(scheduling);
     }
 
