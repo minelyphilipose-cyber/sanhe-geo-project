@@ -357,7 +357,6 @@ public class SelfMediaPublishScheduleService {
         LocalDateTime plannedCursor = validated.windowStart();
         LocalDateTime executionCursor = validated.executionWindowStart();
         QuotaPrecheck quotaPrecheck = quotaPrecheck(validated.brandId());
-        int activeBrandSchedules = activeScheduleCount(validated.brandId());
         List<ScheduleQuotaReservation> quotaReservations = new ArrayList<>();
         for (Long articleId : validated.articleIds()) {
             ArticleDraft article = articleDraftMapper.selectById(articleId);
@@ -375,15 +374,6 @@ public class SelfMediaPublishScheduleService {
                 if (executionCursor.isAfter(validated.executionWindowEnd())) {
                     response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
                             "SCHEDULE_EXECUTION_WINDOW_FULL", "执行填充时间窗口已满，请扩大时间窗口或减少排期数量", null));
-                    continue;
-                }
-                if (activeBrandSchedules + quotaReservations.size() >= MAX_ACTIVE_SCHEDULES_PER_BRAND) {
-                    response.getRejectedItems().add(brandQueueFullRejected(
-                            articleId,
-                            accountId,
-                            candidate.account().getPlatform(),
-                            activeBrandSchedules + quotaReservations.size()
-                    ));
                     continue;
                 }
                 int requiredLeadMinutes = requiredPlatformScheduleCreateLeadMinutes(

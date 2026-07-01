@@ -230,19 +230,22 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
-    void createSchedules_rejectsWhenBrandActiveQueueFull() {
+    void createSystemSchedules_allowsWhenBrandActiveQueueFull() {
         prepareValidArticleAndAccount();
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
-        when(scheduleMapper.countActiveByBrandId(eq(8L), anyList())).thenReturn(10L);
         stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(51L);
+            return 1;
+        });
 
-        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(validRequest(), "new-key");
+        SelfMediaPublishScheduleCreateResponse response = service.createSystemSchedules(validRequest(), "new-key", 99L);
 
-        assertTrue(response.getCreatedSchedules().isEmpty());
-        assertEquals(1, response.getRejectedItems().size());
-        assertEquals("BRAND_SELF_MEDIA_QUEUE_FULL", response.getRejectedItems().get(0).getCode());
-        verify(scheduleMapper, never()).insert(any());
-        verify(companyChannelQuotaService, never()).reserveSelfMediaSchedules(anyLong(), anyList());
+        assertEquals(1, response.getCreatedSchedules().size());
+        assertTrue(response.getRejectedItems().isEmpty());
+        verify(scheduleMapper, never()).countActiveByBrandId(anyLong(), anyList());
+        verify(companyChannelQuotaService).reserveSelfMediaSchedules(anyLong(), anyList());
     }
 
     @Test
