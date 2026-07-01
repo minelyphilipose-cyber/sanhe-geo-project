@@ -242,10 +242,38 @@ class SelfMediaPublishScheduleServiceTest {
 
         SelfMediaPublishScheduleCreateResponse response = service.createSystemSchedules(validRequest(), "new-key", 99L);
 
-        assertEquals(1, response.getCreatedSchedules().size());
+        assertEquals(1, response.getCreatedSchedules().size(), response.getRejectedItems().toString());
         assertTrue(response.getRejectedItems().isEmpty());
         verify(scheduleMapper, never()).countActiveByBrandId(anyLong(), anyList());
         verify(companyChannelQuotaService).reserveSelfMediaSchedules(anyLong(), anyList());
+    }
+
+    @Test
+    void createSystemSchedulesStoresPublishPlatformWhenAccountUsesLegacyWechatAlias() {
+        ArticleDraft article = article();
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+        when(brandMapper.selectById(8L)).thenReturn(brand());
+        SelfMediaAccount account = account();
+        account.setPlatform("wechat");
+        when(accountMapper.selectById(20L)).thenReturn(account);
+        when(scheduleCapabilityService.readiness("wechat_mp", SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(51L);
+            return 1;
+        });
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSystemSchedules(validRequest(), "wechat-key", 99L);
+
+        assertEquals(1, response.getCreatedSchedules().size(), response.getRejectedItems().toString());
+        ArgumentCaptor<SelfMediaPublishSchedule> captor = ArgumentCaptor.forClass(SelfMediaPublishSchedule.class);
+        verify(scheduleMapper).insert(captor.capture());
+        assertEquals("wechat_mp", captor.getValue().getPlatform());
+        verify(companyChannelQuotaService).reserveSelfMediaSchedules(eq(6L), anyList());
     }
 
     @Test
@@ -623,13 +651,15 @@ class SelfMediaPublishScheduleServiceTest {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
-        when(scheduleMapper.countActiveByBrandId(eq(8L), anyList())).thenReturn(10L);
+        when(scheduleMapper.countActiveByBrandIdAndRequestKeyPrefix(eq(8L), eq("platform-quick-dispatch-"), anyList()))
+                .thenReturn(10L);
+        stubRequestInsert();
 
         SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("toutiao", false), "dispatch-key");
 
-        assertEquals("queue_full", response.getAction());
-        assertEquals("BRAND_SELF_MEDIA_QUEUE_FULL", response.getCode());
-        verify(requestMapper, never()).insert(any());
+        assertEquals("rejected", response.getAction());
+        assertEquals("QUICK_DISPATCH_NOT_CREATED", response.getCode());
+        assertEquals("BRAND_SELF_MEDIA_QUEUE_FULL", response.getCreateResponse().getRejectedItems().get(0).getCode());
         verify(scheduleMapper, never()).insert(any());
     }
 

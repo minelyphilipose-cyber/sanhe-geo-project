@@ -68,12 +68,15 @@ class SelfMediaPublishAutoScheduleServiceTest {
         when(brandMapper.selectById(8L)).thenReturn(brand);
         when(accountMapper.selectById(20L)).thenReturn(account(20L, "toutiao"));
         when(accountMapper.selectById(21L)).thenReturn(account(21L, "baijiahao"));
+        when(accountMapper.selectById(22L)).thenReturn(account(22L, "wechat"));
         when(scheduleMapper.countActiveByBrandPlatformAndPeriod(anyLong(), anyString(), any(), any(), any()))
                 .thenReturn(0L);
         when(quotaService.selfMediaDistributionQuota(6L, "toutiao"))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 0, 2));
         when(quotaService.selfMediaDistributionQuota(6L, "baijiahao"))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:baijiahao", "month", "2026-06", 0, 2));
+        when(quotaService.selfMediaDistributionQuota(6L, "wechat"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:wechat", "month", "2026-06", 0, 2));
         when(scheduleAdapterRouter.contract("toutiao")).thenReturn(java.util.Optional.of(contract(
                 "toutiao",
                 SelfMediaPlatformScheduleMode.PLATFORM_NATIVE
@@ -81,6 +84,10 @@ class SelfMediaPublishAutoScheduleServiceTest {
         when(scheduleAdapterRouter.contract("baijiahao")).thenReturn(java.util.Optional.of(contract(
                 "baijiahao",
                 SelfMediaPlatformScheduleMode.BACKEND_DELAYED
+        )));
+        when(scheduleAdapterRouter.contract("wechat_mp")).thenReturn(java.util.Optional.of(contract(
+                "wechat_mp",
+                SelfMediaPlatformScheduleMode.PLATFORM_NATIVE
         )));
         when(scheduleService.createSchedules(any(SelfMediaPublishScheduleCreateRequest.class), anyString()))
                 .thenReturn(new SelfMediaPublishScheduleCreateResponse());
@@ -141,6 +148,16 @@ class SelfMediaPublishAutoScheduleServiceTest {
                 .toList();
         assertTrue(strategies.contains(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE));
         assertTrue(strategies.contains(SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH));
+    }
+
+    @Test
+    void previewNormalizesWechatAccountToPublishPlatformForScheduleOccupation() {
+        SelfMediaPublishAutoScheduleResponse response = service.preview(request(List.of(10L), List.of(22L)));
+
+        assertEquals(1, response.getPlannedCount());
+        assertEquals("wechat_mp", response.getPlannedItems().get(0).getPlatform());
+        verify(quotaService).selfMediaDistributionQuota(6L, "wechat");
+        verify(scheduleMapper).countActiveByBrandPlatformAndPeriod(eq(8L), eq("wechat_mp"), any(), any(), any());
     }
 
     private SelfMediaPublishAutoScheduleRequest request(List<Long> articleIds, List<Long> accountIds) {

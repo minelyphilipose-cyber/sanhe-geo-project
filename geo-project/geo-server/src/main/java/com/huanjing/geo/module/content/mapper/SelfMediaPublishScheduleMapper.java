@@ -332,6 +332,22 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
 
     @Select("""
             <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE brand_id = #{brandId}
+              AND request_idempotency_key LIKE CONCAT(#{requestKeyPrefix}, '%')
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    long countActiveByBrandIdAndRequestKeyPrefix(@Param("brandId") Long brandId,
+                                                 @Param("requestKeyPrefix") String requestKeyPrefix,
+                                                 @Param("statuses") List<String> statuses);
+
+    @Select("""
+            <script>
             SELECT DISTINCT article_id
             FROM self_media_publish_schedule
             WHERE article_id IN

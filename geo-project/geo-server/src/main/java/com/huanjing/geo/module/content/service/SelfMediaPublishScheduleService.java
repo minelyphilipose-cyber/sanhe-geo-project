@@ -75,6 +75,7 @@ public class SelfMediaPublishScheduleService {
     private static final int ERROR_CODE = 70040;
     private static final int DEFAULT_INTERVAL_MINUTES = 30;
     private static final int MAX_ACTIVE_SCHEDULES_PER_BRAND = 10;
+    private static final String QUICK_DISPATCH_REQUEST_KEY_PREFIX = "platform-quick-dispatch-";
     private static final int QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES = 3;
     private static final int QUICK_SCHEDULE_SLOT_LOOKAHEAD_HOURS = 12;
     private static final int QUICK_DISPATCH_MANUAL_START_DELAY_MINUTES = 2;
@@ -244,7 +245,7 @@ public class SelfMediaPublishScheduleService {
         } else if (!"ready".equals(plan.response().getAction())) {
             return plan.response();
         }
-        SelfMediaPublishScheduleCreateResponse created = createQuickSchedule(plan, operator.getId(), idempotencyKeyHeader);
+        SelfMediaPublishScheduleCreateResponse created = createQuickSchedule(plan, operator.getId(), idempotencyKeyHeader, false);
         SelfMediaPlatformQuickScheduleResponse response = plan.response();
         response.setAction(created.getCreatedSchedules().isEmpty() ? "rejected" : "created");
         response.setCode(created.getCreatedSchedules().isEmpty() ? "QUICK_SCHEDULE_NOT_CREATED" : "QUICK_SCHEDULE_CREATED");
@@ -312,7 +313,7 @@ public class SelfMediaPublishScheduleService {
         }
 
         plan = withQuickDispatchTiming(plan, now);
-        SelfMediaPublishScheduleCreateResponse created = createQuickSchedule(plan, operator.getId(), idempotencyKeyHeader);
+        SelfMediaPublishScheduleCreateResponse created = createQuickSchedule(plan, operator.getId(), idempotencyKeyHeader, true);
         SelfMediaPlatformQuickScheduleResponse response = plan.response();
         response.setAction(created.getCreatedSchedules().isEmpty() ? "rejected" : "created");
         response.setCode(created.getCreatedSchedules().isEmpty() ? "QUICK_DISPATCH_NOT_CREATED" : "QUICK_DISPATCH_CREATED");
@@ -366,25 +367,26 @@ public class SelfMediaPublishScheduleService {
                     response.getRejectedItems().add(candidate.rejected());
                     continue;
                 }
+                String publishPlatform = normalizePublishPlatform(candidate.account().getPlatform());
                 if (plannedCursor.isAfter(validated.windowEnd())) {
-                    response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
+                    response.getRejectedItems().add(rejected(articleId, accountId, publishPlatform,
                             "SCHEDULE_WINDOW_FULL", "排期时间窗口已满，请扩大时间窗口或减少排期数量", null));
                     continue;
                 }
                 if (executionCursor.isAfter(validated.executionWindowEnd())) {
-                    response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
+                    response.getRejectedItems().add(rejected(articleId, accountId, publishPlatform,
                             "SCHEDULE_EXECUTION_WINDOW_FULL", "执行填充时间窗口已满，请扩大时间窗口或减少排期数量", null));
                     continue;
                 }
                 int requiredLeadMinutes = requiredPlatformScheduleCreateLeadMinutes(
                         validated.strategy(),
-                        candidate.account().getPlatform()
+                        publishPlatform
                 );
                 LocalDateTime validationBaseTime = validated.hasExplicitExecutionWindow()
                         ? executionCursor
                         : LocalDateTime.now();
-                if (isPlatformScheduleTooClose(validated.strategy(), validationBaseTime, plannedCursor, candidate.account().getPlatform())) {
-                    response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
+                if (isPlatformScheduleTooClose(validated.strategy(), validationBaseTime, plannedCursor, publishPlatform)) {
+                    response.getRejectedItems().add(rejected(articleId, accountId, publishPlatform,
                             "PLATFORM_SCHEDULE_TIME_TOO_CLOSE",
                             "平台定时发布时间需至少晚于执行填充时间 " + minutesText(requiredLeadMinutes),
                             null));
@@ -392,17 +394,17 @@ public class SelfMediaPublishScheduleService {
                 }
                 int maxRemainingMinutes = maxPlatformScheduleRemainingMinutes(
                         validated.strategy(),
-                        candidate.account().getPlatform()
+                        publishPlatform
                 );
-                if (isPlatformScheduleTooFar(validated.strategy(), validationBaseTime, plannedCursor, candidate.account().getPlatform())) {
-                    response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
+                if (isPlatformScheduleTooFar(validated.strategy(), validationBaseTime, plannedCursor, publishPlatform)) {
+                    response.getRejectedItems().add(rejected(articleId, accountId, publishPlatform,
                             "PLATFORM_SCHEDULE_TIME_TOO_FAR",
                             "平台定时发布时间最多支持执行填充时间后 " + minutesText(maxRemainingMinutes),
                             null));
                     continue;
                 }
                 SelfMediaPublishScheduleRejectedItemVO quotaRejected = quotaPrecheck.check(articleId, accountId,
-                        candidate.account().getPlatform());
+                        publishPlatform);
                 if (quotaRejected != null) {
                     response.getRejectedItems().add(quotaRejected);
                     continue;
@@ -410,7 +412,7 @@ public class SelfMediaPublishScheduleService {
                 SelfMediaPublishSchedule inserted = createScheduleRow(requestRow, operatorId, candidate,
                         plannedCursor, executionCursor, validated.strategy());
                 if (inserted != null) {
-                    quotaPrecheck.consume(candidate.account().getPlatform());
+                    quotaPrecheck.consume(publishPlatform);
                     quotaReservations.add(new ScheduleQuotaReservation(
                             inserted.getId(),
                             candidate.article().getProjectId(),
@@ -420,7 +422,7 @@ public class SelfMediaPublishScheduleService {
                     plannedCursor = plannedCursor.plusMinutes(validated.intervalMinutes());
                     executionCursor = executionCursor.plusMinutes(validated.intervalMinutes());
                 } else {
-                    response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
+                    response.getRejectedItems().add(rejected(articleId, accountId, publishPlatform,
                             "ACTIVE_SCHEDULE_EXISTS", "同一文章、账号和计划时间已存在活跃排期", null));
                 }
             }
@@ -488,12 +490,6 @@ public class SelfMediaPublishScheduleService {
         LocalDateTime now = LocalDateTime.now();
         PeriodWindow month = currentMonth(now);
         if (!quotaReplacementAlreadyApplied) {
-            SelfMediaPublishScheduleRejectedItemVO queueRejected = brandQueuePrecheck(
-                    article.getId(), account.getId(), platform, brandId);
-            if (queueRejected != null) {
-                return quickResponse("queue_full", queueRejected.getCode(), queueRejected.getMessage(),
-                        article.getId(), brandId, platform, account.getId(), null, null, null);
-            }
             SelfMediaPublishScheduleRejectedItemVO quotaRejected = quotaPrecheck(brandId)
                     .check(article.getId(), account.getId(), platform);
             if (quotaRejected != null) {
@@ -519,7 +515,8 @@ public class SelfMediaPublishScheduleService {
 
     private SelfMediaPublishScheduleCreateResponse createQuickSchedule(QuickSchedulePlan plan,
                                                                       Long operatorId,
-                                                                      String idempotencyKeyHeader) {
+                                                                      String idempotencyKeyHeader,
+                                                                      boolean enforceQuickDispatchQueueLimit) {
         QuickScheduleData data = plan.data();
         ValidatedRequest validated = new ValidatedRequest(
                 plan.response().getBrandId(),
@@ -544,12 +541,14 @@ public class SelfMediaPublishScheduleService {
         SelfMediaPublishScheduleCreateResponse response = new SelfMediaPublishScheduleCreateResponse();
         response.setRequestId(requestRow.getId());
         response.setRequestIdempotencyKey(requestKey);
-        SelfMediaPublishScheduleRejectedItemVO queueRejected = brandQueuePrecheck(
-                plan.response().getArticleId(),
-                plan.response().getSelfMediaAccountId(),
-                plan.response().getPlatform(),
-                plan.response().getBrandId()
-        );
+        SelfMediaPublishScheduleRejectedItemVO queueRejected = enforceQuickDispatchQueueLimit
+                ? brandQuickDispatchQueuePrecheck(
+                        plan.response().getArticleId(),
+                        plan.response().getSelfMediaAccountId(),
+                        plan.response().getPlatform(),
+                        plan.response().getBrandId()
+                )
+                : null;
         if (queueRejected != null) {
             response.getRejectedItems().add(queueRejected);
             requestRow.setScheduleCount(0);
@@ -2344,7 +2343,7 @@ public class SelfMediaPublishScheduleService {
                                         Long accountId,
                                         String strategy) {
         SelfMediaAccount account = selfMediaAccountMapper.selectById(accountId);
-        String platform = account == null ? null : account.getPlatform();
+        String platform = account == null ? null : normalizePublishPlatform(account.getPlatform());
         if (article == null) {
             return Candidate.rejected(rejected(articleId, accountId, platform,
                     "ARTICLE_NOT_FOUND", "文章不存在", null));
@@ -2447,7 +2446,8 @@ public class SelfMediaPublishScheduleService {
             row.setBrowserEnvironmentId(candidate.binding().getBrowserEnvironmentId());
             row.setBrowserEnvironmentAccountId(candidate.binding().getId());
         }
-        row.setPlatform(candidate.account().getPlatform());
+        String platform = normalizePublishPlatform(candidate.account().getPlatform());
+        row.setPlatform(platform);
         row.setScheduleStrategy(strategy);
         row.setPlannedPublishAt(plannedAt);
         row.setPlatformScheduledAt(plannedAt);
@@ -2462,12 +2462,12 @@ public class SelfMediaPublishScheduleService {
         row.setPublishCheckLocationName(truncate(resolvePublishCheckLocationName(requestRow.getBrandId()), 128));
         row.setPublishCheckFingerprint(publishCheckFingerprint(row));
         row.setAttemptCount(0);
-        row.setMaxAttempts(resolveMaxAttempts(candidate.account().getPlatform(), strategy));
+        row.setMaxAttempts(resolveMaxAttempts(platform, strategy));
         row.setNextAttemptAt(resolveScheduleExecutionAttemptTime(
                 requestRow.getBrandId(),
                 plannedAt,
                 executionAt,
-                candidate.account().getPlatform(),
+                platform,
                 strategy,
                 useExactExecutionAt
         ));
@@ -2810,22 +2810,23 @@ public class SelfMediaPublishScheduleService {
         return hasActiveSelfMediaSchedule(articleId, null);
     }
 
-    private int activeScheduleCount(Long brandId) {
+    private int activeQuickDispatchScheduleCount(Long brandId) {
         if (brandId == null || brandId <= 0) {
             return 0;
         }
-        long count = scheduleMapper.countActiveByBrandId(
+        long count = scheduleMapper.countActiveByBrandIdAndRequestKeyPrefix(
                 brandId,
+                QUICK_DISPATCH_REQUEST_KEY_PREFIX,
                 new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
         );
         return count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count;
     }
 
-    private SelfMediaPublishScheduleRejectedItemVO brandQueuePrecheck(Long articleId,
-                                                                      Long accountId,
-                                                                      String platform,
-                                                                      Long brandId) {
-        int activeCount = activeScheduleCount(brandId);
+    private SelfMediaPublishScheduleRejectedItemVO brandQuickDispatchQueuePrecheck(Long articleId,
+                                                                                   Long accountId,
+                                                                                   String platform,
+                                                                                   Long brandId) {
+        int activeCount = activeQuickDispatchScheduleCount(brandId);
         if (activeCount < MAX_ACTIVE_SCHEDULES_PER_BRAND) {
             return null;
         }
@@ -3125,9 +3126,24 @@ public class SelfMediaPublishScheduleService {
         if (!StringUtils.hasText(accountPlatform)) {
             accountPlatform = normalize(platform);
         }
+        SelfMediaAccount account = selectActivePlatformAccountByStoredPlatform(brandId, accountPlatform);
+        if (account != null) {
+            return account;
+        }
+        String quotaPlatform = ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(platform);
+        if (StringUtils.hasText(quotaPlatform) && !quotaPlatform.equals(accountPlatform)) {
+            return selectActivePlatformAccountByStoredPlatform(brandId, quotaPlatform);
+        }
+        return null;
+    }
+
+    private SelfMediaAccount selectActivePlatformAccountByStoredPlatform(Long brandId, String platform) {
+        if (!StringUtils.hasText(platform)) {
+            return null;
+        }
         return selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
                 .eq(SelfMediaAccount::getBrandId, brandId)
-                .eq(SelfMediaAccount::getPlatform, accountPlatform)
+                .eq(SelfMediaAccount::getPlatform, platform)
                 .eq(SelfMediaAccount::getStatus, "active")
                 .isNull(SelfMediaAccount::getDeletedAt)
                 .orderByDesc(SelfMediaAccount::getUpdatedAt)
@@ -3314,7 +3330,7 @@ public class SelfMediaPublishScheduleService {
             return null;
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        String publishPlatform = ArticlePromptChannels.canonicalSelfMediaPublishPlatform(normalized);
+        String publishPlatform = ArticlePromptChannels.normalizeSelfMediaPublishPlatform(normalized);
         return StringUtils.hasText(publishPlatform) ? publishPlatform : normalized;
     }
 
@@ -3475,7 +3491,7 @@ public class SelfMediaPublishScheduleService {
         }
 
         private SelfMediaPublishScheduleRejectedItemVO check(Long articleId, Long accountId, String platform) {
-            String normalizedPlatform = normalize(platform);
+            String normalizedPlatform = normalizePublishPlatform(platform);
             if (!StringUtils.hasText(normalizedPlatform)) {
                 return rejected(articleId, accountId, platform,
                         "CHANNEL_QUOTA_UNAVAILABLE",
@@ -3511,7 +3527,7 @@ public class SelfMediaPublishScheduleService {
         }
 
         private void consume(String platform) {
-            String normalizedPlatform = normalize(platform);
+            String normalizedPlatform = normalizePublishPlatform(platform);
             Integer remaining = remainingByPlatform.get(normalizedPlatform);
             if (remaining != null) {
                 remainingByPlatform.put(normalizedPlatform, remaining - 1);
@@ -3520,8 +3536,12 @@ public class SelfMediaPublishScheduleService {
 
         private Integer loadRemaining(String platform) {
             try {
+                String quotaPlatform = ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(platform);
                 CompanyChannelQuotaService.DistributionQuotaView quota =
-                        companyChannelQuotaService.selfMediaDistributionQuota(companyId, platform);
+                        companyChannelQuotaService.selfMediaDistributionQuota(
+                                companyId,
+                                StringUtils.hasText(quotaPlatform) ? quotaPlatform : platform
+                        );
                 return Math.max(0, quota.quotaLimit() - quota.usedCount());
             } catch (BizException ex) {
                 unavailableMessageByPlatform.put(platform, ex.getMessage());

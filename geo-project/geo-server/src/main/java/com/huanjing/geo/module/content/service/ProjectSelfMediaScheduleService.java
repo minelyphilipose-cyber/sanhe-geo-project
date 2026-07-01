@@ -66,6 +66,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -167,9 +168,9 @@ public class ProjectSelfMediaScheduleService {
         }
         batch = settleTerminalGenerationFailure(batch);
         ProjectSelfMediaScheduleBatchDetailVO detail = new ProjectSelfMediaScheduleBatchDetailVO();
-        detail.setBatch(ProjectSelfMediaScheduleBatchVO.from(batch));
         GenerationPayload payload = readGenerationPayload(batch.getRequestPayload());
         if (payload == null || payload.plans() == null) {
+            detail.setBatch(ProjectSelfMediaScheduleBatchVO.from(batch));
             return detail;
         }
         Map<Long, SelfMediaAccount> accountCache = new LinkedHashMap<>();
@@ -179,6 +180,8 @@ public class ProjectSelfMediaScheduleService {
         for (GenerationPlan plan : payload.plans()) {
             detail.getItems().add(toDetailItem(batch, plan, rejectedItems, accountCache, articleCache));
         }
+        batch = reconcileBatchSummaryFromDetail(batch, detail.getItems());
+        detail.setBatch(ProjectSelfMediaScheduleBatchVO.from(batch));
         detail.setFailureSummaries(buildFailureSummaries(detail.getItems()));
         detail.setStatusRules(scheduleStatusRules());
         detail.setActionPreview(buildBatchActionPreview(detail.getItems(), targetMonth));
@@ -1039,6 +1042,47 @@ public class ProjectSelfMediaScheduleService {
         return failed;
     }
 
+    private ProjectSelfMediaScheduleBatch reconcileBatchSummaryFromDetail(ProjectSelfMediaScheduleBatch batch,
+                                                                          List<ProjectSelfMediaScheduleBatchDetailVO.Item> items) {
+        if (batch == null || items == null || items.isEmpty() || STATUS_PROCESSING.equals(normalizeText(batch.getStatus()))) {
+            return batch;
+        }
+        String currentStatus = normalizeText(batch.getStatus());
+        if (!STATUS_CREATED.equals(currentStatus) && !STATUS_PARTIAL_FAILED.equals(currentStatus)) {
+            return batch;
+        }
+        int created = 0;
+        int rejected = 0;
+        for (ProjectSelfMediaScheduleBatchDetailVO.Item item : items) {
+            if (item.getScheduleId() != null) {
+                created++;
+                continue;
+            }
+            String generationStatus = normalizeText(item.getGenerationStatus());
+            String scheduleStatus = normalizeText(item.getScheduleStatus());
+            if ("failed".equals(generationStatus)
+                    || "rejected".equals(scheduleStatus)
+                    || item.getArticleId() != null) {
+                rejected++;
+            }
+        }
+        String status = rejected > 0 ? STATUS_PARTIAL_FAILED : STATUS_CREATED;
+        String failureMessage = rejected > 0 ? "部分文章生成或排期失败" : null;
+        boolean changed = !status.equals(normalizeText(batch.getStatus()))
+                || !Objects.equals(batch.getCreatedCount(), created)
+                || !Objects.equals(batch.getRejectedCount(), rejected)
+                || !Objects.equals(batch.getFailureMessage(), failureMessage);
+        if (!changed) {
+            return batch;
+        }
+        batch.setStatus(status);
+        batch.setCreatedCount(created);
+        batch.setRejectedCount(rejected);
+        batch.setFailureMessage(failureMessage);
+        batchMapper.updateById(batch);
+        return batch;
+    }
+
     private boolean isGeneratedWithoutSchedule(ProjectSelfMediaScheduleBatch batch,
                                                GenerationPlan plan,
                                                BatchArticleGenerationTask task) {
@@ -1454,9 +1498,10 @@ public class ProjectSelfMediaScheduleService {
         accountsByPlatform.forEach((platform, accounts) -> {
             CompanyChannelQuotaService.DistributionQuotaView quota =
                     companyChannelQuotaService.selfMediaDistributionQuota(project.getCompanyId(), platform);
+            String publishPlatform = firstText(ArticlePromptChannels.normalizeSelfMediaPublishPlatform(platform), platform);
             long activeSchedules = selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
                     project.getBrandId(),
-                    platform,
+                    publishPlatform,
                     periodStart,
                     periodEnd,
                     new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
@@ -1881,7 +1926,7 @@ public class ProjectSelfMediaScheduleService {
         return selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(
                 task.getArticleId(),
                 plan.selfMediaAccountId(),
-                normalizePlatform(plan.platform())
+                firstText(ArticlePromptChannels.normalizeSelfMediaPublishPlatform(plan.platform()), normalizePlatform(plan.platform()))
         );
     }
 
@@ -2096,7 +2141,7 @@ public class ProjectSelfMediaScheduleService {
         if (!StringUtils.hasText(value)) {
             return null;
         }
-        return ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(value.trim().toLowerCase(Locale.ROOT));
+        return ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(value.trim().toLowerCase(Locale.ROOT));
     }
 
     private String normalizeText(String value) {

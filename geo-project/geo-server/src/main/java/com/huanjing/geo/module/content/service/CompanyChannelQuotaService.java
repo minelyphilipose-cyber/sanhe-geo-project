@@ -510,11 +510,8 @@ public class CompanyChannelQuotaService {
         if (!StringUtils.hasText(platformValue)) {
             throw new BizException(400, "Self-media account is missing platform");
         }
-        String platform = ArticlePromptChannels.canonicalSubCode(
-                ArticlePromptChannels.SELF_MEDIA,
-                platformValue.trim().toLowerCase(Locale.ROOT)
-        );
-        if (!ArticlePromptChannels.SELF_MEDIA_SUBS.contains(platform)) {
+        String platform = ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(platformValue);
+        if (!StringUtils.hasText(platform)) {
             throw new BizException(400, "Unsupported self-media platform for quota: " + platformValue);
         }
         return ArticlePromptChannels.SELF_MEDIA + ":" + platform;

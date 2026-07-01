@@ -854,7 +854,7 @@ public class ContentAutoDistributionService {
         if (!StringUtils.hasText(channelCode) || !channelCode.startsWith(ArticlePromptChannels.SELF_MEDIA + ":")) {
             return null;
         }
-        return ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(
+        return ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(
                 channelCode.substring((ArticlePromptChannels.SELF_MEDIA + ":").length())
         );
     }
@@ -871,7 +871,7 @@ public class ContentAutoDistributionService {
                 .orderByAsc(SelfMediaAccount::getId));
         List<TargetRef> result = new ArrayList<>();
         for (SelfMediaAccount account : accounts) {
-            String platform = ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(account.getPlatform());
+            String platform = ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(account.getPlatform());
             if (platform == null) {
                 continue;
             }
@@ -920,7 +920,7 @@ public class ContentAutoDistributionService {
                     .eq(SelfMediaAccount::getStatus, "active")
                     .isNull(SelfMediaAccount::getDeletedAt))
                     .stream()
-                    .filter(account -> platform.equals(ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(account.getPlatform())))
+                    .filter(account -> platform.equals(ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(account.getPlatform())))
                     .count();
             if (accountCount <= 0) {
                 return "自媒体平台 / " + platformName + " 无可用账号，请先在品牌下配置并启用账号";

@@ -30,6 +30,8 @@ class ArticlePromptChannelsTest {
         assertEquals("wechat", ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(" WECHAT_MP "));
         assertEquals("xiaohongshu", ArticlePromptChannels.canonicalSelfMediaQuotaPlatform("xiaohongshu"));
         assertNull(ArticlePromptChannels.canonicalSelfMediaQuotaPlatform("unknown"));
+        assertEquals("douyin", ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(" DOUYIN_IMAGE_TEXT "));
+        assertEquals("wechat", ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(" WECHAT_MP "));
     }
 
     @Test
@@ -39,6 +41,9 @@ class ArticlePromptChannelsTest {
         assertEquals("douyin", ArticlePromptChannels.canonicalSelfMediaPublishPlatform("douyin_image_text"));
         assertEquals("toutiao", ArticlePromptChannels.canonicalSelfMediaPublishPlatform("toutiao"));
         assertNull(ArticlePromptChannels.canonicalSelfMediaPublishPlatform("unknown"));
+        assertEquals("wechat_mp", ArticlePromptChannels.normalizeSelfMediaPublishPlatform("wechat"));
+        assertEquals("wechat_mp", ArticlePromptChannels.normalizeSelfMediaPublishPlatform("WECHAT_MP"));
+        assertEquals("douyin", ArticlePromptChannels.normalizeSelfMediaPublishPlatform("douyin_image_text"));
     }
 
     @Test

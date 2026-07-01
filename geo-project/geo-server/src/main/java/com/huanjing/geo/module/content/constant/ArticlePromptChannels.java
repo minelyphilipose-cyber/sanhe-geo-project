@@ -157,7 +157,7 @@ public final class ArticlePromptChannels {
     }
 
     public static String canonicalSelfMediaPublishPlatform(String platform) {
-        String quotaPlatform = canonicalSelfMediaQuotaPlatform(platform);
+        String quotaPlatform = normalizeSelfMediaQuotaPlatform(platform);
         if (quotaPlatform == null) {
             return null;
         }
@@ -165,5 +165,13 @@ public final class ArticlePromptChannels {
             case "wechat" -> "wechat_mp";
             default -> quotaPlatform;
         };
+    }
+
+    public static String normalizeSelfMediaQuotaPlatform(String platform) {
+        return canonicalSelfMediaQuotaPlatform(platform);
+    }
+
+    public static String normalizeSelfMediaPublishPlatform(String platform) {
+        return canonicalSelfMediaPublishPlatform(platform);
     }
 }

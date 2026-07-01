@@ -132,7 +132,7 @@ public class SelfMediaAccountPlatformEligibilityService {
     }
 
     private String normalizePlatform(String platform) {
-        String canonical = ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(platform);
+        String canonical = ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(platform);
         if (!StringUtils.hasText(canonical)) {
             throw new BizException(400, "unsupported self-media platform");
         }
@@ -140,7 +140,7 @@ public class SelfMediaAccountPlatformEligibilityService {
     }
 
     private String scheduleCapabilityPlatform(String platform) {
-        String publishPlatform = ArticlePromptChannels.canonicalSelfMediaPublishPlatform(platform);
+        String publishPlatform = ArticlePromptChannels.normalizeSelfMediaPublishPlatform(platform);
         return StringUtils.hasText(publishPlatform) ? publishPlatform : normalizePlatform(platform);
     }
 }

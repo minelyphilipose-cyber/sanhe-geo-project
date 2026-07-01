@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
@@ -135,7 +136,7 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
             return PublishCheckResult.unknown(diagnostics("official_api_task_missing", row, null, null, null));
         }
         SelfMediaAccount account = requireAccount(task.getSelfMediaAccountId(), row.getPlatform());
-        AutoSelfMediaAdapter adapter = requireAdapter(account.getPlatform());
+        AutoSelfMediaAdapter adapter = requireAdapter(row.getPlatform());
         ReviewStatusResult status;
         try {
             status = adapter.refreshReviewStatus(task, account);
@@ -304,7 +305,7 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         task.setSelfMediaAccountId(account.getId());
         task.setAttemptNo(nextAttemptNo(article.getId(), account.getId()));
         task.setStatus("submitting");
-        task.setIntegrationMethod(account.getPlatform());
+        task.setIntegrationMethod(row.getPlatform());
         task.setDispatchMode("AUTO");
         task.setRetryCount(0);
         task.setOperatorId(row.getUpdatedBy() == null ? row.getCreatedBy() : row.getUpdatedBy());
@@ -624,7 +625,12 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
     }
 
     private String normalize(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        String publishPlatform = ArticlePromptChannels.normalizeSelfMediaPublishPlatform(normalized);
+        return StringUtils.hasText(publishPlatform) ? publishPlatform : normalized;
     }
 
     private String safeMessage(Exception ex) {

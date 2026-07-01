@@ -294,7 +294,7 @@ public class SelfMediaScheduleCapabilityService {
             fail("INVALID_PLATFORM", "platform must not be blank");
         }
         String normalized = platform.trim().toLowerCase(Locale.ROOT);
-        String publishPlatform = ArticlePromptChannels.canonicalSelfMediaPublishPlatform(normalized);
+        String publishPlatform = ArticlePromptChannels.normalizeSelfMediaPublishPlatform(normalized);
         return StringUtils.hasText(publishPlatform) ? publishPlatform : normalized;
     }
 

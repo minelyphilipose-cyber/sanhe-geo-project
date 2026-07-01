@@ -339,6 +339,32 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     @Test
+    void previewForProjectUsesQuotaPlatformForQuotaAndPublishPlatformForScheduleOccupation() {
+        ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
+        request.setTargetMonth("2026-06");
+        request.setSelfMediaAccountIds(List.of(20L));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        SelfMediaAccount account = account();
+        account.setPlatform("wechat_mp");
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account);
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "wechat"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:wechat", "month", "2026-06", 2, 5));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("wechat_mp"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(1L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(11, 9), slot(12, 9), slot(13, 9)));
+        when(scheduleAdapterRouter.rules("wechat", "platform_schedule"))
+                .thenReturn(SelfMediaPlatformScheduleRules.defaults());
+
+        assertEquals(3, service.previewForProject(7L, request).getPlannedCount());
+        verify(companyChannelQuotaService).selfMediaDistributionQuota(6L, "wechat");
+        verify(selfMediaPublishScheduleMapper).countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("wechat_mp"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList());
+    }
+
+    @Test
     void previewForProjectReportsInsufficientFutureSlots() {
         service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
         ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
@@ -710,6 +736,64 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals(88L, item.getScheduleId());
         assertEquals("pending", item.getScheduleStatus());
         assertEquals(LocalDateTime.of(2026, 6, 11, 10, 0), item.getPlannedPublishAt());
+    }
+
+    @Test
+    void getBatchDetailMatchesRetryScheduleByPublishPlatformAlias() {
+        ProjectSelfMediaScheduleBatch batch = new ProjectSelfMediaScheduleBatch();
+        batch.setId(33L);
+        batch.setProjectId(7L);
+        batch.setBrandId(8L);
+        batch.setCompanyId(6L);
+        batch.setTargetMonth("2026-06");
+        batch.setStatus("partial_failed");
+        batch.setRequestPayload("""
+                {
+                  "targetMonth": "2026-06",
+                  "scheduleStrategy": "platform_specific",
+                  "includeAdjustedWorkdays": false,
+                  "plans": [
+                    {
+                      "generationBatchId": 44,
+                      "generationTaskId": 55,
+                      "selfMediaAccountId": 20,
+                      "platform": "wechat"
+                    }
+                  ]
+                }
+                """);
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        SelfMediaAccount account = account();
+        account.setPlatform("wechat_mp");
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account);
+
+        BatchArticleGenerationTask task = generationTask(55L, 66L);
+        when(generationTaskMapper.selectById(55L)).thenReturn(task);
+
+        ArticleDraft article = new ArticleDraft();
+        article.setId(66L);
+        article.setTitle("公众号排期文章");
+        when(articleDraftMapper.selectById(66L)).thenReturn(article);
+        when(selfMediaPublishScheduleRequestMapper.selectByRequestKey(8L, "project-auto-33-55"))
+                .thenReturn(null);
+
+        SelfMediaPublishSchedule retrySchedule = new SelfMediaPublishSchedule();
+        retrySchedule.setId(132L);
+        retrySchedule.setStatus("pending");
+        retrySchedule.setPlatform("wechat_mp");
+        retrySchedule.setPlannedPublishAt(LocalDateTime.of(2026, 6, 11, 10, 10));
+        when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "wechat_mp"))
+                .thenReturn(retrySchedule);
+
+        ProjectSelfMediaScheduleBatchDetailVO detail = service.getBatchDetail(7L, "2026-06");
+
+        assertEquals("created", detail.getBatch().getStatus());
+        assertEquals(1, detail.getBatch().getCreatedCount());
+        assertEquals(0, detail.getBatch().getRejectedCount());
+        ProjectSelfMediaScheduleBatchDetailVO.Item item = detail.getItems().get(0);
+        assertEquals(132L, item.getScheduleId());
+        assertEquals("pending", item.getScheduleStatus());
+        assertEquals(LocalDateTime.of(2026, 6, 11, 10, 10), item.getPlannedPublishAt());
     }
 
     @Test

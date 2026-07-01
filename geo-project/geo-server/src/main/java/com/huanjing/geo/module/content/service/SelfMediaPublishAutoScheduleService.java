@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishAutoScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
@@ -144,7 +145,7 @@ public class SelfMediaPublishAutoScheduleService {
                             "SELF_MEDIA_ACCOUNT_NOT_FOUND", "自媒体账号不存在"));
                     continue;
                 }
-                String platform = normalize(account.getPlatform());
+                String platform = normalizePublishPlatform(account.getPlatform());
                 if (!StringUtils.hasText(platform)) {
                     response.getPlannedItems().add(rejectedItem(articleId, accountId, null,
                             "SELF_MEDIA_PLATFORM_MISSING", "自媒体账号缺少平台"));
@@ -184,8 +185,9 @@ public class SelfMediaPublishAutoScheduleService {
         LocalDateTime periodEnd = request.targetMonth().plusMonths(1).atDay(1).atStartOfDay();
         Map<String, Integer> remainingByPlatform = new LinkedHashMap<>();
         request.platforms().forEach(platform -> {
+            String quotaPlatform = normalizeQuotaPlatform(platform);
             CompanyChannelQuotaService.DistributionQuotaView quota =
-                    companyChannelQuotaService.selfMediaDistributionQuota(request.companyId(), platform);
+                    companyChannelQuotaService.selfMediaDistributionQuota(request.companyId(), quotaPlatform);
             long activeSchedules = scheduleMapper.countActiveByBrandPlatformAndPeriod(
                     request.brandId(),
                     platform,
@@ -264,7 +266,7 @@ public class SelfMediaPublishAutoScheduleService {
         List<Long> accountIds = distinctPositive(request.getSelfMediaAccountIds(), "selfMediaAccountIds");
         List<String> platforms = accountIds.stream()
                 .map(selfMediaAccountMapper::selectById)
-                .map(account -> account == null ? null : normalize(account.getPlatform()))
+                .map(account -> account == null ? null : normalizePublishPlatform(account.getPlatform()))
                 .filter(StringUtils::hasText)
                 .distinct()
                 .toList();
@@ -314,6 +316,23 @@ public class SelfMediaPublishAutoScheduleService {
 
     private String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizePublishPlatform(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        String publishPlatform = ArticlePromptChannels.normalizeSelfMediaPublishPlatform(normalized);
+        return StringUtils.hasText(publishPlatform) ? publishPlatform : normalized;
+    }
+
+    private String normalizeQuotaPlatform(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String quotaPlatform = ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(value);
+        return StringUtils.hasText(quotaPlatform) ? quotaPlatform : normalize(value);
     }
 
     private String autoIdempotencyKey(Long brandId, SelfMediaPublishAutoScheduleItemVO item, String strategy) {

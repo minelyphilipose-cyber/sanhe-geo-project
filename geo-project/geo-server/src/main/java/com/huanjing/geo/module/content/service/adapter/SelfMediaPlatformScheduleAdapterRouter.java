@@ -63,7 +63,7 @@ public class SelfMediaPlatformScheduleAdapterRouter {
             return "";
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        String publishPlatform = ArticlePromptChannels.canonicalSelfMediaPublishPlatform(normalized);
+        String publishPlatform = ArticlePromptChannels.normalizeSelfMediaPublishPlatform(normalized);
         return StringUtils.hasText(publishPlatform) ? publishPlatform : normalized;
     }
 }
