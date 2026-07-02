@@ -1,7 +1,11 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
@@ -17,14 +21,18 @@ import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleBatch;
+import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleCarryOver;
 import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleConfig;
+import com.huanjing.geo.module.content.entity.ProjectSelfMediaSchedulePlan;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleBatchMapper;
+import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleCarryOverMapper;
 import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleConfigMapper;
+import com.huanjing.geo.module.content.mapper.ProjectSelfMediaSchedulePlanMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
@@ -59,6 +67,8 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -78,6 +88,16 @@ public class ProjectSelfMediaScheduleService {
     private static final int AUTO_COMPENSATION_MAX_ATTEMPTS = 3;
     private static final int LOCAL_AGENT_ONLINE_WINDOW_MINUTES = 10;
     private static final int LOCAL_AGENT_ASSUMED_CAPACITY = 2;
+    private static final String ERROR_CAPACITY_INSUFFICIENT = "SELF_MEDIA_SCHEDULE_CAPACITY_INSUFFICIENT";
+    private static final String ERROR_COMPRESS_NOT_SUPPORTED = "SELF_MEDIA_SCHEDULE_COMPRESS_NOT_SUPPORTED";
+    private static final String ERROR_DECISION_REASON_REQUIRED = "SELF_MEDIA_SCHEDULE_DECISION_REASON_REQUIRED";
+    private static final String STRATEGY_STRICT_CURRENT_MONTH = "strict_current_month";
+    private static final String STRATEGY_CARRY_OVER = "carry_over";
+    private static final String STRATEGY_COMPRESSED_CURRENT_MONTH = "compressed_current_month";
+    private static final String CARRY_OVER_STATUS_PENDING = "pending";
+    private static final String CARRY_OVER_STATUS_CONSUMED = "consumed";
+    private static final String PERM_SELF_MEDIA_SCHEDULE_LATE_START_DECIDE =
+            "content.self_media_schedule.late_start_decide";
     public static final String TRIGGER_MANUAL = "manual";
     public static final String TRIGGER_JOB = "job";
     private static final String STATUS_PROCESSING = "processing";
@@ -90,6 +110,8 @@ public class ProjectSelfMediaScheduleService {
     private final BrandMapper brandMapper;
     private final ProjectSelfMediaScheduleConfigMapper configMapper;
     private final ProjectSelfMediaScheduleBatchMapper batchMapper;
+    private final ProjectSelfMediaScheduleCarryOverMapper carryOverMapper;
+    private final ProjectSelfMediaSchedulePlanMapper planMapper;
     private final ArticleDraftMapper articleDraftMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final SelfMediaPublishScheduleMapper selfMediaPublishScheduleMapper;
@@ -398,14 +420,10 @@ public class ProjectSelfMediaScheduleService {
         List<Long> accountIds = autoRequest.getSelfMediaAccountIds().isEmpty()
                 ? selectBrandAccountIds(project.getBrandId())
                 : autoRequest.getSelfMediaAccountIds();
-        List<AccountPublishPlan> plans = buildAccountPublishPlans(project, autoRequest.getTargetMonth(), accountIds);
-        SelfMediaPublishAutoScheduleResponse response = acceptedResponse(autoRequest, plans.size());
-        response.setSlotGroups(analyzeAvailableSlots(
-                YearMonth.parse(autoRequest.getTargetMonth()),
-                plans,
-                autoRequest.getScheduleStrategy(),
-                Boolean.TRUE.equals(autoRequest.getIncludeAdjustedWorkdays())
-        ));
+        AccountPublishPlanResult planResult = buildAccountPublishPlans(project, autoRequest.getTargetMonth(), accountIds);
+        List<AccountPublishPlan> plans = planResult.plans();
+        SelfMediaPublishAutoScheduleResponse response = evaluateCapacity(autoRequest, plans);
+        applyPlanBuildWarnings(response, planResult);
         response.getPlannedItems().addAll(buildPreviewItems(response.getSlotGroups(), plans));
         response.setRejectedCount((int) response.getPlannedItems().stream()
                 .filter(item -> "rejected".equals(item.getStatus()))
@@ -501,6 +519,246 @@ public class ProjectSelfMediaScheduleService {
         return processed;
     }
 
+    public int createDueEnabledProjectPlans(String targetMonth,
+                                            String triggerMode,
+                                            LocalDateTime windowStart,
+                                            int windowHours,
+                                            int jitterMinutes,
+                                            int pageSize) {
+        parseTargetMonth(targetMonth);
+        List<ProjectSelfMediaScheduleConfig> configs = new ArrayList<>();
+        Long lastProjectId = 0L;
+        int safePageSize = Math.max(1, pageSize);
+        while (true) {
+            List<ProjectSelfMediaScheduleConfig> page = configMapper.selectEnabledPage(lastProjectId, safePageSize);
+            if (page.isEmpty()) {
+                break;
+            }
+            configs.addAll(page);
+            lastProjectId = page.get(page.size() - 1).getProjectId();
+        }
+        if (configs.isEmpty()) {
+            return 0;
+        }
+        List<LocalDateTime> executeTimes = spreadMonthlySchedulePlanTimes(
+                windowStart == null ? LocalDateTime.now(clock) : windowStart,
+                configs.size(),
+                windowHours,
+                jitterMinutes
+        );
+        int created = 0;
+        for (int i = 0; i < configs.size(); i++) {
+            ProjectSelfMediaScheduleConfig config = configs.get(i);
+            Project project = projectMapper.selectById(config.getProjectId());
+            if (project == null || project.getDeletedAt() != null) {
+                continue;
+            }
+            ProjectSelfMediaSchedulePlan plan = new ProjectSelfMediaSchedulePlan();
+            plan.setProjectId(project.getId());
+            plan.setCompanyId(project.getCompanyId());
+            plan.setBrandId(project.getBrandId());
+            plan.setTargetMonth(targetMonth);
+            plan.setTriggerMode(StringUtils.hasText(triggerMode) ? triggerMode.trim() : TRIGGER_JOB);
+            plan.setPlannedExecuteAt(executeTimes.get(i));
+            plan.setNextAttemptAt(executeTimes.get(i));
+            plan.setStatus("pending");
+            plan.setRetryCount(0);
+            try {
+                plan.setCreatedBy(resolveSystemOperatorId(project, config));
+                planMapper.insert(plan);
+                created++;
+            } catch (DuplicateKeyException ignored) {
+                if (resetExistingMonthlyPlanForCompensation(plan)) {
+                    created++;
+                }
+            } catch (Exception ex) {
+                log.warn("project self-media schedule stagger plan create failed projectId={} month={} error={}",
+                        project.getId(), targetMonth, trimMessage(ex.getMessage()));
+            }
+        }
+        return created;
+    }
+
+    private boolean resetExistingMonthlyPlanForCompensation(ProjectSelfMediaSchedulePlan plan) {
+        if (plan == null || !"compensation".equals(plan.getTriggerMode())) {
+            return false;
+        }
+        ProjectSelfMediaSchedulePlan existing = planMapper.selectOne(
+                new LambdaQueryWrapper<ProjectSelfMediaSchedulePlan>()
+                        .eq(ProjectSelfMediaSchedulePlan::getProjectId, plan.getProjectId())
+                        .eq(ProjectSelfMediaSchedulePlan::getTargetMonth, plan.getTargetMonth())
+                        .last("LIMIT 1")
+        );
+        if (existing == null || !List.of("failed", "failed_terminal", "skipped").contains(existing.getStatus())) {
+            return false;
+        }
+        int updated = planMapper.update(null, new LambdaUpdateWrapper<ProjectSelfMediaSchedulePlan>()
+                .eq(ProjectSelfMediaSchedulePlan::getId, existing.getId())
+                .in(ProjectSelfMediaSchedulePlan::getStatus, List.of("failed", "failed_terminal", "skipped"))
+                .set(ProjectSelfMediaSchedulePlan::getTriggerMode, plan.getTriggerMode())
+                .set(ProjectSelfMediaSchedulePlan::getPlannedExecuteAt, plan.getPlannedExecuteAt())
+                .set(ProjectSelfMediaSchedulePlan::getNextAttemptAt, plan.getNextAttemptAt())
+                .set(ProjectSelfMediaSchedulePlan::getStatus, "pending")
+                .set(ProjectSelfMediaSchedulePlan::getRetryCount, 0)
+                .set(ProjectSelfMediaSchedulePlan::getFailureMessage, null)
+                .set(ProjectSelfMediaSchedulePlan::getCreatedBy, plan.getCreatedBy()));
+        return updated > 0;
+    }
+
+    public int processDueProjectSchedulePlans(int limit, int retryMaxCount) {
+        return processDueProjectSchedulePlans(limit, retryMaxCount, 120);
+    }
+
+    public int processDueProjectSchedulePlans(int limit, int retryMaxCount, int runningTimeoutMinutes) {
+        LocalDateTime now = LocalDateTime.now(clock).withNano(0);
+        int safeRetryMax = Math.max(1, retryMaxCount);
+        recoverStaleRunningProjectSchedulePlans(safeRetryMax, runningTimeoutMinutes);
+        List<ProjectSelfMediaSchedulePlan> plans = planMapper.selectList(
+                new LambdaQueryWrapper<ProjectSelfMediaSchedulePlan>()
+                        .in(ProjectSelfMediaSchedulePlan::getStatus, List.of("pending", "failed"))
+                        .le(ProjectSelfMediaSchedulePlan::getPlannedExecuteAt, now)
+                        .le(ProjectSelfMediaSchedulePlan::getNextAttemptAt, now)
+                        .lt(ProjectSelfMediaSchedulePlan::getRetryCount, safeRetryMax)
+                        .orderByAsc(ProjectSelfMediaSchedulePlan::getPlannedExecuteAt, ProjectSelfMediaSchedulePlan::getId)
+                        .last("LIMIT " + Math.max(1, limit))
+        );
+        int processed = 0;
+        for (ProjectSelfMediaSchedulePlan plan : plans) {
+            String status = plan.getStatus();
+            int claimed = planMapper.update(null, new LambdaUpdateWrapper<ProjectSelfMediaSchedulePlan>()
+                    .eq(ProjectSelfMediaSchedulePlan::getId, plan.getId())
+                    .eq(ProjectSelfMediaSchedulePlan::getStatus, status)
+                    .set(ProjectSelfMediaSchedulePlan::getStatus, "running")
+                    .set(ProjectSelfMediaSchedulePlan::getFailureMessage, null));
+            if (claimed <= 0) {
+                continue;
+            }
+            runProjectSchedulePlan(plan, safeRetryMax);
+            processed++;
+        }
+        return processed;
+    }
+
+    public int recoverStaleRunningProjectSchedulePlans(int retryMaxCount, int runningTimeoutMinutes) {
+        LocalDateTime now = LocalDateTime.now(clock).withNano(0);
+        LocalDateTime deadline = now.minusMinutes(Math.max(1, runningTimeoutMinutes));
+        int safeRetryMax = Math.max(1, retryMaxCount);
+        List<ProjectSelfMediaSchedulePlan> stalePlans = planMapper.selectList(
+                new QueryWrapper<ProjectSelfMediaSchedulePlan>()
+                        .eq("status", "running")
+                        .le("updated_at", deadline)
+                        .orderByAsc("updated_at", "id")
+        );
+        int recovered = 0;
+        for (ProjectSelfMediaSchedulePlan plan : stalePlans) {
+            int nextRetryCount = (plan.getRetryCount() == null ? 0 : plan.getRetryCount()) + 1;
+            boolean exhausted = nextRetryCount >= safeRetryMax;
+            int updated = planMapper.update(null, new UpdateWrapper<ProjectSelfMediaSchedulePlan>()
+                    .eq("id", plan.getId())
+                    .eq("status", "running")
+                    .set("status", exhausted ? "failed_terminal" : "failed")
+                    .set("retry_count", nextRetryCount)
+                    .set("next_attempt_at", exhausted ? null : now)
+                    .set("failure_message",
+                            exhausted
+                                    ? "排期计划运行超时且已达到最大重试次数，请人工确认"
+                                    : "排期计划运行超时，已释放为可重试状态"));
+            recovered += updated > 0 ? 1 : 0;
+        }
+        if (recovered > 0) {
+            log.warn("project self-media stale running schedule plans recovered count={} timeoutMinutes={}",
+                    recovered, Math.max(1, runningTimeoutMinutes));
+        }
+        return recovered;
+    }
+
+    private void runProjectSchedulePlan(ProjectSelfMediaSchedulePlan plan, int retryMaxCount) {
+        try {
+            YearMonth parsedTargetMonth = parseTargetMonth(plan.getTargetMonth());
+            ProjectSelfMediaScheduleConfig config = configMapper.selectByProjectId(plan.getProjectId());
+            if (config == null || !Boolean.TRUE.equals(config.getAutoScheduleEnabled())) {
+                markProjectSchedulePlanTerminal(plan, "skipped", "项目未开启自媒体自动排期开关");
+                return;
+            }
+            ProjectSelfMediaScheduleBatch existed = settleTerminalGenerationFailure(
+                    batchMapper.selectByProjectAndMonth(plan.getProjectId(), plan.getTargetMonth()));
+            if (isActiveOrCompletedBatch(existed)) {
+                markProjectSchedulePlanTerminal(plan, "completed", null);
+                return;
+            }
+            Project project = projectMapper.selectById(plan.getProjectId());
+            if (project == null || project.getDeletedAt() != null) {
+                markProjectSchedulePlanTerminal(plan, "skipped", "项目不存在或已删除");
+                return;
+            }
+            Long operatorId = plan.getCreatedBy() != null && plan.getCreatedBy() > 0
+                    ? plan.getCreatedBy()
+                    : resolveSystemOperatorId(project, config);
+            if (isFailedBatchWithGenerationPlan(existed)) {
+                recordSkippedBatch(project, config, plan.getTargetMonth(), "本月已有失败批次且已生成文章计划，请人工进入批次明细补排期/重试", operatorId, existed);
+                markProjectSchedulePlanTerminal(plan, "skipped", "本月已有失败批次且已生成文章计划");
+                return;
+            }
+            String projectBlockReason = projectAutoScheduleBlockReason(project, parsedTargetMonth);
+            if (projectBlockReason != null) {
+                recordSkippedBatch(project, config, plan.getTargetMonth(), projectBlockReason, operatorId, existed);
+                markProjectSchedulePlanTerminal(plan, "skipped", projectBlockReason);
+                return;
+            }
+            List<Long> accountIds = selectBrandAccountIds(project.getBrandId());
+            if (accountIds.isEmpty()) {
+                recordSkippedBatch(project, config, plan.getTargetMonth(), "项目品牌暂无可用于自媒体自动排期的有效账号", operatorId, existed);
+                markProjectSchedulePlanTerminal(plan, "skipped", "项目品牌暂无可用于自媒体自动排期的有效账号");
+                return;
+            }
+            ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
+            request.setSelfMediaAccountIds(accountIds);
+            request.setTargetMonth(plan.getTargetMonth());
+            request.setScheduleStrategy(SelfMediaPublishAutoScheduleService.STRATEGY_PLATFORM_SPECIFIC);
+            request.setIncludeAdjustedWorkdays(config.getIncludeAdjustedWorkdays());
+            acceptGenerationBatch(project, config, request, plan.getTriggerMode(), operatorId, existed, null);
+            markProjectSchedulePlanTerminal(plan, "completed", null);
+        } catch (Exception ex) {
+            int retryCount = (plan.getRetryCount() == null ? 0 : plan.getRetryCount()) + 1;
+            boolean exhausted = retryCount >= retryMaxCount;
+            planMapper.update(null, new LambdaUpdateWrapper<ProjectSelfMediaSchedulePlan>()
+                    .eq(ProjectSelfMediaSchedulePlan::getId, plan.getId())
+                    .set(ProjectSelfMediaSchedulePlan::getStatus, exhausted ? "failed_terminal" : "failed")
+                    .set(ProjectSelfMediaSchedulePlan::getRetryCount, retryCount)
+                    .set(ProjectSelfMediaSchedulePlan::getNextAttemptAt, LocalDateTime.now(clock).plusMinutes(15))
+                    .set(ProjectSelfMediaSchedulePlan::getFailureMessage, trimMessage(ex.getMessage())));
+        }
+    }
+
+    private void markProjectSchedulePlanTerminal(ProjectSelfMediaSchedulePlan plan, String status, String message) {
+        planMapper.update(null, new LambdaUpdateWrapper<ProjectSelfMediaSchedulePlan>()
+                .eq(ProjectSelfMediaSchedulePlan::getId, plan.getId())
+                .set(ProjectSelfMediaSchedulePlan::getStatus, status)
+                .set(ProjectSelfMediaSchedulePlan::getFailureMessage, StringUtils.hasText(message) ? trimMessage(message) : null));
+    }
+
+    private List<LocalDateTime> spreadMonthlySchedulePlanTimes(LocalDateTime windowStart,
+                                                              int count,
+                                                              int windowHours,
+                                                              int jitterMinutes) {
+        if (count <= 0) {
+            return List.of();
+        }
+        LocalDateTime base = (windowStart == null ? LocalDateTime.now(clock) : windowStart).withNano(0);
+        long windowSeconds = TimeUnit.HOURS.toSeconds(Math.max(1, windowHours));
+        long jitterSeconds = Math.max(0, jitterMinutes) * 60L;
+        List<LocalDateTime> times = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            long offsetSeconds = count <= 1 ? 0L : (windowSeconds * i) / count;
+            if (jitterSeconds > 0) {
+                offsetSeconds += ThreadLocalRandom.current().nextLong(jitterSeconds + 1);
+            }
+            offsetSeconds = Math.min(offsetSeconds, windowSeconds);
+            times.add(base.plusSeconds(offsetSeconds).withNano(0));
+        }
+        return times;
+    }
+
     public int progressProcessingBatches(int limit) {
         int processed = 0;
         for (ProjectSelfMediaScheduleBatch batch : batchMapper.selectProcessing(Math.max(1, limit))) {
@@ -568,6 +826,16 @@ public class ProjectSelfMediaScheduleService {
         response.setCreated(true);
         response.setPlannedCount(batch.getPlannedCount() == null ? 0 : batch.getPlannedCount());
         response.setRejectedCount(batch.getRejectedCount() == null ? 0 : batch.getRejectedCount());
+        response.setRequestedCount(batch.getRequestedCount());
+        response.setDeficitCount(batch.getDeficitCount());
+        response.setCarryOverCount(batch.getCarryOverCount());
+        if (safeCount(batch.getCarryOverCount()) > 0) {
+            response.setDecisionStrategy(STRATEGY_CARRY_OVER);
+        }
+        if (StringUtils.hasText(batch.getCapacitySnapshotJson())) {
+            SelfMediaPublishAutoScheduleResponse capacity = readAutoScheduleResponse(batch.getCapacitySnapshotJson());
+            applyCapacityFields(response, capacity);
+        }
         return response;
     }
 
@@ -677,21 +945,67 @@ public class ProjectSelfMediaScheduleService {
         List<Long> accountIds = autoRequest.getSelfMediaAccountIds().isEmpty()
                 ? selectBrandAccountIds(project.getBrandId())
                 : autoRequest.getSelfMediaAccountIds();
-        List<AccountPublishPlan> plans = buildAccountPublishPlans(project, autoRequest.getTargetMonth(), accountIds);
+        AccountPublishPlanResult planResult = buildAccountPublishPlans(project, autoRequest.getTargetMonth(), accountIds);
+        List<AccountPublishPlan> plans = planResult.plans();
         if (plans.isEmpty()) {
             throw new BizException(ERROR_CODE, "该项目本月自媒体平台剩余额度为 0，无法创建自动化排期");
         }
-        validateAvailableSlotsBeforeGeneration(autoRequest, plans);
+        SelfMediaPublishAutoScheduleResponse capacity = evaluateCapacity(autoRequest, plans);
+        applyPlanBuildWarnings(capacity, planResult);
+        if (!Boolean.TRUE.equals(capacity.getEnough())) {
+            return acceptInsufficientCapacityBatch(
+                    project,
+                    autoRequest,
+                    request,
+                    triggerMode,
+                    operatorId,
+                    reusableBatch,
+                    idempotencyKey,
+                    plans,
+                    capacity
+            );
+        }
 
+        return acceptGenerationBatchWithPlans(
+                project,
+                autoRequest,
+                triggerMode,
+                operatorId,
+                reusableBatch,
+                idempotencyKey,
+                plans,
+                capacity,
+                null
+        );
+    }
+
+    private SelfMediaPublishAutoScheduleResponse acceptGenerationBatchWithPlans(Project project,
+                                                                                SelfMediaPublishAutoScheduleRequest autoRequest,
+                                                                                String triggerMode,
+                                                                                Long operatorId,
+                                                                                ProjectSelfMediaScheduleBatch reusableBatch,
+                                                                                String idempotencyKey,
+                                                                                List<AccountPublishPlan> plans,
+                                                                                SelfMediaPublishAutoScheduleResponse capacity,
+                                                                                CarryOverResult carryOverResult) {
         ProjectSelfMediaScheduleBatch batch = reusableBatch == null
                 ? newBatch(project, autoRequest, triggerMode, operatorId)
                 : resetReusableBatch(reusableBatch, project, autoRequest, triggerMode, operatorId);
+        SelfMediaPublishAutoScheduleResponse capacitySnapshot = capacity != null
+                ? capacity
+                : carryOverResult == null ? null : carryOverResult.capacity();
         batch.setStatus(STATUS_PROCESSING);
         batch.setArticleCount(plans.size());
         batch.setAccountCount((int) plans.stream().map(AccountPublishPlan::accountId).distinct().count());
         batch.setPlannedCount(plans.size());
         batch.setCreatedCount(0);
         batch.setRejectedCount(0);
+        batch.setRequestedCount(capacitySnapshot == null ? plans.size() : safeCount(capacitySnapshot.getRequestedCount()));
+        batch.setDeficitCount(capacitySnapshot == null ? 0 : safeCount(capacitySnapshot.getDeficitCount()));
+        batch.setCarryOverCount(carryOverResult == null ? 0 : safeCount(carryOverResult.count()));
+        batch.setDecisionOperatorId(carryOverResult == null ? null : operatorId);
+        batch.setDecisionReason(carryOverResult == null ? null : trimMessage(carryOverResult.reason()));
+        batch.setCapacitySnapshotJson(capacitySnapshot == null ? null : toJson(capacitySnapshot));
         batch.setGenerationBatchIds(null);
         batch.setResultSnapshot(null);
         batch.setFailureMessage(null);
@@ -725,8 +1039,26 @@ public class ProjectSelfMediaScheduleService {
                     generationPlans
             )));
             batchMapper.updateById(batch);
+            consumePendingCarryOvers(plans);
+            CarryOverResult createdCarryOver = carryOverResult;
+            if (carryOverResult != null) {
+                createdCarryOver = createCarryOver(
+                        project,
+                        batch.getId(),
+                        autoRequest.getTargetMonth(),
+                        carryOverResult.capacity(),
+                        carryOverResult.plans(),
+                        operatorId,
+                        carryOverResult.reason()
+                );
+            }
             SelfMediaPublishAutoScheduleResponse response = acceptedResponse(autoRequest, plans.size());
             response.setCreated(true);
+            if (createdCarryOver != null) {
+                applyCapacityFields(response, createdCarryOver.capacity());
+                response.setPlannedCount(plans.size());
+                applyCarryOverResult(response, createdCarryOver);
+            }
             return response;
         } catch (RuntimeException ex) {
             batch.setStatus(STATUS_FAILED);
@@ -1110,7 +1442,7 @@ public class ProjectSelfMediaScheduleService {
                 throw new BizException(
                         ERROR_CODE,
                         firstText(group.getMessage(),
-                                group.getPlatformLabel() + "本月剩余可自动排期时间不足，请选择下月或减少排期数量")
+                                group.getPlatformLabel() + "目标月份剩余可自动排期时间不足，请选择其他月份或减少排期数量")
                 );
             }
         }
@@ -1132,7 +1464,7 @@ public class ProjectSelfMediaScheduleService {
             int cursor = cursorByPlatform.getOrDefault(platform, 0);
             List<SelfMediaPublishAutoScheduleResponse.SlotPreview> previews = previewsByPlatform.get(platform);
             if (previews == null || cursor >= previews.size()) {
-                throw new BizException(ERROR_CODE, platformLabel(platform) + "本月剩余可自动排期时间不足，请选择下月或减少排期数量");
+                throw new BizException(ERROR_CODE, platformLabel(platform) + "目标月份剩余可自动排期时间不足，请选择其他月份或减少排期数量");
             }
             SelfMediaPublishAutoScheduleResponse.SlotPreview preview = previews.get(cursor);
             cursorByPlatform.put(platform, cursor + 1);
@@ -1158,7 +1490,10 @@ public class ProjectSelfMediaScheduleService {
             boolean includeAdjustedWorkdays
     ) {
         Map<String, List<AccountPublishPlan>> plansByPlatform = new LinkedHashMap<>();
-        for (AccountPublishPlan plan : plans) {
+        List<AccountPublishPlan> orderedPlans = plans.stream()
+                .sorted(Comparator.comparing((AccountPublishPlan plan) -> plan.carryOverId() == null))
+                .toList();
+        for (AccountPublishPlan plan : orderedPlans) {
             String platform = firstText(normalizePlatform(plan.platform()), "unknown");
             plansByPlatform.computeIfAbsent(platform, ignored -> new ArrayList<>()).add(plan);
         }
@@ -1173,18 +1508,25 @@ public class ProjectSelfMediaScheduleService {
                     .filter(slot -> isFutureExecutableSlot(slot, platform, scheduleStrategy, now))
                     .sorted(Comparator.comparing(BusinessCalendarService.PublishSlot::plannedAt))
                     .toList();
+            int requestedCount = entry.getValue().size();
+            int availableSlotCount = platformSlots.size();
             SelfMediaPublishAutoScheduleResponse.SlotGroup group = new SelfMediaPublishAutoScheduleResponse.SlotGroup();
             group.setPlatform(platform);
             group.setPlatformLabel(platformLabel(platform));
             group.setScheduleStrategy(scheduleStrategy);
-            group.setRequestedCount(entry.getValue().size());
-            group.setAvailableSlotCount(platformSlots.size());
-            group.setEnough(platformSlots.size() >= entry.getValue().size());
+            group.setRequestedCount(requestedCount);
+            group.setAvailableSlotCount(availableSlotCount);
+            group.setDeficitCount(Math.max(0, requestedCount - availableSlotCount));
+            group.setRemainingWorkdayCount((int) platformSlots.stream()
+                    .map(BusinessCalendarService.PublishSlot::date)
+                    .distinct()
+                    .count());
+            group.setEnough(availableSlotCount >= requestedCount);
             group.setMessage(Boolean.TRUE.equals(group.getEnough())
-                    ? "可满足本月自动排期"
-                    : platformLabel(platform) + "本月剩余可自动排期时间不足，请选择下月或减少排期数量");
+                    ? "可满足目标月份自动排期"
+                    : platformLabel(platform) + "目标月份剩余可自动排期时间不足，请选择其他月份或减少排期数量");
             List<BusinessCalendarService.PublishSlot> selectedSlots = group.getEnough()
-                    ? selectEvenlyFromSlots(platformSlots, entry.getValue().size())
+                    ? selectEvenlyFromSlots(platformSlots, requestedCount)
                     : List.of();
             for (BusinessCalendarService.PublishSlot slot : selectedSlots) {
                 SelfMediaPublishAutoScheduleResponse.SlotPreview preview = new SelfMediaPublishAutoScheduleResponse.SlotPreview();
@@ -1198,23 +1540,290 @@ public class ProjectSelfMediaScheduleService {
         return groups;
     }
 
-    private void validateAvailableSlotsBeforeGeneration(SelfMediaPublishAutoScheduleRequest request,
-                                                        List<AccountPublishPlan> plans) {
+    private SelfMediaPublishAutoScheduleResponse evaluateCapacity(SelfMediaPublishAutoScheduleRequest request,
+                                                                  List<AccountPublishPlan> plans) {
         List<SelfMediaPublishAutoScheduleResponse.SlotGroup> groups = analyzeAvailableSlots(
                 YearMonth.parse(request.getTargetMonth()),
                 plans,
                 request.getScheduleStrategy(),
                 Boolean.TRUE.equals(request.getIncludeAdjustedWorkdays())
         );
-        for (SelfMediaPublishAutoScheduleResponse.SlotGroup group : groups) {
-            if (!Boolean.TRUE.equals(group.getEnough())) {
-                throw new BizException(
-                        ERROR_CODE,
-                        firstText(group.getMessage(),
-                                group.getPlatformLabel() + "本月剩余可自动排期时间不足，请选择下月或减少排期数量")
-                );
+        SelfMediaPublishAutoScheduleResponse summary = acceptedResponse(request, plans.size());
+        summary.setSlotGroups(groups);
+        applyCapacitySummary(summary);
+        return summary;
+    }
+
+    private void validateAvailableSlotsBeforeGeneration(SelfMediaPublishAutoScheduleRequest request,
+                                                        List<AccountPublishPlan> plans) {
+        SelfMediaPublishAutoScheduleResponse summary = evaluateCapacity(request, plans);
+        if (!Boolean.TRUE.equals(summary.getEnough())) {
+            throwCapacityInsufficient(summary);
+        }
+    }
+
+    private SelfMediaPublishAutoScheduleResponse acceptInsufficientCapacityBatch(
+            Project project,
+            SelfMediaPublishAutoScheduleRequest autoRequest,
+            ProjectSelfMediaAutoScheduleRequest request,
+            String triggerMode,
+            Long operatorId,
+            ProjectSelfMediaScheduleBatch reusableBatch,
+            String idempotencyKey,
+            List<AccountPublishPlan> plans,
+            SelfMediaPublishAutoScheduleResponse capacity
+    ) {
+        String decisionStrategy = normalizeText(request == null ? null : request.getDecisionStrategy());
+        if (STRATEGY_COMPRESSED_CURRENT_MONTH.equals(decisionStrategy)) {
+            throw new BizException(
+                    ERROR_CODE,
+                    "压缩本月排期暂未开放，请选择结转补排或减少排期数量",
+                    400,
+                    Map.of("errorCode", ERROR_COMPRESS_NOT_SUPPORTED)
+            );
+        }
+        if (!STRATEGY_CARRY_OVER.equals(decisionStrategy)) {
+            throwCapacityInsufficient(capacity);
+        }
+        String decisionReason = trimToNull(request == null ? null : request.getDecisionReason());
+        if (!StringUtils.hasText(decisionReason)) {
+            throw new BizException(
+                    ERROR_CODE,
+                    "结转补排必须填写决策原因",
+                    400,
+                    Map.of("errorCode", ERROR_DECISION_REASON_REQUIRED)
+            );
+        }
+        currentUserService.ensurePermission(PERM_SELF_MEDIA_SCHEDULE_LATE_START_DECIDE);
+        CarryOverSplit split = splitPlansByCapacity(plans, capacity);
+        if (split.currentMonthPlans().isEmpty()) {
+            CarryOverResult result = createCarryOver(
+                    project,
+                    null,
+                    autoRequest.getTargetMonth(),
+                    capacity,
+                    split.carryOverPlans(),
+                    operatorId,
+                    decisionReason
+            );
+            SelfMediaPublishAutoScheduleResponse response = acceptedResponse(autoRequest, 0);
+            response.setCreated(false);
+            response.setDecisionStrategy(STRATEGY_CARRY_OVER);
+            applyCapacityFields(response, capacity);
+            applyCarryOverResult(response, result);
+            return response;
+        }
+        CarryOverResult result = new CarryOverResult(
+                null,
+                split.carryOverPlans().size(),
+                YearMonth.parse(autoRequest.getTargetMonth()).plusMonths(1).toString(),
+                capacity,
+                split.carryOverPlans(),
+                decisionReason
+        );
+        return acceptGenerationBatchWithPlans(
+                project,
+                autoRequest,
+                triggerMode,
+                operatorId,
+                reusableBatch,
+                idempotencyKey,
+                split.currentMonthPlans(),
+                capacity,
+                result
+        );
+    }
+
+    private CarryOverSplit splitPlansByCapacity(List<AccountPublishPlan> plans,
+                                                SelfMediaPublishAutoScheduleResponse capacity) {
+        Map<String, Integer> remainingByPlatform = new LinkedHashMap<>();
+        for (SelfMediaPublishAutoScheduleResponse.SlotGroup group : capacity.getSlotGroups()) {
+            String platform = firstText(normalizePlatform(group.getPlatform()), "unknown");
+            int requested = safeCount(group.getRequestedCount());
+            int available = safeCount(group.getAvailableSlotCount());
+            remainingByPlatform.put(platform, Math.min(requested, available));
+        }
+        List<AccountPublishPlan> current = new ArrayList<>();
+        List<AccountPublishPlan> carryOver = new ArrayList<>();
+        List<AccountPublishPlan> orderedPlans = plans.stream()
+                .sorted(Comparator.comparing((AccountPublishPlan plan) -> plan.carryOverId() == null))
+                .toList();
+        for (AccountPublishPlan plan : orderedPlans) {
+            String platform = firstText(normalizePlatform(plan.platform()), "unknown");
+            int remaining = remainingByPlatform.getOrDefault(platform, 0);
+            if (remaining > 0) {
+                current.add(plan);
+                remainingByPlatform.put(platform, remaining - 1);
+            } else {
+                carryOver.add(plan);
             }
         }
+        return new CarryOverSplit(current, carryOver);
+    }
+
+    private CarryOverResult createCarryOver(Project project,
+                                            Long sourceBatchId,
+                                            String sourceMonth,
+                                            SelfMediaPublishAutoScheduleResponse capacity,
+                                            List<AccountPublishPlan> carryOverPlans,
+                                            Long operatorId,
+                                            String decisionReason) {
+        if (carryOverPlans == null || carryOverPlans.isEmpty()) {
+            return null;
+        }
+        String targetMonth = YearMonth.parse(sourceMonth).plusMonths(1).toString();
+        lockCarryOverDecisionScope(project.getId());
+        ProjectSelfMediaScheduleCarryOver existed = findPendingCarryOver(project.getId(), sourceMonth, targetMonth);
+        if (existed != null) {
+            return new CarryOverResult(
+                    existed.getId(),
+                    safeCount(existed.getCarryOverCount()),
+                    existed.getTargetMonth(),
+                    capacity,
+                    carryOverPlans,
+                    decisionReason
+            );
+        }
+        ProjectSelfMediaScheduleCarryOver row = new ProjectSelfMediaScheduleCarryOver();
+        row.setProjectId(project.getId());
+        row.setCompanyId(project.getCompanyId());
+        row.setBrandId(project.getBrandId());
+        row.setSourceBatchId(sourceBatchId);
+        row.setSourceMonth(sourceMonth);
+        row.setTargetMonth(targetMonth);
+        row.setRequestedCount(safeCount(capacity.getRequestedCount()));
+        row.setCarryOverCount(carryOverPlans.size());
+        row.setConsumedCount(0);
+        row.setStatus(CARRY_OVER_STATUS_PENDING);
+        row.setDecisionOperatorId(operatorId);
+        row.setDecisionReason(trimMessage(decisionReason));
+        row.setCapacitySnapshotJson(toJson(capacity));
+        row.setCarryOverPlanJson(toJson(carryOverPlans.stream()
+                .map(plan -> new CarryOverPlan(plan.accountId(), plan.platform()))
+                .toList()));
+        carryOverMapper.insert(row);
+        return new CarryOverResult(
+                row.getId(),
+                carryOverPlans.size(),
+                targetMonth,
+                capacity,
+                carryOverPlans,
+                decisionReason
+        );
+    }
+
+    private void lockCarryOverDecisionScope(Long projectId) {
+        if (projectId == null) {
+            return;
+        }
+        projectMapper.selectOne(
+                new QueryWrapper<Project>()
+                        .select("id")
+                        .eq("id", projectId)
+                        .last("FOR UPDATE")
+        );
+    }
+
+    private ProjectSelfMediaScheduleCarryOver findPendingCarryOver(Long projectId, String sourceMonth, String targetMonth) {
+        List<ProjectSelfMediaScheduleCarryOver> rows = carryOverMapper.selectList(
+                new QueryWrapper<ProjectSelfMediaScheduleCarryOver>()
+                        .eq("project_id", projectId)
+                        .eq("source_month", sourceMonth)
+                        .eq("target_month", targetMonth)
+                        .eq("status", CARRY_OVER_STATUS_PENDING)
+                        .orderByAsc("id")
+                        .last("LIMIT 1")
+        );
+        return rows == null || rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private void applyCarryOverResult(SelfMediaPublishAutoScheduleResponse response,
+                                      CarryOverResult result) {
+        if (result == null || result.count() <= 0) {
+            return;
+        }
+        response.setDecisionStrategy(STRATEGY_CARRY_OVER);
+        response.setCarryOverCreated(result.id() != null);
+        response.setCarryOverCount(result.count());
+        response.setCarryOverTargetMonth(result.targetMonth());
+    }
+
+    private void applyCapacityFields(SelfMediaPublishAutoScheduleResponse response,
+                                     SelfMediaPublishAutoScheduleResponse capacity) {
+        if (response == null || capacity == null) {
+            return;
+        }
+        response.setAvailableSlotCount(capacity.getAvailableSlotCount());
+        response.setDeficitCount(capacity.getDeficitCount());
+        response.setEnough(capacity.getEnough());
+        response.setRecommendedStrategy(capacity.getRecommendedStrategy());
+        response.setSlotGroups(capacity.getSlotGroups());
+        response.setRequestedCount(capacity.getRequestedCount());
+        response.setNormalRequiredCount(capacity.getNormalRequiredCount());
+        response.setPendingCarryOverCount(capacity.getPendingCarryOverCount());
+        response.setUnavailableCarryOverCount(capacity.getUnavailableCarryOverCount());
+        response.setCarryOverSources(capacity.getCarryOverSources());
+        response.setWarnings(capacity.getWarnings());
+    }
+
+    private void applyPlanBuildWarnings(SelfMediaPublishAutoScheduleResponse response,
+                                        AccountPublishPlanResult planResult) {
+        if (response == null || planResult == null) {
+            return;
+        }
+        response.setNormalRequiredCount(planResult.normalRequiredCount());
+        response.setPendingCarryOverCount(planResult.pendingCarryOverCount());
+        response.setCarryOverSources(planResult.carryOverSources());
+        response.setUnavailableCarryOverCount(planResult.unavailableCarryOverCount());
+        if (planResult.warnings() != null && !planResult.warnings().isEmpty()) {
+            response.getWarnings().addAll(planResult.warnings());
+        }
+    }
+
+    private void applyCapacitySummary(SelfMediaPublishAutoScheduleResponse response) {
+        int requiredCount = safeCount(response.getRequestedCount());
+        int availableCount = 0;
+        int deficitCount = 0;
+        boolean enough = true;
+        for (SelfMediaPublishAutoScheduleResponse.SlotGroup group : response.getSlotGroups()) {
+            int requested = safeCount(group.getRequestedCount());
+            int available = safeCount(group.getAvailableSlotCount());
+            availableCount += Math.min(requested, available);
+            deficitCount += Math.max(0, requested - available);
+            enough = enough && Boolean.TRUE.equals(group.getEnough());
+        }
+        response.setAvailableSlotCount(availableCount);
+        response.setDeficitCount(Math.max(deficitCount, Math.max(0, requiredCount - availableCount)));
+        response.setEnough(enough && response.getDeficitCount() == 0);
+        response.setRecommendedStrategy(Boolean.TRUE.equals(response.getEnough())
+                ? STRATEGY_STRICT_CURRENT_MONTH
+                : STRATEGY_CARRY_OVER);
+    }
+
+    private void throwCapacityInsufficient(SelfMediaPublishAutoScheduleResponse summary) {
+        int requiredCount = safeCount(summary.getRequestedCount());
+        int availableCount = safeCount(summary.getAvailableSlotCount());
+        int deficitCount = safeCount(summary.getDeficitCount());
+        String message = "目标月份剩余可自动排期容量不足：应排 " + requiredCount
+                + "，可排 " + availableCount
+                + "，缺口 " + deficitCount
+                + "。请选择其他月份或由交付负责人走结转补排。";
+        throw new BizException(
+                ERROR_CODE,
+                message,
+                400,
+                Map.of(
+                        "errorCode", ERROR_CAPACITY_INSUFFICIENT,
+                        "requiredCount", requiredCount,
+                        "availableSlotCount", availableCount,
+                        "deficitCount", deficitCount,
+                        "recommendedStrategy", firstText(summary.getRecommendedStrategy(), STRATEGY_CARRY_OVER)
+                )
+        );
+    }
+
+    private int safeCount(Integer value) {
+        return value == null ? 0 : Math.max(0, value);
     }
 
     private List<SelfMediaPublishAutoScheduleItemVO> buildPreviewItems(
@@ -1244,7 +1853,7 @@ public class ProjectSelfMediaScheduleService {
             } else {
                 item.setStatus("rejected");
                 item.setRejectionCode("PROJECT_AUTO_SCHEDULE_SLOT_UNAVAILABLE");
-                item.setRejectionMessage(platformLabel(platform) + "本月剩余可自动排期时间不足");
+                item.setRejectionMessage(platformLabel(platform) + "目标月份剩余可自动排期时间不足");
             }
             items.add(item);
         }
@@ -1475,7 +2084,7 @@ public class ProjectSelfMediaScheduleService {
         return article != null && article.getSubjectBrandId() != null ? article.getSubjectBrandId() : sourceBrandId;
     }
 
-    private List<AccountPublishPlan> buildAccountPublishPlans(Project project, String targetMonth, List<Long> accountIds) {
+    private AccountPublishPlanResult buildAccountPublishPlans(Project project, String targetMonth, List<Long> accountIds) {
         YearMonth month = parseTargetMonth(targetMonth);
         LocalDateTime periodStart = month.atDay(1).atStartOfDay();
         LocalDateTime periodEnd = month.plusMonths(1).atDay(1).atStartOfDay();
@@ -1494,7 +2103,8 @@ public class ProjectSelfMediaScheduleService {
             }
             accountsByPlatform.computeIfAbsent(platform, ignored -> new ArrayList<>()).add(account);
         }
-        List<AccountPublishPlan> plans = new ArrayList<>();
+        CarryOverLoadResult carryOverLoad = loadPendingCarryOverPlans(project, targetMonth, accountsByPlatform);
+        List<AccountPublishPlan> plans = new ArrayList<>(carryOverLoad.plans());
         accountsByPlatform.forEach((platform, accounts) -> {
             CompanyChannelQuotaService.DistributionQuotaView quota =
                     companyChannelQuotaService.selfMediaDistributionQuota(project.getCompanyId(), platform);
@@ -1513,7 +2123,166 @@ public class ProjectSelfMediaScheduleService {
                 plans.add(new AccountPublishPlan(account.getId(), platform));
             }
         });
+        int pendingCarryOverCount = (int) plans.stream()
+                .filter(plan -> plan.carryOverId() != null)
+                .count();
+        int normalRequiredCount = Math.max(0, plans.size() - pendingCarryOverCount);
+        return new AccountPublishPlanResult(
+                plans,
+                normalRequiredCount,
+                pendingCarryOverCount,
+                carryOverLoad.unavailableCount(),
+                carryOverLoad.warnings(),
+                carryOverLoad.sources()
+        );
+    }
+
+    private CarryOverLoadResult loadPendingCarryOverPlans(Project project,
+                                                          String targetMonth,
+                                                          Map<String, List<SelfMediaAccount>> accountsByPlatform) {
+        List<ProjectSelfMediaScheduleCarryOver> rows = carryOverMapper.selectList(
+                new QueryWrapper<ProjectSelfMediaScheduleCarryOver>()
+                        .eq("project_id", project.getId())
+                        .eq("target_month", targetMonth)
+                        .eq("status", CARRY_OVER_STATUS_PENDING)
+                        .orderByAsc("id")
+        );
+        if (rows == null || rows.isEmpty()) {
+            return new CarryOverLoadResult(List.of(), 0, List.of(), List.of());
+        }
+        Map<Long, SelfMediaAccount> accountById = new LinkedHashMap<>();
+        accountsByPlatform.values().forEach(accounts ->
+                accounts.forEach(account -> accountById.put(account.getId(), account)));
+        List<AccountPublishPlan> plans = new ArrayList<>();
+        int unavailableCount = 0;
+        List<String> warnings = new ArrayList<>();
+        List<SelfMediaPublishAutoScheduleResponse.CarryOverSource> sources = new ArrayList<>();
+        for (ProjectSelfMediaScheduleCarryOver row : rows) {
+            sources.add(toCarryOverSource(row));
+            List<CarryOverPlan> savedPlans = readCarryOverPlans(row.getCarryOverPlanJson());
+            if (savedPlans.isEmpty()) {
+                savedPlans = fallbackCarryOverPlans(row, accountsByPlatform);
+            }
+            List<AccountPublishPlan> rowPlans = new ArrayList<>();
+            int rowUnavailableCount = 0;
+            for (CarryOverPlan savedPlan : savedPlans) {
+                String platform = firstText(normalizePlatform(savedPlan.platform()), null);
+                if (!StringUtils.hasText(platform)) {
+                    rowUnavailableCount++;
+                    continue;
+                }
+                Long accountId = resolveCarryOverAccountId(savedPlan.accountId(), platform, accountsByPlatform, accountById);
+                if (accountId != null) {
+                    rowPlans.add(new AccountPublishPlan(accountId, platform, row.getId()));
+                } else {
+                    rowUnavailableCount++;
+                }
+            }
+            if (rowUnavailableCount > 0) {
+                unavailableCount += rowUnavailableCount;
+                warnings.add("存在历史结转因平台账号不可用暂无法消费，已继续保持 pending，请补充可用账号后重试。");
+                continue;
+            }
+            plans.addAll(rowPlans);
+        }
+        return new CarryOverLoadResult(plans, unavailableCount, warnings.stream().distinct().toList(), sources);
+    }
+
+    private SelfMediaPublishAutoScheduleResponse.CarryOverSource toCarryOverSource(ProjectSelfMediaScheduleCarryOver row) {
+        SelfMediaPublishAutoScheduleResponse.CarryOverSource source =
+                new SelfMediaPublishAutoScheduleResponse.CarryOverSource();
+        source.setId(row.getId());
+        source.setSourceMonth(row.getSourceMonth());
+        source.setTargetMonth(row.getTargetMonth());
+        source.setCarryOverCount(safeCount(row.getCarryOverCount()));
+        source.setConsumedCount(safeCount(row.getConsumedCount()));
+        source.setPendingCount(Math.max(0, safeCount(row.getCarryOverCount()) - safeCount(row.getConsumedCount())));
+        source.setStatus(row.getStatus());
+        return source;
+    }
+
+    private List<CarryOverPlan> readCarryOverPlans(String value) {
+        if (!StringUtils.hasText(value)) {
+            return List.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(value);
+            if (root == null || !root.isArray()) {
+                return List.of();
+            }
+            List<CarryOverPlan> plans = new ArrayList<>();
+            for (JsonNode node : root) {
+                if (node == null || !node.isObject()) {
+                    continue;
+                }
+                JsonNode accountNode = node.hasNonNull("accountId")
+                        ? node.get("accountId")
+                        : node.get("selfMediaAccountId");
+                Long accountId = accountNode != null && accountNode.canConvertToLong()
+                        ? accountNode.asLong()
+                        : null;
+                String platform = node.hasNonNull("platform") ? node.get("platform").asText(null) : null;
+                plans.add(new CarryOverPlan(accountId, platform));
+            }
+            return plans;
+        } catch (Exception ex) {
+            return List.of();
+        }
+    }
+
+    private List<CarryOverPlan> fallbackCarryOverPlans(ProjectSelfMediaScheduleCarryOver row,
+                                                       Map<String, List<SelfMediaAccount>> accountsByPlatform) {
+        if (accountsByPlatform.isEmpty()) {
+            return List.of();
+        }
+        String platform = accountsByPlatform.keySet().iterator().next();
+        int count = Math.max(0, safeCount(row.getCarryOverCount()) - safeCount(row.getConsumedCount()));
+        List<CarryOverPlan> plans = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            plans.add(new CarryOverPlan(null, platform));
+        }
         return plans;
+    }
+
+    private Long resolveCarryOverAccountId(Long savedAccountId,
+                                           String platform,
+                                           Map<String, List<SelfMediaAccount>> accountsByPlatform,
+                                           Map<Long, SelfMediaAccount> accountById) {
+        SelfMediaAccount savedAccount = savedAccountId == null ? null : accountById.get(savedAccountId);
+        if (savedAccount != null && platform.equals(normalizePlatform(savedAccount.getPlatform()))) {
+            return savedAccount.getId();
+        }
+        List<SelfMediaAccount> platformAccounts = accountsByPlatform.get(platform);
+        if (platformAccounts == null || platformAccounts.isEmpty()) {
+            return null;
+        }
+        return platformAccounts.get(0).getId();
+    }
+
+    private void consumePendingCarryOvers(List<AccountPublishPlan> plans) {
+        List<Long> carryOverIds = plans.stream()
+                .map(AccountPublishPlan::carryOverId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (carryOverIds.isEmpty()) {
+            return;
+        }
+        List<ProjectSelfMediaScheduleCarryOver> rows = carryOverMapper.selectList(
+                new QueryWrapper<ProjectSelfMediaScheduleCarryOver>()
+                        .in("id", carryOverIds)
+                        .eq("status", CARRY_OVER_STATUS_PENDING)
+        );
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        for (ProjectSelfMediaScheduleCarryOver row : rows) {
+            ProjectSelfMediaScheduleCarryOver update = new ProjectSelfMediaScheduleCarryOver();
+            update.setId(row.getId());
+            update.setStatus(CARRY_OVER_STATUS_CONSUMED);
+            update.setConsumedCount(safeCount(row.getCarryOverCount()));
+            carryOverMapper.updateById(update);
+        }
     }
 
     private SelfMediaPublishAutoScheduleResponse acceptedResponse(SelfMediaPublishAutoScheduleRequest request, int count) {
@@ -2164,7 +2933,39 @@ public class ProjectSelfMediaScheduleService {
         this.clock = clock == null ? Clock.systemDefaultZone() : clock;
     }
 
-    private record AccountPublishPlan(Long accountId, String platform) {
+    private record AccountPublishPlan(Long accountId, String platform, Long carryOverId) {
+        private AccountPublishPlan(Long accountId, String platform) {
+            this(accountId, platform, null);
+        }
+    }
+
+    private record AccountPublishPlanResult(List<AccountPublishPlan> plans,
+                                            int normalRequiredCount,
+                                            int pendingCarryOverCount,
+                                            int unavailableCarryOverCount,
+                                            List<String> warnings,
+                                            List<SelfMediaPublishAutoScheduleResponse.CarryOverSource> carryOverSources) {
+    }
+
+    private record CarryOverLoadResult(List<AccountPublishPlan> plans,
+                                       int unavailableCount,
+                                       List<String> warnings,
+                                       List<SelfMediaPublishAutoScheduleResponse.CarryOverSource> sources) {
+    }
+
+    private record CarryOverPlan(Long accountId, String platform) {
+    }
+
+    private record CarryOverSplit(List<AccountPublishPlan> currentMonthPlans,
+                                  List<AccountPublishPlan> carryOverPlans) {
+    }
+
+    private record CarryOverResult(Long id,
+                                   int count,
+                                   String targetMonth,
+                                   SelfMediaPublishAutoScheduleResponse capacity,
+                                   List<AccountPublishPlan> plans,
+                                   String reason) {
     }
 
     private record GenerationPlan(Long generationBatchId,

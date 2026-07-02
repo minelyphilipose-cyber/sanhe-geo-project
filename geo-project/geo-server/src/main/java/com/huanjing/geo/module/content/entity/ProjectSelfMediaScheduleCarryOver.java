@@ -8,34 +8,24 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("project_self_media_schedule_batch")
-public class ProjectSelfMediaScheduleBatch {
+@TableName("project_self_media_schedule_carry_over")
+public class ProjectSelfMediaScheduleCarryOver {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long projectId;
-    private Long brandId;
     private Long companyId;
+    private Long brandId;
+    private Long sourceBatchId;
+    private String sourceMonth;
     private String targetMonth;
-    private String triggerMode;
-    private String status;
-    private String scheduleStrategy;
-    private Integer articleCount;
-    private Integer accountCount;
-    private Integer plannedCount;
-    private Integer createdCount;
-    private Integer rejectedCount;
     private Integer requestedCount;
-    private Integer deficitCount;
     private Integer carryOverCount;
+    private Integer consumedCount;
+    private String status;
     private Long decisionOperatorId;
     private String decisionReason;
     private String capacitySnapshotJson;
-    private String generationBatchIds;
-    private String requestPayload;
-    private String resultSnapshot;
-    private String failureMessage;
-    private Long createdBy;
-    private Long updatedBy;
+    private String carryOverPlanJson;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

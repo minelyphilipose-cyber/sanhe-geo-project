@@ -19,4 +19,8 @@ public class ProjectSelfMediaAutoScheduleRequest {
     private String scheduleStrategy;
 
     private Boolean includeAdjustedWorkdays;
+
+    private String decisionStrategy;
+
+    private String decisionReason;
 }

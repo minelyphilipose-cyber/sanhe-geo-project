@@ -12,6 +12,7 @@ import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticlePublishItemMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionBatchMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionItemMapper;
+import com.huanjing.geo.module.content.mapper.ContentAutoDistributionPlanMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
@@ -86,6 +87,7 @@ class ContentAutoDistributionServiceTest {
                 mock(SysUserMapper.class),
                 batchMapper,
                 itemMapper,
+                mock(ContentAutoDistributionPlanMapper.class),
                 mock(BatchArticleGenerationTaskMapper.class),
                 mock(BatchArticlePublishItemMapper.class),
                 articleDraftMapper,

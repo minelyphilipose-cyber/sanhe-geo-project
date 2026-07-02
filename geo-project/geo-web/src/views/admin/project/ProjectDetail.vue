@@ -366,6 +366,9 @@
                   {{ selfMediaBatchStatusLabel(selfMediaScheduleBatch.status) }}
                 </el-tag>
                 <span>计划 {{ selfMediaScheduleBatch.plannedCount || 0 }}，已排 {{ selfMediaScheduleBatch.createdCount || 0 }}，失败 {{ selfMediaScheduleBatch.rejectedCount || 0 }}</span>
+                <span v-if="selfMediaScheduleBatch.requestedCount != null">
+                  请求 {{ selfMediaScheduleBatch.requestedCount || 0 }}，缺口 {{ selfMediaScheduleBatch.deficitCount || 0 }}，结转 {{ selfMediaScheduleBatch.carryOverCount || 0 }}
+                </span>
                 <el-button link type="primary" :loading="selfMediaDetailLoading" @click="openSelfMediaBatchDetail">
                   查看明细
                 </el-button>
@@ -380,6 +383,42 @@
               class="auto-schedule-alert"
               :title="selfMediaScheduleBatch.failureMessage"
             />
+            <el-alert
+              v-if="selfMediaScheduleBatch?.decisionReason"
+              type="info"
+              :closable="false"
+              class="auto-schedule-alert"
+              :title="`结转原因：${selfMediaScheduleBatch.decisionReason}`"
+            />
+            <el-alert
+              v-if="selfMediaPreview && selfMediaPreview.enough === false"
+              type="warning"
+              :closable="false"
+              class="auto-schedule-alert"
+              :title="selfMediaCapacityWarningText"
+            />
+            <el-alert
+              v-for="warning in selfMediaPreview?.warnings || []"
+              :key="warning"
+              type="warning"
+              :closable="false"
+              class="auto-schedule-alert"
+              :title="warning"
+            />
+            <div
+              v-if="selfMediaPreview && ((selfMediaPreview.normalRequiredCount || 0) > 0 || (selfMediaPreview.pendingCarryOverCount || 0) > 0 || (selfMediaPreview.carryOverSources || []).length)"
+              class="auto-schedule-demand-summary"
+            >
+              <span>正常额度 {{ selfMediaPreview.normalRequiredCount || 0 }}</span>
+              <span>历史结转 {{ selfMediaPreview.pendingCarryOverCount || 0 }}</span>
+              <span v-if="selfMediaPreview.unavailableCarryOverCount">不可用结转 {{ selfMediaPreview.unavailableCarryOverCount }}</span>
+              <span
+                v-for="source in selfMediaPreview.carryOverSources || []"
+                :key="source.id || `${source.sourceMonth}-${source.targetMonth}`"
+              >
+                {{ source.sourceMonth || '-' }} 结转 {{ source.pendingCount || source.carryOverCount || 0 }}
+              </span>
+            </div>
             <div v-if="selfMediaPreview?.slotGroups?.length" class="auto-schedule-precheck">
               <div
                 v-for="group in selfMediaPreview.slotGroups"
@@ -389,7 +428,11 @@
               >
                 <div class="auto-schedule-precheck-main">
                   <strong>{{ group.platformLabel || selfMediaPlatformLabel(group.platform) }}</strong>
-                  <span>需要 {{ group.requestedCount || 0 }} / 可用 {{ group.availableSlotCount || 0 }}</span>
+                  <span>
+                    需要 {{ group.requestedCount || 0 }} / 可排 {{ group.availableSlotCount || 0 }}
+                    <template v-if="group.deficitCount"> / 缺口 {{ group.deficitCount }}</template>
+                    <template v-if="group.remainingWorkdayCount != null"> / 剩余工作日 {{ group.remainingWorkdayCount }}</template>
+                  </span>
                   <el-tag size="small" :type="group.enough ? 'success' : 'danger'" effect="light">
                     {{ group.enough ? '可自动排期' : '可用时间不足' }}
                   </el-tag>
@@ -1247,8 +1290,23 @@ const selfMediaDetailManualMarkableCount = computed(() =>
   selfMediaDetailItems.value.filter((item) => !!item.scheduleId && manualMarkableScheduleStatuses.has(item.scheduleStatus || '')).length,
 )
 const selfMediaPreviewHasInsufficientSlots = computed(() =>
-  (selfMediaPreview.value?.slotGroups || []).some((group) => group.enough === false),
+  selfMediaPreview.value?.enough === false
+    || (selfMediaPreview.value?.slotGroups || []).some((group) => group.enough === false),
 )
+const canDecideSelfMediaScheduleCarryOver = computed(() =>
+  userStore.hasPermission('content.self_media_schedule.late_start_decide'),
+)
+const selfMediaCapacityWarningText = computed(() => {
+  const preview = selfMediaPreview.value
+  if (!preview) return ''
+  const required = preview.requestedCount || 0
+  const available = preview.availableSlotCount || 0
+  const deficit = preview.deficitCount || Math.max(required - available, 0)
+  const strategy = preview.recommendedStrategy === 'carry_over'
+    ? (canDecideSelfMediaScheduleCarryOver.value ? '可由交付负责人确认结转补排。' : '请联系交付负责人结转补排。')
+    : '请调整账号、减少数量或选择其他月份。'
+  return `目标月份剩余自动排期容量不足：应排 ${required}，可排 ${available}，缺口 ${deficit}。${strategy}`
+})
 const selfMediaCalendarMissing = computed(() => selfMediaCalendarStatus.value?.exists === false)
 const selfMediaCalendarStatusText = computed(() => {
   const status = selfMediaCalendarStatus.value
@@ -1338,9 +1396,10 @@ const canCreateSelfMediaSchedule = computed(() => {
   if (!selfMediaScheduleMonth.value) return false
   if (!activeSelfMediaAccounts.value.length) return false
   if (selfMediaCalendarMissing.value) return false
-  if (selfMediaPreviewHasInsufficientSlots.value) return false
   const status = selfMediaScheduleBatch.value?.status
-  return !['processing', 'created', 'partial_failed'].includes(status || '')
+  if (['processing', 'created', 'partial_failed'].includes(status || '')) return false
+  if (selfMediaPreviewHasInsufficientSlots.value) return canDecideSelfMediaScheduleCarryOver.value
+  return true
 })
 const channelQuotaGroups = computed(() => {
   const base = channelQuotaItems.value.filter((item) => !isSelfMediaQuotaChannel(item.channelCode))
@@ -1659,11 +1718,12 @@ function applySelfMediaScheduleConfig(config?: ProjectSelfMediaScheduleConfig | 
   selfMediaScheduleForm.remark = config?.remark || ''
 }
 
-function selfMediaSchedulePayload(): ProjectSelfMediaAutoSchedulePayload {
+function selfMediaSchedulePayload(extra?: Partial<ProjectSelfMediaAutoSchedulePayload>): ProjectSelfMediaAutoSchedulePayload {
   return {
     targetMonth: selfMediaScheduleMonth.value,
     selfMediaAccountIds: selectedSelfMediaAccountIds.value.length ? selectedSelfMediaAccountIds.value : undefined,
     includeAdjustedWorkdays: selfMediaScheduleForm.includeAdjustedWorkdays,
+    ...extra,
   }
 }
 
@@ -1960,8 +2020,40 @@ async function createSelfMediaSchedule() {
   if (!current || !canCreateSelfMediaSchedule.value) return
   try {
     const preview = await runSelfMediaSchedulePrecheck()
-    if ((preview?.slotGroups || []).some((group) => group.enough === false)) {
-      ElMessage.warning('本月剩余可用发布时间不足，请调整账号、减少数量或选择下月')
+    if (preview?.enough === false || (preview?.slotGroups || []).some((group) => group.enough === false)) {
+      const required = preview?.requestedCount || 0
+      const available = preview?.availableSlotCount || 0
+      const deficit = preview?.deficitCount || Math.max(required - available, 0)
+      if (!canDecideSelfMediaScheduleCarryOver.value) {
+        ElMessage.warning('目标月份剩余自动排期容量不足，请联系交付负责人结转补排')
+        return
+      }
+      const { value } = await ElMessageBox.prompt(
+        `目标月份剩余自动排期容量不足：应排 ${required}，可排 ${available}，缺口 ${deficit}。是否由交付负责人确认本月先排 ${available} 条，剩余 ${deficit} 条结转到下月？`,
+        '结转补排确认',
+        {
+          type: 'warning',
+          confirmButtonText: '确认结转',
+          cancelButtonText: '取消',
+          inputType: 'textarea',
+          inputPlaceholder: '请填写结转原因，例如：客户晚启动，本月有效工作日不足',
+          inputValidator: (input: string) => input.trim().length > 0 || '请填写结转原因',
+        },
+      )
+      const decisionReason = String(value || '').trim()
+      selfMediaScheduleCreating.value = true
+      const idempotencyKey = createIdempotencyKey(`project-self-media-${current.id}-${selfMediaScheduleMonth.value}-carry-over`)
+      const { data } = await createProjectSelfMediaAutoSchedule(
+        current.id,
+        selfMediaSchedulePayload({
+          decisionStrategy: 'carry_over',
+          decisionReason,
+        }),
+        idempotencyKey,
+      )
+      selfMediaPreview.value = data.data
+      ElMessage.success(`自动排期已提交，已结转 ${data.data?.carryOverCount || deficit} 条到 ${data.data?.carryOverTargetMonth || '下月'}`)
+      await loadSelfMediaScheduleBatch()
       return
     }
     await ElMessageBox.confirm(
@@ -1973,7 +2065,8 @@ async function createSelfMediaSchedule() {
     const idempotencyKey = createIdempotencyKey(`project-self-media-${current.id}-${selfMediaScheduleMonth.value}`)
     const { data } = await createProjectSelfMediaAutoSchedule(current.id, selfMediaSchedulePayload(), idempotencyKey)
     selfMediaPreview.value = data.data
-    ElMessage.success('自动排期已提交，后台正在生成文章并安排发布时间')
+    const carryOverText = data.data?.carryOverCount ? `，已结转 ${data.data.carryOverCount} 条到 ${data.data.carryOverTargetMonth || '下月'}` : ''
+    ElMessage.success(`自动排期已提交，后台正在生成文章并安排发布时间${carryOverText}`)
     await loadSelfMediaScheduleBatch()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
@@ -2985,6 +3078,20 @@ onMounted(() => {
 }
 .auto-schedule-alert {
   margin-top: 0;
+}
+.auto-schedule-demand-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+.auto-schedule-demand-summary span {
+  padding: 3px 7px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
 }
 .auto-schedule-precheck {
   display: grid;

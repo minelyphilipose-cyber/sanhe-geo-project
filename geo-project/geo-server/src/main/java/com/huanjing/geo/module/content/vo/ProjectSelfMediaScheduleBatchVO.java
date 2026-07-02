@@ -20,6 +20,12 @@ public class ProjectSelfMediaScheduleBatchVO {
     private Integer plannedCount;
     private Integer createdCount;
     private Integer rejectedCount;
+    private Integer requestedCount;
+    private Integer deficitCount;
+    private Integer carryOverCount;
+    private Long decisionOperatorId;
+    private String decisionReason;
+    private String capacitySnapshotJson;
     private String generationBatchIds;
     private String failureMessage;
     private LocalDateTime createdAt;
@@ -43,6 +49,12 @@ public class ProjectSelfMediaScheduleBatchVO {
         vo.setPlannedCount(row.getPlannedCount());
         vo.setCreatedCount(row.getCreatedCount());
         vo.setRejectedCount(row.getRejectedCount());
+        vo.setRequestedCount(row.getRequestedCount());
+        vo.setDeficitCount(row.getDeficitCount());
+        vo.setCarryOverCount(row.getCarryOverCount());
+        vo.setDecisionOperatorId(row.getDecisionOperatorId());
+        vo.setDecisionReason(row.getDecisionReason());
+        vo.setCapacitySnapshotJson(row.getCapacitySnapshotJson());
         vo.setGenerationBatchIds(row.getGenerationBatchIds());
         vo.setFailureMessage(row.getFailureMessage());
         vo.setCreatedAt(row.getCreatedAt());

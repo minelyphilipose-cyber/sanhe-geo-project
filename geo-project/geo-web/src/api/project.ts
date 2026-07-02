@@ -57,6 +57,12 @@ export interface ProjectSelfMediaScheduleBatch {
   plannedCount: number
   createdCount: number
   rejectedCount: number
+  requestedCount?: number | null
+  deficitCount?: number | null
+  carryOverCount?: number | null
+  decisionOperatorId?: number | null
+  decisionReason?: string | null
+  capacitySnapshotJson?: string | null
   generationBatchIds?: string | null
   failureMessage?: string | null
   createdAt?: string
@@ -150,11 +156,34 @@ export interface ProjectSelfMediaAutoScheduleResponse {
   targetMonth: string
   scheduleStrategy: string
   requestedCount: number
+  normalRequiredCount?: number | null
+  pendingCarryOverCount?: number | null
+  availableSlotCount?: number | null
+  deficitCount?: number | null
+  enough?: boolean | null
+  recommendedStrategy?: string | null
+  decisionStrategy?: string | null
   plannedCount: number
   rejectedCount: number
   created: boolean
+  carryOverCreated?: boolean | null
+  carryOverCount?: number | null
+  carryOverTargetMonth?: string | null
+  unavailableCarryOverCount?: number | null
+  warnings?: string[]
+  carryOverSources?: ProjectSelfMediaCarryOverSource[]
   plannedItems?: ProjectSelfMediaAutoSchedulePreviewItem[]
   slotGroups?: ProjectSelfMediaAutoScheduleSlotGroup[]
+}
+
+export interface ProjectSelfMediaCarryOverSource {
+  id?: number | null
+  sourceMonth?: string | null
+  targetMonth?: string | null
+  carryOverCount?: number | null
+  consumedCount?: number | null
+  pendingCount?: number | null
+  status?: string | null
 }
 
 export interface ProjectSelfMediaAutoSchedulePreviewItem {
@@ -175,6 +204,8 @@ export interface ProjectSelfMediaAutoScheduleSlotGroup {
   scheduleStrategy?: string | null
   requestedCount: number
   availableSlotCount: number
+  deficitCount?: number | null
+  remainingWorkdayCount?: number | null
   enough: boolean
   message?: string | null
   selectedSlots?: Array<{
@@ -189,6 +220,8 @@ export interface ProjectSelfMediaAutoSchedulePayload {
   selfMediaAccountIds?: number[]
   scheduleStrategy?: string
   includeAdjustedWorkdays?: boolean
+  decisionStrategy?: string
+  decisionReason?: string
 }
 
 export interface ProjectBusinessCalendarStatus {
@@ -260,20 +293,20 @@ export function createProjectSelfMediaAutoSchedule(id: number, data: ProjectSelf
   })
 }
 
-export function getProjectChannelAllocationQuota(params: { companyId: number; excludeProjectId?: number }) {
-  return request.get<R<ProjectChannelAllocationQuota>>('/projects/channel-allocation-quota', { params })
+export function getProjectChannelAllocationQuota(params: { companyId: number; excludeProjectId?: number }, silentError = false) {
+  return request.get<R<ProjectChannelAllocationQuota>>('/projects/channel-allocation-quota', { params, silentError } as any)
 }
 
-export function getProjectKeywordGroupQuota(params: { companyId: number; excludeProjectId?: number }) {
-  return request.get<R<ProjectKeywordGroupQuota>>('/projects/keyword-group-quota', { params })
+export function getProjectKeywordGroupQuota(params: { companyId: number; excludeProjectId?: number }, silentError = false) {
+  return request.get<R<ProjectKeywordGroupQuota>>('/projects/keyword-group-quota', { params, silentError } as any)
 }
 
-export function createProject(data: Record<string, any>) {
-  return request.post<R<Project>>('/projects', data)
+export function createProject(data: Record<string, any>, silentError = false) {
+  return request.post<R<Project>>('/projects', data, { silentError } as any)
 }
 
-export function updateProject(id: number, data: Record<string, any>) {
-  return request.put<R<Project>>(`/projects/${id}`, data)
+export function updateProject(id: number, data: Record<string, any>, silentError = false) {
+  return request.put<R<Project>>(`/projects/${id}`, data, { silentError } as any)
 }
 
 export function updateProjectChannelAllocations(id: number, data: {

@@ -11,14 +11,18 @@ import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleBatch;
+import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleCarryOver;
 import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleConfig;
+import com.huanjing.geo.module.content.entity.ProjectSelfMediaSchedulePlan;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleBatchMapper;
+import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleCarryOverMapper;
 import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleConfigMapper;
+import com.huanjing.geo.module.content.mapper.ProjectSelfMediaSchedulePlanMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
@@ -63,14 +67,19 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 
 class ProjectSelfMediaScheduleServiceTest {
     private ProjectMapper projectMapper;
     private BrandMapper brandMapper;
     private ProjectSelfMediaScheduleConfigMapper configMapper;
     private ProjectSelfMediaScheduleBatchMapper batchMapper;
+    private ProjectSelfMediaScheduleCarryOverMapper carryOverMapper;
+    private ProjectSelfMediaSchedulePlanMapper planMapper;
     private ArticleDraftMapper articleDraftMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
     private SelfMediaPublishScheduleMapper selfMediaPublishScheduleMapper;
@@ -88,6 +97,7 @@ class ProjectSelfMediaScheduleServiceTest {
     private BrandAccessService brandAccessService;
     private SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
     private LocalAgentSessionMapper localAgentSessionMapper;
+    private CurrentUserService currentUserService;
     private ProjectSelfMediaScheduleService service;
 
     @BeforeEach
@@ -96,6 +106,8 @@ class ProjectSelfMediaScheduleServiceTest {
         brandMapper = mock(BrandMapper.class);
         configMapper = mock(ProjectSelfMediaScheduleConfigMapper.class);
         batchMapper = mock(ProjectSelfMediaScheduleBatchMapper.class);
+        carryOverMapper = mock(ProjectSelfMediaScheduleCarryOverMapper.class);
+        planMapper = mock(ProjectSelfMediaSchedulePlanMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
         selfMediaPublishScheduleMapper = mock(SelfMediaPublishScheduleMapper.class);
@@ -113,7 +125,7 @@ class ProjectSelfMediaScheduleServiceTest {
         brandAccessService = mock(BrandAccessService.class);
         scheduleAdapterRouter = mock(SelfMediaPlatformScheduleAdapterRouter.class);
         localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
-        CurrentUserService currentUserService = mock(CurrentUserService.class);
+        currentUserService = mock(CurrentUserService.class);
         SysUser user = new SysUser();
         user.setId(99L);
         when(currentUserService.requireCurrentUser()).thenReturn(user);
@@ -124,12 +136,15 @@ class ProjectSelfMediaScheduleServiceTest {
                 .thenReturn(List.of(slot(11, 9), slot(12, 9), slot(13, 9), slot(14, 9), slot(15, 9)));
         when(scheduleAdapterRouter.rules(anyString(), anyString()))
                 .thenReturn(SelfMediaPlatformScheduleRules.defaults());
+        when(scheduleAdapterRouter.contract(anyString())).thenReturn(Optional.empty());
 
         service = new ProjectSelfMediaScheduleService(
                 projectMapper,
                 brandMapper,
                 configMapper,
                 batchMapper,
+                carryOverMapper,
+                planMapper,
                 articleDraftMapper,
                 selfMediaAccountMapper,
                 selfMediaPublishScheduleMapper,
@@ -170,6 +185,427 @@ class ProjectSelfMediaScheduleServiceTest {
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
 
         assertThrows(BizException.class, () -> service.createForProject(7L, request(), "manual"));
+    }
+
+    @Test
+    void createForProjectRejectsWithCapacityCodeBeforeGenerating() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 2));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(LocalDateTime.of(2026, 6, 21, 9, 10))));
+        when(scheduleAdapterRouter.rules("toutiao", "platform_schedule"))
+                .thenReturn(new SelfMediaPlatformScheduleRules(10, 120, 4, 7 * 24 * 60));
+
+        BizException ex = assertThrows(BizException.class, () -> service.createForProject(7L, request(), "manual"));
+
+        assertEquals(400, ex.getHttpStatus());
+        assertTrue(String.valueOf(ex.getData()).contains("SELF_MEDIA_SCHEDULE_CAPACITY_INSUFFICIENT"));
+        verify(generationService, never()).createSystemBatch(any(), any());
+    }
+
+    @Test
+    void createForProjectCarriesOverDeficitAfterLeadDecision() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
+        doAnswer(invocation -> {
+            ProjectSelfMediaScheduleBatch batch = invocation.getArgument(0);
+            batch.setId(66L);
+            return 1;
+        }).when(batchMapper).insert(any(ProjectSelfMediaScheduleBatch.class));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 2));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(LocalDateTime.of(2026, 6, 21, 12, 0))));
+        when(scheduleAdapterRouter.rules("toutiao", "platform_schedule"))
+                .thenReturn(new SelfMediaPlatformScheduleRules(10, 120, 4, 7 * 24 * 60));
+        KeywordGroupResult question = new KeywordGroupResult();
+        question.setKeywordText("测试问题");
+        question.setSceneCode("news_brief");
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'")).thenReturn(List.of(question));
+        BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(44L, 1, "pending", false, false, List.of());
+        when(generationService.createSystemBatch(any(), eq(99L))).thenReturn(generation);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(55L);
+        task.setBatchId(44L);
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setDecisionStrategy("carry_over");
+        request.setDecisionReason("容量不足，结转补排");
+
+        var response = service.createForProject(7L, request, "manual");
+
+        assertEquals(1, response.getPlannedCount());
+        assertEquals(1, response.getCarryOverCount());
+        assertEquals("2026-07", response.getCarryOverTargetMonth());
+        verify(generationService).createSystemBatch(any(), eq(99L));
+        ArgumentCaptor<ProjectSelfMediaScheduleBatch> batchCaptor =
+                ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
+        verify(batchMapper).insert(batchCaptor.capture());
+        assertEquals(2, batchCaptor.getValue().getRequestedCount());
+        assertEquals(1, batchCaptor.getValue().getDeficitCount());
+        assertEquals(1, batchCaptor.getValue().getCarryOverCount());
+        assertEquals(99L, batchCaptor.getValue().getDecisionOperatorId());
+        assertEquals("容量不足，结转补排", batchCaptor.getValue().getDecisionReason());
+        assertTrue(batchCaptor.getValue().getCapacitySnapshotJson().contains("\"deficitCount\":1"));
+        ArgumentCaptor<ProjectSelfMediaScheduleCarryOver> captor =
+                ArgumentCaptor.forClass(ProjectSelfMediaScheduleCarryOver.class);
+        verify(carryOverMapper).insert(captor.capture());
+        assertEquals(66L, captor.getValue().getSourceBatchId());
+        assertEquals("2026-06", captor.getValue().getSourceMonth());
+        assertEquals("2026-07", captor.getValue().getTargetMonth());
+        assertEquals(1, captor.getValue().getCarryOverCount());
+    }
+
+    @Test
+    void previewForProjectSplitsNormalAndPendingCarryOverDemand() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 7, 1, 9, 0)));
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setTargetMonth("2026-07");
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-07", 0, 2));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 7)), eq(false)))
+                .thenReturn(List.of(
+                        slot(LocalDateTime.of(2026, 7, 8, 12, 0)),
+                        slot(LocalDateTime.of(2026, 7, 9, 12, 0)),
+                        slot(LocalDateTime.of(2026, 7, 10, 12, 0))
+                ));
+        ProjectSelfMediaScheduleCarryOver pending = carryOver(88L, "2026-06", "2026-07", 1);
+        when(carryOverMapper.selectList(any())).thenReturn(List.of(pending));
+
+        var response = service.previewForProject(7L, request);
+
+        assertEquals(3, response.getRequestedCount());
+        assertEquals(2, response.getNormalRequiredCount());
+        assertEquals(1, response.getPendingCarryOverCount());
+        assertEquals(1, response.getCarryOverSources().size());
+        assertEquals("2026-06", response.getCarryOverSources().get(0).getSourceMonth());
+        assertEquals(1, response.getCarryOverSources().get(0).getPendingCount());
+    }
+
+    @Test
+    void createForProjectPrioritizesPendingCarryOverWhenTargetMonthCapacityIsTight() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 7, 1, 9, 0)));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-07")).thenReturn(null);
+        doAnswer(invocation -> {
+            ProjectSelfMediaScheduleBatch batch = invocation.getArgument(0);
+            batch.setId(77L);
+            return 1;
+        }).when(batchMapper).insert(any(ProjectSelfMediaScheduleBatch.class));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-07", 0, 1));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 7)), eq(false)))
+                .thenReturn(List.of(slot(LocalDateTime.of(2026, 7, 8, 12, 0))));
+        KeywordGroupResult question = new KeywordGroupResult();
+        question.setKeywordText("测试问题");
+        question.setSceneCode("news_brief");
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'")).thenReturn(List.of(question));
+        BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(44L, 1, "pending", false, false, List.of());
+        when(generationService.createSystemBatch(any(), eq(99L))).thenReturn(generation);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(55L);
+        task.setBatchId(44L);
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
+        ProjectSelfMediaScheduleCarryOver pending = carryOver(88L, "2026-06", "2026-07", 1);
+        when(carryOverMapper.selectList(any()))
+                .thenReturn(List.of(pending))
+                .thenReturn(List.of(pending))
+                .thenReturn(List.of());
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setTargetMonth("2026-07");
+        request.setDecisionStrategy("carry_over");
+        request.setDecisionReason("优先补历史结转");
+
+        var response = service.createForProject(7L, request, "manual");
+
+        assertEquals(1, response.getPlannedCount());
+        assertEquals(1, response.getCarryOverCount());
+        assertEquals("2026-08", response.getCarryOverTargetMonth());
+        ArgumentCaptor<ProjectSelfMediaScheduleCarryOver> updateCaptor =
+                ArgumentCaptor.forClass(ProjectSelfMediaScheduleCarryOver.class);
+        verify(carryOverMapper).updateById(updateCaptor.capture());
+        assertEquals(88L, updateCaptor.getValue().getId());
+        assertEquals("consumed", updateCaptor.getValue().getStatus());
+        ArgumentCaptor<ProjectSelfMediaScheduleCarryOver> insertCaptor =
+                ArgumentCaptor.forClass(ProjectSelfMediaScheduleCarryOver.class);
+        verify(carryOverMapper).insert(insertCaptor.capture());
+        assertEquals("2026-07", insertCaptor.getValue().getSourceMonth());
+        assertEquals("2026-08", insertCaptor.getValue().getTargetMonth());
+    }
+
+    @Test
+    void createForProjectReusesPendingCarryOverWhenNoCurrentMonthSlotExists() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 2));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of());
+        ProjectSelfMediaScheduleCarryOver existed = carryOver(99L, "2026-06", "2026-07", 2);
+        when(carryOverMapper.selectList(any()))
+                .thenReturn(List.of())
+                .thenReturn(List.of())
+                .thenReturn(List.of())
+                .thenReturn(List.of(existed));
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setDecisionStrategy("carry_over");
+        request.setDecisionReason("无可排槽位，结转补排");
+
+        var first = service.createForProject(7L, request, "manual");
+        var second = service.createForProject(7L, request, "manual");
+
+        assertEquals(2, first.getCarryOverCount());
+        assertEquals(2, second.getCarryOverCount());
+        assertEquals("2026-07", second.getCarryOverTargetMonth());
+        verify(carryOverMapper, times(1)).insert(any(ProjectSelfMediaScheduleCarryOver.class));
+        verify(generationService, never()).createSystemBatch(any(), any());
+    }
+
+    @Test
+    void createForProjectRejectsCarryOverWithoutLeadPermission() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 2));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(LocalDateTime.of(2026, 6, 21, 12, 0))));
+        doThrow(new BizException(403, "No permission: content.self_media_schedule.late_start_decide"))
+                .when(currentUserService).ensurePermission("content.self_media_schedule.late_start_decide");
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setDecisionStrategy("carry_over");
+        request.setDecisionReason("容量不足，结转补排");
+
+        BizException ex = assertThrows(BizException.class, () -> service.createForProject(7L, request, "manual"));
+
+        assertEquals(403, ex.getCode());
+        verify(carryOverMapper, never()).insert(any(ProjectSelfMediaScheduleCarryOver.class));
+        verify(generationService, never()).createSystemBatch(any(), any());
+    }
+
+    @Test
+    void createForProjectRejectsCarryOverWithoutDecisionReason() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 2));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(LocalDateTime.of(2026, 6, 21, 12, 0))));
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setDecisionStrategy("carry_over");
+
+        BizException ex = assertThrows(BizException.class, () -> service.createForProject(7L, request, "manual"));
+
+        assertEquals(400, ex.getHttpStatus());
+        assertTrue(String.valueOf(ex.getData()).contains("SELF_MEDIA_SCHEDULE_DECISION_REASON_REQUIRED"));
+        verify(carryOverMapper, never()).insert(any(ProjectSelfMediaScheduleCarryOver.class));
+    }
+
+    @Test
+    void createForProjectRejectsCompressedCurrentMonthWithStableCode() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 2));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(LocalDateTime.of(2026, 6, 21, 12, 0))));
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setDecisionStrategy("compressed_current_month");
+
+        BizException ex = assertThrows(BizException.class, () -> service.createForProject(7L, request, "manual"));
+
+        assertEquals(400, ex.getHttpStatus());
+        assertTrue(String.valueOf(ex.getData()).contains("SELF_MEDIA_SCHEDULE_COMPRESS_NOT_SUPPORTED"));
+    }
+
+    @Test
+    void createForProjectConsumesCarryOverWithFallbackAccountOnSamePlatform() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 7, 1, 9, 0)));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-07")).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(21L)).thenReturn(account(21L, "active"));
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-07", 0, 0));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 7)), eq(false)))
+                .thenReturn(List.of(slot(LocalDateTime.of(2026, 7, 8, 12, 0))));
+        KeywordGroupResult question = new KeywordGroupResult();
+        question.setKeywordText("测试问题");
+        question.setSceneCode("news_brief");
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'")).thenReturn(List.of(question));
+        BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(44L, 1, "pending", false, false, List.of());
+        when(generationService.createSystemBatch(any(), eq(99L))).thenReturn(generation);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(55L);
+        task.setBatchId(44L);
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
+        ProjectSelfMediaScheduleCarryOver pending = carryOver(88L, "2026-06", "2026-07", 1);
+        when(carryOverMapper.selectList(any()))
+                .thenReturn(List.of(pending))
+                .thenReturn(List.of(pending));
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setTargetMonth("2026-07");
+        request.setSelfMediaAccountIds(List.of(21L));
+        request.setDecisionStrategy("carry_over");
+        request.setDecisionReason("混合可用状态保持历史结转 pending");
+
+        var response = service.createForProject(7L, request, "manual");
+
+        assertEquals(1, response.getPlannedCount());
+        verify(generationService).createSystemBatch(any(), eq(99L));
+        ArgumentCaptor<ProjectSelfMediaScheduleBatch> batchCaptor =
+                ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
+        verify(batchMapper).insert(batchCaptor.capture());
+        assertTrue(batchCaptor.getValue().getRequestPayload().contains("\"selfMediaAccountId\":21"),
+                batchCaptor.getValue().getRequestPayload());
+        verify(carryOverMapper).updateById(any(ProjectSelfMediaScheduleCarryOver.class));
+    }
+
+    @Test
+    void createForProjectDoesNotConsumeMixedAvailableUnavailableCarryOverRow() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 7, 1, 9, 0)));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-07")).thenReturn(null);
+        doAnswer(invocation -> {
+            ProjectSelfMediaScheduleBatch batch = invocation.getArgument(0);
+            batch.setId(77L);
+            return 1;
+        }).when(batchMapper).insert(any(ProjectSelfMediaScheduleBatch.class));
+        when(selfMediaAccountMapper.selectById(21L)).thenReturn(account(21L, "active"));
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-07", 0, 1));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 7)), eq(false)))
+                .thenReturn(List.of(slot(LocalDateTime.of(2026, 7, 8, 12, 0))));
+        KeywordGroupResult question = new KeywordGroupResult();
+        question.setKeywordText("测试问题");
+        question.setSceneCode("news_brief");
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'")).thenReturn(List.of(question));
+        BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(44L, 1, "pending", false, false, List.of());
+        when(generationService.createSystemBatch(any(), eq(99L))).thenReturn(generation);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(55L);
+        task.setBatchId(44L);
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
+        ProjectSelfMediaScheduleCarryOver pending = carryOver(88L, "2026-06", "2026-07", 2);
+        pending.setCarryOverPlanJson("""
+                [
+                  {"accountId":21,"platform":"toutiao"},
+                  {"accountId":999,"platform":"xhs"}
+                ]
+                """);
+        when(carryOverMapper.selectList(any())).thenReturn(List.of(pending));
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setTargetMonth("2026-07");
+        request.setSelfMediaAccountIds(List.of(21L));
+        request.setDecisionStrategy("carry_over");
+        request.setDecisionReason("混合可用状态保持历史结转 pending");
+
+        var response = service.createForProject(7L, request, "manual");
+
+        assertEquals(1, response.getPlannedCount());
+        verify(generationService).createSystemBatch(any(), eq(99L));
+        verify(carryOverMapper, never()).updateById(any(ProjectSelfMediaScheduleCarryOver.class));
+    }
+
+    @Test
+    void previewKeepsCarryOverPendingWhenPlatformHasNoAvailableAccount() {
+        ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
+        request.setTargetMonth("2026-07");
+        request.setSelfMediaAccountIds(List.of(20L));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(null);
+        ProjectSelfMediaScheduleCarryOver pending = carryOver(88L, "2026-06", "2026-07", 1);
+        when(carryOverMapper.selectList(any())).thenReturn(List.of(pending));
+
+        var response = service.previewForProject(7L, request);
+
+        assertEquals(0, response.getPlannedCount());
+        assertEquals(1, response.getUnavailableCarryOverCount());
+        assertTrue(response.getWarnings().stream().anyMatch(message -> message.contains("历史结转")));
+        verify(carryOverMapper, never()).updateById(any(ProjectSelfMediaScheduleCarryOver.class));
+    }
+
+    @Test
+    void getBatchReturnsAuditFields() {
+        ProjectSelfMediaScheduleBatch batch = new ProjectSelfMediaScheduleBatch();
+        batch.setId(33L);
+        batch.setProjectId(7L);
+        batch.setBrandId(8L);
+        batch.setCompanyId(6L);
+        batch.setTargetMonth("2026-06");
+        batch.setStatus("processing");
+        batch.setRequestedCount(2);
+        batch.setDeficitCount(1);
+        batch.setCarryOverCount(1);
+        batch.setDecisionOperatorId(99L);
+        batch.setDecisionReason("容量不足，结转补排");
+        batch.setCapacitySnapshotJson("{\"deficitCount\":1}");
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+
+        var response = service.getBatch(7L, "2026-06");
+
+        assertEquals(2, response.getRequestedCount());
+        assertEquals(1, response.getDeficitCount());
+        assertEquals(1, response.getCarryOverCount());
+        assertEquals(99L, response.getDecisionOperatorId());
+        assertEquals("容量不足，结转补排", response.getDecisionReason());
+        assertEquals("{\"deficitCount\":1}", response.getCapacitySnapshotJson());
     }
 
     @Test
@@ -318,6 +754,23 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     @Test
+    void recoverStaleRunningProjectSchedulePlansReleasesRetryableRows() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 12, 0)));
+        ProjectSelfMediaSchedulePlan plan = new ProjectSelfMediaSchedulePlan();
+        plan.setId(77L);
+        plan.setStatus("running");
+        plan.setRetryCount(1);
+        plan.setUpdatedAt(LocalDateTime.of(2026, 6, 21, 9, 0));
+        when(planMapper.selectList(any())).thenReturn(List.of(plan));
+        when(planMapper.update(eq(null), any())).thenReturn(1);
+
+        int recovered = service.recoverStaleRunningProjectSchedulePlans(3, 120);
+
+        assertEquals(1, recovered);
+        verify(planMapper).update(eq(null), any());
+    }
+
+    @Test
     void previewForProjectUsesQuotaWithoutArticleInventory() {
         ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
         request.setTargetMonth("2026-06");
@@ -386,10 +839,56 @@ class ProjectSelfMediaScheduleServiceTest {
         var response = service.previewForProject(7L, request);
 
         assertEquals(2, response.getRequestedCount());
+        assertEquals(0, response.getAvailableSlotCount());
+        assertEquals(2, response.getDeficitCount());
+        assertEquals(false, response.getEnough());
+        assertEquals("carry_over", response.getRecommendedStrategy());
         assertEquals(2, response.getRejectedCount());
         assertEquals(1, response.getSlotGroups().size());
         assertEquals(false, response.getSlotGroups().get(0).getEnough());
-        assertTrue(response.getSlotGroups().get(0).getMessage().contains("本月剩余可自动排期时间不足"));
+        assertEquals(2, response.getSlotGroups().get(0).getDeficitCount());
+        assertEquals(0, response.getSlotGroups().get(0).getRemainingWorkdayCount());
+        assertTrue(response.getSlotGroups().get(0).getMessage().contains("目标月份剩余可自动排期时间不足"));
+    }
+
+    @Test
+    void previewForProjectSummarizesActualCapacityByPlatformMix() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 21, 9, 0)));
+        ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
+        request.setTargetMonth("2026-06");
+        request.setSelfMediaAccountIds(List.of(20L, 21L));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        SelfMediaAccount wechat = account();
+        wechat.setId(21L);
+        wechat.setPlatform("wechat_mp");
+        when(selfMediaAccountMapper.selectById(21L)).thenReturn(wechat);
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 1));
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "wechat"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:wechat", "month", "2026-06", 0, 3));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("wechat_mp"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(21, 10), slot(21, 11), slot(22, 10), slot(23, 10), slot(24, 10)));
+        when(scheduleAdapterRouter.rules(eq("toutiao"), anyString()))
+                .thenReturn(SelfMediaPlatformScheduleRules.defaults());
+        when(scheduleAdapterRouter.rules(eq("wechat"), anyString()))
+                .thenReturn(new SelfMediaPlatformScheduleRules(10, 10_000, 4, 7 * 24 * 60));
+
+        var response = service.previewForProject(7L, request);
+
+        assertEquals(4, response.getRequestedCount());
+        assertEquals(1, response.getAvailableSlotCount());
+        assertEquals(3, response.getDeficitCount());
+        assertEquals(false, response.getEnough());
+        assertEquals("carry_over", response.getRecommendedStrategy());
     }
 
     @Test
@@ -1195,11 +1694,30 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     private SelfMediaAccount account() {
+        return account(20L, "active");
+    }
+
+    private SelfMediaAccount account(Long id, String status) {
         SelfMediaAccount account = new SelfMediaAccount();
-        account.setId(20L);
+        account.setId(id);
         account.setBrandId(8L);
         account.setPlatform("toutiao");
-        account.setStatus("active");
+        account.setStatus(status);
         return account;
+    }
+
+    private ProjectSelfMediaScheduleCarryOver carryOver(Long id, String sourceMonth, String targetMonth, int count) {
+        ProjectSelfMediaScheduleCarryOver row = new ProjectSelfMediaScheduleCarryOver();
+        row.setId(id);
+        row.setProjectId(7L);
+        row.setBrandId(8L);
+        row.setCompanyId(6L);
+        row.setSourceMonth(sourceMonth);
+        row.setTargetMonth(targetMonth);
+        row.setCarryOverCount(count);
+        row.setConsumedCount(0);
+        row.setStatus("pending");
+        row.setCarryOverPlanJson("[{\"accountId\":20,\"platform\":\"toutiao\"}]");
+        return row;
     }
 }

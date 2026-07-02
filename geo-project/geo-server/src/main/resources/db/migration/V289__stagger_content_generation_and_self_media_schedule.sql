@@ -1,0 +1,42 @@
+CREATE TABLE IF NOT EXISTS content_auto_distribution_plan (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  company_id BIGINT NULL,
+  brand_id BIGINT NULL,
+  plan_date DATE NOT NULL,
+  planned_execute_at DATETIME NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  retry_count INT NOT NULL DEFAULT 0,
+  next_attempt_at DATETIME NULL,
+  failure_message VARCHAR(512) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_content_auto_distribution_plan_project_date (project_id, plan_date),
+  KEY idx_content_auto_distribution_plan_due (status, next_attempt_at, planned_execute_at, id),
+  KEY idx_content_auto_distribution_plan_date (plan_date, status),
+  CONSTRAINT fk_content_auto_distribution_plan_project FOREIGN KEY (project_id) REFERENCES project(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='staggered daily auto distribution project plan';
+
+CREATE TABLE IF NOT EXISTS project_self_media_schedule_plan (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  company_id BIGINT NULL,
+  brand_id BIGINT NULL,
+  target_month VARCHAR(7) NOT NULL,
+  trigger_mode VARCHAR(32) NOT NULL,
+  planned_execute_at DATETIME NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  retry_count INT NOT NULL DEFAULT 0,
+  next_attempt_at DATETIME NULL,
+  failure_message VARCHAR(512) NULL,
+  created_by BIGINT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_project_self_media_schedule_plan_month (project_id, target_month),
+  KEY idx_project_self_media_schedule_plan_due (status, next_attempt_at, planned_execute_at, id),
+  KEY idx_project_self_media_schedule_plan_month_status (target_month, status),
+  CONSTRAINT fk_project_self_media_schedule_plan_project FOREIGN KEY (project_id) REFERENCES project(id),
+  CONSTRAINT fk_project_self_media_schedule_plan_brand FOREIGN KEY (brand_id) REFERENCES brand(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='staggered project self-media monthly schedule plan';

@@ -12,9 +12,22 @@ public class SelfMediaPublishAutoScheduleResponse {
     private String targetMonth;
     private String scheduleStrategy;
     private Integer requestedCount;
+    private Integer normalRequiredCount;
+    private Integer pendingCarryOverCount;
+    private Integer availableSlotCount;
+    private Integer deficitCount;
+    private Boolean enough;
+    private String recommendedStrategy;
+    private String decisionStrategy;
     private Integer plannedCount;
     private Integer rejectedCount;
     private Boolean created;
+    private Boolean carryOverCreated;
+    private Integer carryOverCount;
+    private String carryOverTargetMonth;
+    private Integer unavailableCarryOverCount;
+    private List<String> warnings = new ArrayList<>();
+    private List<CarryOverSource> carryOverSources = new ArrayList<>();
     private List<SelfMediaPublishAutoScheduleItemVO> plannedItems = new ArrayList<>();
     private List<SlotGroup> slotGroups = new ArrayList<>();
     private List<SelfMediaPublishScheduleVO> createdSchedules = new ArrayList<>();
@@ -28,6 +41,8 @@ public class SelfMediaPublishAutoScheduleResponse {
         private String scheduleStrategy;
         private Integer requestedCount;
         private Integer availableSlotCount;
+        private Integer deficitCount;
+        private Integer remainingWorkdayCount;
         private Boolean enough;
         private String message;
         private List<SlotPreview> selectedSlots = new ArrayList<>();
@@ -38,5 +53,16 @@ public class SelfMediaPublishAutoScheduleResponse {
         private LocalDateTime executionAt;
         private LocalDateTime plannedPublishAt;
         private String windowName;
+    }
+
+    @Data
+    public static class CarryOverSource {
+        private Long id;
+        private String sourceMonth;
+        private String targetMonth;
+        private Integer carryOverCount;
+        private Integer consumedCount;
+        private Integer pendingCount;
+        private String status;
     }
 }

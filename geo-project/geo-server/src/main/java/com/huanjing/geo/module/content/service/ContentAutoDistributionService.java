@@ -15,6 +15,7 @@ import com.huanjing.geo.module.content.entity.BatchArticlePublishItem;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.ContentAutoDistributionBatch;
 import com.huanjing.geo.module.content.entity.ContentAutoDistributionItem;
+import com.huanjing.geo.module.content.entity.ContentAutoDistributionPlan;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
@@ -22,6 +23,7 @@ import com.huanjing.geo.module.content.mapper.BatchArticlePublishItemMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionBatchMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionItemMapper;
+import com.huanjing.geo.module.content.mapper.ContentAutoDistributionPlanMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
@@ -68,6 +70,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 @RequiredArgsConstructor
@@ -94,6 +97,7 @@ public class ContentAutoDistributionService {
     private final SysUserMapper sysUserMapper;
     private final ContentAutoDistributionBatchMapper batchMapper;
     private final ContentAutoDistributionItemMapper itemMapper;
+    private final ContentAutoDistributionPlanMapper planMapper;
     private final BatchArticleGenerationTaskMapper generationTaskMapper;
     private final BatchArticlePublishItemMapper publishItemMapper;
     private final ArticleDraftMapper articleDraftMapper;
@@ -126,13 +130,34 @@ public class ContentAutoDistributionService {
     private long configuredOperatorUserId;
     @Value("${geo.content.auto-distribution.stale-generation-timeout-hours:24}")
     private long staleGenerationTimeoutHours;
+    @Value("${geo.content.auto-distribution.plan-window-start:00:30}")
+    private String planWindowStart;
+    @Value("${geo.content.auto-distribution.plan-window-end:18:00}")
+    private String planWindowEnd;
+    @Value("${geo.content.auto-distribution.plan-jitter-minutes:10}")
+    private int planJitterMinutes;
+    @Value("${geo.content.auto-distribution.plan-worker-batch-size:10}")
+    private int planWorkerBatchSize;
+    @Value("${geo.content.auto-distribution.plan-retry-max-count:3}")
+    private int planRetryMaxCount;
 
     @Scheduled(cron = "${geo.content.auto-distribution.cron:0 0 1 * * ?}", zone = "Asia/Shanghai")
     public void runDailyPlan() {
         if (!enabled) {
             return;
         }
-        withLock(dailyLockKey, () -> createDailyPlan(LocalDate.now(BUSINESS_ZONE)));
+        withLock(dailyLockKey, () -> createDailyProjectPlans(LocalDate.now(BUSINESS_ZONE)));
+    }
+
+    @Scheduled(fixedDelayString = "${geo.content.auto-distribution.plan-worker-fixed-delay-ms:60000}")
+    public void runDueDailyPlans() {
+        if (!enabled) {
+            return;
+        }
+        int processed = processDueDailyProjectPlans(planWorkerBatchSize);
+        if (processed > 0) {
+            log.info("auto distribution staggered daily plans processed count={}", processed);
+        }
     }
 
     @Scheduled(fixedDelayString = "${geo.content.auto-distribution.progress-poll-ms:60000}")
@@ -144,13 +169,7 @@ public class ContentAutoDistributionService {
     }
 
     public void createDailyPlan(LocalDate planDate) {
-        List<Project> projects = projectMapper.selectList(new LambdaQueryWrapper<Project>()
-                .eq(Project::getStatus, "active")
-                .isNull(Project::getDeletedAt)
-                .and(wrapper -> wrapper.eq(Project::getContentGenerationEnabled, true)
-                        .or()
-                        .isNull(Project::getContentGenerationEnabled))
-                .orderByAsc(Project::getId));
+        List<Project> projects = selectDailyPlanProjects();
         for (Project project : projects) {
             try {
                 Long operatorId = resolveOperatorUserId(project);
@@ -160,6 +179,104 @@ public class ContentAutoDistributionService {
                         project.getId(), planDate, ex.getMessage(), ex);
             }
         }
+    }
+
+    public int createDailyProjectPlans(LocalDate planDate) {
+        List<Project> projects = selectDailyPlanProjects();
+        if (projects.isEmpty()) {
+            return 0;
+        }
+        List<LocalDateTime> executeTimes = spreadExecuteTimes(planDate, projects.size(), planWindowStart, planWindowEnd, planJitterMinutes);
+        int created = 0;
+        for (int i = 0; i < projects.size(); i++) {
+            Project project = projects.get(i);
+            ContentAutoDistributionPlan plan = new ContentAutoDistributionPlan();
+            plan.setProjectId(project.getId());
+            plan.setCompanyId(project.getCompanyId());
+            plan.setBrandId(project.getBrandId());
+            plan.setPlanDate(planDate);
+            plan.setPlannedExecuteAt(executeTimes.get(i));
+            plan.setNextAttemptAt(executeTimes.get(i));
+            plan.setStatus("pending");
+            plan.setRetryCount(0);
+            try {
+                planMapper.insert(plan);
+                created++;
+            } catch (DuplicateKeyException ignored) {
+                // Idempotent daily planning: one project can only have one auto plan per date.
+            } catch (Exception ex) {
+                log.warn("auto distribution staggered plan create failed projectId={} date={} error={}",
+                        project.getId(), planDate, ex.getMessage());
+            }
+        }
+        return created;
+    }
+
+    public int processDueDailyProjectPlans(int limit) {
+        LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE).withNano(0);
+        List<ContentAutoDistributionPlan> plans = planMapper.selectList(
+                new LambdaQueryWrapper<ContentAutoDistributionPlan>()
+                        .in(ContentAutoDistributionPlan::getStatus, List.of("pending", "failed"))
+                        .le(ContentAutoDistributionPlan::getNextAttemptAt, now)
+                        .le(ContentAutoDistributionPlan::getPlannedExecuteAt, now)
+                        .lt(ContentAutoDistributionPlan::getRetryCount, Math.max(1, planRetryMaxCount))
+                        .orderByAsc(ContentAutoDistributionPlan::getPlannedExecuteAt, ContentAutoDistributionPlan::getId)
+                        .last("LIMIT " + Math.max(1, limit))
+        );
+        int processed = 0;
+        for (ContentAutoDistributionPlan plan : plans) {
+            String status = plan.getStatus();
+            int claimed = planMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionPlan>()
+                    .eq(ContentAutoDistributionPlan::getId, plan.getId())
+                    .eq(ContentAutoDistributionPlan::getStatus, status)
+                    .set(ContentAutoDistributionPlan::getStatus, "running")
+                    .set(ContentAutoDistributionPlan::getFailureMessage, null));
+            if (claimed <= 0) {
+                continue;
+            }
+            runDailyProjectPlan(plan);
+            processed++;
+        }
+        return processed;
+    }
+
+    private List<Project> selectDailyPlanProjects() {
+        return projectMapper.selectList(new LambdaQueryWrapper<Project>()
+                .eq(Project::getStatus, "active")
+                .isNull(Project::getDeletedAt)
+                .and(wrapper -> wrapper.eq(Project::getContentGenerationEnabled, true)
+                        .or()
+                        .isNull(Project::getContentGenerationEnabled))
+                .orderByAsc(Project::getId));
+    }
+
+    private void runDailyProjectPlan(ContentAutoDistributionPlan plan) {
+        Project project = projectMapper.selectById(plan.getProjectId());
+        if (project == null || project.getDeletedAt() != null || !"active".equals(project.getStatus())) {
+            markDailyProjectPlanTerminal(plan, "skipped", "项目不存在、已删除或非启用状态");
+            return;
+        }
+        try {
+            Long operatorId = resolveOperatorUserId(project);
+            createProjectPlan(project, plan.getPlanDate(), operatorId);
+            markDailyProjectPlanTerminal(plan, "completed", null);
+        } catch (Exception ex) {
+            int retryCount = (plan.getRetryCount() == null ? 0 : plan.getRetryCount()) + 1;
+            boolean exhausted = retryCount >= Math.max(1, planRetryMaxCount);
+            planMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionPlan>()
+                    .eq(ContentAutoDistributionPlan::getId, plan.getId())
+                    .set(ContentAutoDistributionPlan::getStatus, exhausted ? "failed_terminal" : "failed")
+                    .set(ContentAutoDistributionPlan::getRetryCount, retryCount)
+                    .set(ContentAutoDistributionPlan::getNextAttemptAt, LocalDateTime.now(BUSINESS_ZONE).plusMinutes(15))
+                    .set(ContentAutoDistributionPlan::getFailureMessage, trimError(ex.getMessage())));
+        }
+    }
+
+    private void markDailyProjectPlanTerminal(ContentAutoDistributionPlan plan, String status, String message) {
+        planMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionPlan>()
+                .eq(ContentAutoDistributionPlan::getId, plan.getId())
+                .set(ContentAutoDistributionPlan::getStatus, status)
+                .set(ContentAutoDistributionPlan::getFailureMessage, StringUtils.hasText(message) ? trimError(message) : null));
     }
 
     @Transactional
@@ -688,7 +805,8 @@ public class ContentAutoDistributionService {
                 continue;
             }
             String status = schedule.getStatus();
-            if (SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(status)) {
+            if (SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(status)
+                    || SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING.equals(status)) {
                 itemMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionItem>()
                         .eq(ContentAutoDistributionItem::getId, item.getId())
                         .set(ContentAutoDistributionItem::getStatus, "published")
@@ -1186,6 +1304,45 @@ public class ContentAutoDistributionService {
                 .eq(SysUser::getIsActive, true)
                 .orderByAsc(SysUser::getId)
                 .last("LIMIT 1"));
+    }
+
+    private List<LocalDateTime> spreadExecuteTimes(LocalDate date,
+                                                   int count,
+                                                   String windowStart,
+                                                   String windowEnd,
+                                                   int jitterMinutes) {
+        if (count <= 0) {
+            return List.of();
+        }
+        LocalTime start = parseLocalTime(windowStart, LocalTime.of(0, 30));
+        LocalTime end = parseLocalTime(windowEnd, LocalTime.of(18, 0));
+        LocalDateTime base = date.atTime(start);
+        long windowSeconds = java.time.Duration.between(start, end).getSeconds();
+        if (windowSeconds <= 0) {
+            windowSeconds = TimeUnit.HOURS.toSeconds(18);
+        }
+        long jitterSeconds = Math.max(0, jitterMinutes) * 60L;
+        List<LocalDateTime> times = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            long offsetSeconds = count <= 1 ? 0L : (windowSeconds * i) / count;
+            if (jitterSeconds > 0) {
+                offsetSeconds += ThreadLocalRandom.current().nextLong(jitterSeconds + 1);
+            }
+            offsetSeconds = Math.min(offsetSeconds, windowSeconds);
+            times.add(base.plusSeconds(offsetSeconds).withNano(0));
+        }
+        return times;
+    }
+
+    private LocalTime parseLocalTime(String value, LocalTime fallback) {
+        if (!StringUtils.hasText(value)) {
+            return fallback;
+        }
+        try {
+            return LocalTime.parse(value.trim());
+        } catch (Exception ignored) {
+            return fallback;
+        }
     }
 
     private void withLock(String key, Runnable runnable) {
