@@ -32,6 +32,34 @@
             <strong>{{ overview.queue.failedTotal + overview.queue.manualRequired + overview.queue.publishUnknown }}</strong>
             <small>失败 {{ overview.queue.failedTotal }}，人工 {{ overview.queue.manualRequired }}，待确认 {{ overview.queue.publishUnknown }}</small>
           </div>
+          <div class="metric-panel" :class="overview.queue.timedOutLockedRunning ? 'is-warning' : ''">
+            <span>浏览器锁</span>
+            <strong>{{ overview.queue.lockedRunning }}</strong>
+            <small>过期待释放 {{ overview.queue.timedOutLockedRunning || 0 }}</small>
+          </div>
+        </section>
+
+        <section v-if="overview.metrics" class="metric-grid">
+          <div class="metric-panel" :class="metricTone(overview.metrics.successRate, 90, 75)">
+            <span>自动化成功率</span>
+            <strong>{{ overview.metrics.successRate }}%</strong>
+            <small>成功 {{ overview.metrics.successTotal }} / 终态 {{ overview.metrics.terminalTotal }}</small>
+          </div>
+          <div class="metric-panel" :class="metricTone(100 - overview.metrics.manualInterventionRate, 90, 75)">
+            <span>人工介入率</span>
+            <strong>{{ overview.metrics.manualInterventionRate }}%</strong>
+            <small>人工 {{ overview.metrics.manualRequired }}，发布失败 {{ overview.metrics.publishFailed }}</small>
+          </div>
+          <div class="metric-panel" :class="metricTone(overview.metrics.urlAcquisitionRate, 90, 70)">
+            <span>发布 URL 获取率</span>
+            <strong>{{ overview.metrics.urlAcquisitionRate }}%</strong>
+            <small>已获取 {{ overview.metrics.urlAcquired }}，待补 {{ overview.metrics.publishedUrlPending }}</small>
+          </div>
+          <div class="metric-panel" :class="overview.metrics.postPublishFailures ? 'is-warning' : 'is-success'">
+            <span>发布后回查异常</span>
+            <strong>{{ overview.metrics.postPublishFailures }}</strong>
+            <small>平均完成耗时 {{ durationText(overview.metrics.averagePublishDurationSeconds) }}</small>
+          </div>
         </section>
 
         <section class="split-layout">
@@ -111,6 +139,18 @@
                   <el-tag size="small" :type="row.scheduleReady ? 'success' : 'info'">
                     {{ row.scheduleReady ? '可自动化' : '未就绪' }}
                   </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="发布链接" width="110">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.requiresPublishedUrl === false ? 'info' : 'warning'">
+                    {{ row.requiresPublishedUrl === false ? '非必需' : '需回收' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="回查" width="120">
+                <template #default="{ row }">
+                  {{ row.publishCheckDelayMinutes || 60 }} 分 / {{ row.publishCheckMaxAttempts || row.maxAttempts || '-' }} 次
                 </template>
               </el-table-column>
               <el-table-column label="说明" min-width="160" show-overflow-tooltip>
@@ -260,6 +300,20 @@ function formatTime(value?: string | null) {
   return value ? formatDateTime(value) : '-'
 }
 
+function metricTone(value: number, healthy: number, warning: number) {
+  if (value >= healthy) return 'is-success'
+  if (value >= warning) return 'is-warning'
+  return 'is-danger'
+}
+
+function durationText(seconds?: number | null) {
+  const value = Number(seconds || 0)
+  if (!Number.isFinite(value) || value <= 0) return '-'
+  if (value < 60) return `${Math.round(value)} 秒`
+  if (value < 3600) return `${Math.round(value / 60)} 分钟`
+  return `${Math.round(value / 360) / 10} 小时`
+}
+
 function statusLabel(status?: string | null) {
   const map: Record<string, string> = {
     pending: '待领取',
@@ -270,6 +324,7 @@ function statusLabel(status?: string | null) {
     publish_due: '到点待核验',
     checking_publish_result: '回查中',
     publish_unknown: '发布待确认',
+    published_url_pending: '已发布待补链接',
     published_confirmed: '已确认发布',
     schedule_failed: '排期失败',
     publish_failed: '发布失败',

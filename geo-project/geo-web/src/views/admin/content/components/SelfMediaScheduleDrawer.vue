@@ -1,25 +1,40 @@
 <template>
   <el-drawer v-model="visible" title="自媒体发布排期" size="84%" class="schedule-drawer">
     <div class="schedule-toolbar">
-      <el-input v-model="query.brandId" class="schedule-filter" clearable placeholder="品牌 ID" @keyup.enter="search" />
-      <el-input v-model="query.articleId" class="schedule-filter" clearable placeholder="文章 ID" @keyup.enter="search" />
-      <el-input v-model="query.selfMediaAccountId" class="schedule-filter" clearable placeholder="账号 ID" @keyup.enter="search" />
-      <el-select v-model="query.platform" class="schedule-filter" clearable placeholder="平台">
-        <el-option label="今日头条" value="toutiao" />
-        <el-option label="百家号" value="baijiahao" />
-        <el-option label="知乎" value="zhihu" />
-        <el-option label="小红书" value="xiaohongshu" />
-        <el-option label="抖音图文" value="douyin" />
-      </el-select>
-      <el-select v-model="query.status" class="schedule-filter" clearable placeholder="状态">
-        <el-option v-for="item in scheduleStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
-      </el-select>
-      <el-input v-model="query.failureCode" class="schedule-filter is-wide" clearable placeholder="失败码" @keyup.enter="search" />
-      <el-select v-model="query.health" class="schedule-filter" clearable placeholder="健康">
-        <el-option v-for="item in scheduleHealthOptions" :key="item.value" :label="item.label" :value="item.value" />
-      </el-select>
-      <el-button type="primary" :icon="Search" @click="search">查询</el-button>
-      <el-button :icon="Refresh" @click="resetQuery">重置</el-button>
+      <div class="schedule-filter-row">
+        <el-input v-model="query.brandName" class="schedule-filter" clearable placeholder="品牌名称" @keyup.enter="search" />
+        <el-input v-model="query.articleTitle" class="schedule-filter is-title" clearable placeholder="文章标题" @keyup.enter="search" />
+        <el-input v-model="query.selfMediaAccountName" class="schedule-filter" clearable placeholder="账号名称" @keyup.enter="search" />
+        <el-select v-model="query.platform" class="schedule-filter" clearable placeholder="平台">
+          <el-option label="今日头条" value="toutiao" />
+          <el-option label="百家号" value="baijiahao" />
+          <el-option label="知乎" value="zhihu" />
+          <el-option label="小红书" value="xiaohongshu" />
+          <el-option label="抖音图文" value="douyin" />
+        </el-select>
+        <el-select v-model="query.status" class="schedule-filter" clearable placeholder="状态">
+          <el-option v-for="item in scheduleStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+        <el-button type="primary" :icon="Search" @click="search">查询</el-button>
+        <el-button :icon="Refresh" @click="resetQuery">重置</el-button>
+        <el-button text type="primary" class="schedule-advanced-toggle" @click="advancedFiltersVisible = !advancedFiltersVisible">
+          高级筛选
+          <el-icon class="schedule-advanced-icon" :class="{ expanded: advancedFiltersVisible }"><ArrowDown /></el-icon>
+        </el-button>
+      </div>
+      <el-collapse-transition>
+        <div v-show="advancedFiltersVisible" class="schedule-filter-row is-advanced">
+          <el-input v-model="query.failureCode" class="schedule-filter is-wide" clearable placeholder="失败码" @keyup.enter="search" />
+          <el-select v-model="query.health" class="schedule-filter" clearable placeholder="健康" @change="query.healthGroup = ''">
+            <el-option v-for="item in scheduleHealthOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </div>
+      </el-collapse-transition>
+    </div>
+
+    <div class="schedule-view-bar">
+      <span>{{ resultScopeText }}</span>
+      <el-button v-if="query.healthGroup || query.health" link type="primary" @click="clearViewFilter">查看全部</el-button>
     </div>
 
     <div class="schedule-health-grid">
@@ -28,8 +43,8 @@
         :key="item.value"
         type="button"
         class="schedule-health-card"
-        :class="[`is-${item.tone}`, { selected: query.health === item.value }]"
-        @click="toggleHealthFilter(item.value)"
+        :class="[`is-${item.tone}`, { selected: query.healthGroup === item.value }]"
+        @click="toggleHealthGroupFilter(item.value)"
       >
         <span class="schedule-health-label">{{ item.label }}</span>
         <strong class="schedule-health-value">{{ item.count }}</strong>
@@ -44,20 +59,18 @@
       <el-tag v-if="alertOverview.info" type="info" size="small">提示 {{ alertOverview.info }}</el-tag>
     </div>
 
-    <DataState :loading="loading" :empty="!filteredRows.length" empty-text="暂无发布排期">
+    <DataState :loading="loading" :empty="!filteredRows.length" :empty-text="scheduleEmptyText">
       <el-table :data="filteredRows" border table-layout="fixed" class="schedule-table">
-        <el-table-column label="排期" width="90">
-          <template #default="scope">#{{ scope.row.id }}</template>
-        </el-table-column>
-        <el-table-column label="文章/品牌" min-width="150">
+        <el-table-column label="排期 / 文章" min-width="220">
           <template #default="scope">
             <div class="schedule-stack">
+              <span class="schedule-muted">#{{ scope.row.id }}</span>
               <button type="button" class="schedule-link" @click="emit('openArticle', scope.row.articleId)">{{ articleDisplay(scope.row) }}</button>
               <span>{{ brandDisplay(scope.row) }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="平台账号" min-width="150">
+        <el-table-column label="平台 / 账号" min-width="145">
           <template #default="scope">
             <div class="schedule-stack">
               <span>{{ platformLabel(scope.row.platform) }}</span>
@@ -65,7 +78,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="发布时间" min-width="190">
+        <el-table-column label="发布时间" min-width="170">
           <template #default="scope">
             <div class="schedule-stack">
               <span>计划 {{ timeText(scope.row.plannedPublishAt) }}</span>
@@ -73,15 +86,21 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="执行状态" min-width="150">
+        <el-table-column label="当前状态" min-width="210">
           <template #default="scope">
             <div class="schedule-stack">
-              <el-tag size="small" :type="statusTag(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag>
-              <span>{{ attemptText(scope.row) }}</span>
+              <div class="schedule-tag-row">
+                <el-tag size="small" :type="statusTag(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag>
+                <el-tag size="small" :type="healthTag(scope.row)">{{ healthLabel(scope.row) }}</el-tag>
+                <el-tag v-if="activeAlertCount(scope.row)" size="small" :type="alertTag(scope.row)">
+                  告警 {{ activeAlertCount(scope.row) }}
+                </el-tag>
+              </div>
+              <span>{{ stageLabel(scope.row) }} · {{ progressText(scope.row) }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="平台结果" min-width="190">
+        <el-table-column label="平台结果" min-width="185">
           <template #default="scope">
             <div class="schedule-stack">
               <div class="schedule-tag-row">
@@ -107,19 +126,6 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="健康/阶段" min-width="170">
-          <template #default="scope">
-            <div class="schedule-stack">
-              <div class="schedule-tag-row">
-                <el-tag size="small" :type="healthTag(scope.row)">{{ healthLabel(scope.row) }}</el-tag>
-                <el-tag v-if="activeAlertCount(scope.row)" size="small" :type="alertTag(scope.row)">
-                  告警 {{ activeAlertCount(scope.row) }}
-                </el-tag>
-              </div>
-              <span>{{ stageLabel(scope.row) }}</span>
-            </div>
-          </template>
-        </el-table-column>
         <el-table-column label="下次处理" min-width="170">
           <template #default="scope">
             <div class="schedule-stack">
@@ -129,20 +135,33 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="异常信息" min-width="220" show-overflow-tooltip>
-          <template #default="scope">{{ failureText(scope.row) }}</template>
+        <el-table-column label="异常摘要" min-width="190" show-overflow-tooltip>
+          <template #default="scope">{{ failureSummary(scope.row) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right" align="center">
+        <el-table-column label="操作" width="178" fixed="right" align="center">
           <template #default="scope">
             <div class="schedule-actions">
+              <el-button
+                v-if="primaryRowAction(scope.row)"
+                link
+                :type="rowActionType(primaryRowAction(scope.row))"
+                @click="runRowAction(scope.row, primaryRowAction(scope.row)!)"
+              >
+                {{ rowActionLabel(primaryRowAction(scope.row)!, scope.row) }}
+              </el-button>
               <el-button link type="primary" @click="showDiagnostics(scope.row)">诊断</el-button>
-              <el-button v-if="canHandleMaterials(scope.row)" link type="primary" @click="handleMaterials(scope.row)">处理素材</el-button>
-              <el-button v-if="canRetryNow(scope.row)" link type="primary" @click="retryNow(scope.row)">立即重试</el-button>
-              <el-button v-if="canRecheck(scope.row)" link type="primary" @click="recheck(scope.row)">重新校验</el-button>
-              <el-button v-if="canMarkManual(scope.row)" link type="warning" @click="markManual(scope.row)">转人工</el-button>
-              <el-button v-if="canConfirmPublished(scope.row)" link type="success" @click="confirmPublished(scope.row)">确认发布</el-button>
-              <el-button v-if="canConfirmFailed(scope.row)" link type="warning" @click="confirmFailed(scope.row)">确认失败</el-button>
-              <el-button v-if="canCancel(scope.row)" link type="danger" @click="cancel(scope.row)">取消</el-button>
+              <el-dropdown v-if="moreRowActions(scope.row).length" trigger="click" @command="(command: string) => runRowAction(scope.row, command as RowAction)">
+                <el-button link type="primary">
+                  更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-for="action in moreRowActions(scope.row)" :key="action" :command="action">
+                      {{ rowActionLabel(action, scope.row) }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>
@@ -199,6 +218,16 @@
               <span>{{ alertTypeLabel(alert.alertType) }}：{{ alert.message }}</span>
             </div>
           </div>
+        </section>
+
+        <section v-if="diagnosticsConclusionFields.length" class="schedule-diagnostics-section is-highlight">
+          <h4>诊断摘要</h4>
+          <dl class="schedule-diagnostics-grid">
+            <template v-for="item in diagnosticsConclusionFields" :key="item.label">
+              <dt>{{ item.label }}</dt>
+              <dd>{{ item.value }}</dd>
+            </template>
+          </dl>
         </section>
 
         <section class="schedule-diagnostics-section">
@@ -279,13 +308,44 @@
         </section>
       </div>
     </el-dialog>
+
+    <el-dialog
+      v-model="manualPublishedVisible"
+      :title="manualPublishedRow ? `人工确认发布 #${manualPublishedRow.id}` : '人工确认发布'"
+      width="520px"
+      class="schedule-manual-dialog"
+    >
+      <el-form label-width="110px" class="schedule-manual-form">
+        <el-form-item label="发布链接">
+          <el-input v-model="manualPublishedForm.platformPublishedUrl" clearable placeholder="平台发布 URL，可选" />
+        </el-form-item>
+        <el-form-item label="平台发布 ID">
+          <el-input v-model="manualPublishedForm.platformPublishId" clearable placeholder="平台作品 ID / 发布 ID，可选" />
+        </el-form-item>
+        <el-form-item label="实际发布时间">
+          <el-date-picker
+            v-model="manualPublishedForm.platformPublishedAt"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            placeholder="选择平台实际发布时间，可选"
+          />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="manualPublishedForm.note" type="textarea" :rows="3" maxlength="200" show-word-limit placeholder="人工确认依据，可选" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="manualPublishedVisible = false">返回</el-button>
+        <el-button type="success" :loading="manualPublishedSubmitting" @click="submitManualPublished">确认发布</el-button>
+      </template>
+    </el-dialog>
   </el-drawer>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowDown, Refresh, Search } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
 import {
   cancelSelfMediaPublishSchedule,
@@ -300,6 +360,8 @@ import type { SelfMediaPublishSchedule } from '@/types'
 import { formatDateTime } from '@/utils/format'
 
 type ScheduleHealth = 'failed' | 'manual' | 'overdue' | 'running' | 'waiting' | 'scheduled' | 'checking' | 'done' | 'cancelled'
+type ScheduleHealthGroup = 'attention' | 'processing' | 'waiting_publish' | 'url_pending' | 'done'
+type RowAction = 'handleMaterials' | 'retryNow' | 'recheck' | 'markManual' | 'confirmPublished' | 'confirmFailed' | 'cancel'
 
 const props = defineProps<{
   modelValue: boolean
@@ -323,15 +385,26 @@ const rows = ref<SelfMediaPublishSchedule[]>([])
 const diagnosticsVisible = ref(false)
 const diagnosticsRow = ref<SelfMediaPublishSchedule | null>(null)
 const diagnosticsJsonText = ref('暂无诊断信息')
+const manualPublishedVisible = ref(false)
+const manualPublishedSubmitting = ref(false)
+const manualPublishedRow = ref<SelfMediaPublishSchedule | null>(null)
+const manualPublishedForm = reactive({
+  platformPublishedUrl: '',
+  platformPublishId: '',
+  platformPublishedAt: '',
+  note: '',
+})
+const advancedFiltersVisible = ref(false)
 const page = reactive({ current: 1, size: 20, total: 0 })
 const query = reactive({
-  brandId: '',
-  articleId: '',
-  selfMediaAccountId: '',
+  brandName: '',
+  articleTitle: '',
+  selfMediaAccountName: '',
   platform: '',
   status: '',
   failureCode: '',
   health: '' as '' | ScheduleHealth,
+  healthGroup: '' as '' | ScheduleHealthGroup,
 })
 
 const scheduleStatusOptions = [
@@ -343,6 +416,7 @@ const scheduleStatusOptions = [
   { label: '到点待核验', value: 'publish_due' },
   { label: '发布结果核验中', value: 'checking_publish_result' },
   { label: '发布待确认', value: 'publish_unknown' },
+  { label: '已发布待补链接', value: 'published_url_pending' },
   { label: '已确认发布', value: 'published_confirmed' },
   { label: '定时失败', value: 'schedule_failed' },
   { label: '发布失败', value: 'publish_failed' },
@@ -365,36 +439,45 @@ const scheduleHealthOptions: Array<{ label: string; value: ScheduleHealth }> = [
 ]
 
 const filteredRows = computed(() => {
-  if (!query.health) return rows.value
-  return rows.value.filter((row) => health(row) === query.health)
+  let result = rows.value
+  if (query.health) {
+    result = result.filter((row) => health(row) === query.health)
+  }
+  if (query.healthGroup) {
+    result = result.filter((row) => healthGroup(row) === query.healthGroup)
+  }
+  return result
 })
 
 const scheduleHealthCards = computed(() => {
-  const counts = rows.value.reduce<Record<ScheduleHealth, number>>((acc, row) => {
-    acc[health(row)] += 1
+  const counts = rows.value.reduce<Record<ScheduleHealthGroup, number>>((acc, row) => {
+    acc[healthGroup(row)] += 1
     return acc
   }, {
-    failed: 0,
-    manual: 0,
-    overdue: 0,
-    running: 0,
-    waiting: 0,
-    scheduled: 0,
-    checking: 0,
+    attention: 0,
+    processing: 0,
+    waiting_publish: 0,
+    url_pending: 0,
     done: 0,
-    cancelled: 0,
   })
   return [
-    { label: '失败', value: 'failed' as ScheduleHealth, count: counts.failed, hint: '执行或发布失败', tone: 'danger' },
-    { label: '人工', value: 'manual' as ScheduleHealth, count: counts.manual, hint: '需人工介入', tone: 'danger' },
-    { label: '超时', value: 'overdue' as ScheduleHealth, count: counts.overdue, hint: '已到处理时间', tone: 'warning' },
-    { label: '执行中', value: 'running' as ScheduleHealth, count: counts.running, hint: '系统或平台处理中', tone: 'primary' },
-    { label: '待执行', value: 'waiting' as ScheduleHealth, count: counts.waiting, hint: '等待下次轮询', tone: 'info' },
-    { label: '已定时', value: 'scheduled' as ScheduleHealth, count: counts.scheduled, hint: '等待平台发布', tone: 'success' },
-    { label: '待确认', value: 'checking' as ScheduleHealth, count: counts.checking, hint: '到点后核验发布', tone: 'warning' },
-    { label: '完成', value: 'done' as ScheduleHealth, count: counts.done, hint: '已确认发布', tone: 'success' },
-    { label: '取消', value: 'cancelled' as ScheduleHealth, count: counts.cancelled, hint: '不再执行', tone: 'muted' },
+    { label: '需处理', value: 'attention' as ScheduleHealthGroup, count: counts.attention, hint: '失败、人工或超时', tone: 'danger' },
+    { label: '执行中', value: 'processing' as ScheduleHealthGroup, count: counts.processing, hint: '系统或平台处理中', tone: 'primary' },
+    { label: '等待发布', value: 'waiting_publish' as ScheduleHealthGroup, count: counts.waiting_publish, hint: '待执行或平台已定时', tone: 'success' },
+    { label: '待补链接', value: 'url_pending' as ScheduleHealthGroup, count: counts.url_pending, hint: '已发布，继续回写 URL', tone: 'warning' },
+    { label: '已完成', value: 'done' as ScheduleHealthGroup, count: counts.done, hint: '已发布或已取消', tone: 'success' },
   ]
+})
+
+const resultScopeText = computed(() => {
+  if (!rows.value.length) return '当前页暂无排期'
+  if (filteredRows.value.length === rows.value.length) return `当前页 ${rows.value.length} 条排期`
+  return `当前筛选 ${filteredRows.value.length} / 当前页 ${rows.value.length} 条`
+})
+
+const scheduleEmptyText = computed(() => {
+  if (query.healthGroup || query.health) return '当前筛选下暂无排期，可切换分类或查看全部'
+  return '暂无发布排期'
 })
 
 const alertOverview = computed(() => {
@@ -435,10 +518,27 @@ const diagnosticsPayload = computed<Record<string, any> | null>(() => {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : null
+  return parsed && typeof parsed === 'object' ? parsed : null
   } catch {
     return null
   }
+})
+
+const diagnosticsConclusionFields = computed(() => {
+  const row = diagnosticsRow.value
+  const payload = diagnosticsPayload.value
+  if (!row) return []
+  const resultCheck = payload ? extractPublishResultCheck(payload) : null
+  const values: Array<{ label: string; value: string }> = []
+  const add = (label: string, value: unknown) => {
+    const text = diagnosticValueText(value)
+    if (text) values.push({ label, value: text })
+  }
+  add('当前结论', diagnosticsConclusionText(row, payload))
+  add('主要原因', publishDiagnosticReasonLabel(payload?.reason) || publishResultReasonLabel(resultCheck?.reason) || failureText(row))
+  add('下一步', recommendationText(row))
+  add('平台证据', publishEvidenceSummary(payload?.evidence, payload?.checkStages))
+  return values.filter((item) => item.value && item.value !== '-').slice(0, 4)
 })
 
 const platformDiagnosticsFields = computed(() => {
@@ -458,8 +558,15 @@ const platformDiagnosticsFields = computed(() => {
   add('计划时间', payload.scheduledAtText || payload.platformScheduledAt || payload.scheduleProbe || verification?.scheduledAtText)
   add('失败环节', operationStageLabel(payload.operationStage, payload.operationStageLabel))
   add('平台状态', platformPublishStatusLabel(firstText(payload.platformStatus, verification?.pageStatusCode, verification?.platformStatus)))
-  add('回查原因', payload.reason)
+  add('回查原因', publishDiagnosticReasonLabel(payload.reason))
   add('回查失败码', failureCodeLabel(payload.failureCode) || payload.failureLabel)
+  add('匹配策略', publishMatchStrategyLabel(payload.matchStrategy))
+  add('回查阶段', publishCheckStageSummary(payload.checkStages))
+  add('页面证据', publishEvidenceSummary(payload.evidence, payload.checkStages))
+  add('候选数量', payload.candidateCount)
+  add('作品卡片数', payload.cardCandidateCount)
+  add('匹配卡片', publishMatchedCardSummary(payload.matchedCard))
+  add('候选摘要', publishCandidateSummary(payload.topCandidates))
   add('匹配标题', payload.hasTitle === undefined ? undefined : (payload.hasTitle ? '已匹配' : '未匹配'))
   add('匹配时间', payload.hasScheduleTime === undefined ? undefined : (payload.hasScheduleTime ? '已匹配' : '未匹配'))
   add('发布信号', payload.hasPublishedSignal === undefined ? undefined : (payload.hasPublishedSignal ? '已检测到' : '未检测到'))
@@ -480,7 +587,7 @@ const platformDiagnosticsFields = computed(() => {
   add('缩略图数', payload.xhsThumbnailCount)
   add('可见图片数', payload.xhsVisibleImageCount)
   add('预览页数', payload.xhsPreviewPages)
-  return values.slice(0, 18)
+  return values.slice(0, 22)
 })
 
 const publishVerificationFields = computed(() => {
@@ -488,6 +595,7 @@ const publishVerificationFields = computed(() => {
   const payload = diagnosticsPayload.value
   if (!row) return []
   const verification = payload ? extractPublishVerification(payload) : null
+  const resultCheck = payload ? extractPublishResultCheck(payload) : null
   const publishedUrl = resolvedPlatformPublishedUrl(row)
   const values: Array<{ label: string; value: string; href?: string }> = []
   const add = (label: string, value: unknown, href?: unknown) => {
@@ -499,6 +607,12 @@ const publishVerificationFields = computed(() => {
 
   add('平台发布 ID', firstText(row.platformPublishId, verification?.platformPublishId))
   add('平台发布链接', publishedUrl || '-', publishedUrl)
+  add('URL 要求', resultCheck?.urlRequired === undefined ? undefined : (resultCheck.urlRequired ? '必须回收发布链接' : '无需回收发布链接'))
+  add('回查结论', publishResultOutcomeLabel(resultCheck?.outcome))
+  add('结论原因', publishResultReasonLabel(resultCheck?.reason))
+  add('匹配发布 ID', resultCheck?.matchedPublishId)
+  add('匹配发布链接', resultCheck?.matchedPublishedUrl, resultCheck?.matchedPublishedUrl)
+  add('确认时间', resultCheck?.confirmedAt)
   add('封面图', firstText(row.publishCheckCoverUrl, verification?.coverImageUrl), firstText(row.publishCheckCoverUrl, verification?.coverImageUrl))
   add('平台状态', platformPublishStatusLabel(firstText(verification?.pageStatusCode, verification?.platformStatus)) || verification?.pageStatus)
   add('平台定时时间', firstText(verification?.scheduledAtText, verification?.platformScheduledAt, row.platformScheduledAt))
@@ -579,18 +693,11 @@ watch(() => [props.initialFailureCode, props.initialStatus], () => {
   }
 })
 
-function positiveNumberInput(value: string) {
-  const text = value.trim()
-  if (!text) return undefined
-  const num = Number(text)
-  return Number.isInteger(num) && num > 0 ? num : undefined
-}
-
 function queryParams() {
   return {
-    brandId: positiveNumberInput(query.brandId),
-    articleId: positiveNumberInput(query.articleId),
-    selfMediaAccountId: positiveNumberInput(query.selfMediaAccountId),
+    brandName: query.brandName.trim() || undefined,
+    articleTitle: query.articleTitle.trim() || undefined,
+    selfMediaAccountName: query.selfMediaAccountName.trim() || undefined,
     platform: query.platform || undefined,
     status: query.status || undefined,
     failureCode: query.failureCode.trim() || undefined,
@@ -619,13 +726,14 @@ function search() {
 }
 
 function resetQuery() {
-  query.brandId = ''
-  query.articleId = ''
-  query.selfMediaAccountId = ''
+  query.brandName = ''
+  query.articleTitle = ''
+  query.selfMediaAccountName = ''
   query.platform = ''
   query.status = ''
   query.failureCode = ''
   query.health = ''
+  query.healthGroup = ''
   search()
 }
 
@@ -633,6 +741,7 @@ function applyInitialFilters() {
   query.failureCode = props.initialFailureCode?.trim() || ''
   query.status = props.initialStatus?.trim() || ''
   query.health = ''
+  query.healthGroup = ''
   page.current = 1
 }
 
@@ -648,13 +757,21 @@ function statusLabel(status?: string | null) {
 
 function statusTag(status?: string | null): 'success' | 'warning' | 'danger' | 'info' {
   if (status === 'scheduled' || status === 'published_confirmed') return 'success'
-  if (['pending', 'filling', 'filled_verified', 'scheduling', 'publish_due', 'checking_publish_result', 'publish_unknown', 'cancel_pending_platform'].includes(status || '')) return 'warning'
+  if (['pending', 'filling', 'filled_verified', 'scheduling', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'cancel_pending_platform'].includes(status || '')) return 'warning'
   if (['schedule_failed', 'publish_failed', 'manual_required'].includes(status || '')) return 'danger'
   return 'info'
 }
 
-function toggleHealthFilter(value: ScheduleHealth) {
-  query.health = query.health === value ? '' : value
+function toggleHealthGroupFilter(value: ScheduleHealthGroup) {
+  query.healthGroup = query.healthGroup === value ? '' : value
+  if (query.healthGroup) {
+    query.health = ''
+  }
+}
+
+function clearViewFilter() {
+  query.health = ''
+  query.healthGroup = ''
 }
 
 function timeText(value?: string | null) {
@@ -674,7 +791,7 @@ function isLocked(row: SelfMediaPublishSchedule) {
 }
 
 function isOverdue(row: SelfMediaPublishSchedule) {
-  if (['schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto', 'cancelled', 'published_confirmed', 'scheduled'].includes(row.status)) return false
+  if (['schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto', 'cancelled', 'published_confirmed', 'published_url_pending', 'scheduled'].includes(row.status)) return false
   if (isLocked(row)) return false
   const nextAttemptAt = timeMs(row.nextAttemptAt)
   return nextAttemptAt !== null && nextAttemptAt <= Date.now()
@@ -684,12 +801,22 @@ function health(row: SelfMediaPublishSchedule): ScheduleHealth {
   if (row.status === 'schedule_failed' || row.status === 'publish_failed') return 'failed'
   if (row.status === 'manual_required' || row.status === 'routed_to_semi_auto') return 'manual'
   if (row.status === 'published_confirmed') return 'done'
+  if (row.status === 'published_url_pending') return 'checking'
   if (row.status === 'cancelled') return 'cancelled'
   if (row.status === 'scheduled') return 'scheduled'
   if (row.status === 'publish_due' || row.status === 'publish_unknown' || row.status === 'cancel_pending_platform') return 'checking'
   if (isLocked(row) || row.status === 'filling' || row.status === 'scheduling' || row.status === 'checking_publish_result') return 'running'
   if (isOverdue(row)) return 'overdue'
   return 'waiting'
+}
+
+function healthGroup(row: SelfMediaPublishSchedule): ScheduleHealthGroup {
+  const value = health(row)
+  if (row.status === 'published_url_pending') return 'url_pending'
+  if (value === 'failed' || value === 'manual' || value === 'overdue') return 'attention'
+  if (value === 'running' || value === 'checking') return 'processing'
+  if (value === 'done' || value === 'cancelled') return 'done'
+  return 'waiting_publish'
 }
 
 function healthLabel(row: SelfMediaPublishSchedule) {
@@ -725,6 +852,7 @@ function stageLabel(row: SelfMediaPublishSchedule) {
     publish_due: '到点待核验',
     checking_publish_result: '发布结果核验中',
     publish_unknown: '等待最终发布确认',
+    published_url_pending: '已发布，等待链接回写',
     published_confirmed: '发布已确认',
     schedule_failed: '定时设置失败',
     publish_failed: '发布结果失败',
@@ -743,6 +871,7 @@ function stageLabel(row: SelfMediaPublishSchedule) {
       publish_due: '待确认发布结果',
       checking_publish_result: '发布结果核验中',
       publish_unknown: '等待最终发布确认',
+      published_url_pending: '已发布，等待链接回写',
       published_confirmed: '发布已确认',
       schedule_failed: '提交平台失败',
       publish_failed: '发布结果失败',
@@ -763,6 +892,7 @@ function stageLabel(row: SelfMediaPublishSchedule) {
       publish_due: '待确认发布结果',
       checking_publish_result: '发布结果核验中',
       publish_unknown: '等待最终发布确认',
+      published_url_pending: '已发布，等待链接回写',
       published_confirmed: '发布已确认',
       schedule_failed: '发布提交失败',
       publish_failed: '发布结果失败',
@@ -825,6 +955,16 @@ function attemptText(row: SelfMediaPublishSchedule) {
   return max > 0 ? `尝试 ${attempt}/${max}` : `尝试 ${attempt}`
 }
 
+function progressText(row: SelfMediaPublishSchedule) {
+  if (row.status === 'published_confirmed') return '已完成'
+  if (row.status === 'published_url_pending') return '等待链接回写'
+  if (row.status === 'cancelled') return '已取消'
+  if (row.status === 'scheduled') return '等待平台发布'
+  if (row.status === 'pending') return '等待领取'
+  if (row.status === 'manual_required' || row.status === 'routed_to_semi_auto') return '需人工介入'
+  return attemptText(row)
+}
+
 function failureText(row: SelfMediaPublishSchedule) {
   const code = row.failureLabel || failureCodeLabel(row.failureCode)
   const message = displayFailureMessage(row)
@@ -835,6 +975,12 @@ function failureText(row: SelfMediaPublishSchedule) {
   if (stage && message) return `${stage}：${message}`
   if (code && message) return `${code}：${message}`
   return message || code || drift || '-'
+}
+
+function failureSummary(row: SelfMediaPublishSchedule) {
+  const text = failureText(row)
+  if (text === '-') return '-'
+  return text.length > 72 ? `${text.slice(0, 72)}...` : text
 }
 
 function failureStageText(row: SelfMediaPublishSchedule) {
@@ -895,6 +1041,10 @@ function extractPublishOptions(payload: Record<string, any>) {
     || nestedRecord(payload, ['result', 'publishOptions'])
 }
 
+function extractPublishResultCheck(payload: Record<string, any>) {
+  return nestedRecord(payload, ['publishResultCheck'])
+}
+
 function extractFailureSnapshot(payload: Record<string, any>) {
   return nestedRecord(payload, ['failureSnapshot'])
     || nestedRecord(payload, ['failure', 'failureSnapshot'])
@@ -914,7 +1064,9 @@ function operationStageLabel(stage?: string | null, fallback?: string | null) {
 }
 
 function platformResultStatus(row: SelfMediaPublishSchedule) {
+  if (row.status === 'published_confirmed' && normalizePlatform(row.platform) === 'douyin' && !resolvedPlatformPublishedUrl(row)) return '已确认发布（无需链接）'
   if (row.status === 'published_confirmed') return '已确认发布'
+  if (row.status === 'published_url_pending') return '已发布待链接'
   if (resolvedPlatformPublishedUrl(row)) return '已回传链接'
   if (row.platformPublishId) return '已回传 ID'
   if (row.publishCheckCoverUrl) return '已回传封面'
@@ -925,7 +1077,7 @@ function platformResultStatus(row: SelfMediaPublishSchedule) {
 
 function platformResultTag(row: SelfMediaPublishSchedule): 'success' | 'warning' | 'danger' | 'info' {
   if (row.status === 'published_confirmed' || resolvedPlatformPublishedUrl(row)) return 'success'
-  if (row.status === 'publish_unknown' || row.status === 'checking_publish_result') return 'warning'
+  if (row.status === 'published_url_pending' || row.status === 'publish_unknown' || row.status === 'checking_publish_result') return 'warning'
   if (row.status === 'publish_failed') return 'danger'
   return 'info'
 }
@@ -1003,10 +1155,16 @@ function failureCodeLabel(code?: string | null) {
     PAGE_LOAD_TIMEOUT: '页面加载或执行超时',
     EDITOR_NOT_READY: '编辑器未就绪',
     PUBLISH_RESULT_CHECK_HELPER_FAILED: '发布结果回查失败',
-    PLATFORM_SCHEDULED_WAITING: '平台已定时，等待发布时间后复查',
+    PUBLISHED_URL_PENDING: '已发布，等待发布链接',
+    PLATFORM_SCHEDULED_WAITING: '平台已定时，等待发布时间后至少 1 小时复查',
     PUBLISH_RESULT_NOT_MATCHED_RETRYING: '发布结果暂未匹配，等待复查',
     PUBLISH_RESULT_NOT_MATCHED: '发布结果多次未匹配',
     PUBLISH_RESULT_RECHECK_REQUESTED: '已人工触发重新校验',
+    PUBLISH_RESULT_CHECK_ATTEMPT_LIMIT_EXCEEDED: '发布结果复查已达到最大次数',
+    PUBLISH_RESULT_CHECK_HEARTBEAT_TIMEOUT: '发布结果回查心跳超时',
+    LOCAL_HELPER_CLAIM_TIMEOUT: '本地助手任务心跳超时',
+    LOCAL_HELPER_PUBLISH_CHECK_FAILED: '本地助手发布回查失败',
+    PUBLISH_CHECK_PAGE_TIMEOUT: '平台作品管理页回查超时',
     PUBLISH_CHECK_FAILED: '发布结果校验失败',
     PUBLISH_RESULT_CHECK_FAILED: '发布结果校验失败',
     MANUAL_RETRY_REQUESTED: '操作员已请求立即重试',
@@ -1103,6 +1261,131 @@ function platformPublishStatusLabel(status?: string | null) {
   return labels[status] || status
 }
 
+function publishResultOutcomeLabel(outcome?: string | null) {
+  if (!outcome) return ''
+  const labels: Record<string, string> = {
+    published_confirmed: '已确认发布',
+    published_url_pending: '已发布，等待链接',
+  }
+  return labels[outcome] || outcome
+}
+
+function publishResultReasonLabel(reason?: string | null) {
+  if (!reason) return ''
+  const labels: Record<string, string> = {
+    published_url_matched: '已匹配到发布链接',
+    platform_does_not_require_published_url: '该平台不要求回收发布链接',
+    published_url_required_but_missing: '该平台要求发布链接，但本次未匹配到',
+    published_url_from_official_review: '已通过平台发布 ID 获取发布链接',
+  }
+  return labels[reason] || reason
+}
+
+function publishDiagnosticReasonLabel(reason?: string | null) {
+  if (!reason) return ''
+  const labels: Record<string, string> = {
+    PUBLISH_RESULT_RECHECK_REQUESTED: '操作员已请求重新校验，等待本地助手领取',
+    PUBLISH_RESULT_CHECK_ATTEMPT_LIMIT_EXCEEDED: '发布结果复查已达到最大次数',
+    PUBLISH_RESULT_CHECK_HEARTBEAT_TIMEOUT: '发布结果回查心跳超时',
+    LOCAL_HELPER_CLAIM_TIMEOUT: '本地助手领取后处理超时',
+    LOCAL_HELPER_PUBLISH_CHECK_FAILED: '本地助手发布结果回查失败',
+    PUBLISH_CHECK_PAGE_TIMEOUT: '平台作品管理页回查超时',
+    platform_does_not_require_published_url: '该平台不要求回收发布链接',
+    published_url_matched: '已匹配到发布链接',
+    published_url_required_but_missing: '该平台要求发布链接，但本次未匹配到',
+    published_url_from_official_review: '已通过平台发布 ID 获取发布链接',
+    'platform schedule time not due': '平台定时时间未到',
+    'matched published note card': '已匹配作品管理卡片',
+    'matched title and platform status': '已匹配标题和平台状态',
+    'title matched but published signal missing': '标题已匹配，但未检测到已发布信号',
+    'title not matched': '标题未匹配',
+    'matched published article': '已匹配已发布文章',
+    'title matched and platform is still reviewing': '标题已匹配，平台仍在审核中',
+    'title matched and platform is scheduled': '标题已匹配，平台仍处于定时待发布',
+  }
+  return labels[reason] || publishResultReasonLabel(reason) || reason
+}
+
+function publishMatchStrategyLabel(strategy?: string | null) {
+  if (!strategy) return ''
+  const labels: Record<string, string> = {
+    anchor_title_url: '标题链接匹配',
+    anchor_title_public_url: '标题公开链接匹配',
+    article_card_public_url: '作品卡片公开链接匹配',
+    article_card_status_window: '作品卡片状态匹配',
+    current_detail_url: '当前详情页确认',
+    note_manager_card: '作品管理卡片匹配',
+    title_status_window: '标题和状态区域匹配',
+    title_only: '仅标题匹配',
+    title_probe: '标题探测',
+  }
+  return labels[strategy] || strategy
+}
+
+function publishCandidateSummary(candidates: unknown) {
+  if (!Array.isArray(candidates) || !candidates.length) return ''
+  return candidates.slice(0, 3)
+    .map((item: any, index: number) => {
+      const text = firstText(item?.text, item?.href, `候选 ${index + 1}`)
+      const flags = [
+        item?.titleMatched === true ? '标题匹配' : '',
+        item?.isPublicUrl === true ? '公开链接' : '',
+      ].filter(Boolean).join('，')
+      return flags ? `${text}（${flags}）` : text
+    })
+    .join('；')
+}
+
+function diagnosticsConclusionText(row: SelfMediaPublishSchedule, payload: Record<string, any> | null) {
+  if (row.status === 'published_confirmed') return platformResultStatus(row) || '已确认发布'
+  if (row.status === 'published_url_pending') return '平台已确认发布，等待链接回写'
+  if (row.status === 'manual_required') return '需要人工确认或处理'
+  if (row.status === 'publish_unknown') return '发布结果暂未最终确认'
+  if (row.status === 'checking_publish_result') return '正在回查平台发布结果'
+  const resultCheck = payload ? extractPublishResultCheck(payload) : null
+  return publishResultOutcomeLabel(resultCheck?.outcome) || statusLabel(row.status)
+}
+
+function publishCheckStageSummary(stages: unknown) {
+  if (!stages || typeof stages !== 'object') return ''
+  const item = stages as Record<string, any>
+  const parts = [
+    item.pageOpened === true ? '页面已打开' : '',
+    item.listLoaded === true ? `列表已加载${item.listItemCount !== undefined ? ` ${item.listItemCount} 条` : ''}` : '',
+    item.titleMatched === true ? '标题已匹配' : item.titleMatched === false ? '标题未匹配' : '',
+    item.publicUrlMatched === true ? '链接已命中' : '',
+    item.statusResolved ? `状态：${platformPublishStatusLabel(String(item.statusResolved)) || item.statusResolved}` : '',
+  ].filter(Boolean)
+  return parts.join('；')
+}
+
+function publishEvidenceSummary(evidence: unknown, stages?: unknown) {
+  if (!evidence || typeof evidence !== 'object') return publishCheckStageSummary(stages)
+  const item = evidence as Record<string, any>
+  const candidates = Array.isArray(item.topCardCandidates) ? item.topCardCandidates : []
+  const bestCard = candidates[0] || {}
+  const parts = [
+    item.bestTitleScore !== undefined ? `最佳标题分 ${item.bestTitleScore}` : '',
+    firstText(item.matchedStatus, bestCard.status),
+    firstText(item.matchedPublishedAt, bestCard.publishedAt),
+    firstText(item.matchedPublishedUrl, bestCard.publishedUrl),
+  ].filter(Boolean)
+  if (parts.length) return parts.join(' / ')
+  return publishCheckStageSummary(stages)
+}
+
+function publishMatchedCardSummary(card: unknown) {
+  if (!card || typeof card !== 'object') return ''
+  const item = card as Record<string, any>
+  const parts = [
+    firstText(item.status),
+    firstText(item.publishedAt),
+    firstText(item.publishedUrl),
+    firstText(item.title),
+  ].filter(Boolean)
+  return parts.join(' / ')
+}
+
 function readableFailureCode(code: string) {
   const normalized = code.trim()
   if (!normalized) return ''
@@ -1148,26 +1431,26 @@ function accountDisplay(row: SelfMediaPublishSchedule) {
 }
 
 function canCancel(row: SelfMediaPublishSchedule) {
-  return props.canPublish && !['cancelled', 'published_confirmed', 'schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto'].includes(row.status)
+  return props.canPublish && !['cancelled', 'published_confirmed', 'published_url_pending', 'schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto'].includes(row.status)
 }
 
 function canConfirmPublished(row: SelfMediaPublishSchedule) {
-  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed'].includes(row.status)
+  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed'].includes(row.status)
 }
 
 function canConfirmFailed(row: SelfMediaPublishSchedule) {
-  return props.canPublish && !['cancelled', 'published_confirmed', 'schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto'].includes(row.status)
+  return props.canPublish && !['cancelled', 'published_confirmed', 'published_url_pending', 'schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto'].includes(row.status)
 }
 
 function canRecheck(row: SelfMediaPublishSchedule) {
-  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed'].includes(row.status)
+  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed'].includes(row.status)
 }
 
 function canRetryNow(row: SelfMediaPublishSchedule | null) {
   if (!props.canPublish || !row) return false
   if (['cancelled', 'published_confirmed', 'cancel_pending_platform', 'routed_to_semi_auto'].includes(row.status)) return false
   if (hasPendingRetryRequest(row) || isLocked(row)) return false
-  if (row.queueKind === 'publish_result_check') return ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed', 'manual_required'].includes(row.status)
+  if (row.queueKind === 'publish_result_check') return ['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed', 'manual_required'].includes(row.status)
   return ['pending', 'filling', 'filled_verified', 'scheduling', 'schedule_failed', 'manual_required'].includes(row.status)
 }
 
@@ -1205,7 +1488,63 @@ function handleMaterials(row: SelfMediaPublishSchedule | null) {
 
 function canMarkManual(row: SelfMediaPublishSchedule) {
   if (!props.canPublish) return false
-  return ['pending', 'filling', 'filled_verified', 'scheduling', 'scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'schedule_failed', 'publish_failed'].includes(row.status)
+  return ['pending', 'filling', 'filled_verified', 'scheduling', 'scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'schedule_failed', 'publish_failed'].includes(row.status)
+}
+
+function allRowActions(row: SelfMediaPublishSchedule): RowAction[] {
+  const actions: RowAction[] = []
+  if (canHandleMaterials(row)) actions.push('handleMaterials')
+  if (canRetryNow(row)) actions.push('retryNow')
+  if (canRecheck(row)) actions.push('recheck')
+  if (canConfirmPublished(row)) actions.push('confirmPublished')
+  if (canMarkManual(row)) actions.push('markManual')
+  if (canConfirmFailed(row)) actions.push('confirmFailed')
+  if (canCancel(row)) actions.push('cancel')
+  return actions
+}
+
+function primaryRowAction(row: SelfMediaPublishSchedule): RowAction | null {
+  if (canHandleMaterials(row)) return 'handleMaterials'
+  if (row.status === 'published_url_pending' && canConfirmPublished(row)) return 'confirmPublished'
+  if (canRetryNow(row)) return 'retryNow'
+  if (canRecheck(row)) return 'recheck'
+  if (canConfirmPublished(row)) return 'confirmPublished'
+  return null
+}
+
+function moreRowActions(row: SelfMediaPublishSchedule) {
+  const primary = primaryRowAction(row)
+  return allRowActions(row).filter((action) => action !== primary)
+}
+
+function rowActionLabel(action: RowAction, row: SelfMediaPublishSchedule) {
+  const labels: Record<RowAction, string> = {
+    handleMaterials: '处理素材',
+    retryNow: '立即重试',
+    recheck: '重新校验',
+    markManual: '转人工',
+    confirmPublished: row.status === 'published_url_pending' ? '补充链接' : '确认发布',
+    confirmFailed: '确认失败',
+    cancel: '取消',
+  }
+  return labels[action]
+}
+
+function rowActionType(action: RowAction | null): 'primary' | 'success' | 'warning' | 'danger' {
+  if (action === 'confirmPublished') return 'success'
+  if (action === 'markManual' || action === 'confirmFailed') return 'warning'
+  if (action === 'cancel') return 'danger'
+  return 'primary'
+}
+
+function runRowAction(row: SelfMediaPublishSchedule, action: RowAction) {
+  if (action === 'handleMaterials') return handleMaterials(row)
+  if (action === 'retryNow') return retryNow(row)
+  if (action === 'recheck') return recheck(row)
+  if (action === 'markManual') return markManual(row)
+  if (action === 'confirmPublished') return confirmPublished(row)
+  if (action === 'confirmFailed') return confirmFailed(row)
+  if (action === 'cancel') return cancel(row)
 }
 
 async function cancel(row: SelfMediaPublishSchedule) {
@@ -1227,19 +1566,30 @@ async function cancel(row: SelfMediaPublishSchedule) {
 }
 
 async function confirmPublished(row: SelfMediaPublishSchedule) {
+  manualPublishedRow.value = row
+  manualPublishedForm.platformPublishedUrl = resolvedPlatformPublishedUrl(row) || ''
+  manualPublishedForm.platformPublishId = row.platformPublishId || ''
+  manualPublishedForm.platformPublishedAt = row.publishedConfirmedAt || row.platformScheduledAt || ''
+  manualPublishedForm.note = ''
+  manualPublishedVisible.value = true
+}
+
+async function submitManualPublished() {
+  const row = manualPublishedRow.value
+  if (!row) return
+  manualPublishedSubmitting.value = true
   try {
-    const result = await ElMessageBox.prompt(`确认排期 #${row.id} 已在平台发布？`, '人工确认发布', {
-      confirmButtonText: '确认发布',
-      cancelButtonText: '返回',
-      inputPlaceholder: '平台发布链接，可选',
+    await confirmSelfMediaPublishSchedulePublished(row.id, {
+      platformPublishedUrl: manualPublishedForm.platformPublishedUrl.trim() || undefined,
+      platformPublishId: manualPublishedForm.platformPublishId.trim() || undefined,
+      platformPublishedAt: manualPublishedForm.platformPublishedAt || undefined,
+      note: manualPublishedForm.note.trim() || undefined,
     })
-    await confirmSelfMediaPublishSchedulePublished(row.id, { platformPublishedUrl: result.value || undefined })
     ElMessage.success('已确认发布')
+    manualPublishedVisible.value = false
     await load()
-  } catch (error) {
-    if (error !== 'cancel' && error !== 'close') {
-      throw error
-    }
+  } finally {
+    manualPublishedSubmitting.value = false
   }
 }
 
@@ -1254,6 +1604,7 @@ async function confirmFailed(row: SelfMediaPublishSchedule) {
     await confirmSelfMediaPublishScheduleFailed(row.id, {
       failureCode: 'MANUAL_CONFIRMED_FAILED',
       failureMessage: result.value.trim(),
+      note: result.value.trim(),
     })
     ElMessage.success('已确认失败')
     await load()
@@ -1369,6 +1720,7 @@ function recommendationText(row: SelfMediaPublishSchedule) {
     if (row.status === 'manual_required') return '按异常信息处理页面或配置问题；处理后重新创建排期。'
   }
   if (row.status === 'publish_unknown') return '等待自动复查；若长时间未变化，可点击“重新校验”或人工确认发布。'
+  if (row.status === 'published_url_pending') return '平台已确认发布，系统会继续补充发布链接；如已拿到链接，可点击“确认发布”补充 URL。'
   if (row.status === 'publish_failed') return `检查本地助手、AdsPower 浏览器和${platformLabel(row.platform)}作品管理页；修复后点击“重新校验”。`
   if (row.status === 'manual_required') return '按异常信息处理配置或页面问题；处理后可点击“重新校验”或重新创建排期。'
   if (row.status === 'checking_publish_result') return '本地助手正在校验作品管理页；若锁定超时仍无变化，可重新校验。'
@@ -1397,28 +1749,73 @@ function platformLabel(value?: string | null) {
   }
   return value ? map[value] || value : '-'
 }
+
+function normalizePlatform(value?: string | null) {
+  return String(value || '').trim().toLowerCase()
+}
 </script>
 
 <style scoped>
 .schedule-toolbar {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.schedule-filter-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
+}
+
+.schedule-filter-row.is-advanced {
+  padding-top: 8px;
+  border-top: 1px dashed #dbe3ef;
 }
 
 .schedule-filter {
   width: 150px;
 }
 
+.schedule-filter.is-title {
+  width: 220px;
+}
+
 .schedule-filter.is-wide {
   width: 240px;
 }
 
+.schedule-advanced-toggle {
+  margin-left: auto;
+}
+
+.schedule-advanced-icon {
+  margin-left: 4px;
+  transition: transform 0.16s ease;
+}
+
+.schedule-advanced-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.schedule-view-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -2px 0 10px;
+  color: #64748b;
+  font-size: 13px;
+}
+
 .schedule-health-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -1442,9 +1839,9 @@ function platformLabel(value?: string | null) {
 
 .schedule-health-card {
   display: grid;
-  gap: 5px;
-  min-height: 86px;
-  padding: 12px 14px;
+  gap: 4px;
+  min-height: 74px;
+  padding: 10px 12px;
   text-align: left;
   background: #f8fafc;
   border: 1px solid #e5e7eb;
@@ -1480,6 +1877,11 @@ function platformLabel(value?: string | null) {
   border-color: #bbf7d0;
 }
 
+.schedule-health-card.is-muted {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
 .schedule-health-label,
 .schedule-health-hint {
   color: #64748b;
@@ -1488,7 +1890,7 @@ function platformLabel(value?: string | null) {
 
 .schedule-health-value {
   color: #0f172a;
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1;
 }
 
@@ -1496,19 +1898,29 @@ function platformLabel(value?: string | null) {
   width: 100%;
 }
 
+.schedule-table :deep(.el-table__cell) {
+  padding: 8px 0;
+}
+
 .schedule-stack {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
   color: #64748b;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
 .schedule-stack > span:first-child {
   color: #0f172a;
   font-size: 13px;
   font-weight: 650;
+}
+
+.schedule-muted {
+  color: #94a3b8 !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
 }
 
 .schedule-tag-row {
@@ -1536,8 +1948,9 @@ function platformLabel(value?: string | null) {
 
 .schedule-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: center;
+  align-items: center;
   gap: 2px 8px;
 }
 
@@ -1581,6 +1994,11 @@ function platformLabel(value?: string | null) {
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
+}
+
+.schedule-diagnostics-section.is-highlight {
+  background: #f8fbff;
+  border-color: #bfdbfe;
 }
 
 .schedule-diagnostics-section h4 {
@@ -1698,5 +2116,9 @@ function platformLabel(value?: string | null) {
 
 .schedule-diagnostics-json.is-compact {
   max-height: 180px;
+}
+
+.schedule-manual-form :deep(.el-date-editor) {
+  width: 100%;
 }
 </style>

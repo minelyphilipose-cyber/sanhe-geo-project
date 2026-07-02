@@ -14,6 +14,7 @@ import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
+import com.huanjing.geo.module.partner.service.PartnerFeatureAccessGuard;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -33,17 +34,20 @@ import org.springframework.web.bind.annotation.RestController;
 public class SelfMediaPublishScheduleController {
     private final SelfMediaPublishScheduleService scheduleService;
     private final SelfMediaPublishAutoScheduleService autoScheduleService;
+    private final PartnerFeatureAccessGuard partnerFeatureAccessGuard;
 
     @PostMapping("/self-media-schedules")
     public R<SelfMediaPublishScheduleCreateResponse> createSchedules(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody SelfMediaPublishScheduleCreateRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.createSchedules(request, idempotencyKey));
     }
 
     @PostMapping("/self-media-schedules/platform-quick-preview")
     public R<SelfMediaPlatformQuickScheduleResponse> previewPlatformQuickSchedule(
             @Valid @RequestBody SelfMediaPlatformQuickScheduleRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.previewPlatformQuickSchedule(request));
     }
 
@@ -51,6 +55,7 @@ public class SelfMediaPublishScheduleController {
     public R<SelfMediaPlatformQuickScheduleResponse> createPlatformQuickSchedule(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody SelfMediaPlatformQuickScheduleRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.createPlatformQuickSchedule(request, idempotencyKey));
     }
 
@@ -58,82 +63,102 @@ public class SelfMediaPublishScheduleController {
     public R<SelfMediaPlatformQuickScheduleResponse> dispatchPlatformQuickSchedule(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody SelfMediaPlatformQuickScheduleRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.dispatchPlatformQuickSchedule(request, idempotencyKey));
     }
 
     @PostMapping("/self-media-schedules/auto-preview")
     public R<SelfMediaPublishAutoScheduleResponse> previewAutoSchedules(
             @Valid @RequestBody SelfMediaPublishAutoScheduleRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(autoScheduleService.preview(request));
     }
 
     @PostMapping("/self-media-schedules/auto-create")
     public R<SelfMediaPublishAutoScheduleResponse> createAutoSchedules(
             @Valid @RequestBody SelfMediaPublishAutoScheduleRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(autoScheduleService.create(request));
     }
 
     @GetMapping("/self-media-schedules")
     public R<Page<SelfMediaPublishScheduleVO>> pageSchedules(@RequestParam(required = false) Long brandId,
+                                                             @RequestParam(required = false) String brandName,
                                                              @RequestParam(required = false) String platform,
                                                              @RequestParam(required = false) String status,
                                                              @RequestParam(required = false) String failureCode,
                                                              @RequestParam(required = false) Long articleId,
+                                                             @RequestParam(required = false) String articleTitle,
                                                              @RequestParam(required = false) Long selfMediaAccountId,
+                                                             @RequestParam(required = false) String selfMediaAccountName,
                                                              @RequestParam(defaultValue = "1") Long current,
                                                              @RequestParam(defaultValue = "20") Long size) {
-        return R.ok(scheduleService.pageSchedules(brandId, platform, status, failureCode, articleId, selfMediaAccountId, current, size));
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(scheduleService.pageSchedules(brandId, brandName, platform, status, failureCode, articleId, articleTitle, selfMediaAccountId, selfMediaAccountName, current, size));
     }
 
     @GetMapping("/self-media-automation/overview")
     public R<SelfMediaAutomationOverviewVO> automationOverview() {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.automationOverview());
     }
 
     @GetMapping("/self-media-schedules/{id}")
     public R<SelfMediaPublishScheduleVO> detail(@PathVariable Long id) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.detail(id));
     }
 
     @PostMapping("/self-media-schedules/{id}/cancel")
     public R<SelfMediaPublishScheduleVO> cancel(@PathVariable Long id,
                                                 @RequestBody(required = false) SelfMediaPublishScheduleCancelRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.cancel(id, request == null ? null : request.getReason()));
     }
 
     @PostMapping("/self-media-schedules/{id}/confirm-platform-cancelled")
     public R<SelfMediaPublishScheduleVO> confirmPlatformCancelled(@PathVariable Long id,
                                                                   @RequestBody(required = false) SelfMediaPublishScheduleCancelRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.confirmPlatformCancelled(id, request == null ? null : request.getReason()));
     }
 
     @PostMapping("/self-media-schedules/{id}/confirm-published")
     public R<SelfMediaPublishScheduleVO> confirmPublished(@PathVariable Long id,
                                                           @RequestBody(required = false) SelfMediaPublishScheduleManualResultRequest request) {
-        return R.ok(scheduleService.confirmPublished(id, request == null ? null : request.getPlatformPublishedUrl()));
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(scheduleService.confirmPublished(id, request));
     }
 
     @PostMapping("/self-media-schedules/{id}/confirm-publish-failed")
     public R<SelfMediaPublishScheduleVO> confirmPublishFailed(@PathVariable Long id,
                                                               @RequestBody(required = false) SelfMediaPublishScheduleManualResultRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         String failureCode = request == null ? null : request.getFailureCode();
         String failureMessage = request == null ? null : request.getFailureMessage();
-        return R.ok(scheduleService.confirmPublishFailed(id, failureCode, failureMessage));
+        return R.ok(scheduleService.confirmPublishFailed(id, failureCode, failureMessage, request == null ? null : request.getNote()));
     }
 
     @PostMapping("/self-media-schedules/{id}/retry-now")
     public R<SelfMediaPublishScheduleVO> retryNow(@PathVariable Long id) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.retryNow(id));
     }
 
     @PostMapping("/self-media-schedules/{id}/mark-manual-required")
     public R<SelfMediaPublishScheduleVO> markManualRequired(@PathVariable Long id,
                                                             @RequestBody(required = false) SelfMediaPublishScheduleCancelRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.markManualRequired(id, request == null ? null : request.getReason()));
     }
 
     @PostMapping("/self-media-schedules/{id}/recheck-publish-result")
     public R<SelfMediaPublishScheduleVO> recheckPublishResult(@PathVariable Long id) {
+        ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.recheckPublishResult(id));
+    }
+
+    private void ensureInternalSelfMediaScheduleAccess() {
+        partnerFeatureAccessGuard.ensureInternalDeliveryFeature("self-media schedule operations");
     }
 }

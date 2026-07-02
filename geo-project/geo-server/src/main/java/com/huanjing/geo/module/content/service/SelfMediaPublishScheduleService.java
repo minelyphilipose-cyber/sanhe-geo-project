@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
@@ -15,6 +16,7 @@ import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
 import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
+import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleManualResultRequest;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
@@ -29,6 +31,7 @@ import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
@@ -742,6 +745,7 @@ public class SelfMediaPublishScheduleService {
         );
         long runningTotal = scheduleMapper.countByStatuses(LOCAL_AGENT_RUNNING_STATUSES);
         long lockedRunning = scheduleMapper.countLockedByStatuses(LOCAL_AGENT_RUNNING_STATUSES, now);
+        long timedOutLockedRunning = scheduleMapper.countTimedOutLockedByStatuses(LOCAL_AGENT_RUNNING_STATUSES, now);
         long failedTotal = scheduleMapper.countByStatuses(List.of(
                 SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
                 SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED
@@ -763,6 +767,7 @@ public class SelfMediaPublishScheduleService {
                         .duePublishCheck(duePublishCheck)
                         .runningTotal(runningTotal)
                         .lockedRunning(lockedRunning)
+                        .timedOutLockedRunning(timedOutLockedRunning)
                         .failedTotal(failedTotal)
                         .manualRequired(manualRequired)
                         .publishUnknown(publishUnknown)
@@ -783,9 +788,50 @@ public class SelfMediaPublishScheduleService {
                 .platformCounts(platformCounts(now, activeStatuses))
                 .failureCodeCounts(failureCodeCounts())
                 .platformCapabilities(platformCapabilities())
+                .metrics(automationMetrics())
                 .thirdPartySubjectPool(thirdPartySubjectPoolOverview())
                 .compensation(compensationOverview(now))
                 .build();
+    }
+
+    private SelfMediaAutomationOverviewVO.AutomationMetrics automationMetrics() {
+        long publishedConfirmed = scheduleMapper.countByStatuses(List.of(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED));
+        long publishedUrlPending = scheduleMapper.countByStatuses(List.of(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING));
+        long publishFailed = scheduleMapper.countByStatuses(List.of(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED));
+        long scheduleFailed = scheduleMapper.countByStatuses(List.of(SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED));
+        long manualRequired = scheduleMapper.countByStatuses(List.of(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED));
+        long urlAcquired = scheduleMapper.countConfirmedWithPublishedUrl();
+        long postPublishFailures = scheduleMapper.countByFailureCodes(List.of(
+                "PUBLISH_RESULT_CHECK_FAILED",
+                "PUBLISH_RESULT_CHECK_HELPER_FAILED",
+                "PUBLISH_RESULT_NOT_MATCHED",
+                "PUBLISH_RESULT_MANUAL_FAILED",
+                "PUBLISHED_URL_PENDING"
+        ));
+        long terminalTotal = publishedConfirmed + publishedUrlPending + publishFailed + scheduleFailed + manualRequired;
+        long successTotal = publishedConfirmed + publishedUrlPending;
+        return SelfMediaAutomationOverviewVO.AutomationMetrics.builder()
+                .terminalTotal(terminalTotal)
+                .successTotal(successTotal)
+                .publishedConfirmed(publishedConfirmed)
+                .publishedUrlPending(publishedUrlPending)
+                .publishFailed(publishFailed)
+                .scheduleFailed(scheduleFailed)
+                .manualRequired(manualRequired)
+                .urlAcquired(urlAcquired)
+                .postPublishFailures(postPublishFailures)
+                .averagePublishDurationSeconds(scheduleMapper.averagePublishedDurationSeconds())
+                .successRate(percent(successTotal, terminalTotal))
+                .manualInterventionRate(percent(manualRequired, terminalTotal))
+                .urlAcquisitionRate(percent(urlAcquired, successTotal))
+                .build();
+    }
+
+    private double percent(long numerator, long denominator) {
+        if (denominator <= 0) {
+            return 0D;
+        }
+        return Math.round((numerator * 10000D / denominator)) / 100D;
     }
 
     public SelfMediaPublishScheduleVO detail(Long id) {
@@ -909,6 +955,9 @@ public class SelfMediaPublishScheduleService {
                             .minRemainingMinutes(item.getMinRemainingMinutes())
                             .maxAttempts(item.getMaxAttempts())
                             .maxRemainingMinutes(item.getMaxRemainingMinutes())
+                            .requiresPublishedUrl(item.getContractRequiresPublishedUrl())
+                            .publishCheckDelayMinutes(item.getContractPublishCheckDelayMinutes())
+                            .publishCheckMaxAttempts(item.getContractPublishCheckMaxAttempts())
                             .build();
                 })
                 .toList();
@@ -1434,6 +1483,10 @@ public class SelfMediaPublishScheduleService {
                 markExpiredPlatformScheduleExecution(candidate, now);
                 continue;
             }
+            if (isPublishResultCheckAttemptLimitExceeded(queueKind, candidate)) {
+                markPublishResultCheckAttemptLimitExceeded(candidate);
+                continue;
+            }
             boolean environmentLockAcquired = false;
             if (requiresEnvironmentLock(candidate)) {
                 if (!environmentLockService.tryAcquire(candidate.getBrowserEnvironmentId(),
@@ -1458,6 +1511,31 @@ public class SelfMediaPublishScheduleService {
             }
         }
         return null;
+    }
+
+    private boolean isPublishResultCheckAttemptLimitExceeded(String queueKind, SelfMediaPublishSchedule row) {
+        if (!SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK.equals(queueKind) || row == null) {
+            return false;
+        }
+        int attempts = row.getAttemptCount() == null ? 0 : row.getAttemptCount();
+        int maxAttempts = row.getMaxAttempts() == null ? resolvePublishCheckMaxAttempts(row) : row.getMaxAttempts();
+        return maxAttempts > 0 && attempts >= maxAttempts;
+    }
+
+    private void markPublishResultCheckAttemptLimitExceeded(SelfMediaPublishSchedule row) {
+        row.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        row.setLockedUntil(null);
+        row.setNextAttemptAt(null);
+        row.setFailureCode("PUBLISH_RESULT_NOT_MATCHED");
+        row.setFailureMessage("发布结果复查已达到最大次数，请人工确认");
+        row.setDiagnosticsJson(diagnosticsJson(
+                "recoveredAt", LocalDateTime.now(),
+                "reason", "PUBLISH_RESULT_CHECK_ATTEMPT_LIMIT_EXCEEDED",
+                "attemptCount", row.getAttemptCount(),
+                "maxAttempts", row.getMaxAttempts()
+        ));
+        scheduleMapper.updateById(row);
+        reconcileAlerts(row);
     }
 
     private boolean requiresEnvironmentLock(SelfMediaPublishSchedule row) {
@@ -1536,8 +1614,8 @@ public class SelfMediaPublishScheduleService {
 
     private void recoverTimedOutPublishCheck(SelfMediaPublishSchedule row) {
         int maxAttempts = Math.max(
-                row.getMaxAttempts() == null ? PUBLISH_CHECK_TOTAL_ATTEMPTS : row.getMaxAttempts(),
-                PUBLISH_CHECK_TOTAL_ATTEMPTS
+                row.getMaxAttempts() == null ? resolvePublishCheckMaxAttempts(row) : row.getMaxAttempts(),
+                resolvePublishCheckMaxAttempts(row)
         );
         LocalDateTime nextAttemptAt = nextPublishCheckRetryAt(row, maxAttempts);
         row.setMaxAttempts(maxAttempts);
@@ -1858,7 +1936,7 @@ public class SelfMediaPublishScheduleService {
             return SelfMediaPublishScheduleVO.from(row);
         }
         int publishCheckMaxAttempts = Math.max(row.getMaxAttempts() == null ? 0 : row.getMaxAttempts(),
-                PUBLISH_CHECK_TOTAL_ATTEMPTS);
+                resolvePublishCheckMaxAttempts(row));
         LocalDateTime retryAt = nextPublishCheckRetryAt(row, publishCheckMaxAttempts);
         if (retryAt != null) {
             row.setMaxAttempts(publishCheckMaxAttempts);
@@ -1896,12 +1974,12 @@ public class SelfMediaPublishScheduleService {
         LocalDateTime platformScheduledAt = row.getPlatformScheduledAt();
         LocalDateTime candidate;
         if (platformScheduledAt != null) {
-            candidate = platformScheduledAt.plusMinutes(PUBLISH_RESULT_INITIAL_DELAY_MINUTES);
+            candidate = platformScheduledAt.plusMinutes(resolvePublishCheckDelayMinutes(row));
             if (candidate.isBefore(now)) {
                 candidate = now.plusMinutes(5);
             }
         } else {
-            candidate = now.plusMinutes(PUBLISH_RESULT_INITIAL_DELAY_MINUTES);
+            candidate = now.plusMinutes(resolvePublishCheckDelayMinutes(row));
         }
         return nextBrandSafeAttemptAt(row.getBrandId(), candidate, row.getId());
     }
@@ -1935,7 +2013,9 @@ public class SelfMediaPublishScheduleService {
                 verification == null ? null : verification.platformPublishedUrl(),
                 row.getPlatformPublishedUrl()
         ));
-        row.setPublishedConfirmedAt(LocalDateTime.now());
+        LocalDateTime confirmedAt = LocalDateTime.now();
+        boolean urlRequired = isPublishedUrlRequired(row.getPlatform());
+        row.setPublishedConfirmedAt(confirmedAt);
         row.setPlatformPublishedUrl(publishedUrl);
         if (verification != null && verification.platformPublishId() != null) {
             row.setPlatformPublishId(verification.platformPublishId());
@@ -1944,12 +2024,21 @@ public class SelfMediaPublishScheduleService {
             row.setPublishCheckCoverUrl(verification.coverImageUrl());
         }
         row.setLockedUntil(null);
-        row.setDiagnosticsJson(trimToNull(diagnosticsJson));
-        if (StringUtils.hasText(publishedUrl)) {
+        if (StringUtils.hasText(publishedUrl) || !urlRequired) {
             row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED);
             row.setNextAttemptAt(null);
             row.setFailureCode(null);
             row.setFailureMessage(null);
+            row.setDiagnosticsJson(publishedResultDiagnostics(
+                    diagnosticsJson,
+                    row,
+                    urlRequired,
+                    "published_confirmed",
+                    StringUtils.hasText(publishedUrl)
+                            ? "published_url_matched"
+                            : "platform_does_not_require_published_url",
+                    confirmedAt
+            ));
             return;
         }
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING);
@@ -1957,12 +2046,61 @@ public class SelfMediaPublishScheduleService {
         row.setNextAttemptAt(nextPublishedUrlCheckAt(row));
         row.setFailureCode("PUBLISHED_URL_PENDING");
         row.setFailureMessage("平台已确认发布，等待发布链接回写");
+        row.setDiagnosticsJson(publishedResultDiagnostics(
+                diagnosticsJson,
+                row,
+                true,
+                "published_url_pending",
+                "published_url_required_but_missing",
+                confirmedAt
+        ));
+    }
+
+    private boolean isPublishedUrlRequired(String platform) {
+        return scheduleAdapterRouter.contract(platform)
+                .map(SelfMediaPlatformCapabilityContract::requiresPublishedUrl)
+                .orElseGet(() -> !"douyin".equals(normalizePublishPlatform(platform)));
+    }
+
+    private String publishedResultDiagnostics(String diagnosticsJson,
+                                              SelfMediaPublishSchedule row,
+                                              boolean urlRequired,
+                                              String outcome,
+                                              String reason,
+                                              LocalDateTime confirmedAt) {
+        ObjectNode root = objectMapper.createObjectNode();
+        if (StringUtils.hasText(diagnosticsJson)) {
+            try {
+                JsonNode parsed = objectMapper.readTree(diagnosticsJson);
+                if (parsed instanceof ObjectNode objectNode) {
+                    root = objectNode.deepCopy();
+                } else {
+                    root.put("rawDiagnostics", diagnosticsJson.trim());
+                }
+            } catch (JsonProcessingException ignored) {
+                root.put("rawDiagnostics", diagnosticsJson.trim());
+            }
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("platform", normalizePublishPlatform(row.getPlatform()));
+        result.put("urlRequired", urlRequired);
+        result.put("outcome", outcome);
+        result.put("reason", reason);
+        result.put("matchedPublishId", trimToNull(row.getPlatformPublishId()));
+        result.put("matchedPublishedUrl", trimToNull(row.getPlatformPublishedUrl()));
+        result.put("confirmedAt", confirmedAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        root.set("publishResultCheck", result);
+        try {
+            return objectMapper.writeValueAsString(root);
+        } catch (JsonProcessingException ignored) {
+            return trimToNull(diagnosticsJson);
+        }
     }
 
     private LocalDateTime nextPublishedUrlCheckAt(SelfMediaPublishSchedule row) {
         return nextBrandSafeAttemptAt(
                 row.getBrandId(),
-                LocalDateTime.now().plusMinutes(PUBLISH_RESULT_INITIAL_DELAY_MINUTES),
+                LocalDateTime.now().plusMinutes(resolvePublishCheckDelayMinutes(row)),
                 row.getId()
         );
     }
@@ -2029,6 +2167,10 @@ public class SelfMediaPublishScheduleService {
                                                                     String failureMessage,
                                                                     String diagnosticsJson) {
         SelfMediaPublishSchedule row = requireSchedule(id);
+        if (SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(normalize(row.getStatus()))
+                && isPublishResultFailureCode(failureCode)) {
+            return markClaimedPublishFailed(id, failureCode, failureMessage, diagnosticsJson);
+        }
         if (!SelfMediaPublishScheduleConstants.STATUS_FILLING.equals(normalize(row.getStatus()))) {
             environmentLockService.release(row.getId());
             return SelfMediaPublishScheduleVO.from(row);
@@ -2041,6 +2183,13 @@ public class SelfMediaPublishScheduleService {
                 diagnosticsJson,
                 nextScheduleExecutionRetryAt(row, failureCode)
         );
+    }
+
+    private boolean isPublishResultFailureCode(String failureCode) {
+        String code = normalize(failureCode);
+        return code.startsWith("publish_result")
+                || code.startsWith("published_url")
+                || code.contains("publish_check");
     }
 
     @Transactional
@@ -2100,11 +2249,25 @@ public class SelfMediaPublishScheduleService {
 
     @Transactional
     public SelfMediaPublishScheduleVO confirmPublished(Long id, String platformPublishedUrl) {
+        SelfMediaPublishScheduleManualResultRequest request = new SelfMediaPublishScheduleManualResultRequest();
+        request.setPlatformPublishedUrl(platformPublishedUrl);
+        return confirmPublished(id, request);
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleVO confirmPublished(Long id, SelfMediaPublishScheduleManualResultRequest request) {
         SelfMediaPublishSchedule row = requireScheduleWithAccess(id);
         if (!PUBLISH_RESULT_CONFIRMABLE_STATUSES.contains(normalize(row.getStatus()))) {
             fail("SCHEDULE_STATUS_NOT_CONFIRMABLE", "当前排期状态不允许确认已发布");
         }
-        applyPublishedResult(row, platformPublishedUrl, new PlatformScheduleVerification(null, null, null, null, null), null);
+        PlatformScheduleVerification verification = new PlatformScheduleVerification(
+                request == null ? null : request.getPlatformPublishedAt(),
+                null,
+                trimToNull(request == null ? null : request.getPlatformPublishId()),
+                trimToNull(request == null ? null : request.getPlatformPublishedUrl()),
+                null
+        );
+        applyPublishedResult(row, request == null ? null : request.getPlatformPublishedUrl(), verification, manualPublishedDiagnostics(row, request));
         touch(row);
         scheduleMapper.updateById(row);
         markArticlePublished(row.getArticleId());
@@ -2117,6 +2280,11 @@ public class SelfMediaPublishScheduleService {
 
     @Transactional
     public SelfMediaPublishScheduleVO confirmPublishFailed(Long id, String failureCode, String failureMessage) {
+        return confirmPublishFailed(id, failureCode, failureMessage, null);
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleVO confirmPublishFailed(Long id, String failureCode, String failureMessage, String note) {
         SelfMediaPublishSchedule row = requireScheduleWithAccess(id);
         if (!PUBLISH_RESULT_CONFIRMABLE_STATUSES.contains(normalize(row.getStatus()))) {
             fail("SCHEDULE_STATUS_NOT_CONFIRMABLE", "当前排期状态不允许确认发布失败");
@@ -2124,12 +2292,47 @@ public class SelfMediaPublishScheduleService {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED);
         row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "PUBLISH_RESULT_MANUAL_FAILED");
         row.setFailureMessage(trimFailureMessage(failureMessage));
+        row.setDiagnosticsJson(manualPublishFailedDiagnostics(row, failureCode, failureMessage, note));
         touch(row);
         scheduleMapper.updateById(row);
         releaseArticleIfNoActiveSchedule(row);
         refundScheduleQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         return SelfMediaPublishScheduleVO.from(row);
+    }
+
+    private String manualPublishedDiagnostics(SelfMediaPublishSchedule row, SelfMediaPublishScheduleManualResultRequest request) {
+        if (request == null) {
+            return null;
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("source", "manual_confirm_published");
+        root.put("platform", normalizePublishPlatform(row.getPlatform()));
+        root.put("note", trimToNull(request.getNote()));
+        root.put("platformPublishedUrl", trimToNull(request.getPlatformPublishedUrl()));
+        root.put("platformPublishId", trimToNull(request.getPlatformPublishId()));
+        if (request.getPlatformPublishedAt() != null) {
+            root.put("platformPublishedAt", request.getPlatformPublishedAt().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        }
+        try {
+            return objectMapper.writeValueAsString(root);
+        } catch (JsonProcessingException ignored) {
+            return null;
+        }
+    }
+
+    private String manualPublishFailedDiagnostics(SelfMediaPublishSchedule row, String failureCode, String failureMessage, String note) {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("source", "manual_confirm_failed");
+        root.put("platform", normalizePublishPlatform(row.getPlatform()));
+        root.put("failureCode", trimToNull(failureCode));
+        root.put("failureMessage", trimFailureMessage(failureMessage));
+        root.put("note", trimToNull(note));
+        try {
+            return objectMapper.writeValueAsString(root);
+        } catch (JsonProcessingException ignored) {
+            return trimToNull(row.getDiagnosticsJson());
+        }
     }
 
     @Transactional
@@ -2221,12 +2424,20 @@ public class SelfMediaPublishScheduleService {
     }
 
     private void queuePublishResultRecheck(SelfMediaPublishSchedule row) {
+        String previousStatus = normalize(row.getStatus());
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
         row.setNextAttemptAt(LocalDateTime.now());
         row.setLockedUntil(null);
-        row.setFailureCode("PUBLISH_RESULT_RECHECK_REQUESTED");
-        row.setFailureMessage("已人工触发重新校验发布结果");
+        row.setFailureCode(null);
+        row.setFailureMessage(null);
+        row.setDiagnosticsJson(diagnosticsJson(
+                "reason", "PUBLISH_RESULT_RECHECK_REQUESTED",
+                "requestedAt", LocalDateTime.now(),
+                "previousStatus", previousStatus,
+                "previousAttemptCount", row.getAttemptCount(),
+                "previousMaxAttempts", row.getMaxAttempts()
+        ));
         row.setMaxAttempts(Math.max(row.getMaxAttempts() == null ? 0 : row.getMaxAttempts(),
                 (row.getAttemptCount() == null ? 0 : row.getAttemptCount()) + 1));
         touch(row);
@@ -2550,12 +2761,28 @@ public class SelfMediaPublishScheduleService {
                 : row.getPlannedPublishAt();
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime candidate = target == null
-                ? now.plusMinutes(PUBLISH_RESULT_INITIAL_DELAY_MINUTES)
-                : target.plusMinutes(PUBLISH_RESULT_INITIAL_DELAY_MINUTES);
+                ? now.plusMinutes(resolvePublishCheckDelayMinutes(row))
+                : target.plusMinutes(resolvePublishCheckDelayMinutes(row));
         if (candidate.isBefore(now)) {
             candidate = now;
         }
         return nextBrandSafeAttemptAt(row.getBrandId(), candidate, row.getId());
+    }
+
+    private int resolvePublishCheckDelayMinutes(SelfMediaPublishSchedule row) {
+        String platform = row == null ? null : row.getPlatform();
+        return scheduleAdapterRouter.contract(platform)
+                .map(SelfMediaPlatformCapabilityContract::publishCheckDelayMinutes)
+                .filter(value -> value > 0)
+                .orElse(PUBLISH_RESULT_INITIAL_DELAY_MINUTES);
+    }
+
+    private int resolvePublishCheckMaxAttempts(SelfMediaPublishSchedule row) {
+        String platform = row == null ? null : row.getPlatform();
+        return scheduleAdapterRouter.contract(platform)
+                .map(SelfMediaPlatformCapabilityContract::publishCheckMaxAttempts)
+                .filter(value -> value > 0)
+                .orElse(PUBLISH_CHECK_TOTAL_ATTEMPTS);
     }
 
     private LocalDateTime nextPublishCheckRetryAt(SelfMediaPublishSchedule row, int maxAttempts) {

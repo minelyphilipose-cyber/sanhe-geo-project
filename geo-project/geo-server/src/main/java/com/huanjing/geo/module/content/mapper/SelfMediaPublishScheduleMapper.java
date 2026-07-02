@@ -112,6 +112,36 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
     long countByStatuses(@Param("statuses") List<String> statuses);
 
     @Select("""
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE status = 'published_confirmed'
+              AND platform_published_url IS NOT NULL
+              AND platform_published_url != ''
+            """)
+    long countConfirmedWithPublishedUrl();
+
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE failure_code IN
+              <foreach collection="failureCodes" item="failureCode" open="(" separator="," close=")">
+                #{failureCode}
+              </foreach>
+            </script>
+            """)
+    long countByFailureCodes(@Param("failureCodes") List<String> failureCodes);
+
+    @Select("""
+            SELECT COALESCE(AVG(TIMESTAMPDIFF(SECOND, created_at, published_confirmed_at)), 0)
+            FROM self_media_publish_schedule
+            WHERE status = 'published_confirmed'
+              AND created_at IS NOT NULL
+              AND published_confirmed_at IS NOT NULL
+            """)
+    Double averagePublishedDurationSeconds();
+
+    @Select("""
             <script>
             SELECT COUNT(1)
             FROM self_media_publish_schedule
@@ -125,6 +155,21 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
             """)
     long countLockedByStatuses(@Param("statuses") List<String> statuses,
                                @Param("now") LocalDateTime now);
+
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND locked_until IS NOT NULL
+              AND locked_until &lt;= #{now}
+            </script>
+            """)
+    long countTimedOutLockedByStatuses(@Param("statuses") List<String> statuses,
+                                       @Param("now") LocalDateTime now);
 
     @Select("""
             <script>

@@ -16,6 +16,7 @@ public class SelfMediaAutomationOverviewVO {
     private List<PlatformCount> platformCounts;
     private List<FailureCodeCount> failureCodeCounts;
     private List<PlatformCapability> platformCapabilities;
+    private AutomationMetrics metrics;
     private ThirdPartySubjectPoolOverview thirdPartySubjectPool;
     private CompensationOverview compensation;
 
@@ -27,6 +28,7 @@ public class SelfMediaAutomationOverviewVO {
         private long duePublishCheck;
         private long runningTotal;
         private long lockedRunning;
+        private long timedOutLockedRunning;
         private long failedTotal;
         private long manualRequired;
         private long publishUnknown;
@@ -73,6 +75,24 @@ public class SelfMediaAutomationOverviewVO {
 
     @Data
     @Builder
+    public static class AutomationMetrics {
+        private long terminalTotal;
+        private long successTotal;
+        private long publishedConfirmed;
+        private long publishedUrlPending;
+        private long publishFailed;
+        private long scheduleFailed;
+        private long manualRequired;
+        private long urlAcquired;
+        private long postPublishFailures;
+        private Double averagePublishDurationSeconds;
+        private double successRate;
+        private double manualInterventionRate;
+        private double urlAcquisitionRate;
+    }
+
+    @Data
+    @Builder
     public static class StatusCount {
         private String status;
         private long count;
@@ -114,6 +134,9 @@ public class SelfMediaAutomationOverviewVO {
         private Integer minRemainingMinutes;
         private Integer maxAttempts;
         private Integer maxRemainingMinutes;
+        private Boolean requiresPublishedUrl;
+        private Integer publishCheckDelayMinutes;
+        private Integer publishCheckMaxAttempts;
     }
 
     @Data

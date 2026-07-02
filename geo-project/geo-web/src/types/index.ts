@@ -34,6 +34,7 @@ export interface UserInfo {
   displayName: string
   role: RoleType
   partnerId: number | null
+  partnerName?: string | null
   phone: string | null
   email: string | null
   avatarUrl: string | null
@@ -98,6 +99,13 @@ export type TrainingStatus = 'not_trained' | 'in_training' | 'passed' | 'product
 
 export type AlertSeverity = 'info' | 'warn' | 'error' | 'critical'
 
+export type PartnerWorkflowStatus =
+  | 'draft'
+  | 'package_requested'
+  | 'package_bound'
+  | 'project_entry'
+  | 'entry_completed'
+
 /* ====================================================
    业务实体
    ==================================================== */
@@ -134,6 +142,10 @@ export interface Company {
   partnerStaffOwnerName?: string | null
   partnerStaffOwnerUsername?: string | null
   partnerStaffOwnerActive?: boolean | null
+  activePackageBindingId?: number | null
+  activePackageName?: string | null
+  partnerWorkflowStatus?: PartnerWorkflowStatus | string | null
+  partnerWorkflowUpdatedAt?: string | null
   status?: string
   remark?: string | null
   createdBy?: number | null
@@ -420,6 +432,7 @@ export interface CompanyPackageBinding {
   packageName: string
   standardPrice: number
   serviceMonths: number
+  coreQuestionLimit?: number | null
   keywordGroupLimit: number
   keywordGroupLimitA: number
   keywordGroupLimitB: number
@@ -431,6 +444,7 @@ export interface CompanyPackageBinding {
   unboundAt?: string | null
   createdAt?: string
   updatedAt?: string
+  visibleChannelQuotas?: ProjectChannelAllocationItem[]
 }
 
 export interface PlatformConfig {
@@ -1561,13 +1575,14 @@ export interface SelfMediaAutomationOverview {
     duePublishCheck: number
     runningTotal: number
     lockedRunning: number
+    timedOutLockedRunning?: number
     failedTotal: number
     manualRequired: number
     publishUnknown: number
   }
-  localExecution: {
-    onlineAgents: number
-    activeSessions: number
+    localExecution: {
+      onlineAgents: number
+      activeSessions: number
     assumedCapacityPerAgent: number
     estimatedCapacity: number
     runningLoad: number
@@ -1585,10 +1600,25 @@ export interface SelfMediaAutomationOverview {
       lastSeenAt?: string | null
       expiresAt?: string | null
       runningLoad?: number | null
-      waitingTasks?: number | null
-    }>
-  }
-  statusCounts: Array<{ status: string; count: number }>
+        waitingTasks?: number | null
+      }>
+    }
+    metrics?: {
+      terminalTotal: number
+      successTotal: number
+      publishedConfirmed: number
+      publishedUrlPending: number
+      publishFailed: number
+      scheduleFailed: number
+      manualRequired: number
+      urlAcquired: number
+      postPublishFailures: number
+      averagePublishDurationSeconds?: number | null
+      successRate: number
+      manualInterventionRate: number
+      urlAcquisitionRate: number
+    }
+    statusCounts: Array<{ status: string; count: number }>
   platformCounts: Array<{ platform: string; activeCount: number; failedCount: number; dueCount: number }>
   failureCodeCounts: Array<{
     code: string
@@ -1612,6 +1642,9 @@ export interface SelfMediaAutomationOverview {
     minRemainingMinutes?: number | null
     maxAttempts?: number | null
     maxRemainingMinutes?: number | null
+    requiresPublishedUrl?: boolean | null
+    publishCheckDelayMinutes?: number | null
+    publishCheckMaxAttempts?: number | null
   }>
   thirdPartySubjectPool?: {
     sourceTotal: number
@@ -1800,6 +1833,7 @@ export interface PackagePlan {
   partnerVisibleConfigJson?: string | null
   internalDeliveryConfigJson?: string | null
   serviceMonths: number
+  coreQuestionLimit?: number | null
   keywordGroupLimit: number
   keywordGroupLimitA: number
   keywordGroupLimitB: number
@@ -1837,6 +1871,9 @@ export interface CompanyKeywordGroupQuota {
   packageBindingId?: number | null
   packageName?: string | null
   activeBinding: boolean
+  coreQuestionQuotaLimit?: number | null
+  usedCoreQuestionCount?: number | null
+  remainingCoreQuestionCount?: number | null
   quotaLimit: number
   quotaLimitA: number
   quotaLimitB: number

@@ -1398,11 +1398,14 @@ export function distributeContentArticleToSelfMediaAccount(articleId: number, da
 
 export function getSelfMediaPublishSchedules(params?: {
   brandId?: number
+  brandName?: string
   platform?: string
   status?: string
   failureCode?: string
   articleId?: number
+  articleTitle?: string
   selfMediaAccountId?: number
+  selfMediaAccountName?: string
   current?: number
   size?: number
 }) {
@@ -1463,11 +1466,16 @@ export function cancelSelfMediaPublishSchedule(id: number, data?: { reason?: str
   return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/cancel`, data ?? {})
 }
 
-export function confirmSelfMediaPublishSchedulePublished(id: number, data?: { platformPublishedUrl?: string }) {
+export function confirmSelfMediaPublishSchedulePublished(id: number, data?: {
+  platformPublishedUrl?: string
+  platformPublishId?: string
+  platformPublishedAt?: string
+  note?: string
+}) {
   return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/confirm-published`, data ?? {})
 }
 
-export function confirmSelfMediaPublishScheduleFailed(id: number, data?: { failureCode?: string; failureMessage?: string }) {
+export function confirmSelfMediaPublishScheduleFailed(id: number, data?: { failureCode?: string; failureMessage?: string; note?: string }) {
   return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/confirm-publish-failed`, data ?? {})
 }
 
