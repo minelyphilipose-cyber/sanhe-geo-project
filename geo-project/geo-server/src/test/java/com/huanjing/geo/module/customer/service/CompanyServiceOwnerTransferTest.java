@@ -11,6 +11,7 @@ import com.huanjing.geo.module.customer.mapper.CompanyAccountMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyAccountTxnMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
+import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.service.KeywordGroupService;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -61,6 +62,7 @@ class CompanyServiceOwnerTransferTest {
                 mock(CompanyPackageBindingService.class),
                 mock(CompanyChannelQuotaUsageMapper.class),
                 mock(KeywordGroupService.class),
+                mock(KeywordGroupMapper.class),
                 mock(ProjectMapper.class),
                 activityLogService
         );

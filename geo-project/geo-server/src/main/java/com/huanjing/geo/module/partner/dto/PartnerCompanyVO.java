@@ -33,6 +33,14 @@ public class PartnerCompanyVO {
     private String referralSource;
     private String status;
     private String remark;
+    private Long partnerStaffOwnerId;
+    private String partnerStaffOwnerName;
+    private String partnerStaffOwnerUsername;
+    private Boolean partnerStaffOwnerActive;
+    private Long activePackageBindingId;
+    private String activePackageName;
+    private String partnerWorkflowStatus;
+    private LocalDateTime partnerWorkflowUpdatedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -30,6 +30,7 @@ import com.huanjing.geo.module.project.dto.ProjectKeywordGroupQuotaVO;
 import com.huanjing.geo.module.project.entity.PackageChannelQuotaConfig;
 import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
 import com.huanjing.geo.module.project.service.ProjectDistributionChannelAllocationService;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -61,6 +62,7 @@ public class PartnerResponseSanitizer {
     );
 
     private final CurrentUserService currentUserService;
+    private final ProjectChannelAllocationMapper projectChannelAllocationMapper;
 
     public boolean currentUserIsPartner() {
         SysUser user = currentUserService.requireCurrentUser();
@@ -259,7 +261,7 @@ public class PartnerResponseSanitizer {
         PartnerCompanyPackageBindingVO vo = new PartnerCompanyPackageBindingVO();
         BeanUtils.copyProperties(binding, vo);
         vo.setCoreQuestionLimit(binding.getKeywordGroupLimitA());
-        vo.setVisibleChannelQuotas(parseVisibleSnapshot(binding.getChannelQuotaSnapshot()));
+        vo.setVisibleChannelQuotas(parseVisibleSnapshot(binding));
         return vo;
     }
 
@@ -361,24 +363,32 @@ public class PartnerResponseSanitizer {
         return vo;
     }
 
-    private List<PartnerChannelQuotaVO> parseVisibleSnapshot(String snapshotJson) {
+    private List<PartnerChannelQuotaVO> parseVisibleSnapshot(CompanyPackageBinding binding) {
+        String snapshotJson = binding == null ? null : binding.getChannelQuotaSnapshot();
         if (!StringUtils.hasText(snapshotJson) || !JSONUtil.isTypeJSONArray(snapshotJson)) {
             return List.of();
         }
         return JSONUtil.parseArray(snapshotJson).stream()
                 .map(item -> JSONUtil.toBean(JSONUtil.parseObj(item), ChannelQuotaSnapshotItem.class))
                 .filter(item -> isPartnerVisibleChannel(item.getChannelCode()))
-                .map(this::toPartnerChannelQuota)
+                .map(item -> toPartnerChannelQuota(binding.getCompanyId(), item))
                 .toList();
     }
 
-    private PartnerChannelQuotaVO toPartnerChannelQuota(ChannelQuotaSnapshotItem source) {
+    private PartnerChannelQuotaVO toPartnerChannelQuota(Long companyId, ChannelQuotaSnapshotItem source) {
         PartnerChannelQuotaVO vo = new PartnerChannelQuotaVO();
         vo.setChannelCode(source.getChannelCode());
         vo.setChannelName(partnerChannelName(source.getChannelCode()));
         vo.setPeriodType(source.getPeriodType());
         vo.setEnabled(source.isEnabled());
         vo.setQuotaLimit(source.getQuotaLimit());
+        long activeAllocated = source.isEnabled()
+                ? projectChannelAllocationMapper.sumActiveAllocatedByCompanyAndChannel(companyId, source.getChannelCode(), null)
+                : 0L;
+        vo.setActiveAllocatedCount(activeAllocated);
+        vo.setCurrentProjectAllocatedCount(0);
+        vo.setRemainingCount(Math.max(source.getQuotaLimit() - activeAllocated, 0));
+        vo.setInputMax(vo.getRemainingCount());
         return vo;
     }
 

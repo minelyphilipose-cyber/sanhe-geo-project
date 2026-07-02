@@ -4,6 +4,8 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.image.CompressedImage;
 import com.huanjing.geo.common.image.ImageCompressionService;
 import com.huanjing.geo.common.storage.MinioStorageService;
+import com.huanjing.geo.module.partner.entity.Partner;
+import com.huanjing.geo.module.partner.mapper.PartnerMapper;
 import com.huanjing.geo.module.system.dto.CurrentUserPasswordChangeRequest;
 import com.huanjing.geo.module.system.dto.CurrentUserProfileUpdateRequest;
 import com.huanjing.geo.module.system.dto.CurrentUserProfileVO;
@@ -31,6 +33,7 @@ public class CurrentUserProfileService {
     private final CurrentUserService currentUserService;
     private final PermissionService permissionService;
     private final SysUserMapper sysUserMapper;
+    private final PartnerMapper partnerMapper;
     private final PasswordEncoder passwordEncoder;
     private final RedisTemplate<String, Object> redisTemplate;
     private final MinioStorageService minioStorageService;
@@ -128,6 +131,7 @@ public class CurrentUserProfileService {
         vo.setDisplayName(user.getDisplayName());
         vo.setRole(user.getRole());
         vo.setPartnerId(user.getPartnerId());
+        vo.setPartnerName(resolvePartnerName(user.getPartnerId()));
         vo.setPhone(user.getPhone());
         vo.setEmail(user.getEmail());
         vo.setAvatarUrl(minioStorageService.resolveAccessibleUrl(
@@ -138,6 +142,14 @@ public class CurrentUserProfileService {
         vo.setIsActive(user.getIsActive());
         vo.setPermissions(permissionService.listPermKeys(user));
         return vo;
+    }
+
+    private String resolvePartnerName(Long partnerId) {
+        if (partnerId == null) {
+            return null;
+        }
+        Partner partner = partnerMapper.selectById(partnerId);
+        return partner == null ? null : partner.getPartnerName();
     }
 
     private void validateAvatarFile(MultipartFile file) {

@@ -62,6 +62,15 @@ export interface PartnerRechargeOrder {
   updatedAt: string
 }
 
+export interface PartnerVoucherFile {
+  fileName: string
+  fileSize?: number | null
+  contentType?: string | null
+  objectKey?: string | null
+  downloadUrl?: string | null
+  previewUrl?: string | null
+}
+
 export interface PartnerStaff {
   id: number
   username: string
@@ -105,9 +114,10 @@ export function getPartnerDetail(id: number) {
 
 export function createPartner(data: {
   partnerName: string
-  partnerLevel: string
+  partnerLevel?: string
   discountRate: number
   initialAmount?: number
+  initialOfflineReference?: string
   presaleReportFreeQuotaLimit?: number
   presaleReportExtraPoints?: number
   contactName?: string
@@ -120,7 +130,7 @@ export function createPartner(data: {
 
 export function updatePartner(id: number, data: {
   partnerName: string
-  partnerLevel: string
+  partnerLevel?: string
   discountRate: number
   presaleReportFreeQuotaLimit?: number
   presaleReportExtraPoints?: number
@@ -188,8 +198,32 @@ export function rechargePartnerAccount(id: number, data: {
   return request.post<R<PartnerTxn>>(`/partners/${id}/account/recharge`, data)
 }
 
+export function uploadPartnerAccountVoucher(id: number, file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post<R<PartnerVoucherFile>>(`/partners/${id}/account/vouchers/upload`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+export function uploadPartnerInitialAccountVoucher(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post<R<PartnerVoucherFile>>('/partners/account/vouchers/initial-upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+export function downloadPartnerAccountVoucher(id: number, objectKey: string) {
+  return request.get<Blob>(`/partners/${id}/account/vouchers/download`, {
+    params: { objectKey },
+    responseType: 'blob',
+  })
+}
+
 export function adjustPartnerAccount(id: number, data: {
   amount: number
+  offlineReference?: string
   remark?: string
 }) {
   return request.post<R<PartnerTxn>>(`/partners/${id}/account/adjust`, data)
@@ -208,8 +242,20 @@ export function createMyPartnerStaff(data: {
   return request.post<R<PartnerStaffCreateResult>>('/partners/me/staff', data)
 }
 
+export function updateMyPartnerStaff(staffUserId: number, data: {
+  displayName: string
+  phone?: string
+  email?: string
+}) {
+  return request.put<R<PartnerStaff>>(`/partners/me/staff/${staffUserId}`, data)
+}
+
 export function updateMyPartnerStaffStatus(staffUserId: number, isActive: boolean) {
   return request.put<R<PartnerStaff>>(`/partners/me/staff/${staffUserId}/status`, { isActive })
+}
+
+export function deleteMyPartnerStaff(staffUserId: number) {
+  return request.delete<R<void>>(`/partners/me/staff/${staffUserId}`)
 }
 
 export function resetMyPartnerStaffPassword(staffUserId: number) {

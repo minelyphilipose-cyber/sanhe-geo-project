@@ -10,7 +10,27 @@ const OPS_ROLES: RoleType[] = ['operator', 'delivery_manager', 'manager', 'super
 
 export function resolvePostLoginPath(ctx: AccessContext): string | null {
   if (ctx.isPartner) {
-    return '/partner/home'
+    const partnerCandidates: Array<{
+      path: string
+      roles?: RoleType[]
+      permissions?: string[]
+    }> = [
+      { path: '/partner/staff-workbench', roles: ['partner_staff'] },
+      { path: '/partner/home', permissions: ['partner.read'] },
+      { path: '/partner/my-customers', permissions: ['company.read'] },
+      { path: '/partner/my-projects', permissions: ['project.read'] },
+      { path: '/partner/profile' },
+    ]
+
+    for (const item of partnerCandidates) {
+      const rolePass = !item.roles || item.roles.length === 0 || ctx.hasRole(item.roles)
+      const permPass = !item.permissions || item.permissions.length === 0 || ctx.hasPermission(item.permissions)
+      if (rolePass && permPass) {
+        return item.path
+      }
+    }
+
+    return null
   }
 
   const candidates: Array<{

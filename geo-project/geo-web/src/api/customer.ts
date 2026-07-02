@@ -46,6 +46,18 @@ export function assignCompanyPartnerStaffOwner(
   return request.post<R<Company>>(`/companies/${id}/partner-staff-owner`, data)
 }
 
+export function requestCompanyPackageReview(id: number) {
+  return request.post<R<Company>>(`/companies/${id}/partner-workflow/request-package`)
+}
+
+export function notifyCompanyProjectEntry(id: number) {
+  return request.post<R<Company>>(`/companies/${id}/partner-workflow/notify-entry`)
+}
+
+export function completeCompanyEntry(id: number) {
+  return request.post<R<Company>>(`/companies/${id}/partner-workflow/complete-entry`)
+}
+
 export function deleteCompany(id: number) {
   return request.delete<R<void>>(`/companies/${id}`)
 }

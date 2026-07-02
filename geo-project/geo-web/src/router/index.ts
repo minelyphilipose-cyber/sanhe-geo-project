@@ -182,21 +182,51 @@ router.beforeEach(async (to, _from, next) => {
     }
   }
 
+  if (userStore.isPartner) {
+    const partnerEntry = resolvePostLoginPath({
+      isPartner: userStore.isPartner,
+      hasPermission: userStore.hasPermission,
+      hasRole: userStore.hasRole,
+    })
+
+    if (to.path === '/partner' || (to.path === '/partner/home' && !userStore.hasRole(['partner']))) {
+      return next(partnerEntry && partnerEntry !== to.fullPath ? partnerEntry : '/403')
+    }
+
+    if (to.path.startsWith('/admin/presale/report')) {
+      return next({
+        path: to.path.replace(/^\/admin\/presale\/report/, '/partner/presale/report'),
+        query: to.query,
+        hash: to.hash,
+      })
+    }
+
+    if (to.path.startsWith('/admin')) {
+      return next(partnerEntry && partnerEntry !== to.fullPath ? partnerEntry : '/403')
+    }
+  }
+
+  if (!userStore.isPartner && to.path.startsWith('/partner')) {
+    return next('/admin/overview')
+  }
+
   const requiredRoles = to.meta?.roles as RoleType[] | undefined
   if (requiredRoles && requiredRoles.length > 0 && !userStore.hasRole(requiredRoles)) {
     return next('/403')
   }
 
+  if (userStore.isPartner && to.path === '/partner/home' && !userStore.hasPermission('partner.read')) {
+    const target = resolvePostLoginPath({
+      isPartner: userStore.isPartner,
+      hasPermission: userStore.hasPermission,
+      hasRole: userStore.hasRole,
+    })
+    return next(target && target !== to.fullPath ? target : '/403')
+  }
+
   const requiredPerms = (to.meta?.permissions as string[] | undefined) || []
   if (requiredPerms.length > 0 && !userStore.hasPermission(requiredPerms)) {
     return next('/403')
-  }
-
-  if (userStore.isPartner && to.path.startsWith('/admin')) {
-    return next('/partner/home')
-  }
-  if (!userStore.isPartner && to.path.startsWith('/partner')) {
-    return next('/admin/overview')
   }
 
   next()

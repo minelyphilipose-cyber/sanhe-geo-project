@@ -2,8 +2,16 @@ package com.huanjing.geo.module.partner.service;
 
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.storage.MinioStorageService;
+import com.huanjing.geo.module.customer.entity.Company;
+import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.customer.service.CompanyService;
 import com.huanjing.geo.module.partner.dto.PartnerAdjustRequest;
 import com.huanjing.geo.module.partner.dto.PartnerCreateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerCreateResult;
@@ -13,8 +21,10 @@ import com.huanjing.geo.module.partner.dto.PartnerRechargeRequest;
 import com.huanjing.geo.module.partner.dto.PartnerStaffCreateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerStaffCreateResult;
 import com.huanjing.geo.module.partner.dto.PartnerStaffResetPasswordResult;
+import com.huanjing.geo.module.partner.dto.PartnerStaffUpdateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerStaffVO;
 import com.huanjing.geo.module.partner.dto.PartnerUpdateRequest;
+import com.huanjing.geo.module.partner.dto.PartnerVoucherFile;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
 import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
@@ -39,12 +49,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
+import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,18 +70,24 @@ public class PartnerService {
 
     private static final String ROLE_PARTNER = "partner";
     private static final String ROLE_PARTNER_STAFF = "partner_staff";
+    private static final String DEFAULT_PARTNER_LEVEL = "custom";
+    private static final long MAX_VOUCHER_FILE_SIZE = 10L * 1024 * 1024;
+    private static final int MAX_OFFLINE_REFERENCE_LENGTH = 12000;
 
     private final PartnerMapper partnerMapper;
     private final PartnerAccountMapper partnerAccountMapper;
     private final PartnerAccountTxnMapper partnerAccountTxnMapper;
     private final PartnerDiscountHistoryMapper partnerDiscountHistoryMapper;
     private final PartnerRechargeOrderMapper partnerRechargeOrderMapper;
+    private final CompanyMapper companyMapper;
     private final SysUserMapper sysUserMapper;
     private final SysRoleMapper sysRoleMapper;
     private final SysUserRoleMapper sysUserRoleMapper;
     private final PasswordEncoder passwordEncoder;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
+    private final MinioStorageService minioStorageService;
+    private final ObjectMapper objectMapper;
 
     public Page<Partner> page(long current, long size, String keyword, String status) {
         currentUserService.ensurePermission("partner.read");
@@ -118,7 +138,7 @@ public class PartnerService {
         Partner partner = new Partner();
         partner.setPartnerCode(partnerCode);
         partner.setPartnerName(req.getPartnerName());
-        partner.setPartnerLevel(req.getPartnerLevel());
+        partner.setPartnerLevel(normalizePartnerLevel(req.getPartnerLevel(), DEFAULT_PARTNER_LEVEL));
         partner.setDiscountRate(req.getDiscountRate());
         partner.setPresaleReportFreeQuotaLimit(normalizePresaleReportFreeQuotaLimit(req.getPresaleReportFreeQuotaLimit()));
         partner.setPresaleReportExtraPoints(normalizePresaleReportExtraPoints(req.getPresaleReportExtraPoints()));
@@ -141,6 +161,11 @@ public class PartnerService {
 
         BigDecimal initialAmount = req.getInitialAmount() == null ? BigDecimal.ZERO : req.getInitialAmount();
         if (initialAmount.compareTo(BigDecimal.ZERO) > 0) {
+            String initialOfflineReference = migrateInitialVoucherReference(
+                    partner.getId(),
+                    currentUserService.requireCurrentUser().getId(),
+                    req.getInitialOfflineReference()
+            );
             account.setCurrentBalance(initialAmount);
             account.setTotalRecharge(initialAmount);
             partnerAccountMapper.updateById(account);
@@ -155,6 +180,7 @@ public class PartnerService {
             txn.setBalanceBefore(BigDecimal.ZERO);
             txn.setBalanceAfter(initialAmount);
             txn.setOperatorUserId(currentUserService.requireCurrentUser().getId());
+            txn.setOfflineReference(initialOfflineReference);
             txn.setRemark("create partner initial prepaid");
             partnerAccountTxnMapper.insert(txn);
         }
@@ -208,7 +234,7 @@ public class PartnerService {
             currentUserService.ensurePermission("partner.discount.update");
         }
         partner.setPartnerName(req.getPartnerName());
-        partner.setPartnerLevel(req.getPartnerLevel());
+        partner.setPartnerLevel(normalizePartnerLevel(req.getPartnerLevel(), partner.getPartnerLevel()));
         partner.setDiscountRate(req.getDiscountRate());
         partner.setPresaleReportFreeQuotaLimit(normalizePresaleReportFreeQuotaLimit(req.getPresaleReportFreeQuotaLimit()));
         partner.setPresaleReportExtraPoints(normalizePresaleReportExtraPoints(req.getPresaleReportExtraPoints()));
@@ -298,6 +324,28 @@ public class PartnerService {
     }
 
     @Transactional
+    public PartnerStaffVO updateMyStaff(Long staffUserId, PartnerStaffUpdateRequest req) {
+        SysUser partnerOwner = requireCurrentPartnerOwner();
+        currentUserService.ensurePermission("partner.staff.manage");
+        SysUser staff = requireOwnedPartnerStaff(partnerOwner.getPartnerId(), staffUserId);
+        Map<String, Object> before = partnerStaffSnapshot(staff);
+        staff.setDisplayName(req.getDisplayName().trim());
+        staff.setPhone(normalizeNullableText(req.getPhone()));
+        staff.setEmail(normalizeNullableText(req.getEmail()));
+        sysUserMapper.updateById(staff);
+        activityLogService.logAction(
+                partnerOwner.getId(),
+                "partner.staff.update",
+                "sys_user",
+                staff.getId(),
+                before,
+                partnerStaffSnapshot(staff),
+                java.util.Map.of("partnerId", partnerOwner.getPartnerId())
+        );
+        return toPartnerStaffVO(staff);
+    }
+
+    @Transactional
     public PartnerStaffVO updateMyStaffStatus(Long staffUserId, Boolean isActive) {
         SysUser partnerOwner = requireCurrentPartnerOwner();
         currentUserService.ensurePermission("partner.staff.manage");
@@ -341,6 +389,31 @@ public class PartnerService {
                 java.util.Map.of("partnerId", partnerOwner.getPartnerId())
         );
         return new PartnerStaffResetPasswordResult(toPartnerStaffVO(staff), newPassword);
+    }
+
+    @Transactional
+    public void deleteMyStaff(Long staffUserId) {
+        SysUser partnerOwner = requireCurrentPartnerOwner();
+        currentUserService.ensurePermission("partner.staff.manage");
+        SysUser staff = requireOwnedPartnerStaff(partnerOwner.getPartnerId(), staffUserId);
+        Map<String, Object> before = partnerStaffSnapshot(staff);
+        companyMapper.update(null, new UpdateWrapper<Company>()
+                .eq("partner_id", partnerOwner.getPartnerId())
+                .eq("partner_staff_owner_id", staff.getId())
+                .set("partner_staff_owner_id", null)
+                .set("partner_workflow_status", CompanyService.PARTNER_WORKFLOW_DRAFT)
+                .set("partner_workflow_updated_at", LocalDateTime.now()));
+        sysUserRoleMapper.delete(new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getUserId, staff.getId()));
+        sysUserMapper.deleteById(staff.getId());
+        activityLogService.logAction(
+                partnerOwner.getId(),
+                "partner.staff.delete",
+                "sys_user",
+                staff.getId(),
+                before,
+                null,
+                java.util.Map.of("partnerId", partnerOwner.getPartnerId())
+        );
     }
 
     private Integer normalizePresaleReportFreeQuotaLimit(Integer value) {
@@ -413,7 +486,7 @@ public class PartnerService {
         order.setPartnerId(partnerId);
         order.setAmount(req.getAmount());
         order.setStatus("pending");
-        order.setOfflineReference(trimToLength(req.getOfflineReference(), 128));
+        order.setOfflineReference(normalizeOfflineReference(req.getOfflineReference()));
         order.setApplyRemark(trimToLength(req.getRemark(), 500));
         order.setApplicantUserId(applicant.getId());
         order.setExpiresAt(LocalDateTime.now().plusDays(7));
@@ -503,6 +576,84 @@ public class PartnerService {
         return rechargeAccount(partnerId, req.getAmount(), req.getOfflineReference(), req.getRemark(), "partner_prepaid", null);
     }
 
+    public PartnerVoucherFile uploadAccountVoucher(Long partnerId, MultipartFile file) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        if (!currentUserService.hasPermission("partner.account.recharge.audit")
+                && !currentUserService.hasPermission("partner.account.recharge.apply")) {
+            throw new BizException(403, "No permission: partner.account.voucher.upload");
+        }
+        requireAccessiblePartnerAccount(partnerId);
+        if (file == null || file.isEmpty()) {
+            throw new BizException(400, "凭证文件不能为空");
+        }
+        if (file.getSize() > MAX_VOUCHER_FILE_SIZE) {
+            throw new BizException(400, "凭证文件不能超过10MB");
+        }
+
+        String originalName = originalName(file);
+        String objectKey = "partner-vouchers/" + partnerId + "/" + LocalDate.now() + "/"
+                + System.currentTimeMillis() + "-" + RandomUtil.randomString(8) + "-" + sanitizeFileName(originalName);
+        minioStorageService.upload(file, objectKey, file.getContentType());
+        activityLogService.logAction(
+                operator.getId(),
+                "partner.account.voucher.upload",
+                "partner",
+                partnerId,
+                null,
+                null,
+                detailMap("fileName", originalName, "fileSize", file.getSize(), "objectKey", objectKey)
+        );
+        return new PartnerVoucherFile(
+                trimToLength(originalName, 255),
+                file.getSize(),
+                trimToLength(file.getContentType(), 128),
+                objectKey,
+                buildVoucherDownloadUrl(partnerId, objectKey)
+        );
+    }
+
+    public PartnerVoucherFile uploadInitialAccountVoucher(MultipartFile file) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("partner.create");
+        if (file == null || file.isEmpty()) {
+            throw new BizException(400, "凭证文件不能为空");
+        }
+        if (file.getSize() > MAX_VOUCHER_FILE_SIZE) {
+            throw new BizException(400, "凭证文件不能超过10MB");
+        }
+
+        String originalName = originalName(file);
+        String objectKey = "partner-vouchers/initial/" + operator.getId() + "/" + LocalDate.now() + "/"
+                + System.currentTimeMillis() + "-" + RandomUtil.randomString(8) + "-" + sanitizeFileName(originalName);
+        minioStorageService.upload(file, objectKey, file.getContentType());
+        return new PartnerVoucherFile(
+                trimToLength(originalName, 255),
+                file.getSize(),
+                trimToLength(file.getContentType(), 128),
+                objectKey,
+                null
+        );
+    }
+
+    public PartnerVoucherFile voucherDetail(Long partnerId, String objectKey) {
+        currentUserService.ensurePermission("partner.account.txn.read");
+        requireAccessiblePartnerAccount(partnerId);
+        String normalizedKey = requireVoucherObjectKey(partnerId, objectKey);
+        return new PartnerVoucherFile(
+                normalizedKey.substring(normalizedKey.lastIndexOf('/') + 1),
+                null,
+                null,
+                normalizedKey,
+                buildVoucherDownloadUrl(partnerId, normalizedKey)
+        );
+    }
+
+    public byte[] readVoucherBytes(Long partnerId, String objectKey) {
+        currentUserService.ensurePermission("partner.account.txn.read");
+        requireAccessiblePartnerAccount(partnerId);
+        return minioStorageService.getObjectBytes(requireVoucherObjectKey(partnerId, objectKey));
+    }
+
     @Transactional
     public PartnerAccountTxn adjust(Long partnerId, PartnerAdjustRequest req) {
         currentUserService.ensurePermission("partner.account.adjust");
@@ -536,6 +687,7 @@ public class PartnerService {
         txn.setBalanceBefore(before);
         txn.setBalanceAfter(after);
         txn.setOperatorUserId(currentUserService.requireCurrentUser().getId());
+        txn.setOfflineReference(normalizeOfflineReference(req.getOfflineReference()));
         txn.setRemark(req.getRemark());
         partnerAccountTxnMapper.insert(txn);
         activityLogService.logAction(
@@ -678,6 +830,17 @@ public class PartnerService {
         } while (true);
     }
 
+    private String normalizePartnerLevel(String requestedLevel, String fallbackLevel) {
+        if (StringUtils.hasText(requestedLevel)) {
+            return requestedLevel.trim();
+        }
+        return StringUtils.hasText(fallbackLevel) ? fallbackLevel.trim() : DEFAULT_PARTNER_LEVEL;
+    }
+
+    private String normalizeNullableText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
     private String buildPartnerUsername(String partnerCode) {
         String base = "partner_" + partnerCode.toLowerCase();
         String candidate = base;
@@ -745,7 +908,7 @@ public class PartnerService {
         txn.setBalanceAfter(after);
         txn.setRechargeOrderId(rechargeOrderId);
         txn.setOperatorUserId(currentUserService.requireCurrentUser().getId());
-        txn.setOfflineReference(offlineReference);
+        txn.setOfflineReference(normalizeOfflineReference(offlineReference));
         txn.setRemark(remark);
         partnerAccountTxnMapper.insert(txn);
         activityLogService.logAction(
@@ -758,6 +921,104 @@ public class PartnerService {
                 detailMap("partnerId", partnerId, "amount", amount, "txnNo", txn.getTxnNo(), "rechargeOrderId", rechargeOrderId)
         );
         return txn;
+    }
+
+    private String normalizeOfflineReference(String offlineReference) {
+        if (!StringUtils.hasText(offlineReference)) {
+            return null;
+        }
+        String trimmed = offlineReference.trim();
+        if (trimmed.length() > MAX_OFFLINE_REFERENCE_LENGTH) {
+            throw new BizException(400, "线下凭证附件数据过长");
+        }
+        return trimmed;
+    }
+
+    private String migrateInitialVoucherReference(Long partnerId, Long operatorId, String offlineReference) {
+        if (!StringUtils.hasText(offlineReference)) {
+            throw new BizException(400, "初始积分大于0时必须上传线下凭证");
+        }
+        List<PartnerVoucherFile> files = parseVoucherFiles(offlineReference);
+        if (files.isEmpty()) {
+            throw new BizException(400, "初始积分大于0时必须上传线下凭证");
+        }
+        String expectedPrefix = "partner-vouchers/initial/" + operatorId + "/";
+        List<PartnerVoucherFile> migrated = files.stream().map(file -> {
+            String sourceKey = requireText(file.getObjectKey(), "凭证文件参数缺失");
+            if (!sourceKey.startsWith(expectedPrefix) || sourceKey.contains("..")) {
+                throw new BizException(403, "无权使用该初始积分凭证");
+            }
+            byte[] bytes = minioStorageService.getObjectBytes(sourceKey);
+            String targetKey = "partner-vouchers/" + partnerId + "/" + LocalDate.now() + "/"
+                    + System.currentTimeMillis() + "-" + RandomUtil.randomString(8) + "-"
+                    + sanitizeFileName(file.getFileName());
+            minioStorageService.uploadBytes(bytes, targetKey, file.getContentType());
+            return new PartnerVoucherFile(
+                    trimToLength(file.getFileName(), 255),
+                    file.getFileSize(),
+                    trimToLength(file.getContentType(), 128),
+                    targetKey,
+                    buildVoucherDownloadUrl(partnerId, targetKey)
+            );
+        }).collect(Collectors.toList());
+        try {
+            return objectMapper.writeValueAsString(migrated);
+        } catch (JsonProcessingException ex) {
+            throw new BizException(500, "保存初始积分凭证失败");
+        }
+    }
+
+    private List<PartnerVoucherFile> parseVoucherFiles(String offlineReference) {
+        String normalized = normalizeOfflineReference(offlineReference);
+        try {
+            return objectMapper.readValue(normalized, new TypeReference<List<PartnerVoucherFile>>() {});
+        } catch (JsonProcessingException ex) {
+            throw new BizException(400, "线下凭证数据格式不正确");
+        }
+    }
+
+    private String requireVoucherObjectKey(Long partnerId, String objectKey) {
+        if (!StringUtils.hasText(objectKey)) {
+            throw new BizException(400, "凭证文件参数缺失");
+        }
+        String normalized = objectKey.trim();
+        String expectedPrefix = "partner-vouchers/" + partnerId + "/";
+        if (!normalized.startsWith(expectedPrefix) || normalized.contains("..")) {
+            throw new BizException(403, "无权访问该凭证文件");
+        }
+        return normalized;
+    }
+
+    private String requireText(String value, String message) {
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(400, message);
+        }
+        return value.trim();
+    }
+
+    private String buildVoucherDownloadUrl(Long partnerId, String objectKey) {
+        return "/api/partners/" + partnerId + "/account/vouchers/download?objectKey="
+                + URLEncoder.encode(objectKey, StandardCharsets.UTF_8);
+    }
+
+    private String originalName(MultipartFile file) {
+        String name = file.getOriginalFilename();
+        return StringUtils.hasText(name) ? name.trim() : "voucher";
+    }
+
+    private String sanitizeFileName(String fileName) {
+        String normalized = fileName == null ? "voucher" : fileName.trim();
+        normalized = normalized.replace("\\", "/");
+        int slash = normalized.lastIndexOf('/');
+        if (slash >= 0) {
+            normalized = normalized.substring(slash + 1);
+        }
+        normalized = normalized.replaceAll("[\\r\\n\\t]+", "_")
+                .replaceAll("[^a-zA-Z0-9._\\-\\u4e00-\\u9fa5]+", "_");
+        if (!StringUtils.hasText(normalized)) {
+            return "voucher";
+        }
+        return trimToLength(normalized.toLowerCase(Locale.ROOT), 120);
     }
 
     private Map<String, Object> detailMap(Object... keysAndValues) {

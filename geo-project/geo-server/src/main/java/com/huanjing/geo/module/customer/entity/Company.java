@@ -75,6 +75,12 @@ public class Company {
     private String partnerStaffOwnerUsername;
     @TableField(exist = false)
     private Boolean partnerStaffOwnerActive;
+    @TableField(exist = false)
+    private Long activePackageBindingId;
+    @TableField(exist = false)
+    private String activePackageName;
+    private String partnerWorkflowStatus;
+    private LocalDateTime partnerWorkflowUpdatedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime deletedAt;

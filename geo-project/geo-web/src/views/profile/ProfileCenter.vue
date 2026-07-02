@@ -3,7 +3,7 @@
     <section class="profile-page__heading">
       <div>
         <h1>个人中心</h1>
-        <p>管理个人资料、本机助手绑定与登录安全。</p>
+        <p>{{ pageSubtitle }}</p>
       </div>
     </section>
 
@@ -54,8 +54,8 @@
             <el-form-item label="角色">
               <el-input :model-value="roleLabel" disabled />
             </el-form-item>
-            <el-form-item label="所属主体">
-              <el-input :model-value="partnerLabel" disabled />
+            <el-form-item v-if="showSubjectField" :label="subjectLabel" class="is-wide">
+              <el-input :model-value="subjectValue" disabled />
             </el-form-item>
             <el-form-item label="姓名" prop="displayName">
               <el-input v-model="profileForm.displayName" maxlength="64" show-word-limit />
@@ -66,14 +66,14 @@
             <el-form-item label="邮箱" prop="email">
               <el-input v-model="profileForm.email" maxlength="128" />
             </el-form-item>
-            <el-form-item>
+            <el-form-item class="is-wide">
               <el-button type="primary" :loading="savingProfile" @click="submitProfile">保存资料</el-button>
             </el-form-item>
           </el-form>
         </div>
       </el-card>
 
-      <div class="profile-grid">
+      <div class="profile-grid" :class="{ 'is-single': !showLocalAgentPanel }">
         <el-card shadow="never" class="profile-card password-card">
           <template #header>
             <div class="profile-card__header">
@@ -101,7 +101,7 @@
           </el-form>
         </el-card>
 
-        <el-card shadow="never" class="profile-card local-agent-card">
+        <el-card v-if="showLocalAgentPanel" shadow="never" class="profile-card local-agent-card">
           <template #header>
             <div class="profile-card__header">
               <div>
@@ -266,6 +266,7 @@ import {
 } from '@/api/localHelper'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/format'
+import { isValidEmail, isValidMobile } from '@/utils/form'
 import type { RoleType } from '@/types'
 
 const ROLE_LABELS: Record<RoleType, string> = {
@@ -322,9 +323,21 @@ const roleLabel = computed(() => {
   return role ? ROLE_LABELS[role] ?? role : '-'
 })
 
-const partnerLabel = computed(() => {
+const isPartnerOwner = computed(() => userStore.role === 'partner')
+const isPartnerStaff = computed(() => userStore.role === 'partner_staff')
+const isPartnerAccount = computed(() => isPartnerOwner.value || isPartnerStaff.value)
+const showLocalAgentPanel = computed(() => !isPartnerAccount.value)
+const showSubjectField = computed(() => !isPartnerOwner.value)
+const pageSubtitle = computed(() => (
+  isPartnerAccount.value ? '管理个人资料与登录安全。' : '管理个人资料、本机助手绑定与登录安全。'
+))
+const subjectLabel = computed(() => (isPartnerStaff.value ? '所属合伙人' : '所属主体'))
+const subjectValue = computed(() => {
+  if (isPartnerStaff.value) {
+    return userStore.userInfo?.partnerName || '-'
+  }
   if (userStore.userInfo?.partnerId) {
-    return `合伙人 #${userStore.userInfo.partnerId}`
+    return userStore.userInfo.partnerName || `合伙人 #${userStore.userInfo.partnerId}`
   }
   return '内部账号'
 })
@@ -337,14 +350,15 @@ const primaryLocalAgentSession = computed(() =>
 
 const profileRules: FormRules = {
   displayName: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
+  phone: [{
+    validator: (_rule, value: string, callback) => {
+      callback(isValidMobile(value) ? undefined : new Error('请输入正确的手机号'))
+    },
+    trigger: 'blur',
+  }],
   email: [{
     validator: (_rule, value: string, callback) => {
-      if (!value) {
-        callback()
-        return
-      }
-      const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-      callback(ok ? undefined : new Error('请输入正确的邮箱'))
+      callback(isValidEmail(value) ? undefined : new Error('请输入正确的邮箱地址'))
     },
     trigger: 'blur',
   }],
@@ -530,11 +544,14 @@ watch(() => userStore.avatarUrl, () => {
 })
 
 onMounted(async () => {
-  if (!userStore.userInfo?.email && !userStore.userInfo?.avatarUrl) {
+  const needsPartnerName = isPartnerStaff.value && userStore.userInfo?.partnerId && !userStore.userInfo?.partnerName
+  if ((!userStore.userInfo?.email && !userStore.userInfo?.avatarUrl) || needsPartnerName) {
     await userStore.syncProfile()
   }
-  await refreshLocalAgentSessions()
-  await refreshAdspowerSettings()
+  if (showLocalAgentPanel.value) {
+    await refreshLocalAgentSessions()
+    await refreshAdspowerSettings()
+  }
   fillProfileForm()
   resetPasswordForm()
 })
@@ -582,6 +599,10 @@ onMounted(async () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
   align-items: stretch;
+}
+
+.profile-grid.is-single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .profile-card {
@@ -717,7 +738,7 @@ onMounted(async () => {
   margin-bottom: 18px;
 }
 
-.profile-form :deep(.el-form-item:nth-child(3)),
+.profile-form :deep(.el-form-item.is-wide),
 .profile-form :deep(.el-form-item:last-child) {
   grid-column: 1 / -1;
 }

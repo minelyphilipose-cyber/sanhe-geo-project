@@ -11,6 +11,7 @@ public class CurrentUserProfileVO {
     private String displayName;
     private String role;
     private Long partnerId;
+    private String partnerName;
     private String phone;
     private String email;
     private String avatarUrl;

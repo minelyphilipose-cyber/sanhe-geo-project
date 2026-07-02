@@ -79,6 +79,21 @@ public class CompanyController {
         return R.ok(partnerResponseSanitizer.company(companyService.assignPartnerStaffOwner(id, req)));
     }
 
+    @PostMapping("/{id}/partner-workflow/request-package")
+    public R<?> requestPartnerPackage(@PathVariable Long id) {
+        return R.ok(partnerResponseSanitizer.company(companyService.requestPartnerPackage(id)));
+    }
+
+    @PostMapping("/{id}/partner-workflow/notify-entry")
+    public R<?> notifyPartnerStaffForProjectEntry(@PathVariable Long id) {
+        return R.ok(partnerResponseSanitizer.company(companyService.notifyPartnerStaffForProjectEntry(id)));
+    }
+
+    @PostMapping("/{id}/partner-workflow/complete-entry")
+    public R<?> completePartnerEntry(@PathVariable Long id) {
+        return R.ok(partnerResponseSanitizer.company(companyService.completePartnerEntry(id)));
+    }
+
     @GetMapping("/{id}/partner-staff-options")
     public R<List<SalesOwnerOptionVO>> partnerStaffOptions(@PathVariable Long id) {
         return R.ok(companyService.partnerStaffOptions(id));

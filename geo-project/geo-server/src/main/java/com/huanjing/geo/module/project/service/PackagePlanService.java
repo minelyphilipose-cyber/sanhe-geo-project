@@ -125,7 +125,7 @@ public class PackagePlanService {
                 new LambdaQueryWrapper<PackagePlan>().eq(PackagePlan::getPackageType, req.getPackageType())
         );
         if (existed != null) {
-            throw new BizException(400, "package_type already exists");
+            throw new BizException(400, "套餐类型已存在，请更换后重试");
         }
         String audienceType = normalizeAudienceType(req.getAudienceType());
         validatePartnerPackageFields(audienceType, req.getPartnerPoints());
@@ -345,25 +345,25 @@ public class PackagePlanService {
     private void validatePartnerPackageFields(String audienceType, BigDecimal partnerPoints) {
         if (AUDIENCE_PARTNER.equals(audienceType)
                 && (partnerPoints == null || partnerPoints.compareTo(BigDecimal.ZERO) <= 0)) {
-            throw new BizException(400, "partner_points must be positive for partner package");
+            throw new BizException(400, "合伙人套餐消耗积分必须大于 0");
         }
     }
 
     private void validateType(String packageType) {
         if (!StringUtils.hasText(packageType) || !PACKAGE_TYPE_PATTERN.matcher(packageType.trim()).matches()) {
-            throw new BizException(400, "Invalid package_type");
+            throw new BizException(400, "套餐类型格式不正确：仅支持小写字母、数字和下划线，需以小写字母开头，长度 3-32");
         }
     }
 
     private void validateBase(BigDecimal standardPrice, Integer serviceMonths, Integer sortOrder) {
         if (standardPrice == null || standardPrice.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BizException(400, "standard_price must be positive");
+            throw new BizException(400, "消耗积分必须大于 0");
         }
         if (serviceMonths == null || serviceMonths <= 0) {
-            throw new BizException(400, "service_months must be positive");
+            throw new BizException(400, "服务月数必须大于 0");
         }
         if (sortOrder == null) {
-            throw new BizException(400, "sort_order is required");
+            throw new BizException(400, "请输入排序值");
         }
     }
 

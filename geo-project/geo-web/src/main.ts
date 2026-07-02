@@ -26,6 +26,7 @@ import App from './App.vue'
 import router from './router'
 import { vPermission } from './directives/permission'
 import './styles/index.css'
+import './styles/partner.css'
 
 const app = createApp(App)
 

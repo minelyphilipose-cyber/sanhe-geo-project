@@ -6,6 +6,7 @@ export interface DashboardOverviewVO {
   activeProjects: number
   totalProjects: number
   monthlyReports: number
+  monthlyDiagnosisReports?: number | null
   openAlerts: number
   totalPartners: number | null
   monthlyNewCustomers: number
@@ -45,6 +46,6 @@ export function getDashboardStageDistribution() {
   return request.get<R<ProjectStageDistributionVO[]>>('/dashboard/project-stage-distribution')
 }
 
-export function getDashboardReportTrend(days = 30) {
-  return request.get<R<ReportTrendVO[]>>('/dashboard/report-trend', { params: { days } })
+export function getDashboardReportTrend(days = 30, scope?: 'diagnosis' | string) {
+  return request.get<R<ReportTrendVO[]>>('/dashboard/report-trend', { params: { days, scope } })
 }

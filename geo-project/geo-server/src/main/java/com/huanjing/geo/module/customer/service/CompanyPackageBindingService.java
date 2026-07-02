@@ -43,6 +43,10 @@ public class CompanyPackageBindingService {
 
     private static final java.time.ZoneId BUSINESS_ZONE = QuotaPeriodResolver.BUSINESS_ZONE;
     private static final String BIZ_TYPE_DISTRIBUTION = "distribution";
+    private static final String PARTNER_WORKFLOW_PACKAGE_REQUESTED = "package_requested";
+    private static final String PARTNER_WORKFLOW_PROJECT_ENTRY = "project_entry";
+    private static final String PARTNER_WORKFLOW_ENTRY_COMPLETED = "entry_completed";
+    private static final String PARTNER_WORKFLOW_PACKAGE_BOUND = "package_bound";
     private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
     private static final Set<String> FAILED_TASK_STATUS = Set.of("failed", "cancelled", "canceled");
     private static final List<String> PROJECT_ALLOCATION_CHANNELS = projectAllocationChannels();
@@ -78,6 +82,18 @@ public class CompanyPackageBindingService {
                         .last("LIMIT 1")
         );
         return binding;
+    }
+
+    public List<CompanyPackageBinding> activeBindings(Set<Long> companyIds) {
+        if (companyIds == null || companyIds.isEmpty()) {
+            return List.of();
+        }
+        return bindingMapper.selectList(
+                new LambdaQueryWrapper<CompanyPackageBinding>()
+                        .in(CompanyPackageBinding::getCompanyId, companyIds)
+                        .eq(CompanyPackageBinding::getStatus, CompanyPackageBinding.STATUS_ACTIVE)
+                        .eq(CompanyPackageBinding::getActiveFlag, 1)
+        );
     }
 
     public CompanyPackageBinding activeBindingForCurrentUser(Long companyId) {
@@ -125,6 +141,7 @@ public class CompanyPackageBindingService {
         bindingMapper.insert(binding);
         initTotalUsage(binding, channelQuotas);
         markCompanySigned(company);
+        markPartnerWorkflowPackageBound(company);
         return binding;
     }
 
@@ -146,6 +163,7 @@ public class CompanyPackageBindingService {
         if (updated != 1) {
             throw new BizException(409, "Package binding status changed, please retry");
         }
+        resetPartnerWorkflowAfterPackageUnbind(companyId);
     }
 
     private void reconcileReservedDistributionQuota(Long companyId) {
@@ -386,6 +404,35 @@ public class CompanyPackageBindingService {
 
     private boolean isPartnerOwner(SysUser user) {
         return user != null && "partner".equalsIgnoreCase(user.getRole());
+    }
+
+    private void markPartnerWorkflowPackageBound(Company company) {
+        if (company == null || company.getPartnerId() == null || !"partner".equals(company.getSourceType())) {
+            return;
+        }
+        String currentStatus = company.getPartnerWorkflowStatus();
+        if (PARTNER_WORKFLOW_PROJECT_ENTRY.equals(currentStatus) || PARTNER_WORKFLOW_ENTRY_COMPLETED.equals(currentStatus)) {
+            return;
+        }
+        company.setPartnerWorkflowStatus(PARTNER_WORKFLOW_PACKAGE_BOUND);
+        company.setPartnerWorkflowUpdatedAt(LocalDateTime.now());
+        companyMapper.updateById(company);
+    }
+
+    private void resetPartnerWorkflowAfterPackageUnbind(Long companyId) {
+        Company company = companyMapper.selectById(companyId);
+        if (company == null || company.getPartnerId() == null || !"partner".equals(company.getSourceType())) {
+            return;
+        }
+        String currentStatus = company.getPartnerWorkflowStatus();
+        if (!PARTNER_WORKFLOW_PACKAGE_BOUND.equals(currentStatus)
+                && !PARTNER_WORKFLOW_PROJECT_ENTRY.equals(currentStatus)
+                && !PARTNER_WORKFLOW_ENTRY_COMPLETED.equals(currentStatus)) {
+            return;
+        }
+        company.setPartnerWorkflowStatus(PARTNER_WORKFLOW_PACKAGE_REQUESTED);
+        company.setPartnerWorkflowUpdatedAt(LocalDateTime.now());
+        companyMapper.updateById(company);
     }
 
     private Map<String, Object> packageSnapshot(PackagePlan plan, List<PackageChannelQuotaConfig> channelQuotas, boolean partnerVisible) {

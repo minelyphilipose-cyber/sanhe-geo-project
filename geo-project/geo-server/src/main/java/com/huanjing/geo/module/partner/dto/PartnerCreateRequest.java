@@ -13,13 +13,13 @@ public class PartnerCreateRequest {
     private String partnerCode;
     @NotBlank
     private String partnerName;
-    @NotBlank
     private String partnerLevel;
     @DecimalMin("0.0001")
     @DecimalMax("1.0000")
     private BigDecimal discountRate;
     @DecimalMin("0.00")
     private BigDecimal initialAmount;
+    private String initialOfflineReference;
     @Min(0)
     private Integer presaleReportFreeQuotaLimit;
     @DecimalMin("0.00")

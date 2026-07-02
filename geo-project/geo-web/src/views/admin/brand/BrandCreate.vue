@@ -86,7 +86,7 @@
 
         <div class="brand-section-bar"><span />联系方式与阵地<i /></div>
         <div class="brand-form-grid">
-          <el-form-item label="联系电话"><el-input v-model="form.phone" /></el-form-item>
+          <el-form-item label="手机号" prop="phone"><el-input v-model="form.phone" placeholder="请输入手机号" /></el-form-item>
           <el-form-item label="对外公开电话"><el-input v-model="form.publicPhone" /></el-form-item>
           <el-form-item label="对外公开地址"><el-input v-model="form.publicAddress" /></el-form-item>
           <el-form-item label="默认发布位置">
@@ -256,7 +256,7 @@ import type { BrandMaterial, BrandProfileVersion, PublishSite } from '@/types'
 import { regionPayloadFromCodes } from '@/constants/region'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url'
-import { nullableText } from '@/utils/form'
+import { isValidMobile, nullableText } from '@/utils/form'
 import { specialIndustryCodesFromOptions } from '@/utils/specialIndustry'
 
 GlobalWorkerOptions.workerSrc = pdfWorkerSrc
@@ -317,6 +317,12 @@ const rules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
+  phone: [{
+    validator: (_rule, value: string, callback) => {
+      callback(isValidMobile(value) ? undefined : new Error('请输入正确的手机号'))
+    },
+    trigger: 'blur',
+  }],
 }
 
 const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'

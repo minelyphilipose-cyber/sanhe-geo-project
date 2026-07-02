@@ -1,8 +1,12 @@
 package com.huanjing.geo.module.partner.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.storage.MinioStorageService;
+import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.partner.dto.PartnerCreateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerStaffCreateRequest;
+import com.huanjing.geo.module.partner.dto.PartnerStaffUpdateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerUpdateRequest;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
@@ -43,6 +47,7 @@ class PartnerServiceTest {
     private PartnerMapper partnerMapper;
     private PartnerAccountMapper partnerAccountMapper;
     private PartnerDiscountHistoryMapper partnerDiscountHistoryMapper;
+    private CompanyMapper companyMapper;
     private SysUserMapper sysUserMapper;
     private SysRoleMapper sysRoleMapper;
     private SysUserRoleMapper sysUserRoleMapper;
@@ -56,12 +61,15 @@ class PartnerServiceTest {
         PartnerAccountTxnMapper partnerAccountTxnMapper = mock(PartnerAccountTxnMapper.class);
         partnerDiscountHistoryMapper = mock(PartnerDiscountHistoryMapper.class);
         PartnerRechargeOrderMapper partnerRechargeOrderMapper = mock(PartnerRechargeOrderMapper.class);
+        companyMapper = mock(CompanyMapper.class);
         sysUserMapper = mock(SysUserMapper.class);
         sysRoleMapper = mock(SysRoleMapper.class);
         sysUserRoleMapper = mock(SysUserRoleMapper.class);
         PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
         currentUserService = mock(CurrentUserService.class);
         ActivityLogService activityLogService = mock(ActivityLogService.class);
+        MinioStorageService minioStorageService = mock(MinioStorageService.class);
+        ObjectMapper objectMapper = new ObjectMapper();
 
         service = new PartnerService(
                 partnerMapper,
@@ -69,12 +77,15 @@ class PartnerServiceTest {
                 partnerAccountTxnMapper,
                 partnerDiscountHistoryMapper,
                 partnerRechargeOrderMapper,
+                companyMapper,
                 sysUserMapper,
                 sysRoleMapper,
                 sysUserRoleMapper,
                 passwordEncoder,
                 currentUserService,
-                activityLogService
+                activityLogService,
+                minioStorageService,
+                objectMapper
         );
 
         when(currentUserService.requireCurrentUser()).thenReturn(user());
@@ -127,7 +138,6 @@ class PartnerServiceTest {
     void createGeneratesPartnerCodeWhenMissing() {
         PartnerCreateRequest req = new PartnerCreateRequest();
         req.setPartnerName("合伙人一号");
-        req.setPartnerLevel("level_29800");
         req.setDiscountRate(new BigDecimal("0.8000"));
         req.setInitialAmount(BigDecimal.ZERO);
         when(partnerMapper.selectCount(any())).thenReturn(0L);
@@ -139,6 +149,7 @@ class PartnerServiceTest {
         Partner saved = captor.getValue();
         assertNotNull(saved.getPartnerCode());
         org.junit.jupiter.api.Assertions.assertTrue(saved.getPartnerCode().matches("P\\d{14}"));
+        assertEquals("custom", saved.getPartnerLevel());
     }
 
     @Test
@@ -231,6 +242,44 @@ class PartnerServiceTest {
     }
 
     @Test
+    void partnerOwnerCanUpdateOwnedStaffProfile() {
+        SysUser owner = user();
+        owner.setRole("partner");
+        owner.setPartnerId(100L);
+        when(currentUserService.requireCurrentUser()).thenReturn(owner);
+        SysUser staff = staffUser();
+        when(sysUserMapper.selectById(30L)).thenReturn(staff);
+        PartnerStaffUpdateRequest req = new PartnerStaffUpdateRequest();
+        req.setDisplayName(" 新员工 ");
+        req.setPhone("13900000000");
+        req.setEmail("staff@example.com");
+
+        var result = service.updateMyStaff(30L, req);
+
+        assertEquals("新员工", result.getDisplayName());
+        ArgumentCaptor<SysUser> userCaptor = ArgumentCaptor.forClass(SysUser.class);
+        verify(sysUserMapper).updateById(userCaptor.capture());
+        assertEquals("新员工", userCaptor.getValue().getDisplayName());
+        assertEquals("13900000000", userCaptor.getValue().getPhone());
+        assertEquals("staff@example.com", userCaptor.getValue().getEmail());
+    }
+
+    @Test
+    void partnerOwnerCanDeleteOwnedStaffAndClearAssignments() {
+        SysUser owner = user();
+        owner.setRole("partner");
+        owner.setPartnerId(100L);
+        when(currentUserService.requireCurrentUser()).thenReturn(owner);
+        when(sysUserMapper.selectById(30L)).thenReturn(staffUser());
+
+        service.deleteMyStaff(30L);
+
+        verify(companyMapper).update(any(), any());
+        verify(sysUserRoleMapper).delete(any());
+        verify(sysUserMapper).deleteById(30L);
+    }
+
+    @Test
     void updateStatusDeactivatesPartnerStaffAccounts() {
         Partner partner = activePartner();
         when(partnerMapper.selectById(100L)).thenReturn(partner);
@@ -255,6 +304,18 @@ class PartnerServiceTest {
         user.setId(9L);
         user.setRole("admin");
         return user;
+    }
+
+    private SysUser staffUser() {
+        SysUser staff = new SysUser();
+        staff.setId(30L);
+        staff.setUsername("staff001");
+        staff.setDisplayName("交付员工");
+        staff.setRole("partner_staff");
+        staff.setPartnerId(100L);
+        staff.setIsActive(true);
+        staff.setTokenVersion(0);
+        return staff;
     }
 
     private Partner activePartner() {

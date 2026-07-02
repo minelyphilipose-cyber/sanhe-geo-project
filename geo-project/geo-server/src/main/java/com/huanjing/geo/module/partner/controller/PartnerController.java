@@ -12,9 +12,11 @@ import com.huanjing.geo.module.partner.dto.PartnerStaffCreateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerStaffCreateResult;
 import com.huanjing.geo.module.partner.dto.PartnerStaffResetPasswordResult;
 import com.huanjing.geo.module.partner.dto.PartnerStaffStatusRequest;
+import com.huanjing.geo.module.partner.dto.PartnerStaffUpdateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerStaffVO;
 import com.huanjing.geo.module.partner.dto.PartnerStatusUpdateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerUpdateRequest;
+import com.huanjing.geo.module.partner.dto.PartnerVoucherFile;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
 import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
@@ -23,8 +25,15 @@ import com.huanjing.geo.module.partner.service.PartnerService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.MediaTypeFactory;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Tag(name = "Partner")
@@ -60,12 +69,26 @@ public class PartnerController {
         return R.ok(partnerService.createMyStaff(req));
     }
 
+    @PutMapping("/me/staff/{staffUserId}")
+    public R<PartnerStaffVO> updateMyStaff(
+            @PathVariable Long staffUserId,
+            @Valid @RequestBody PartnerStaffUpdateRequest req
+    ) {
+        return R.ok(partnerService.updateMyStaff(staffUserId, req));
+    }
+
     @PutMapping("/me/staff/{staffUserId}/status")
     public R<PartnerStaffVO> updateMyStaffStatus(
             @PathVariable Long staffUserId,
             @Valid @RequestBody PartnerStaffStatusRequest req
     ) {
         return R.ok(partnerService.updateMyStaffStatus(staffUserId, req.getIsActive()));
+    }
+
+    @DeleteMapping("/me/staff/{staffUserId}")
+    public R<Void> deleteMyStaff(@PathVariable Long staffUserId) {
+        partnerService.deleteMyStaff(staffUserId);
+        return R.ok();
     }
 
     @PostMapping("/me/staff/{staffUserId}/reset-password")
@@ -140,6 +163,62 @@ public class PartnerController {
     @PostMapping("/{id}/account/recharge")
     public R<PartnerAccountTxn> recharge(@PathVariable Long id, @Valid @RequestBody PartnerRechargeRequest req) {
         return R.ok(partnerService.recharge(id, req));
+    }
+
+    @PostMapping("/{id}/account/vouchers/upload")
+    public R<PartnerVoucherFile> uploadAccountVoucher(
+            @PathVariable Long id,
+            @RequestPart("file") MultipartFile file
+    ) {
+        return R.ok(partnerService.uploadAccountVoucher(id, file));
+    }
+
+    @PostMapping("/account/vouchers/initial-upload")
+    public R<PartnerVoucherFile> uploadInitialAccountVoucher(@RequestPart("file") MultipartFile file) {
+        return R.ok(partnerService.uploadInitialAccountVoucher(file));
+    }
+
+    @GetMapping("/{id}/account/vouchers/download")
+    public ResponseEntity<byte[]> downloadAccountVoucher(
+            @PathVariable Long id,
+            @RequestParam String objectKey
+    ) {
+        PartnerVoucherFile voucher = partnerService.voucherDetail(id, objectKey);
+        byte[] bytes = partnerService.readVoucherBytes(id, objectKey);
+        String fileName = voucher.getFileName();
+        MediaType mediaType = voucherMediaType(fileName);
+        boolean inline = "image".equalsIgnoreCase(mediaType.getType()) || mediaType.includes(MediaType.APPLICATION_PDF);
+        ContentDisposition disposition = (inline ? ContentDisposition.inline() : ContentDisposition.attachment())
+                .filename(fileName, StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(bytes);
+    }
+
+    private MediaType voucherMediaType(String fileName) {
+        String lower = fileName == null ? "" : fileName.toLowerCase();
+        if (lower.endsWith(".svg")) {
+            return MediaType.parseMediaType("image/svg+xml");
+        }
+        if (lower.endsWith(".png")) {
+            return MediaType.IMAGE_PNG;
+        }
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            return MediaType.IMAGE_JPEG;
+        }
+        if (lower.endsWith(".gif")) {
+            return MediaType.IMAGE_GIF;
+        }
+        if (lower.endsWith(".webp")) {
+            return MediaType.parseMediaType("image/webp");
+        }
+        if (lower.endsWith(".bmp")) {
+            return MediaType.parseMediaType("image/bmp");
+        }
+        return MediaTypeFactory.getMediaType(fileName).orElse(MediaType.APPLICATION_OCTET_STREAM);
     }
 
     @PostMapping("/{id}/account/adjust")

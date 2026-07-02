@@ -1,86 +1,61 @@
-﻿<template>
-  <div class="space-y-4">
-    <el-card v-loading="loading">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span>余额总览</span>
-          <div class="flex items-center gap-2">
-            <el-button v-if="canApplyRecharge" type="primary" @click="applyVisible = true">发起充值申请</el-button>
-            <el-tag>{{ dictStore.label('partner_status', account?.status) }}</el-tag>
-          </div>
+<template>
+  <div class="partner-page partner-balance-page">
+    <section v-loading="loading" class="balance-hero">
+      <div class="balance-main">
+        <div class="eyebrow">合伙人积分账户</div>
+        <div class="hero-title-row">
+          <h1>余额与扣款</h1>
+          <el-tag :type="accountStatusTag" effect="light" round>
+            {{ dictStore.label('partner_status', account?.status) || account?.status || '未启用' }}
+          </el-tag>
         </div>
-      </template>
-      <el-descriptions :column="4" border>
-        <el-descriptions-item label="当前余额">{{ centsToYuan(account?.currentBalance) }}</el-descriptions-item>
-        <el-descriptions-item label="累计充值">{{ centsToYuan(account?.totalRecharge) }}</el-descriptions-item>
-        <el-descriptions-item label="累计扣款">{{ centsToYuan(account?.totalDeduction) }}</el-descriptions-item>
-        <el-descriptions-item label="币种">{{ account?.currency || '-' }}</el-descriptions-item>
-      </el-descriptions>
-    </el-card>
+        <div class="balance-value">{{ formatPoints(account?.currentBalance) }}</div>
+        <div class="balance-caption">当前可用积分。项目审批、诊断报告超额生成等会从该账户扣减。</div>
+      </div>
 
-    <el-card v-loading="orderLoading">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span>充值申请</span>
-          <el-select v-model="orderQuery.status" clearable placeholder="申请状态" style="width: 160px" @change="onOrderSearch">
-            <el-option label="待审核" value="pending" />
-            <el-option label="已通过" value="approved" />
-            <el-option label="已驳回" value="rejected" />
-            <el-option label="已取消" value="cancelled" />
-            <el-option label="已超时" value="expired" />
-          </el-select>
+      <div class="balance-stat-grid">
+        <div class="balance-stat">
+          <span>累计入账</span>
+          <strong>{{ formatPoints(account?.totalRecharge) }}</strong>
         </div>
-      </template>
-
-      <DataState :loading="orderLoading" :empty="!orderLoading && rechargeOrders.length === 0" empty-text="暂无充值申请">
-        <el-table :data="rechargeOrders" border>
-          <el-table-column prop="orderNo" label="申请单号" min-width="210" />
-          <el-table-column label="金额(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.amount) }}</template>
-          </el-table-column>
-          <el-table-column label="状态" width="120">
-            <template #default="scope">
-              <el-tag :type="rechargeOrderStatusTag(scope.row.status)">
-                {{ rechargeOrderStatusLabel(scope.row.status) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="offlineReference" label="线下凭证" width="160" />
-          <el-table-column prop="applyRemark" label="申请备注" min-width="180" />
-          <el-table-column prop="rejectReason" label="驳回原因" min-width="180" />
-          <el-table-column prop="expiresAt" label="处理截止" width="180" />
-          <el-table-column prop="createdAt" label="申请时间" width="180" />
-          <el-table-column label="操作" width="100" fixed="right">
-            <template #default="scope">
-              <el-button
-                v-if="canApplyRecharge && scope.row.status === 'pending'"
-                size="small"
-                type="danger"
-                @click="cancelRecharge(scope.row)"
-              >
-                取消
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <div class="mt-4 flex justify-end">
-          <el-pagination
-            background
-            layout="prev, pager, next, total"
-            :current-page="orderPage.current"
-            :page-size="orderPage.size"
-            :total="orderPage.total"
-            @current-change="onOrderPageChange"
-          />
+        <div class="balance-stat">
+          <span>累计扣减</span>
+          <strong>{{ formatPoints(account?.totalDeduction) }}</strong>
         </div>
-      </DataState>
-    </el-card>
+        <div class="balance-stat">
+          <span>账户币种</span>
+          <strong>{{ account?.currency || 'CNY' }}</strong>
+        </div>
+      </div>
+    </section>
 
-    <el-card>
-      <template #header>
-        <div class="flex items-center gap-2">
-          <el-select v-model="query.txnType" clearable placeholder="流水类型" style="width: 160px" @change="onSearch">
+    <section class="recharge-guide">
+      <div class="guide-copy">
+        <div class="guide-icon">i</div>
+        <div>
+          <h2>充值请联系专属客服工作人员</h2>
+          <p>请提交充值金额、转账截图或付款凭证。总部处理人员核验后，会在合伙人详情页完成积分入账。</p>
+        </div>
+      </div>
+      <div class="guide-flow">
+        <span>服务群提交</span>
+        <i></i>
+        <span>总部核验</span>
+        <i></i>
+        <span>后台入账</span>
+        <i></i>
+        <span>流水可查</span>
+      </div>
+    </section>
+
+    <section class="txn-panel">
+      <div class="panel-header">
+        <div>
+          <h2>积分流水</h2>
+          <p>查看充值入账、项目扣款、手工调整等账户变动记录。</p>
+        </div>
+        <div class="filter-row">
+          <el-select v-model="query.txnType" clearable placeholder="流水类型" class="filter-control" @change="onSearch">
             <el-option
               v-for="item in dictStore.options('partner_txn_type')"
               :key="item.dictKey"
@@ -88,7 +63,7 @@
               :value="item.dictKey"
             />
           </el-select>
-          <el-select v-model="query.bizType" clearable placeholder="业务类型" style="width: 180px" @change="onSearch">
+          <el-select v-model="query.bizType" clearable placeholder="业务类型" class="filter-control" @change="onSearch">
             <el-option
               v-for="item in dictStore.options('partner_biz_type')"
               :key="item.dictKey"
@@ -99,38 +74,48 @@
           <el-date-picker
             v-model="query.dateRange"
             type="datetimerange"
-            range-separator="to"
-            start-placeholder="Start"
-            end-placeholder="End"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
             value-format="YYYY-MM-DD HH:mm:ss"
-            style="width: 360px"
+            class="date-filter"
             @change="onSearch"
           />
         </div>
-      </template>
+      </div>
 
-      <DataState :loading="loading" :empty="!loading && txns.length === 0" empty-text="暂无流水数据">
-        <el-table :data="txns" border>
-          <el-table-column prop="txnNo" label="流水号" min-width="220" />
+      <DataState :loading="loading" :empty="!loading && txns.length === 0" empty-text="暂无积分流水">
+        <el-table :data="txns" class="txn-table" table-layout="fixed">
           <el-table-column label="类型" width="120">
-            <template #default="scope">{{ dictStore.label('partner_txn_type', scope.row.txnType) }}</template>
+            <template #default="scope">
+              <span class="txn-type" :class="txnTypeClass(scope.row.txnType)">
+                {{ dictStore.label('partner_txn_type', scope.row.txnType) }}
+              </span>
+            </template>
           </el-table-column>
-          <el-table-column label="业务" width="140">
+          <el-table-column label="业务" width="150">
             <template #default="scope">{{ dictStore.label('partner_biz_type', scope.row.bizType) }}</template>
           </el-table-column>
-          <el-table-column label="金额(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.amount) }}</template>
+          <el-table-column label="变动积分" width="130">
+            <template #default="scope">
+              <span class="amount-text" :class="amountClass(scope.row.amount)">
+                {{ signedPoints(scope.row.amount) }}
+              </span>
+            </template>
           </el-table-column>
-          <el-table-column label="余额前(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.balanceBefore) }}</template>
+          <el-table-column label="变动前" width="130">
+            <template #default="scope">{{ formatPoints(scope.row.balanceBefore) }}</template>
           </el-table-column>
-          <el-table-column label="余额后(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.balanceAfter) }}</template>
+          <el-table-column label="变动后" width="130">
+            <template #default="scope">{{ formatPoints(scope.row.balanceAfter) }}</template>
           </el-table-column>
-          <el-table-column prop="createdAt" label="时间" width="170" />
+          <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
+          <el-table-column label="时间" width="180">
+            <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
+          </el-table-column>
         </el-table>
 
-        <div class="mt-4 flex justify-end">
+        <div class="table-footer">
           <el-pagination
             background
             layout="prev, pager, next, total"
@@ -141,35 +126,17 @@
           />
         </div>
       </DataState>
-    </el-card>
-
-    <el-dialog v-model="applyVisible" title="充值申请" width="520px">
-      <el-form :model="applyForm" label-width="100px">
-        <el-form-item label="金额(元)" required>
-          <el-input-number v-model="applyForm.amountYuan" :min="0.01" :precision="2" :step="100" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="线下凭证"><el-input v-model="applyForm.offlineReference" maxlength="128" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="applyForm.remark" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="applyVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitApplyRecharge">提交</el-button>
-      </template>
-    </el-dialog>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import {
-  applyPartnerRecharge,
-  cancelPartnerRechargeOrder,
   getPartnerAccount,
   getPartnerAccountTxns,
-  getPartnerRechargeOrders,
   type PartnerAccount,
-  type PartnerRechargeOrder,
   type PartnerTxn,
 } from '@/api/partner'
 import { useDictStore } from '@/stores/dict'
@@ -179,30 +146,50 @@ import DataState from '@/components/ui/DataState.vue'
 const userStore = useUserStore()
 const dictStore = useDictStore()
 const loading = ref(false)
-const orderLoading = ref(false)
-const submitting = ref(false)
 const account = ref<PartnerAccount | null>(null)
 const txns = ref<PartnerTxn[]>([])
-const rechargeOrders = ref<PartnerRechargeOrder[]>([])
 const page = reactive({ current: 1, size: 20, total: 0 })
-const orderPage = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive<{
   txnType: string
   bizType: string
   dateRange: [string, string] | []
 }>({ txnType: '', bizType: '', dateRange: [] })
-const orderQuery = reactive({ status: '' })
-const applyVisible = ref(false)
-const applyForm = reactive({ amountYuan: 100, offlineReference: '', remark: '' })
-const canApplyRecharge = computed(() => userStore.hasPermission('partner.account.recharge.apply'))
 
-function centsToYuan(v?: number | null) {
+const accountStatusTag = computed(() => {
+  if (account.value?.status === 'active') return 'success'
+  if (account.value?.status === 'paused') return 'warning'
+  return 'info'
+})
+
+function formatPoints(v?: number | null) {
   if (v == null) return '-'
   return Number(v).toFixed(2)
 }
 
-function yuanToCents(v: number) {
-  return Number(v.toFixed(2))
+function signedPoints(v?: number | null) {
+  if (v == null) return '-'
+  const value = Number(v)
+  const prefix = value > 0 ? '+' : ''
+  return `${prefix}${value.toFixed(2)}`
+}
+
+function amountClass(v?: number | null) {
+  const value = Number(v || 0)
+  if (value > 0) return 'is-credit'
+  if (value < 0) return 'is-debit'
+  return 'is-neutral'
+}
+
+function txnTypeClass(type?: string | null) {
+  if (type === 'recharge') return 'is-credit'
+  if (type === 'deduction') return 'is-debit'
+  return 'is-adjust'
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '-'
+  const normalized = value.replace('T', ' ').replace(/\.\d+$/, '')
+  return normalized.length >= 19 ? normalized.slice(0, 19) : normalized
 }
 
 async function load() {
@@ -237,26 +224,6 @@ async function load() {
   }
 }
 
-async function loadRechargeOrders() {
-  const partnerId = userStore.userInfo?.partnerId
-  if (!partnerId) return
-  orderLoading.value = true
-  try {
-    const { data } = await getPartnerRechargeOrders(partnerId, {
-      current: orderPage.current,
-      size: orderPage.size,
-      status: orderQuery.status || undefined,
-    })
-    rechargeOrders.value = data.data.records || []
-    orderPage.total = data.data.total || 0
-  } catch {
-    rechargeOrders.value = []
-    orderPage.total = 0
-  } finally {
-    orderLoading.value = false
-  }
-}
-
 function onPageChange(v: number) {
   page.current = v
   load()
@@ -267,81 +234,306 @@ function onSearch() {
   load()
 }
 
-function onOrderPageChange(v: number) {
-  orderPage.current = v
-  loadRechargeOrders()
-}
-
-function onOrderSearch() {
-  orderPage.current = 1
-  loadRechargeOrders()
-}
-
-async function submitApplyRecharge() {
-  const partnerId = userStore.userInfo?.partnerId
-  if (!partnerId) {
-    ElMessage.error('当前账号未绑定合伙人信息')
-    return
-  }
-  if (!applyForm.amountYuan || applyForm.amountYuan <= 0) {
-    ElMessage.warning('充值金额需大于0')
-    return
-  }
-  submitting.value = true
-  try {
-    await applyPartnerRecharge(partnerId, {
-      amount: yuanToCents(applyForm.amountYuan),
-      offlineReference: applyForm.offlineReference || undefined,
-      remark: applyForm.remark || undefined,
-    })
-    ElMessage.success('充值申请已提交')
-    applyVisible.value = false
-    applyForm.amountYuan = 100
-    applyForm.offlineReference = ''
-    applyForm.remark = ''
-    await loadRechargeOrders()
-  } finally {
-    submitting.value = false
-  }
-}
-
-async function cancelRecharge(order: PartnerRechargeOrder) {
-  const partnerId = userStore.userInfo?.partnerId
-  if (!partnerId) return
-  await ElMessageBox.confirm('确认取消该充值申请？', '取消充值申请', {
-    type: 'warning',
-    confirmButtonText: '确认取消',
-    cancelButtonText: '返回',
-  })
-  await cancelPartnerRechargeOrder(partnerId, order.id)
-  ElMessage.success('充值申请已取消')
-  await loadRechargeOrders()
-}
-
-function rechargeOrderStatusLabel(status: string) {
-  const mapping: Record<string, string> = {
-    pending: '待审核',
-    cancelled: '已取消',
-    approved: '已通过',
-    rejected: '已驳回',
-    expired: '已超时',
-  }
-  return mapping[status] || status || '-'
-}
-
-function rechargeOrderStatusTag(status: string): 'success' | 'warning' | 'danger' | 'info' {
-  const mapping: Record<string, 'success' | 'warning' | 'danger' | 'info'> = {
-    pending: 'warning',
-    approved: 'success',
-    rejected: 'danger',
-    cancelled: 'info',
-    expired: 'danger',
-  }
-  return mapping[status] || 'info'
-}
-
 onMounted(async () => {
   await dictStore.ensureLoaded()
-  await Promise.all([load(), loadRechargeOrders()])
+  await load()
 })
 </script>
+
+<style scoped>
+.partner-balance-page {
+  display: grid;
+  gap: 18px;
+}
+
+.balance-hero,
+.recharge-guide,
+.txn-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+}
+
+.balance-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+  overflow: hidden;
+}
+
+.balance-main {
+  padding: 28px 30px;
+  background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%);
+}
+
+.eyebrow {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.hero-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.hero-title-row h1,
+.guide-copy h2,
+.panel-header h2 {
+  margin: 0;
+  color: #0f172a;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.hero-title-row h1 {
+  font-size: 24px;
+}
+
+.balance-value {
+  margin-top: 18px;
+  color: #0f172a;
+  font-size: 44px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.balance-caption {
+  max-width: 520px;
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.balance-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: stretch;
+}
+
+.balance-stat {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 22px;
+  border-left: 1px solid #e2e8f0;
+}
+
+.balance-stat span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.balance-stat strong {
+  color: #0f172a;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.recharge-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 22px;
+}
+
+.guide-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.guide-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-weight: 900;
+}
+
+.guide-copy h2,
+.panel-header h2 {
+  font-size: 18px;
+}
+
+.guide-copy p,
+.panel-header p {
+  margin: 5px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.guide-flow {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.guide-flow span {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.guide-flow i {
+  width: 18px;
+  height: 1px;
+  background: #cbd5e1;
+}
+
+.txn-panel {
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.filter-control {
+  width: 150px;
+}
+
+.date-filter {
+  width: 360px;
+}
+
+.txn-table {
+  width: calc(100% - 44px);
+  margin: 20px 22px 0;
+}
+
+.txn-table :deep(.el-table__header th) {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 900;
+}
+
+.txn-table :deep(.el-table__cell) {
+  color: #334155;
+  font-weight: 600;
+}
+
+.txn-type {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.txn-type.is-credit {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.txn-type.is-debit {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.txn-type.is-adjust {
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.amount-text {
+  font-weight: 900;
+}
+
+.amount-text.is-credit {
+  color: #047857;
+}
+
+.amount-text.is-debit {
+  color: #dc2626;
+}
+
+.amount-text.is-neutral {
+  color: #64748b;
+}
+
+.table-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 22px 22px;
+}
+
+@media (max-width: 1100px) {
+  .balance-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .balance-stat-grid {
+    border-top: 1px solid #e2e8f0;
+  }
+
+  .recharge-guide,
+  .panel-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .guide-flow {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 768px) {
+  .balance-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .balance-stat {
+    border-left: 0;
+    border-top: 1px solid #e2e8f0;
+  }
+
+  .filter-row,
+  .filter-control,
+  .date-filter {
+    width: 100%;
+  }
+}
+</style>

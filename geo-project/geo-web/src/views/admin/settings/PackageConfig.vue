@@ -4,7 +4,7 @@
       <div>
         <div class="admin-page-kicker">系统配置</div>
         <h1 class="admin-page-title">套餐配置</h1>
-        <div class="admin-page-subtitle">维护套餐价格、服务周期、拓词额度和渠道分发额度。</div>
+        <div class="admin-page-subtitle">维护套餐消耗积分、服务周期、拓词额度和渠道分发额度。</div>
       </div>
       <div class="admin-page-actions">
         <el-button type="primary" @click="openCreate">新增套餐</el-button>
@@ -38,9 +38,9 @@
         <span class="admin-metric-hint">当前页启用状态</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #7c3aed; --metric-tone: #f5f3ff">
-        <span class="admin-metric-label">平均价格</span>
+        <span class="admin-metric-label">平均消耗积分</span>
         <strong class="admin-metric-value">{{ avgPriceText }}</strong>
-        <span class="admin-metric-hint">按当前页标准价计算</span>
+        <span class="admin-metric-hint">按当前页消耗积分计算</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
         <span class="admin-metric-label">平均周期</span>
@@ -53,7 +53,7 @@
       <div class="table-header">
         <div>
           <div class="table-title">套餐列表</div>
-          <div class="table-subtitle">按价格、服务周期、拓词额度和渠道额度核对套餐能力。</div>
+          <div class="table-subtitle">按消耗积分、服务周期、拓词额度和渠道额度核对套餐能力。</div>
         </div>
         <div class="chips">
           <span class="chip chip-muted">当前页 {{ rows.length }}</span>
@@ -76,7 +76,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="标准价(元)" width="120">
+          <el-table-column label="消耗积分" width="120">
             <template #default="scope">{{ Number(scope.row.standardPrice || 0).toFixed(2) }}</template>
           </el-table-column>
           <el-table-column label="适用对象" width="110">
@@ -85,9 +85,6 @@
                 {{ audienceLabel(scope.row.audienceType) }}
               </el-tag>
             </template>
-          </el-table-column>
-          <el-table-column label="合伙人积分" width="120">
-            <template #default="scope">{{ scope.row.audienceType === 'partner' ? Number(scope.row.partnerPoints || 0).toFixed(2) : '-' }}</template>
           </el-table-column>
           <el-table-column prop="serviceMonths" label="服务月数" width="100" />
           <el-table-column label="拓词问题额度" min-width="190">
@@ -141,7 +138,14 @@
           </div>
           <div class="form-grid is-two">
             <el-form-item label="套餐类型" prop="packageType" required>
-              <el-input v-model="form.packageType" :disabled="formMode === 'edit'" placeholder="如: trial_basic" />
+              <el-input
+                v-model="form.packageType"
+                :disabled="formMode === 'edit'"
+                maxlength="32"
+                placeholder="如: partner_a，不能使用大写字母"
+                @blur="trimPackageTypeInput"
+              />
+              <div class="form-tip">套餐类型是系统唯一标识，仅支持小写字母、数字和下划线，需以小写字母开头，长度 3-32；例如 partner_a。</div>
             </el-form-item>
             <el-form-item label="套餐名称" prop="packageName" required>
               <el-input v-model="form.packageName" />
@@ -161,19 +165,16 @@
         <section class="form-section">
           <div class="form-section-head">
             <div>
-              <span>价格与拓词额度</span>
-              <strong>标准价、服务周期与 A/B/C 档问题数</strong>
+              <span>积分与拓词额度</span>
+              <strong>消耗积分、服务周期与 A/B/C 档问题数</strong>
             </div>
             <em :class="{ invalid: tierTotal !== form.keywordGroupLimit }">
               A/B/C 合计 {{ tierTotal }} / 总数 {{ form.keywordGroupLimit }}
             </em>
           </div>
           <div class="form-grid is-three">
-            <el-form-item label="标准价(元)" prop="standardPrice" required>
+            <el-form-item label="消耗积分" prop="standardPrice" required>
               <el-input-number v-model="form.standardPrice" :min="0.01" :precision="2" />
-            </el-form-item>
-            <el-form-item v-if="form.audienceType === 'partner'" label="合伙人套餐积分" prop="partnerPoints" required>
-              <el-input-number v-model="form.partnerPoints" :min="0.01" :precision="2" />
             </el-form-item>
             <el-form-item label="服务月数" prop="serviceMonths" required>
               <el-input-number v-model="form.serviceMonths" :min="1" />
@@ -197,59 +198,127 @@
           <div class="form-section-head">
             <div>
               <span>分发渠道额度</span>
-              <strong>官网、行业站、平台网站、各自媒体平台和权重媒体额度</strong>
+              <strong>{{ form.audienceType === 'partner' ? '合伙人侧可显示渠道与总部隐藏渠道' : '官网、行业站、平台网站、各自媒体平台和权重媒体额度' }}</strong>
             </div>
+            <em v-if="form.audienceType === 'partner'">
+              可见 {{ partnerVisibleChannelQuotaConfigs.length }} / 隐藏 {{ partnerHiddenChannelQuotaConfigs.length }}
+            </em>
           </div>
-          <el-table class="quota-editor-table" :data="baseChannelQuotaConfigs" border table-layout="fixed">
-            <el-table-column label="渠道" min-width="180">
-              <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
-            </el-table-column>
-            <el-table-column label="周期" min-width="160">
-              <template #default="scope">
-                <el-select v-model="scope.row.periodType" :disabled="scope.row.channelCode === 'authority_media'">
-                  <el-option v-for="item in periodOptions(scope.row.channelCode)" :key="item.value" :label="item.label" :value="item.value" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="额度" min-width="160">
-              <template #default="scope">
-                <el-input-number v-model="scope.row.quotaLimit" :min="0" />
-              </template>
-            </el-table-column>
-            <el-table-column label="启用" width="100">
-              <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
-            </el-table-column>
-          </el-table>
-          <el-collapse v-if="selfMediaChannelQuotaConfigs.length" class="quota-channel-groups" model-value="self_media">
-            <el-collapse-item name="self_media">
-              <template #title>
-                <div class="quota-group-title">
-                  <span>自媒体平台</span>
-                  <el-tag size="small" type="info">{{ selfMediaChannelQuotaConfigs.length }} 个平台</el-tag>
+          <template v-if="form.audienceType === 'partner'">
+            <div class="quota-visibility-layout">
+              <div class="quota-visibility-block is-visible">
+                <div class="quota-block-head">
+                  <div>
+                    <strong>合伙人侧可显示渠道</strong>
+                    <span>会在合伙人套餐、客户详情和项目额度中展示，用于合伙人理解可交付范围。</span>
+                  </div>
+                  <el-tag type="success" size="small">{{ partnerVisibleChannelQuotaConfigs.length }} 个渠道</el-tag>
                 </div>
-              </template>
-              <el-table class="quota-editor-table" :data="selfMediaChannelQuotaConfigs" border table-layout="fixed">
-                <el-table-column label="平台" min-width="180">
-                  <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
-                </el-table-column>
-                <el-table-column label="周期" min-width="160">
-                  <template #default="scope">
-                    <el-select v-model="scope.row.periodType">
-                      <el-option v-for="item in periodOptions(scope.row.channelCode)" :key="item.value" :label="item.label" :value="item.value" />
-                    </el-select>
-                  </template>
-                </el-table-column>
-                <el-table-column label="额度" min-width="160">
-                  <template #default="scope">
-                    <el-input-number v-model="scope.row.quotaLimit" :min="0" />
-                  </template>
-                </el-table-column>
-                <el-table-column label="启用" width="100">
-                  <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
-                </el-table-column>
-              </el-table>
-            </el-collapse-item>
-          </el-collapse>
+                <el-table class="quota-editor-table is-embedded" :data="partnerVisibleChannelQuotaConfigs" border table-layout="fixed">
+                  <el-table-column label="渠道" min-width="180">
+                    <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
+                  </el-table-column>
+                  <el-table-column label="周期" min-width="160">
+                    <template #default="scope">
+                      <el-select v-model="scope.row.periodType" :disabled="scope.row.channelCode === 'authority_media'">
+                        <el-option v-for="item in periodOptions(scope.row.channelCode)" :key="item.value" :label="item.label" :value="item.value" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="额度" min-width="160">
+                    <template #default="scope">
+                      <el-input-number v-model="scope.row.quotaLimit" :min="0" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="启用" width="100">
+                    <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
+                  </el-table-column>
+                </el-table>
+              </div>
+
+              <div class="quota-visibility-block is-hidden">
+                <div class="quota-block-head">
+                  <div>
+                    <strong>总部隐藏渠道</strong>
+                    <span>仅供总部交付配置和内部消耗使用，合伙人侧不展示具体渠道名称与额度。</span>
+                  </div>
+                  <el-tag type="warning" size="small">{{ partnerHiddenChannelQuotaConfigs.length }} 个渠道</el-tag>
+                </div>
+                <el-table class="quota-editor-table is-embedded" :data="partnerHiddenChannelQuotaConfigs" border table-layout="fixed">
+                  <el-table-column label="渠道" min-width="180">
+                    <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
+                  </el-table-column>
+                  <el-table-column label="周期" min-width="160">
+                    <template #default="scope">
+                      <el-select v-model="scope.row.periodType" :disabled="scope.row.channelCode === 'authority_media'">
+                        <el-option v-for="item in periodOptions(scope.row.channelCode)" :key="item.value" :label="item.label" :value="item.value" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="额度" min-width="160">
+                    <template #default="scope">
+                      <el-input-number v-model="scope.row.quotaLimit" :min="0" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="启用" width="100">
+                    <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
+                  </el-table-column>
+                </el-table>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <el-table class="quota-editor-table" :data="baseChannelQuotaConfigs" border table-layout="fixed">
+              <el-table-column label="渠道" min-width="180">
+                <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
+              </el-table-column>
+              <el-table-column label="周期" min-width="160">
+                <template #default="scope">
+                  <el-select v-model="scope.row.periodType" :disabled="scope.row.channelCode === 'authority_media'">
+                    <el-option v-for="item in periodOptions(scope.row.channelCode)" :key="item.value" :label="item.label" :value="item.value" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="额度" min-width="160">
+                <template #default="scope">
+                  <el-input-number v-model="scope.row.quotaLimit" :min="0" />
+                </template>
+              </el-table-column>
+              <el-table-column label="启用" width="100">
+                <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
+              </el-table-column>
+            </el-table>
+            <el-collapse v-if="selfMediaChannelQuotaConfigs.length" class="quota-channel-groups" model-value="self_media">
+              <el-collapse-item name="self_media">
+                <template #title>
+                  <div class="quota-group-title">
+                    <span>自媒体平台</span>
+                    <el-tag size="small" type="info">{{ selfMediaChannelQuotaConfigs.length }} 个平台</el-tag>
+                  </div>
+                </template>
+                <el-table class="quota-editor-table" :data="selfMediaChannelQuotaConfigs" border table-layout="fixed">
+                  <el-table-column label="平台" min-width="180">
+                    <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
+                  </el-table-column>
+                  <el-table-column label="周期" min-width="160">
+                    <template #default="scope">
+                      <el-select v-model="scope.row.periodType">
+                        <el-option v-for="item in periodOptions(scope.row.channelCode)" :key="item.value" :label="item.label" :value="item.value" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="额度" min-width="160">
+                    <template #default="scope">
+                      <el-input-number v-model="scope.row.quotaLimit" :min="0" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="启用" width="100">
+                    <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
+                  </el-table-column>
+                </el-table>
+              </el-collapse-item>
+            </el-collapse>
+          </template>
         </section>
 
         <section class="form-section">
@@ -306,6 +375,7 @@ const query = reactive({
   enabled: undefined as boolean | undefined,
   audienceType: undefined as 'internal' | 'partner' | undefined,
 })
+const PARTNER_VISIBLE_SELF_MEDIA_PLATFORMS = new Set(['wechat', 'douyin', 'toutiao', 'zhihu', 'baijiahao', 'xiaohongshu'])
 
 const form = reactive({
   packageType: '',
@@ -332,12 +402,25 @@ const form = reactive({
   channelQuotaConfigs: defaultChannelQuotas() as PackageChannelQuotaConfig[],
 })
 
+const PACKAGE_TYPE_PATTERN = /^[a-z][a-z0-9_]{2,31}$/
+
 const rules: FormRules = {
-  packageType: [{ required: true, message: '请输入套餐类型', trigger: 'blur' }],
+  packageType: [
+    { required: true, message: '请输入套餐类型', trigger: 'blur' },
+    {
+      validator: (_rule, value, callback) => {
+        if (!PACKAGE_TYPE_PATTERN.test(String(value || '').trim())) {
+          callback(new Error('套餐类型仅支持小写字母、数字和下划线，需以小写字母开头，长度 3-32'))
+          return
+        }
+        callback()
+      },
+      trigger: ['blur', 'change'],
+    },
+  ],
   packageName: [{ required: true, message: '请输入套餐名称', trigger: 'blur' }],
   audienceType: [{ required: true, message: '请选择适用对象', trigger: 'change' }],
-  standardPrice: [{ required: true, message: '请输入标准价', trigger: 'change' }],
-  partnerPoints: [{ required: true, message: '请输入合伙人套餐积分', trigger: 'change' }],
+  standardPrice: [{ required: true, message: '请输入消耗积分', trigger: 'change' }],
   serviceMonths: [{ required: true, message: '请输入服务月数', trigger: 'change' }],
   keywordGroupLimit: [{ required: true, message: '请输入拓词问题总数', trigger: 'change' }],
   keywordGroupLimitA: [{ required: true, message: '请输入 A 档问题数', trigger: 'change' }],
@@ -359,6 +442,8 @@ const avgServiceMonths = computed(() => {
 })
 const baseChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => !isSelfMediaQuotaChannel(item.channelCode)))
 const selfMediaChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => isSelfMediaQuotaChannel(item.channelCode)))
+const partnerVisibleChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => isPartnerVisibleQuotaChannel(item.channelCode)))
+const partnerHiddenChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => !isPartnerVisibleQuotaChannel(item.channelCode)))
 const formEditable = computed(() => formMode.value === 'create' || editingPackageStatus.value === 'draft')
 
 function defaultChannelQuotas(): PackageChannelQuotaConfig[] {
@@ -372,6 +457,17 @@ function defaultChannelQuotas(): PackageChannelQuotaConfig[] {
 
 function channelLabel(code: string) {
   return distributionChannelLabel(code)
+}
+
+function trimPackageTypeInput() {
+  form.packageType = form.packageType.trim()
+}
+
+function isPartnerVisibleQuotaChannel(code?: string | null) {
+  if (code === 'official_site') return true
+  if (!code || !isSelfMediaQuotaChannel(code)) return false
+  const platform = code.slice('self_media:'.length)
+  return PARTNER_VISIBLE_SELF_MEDIA_PLATFORMS.has(platform)
 }
 
 function periodOptions(channelCode: string) {
@@ -520,12 +616,13 @@ function openEdit(row: PackagePlan) {
 }
 
 function buildPayload() {
+  const consumePoints = Number(form.standardPrice || 0)
   return {
-    packageType: form.packageType,
+    packageType: form.packageType.trim().toLowerCase(),
     packageName: form.packageName,
     audienceType: form.audienceType,
-    standardPrice: form.standardPrice,
-    partnerPoints: form.audienceType === 'partner' ? form.partnerPoints : null,
+    standardPrice: consumePoints,
+    partnerPoints: form.audienceType === 'partner' ? consumePoints : null,
     serviceMonths: form.serviceMonths,
     keywordGroupLimit: form.keywordGroupLimit,
     keywordGroupLimitA: form.keywordGroupLimitA,
@@ -553,7 +650,12 @@ function buildPayload() {
 
 async function submit() {
   const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
+  if (!valid) {
+    if (!PACKAGE_TYPE_PATTERN.test(form.packageType.trim())) {
+      ElMessage.warning('请检查套餐类型：只能使用小写字母、数字和下划线，并以小写字母开头')
+    }
+    return
+  }
   if (tierTotal.value !== Number(form.keywordGroupLimit || 0)) {
     ElMessage.warning('A/B/C 问题数合计必须等于拓词问题总数')
     return
@@ -754,8 +856,62 @@ onMounted(load)
   grid-column: 1 / -1;
 }
 
+.form-tip {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .quota-channel-groups {
   margin-top: 12px;
+}
+
+.quota-visibility-layout {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.quota-visibility-block {
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.quota-visibility-block.is-visible {
+  border-color: #bbf7d0;
+  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 118px);
+}
+
+.quota-visibility-block.is-hidden {
+  border-color: #fed7aa;
+  background: linear-gradient(180deg, #fff7ed 0%, #ffffff 118px);
+}
+
+.quota-block-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.quota-block-head strong {
+  display: block;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.quota-block-head span {
+  display: block;
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .quota-group-title {
@@ -785,6 +941,13 @@ onMounted(load)
 .quota-editor-table {
   margin: 16px;
   width: calc(100% - 32px);
+}
+
+.quota-editor-table.is-embedded {
+  margin: 0;
+  width: 100%;
+  border-right: 0;
+  border-left: 0;
 }
 
 .quota-editor-table :deep(.el-select),

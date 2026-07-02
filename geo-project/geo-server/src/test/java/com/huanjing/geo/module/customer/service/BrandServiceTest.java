@@ -51,7 +51,8 @@ class BrandServiceTest {
                 currentUserService,
                 internalScopeService,
                 mock(ActivityLogService.class),
-                mock(BrandProfileService.class)
+                mock(BrandProfileService.class),
+                mock(BrandImageFolderService.class)
         );
         SysUser operator = new SysUser();
         operator.setId(100L);

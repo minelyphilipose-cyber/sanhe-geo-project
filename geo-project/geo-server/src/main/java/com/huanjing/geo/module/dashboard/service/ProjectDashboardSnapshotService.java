@@ -5,9 +5,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.dashboard.entity.ProjectDashboardShare;
 import com.huanjing.geo.module.dashboard.entity.ProjectDashboardSnapshot;
@@ -38,6 +40,18 @@ public class ProjectDashboardSnapshotService {
 
     private static final int REFRESH_LOCK_SECONDS = 60;
     private static final String REFRESH_LOCK_PREFIX = "geo:dashboard:snapshot:refresh:";
+    private static final Set<String> MEASURABLE_INDEX_CHANNELS = Set.of(
+            "official_site", "agent_site", "brand_geo_site", "agent_official_site",
+            "forum", "forum_site", "industry_site", "authority_media",
+            "wechat", "wechat_mp", "douyin", "xiaohongshu", "toutiao", "baijiahao", "zhihu",
+            "self_media:wechat", "self_media:wechat_mp", "self_media:douyin", "self_media:xiaohongshu",
+            "self_media:toutiao", "self_media:baijiahao", "self_media:zhihu"
+    );
+    private static final Set<String> SELF_INDEX_CHANNELS = Set.of(
+            "official_site", "agent_site", "brand_geo_site", "agent_official_site",
+            "forum", "forum_site", "industry_site", "authority_media"
+    );
+    private static final List<String> PUBLISHED_RECORD_STATUSES = List.of("published", "published_confirmed", "distributed");
 
     private final ProjectDashboardShareMapper shareMapper;
     private final ProjectDashboardSnapshotMapper snapshotMapper;
@@ -45,6 +59,7 @@ public class ProjectDashboardSnapshotService {
     private final PollResultMapper pollResultMapper;
     private final ArticleBatchMapper articleBatchMapper;
     private final ArticleDraftMapper articleDraftMapper;
+    private final ArticlePublishRecordMapper articlePublishRecordMapper;
     private final DistributionTaskMapper distributionTaskMapper;
     private final KeywordGroupService keywordGroupService;
     private final StringRedisTemplate stringRedisTemplate;
@@ -167,6 +182,7 @@ public class ProjectDashboardSnapshotService {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("articleCreated", 0L);
             row.put("articlePublished", 0L);
+            row.put("articleIndexed", 0L);
             row.put("hitCount", 0L);
             merged.put(date, row);
         }
@@ -183,6 +199,19 @@ public class ProjectDashboardSnapshotService {
             }
         }
 
+        QueryWrapper<ArticleDraft> draftCreatedWrapper = new QueryWrapper<>();
+        draftCreatedWrapper.select("DATE(created_at) AS createdDate", "COUNT(*) AS articleCreated")
+                .eq("project_id", projectId)
+                .ge("created_at", startDate.atStartOfDay())
+                .groupBy("DATE(created_at)");
+        for (Map<String, Object> row : articleDraftMapper.selectMaps(draftCreatedWrapper)) {
+            LocalDate date = localDateValue(row.get("createdDate"));
+            if (date != null && merged.containsKey(date)) {
+                long existing = longValue(merged.get(date).get("articleCreated"));
+                merged.get(date).put("articleCreated", Math.max(existing, longValue(row.get("articleCreated"))));
+            }
+        }
+
         QueryWrapper<DistributionTask> publishedWrapper = new QueryWrapper<>();
         publishedWrapper.select("DATE(finished_at) AS finishedDate", "COUNT(DISTINCT article_id) AS articlePublished")
                 .eq("project_id", projectId)
@@ -194,6 +223,42 @@ public class ProjectDashboardSnapshotService {
             LocalDate date = localDateValue(row.get("finishedDate"));
             if (date != null && merged.containsKey(date)) {
                 merged.get(date).put("articlePublished", longValue(row.get("articlePublished")));
+            }
+        }
+
+        QueryWrapper<ArticlePublishRecord> publishRecordWrapper = new QueryWrapper<>();
+        publishRecordWrapper.select(
+                        "DATE(COALESCE(published_at, verified_at, created_at)) AS publishedDate",
+                        "COUNT(DISTINCT article_id) AS articlePublished"
+                )
+                .eq("project_id", projectId)
+                .in("publish_status", PUBLISHED_RECORD_STATUSES)
+                .ge("COALESCE(published_at, verified_at, created_at)", startDate.atStartOfDay())
+                .groupBy("DATE(COALESCE(published_at, verified_at, created_at))");
+        for (Map<String, Object> row : articlePublishRecordMapper.selectMaps(publishRecordWrapper)) {
+            LocalDate date = localDateValue(row.get("publishedDate"));
+            if (date != null && merged.containsKey(date)) {
+                long existing = longValue(merged.get(date).get("articlePublished"));
+                merged.get(date).put("articlePublished", Math.max(existing, longValue(row.get("articlePublished"))));
+            }
+        }
+
+        QueryWrapper<ArticlePublishRecord> indexedRecordWrapper = new QueryWrapper<>();
+        indexedRecordWrapper.select(
+                        "DATE(COALESCE(published_at, verified_at, created_at)) AS indexedDate",
+                        "COUNT(DISTINCT article_id) AS articleIndexed"
+                )
+                .eq("project_id", projectId)
+                .in("publish_status", PUBLISHED_RECORD_STATUSES)
+                .in("COALESCE(target_channel, target_kind, '')", MEASURABLE_INDEX_CHANNELS)
+                .and(wrapper -> wrapper.in("COALESCE(target_channel, target_kind, '')", SELF_INDEX_CHANNELS)
+                        .or().isNotNull("verified_at"))
+                .ge("COALESCE(published_at, verified_at, created_at)", startDate.atStartOfDay())
+                .groupBy("DATE(COALESCE(published_at, verified_at, created_at))");
+        for (Map<String, Object> row : articlePublishRecordMapper.selectMaps(indexedRecordWrapper)) {
+            LocalDate date = localDateValue(row.get("indexedDate"));
+            if (date != null && merged.containsKey(date)) {
+                merged.get(date).put("articleIndexed", longValue(row.get("articleIndexed")));
             }
         }
 
@@ -279,6 +344,7 @@ public class ProjectDashboardSnapshotService {
         long siteTotal = 0L;
         long articleCreated = 0L;
         long articlePublished = 0L;
+        long articleIndexed = 0L;
         Set<String> platformCodes = new LinkedHashSet<>();
         for (ProjectDashboardSnapshot snapshot : dailyTrendSnapshots) {
             if (snapshot.getSnapshotDate() == null || snapshot.getSnapshotDate().isBefore(startDate)) {
@@ -290,6 +356,7 @@ public class ProjectDashboardSnapshotService {
             siteTotal += longValue(value.get("siteCount"));
             articleCreated += longValue(value.get("articleCreated"));
             articlePublished += longValue(value.get("articlePublished"));
+            articleIndexed += longValue(value.get("articleIndexed"));
             Object codes = value.get("hitPlatformCodes");
             if (codes instanceof Collection<?> collection) {
                 for (Object code : collection) {
@@ -307,6 +374,7 @@ public class ProjectDashboardSnapshotService {
         payload.put("siteTotal", siteTotal);
         payload.put("articleCreated", articleCreated);
         payload.put("articlePublished", articlePublished);
+        payload.put("articleIndexed", articleIndexed);
         return payload;
     }
 
@@ -381,7 +449,7 @@ public class ProjectDashboardSnapshotService {
                         .in(ArticleDraft::getStatus, List.of("approved", "distributing", "distributed", "published", "unpublished"))
         );
         Set<Long> distributedArticleIds = loadDistributionArticleIds(projectId, List.of("submitting", "submitted", "confirmed"));
-        Set<Long> publishedArticleIds = loadDistributionArticleIds(projectId, List.of("submitted", "confirmed"));
+        Set<Long> publishedArticleIds = loadPublishedArticleIds(projectId);
         Set<Long> pendingArticleIds = loadDistributionArticleIds(projectId, List.of("pending"));
         Set<Long> failedDistributionArticleIds = loadDistributionArticleIds(projectId, List.of("failed"));
         long generationFailureCount = sumGenerationFailureCount(projectId);
@@ -443,6 +511,20 @@ public class ProjectDashboardSnapshotService {
                 .map(DistributionTask::getArticleId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private Set<Long> loadPublishedArticleIds(Long projectId) {
+        Set<Long> articleIds = loadDistributionArticleIds(projectId, List.of("submitted", "confirmed"));
+        articlePublishRecordMapper.selectList(
+                new LambdaQueryWrapper<ArticlePublishRecord>()
+                        .eq(ArticlePublishRecord::getProjectId, projectId)
+                        .in(ArticlePublishRecord::getPublishStatus, PUBLISHED_RECORD_STATUSES)
+                        .select(ArticlePublishRecord::getArticleId)
+        ).stream()
+                .map(ArticlePublishRecord::getArticleId)
+                .filter(Objects::nonNull)
+                .forEach(articleIds::add);
+        return articleIds;
     }
 
     private long sumGenerationFailureCount(Long projectId) {

@@ -242,7 +242,11 @@
           </el-collapse>
         </div>
       </template>
-      <el-empty v-else description="当前客户未绑定套餐" />
+      <div v-else class="customer-package-empty">
+        <el-empty description="当前客户未绑定套餐" :image-size="96">
+          <el-button v-if="canManagePackageBinding" type="primary" @click="openPackageBind">绑定合伙人套餐</el-button>
+        </el-empty>
+      </div>
       <el-table v-if="packageBindingHistory.length" class="mt-4" :data="packageBindingHistory" border>
         <el-table-column prop="packageName" label="历史套餐" min-width="180" />
         <el-table-column label="状态" width="110">
@@ -399,7 +403,7 @@
         </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
-        <el-form-item label="联系电话"><el-input v-model="brandForm.phone" /></el-form-item>
+        <el-form-item label="手机号" prop="phone"><el-input v-model="brandForm.phone" placeholder="请输入手机号" /></el-form-item>
         <el-form-item label="微信"><el-input v-model="brandForm.wechat" /></el-form-item>
         <el-form-item label="状态">
           <el-select v-model="brandForm.status" style="width: 100%">
@@ -534,7 +538,7 @@ import { distributionChannelLabel, isSelfMediaQuotaChannel } from '@/constants/d
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { errorMessage } from '@/utils/error'
 import { formatDateTimeSeconds } from '@/utils/format'
-import { nullableText } from '@/utils/form'
+import { isValidMobile, nullableText } from '@/utils/form'
 
 const route = useRoute()
 const router = useRouter()
@@ -546,7 +550,8 @@ const canCreateBrand = computed(() => userStore.hasPermission('brand.create'))
 const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
 const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
 const canCreateProject = computed(() => userStore.hasPermission('project.create'))
-const canManagePackageBinding = computed(() => userStore.hasPermission('user.manage'))
+const isPartnerOwner = computed(() => userStore.role === 'partner')
+const canManagePackageBinding = computed(() => userStore.hasPermission('user.manage') || isPartnerOwner.value)
 const canSelectSalesOwner = computed(() => userStore.role !== 'sales' && canUpdateCompany.value)
 const canTransferOwner = computed(() => userStore.hasPermission('delivery.assignment.manage'))
 const companyId = Number(route.params.id)
@@ -634,6 +639,12 @@ const brandForm = reactive({
 const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
+  phone: [{
+    validator: (_rule, value: string, callback) => {
+      callback(isValidMobile(value) ? undefined : new Error('请输入正确的手机号'))
+    },
+    trigger: 'blur',
+  }],
 }
 
 const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
@@ -887,7 +898,7 @@ async function removeCurrentCompany() {
     })
     await deleteCompany(companyId)
     ElMessage.success('删除成功')
-    router.push('/admin/customers')
+    router.push(userStore.isPartner ? '/partner/my-customers' : '/admin/customers')
   } catch {
     // canceled
   }
@@ -941,7 +952,7 @@ async function submitCompany() {
 }
 
 function openBrandCreate() {
-  router.push({ path: '/admin/brands/create', query: { companyId: String(companyId) } })
+  router.push({ path: userStore.isPartner ? '/partner/brands/create' : '/admin/brands/create', query: { companyId: String(companyId) } })
 }
 
 async function loadPackageBinding() {
@@ -1260,7 +1271,7 @@ function goCreateProject(brandId: number) {
 }
 
 function goBrandDetail(brandId: number) {
-  router.push(`/admin/brands/${brandId}`)
+  router.push(`${userStore.isPartner ? '/partner' : '/admin'}/brands/${brandId}`)
 }
 
 const availableBrandIndustries = computed(() => companyForm.industryTags || [])

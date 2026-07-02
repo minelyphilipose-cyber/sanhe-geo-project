@@ -20,6 +20,7 @@ export function meApi() {
     displayName: string
     role: string
     partnerId: number | null
+    partnerName: string | null
     phone: string | null
     email: string | null
     avatarUrl: string | null
@@ -39,6 +40,7 @@ export function updateMyProfileApi(payload: {
     displayName: string
     role: string
     partnerId: number | null
+    partnerName: string | null
     phone: string | null
     email: string | null
     avatarUrl: string | null
@@ -56,6 +58,7 @@ export function uploadMyAvatarApi(file: File) {
     displayName: string
     role: string
     partnerId: number | null
+    partnerName: string | null
     phone: string | null
     email: string | null
     avatarUrl: string | null

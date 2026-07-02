@@ -209,7 +209,7 @@
         </el-table-column>
 
         <template #empty>
-          <el-empty description="暂无报告,新建后约 2.5-3.5 分钟生成首版">
+          <el-empty description="暂无报告,请前往新建">
             <el-button v-if="canCreateReportPermission" type="primary" :icon="Plus" @click="goCreate">新建报告</el-button>
           </el-empty>
         </template>

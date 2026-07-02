@@ -2,6 +2,7 @@ package com.huanjing.geo.module.customer.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.dto.BrandImageFolderRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandImageFolder;
 import com.huanjing.geo.module.customer.entity.BrandImageFolderProject;
@@ -19,6 +20,8 @@ import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -83,7 +86,12 @@ class BrandImageFolderServiceTest {
 
     @Test
     void deleteFolder_unbindsMaterialsAndRelationsBeforeDeletingFolder() {
-        when(folderMapper.selectById(100L)).thenReturn(folder(BrandImageFolderService.STATUS_DISABLED, false));
+        when(folderMapper.selectById(100L)).thenReturn(folder(100L, "临时素材", BrandImageFolderService.STATUS_DISABLED, false));
+        when(folderMapper.selectList(any())).thenReturn(List.of(
+                folder(100L, "临时素材", BrandImageFolderService.STATUS_DISABLED, false),
+                folder(101L, "插图", BrandImageFolderService.STATUS_ACTIVE, false),
+                folder(102L, "封面", BrandImageFolderService.STATUS_ACTIVE, false)
+        ));
 
         service.deleteFolder(10L, 100L);
 
@@ -104,6 +112,38 @@ class BrandImageFolderServiceTest {
         verify(folderMapper, never()).deleteById(any(Long.class));
     }
 
+    @Test
+    void updateFolder_rejectsDisablingLastIllustrationFolder() {
+        when(folderMapper.selectById(100L)).thenReturn(folder(100L, "插图", BrandImageFolderService.STATUS_ACTIVE, false));
+        when(folderMapper.selectList(any())).thenReturn(List.of(
+                folder(100L, "插图", BrandImageFolderService.STATUS_ACTIVE, false),
+                folder(102L, "封面", BrandImageFolderService.STATUS_ACTIVE, false)
+        ));
+        BrandImageFolderRequest req = folderRequest("插图", BrandImageFolderService.STATUS_DISABLED);
+
+        assertThatThrownBy(() -> service.updateFolder(10L, 100L, req))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("文章自动生成需要");
+
+        verify(folderMapper, never()).updateById(any(BrandImageFolder.class));
+    }
+
+    @Test
+    void updateFolder_rejectsRenamingCoverFolder() {
+        when(folderMapper.selectById(102L)).thenReturn(folder(102L, "封面", BrandImageFolderService.STATUS_ACTIVE, false));
+        when(folderMapper.selectList(any())).thenReturn(List.of(
+                folder(101L, "插图_门店", BrandImageFolderService.STATUS_ACTIVE, false),
+                folder(102L, "封面", BrandImageFolderService.STATUS_ACTIVE, false)
+        ));
+        BrandImageFolderRequest req = folderRequest("首图", BrandImageFolderService.STATUS_ACTIVE);
+
+        assertThatThrownBy(() -> service.updateFolder(10L, 102L, req))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("文章自动生成需要");
+
+        verify(folderMapper, never()).updateById(any(BrandImageFolder.class));
+    }
+
     private Brand brand() {
         Brand brand = new Brand();
         brand.setId(10L);
@@ -118,11 +158,23 @@ class BrandImageFolderServiceTest {
     }
 
     private BrandImageFolder folder(String status, boolean defaultFlag) {
+        return folder(100L, null, status, defaultFlag);
+    }
+
+    private BrandImageFolder folder(Long id, String folderName, String status, boolean defaultFlag) {
         BrandImageFolder folder = new BrandImageFolder();
-        folder.setId(100L);
+        folder.setId(id);
         folder.setBrandId(10L);
+        folder.setFolderName(folderName);
         folder.setStatus(status);
         folder.setDefaultFlag(defaultFlag);
         return folder;
+    }
+
+    private BrandImageFolderRequest folderRequest(String folderName, String status) {
+        BrandImageFolderRequest req = new BrandImageFolderRequest();
+        req.setFolderName(folderName);
+        req.setStatus(status);
+        return req;
     }
 }

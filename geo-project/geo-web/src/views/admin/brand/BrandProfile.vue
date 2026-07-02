@@ -51,7 +51,8 @@
             <el-descriptions-item label="对外公开电话">{{ brand?.publicPhone || '-' }}</el-descriptions-item>
             <el-descriptions-item label="对外公开地址">{{ brand?.publicAddress || '-' }}</el-descriptions-item>
             <el-descriptions-item label="自媒体默认发布位置">{{ brand?.selfMediaPublishLocationName || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="Agent 官网">{{ agentSiteLabel(brand?.geoSiteCode) }}</el-descriptions-item>
+            <el-descriptions-item label="Agent 官网名称">{{ brand?.geoSiteName || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="Agent 官网域名">{{ brand?.geoSiteDomain || '-' }}</el-descriptions-item>
             <el-descriptions-item label="行业资讯站">{{ brand?.industrySiteName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="业务介绍" :span="3">{{ brand?.businessIntro || '-' }}</el-descriptions-item>
             <el-descriptions-item label="品牌资质描述" :span="3">{{ brand?.brandQualificationDescription || '-' }}</el-descriptions-item>
@@ -108,8 +109,8 @@
               <el-form-item label="官网">
                 <el-input v-model="infoForm.website" />
               </el-form-item>
-              <el-form-item label="联系电话">
-                <el-input v-model="infoForm.phone" />
+              <el-form-item label="手机号" prop="phone">
+                <el-input v-model="infoForm.phone" placeholder="请输入手机号" />
               </el-form-item>
               <el-form-item label="微信">
                 <el-input v-model="infoForm.wechat" />
@@ -123,22 +124,11 @@
               <el-form-item label="默认发布位置">
                 <el-input v-model="infoForm.selfMediaPublishLocationName" maxlength="64" placeholder="用于头条等自媒体发布页添加位置" />
               </el-form-item>
-              <el-form-item label="Agent 官网">
-                <el-select
-                  v-model="infoForm.geoSiteCode"
-                  clearable
-                  filterable
-                  placeholder="选择 Agent 官网，自动带出站点标识"
-                  style="width: 100%"
-                  @change="handleAgentSiteChange"
-                >
-                  <el-option
-                    v-for="site in agentSiteOptions"
-                    :key="site.siteCode || site.id"
-                    :label="site.siteName"
-                    :value="site.siteCode"
-                  />
-                </el-select>
+              <el-form-item label="Agent 官网名称">
+                <el-input v-model="infoForm.geoSiteName" placeholder="如：品牌 Agent 官网" />
+              </el-form-item>
+              <el-form-item label="Agent 官网域名">
+                <el-input v-model="infoForm.geoSiteDomain" placeholder="如：www.example.com" />
               </el-form-item>
               <el-form-item label="行业资讯站">
                 <el-select
@@ -285,7 +275,7 @@ import type { Brand, BrandStatementView, BrandMaterial, BrandProfileVersion, Pub
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
-import { nullableText } from '@/utils/form'
+import { isValidMobile, nullableText } from '@/utils/form'
 
 const route = useRoute()
 const router = useRouter()
@@ -304,7 +294,6 @@ const brand = ref<Brand | null>(null)
 const statement = ref<BrandStatementView | null>(null)
 const companyIndustryTags = ref<string[]>([])
 const publishSites = ref<PublishSite[]>([])
-const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 
 // ────────── Tab 1: 基础资料 ──────────
 const editingInfo = ref(false)
@@ -325,7 +314,8 @@ const infoForm = reactive({
   publicPhone: '',
   publicAddress: '',
   selfMediaPublishLocationName: '',
-  geoSiteCode: '',
+  geoSiteName: '',
+  geoSiteDomain: '',
   geoSiteStatus: '',
   industrySiteName: '',
   industrySiteCode: '',
@@ -339,16 +329,18 @@ const infoForm = reactive({
 const infoRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
+  phone: [{
+    validator: (_rule, value: string, callback) => {
+      callback(isValidMobile(value) ? undefined : new Error('请输入正确的手机号'))
+    },
+    trigger: 'blur',
+  }],
 }
 
 const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
 const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
 
 const availableIndustries = computed(() => companyIndustryTags.value)
-const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
-  isValidGeoSiteCode(site.siteCode)
-  && (site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'),
-))
 const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
   site.integrationMethod !== 'brand_geo_site'
   && site.integrationMethod !== 'forum_playwright'
@@ -368,26 +360,6 @@ function industryLabel(value?: string | null) {
 
 function normalizeUrl(url: string) {
   return url.startsWith('http') ? url : `https://${url}`
-}
-
-function agentSiteLabel(code?: string | null) {
-  if (!code) return '-'
-  return agentSiteOptions.value.find((item) => item.siteCode === code)?.siteName || code
-}
-
-function normalizeGeoSiteCode(code?: string | null) {
-  const normalized = code?.trim().toLowerCase() || ''
-  return GEO_SITE_CODE_PATTERN.test(normalized) ? normalized : ''
-}
-
-function isValidGeoSiteCode(code?: string | null) {
-  return !!normalizeGeoSiteCode(code)
-}
-
-function handleAgentSiteChange(value: string) {
-  infoForm.geoSiteCode = normalizeGeoSiteCode(value)
-  const site = agentSiteOptions.value.find((item) => item.siteCode === infoForm.geoSiteCode)
-  infoForm.geoSiteStatus = site ? 'active' : ''
 }
 
 function handleIndustrySiteChange(value: string) {
@@ -421,7 +393,8 @@ function fillInfoForm(data: Brand) {
   infoForm.publicPhone = data.publicPhone || ''
   infoForm.publicAddress = data.publicAddress || ''
   infoForm.selfMediaPublishLocationName = data.selfMediaPublishLocationName || ''
-  infoForm.geoSiteCode = data.geoSiteCode || ''
+  infoForm.geoSiteName = data.geoSiteName || ''
+  infoForm.geoSiteDomain = data.geoSiteDomain || ''
   infoForm.geoSiteStatus = data.geoSiteStatus || ''
   infoForm.industrySiteName = data.industrySiteName || ''
   infoForm.industrySiteCode = data.industrySiteCode || ''
@@ -474,8 +447,9 @@ async function saveInfo() {
       officialAccount: nullableText(brand.value?.officialAccount),
       videoAccount: nullableText(brand.value?.videoAccount),
       douyinAccount: nullableText(brand.value?.douyinAccount),
-      geoSiteCode: normalizeGeoSiteCode(infoForm.geoSiteCode) || null,
-      geoSiteStatus: normalizeGeoSiteCode(infoForm.geoSiteCode) ? infoForm.geoSiteStatus || 'active' : null,
+      geoSiteName: nullableText(infoForm.geoSiteName),
+      geoSiteDomain: nullableText(infoForm.geoSiteDomain),
+      geoSiteStatus: nullableText(infoForm.geoSiteDomain) ? infoForm.geoSiteStatus || 'active' : null,
       industrySiteName: nullableText(infoForm.industrySiteName),
       industrySiteCode: nullableText(infoForm.industrySiteCode),
       status: infoForm.status,

@@ -65,9 +65,18 @@
           </div>
         </section>
         <section class="brand-detail-section">
-          <div class="brand-section-bar"><span />联系方式与阵地<i /></div>
+          <div class="brand-section-bar"><span />联系方式<i /></div>
           <div class="brand-info-grid">
             <div v-for="item in brandContactInfoItems" :key="item.label" class="brand-info-item">
+              <span class="brand-info-label">{{ item.label }}</span>
+              <strong class="brand-info-value">{{ item.value }}</strong>
+            </div>
+          </div>
+        </section>
+        <section class="brand-detail-section">
+          <div class="brand-section-bar"><span />总部交付配置<i /></div>
+          <div class="brand-info-grid">
+            <div v-for="item in brandDeliveryConfigItems" :key="item.label" class="brand-info-item">
               <span class="brand-info-label">{{ item.label }}</span>
               <strong class="brand-info-value">{{ item.value }}</strong>
             </div>
@@ -226,12 +235,60 @@
           </div>
         </div>
       </div>
-      <el-table v-loading="browserEnvironmentsLoading" :data="browserEnvironments" border empty-text="暂无指纹浏览器环境">
+      <div v-if="canUpdateBrand" class="environment-toolbar">
+        <div>
+          <h3>指纹浏览器环境</h3>
+          <p>扩展会话按环境名称归属到对应 AdsPower 环境，避免同一实例重复展示。</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <el-button :loading="extensionSessionsLoading" @click="refreshExtensionBindingStatus">刷新扩展状态</el-button>
+          <el-button type="primary" :loading="extensionBindCodeLoading" @click="generateBrandExtensionBindCode">
+            生成绑定码
+          </el-button>
+        </div>
+      </div>
+
+      <div v-if="extensionBindCode && canUpdateBrand" class="extension-bind-code-box">
+        <div>
+          <span>扩展绑定码</span>
+          <strong>{{ extensionBindCode.code }}</strong>
+          <small>{{ extensionBindCode.expiresInSeconds }} 秒内有效；请复制后在 AdsPower 环境扩展弹窗中绑定。</small>
+        </div>
+        <div class="flex items-center gap-2">
+          <el-button plain :disabled="!defaultBrowserEnvironment" :loading="extensionEnvironmentOpening" @click="openDefaultEnvironmentForExtensionBinding">
+            打开并自动绑定
+          </el-button>
+          <el-button type="primary" plain @click="copyBrandExtensionBindCode">复制绑定码</el-button>
+        </div>
+      </div>
+
+      <el-table v-loading="browserEnvironmentsLoading || extensionSessionsLoading" :data="browserEnvironmentRows" border empty-text="暂无指纹浏览器环境">
         <el-table-column prop="name" label="环境名称" min-width="160">
           <template #default="{ row }">{{ row.name || row.environmentKey }}</template>
         </el-table-column>
-        <el-table-column prop="environmentKey" label="环境代号" min-width="150" />
+        <el-table-column prop="environmentKey" label="环境代号" min-width="190">
+          <template #default="{ row }">
+            <div class="environment-key-cell">{{ row.environmentKey }}</div>
+          </template>
+        </el-table-column>
         <el-table-column prop="providerProfileId" label="AdsPower 浏览器编号" min-width="190" />
+        <el-table-column v-if="canUpdateBrand" label="扩展绑定" min-width="260">
+          <template #default="{ row }">
+            <div v-if="row.extensionSession" class="extension-session-inline">
+              <el-tag size="small" :type="extensionSessionOnline(row.extensionSession) ? 'success' : 'warning'">
+                {{ extensionSessionOnline(row.extensionSession) ? '已绑定' : '已绑定未活跃' }}
+              </el-tag>
+              <span>Session #{{ row.extensionSession.id }}</span>
+              <small>
+                v{{ row.extensionSession.extensionVersion || '-' }} · 最近活跃 {{ row.extensionSession.lastSeenAt || row.extensionSession.boundAt || '-' }}
+              </small>
+            </div>
+            <div v-else class="extension-session-inline is-empty">
+              <el-tag size="small" type="warning">未绑定</el-tag>
+              <span>打开该环境后绑定 GEO 扩展</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
@@ -239,73 +296,26 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="canUpdateBrand" label="操作" width="150" fixed="right">
+        <el-table-column v-if="canUpdateBrand" label="操作" width="190" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openBrowserEnvironmentEdit(row)">编辑</el-button>
+            <el-button v-if="row.extensionSession" link type="warning" @click="revokeBrandExtension(row.extensionSession)">解绑扩展</el-button>
             <el-button link type="danger" @click="removeBrowserEnvironment(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
-      <div v-if="canUpdateBrand" class="extension-binding-panel">
-        <div class="extension-binding-head">
-          <div>
-            <h3>环境扩展绑定</h3>
-            <p>用于 AdsPower 环境内 GEO 扩展绑定当前品牌后台；出现异常时可吊销旧会话后重新绑定。</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <el-button :loading="extensionSessionsLoading" @click="refreshExtensionBindingStatus">刷新状态</el-button>
-            <el-button type="primary" :loading="extensionBindCodeLoading" @click="generateBrandExtensionBindCode">
-              生成绑定码
-            </el-button>
-          </div>
+      <div v-if="canUpdateBrand && unmatchedExtensionSessions.length" class="unmatched-extension-sessions">
+        <el-alert type="warning" :closable="false" show-icon>
+          <template #title>
+            有 {{ unmatchedExtensionSessions.length }} 个扩展会话未匹配到当前环境，请确认扩展绑定时使用的环境名称或 AdsPower 编号是否正确。
+          </template>
+        </el-alert>
+        <div class="unmatched-extension-list">
+          <span v-for="session in unmatchedExtensionSessions" :key="session.id">
+            Session #{{ session.id }} · {{ session.environmentKey || '-' }} · {{ session.providerProfileId || '-' }}
+          </span>
         </div>
-
-        <div v-if="extensionBindCode" class="extension-bind-code-box">
-          <div>
-            <span>扩展绑定码</span>
-            <strong>{{ extensionBindCode.code }}</strong>
-            <small>{{ extensionBindCode.expiresInSeconds }} 秒内有效；请复制后在 AdsPower 环境扩展弹窗中绑定。</small>
-          </div>
-          <div class="flex items-center gap-2">
-            <el-button plain :disabled="!defaultBrowserEnvironment" :loading="extensionEnvironmentOpening" @click="openDefaultEnvironmentForExtensionBinding">
-              打开并自动绑定
-            </el-button>
-            <el-button type="primary" plain @click="copyBrandExtensionBindCode">复制绑定码</el-button>
-          </div>
-        </div>
-
-        <el-table
-          v-loading="extensionSessionsLoading"
-          :data="extensionSessions"
-          border
-          empty-text="暂无已绑定扩展会话"
-        >
-          <el-table-column prop="id" label="Session ID" width="110" />
-          <el-table-column prop="extensionVersion" label="版本" width="110">
-            <template #default="{ row }">{{ row.extensionVersion || '-' }}</template>
-          </el-table-column>
-          <el-table-column prop="environmentKey" label="环境代号" min-width="150">
-            <template #default="{ row }">{{ row.environmentKey || '-' }}</template>
-          </el-table-column>
-          <el-table-column prop="providerProfileId" label="浏览器编号" min-width="160">
-            <template #default="{ row }">{{ row.providerProfileId || '-' }}</template>
-          </el-table-column>
-          <el-table-column prop="installId" label="安装标识" min-width="180">
-            <template #default="{ row }">{{ row.installId || '-' }}</template>
-          </el-table-column>
-          <el-table-column label="最近活跃" min-width="170">
-            <template #default="{ row }">{{ row.lastSeenAt || row.boundAt || '-' }}</template>
-          </el-table-column>
-          <el-table-column label="过期时间" min-width="170">
-            <template #default="{ row }">{{ row.expiresAt || '-' }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="100" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="danger" @click="revokeBrandExtension(row)">解绑</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
       </div>
     </el-card>
 
@@ -394,6 +404,15 @@
           <div class="flex items-center gap-2">
             <el-button
               v-if="canUpdateBrand"
+              plain
+              :disabled="!defaultBrowserEnvironment || !syncableEnvironmentSelfMediaAccounts.length"
+              :loading="loginStatusSyncing"
+              @click="syncBrowserEnvironmentLoginStatus"
+            >
+              同步登录状态
+            </el-button>
+            <el-button
+              v-if="canUpdateBrand"
               type="primary"
               link
               :disabled="!defaultBrowserEnvironment || !hasUnboundSemiAutoAccounts"
@@ -465,6 +484,13 @@
         <el-table-column label="最近上报" min-width="210">
           <template #default="{ row }">
             <div>{{ browserEnvironmentLastReportTime(row) }}</div>
+            <div
+              v-if="browserEnvironmentLoginStatusReason(row)"
+              class="table-subtext"
+              :class="{ 'table-error-text': browserEnvironmentLoginStatusIsProblem(row) }"
+            >
+              {{ browserEnvironmentLoginStatusReason(row) }}
+            </div>
             <div v-if="browserEnvironmentAccountOf(row)?.environmentKey" class="table-subtext">
               已绑定：{{ browserEnvironmentAccountOf(row)?.environmentKey }}
             </div>
@@ -854,13 +880,17 @@
           <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         </div>
 
-        <div class="brand-section-bar"><span />联系方式与阵地<i /></div>
+        <div class="brand-section-bar"><span />联系方式<i /></div>
         <div class="brand-form-grid">
           <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
-          <el-form-item label="联系电话"><el-input v-model="brandForm.phone" /></el-form-item>
+          <el-form-item label="手机号" prop="phone"><el-input v-model="brandForm.phone" placeholder="请输入手机号" /></el-form-item>
           <el-form-item label="对外公开电话"><el-input v-model="brandForm.publicPhone" /></el-form-item>
           <el-form-item label="微信"><el-input v-model="brandForm.wechat" /></el-form-item>
           <el-form-item class="is-wide" label="对外公开地址"><el-input v-model="brandForm.publicAddress" /></el-form-item>
+        </div>
+
+        <div class="brand-section-bar"><span />总部交付配置<i /></div>
+        <div class="brand-form-grid">
           <el-form-item label="默认发布位置">
             <el-input v-model="brandForm.selfMediaPublishLocationName" maxlength="64" placeholder="用于头条等自媒体发布页添加位置" />
           </el-form-item>
@@ -939,10 +969,10 @@
         <div class="brand-section-bar"><span />基础信息<i /></div>
         <div class="brand-form-grid">
           <el-form-item label="产品名称" prop="offeringName" required>
-            <el-input v-model="offeringForm.offeringName" maxlength="128" show-word-limit placeholder="请输入产品名称" />
+            <el-input v-model="offeringForm.offeringName" maxlength="64" show-word-limit placeholder="请输入简短产品或服务名称" />
           </el-form-item>
           <el-form-item label="产品简称">
-            <el-input v-model="offeringForm.offeringAliases" maxlength="300" show-word-limit placeholder="多个简称以逗号隔开" />
+            <el-input v-model="offeringForm.offeringAliases" maxlength="120" show-word-limit placeholder="多个简称用逗号隔开，尽量简短" />
           </el-form-item>
           <el-form-item label="状态" prop="status" required>
             <el-select v-model="offeringForm.status" style="width: 100%">
@@ -996,20 +1026,22 @@
             <div class="brand-field-help">品类来自特殊行业合规选题角度配置，保存后用于自动匹配可用选题角度。</div>
           </el-form-item>
           <el-form-item v-if="isMedicalComplianceIndustry" class="is-wide" label="特殊行业资质引用">
-            <el-input v-model="offeringForm.qualificationRef" type="textarea" :rows="2" maxlength="500" show-word-limit />
+            <el-input v-model="offeringForm.qualificationRef" type="textarea" :rows="2" maxlength="300" show-word-limit placeholder="填写资质名称、编号或可核验来源，简要说明即可" />
           </el-form-item>
           <el-form-item class="is-wide" label="目标人群">
-            <el-input v-model="offeringForm.targetUsers" type="textarea" :rows="2" maxlength="500" show-word-limit />
+            <el-input v-model="offeringForm.targetUsers" type="textarea" :rows="2" maxlength="200" show-word-limit placeholder="例如：周边家庭客群、年轻消费群体、企业采购负责人" />
           </el-form-item>
           <el-form-item class="is-wide" label="适用场景">
-            <el-input v-model="offeringForm.useScenarios" type="textarea" :rows="2" maxlength="800" show-word-limit />
+            <el-input v-model="offeringForm.useScenarios" type="textarea" :rows="2" maxlength="200" show-word-limit placeholder="例如：节假日活动、亲子消费、企业团购、日常便民服务" />
           </el-form-item>
           <el-form-item class="is-wide" label="产品介绍">
             <el-input
               v-model="offeringForm.offeringIntro"
               type="textarea"
-              :rows="4"
-              placeholder="说明该产品、服务项目或特色业务项解决的问题、适合的人群、主要流程或特点。"
+              :rows="3"
+              maxlength="400"
+              show-word-limit
+              placeholder="说明解决的问题、主要流程、核心卖点与差异化，控制在一段内。"
             />
           </el-form-item>
           <el-form-item class="is-wide" label="产品资质描述">
@@ -1017,13 +1049,13 @@
               v-model="offeringForm.qualificationDescription"
               type="textarea"
               :rows="3"
-              maxlength="1000"
+              maxlength="400"
               show-word-limit
               placeholder="填写可公开、可核验的资质、认证、标准或设备信息；没有可留空。"
             />
           </el-form-item>
           <el-form-item class="is-wide" label="备注">
-            <el-input v-model="offeringForm.remark" type="textarea" :rows="2" maxlength="500" show-word-limit />
+            <el-input v-model="offeringForm.remark" type="textarea" :rows="2" maxlength="200" show-word-limit placeholder="仅填写必要补充说明" />
             <div class="brand-field-help">内部备注默认不进入文章生成提示词。</div>
           </el-form-item>
         </div>
@@ -1229,7 +1261,7 @@ import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
-import { nullableText } from '@/utils/form'
+import { isValidMobile, nullableText } from '@/utils/form'
 import { specialIndustryCodesFromOptions } from '@/utils/specialIndustry'
 
 const route = useRoute()
@@ -1250,6 +1282,9 @@ type SemiAutoSelfMediaAccount = SelfMediaAccount & {
   cookieCredentialStatus?: string | null
   cookieCredentialVersion?: number | null
   cookieCredentialCapturedAt?: string | null
+}
+type BrowserEnvironmentRow = BrowserEnvironment & {
+  extensionSession?: ExtensionSession | null
 }
 
 const loading = ref(false)
@@ -1297,6 +1332,7 @@ const adspowerExtensionStatus = ref<LocalHelperExtensionStatus | null>(null)
 const extensionBindCode = ref<ExtensionBindCode | null>(null)
 const extensionBindCodeLoading = ref(false)
 const extensionEnvironmentOpening = ref(false)
+const loginStatusSyncing = ref(false)
 const environmentBindingVisible = ref(false)
 const environmentBindingSaving = ref(false)
 const environmentBindingTargetAccount = ref<SemiAutoSelfMediaAccount | null>(null)
@@ -1399,6 +1435,12 @@ const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
+  phone: [{
+    validator: (_rule, value: string, callback) => {
+      callback(isValidMobile(value) ? undefined : new Error('请输入正确的手机号'))
+    },
+    trigger: 'blur',
+  }],
 }
 
 const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
@@ -1534,8 +1576,28 @@ const selfMediaAccountRequirement = computed(() => {
 
 const activeBrowserEnvironments = computed(() => browserEnvironments.value.filter((item) => item.status === 'active'))
 const defaultBrowserEnvironment = computed(() => activeBrowserEnvironments.value[0] || null)
+const browserEnvironmentRows = computed<BrowserEnvironmentRow[]>(() =>
+  browserEnvironments.value.map((environment) => ({
+    ...environment,
+    extensionSession: extensionSessionOfEnvironment(environment),
+  })),
+)
+const matchedExtensionSessionIds = computed(() =>
+  new Set(extensionSessions.value
+    .filter((session) => browserEnvironments.value.some((environment) => extensionSessionMatchesEnvironment(session, environment)))
+    .map((session) => session.id)),
+)
+const unmatchedExtensionSessions = computed(() =>
+  extensionSessions.value.filter((session) =>
+    extensionSessionRecentlyActive(session)
+    && !matchedExtensionSessionIds.value.has(session.id),
+  ),
+)
 const hasUnboundSemiAutoAccounts = computed(() =>
   environmentSelfMediaAccounts.value.some((account) => !browserEnvironmentAccountOf(account)),
+)
+const syncableEnvironmentSelfMediaAccounts = computed(() =>
+  environmentSelfMediaAccounts.value.filter((account) => browserEnvironmentAccountOf(account)?.id),
 )
 const automationAccountTotal = computed(() => automationReadiness.value?.accounts?.length || 0)
 const automationAccountReadyCount = computed(() =>
@@ -1588,6 +1650,43 @@ const adspowerExtensionDetailText = computed(() => {
   }
   return ''
 })
+
+function extensionSessionOfEnvironment(environment: BrowserEnvironment) {
+  const matched = extensionSessions.value
+    .filter((session) => extensionSessionMatchesEnvironment(session, environment))
+    .sort((a, b) => String(b.lastSeenAt || b.boundAt || '').localeCompare(String(a.lastSeenAt || a.boundAt || '')))
+  return matched[0] || null
+}
+
+function extensionSessionMatchesEnvironment(session: ExtensionSession, environment: BrowserEnvironment) {
+  const environmentName = normalizeEnvironmentIdentity(environment.name)
+  const environmentKey = normalizeEnvironmentIdentity(environment.environmentKey)
+  const providerProfileId = normalizeEnvironmentIdentity(environment.providerProfileId)
+  const sessionEnvironmentKey = normalizeEnvironmentIdentity(session.environmentKey)
+  const sessionProviderProfileId = normalizeEnvironmentIdentity(session.providerProfileId)
+  return (environmentName && environmentName === sessionEnvironmentKey)
+    || (environmentKey && environmentKey === sessionEnvironmentKey)
+    || (providerProfileId && providerProfileId === sessionProviderProfileId)
+}
+
+function normalizeEnvironmentIdentity(value?: string | null) {
+  return String(value || '').trim().replace(/[-\s]+/g, '_')
+}
+
+function extensionSessionOnline(session?: ExtensionSession | null) {
+  if (!session) return false
+  if (session.status && String(session.status).toLowerCase() !== 'active') return false
+  if (!session.lastSeenAt) return false
+  return Date.now() - new Date(session.lastSeenAt).getTime() < 10 * 60 * 1000
+}
+
+function extensionSessionRecentlyActive(session?: ExtensionSession | null) {
+  if (!session) return false
+  if (session.status && String(session.status).toLowerCase() !== 'active') return false
+  const seenAt = session.lastSeenAt || session.boundAt
+  if (!seenAt) return false
+  return Date.now() - new Date(seenAt).getTime() < 24 * 60 * 60 * 1000
+}
 
 const enabledPerspectives = computed(() => templatePerspectives.value.filter((item) => item.enabled))
 const thirdPartySubjectPerspectiveCodes = computed(() =>
@@ -1676,8 +1775,11 @@ const brandContactInfoItems = computed(() => [
   { label: '联系电话', value: brand.value?.phone || '-' },
   { label: '对外公开电话', value: brand.value?.publicPhone || '-' },
   { label: '对外公开地址', value: brand.value?.publicAddress || '-' },
-  { label: '自媒体默认发布位置', value: brand.value?.selfMediaPublishLocationName || '-' },
   { label: '微信', value: brand.value?.wechat || '-' },
+])
+
+const brandDeliveryConfigItems = computed(() => [
+  { label: '自媒体默认发布位置', value: brand.value?.selfMediaPublishLocationName || '-' },
   { label: 'Agent 官网名称', value: brand.value?.geoSiteName || '-' },
   { label: 'Agent 官网域名', value: brand.value?.geoSiteDomain || '-' },
   { label: '行业资讯站', value: brand.value?.industrySiteName || '-' },
@@ -1844,6 +1946,21 @@ function browserEnvironmentLoginStatusTagType(account: SelfMediaAccount) {
 function browserEnvironmentLastReportTime(account: SelfMediaAccount) {
   const binding = browserEnvironmentAccountOf(account)
   return binding?.lastVerifiedAt || binding?.lastLoginSeenAt || '-'
+}
+
+function browserEnvironmentLoginStatusReason(account: SelfMediaAccount) {
+  const binding = browserEnvironmentAccountOf(account)
+  if (!binding) return ''
+  if (binding.loginStatus === 'logged_in') return ''
+  const message = binding.lastErrorMessage || ''
+  const code = binding.lastErrorCode || ''
+  if (message && code) return `${code}：${message}`
+  return message || code || ''
+}
+
+function browserEnvironmentLoginStatusIsProblem(account: SelfMediaAccount) {
+  const status = browserEnvironmentAccountOf(account)?.loginStatus
+  return Boolean(status && status !== 'logged_in' && status !== 'unknown')
 }
 
 function browserEnvironmentOptionLabel(environment: BrowserEnvironment) {
@@ -2470,6 +2587,115 @@ async function inspectDefaultEnvironmentExtension(options: { silent?: boolean } 
     }
     return adspowerExtensionStatus.value
   }
+}
+
+async function syncBrowserEnvironmentLoginStatus() {
+  const environment = defaultBrowserEnvironment.value
+  if (!environment?.environmentKey || !environment.providerProfileId) {
+    ElMessage.warning('请先配置并启用 AdsPower 浏览器环境')
+    return
+  }
+  const accounts = syncableEnvironmentSelfMediaAccounts.value.map((account) => {
+    const binding = browserEnvironmentAccountOf(account)
+    const platform = normalizeSelfMediaPlatformForLogin(account.platform)
+    return {
+      platform,
+      loginUrl: selfMediaPlatformLoginReportUrl(platform, {
+        environmentKey: environment.environmentKey,
+        browserEnvironmentAccountId: binding?.id || null,
+        selfMediaAccountId: account.id || null,
+      }),
+      browserEnvironmentAccountId: binding?.id || null,
+    }
+  }).filter((account) => account.platform && account.loginUrl && account.browserEnvironmentAccountId)
+  if (!accounts.length) {
+    ElMessage.warning('当前品牌没有已绑定环境的自媒体账号，请先补齐环境绑定')
+    return
+  }
+  loginStatusSyncing.value = true
+  try {
+    const openedPlatforms = new Set<string>()
+    const openFailures: string[] = []
+    for (const account of accounts) {
+      if (openedPlatforms.has(account.platform)) continue
+      openedPlatforms.add(account.platform)
+      try {
+        await openLocalHelperEnvironment(localHelperClientConfig(), {
+          environmentKey: environment.environmentKey,
+          providerProfileId: environment.providerProfileId,
+          environmentName: environment.name || environment.environmentKey,
+          url: account.loginUrl,
+        })
+      } catch (error) {
+        const platformName = selfMediaPlatformLabel(account.platform)
+        const message = error instanceof Error ? error.message : String(error || '')
+        openFailures.push(`${platformName}：${message || '打开失败'}`)
+      }
+      await delay(2200)
+    }
+    if (openFailures.length) {
+      ElMessage.warning(`部分平台登录身份页打开失败：${openFailures.slice(0, 2).join('；')}${openFailures.length > 2 ? ' 等' : ''}`)
+    } else {
+      ElMessage.info('已打开各平台登录身份页；扩展将在页面加载完成后自动上报登录状态')
+    }
+    await delay(7000)
+    await Promise.all([
+      loadAutomationReadiness({ silent: true }),
+      loadSelfMediaAccounts(),
+      refreshExtensionBindingStatus(),
+    ])
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '同步 AdsPower 登录状态失败')
+  } finally {
+    loginStatusSyncing.value = false
+  }
+}
+
+function normalizeSelfMediaPlatformForLogin(value?: string | null) {
+  const text = String(value || '').trim().toLowerCase()
+  if (text === 'douyin_image_text') return 'douyin'
+  if (text === 'wechat') return 'wechat_mp'
+  return text
+}
+
+function selfMediaPlatformLoginReportUrl(platform?: string | null, options: {
+  environmentKey?: string | null
+  browserEnvironmentAccountId?: number | string | null
+  selfMediaAccountId?: number | string | null
+} = {}) {
+  const normalized = normalizeSelfMediaPlatformForLogin(platform)
+  let url = ''
+  if (normalized === 'toutiao') url = 'https://mp.toutiao.com/profile_v4/personal/info'
+  if (normalized === 'zhihu') url = 'https://www.zhihu.com/creator/manage/creation/article'
+  if (normalized === 'xiaohongshu') url = 'https://creator.xiaohongshu.com/new/home?source=official'
+  if (normalized === 'baijiahao') url = 'https://baijiahao.baidu.com/builder/rc/settings/accountSet'
+  if (normalized === 'douyin') url = 'https://creator.douyin.com/creator-micro/home'
+  if (!url) return ''
+  return withLoginReportContext(url, {
+    platform: normalized,
+    environmentKey: options.environmentKey,
+    browserEnvironmentAccountId: options.browserEnvironmentAccountId,
+    selfMediaAccountId: options.selfMediaAccountId,
+  })
+}
+
+function withLoginReportContext(urlValue: string, options: {
+  platform?: string | null
+  environmentKey?: string | null
+  browserEnvironmentAccountId?: number | string | null
+  selfMediaAccountId?: number | string | null
+}) {
+  const url = new URL(urlValue)
+  url.searchParams.set('geoEnvLoginReport', '1')
+  if (options.platform) url.searchParams.set('geoEnvPlatform', options.platform)
+  if (options.environmentKey) url.searchParams.set('geoEnvEnvironmentKey', String(options.environmentKey))
+  if (options.browserEnvironmentAccountId) {
+    url.searchParams.set('geoEnvEnvironmentAccountId', String(options.browserEnvironmentAccountId))
+  }
+  if (options.selfMediaAccountId) {
+    url.searchParams.set('geoEnvSelfMediaAccountId', String(options.selfMediaAccountId))
+  }
+  return url.toString()
 }
 
 async function openDefaultBrowserEnvironment() {
@@ -3453,30 +3679,27 @@ onMounted(async () => {
   gap: 10px;
 }
 
-.extension-binding-panel {
+.environment-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin-top: 18px;
+  margin-bottom: 14px;
   padding: 16px;
   border: 1px solid #dbeafe;
   border-radius: 12px;
   background: #f8fbff;
 }
 
-.extension-binding-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-
-.extension-binding-head h3 {
+.environment-toolbar h3 {
   margin: 0;
   color: #0f172a;
   font-size: 15px;
   font-weight: 850;
 }
 
-.extension-binding-head p {
+.environment-toolbar p {
   margin: 6px 0 0;
   color: #64748b;
   font-size: 12px;
@@ -3520,6 +3743,52 @@ onMounted(async () => {
   font-size: 12px;
 }
 
+.environment-key-cell {
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.extension-session-inline {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.extension-session-inline small {
+  flex-basis: 100%;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.extension-session-inline.is-empty span {
+  color: #64748b;
+}
+
+.unmatched-extension-sessions {
+  margin-top: 12px;
+}
+
+.unmatched-extension-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.unmatched-extension-list span {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+}
+
 .environment-binding-summary {
   margin: 14px 0;
 }
@@ -3534,7 +3803,7 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
 
-  .extension-binding-head,
+  .environment-toolbar,
   .extension-bind-code-box,
   .automation-readiness__head {
     align-items: stretch;

@@ -108,16 +108,19 @@ public class DashboardService {
         LambdaQueryWrapper<Report> reportWrapper = new LambdaQueryWrapper<Report>()
                 .ge(Report::getCreatedAt, monthStart)
                 .notIn(Report::getReportType, List.of("biweekly", "monthly", "quarterly"));
+        Long monthlyDiagnosisReports = countMonthlyPresaleReports(user, monthStart);
+        vo.setMonthlyDiagnosisReports(monthlyDiagnosisReports);
+
         if (scopePartnerId != null) {
             List<Long> projectIds = loadProjectIdsByPartner(scopePartnerId);
             if (projectIds.isEmpty()) {
-                vo.setMonthlyReports(countMonthlyPresaleReports(user, monthStart));
+                vo.setMonthlyReports(monthlyDiagnosisReports);
             } else {
                 reportWrapper.in(Report::getProjectId, projectIds);
-                vo.setMonthlyReports(reportMapper.selectCount(reportWrapper) + countMonthlyPresaleReports(user, monthStart));
+                vo.setMonthlyReports(reportMapper.selectCount(reportWrapper) + monthlyDiagnosisReports);
             }
         } else {
-            vo.setMonthlyReports(reportMapper.selectCount(reportWrapper) + countMonthlyPresaleReports(user, monthStart));
+            vo.setMonthlyReports(reportMapper.selectCount(reportWrapper) + monthlyDiagnosisReports);
         }
 
         if (scopePartnerId == null) {
@@ -288,7 +291,7 @@ public class DashboardService {
                 .collect(Collectors.toList());
     }
 
-    public List<ReportTrendVO> reportTrend(int days) {
+    public List<ReportTrendVO> reportTrend(int days, String scope) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         Long scopePartnerId = currentUserService.requirePartnerScope(user);
@@ -297,23 +300,25 @@ public class DashboardService {
         LocalDate today = LocalDate.now();
         LocalDate startDate = today.minusDays(safeDays - 1L);
 
-        LambdaQueryWrapper<Report> wrapper = new LambdaQueryWrapper<Report>()
-                .ge(Report::getCreatedAt, startDate.atStartOfDay())
-                .le(Report::getCreatedAt, today.atTime(LocalTime.MAX))
-                .notIn(Report::getReportType, List.of("biweekly", "monthly", "quarterly"));
-        if (scopePartnerId != null) {
-            List<Long> projectIds = loadProjectIdsByPartner(scopePartnerId);
-            if (projectIds.isEmpty()) {
-                wrapper.eq(Report::getId, -1L);
-            } else {
-                wrapper.in(Report::getProjectId, projectIds);
+        Map<LocalDate, Long> dailyCount = new java.util.HashMap<>();
+        if (!"diagnosis".equalsIgnoreCase(String.valueOf(scope))) {
+            LambdaQueryWrapper<Report> wrapper = new LambdaQueryWrapper<Report>()
+                    .ge(Report::getCreatedAt, startDate.atStartOfDay())
+                    .le(Report::getCreatedAt, today.atTime(LocalTime.MAX))
+                    .notIn(Report::getReportType, List.of("biweekly", "monthly", "quarterly"));
+            if (scopePartnerId != null) {
+                List<Long> projectIds = loadProjectIdsByPartner(scopePartnerId);
+                if (projectIds.isEmpty()) {
+                    wrapper.eq(Report::getId, -1L);
+                } else {
+                    wrapper.in(Report::getProjectId, projectIds);
+                }
             }
+            List<Report> reports = reportMapper.selectList(wrapper.select(Report::getCreatedAt));
+            dailyCount.putAll(reports.stream()
+                    .filter(report -> report.getCreatedAt() != null)
+                    .collect(Collectors.groupingBy(report -> report.getCreatedAt().toLocalDate(), Collectors.counting())));
         }
-
-        List<Report> reports = reportMapper.selectList(wrapper.select(Report::getCreatedAt));
-        Map<LocalDate, Long> dailyCount = reports.stream()
-                .filter(report -> report.getCreatedAt() != null)
-                .collect(Collectors.groupingBy(report -> report.getCreatedAt().toLocalDate(), Collectors.counting()));
         List<LocalDateTime> presaleGeneratedTimes = presaleReportVersionMapper.selectGeneratedCurrentReportTimes(
                 startDate.atStartOfDay(),
                 today.atTime(LocalTime.MAX),

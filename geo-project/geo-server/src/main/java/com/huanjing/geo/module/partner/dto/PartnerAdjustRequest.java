@@ -9,5 +9,6 @@ import java.math.BigDecimal;
 public class PartnerAdjustRequest {
     @NotNull
     private BigDecimal amount;
+    private String offlineReference;
     private String remark;
 }

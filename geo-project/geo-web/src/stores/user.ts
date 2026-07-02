@@ -108,6 +108,7 @@ export const useUserStore = defineStore('user', () => {
       displayName: profile.displayName,
       role: profile.role as RoleType,
       partnerId: profile.partnerId,
+      partnerName: profile.partnerName,
       phone: profile.phone,
       email: profile.email,
       avatarUrl: profile.avatarUrl,

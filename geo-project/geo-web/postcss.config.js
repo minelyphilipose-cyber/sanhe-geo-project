@@ -14,6 +14,7 @@ export default {
         /src[\\/]App\.vue/,
         /src[\\/]assets/,
         /src[\\/]styles[\\/]index\.css/,
+        /src[\\/]styles[\\/]partner\.css/,
         /src[\\/]layouts/,
         /src[\\/]views(?![\\/]mobile-dashboard)/,
         /src[\\/]components(?![\\/]mobile-dashboard)/,

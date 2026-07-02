@@ -33,6 +33,8 @@ import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
 import com.huanjing.geo.module.project.service.KeywordGroupService;
+import com.huanjing.geo.module.project.entity.KeywordGroup;
+import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -74,6 +76,11 @@ public class CompanyService {
     private static final Set<String> OWNER_TYPES = Set.of("direct", "partner", "joint");
     private static final Set<String> SOURCE_TYPES = Set.of("internal", "partner");
     private static final Set<String> STATUSES = Set.of("potential", "signed", "inactive");
+    public static final String PARTNER_WORKFLOW_DRAFT = "draft";
+    public static final String PARTNER_WORKFLOW_PACKAGE_REQUESTED = "package_requested";
+    public static final String PARTNER_WORKFLOW_PACKAGE_BOUND = "package_bound";
+    public static final String PARTNER_WORKFLOW_PROJECT_ENTRY = "project_entry";
+    public static final String PARTNER_WORKFLOW_ENTRY_COMPLETED = "entry_completed";
     private static final Set<String> DISTRIBUTION_PERIOD_TYPES = Set.of("day", "week", "month", "total");
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final List<ChannelDefinition> DISTRIBUTION_CHANNELS = distributionChannels();
@@ -90,6 +97,7 @@ public class CompanyService {
     private final CompanyPackageBindingService companyPackageBindingService;
     private final CompanyChannelQuotaUsageMapper companyChannelQuotaUsageMapper;
     private final KeywordGroupService keywordGroupService;
+    private final KeywordGroupMapper keywordGroupMapper;
     private final ProjectMapper projectMapper;
     private final ActivityLogService activityLogService;
 
@@ -282,6 +290,11 @@ public class CompanyService {
         company.setRemark(req.getRemark());
         company.setCreatedBy(operator.getId());
         company.setOwnerId(operator.getId());
+        if ("partner_staff".equals(operator.getRole())) {
+            company.setPartnerStaffOwnerId(operator.getId());
+        }
+        company.setPartnerWorkflowStatus(PARTNER_WORKFLOW_DRAFT);
+        company.setPartnerWorkflowUpdatedAt(LocalDateTime.now());
         companyMapper.insert(company);
         ensureAccount(company.getId());
         activityLogService.logAction(
@@ -290,6 +303,89 @@ public class CompanyService {
                 "company",
                 company.getId(),
                 null,
+                snapshotCompany(company),
+                null
+        );
+        attachOwnerInfo(company);
+        return company;
+    }
+
+    @Transactional
+    public Company requestPartnerPackage(Long id) {
+        SysUser operator = requirePartnerStaffOperator();
+        Company company = requireCompany(id);
+        ensureStaffOwnsCompany(operator, company);
+        ensureCompanyHasBrand(company.getId());
+        Map<String, Object> before = snapshotCompany(company);
+        updatePartnerWorkflow(company, PARTNER_WORKFLOW_PACKAGE_REQUESTED);
+        activityLogService.logAction(
+                operator.getId(),
+                "company.partner_workflow.request_package",
+                "company",
+                company.getId(),
+                before,
+                snapshotCompany(company),
+                null
+        );
+        attachOwnerInfo(company);
+        return company;
+    }
+
+    @Transactional
+    public Company markPackageBoundForPartnerWorkflow(Long id) {
+        Company company = requireCompany(id);
+        if (!isPartnerCompany(company)) {
+            return company;
+        }
+        if (PARTNER_WORKFLOW_ENTRY_COMPLETED.equals(company.getPartnerWorkflowStatus())
+                || PARTNER_WORKFLOW_PROJECT_ENTRY.equals(company.getPartnerWorkflowStatus())) {
+            return company;
+        }
+        updatePartnerWorkflow(company, PARTNER_WORKFLOW_PACKAGE_BOUND);
+        return company;
+    }
+
+    @Transactional
+    public Company notifyPartnerStaffForProjectEntry(Long id) {
+        SysUser operator = requirePartnerOwnerOperator();
+        Company company = requireCompany(id);
+        currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
+        if (companyPackageBindingService.activeBinding(id) == null) {
+            throw new BizException(400, "请先为客户绑定合伙人套餐，再通知交付员工继续录入");
+        }
+        Map<String, Object> before = snapshotCompany(company);
+        updatePartnerWorkflow(company, PARTNER_WORKFLOW_PROJECT_ENTRY);
+        activityLogService.logAction(
+                operator.getId(),
+                "company.partner_workflow.notify_project_entry",
+                "company",
+                company.getId(),
+                before,
+                snapshotCompany(company),
+                null
+        );
+        attachOwnerInfo(company);
+        return company;
+    }
+
+    @Transactional
+    public Company completePartnerEntry(Long id) {
+        SysUser operator = requirePartnerStaffOperator();
+        Company company = requireCompany(id);
+        ensureStaffOwnsCompany(operator, company);
+        if (companyPackageBindingService.activeBinding(id) == null) {
+            throw new BizException(400, "客户尚未绑定有效套餐，请先提交负责人添加客户套餐");
+        }
+        ensureCompanyHasProject(company.getId());
+        ensureCompanyHasKeywordGroup(company.getId());
+        Map<String, Object> before = snapshotCompany(company);
+        updatePartnerWorkflow(company, PARTNER_WORKFLOW_ENTRY_COMPLETED);
+        activityLogService.logAction(
+                operator.getId(),
+                "company.partner_workflow.complete_entry",
+                "company",
+                company.getId(),
+                before,
                 snapshotCompany(company),
                 null
         );
@@ -811,7 +907,78 @@ public class CompanyService {
         snapshot.put("createdBy", company.getCreatedBy());
         snapshot.put("ownerId", company.getOwnerId());
         snapshot.put("partnerStaffOwnerId", company.getPartnerStaffOwnerId());
+        snapshot.put("partnerWorkflowStatus", company.getPartnerWorkflowStatus());
+        snapshot.put("partnerWorkflowUpdatedAt", company.getPartnerWorkflowUpdatedAt());
         return snapshot;
+    }
+
+    private void updatePartnerWorkflow(Company company, String status) {
+        company.setPartnerWorkflowStatus(status);
+        company.setPartnerWorkflowUpdatedAt(LocalDateTime.now());
+        companyMapper.updateById(company);
+    }
+
+    private SysUser requirePartnerStaffOperator() {
+        SysUser operator = currentUserService.requireCurrentUser();
+        if (!"partner_staff".equals(operator.getRole())) {
+            throw new BizException(403, "仅合伙人交付员工可以执行该操作");
+        }
+        currentUserService.ensurePermission("company.update");
+        return operator;
+    }
+
+    private SysUser requirePartnerOwnerOperator() {
+        SysUser operator = currentUserService.requireCurrentUser();
+        if (!"partner".equals(operator.getRole())) {
+            throw new BizException(403, "仅合伙人负责人可以执行该操作");
+        }
+        currentUserService.ensurePermission("company.read");
+        return operator;
+    }
+
+    private void ensureStaffOwnsCompany(SysUser operator, Company company) {
+        currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(operator, company, "company");
+        if (company.getPartnerStaffOwnerId() == null || !company.getPartnerStaffOwnerId().equals(operator.getId())) {
+            throw new BizException(403, "当前客户未分配给该交付员工");
+        }
+    }
+
+    private boolean isPartnerCompany(Company company) {
+        return company != null && "partner".equals(company.getSourceType()) && company.getPartnerId() != null;
+    }
+
+    private void ensureCompanyHasBrand(Long companyId) {
+        Long count = brandMapper.selectCount(
+                new LambdaQueryWrapper<Brand>()
+                        .eq(Brand::getCompanyId, companyId)
+                        .isNull(Brand::getDeletedAt)
+        );
+        if (count == null || count == 0) {
+            throw new BizException(400, "请先录入至少一个品牌信息，再提交负责人添加客户套餐");
+        }
+    }
+
+    private void ensureCompanyHasProject(Long companyId) {
+        Long count = projectMapper.selectCount(
+                new LambdaQueryWrapper<com.huanjing.geo.module.project.entity.Project>()
+                        .eq(com.huanjing.geo.module.project.entity.Project::getCompanyId, companyId)
+                        .isNull(com.huanjing.geo.module.project.entity.Project::getDeletedAt)
+        );
+        if (count == null || count == 0) {
+            throw new BizException(400, "请先录入至少一个项目信息，再标记录入完成");
+        }
+    }
+
+    private void ensureCompanyHasKeywordGroup(Long companyId) {
+        Long count = keywordGroupMapper.selectCount(
+                new LambdaQueryWrapper<KeywordGroup>()
+                        .eq(KeywordGroup::getCompanyId, companyId)
+                        .eq(KeywordGroup::getDeleted, false)
+        );
+        if (count == null || count == 0) {
+            throw new BizException(400, "请先为项目创建核心问题，再标记录入完成");
+        }
     }
 
     private void ensureSalesCompanyAccess(SysUser user, Company company) {
@@ -826,11 +993,13 @@ public class CompanyService {
     private void attachOwnerInfo(Company company) {
         if (company == null || company.getOwnerId() == null) {
             attachPartnerStaffOwnerInfo(company, null);
+            attachActivePackageBindingInfo(company);
             return;
         }
         SysUser owner = sysUserMapper.selectById(company.getOwnerId());
         company.setOwnerName(displayName(owner));
         attachPartnerStaffOwnerInfo(company, null);
+        attachActivePackageBindingInfo(company);
     }
 
     private void attachOwnerNames(List<Company> companies) {
@@ -849,6 +1018,41 @@ public class CompanyService {
             }
         }
         attachPartnerStaffOwnerInfos(companies);
+        attachActivePackageBindingInfos(companies);
+    }
+
+    private void attachActivePackageBindingInfo(Company company) {
+        if (company == null || company.getId() == null) {
+            return;
+        }
+        applyActivePackageBinding(company, companyPackageBindingService.activeBinding(company.getId()));
+    }
+
+    private void attachActivePackageBindingInfos(List<Company> companies) {
+        if (companies == null || companies.isEmpty()) {
+            return;
+        }
+        Set<Long> companyIds = companies.stream()
+                .map(Company::getId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (companyIds.isEmpty()) {
+            return;
+        }
+        List<CompanyPackageBinding> bindings = companyPackageBindingService.activeBindings(companyIds);
+        Map<Long, CompanyPackageBinding> bindingByCompanyId = bindings.stream()
+                .collect(Collectors.toMap(CompanyPackageBinding::getCompanyId, binding -> binding, (left, right) -> left));
+        for (Company company : companies) {
+            applyActivePackageBinding(company, bindingByCompanyId.get(company.getId()));
+        }
+    }
+
+    private void applyActivePackageBinding(Company company, CompanyPackageBinding binding) {
+        if (company == null) {
+            return;
+        }
+        company.setActivePackageBindingId(binding == null ? null : binding.getId());
+        company.setActivePackageName(binding == null ? null : binding.getPackageName());
     }
 
     private void attachPartnerStaffOwnerInfo(Company company, Map<Long, SysUser> userById) {

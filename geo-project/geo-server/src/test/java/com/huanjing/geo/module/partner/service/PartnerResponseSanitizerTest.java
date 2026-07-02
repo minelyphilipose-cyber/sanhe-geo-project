@@ -24,6 +24,7 @@ import com.huanjing.geo.module.project.dto.ProjectKeywordGroupQuotaVO;
 import com.huanjing.geo.module.project.entity.PackageChannelQuotaConfig;
 import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,13 +44,15 @@ import static org.mockito.Mockito.when;
 class PartnerResponseSanitizerTest {
 
     private CurrentUserService currentUserService;
+    private ProjectChannelAllocationMapper projectChannelAllocationMapper;
     private PartnerResponseSanitizer sanitizer;
     private SysUser currentUser;
 
     @BeforeEach
     void setUp() {
         currentUserService = mock(CurrentUserService.class);
-        sanitizer = new PartnerResponseSanitizer(currentUserService);
+        projectChannelAllocationMapper = mock(ProjectChannelAllocationMapper.class);
+        sanitizer = new PartnerResponseSanitizer(currentUserService, projectChannelAllocationMapper);
         currentUser = new SysUser();
         currentUser.setId(1L);
         when(currentUserService.requireCurrentUser()).thenReturn(currentUser);
@@ -192,7 +195,7 @@ class PartnerResponseSanitizerTest {
         assertFalse(hasGetter(vo, "getOwnerId"));
         assertFalse(hasGetter(vo, "getOwnerName"));
         assertFalse(hasGetter(vo, "getSalesOwnerId"));
-        assertFalse(hasGetter(vo, "getPartnerStaffOwnerId"));
+        assertEquals(102L, vo.getPartnerStaffOwnerId());
     }
 
     @Test

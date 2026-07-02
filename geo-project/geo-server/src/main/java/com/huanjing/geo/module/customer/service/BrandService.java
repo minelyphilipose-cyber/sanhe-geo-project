@@ -59,6 +59,7 @@ public class BrandService {
     private final InternalScopeService internalScopeService;
     private final ActivityLogService activityLogService;
     private final BrandProfileService brandProfileService;
+    private final BrandImageFolderService brandImageFolderService;
 
     public Page<Brand> page(long current, long size, Long companyId, String keyword) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -205,6 +206,7 @@ public class BrandService {
         applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
         brand.setStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         brandMapper.insert(brand);
+        brandImageFolderService.ensureRequiredArticleImageFolders(brand.getId(), operator.getId());
         brandProfileService.createProfileVersionSnapshot(
                 brand,
                 operator.getId(),

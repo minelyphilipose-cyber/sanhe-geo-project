@@ -12,7 +12,6 @@ import java.math.BigDecimal;
 public class PartnerUpdateRequest {
     @NotBlank
     private String partnerName;
-    @NotBlank
     private String partnerLevel;
     @DecimalMin("0.0001")
     @DecimalMax("1.0000")

@@ -53,19 +53,15 @@
             <strong>{{ partner?.partnerCode || '-' }}</strong>
           </div>
           <div class="profile-item">
-            <span>等级</span>
-            <strong>{{ dictStore.label('partner_level', partner?.partnerLevel) }}</strong>
-          </div>
-          <div class="profile-item">
             <span>折扣</span>
             <strong>{{ partner ? `${(partner.discountRate * 100).toFixed(1)}%` : '-' }}</strong>
           </div>
           <div class="profile-item">
-            <span>诊断免费次数</span>
-            <strong>{{ partner?.presaleReportFreeQuotaLimit ?? 0 }} 次</strong>
+            <span>诊断报告每月免费额度</span>
+            <strong>{{ partner?.presaleReportFreeQuotaLimit ?? 0 }} 次/月</strong>
           </div>
           <div class="profile-item">
-            <span>超额诊断积分</span>
+            <span>诊断报告超额消耗积分(单次)</span>
             <strong>{{ formatPoints(partner?.presaleReportExtraPoints) }} / 次</strong>
           </div>
           <div class="profile-item">
@@ -178,7 +174,19 @@
           <el-table-column label="变更后积分" width="120">
             <template #default="scope">{{ centsToYuan(scope.row.balanceAfter) }}</template>
           </el-table-column>
-          <el-table-column prop="offlineReference" label="线下凭证" width="160" show-overflow-tooltip />
+          <el-table-column label="线下凭证" width="150">
+            <template #default="scope">
+              <el-button
+                v-if="voucherFiles(scope.row.offlineReference).length > 0"
+                link
+                type="primary"
+                @click="openVoucherDialog(scope.row.offlineReference)"
+              >
+                查看凭证({{ voucherFiles(scope.row.offlineReference).length }})
+              </el-button>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
         </el-table>
       </DataState>
@@ -231,7 +239,19 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column prop="offlineReference" label="线下凭证" width="160" show-overflow-tooltip />
+          <el-table-column label="线下凭证" width="150">
+            <template #default="scope">
+              <el-button
+                v-if="voucherFiles(scope.row.offlineReference).length > 0"
+                link
+                type="primary"
+                @click="openVoucherDialog(scope.row.offlineReference)"
+              >
+                查看凭证({{ voucherFiles(scope.row.offlineReference).length }})
+              </el-button>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="applyRemark" label="申请备注" min-width="180" show-overflow-tooltip />
           <el-table-column prop="rejectReason" label="驳回原因" min-width="180" show-overflow-tooltip />
           <el-table-column label="到期时间" width="180">
@@ -275,12 +295,48 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="rechargeVisible" title="直接入账" width="560px" class="admin-editor-dialog">
+    <el-dialog v-model="rechargeVisible" title="直接入账" width="560px" class="admin-editor-dialog" @closed="resetRechargeForm">
       <el-form :model="rechargeForm" label-width="100px" class="admin-dialog-form">
         <el-form-item label="积分" required>
           <el-input-number v-model="rechargeForm.amountYuan" :min="0.01" :precision="2" :step="100" style="width: 100%" />
         </el-form-item>
-        <el-form-item label="线下凭证"><el-input v-model="rechargeForm.offlineReference" /></el-form-item>
+        <el-form-item label="线下凭证" required class="is-full">
+          <div class="voucher-upload-field">
+            <el-upload
+              drag
+              multiple
+              :show-file-list="false"
+              :before-upload="handleRechargeVoucherUpload"
+              :disabled="voucherUploading"
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+            >
+              <div class="voucher-upload-copy">
+                <strong>{{ voucherUploading ? '凭证上传中...' : '上传转账截图或文件资料' }}</strong>
+                <span>支持图片、PDF、Word、Excel，单个文件不超过 10MB。</span>
+              </div>
+            </el-upload>
+            <div v-if="rechargeVoucherFiles.length > 0" class="voucher-file-list">
+              <div v-for="file in rechargeVoucherFiles" :key="file.objectKey || file.fileName" class="voucher-file-item">
+                <button
+                  v-if="isImageVoucher(file)"
+                  type="button"
+                  class="voucher-thumb"
+                  @click="openVoucherFile(file)"
+                >
+                  <img :src="voucherPreviewUrl(file)" :alt="file.fileName" />
+                </button>
+                <div v-else class="voucher-file-badge" :class="`is-${voucherFileKind(file)}`">
+                  {{ voucherFileLabel(file) }}
+                </div>
+                <div class="voucher-file-main">
+                  <strong :title="file.fileName">{{ file.fileName }}</strong>
+                  <span>{{ formatFileSize(file.fileSize) }} · {{ voucherFileTypeText(file) }}</span>
+                </div>
+                <el-button link type="danger" @click="removeRechargeVoucher(file)">移除</el-button>
+              </div>
+            </div>
+          </div>
+        </el-form-item>
         <el-form-item label="备注" class="is-full"><el-input v-model="rechargeForm.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
@@ -289,10 +345,47 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="adjustVisible" title="手工调整" width="560px" class="admin-editor-dialog">
+    <el-dialog v-model="adjustVisible" title="手工调整" width="560px" class="admin-editor-dialog" @closed="resetAdjustForm">
       <el-form :model="adjustForm" label-width="100px" class="admin-dialog-form">
         <el-form-item label="积分" required>
           <el-input-number v-model="adjustForm.amountYuan" :precision="2" :step="10" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="线下凭证" required class="is-full">
+          <div class="voucher-upload-field">
+            <el-upload
+              drag
+              multiple
+              :show-file-list="false"
+              :before-upload="handleAdjustVoucherUpload"
+              :disabled="voucherUploading"
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+            >
+              <div class="voucher-upload-copy">
+                <strong>{{ voucherUploading ? '凭证上传中...' : '上传调整依据或审批资料' }}</strong>
+                <span>支持图片、PDF、Word、Excel，单个文件不超过 10MB。</span>
+              </div>
+            </el-upload>
+            <div v-if="adjustVoucherFiles.length > 0" class="voucher-file-list">
+              <div v-for="file in adjustVoucherFiles" :key="file.objectKey || file.fileName" class="voucher-file-item">
+                <button
+                  v-if="isImageVoucher(file)"
+                  type="button"
+                  class="voucher-thumb"
+                  @click="openVoucherFile(file)"
+                >
+                  <img :src="voucherPreviewUrl(file)" :alt="file.fileName" />
+                </button>
+                <div v-else class="voucher-file-badge" :class="`is-${voucherFileKind(file)}`">
+                  {{ voucherFileLabel(file) }}
+                </div>
+                <div class="voucher-file-main">
+                  <strong :title="file.fileName">{{ file.fileName }}</strong>
+                  <span>{{ formatFileSize(file.fileSize) }} · {{ voucherFileTypeText(file) }}</span>
+                </div>
+                <el-button link type="danger" @click="removeAdjustVoucher(file)">移除</el-button>
+              </div>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="备注" class="is-full"><el-input v-model="adjustForm.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -318,6 +411,30 @@
         <el-button type="primary" :loading="submitting" @click="submitAudit">确认</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="voucherVisible" title="线下凭证" width="640px" class="admin-editor-dialog" @closed="clearCurrentVoucherPreviews">
+      <div v-if="currentVoucherFiles.length > 0" class="voucher-preview-list">
+        <div v-for="file in currentVoucherFiles" :key="file.objectKey || file.fileName" class="voucher-preview-item">
+          <button
+            v-if="isImageVoucher(file)"
+            type="button"
+            class="voucher-thumb is-preview"
+            @click="openVoucherFile(file)"
+          >
+            <img :src="voucherPreviewUrl(file)" :alt="file.fileName" />
+          </button>
+          <div v-else class="voucher-file-badge is-preview" :class="`is-${voucherFileKind(file)}`">
+            {{ voucherFileLabel(file) }}
+          </div>
+          <div class="voucher-file-main">
+            <strong :title="file.fileName">{{ file.fileName }}</strong>
+            <span>{{ formatFileSize(file.fileSize) }} · {{ voucherFileTypeText(file) }}</span>
+          </div>
+          <el-button v-if="file.downloadUrl" type="primary" plain @click="openVoucherFile(file)">查看/下载</el-button>
+        </div>
+      </div>
+      <DataState v-else :loading="false" :empty="true" empty-text="暂无线下凭证" />
+    </el-dialog>
   </div>
 </template>
 
@@ -329,16 +446,19 @@ import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import {
   adjustPartnerAccount,
+  downloadPartnerAccountVoucher,
   auditPartnerRechargeOrder,
   getPartnerAccount,
   getPartnerAccountTxns,
   getPartnerDetail,
   getPartnerRechargeOrders,
   rechargePartnerAccount,
+  uploadPartnerAccountVoucher,
   type PartnerAccount,
   type PartnerItem,
   type PartnerRechargeOrder,
   type PartnerTxn,
+  type PartnerVoucherFile,
 } from '@/api/partner'
 import DataState from '@/components/ui/DataState.vue'
 
@@ -372,8 +492,13 @@ const orderQuery = reactive({ status: '' })
 const rechargeVisible = ref(false)
 const adjustVisible = ref(false)
 const auditVisible = ref(false)
-const rechargeForm = reactive({ amountYuan: 100, offlineReference: '', remark: '' })
+const rechargeForm = reactive({ amountYuan: 100, remark: '' })
+const rechargeVoucherFiles = ref<PartnerVoucherFile[]>([])
+const voucherUploading = ref(false)
+const voucherVisible = ref(false)
+const currentVoucherFiles = ref<PartnerVoucherFile[]>([])
 const adjustForm = reactive({ amountYuan: 0, remark: '' })
+const adjustVoucherFiles = ref<PartnerVoucherFile[]>([])
 const currentOrder = ref<PartnerRechargeOrder | null>(null)
 const auditForm = reactive<{
   action: 'approve' | 'reject'
@@ -395,6 +520,13 @@ function formatPoints(v?: number | null) {
 
 function yuanToCents(v: number) {
   return Number(v.toFixed(2))
+}
+
+function formatFileSize(size?: number | null) {
+  if (!size || size <= 0) return '未知大小'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
 function partnerStatusClass(status?: string | null) {
@@ -499,22 +631,203 @@ async function submitRecharge() {
     ElMessage.warning('充值积分需大于0')
     return
   }
+  if (rechargeVoucherFiles.value.length === 0) {
+    ElMessage.warning('请上传线下凭证照片或文件')
+    return
+  }
   submitting.value = true
   try {
     await rechargePartnerAccount(partnerId, {
       amount: yuanToCents(rechargeForm.amountYuan),
-      offlineReference: rechargeForm.offlineReference || undefined,
+      offlineReference: buildVoucherReference(rechargeVoucherFiles.value),
       remark: rechargeForm.remark || undefined,
     })
     ElMessage.success('充值录入成功')
     rechargeVisible.value = false
-    rechargeForm.amountYuan = 100
-    rechargeForm.offlineReference = ''
-    rechargeForm.remark = ''
+    resetRechargeForm()
     await Promise.all([loadAccount(), loadRechargeOrders()])
   } finally {
     submitting.value = false
   }
+}
+
+async function handleRechargeVoucherUpload(file: File) {
+  return uploadVoucherFile(file, rechargeVoucherFiles)
+}
+
+async function handleAdjustVoucherUpload(file: File) {
+  return uploadVoucherFile(file, adjustVoucherFiles)
+}
+
+async function uploadVoucherFile(file: File, target: { value: PartnerVoucherFile[] }) {
+  if (target.value.length >= 6) {
+    ElMessage.warning('最多上传 6 个凭证文件')
+    return false
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    ElMessage.warning('单个凭证文件不能超过 10MB')
+    return false
+  }
+  voucherUploading.value = true
+  try {
+    const { data } = await uploadPartnerAccountVoucher(partnerId, file)
+    target.value.push(withLocalVoucherPreview(data.data, file))
+    ElMessage.success('凭证上传成功')
+  } finally {
+    voucherUploading.value = false
+  }
+  return false
+}
+
+function removeRechargeVoucher(file: PartnerVoucherFile) {
+  revokeVoucherPreviewUrl(file)
+  rechargeVoucherFiles.value = rechargeVoucherFiles.value.filter((item) => (
+    (item.objectKey || item.fileName) !== (file.objectKey || file.fileName)
+  ))
+}
+
+function removeAdjustVoucher(file: PartnerVoucherFile) {
+  revokeVoucherPreviewUrl(file)
+  adjustVoucherFiles.value = adjustVoucherFiles.value.filter((item) => (
+    (item.objectKey || item.fileName) !== (file.objectKey || file.fileName)
+  ))
+}
+
+function resetRechargeForm() {
+  rechargeForm.amountYuan = 100
+  rechargeForm.remark = ''
+  rechargeVoucherFiles.value.forEach(revokeVoucherPreviewUrl)
+  rechargeVoucherFiles.value = []
+}
+
+function resetAdjustForm() {
+  adjustForm.amountYuan = 0
+  adjustForm.remark = ''
+  adjustVoucherFiles.value.forEach(revokeVoucherPreviewUrl)
+  adjustVoucherFiles.value = []
+}
+
+function clearCurrentVoucherPreviews() {
+  currentVoucherFiles.value.forEach(revokeVoucherPreviewUrl)
+  currentVoucherFiles.value = []
+}
+
+function buildVoucherReference(files: PartnerVoucherFile[]) {
+  return JSON.stringify(files.map((file) => ({
+    fileName: file.fileName,
+    fileSize: file.fileSize,
+    contentType: file.contentType,
+    objectKey: file.objectKey,
+    downloadUrl: file.downloadUrl,
+  })))
+}
+
+function voucherFiles(value?: string | null): PartnerVoucherFile[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item) => item && typeof item === 'object' && typeof item.fileName === 'string')
+      .map((item) => item as PartnerVoucherFile)
+  } catch {
+    return []
+  }
+}
+
+async function openVoucherDialog(value?: string | null) {
+  currentVoucherFiles.value.forEach(revokeVoucherPreviewUrl)
+  currentVoucherFiles.value = voucherFiles(value)
+  voucherVisible.value = true
+  await loadVoucherPreviews(currentVoucherFiles.value)
+}
+
+async function openVoucherFile(file: PartnerVoucherFile) {
+  let url = file.previewUrl || file.downloadUrl
+  if (!file.previewUrl && file.objectKey) {
+    try {
+      url = await buildAuthenticatedVoucherUrl(file)
+    } catch {
+      url = file.downloadUrl
+    }
+  }
+  if (!url) return
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function voucherFileKind(file: PartnerVoucherFile) {
+  const name = file.fileName.toLowerCase()
+  const contentType = (file.contentType || '').toLowerCase()
+  if (contentType.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)) return 'image'
+  if (contentType.includes('pdf') || name.endsWith('.pdf')) return 'pdf'
+  if (contentType.includes('word') || name.endsWith('.doc') || name.endsWith('.docx')) return 'word'
+  if (contentType.includes('excel') || contentType.includes('spreadsheet') || name.endsWith('.xls') || name.endsWith('.xlsx')) return 'excel'
+  return 'file'
+}
+
+function voucherFileLabel(file: PartnerVoucherFile) {
+  const labels: Record<string, string> = {
+    image: 'IMG',
+    pdf: 'PDF',
+    word: 'Word',
+    excel: 'Excel',
+    file: 'File',
+  }
+  return labels[voucherFileKind(file)] || labels.file
+}
+
+function voucherFileTypeText(file: PartnerVoucherFile) {
+  const labels: Record<string, string> = {
+    image: '图片凭证',
+    pdf: 'PDF 文件',
+    word: 'Word 文档',
+    excel: 'Excel 表格',
+    file: '附件资料',
+  }
+  return isImageVoucher(file) ? '图片凭证' : labels[voucherFileKind(file)] || labels.file
+}
+
+function isImageVoucher(file: PartnerVoucherFile) {
+  return Boolean(file.previewUrl) && voucherFileKind(file) === 'image'
+}
+
+function voucherPreviewUrl(file: PartnerVoucherFile) {
+  return file.previewUrl || file.downloadUrl || ''
+}
+
+function withLocalVoucherPreview(voucher: PartnerVoucherFile, file: File) {
+  if (isLocalImageFile(file)) {
+    return { ...voucher, previewUrl: URL.createObjectURL(file) }
+  }
+  return voucher
+}
+
+function isLocalImageFile(file: File) {
+  return file.type.toLowerCase().startsWith('image/')
+    || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name.toLowerCase())
+}
+
+function revokeVoucherPreviewUrl(file: PartnerVoucherFile) {
+  if (file.previewUrl?.startsWith('blob:')) {
+    URL.revokeObjectURL(file.previewUrl)
+  }
+}
+
+async function loadVoucherPreviews(files: PartnerVoucherFile[]) {
+  await Promise.all(files.map(async (file) => {
+    if (file.previewUrl || voucherFileKind(file) !== 'image' || !file.objectKey) return
+    try {
+      file.previewUrl = await buildAuthenticatedVoucherUrl(file)
+    } catch {
+      file.previewUrl = null
+    }
+  }))
+}
+
+async function buildAuthenticatedVoucherUrl(file: PartnerVoucherFile) {
+  if (!file.objectKey) return ''
+  const { data } = await downloadPartnerAccountVoucher(partnerId, file.objectKey)
+  return URL.createObjectURL(data)
 }
 
 function openAuditDialog(order: PartnerRechargeOrder, action: 'approve' | 'reject') {
@@ -551,6 +864,10 @@ async function submitAdjust() {
     ElMessage.warning('请输入调整积分')
     return
   }
+  if (adjustVoucherFiles.value.length === 0) {
+    ElMessage.warning('请上传线下凭证照片或文件')
+    return
+  }
   submitting.value = true
   try {
     await ElMessageBox.confirm(
@@ -560,12 +877,12 @@ async function submitAdjust() {
     )
     await adjustPartnerAccount(partnerId, {
       amount: yuanToCents(adjustForm.amountYuan),
+      offlineReference: buildVoucherReference(adjustVoucherFiles.value),
       remark: adjustForm.remark || undefined,
     })
     ElMessage.success('调整成功')
     adjustVisible.value = false
-    adjustForm.amountYuan = 0
-    adjustForm.remark = ''
+    resetAdjustForm()
     await loadAccount()
   } catch {
     // user canceled
@@ -795,6 +1112,148 @@ onMounted(async () => {
 .order-alert {
   margin: 12px 16px 0;
   width: calc(100% - 32px);
+}
+
+.text-muted {
+  color: #94a3b8;
+}
+
+.voucher-upload-field {
+  width: 100%;
+}
+
+.voucher-upload-field :deep(.el-upload),
+.voucher-upload-field :deep(.el-upload-dragger) {
+  width: 100%;
+}
+
+.voucher-upload-field :deep(.el-upload-dragger) {
+  padding: 18px 16px;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.voucher-upload-copy {
+  display: grid;
+  gap: 5px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.voucher-upload-copy strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.voucher-upload-copy span {
+  font-size: 12px;
+}
+
+.voucher-file-list,
+.voucher-preview-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.voucher-file-item,
+.voucher-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.voucher-file-item .el-button,
+.voucher-preview-item .el-button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.voucher-thumb {
+  overflow: hidden;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.voucher-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.voucher-thumb.is-preview {
+  width: 88px;
+  height: 66px;
+}
+
+.voucher-file-badge {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.voucher-file-badge.is-preview {
+  width: 88px;
+  height: 66px;
+}
+
+.voucher-file-badge.is-pdf {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.voucher-file-badge.is-word {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.voucher-file-badge.is-excel {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.voucher-file-badge.is-file {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.voucher-file-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.voucher-file-main strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voucher-file-main span {
+  color: #64748b;
+  font-size: 12px;
 }
 
 :deep(.overdue-recharge-order) {

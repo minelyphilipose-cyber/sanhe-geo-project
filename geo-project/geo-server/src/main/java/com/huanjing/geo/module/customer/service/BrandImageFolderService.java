@@ -45,6 +45,11 @@ public class BrandImageFolderService {
     public static final String STATUS_ACTIVE = "active";
     public static final String STATUS_DISABLED = "disabled";
     private static final String DEFAULT_FOLDER_NAME = "默认图库";
+    private static final String ILLUSTRATION_FOLDER_PREFIX = "插图";
+    private static final String COVER_FOLDER_NAME = "封面";
+    private static final String ARTICLE_FOLDER_RULE_MESSAGE =
+            "不能这样修改：文章自动生成需要至少一个启用且名称以“插图”开头的文件夹，并保留一个启用且名称为“封面”的文件夹。";
+    private static final List<String> REQUIRED_ARTICLE_IMAGE_FOLDERS = List.of(ILLUSTRATION_FOLDER_PREFIX, COVER_FOLDER_NAME);
     private static final int MAX_TAG_LENGTH = 10;
 
     private final BrandMapper brandMapper;
@@ -57,8 +62,11 @@ public class BrandImageFolderService {
     private final CurrentUserService currentUserService;
     private final BrandMaterialPublicUrlService publicUrlService;
 
+    @Transactional
     public List<BrandImageFolderVO> listFolders(Long brandId, Long projectId, String tag, boolean activeOnly, boolean includeMaterials) {
         Brand brand = requireAccessibleBrand(brandId, true);
+        SysUser operator = currentUserService.requireCurrentUser();
+        ensureRequiredArticleImageFolders(brand.getId(), operator.getId());
         Long normalizedProjectId = validateProjectFilter(brand.getId(), projectId);
         Set<Long> tagMatchedFolderIds = queryTagMatchedFolderIds(brand.getId(), tag);
         if (StringUtils.hasText(tag) && tagMatchedFolderIds.isEmpty()) {
@@ -147,9 +155,12 @@ public class BrandImageFolderService {
     public BrandImageFolderVO updateFolder(Long brandId, Long folderId, BrandImageFolderRequest req) {
         Brand brand = requireAccessibleBrand(brandId, false);
         BrandImageFolder folder = requireFolder(brand.getId(), folderId);
-        folder.setFolderName(validateFolderName(req.getFolderName()));
+        String folderName = validateFolderName(req.getFolderName());
+        String status = normalizeStatus(req.getStatus());
+        assertArticleImageFolderContractAfterUpdate(brand.getId(), folder.getId(), folderName, status);
+        folder.setFolderName(folderName);
         folder.setDescription(trimToNull(req.getDescription(), 500));
-        folder.setStatus(normalizeStatus(req.getStatus()));
+        folder.setStatus(status);
         folderMapper.updateById(folder);
         replaceProjects(folder, normalizeProjectIds(brand.getId(), req.getProjectIds()));
         replaceTags(folder.getId(), normalizeTags(req.getTags()));
@@ -169,6 +180,7 @@ public class BrandImageFolderService {
         if (!STATUS_DISABLED.equalsIgnoreCase(folder.getStatus())) {
             throw new BizException(400, "请先停用图库文件夹后再删除");
         }
+        assertArticleImageFolderContractAfterDelete(brand.getId(), folder.getId());
         brandMaterialMapper.update(null, new UpdateWrapper<BrandMaterial>()
                 .eq("brand_id", brand.getId())
                 .eq("folder_id", folder.getId())
@@ -209,6 +221,86 @@ public class BrandImageFolderService {
         return folder;
     }
 
+    @Transactional
+    public void ensureRequiredArticleImageFolders(Long brandId, Long operatorId) {
+        for (String folderName : REQUIRED_ARTICLE_IMAGE_FOLDERS) {
+            ensureFolderByName(brandId, folderName, articleFolderDescription(folderName), operatorId);
+        }
+    }
+
+    private BrandImageFolder ensureFolderByName(Long brandId, String folderName, String description, Long operatorId) {
+        BrandImageFolder existing = folderMapper.selectOne(new LambdaQueryWrapper<BrandImageFolder>()
+                .eq(BrandImageFolder::getBrandId, brandId)
+                .eq(BrandImageFolder::getFolderName, folderName)
+                .last("LIMIT 1"));
+        if (existing != null) {
+            if (!STATUS_ACTIVE.equalsIgnoreCase(existing.getStatus())) {
+                existing.setStatus(STATUS_ACTIVE);
+                folderMapper.updateById(existing);
+            }
+            return existing;
+        }
+        BrandImageFolder folder = new BrandImageFolder();
+        folder.setBrandId(brandId);
+        folder.setFolderName(folderName);
+        folder.setDescription(description);
+        folder.setStatus(STATUS_ACTIVE);
+        folder.setDefaultFlag(false);
+        folder.setCreatedBy(operatorId == null ? 0L : operatorId);
+        folderMapper.insert(folder);
+        return folder;
+    }
+
+    private String articleFolderDescription(String folderName) {
+        if (COVER_FOLDER_NAME.equals(folderName)) {
+            return "文章封面、首图等封面素材";
+        }
+        return "文章正文插图、场景图等内容素材";
+    }
+
+    private void assertArticleImageFolderContractAfterUpdate(Long brandId, Long folderId, String nextName, String nextStatus) {
+        List<ArticleFolderState> nextFolders = folderMapper.selectList(new LambdaQueryWrapper<BrandImageFolder>()
+                        .eq(BrandImageFolder::getBrandId, brandId))
+                .stream()
+                .map(folder -> folderId.equals(folder.getId())
+                        ? new ArticleFolderState(folder.getId(), nextName, nextStatus)
+                        : new ArticleFolderState(folder.getId(), folder.getFolderName(), folder.getStatus()))
+                .toList();
+        assertRequiredArticleImageFolders(nextFolders);
+    }
+
+    private void assertArticleImageFolderContractAfterDelete(Long brandId, Long folderId) {
+        List<ArticleFolderState> nextFolders = folderMapper.selectList(new LambdaQueryWrapper<BrandImageFolder>()
+                        .eq(BrandImageFolder::getBrandId, brandId))
+                .stream()
+                .filter(folder -> !folderId.equals(folder.getId()))
+                .map(folder -> new ArticleFolderState(folder.getId(), folder.getFolderName(), folder.getStatus()))
+                .toList();
+        assertRequiredArticleImageFolders(nextFolders);
+    }
+
+    private void assertRequiredArticleImageFolders(List<ArticleFolderState> folders) {
+        boolean hasIllustrationFolder = folders.stream().anyMatch(this::isActiveArticleIllustrationFolder);
+        boolean hasCoverFolder = folders.stream().anyMatch(this::isActiveArticleCoverFolder);
+        if (!hasIllustrationFolder || !hasCoverFolder) {
+            throw new BizException(400, ARTICLE_FOLDER_RULE_MESSAGE);
+        }
+    }
+
+    private boolean isActiveArticleIllustrationFolder(ArticleFolderState folder) {
+        return STATUS_ACTIVE.equalsIgnoreCase(folder.status())
+                && StringUtils.hasText(folder.folderName())
+                && folder.folderName().trim().startsWith(ILLUSTRATION_FOLDER_PREFIX);
+    }
+
+    private boolean isActiveArticleCoverFolder(ArticleFolderState folder) {
+        return STATUS_ACTIVE.equalsIgnoreCase(folder.status())
+                && COVER_FOLDER_NAME.equals(trimToNull(folder.folderName(), 128));
+    }
+
+    private record ArticleFolderState(Long id, String folderName, String status) {
+    }
+
     public BrandImageFolder requireActiveFolderForSelection(Long brandId, Long folderId) {
         BrandImageFolder folder = requireFolder(brandId, folderId);
         if (!STATUS_ACTIVE.equalsIgnoreCase(folder.getStatus())) {
@@ -219,11 +311,11 @@ public class BrandImageFolderService {
 
     public BrandImageFolder requireFolder(Long brandId, Long folderId) {
         if (folderId == null) {
-            throw new BizException(400, "folderId required");
+            throw new BizException(400, "请选择图片文件夹");
         }
         BrandImageFolder folder = folderMapper.selectById(folderId);
         if (folder == null || !brandId.equals(folder.getBrandId())) {
-            throw new BizException(404, "Image folder not found");
+            throw new BizException(404, "图片文件夹不存在或已删除");
         }
         return folder;
     }
@@ -233,11 +325,11 @@ public class BrandImageFolderService {
         currentUserService.ensurePermission(readOnly ? "company.read" : "brand.update");
         Brand brand = brandMapper.selectById(brandId);
         if (brand == null || brand.getDeletedAt() != null) {
-            throw new BizException(404, "Brand not found");
+            throw new BizException(404, "品牌不存在或已删除");
         }
         Company company = companyMapper.selectById(brand.getCompanyId());
         if (company == null || company.getDeletedAt() != null) {
-            throw new BizException(404, "Company not found");
+            throw new BizException(404, "客户不存在或已删除");
         }
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
         return brand;
@@ -403,7 +495,7 @@ public class BrandImageFolderService {
         }
         String status = value.trim().toLowerCase(Locale.ROOT);
         if (!STATUS_ACTIVE.equals(status) && !STATUS_DISABLED.equals(status)) {
-            throw new BizException(400, "Invalid folder status");
+            throw new BizException(400, "图片文件夹状态不正确");
         }
         return status;
     }

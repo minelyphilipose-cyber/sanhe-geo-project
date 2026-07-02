@@ -44,7 +44,8 @@ public class DashboardController {
 
     @Operation(summary = "报表生成趋势")
     @GetMapping("/report-trend")
-    public R<List<ReportTrendVO>> reportTrend(@RequestParam(defaultValue = "30") int days) {
-        return R.ok(dashboardService.reportTrend(days));
+    public R<List<ReportTrendVO>> reportTrend(@RequestParam(defaultValue = "30") int days,
+                                              @RequestParam(required = false) String scope) {
+        return R.ok(dashboardService.reportTrend(days, scope));
     }
 }
