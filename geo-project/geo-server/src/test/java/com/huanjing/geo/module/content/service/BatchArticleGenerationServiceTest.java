@@ -698,6 +698,35 @@ class BatchArticleGenerationServiceTest {
     }
 
     @Test
+    void submitPendingContinuationFillsOnlyAvailableSlots() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        ReflectionTestUtils.setField(service, "taskSubmitLimit", 2);
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(77L);
+        batch.setStatus("running");
+        BatchArticleGenerationTask running = generationTask(101L, 77L);
+        running.setArticleIndexInBatch(1);
+        running.setStatus("running");
+        BatchArticleGenerationTask firstPending = generationTask(102L, 77L);
+        firstPending.setArticleIndexInBatch(2);
+        firstPending.setStatus("pending");
+        BatchArticleGenerationTask secondPending = generationTask(103L, 77L);
+        secondPending.setArticleIndexInBatch(3);
+        secondPending.setStatus("pending");
+        when(batchMapper.selectById(77L)).thenReturn(batch);
+        when(taskMapper.selectList(any())).thenReturn(List.of(running, firstPending, secondPending));
+        when(taskMapper.claimPendingForRun(any(), any(), any())).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(service, "submitPendingContinuation", 77L);
+
+        assertThat(executor.commands).hasSize(1);
+        assertEquals("running", firstPending.getStatus());
+        assertEquals("pending", secondPending.getStatus());
+        verify(taskMapper).claimPendingForRun(102L, 77L, firstPending.getStartedAt());
+    }
+
+    @Test
     void submitBatchTaskReleasesClaimWhenExecutorRejects() {
         ReflectionTestUtils.setField(service, "articleAiDraftExecutor", new RejectingExecutor());
         BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();

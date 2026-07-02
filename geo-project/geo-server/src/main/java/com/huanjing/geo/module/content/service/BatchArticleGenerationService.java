@@ -782,6 +782,7 @@ public class BatchArticleGenerationService {
         task.setStartedAt(now);
         task.setFinishedAt(null);
         task.setErrorMessage(null);
+        task.setUpdatedAt(now);
         refreshBatchProgress(batch.getId(), false);
         return true;
     }
@@ -795,6 +796,7 @@ public class BatchArticleGenerationService {
                     }
                 } finally {
                     completeBatch(task.getBatchId());
+                    submitPendingContinuation(task.getBatchId());
                 }
             });
             return true;
@@ -808,15 +810,50 @@ public class BatchArticleGenerationService {
         }
     }
 
+    private void submitPendingContinuation(Long batchId) {
+        if (batchId == null) {
+            return;
+        }
+        BatchArticleGenerationBatch batch = batchMapper.selectById(batchId);
+        if (batch == null || !(STATUS_PENDING.equals(batch.getStatus()) || STATUS_RUNNING.equals(batch.getStatus()))) {
+            return;
+        }
+        List<BatchArticleGenerationTask> tasks = selectBatchTasks(batchId);
+        long pending = tasks.stream().filter(task -> STATUS_PENDING.equals(task.getStatus())).count();
+        if (pending <= 0) {
+            return;
+        }
+        long running = tasks.stream().filter(task -> STATUS_RUNNING.equals(task.getStatus())).count();
+        int availableSlots = taskSubmitLimit() - (int) running;
+        if (availableSlots <= 0) {
+            return;
+        }
+        List<BatchArticleGenerationTask> nextTasks = tasks.stream()
+                .filter(task -> STATUS_PENDING.equals(task.getStatus()))
+                .sorted((left, right) -> Integer.compare(
+                        left.getArticleIndexInBatch() == null ? Integer.MAX_VALUE : left.getArticleIndexInBatch(),
+                        right.getArticleIndexInBatch() == null ? Integer.MAX_VALUE : right.getArticleIndexInBatch()))
+                .limit(availableSlots)
+                .toList();
+        if (nextTasks.isEmpty()) {
+            return;
+        }
+        log.info("batch article generation continuing pending tasks batchId={} submittedUpTo={} pending={}",
+                batchId, nextTasks.size(), pending);
+        submitBatchTasks(batch, nextTasks);
+    }
+
     private void releaseClaimedTask(BatchArticleGenerationTask task) {
         if (task == null || task.getId() == null || task.getBatchId() == null) {
             return;
         }
-        taskMapper.releaseRunningClaim(task.getId(), task.getBatchId(), LocalDateTime.now().withNano(0));
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        taskMapper.releaseRunningClaim(task.getId(), task.getBatchId(), now);
         task.setStatus(STATUS_PENDING);
         task.setStartedAt(null);
         task.setFinishedAt(null);
         task.setErrorMessage(null);
+        task.setUpdatedAt(now);
     }
 
     private boolean isTaskClaimStillOwned(BatchArticleGenerationTask task) {
@@ -877,11 +914,13 @@ public class BatchArticleGenerationService {
         if (task == null || task.getId() == null || task.getBatchId() == null) {
             return;
         }
-        taskMapper.resetRunningForRecovery(task.getId(), task.getBatchId(), LocalDateTime.now().withNano(0));
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        taskMapper.resetRunningForRecovery(task.getId(), task.getBatchId(), now);
         task.setStatus(STATUS_PENDING);
         task.setStartedAt(null);
         task.setFinishedAt(null);
         task.setErrorMessage(null);
+        task.setUpdatedAt(now);
     }
 
     private void runTask(BatchArticleGenerationBatch batch, BatchArticleGenerationTask task) {
@@ -1332,7 +1371,9 @@ public class BatchArticleGenerationService {
             task.setComplianceStatus(MedicalArticleConstants.COMPLIANCE_PASSED);
             task.setComplianceIssuesJson(null);
         }
-        task.setFinishedAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        task.setFinishedAt(now);
+        task.setUpdatedAt(now);
         taskMapper.updateById(task);
         refreshBatchProgress(task.getBatchId(), false);
     }
@@ -1359,7 +1400,9 @@ public class BatchArticleGenerationService {
         task.setModelPlatformCode(model.platformCode());
         task.setModelId(model.modelId());
         task.setRetryCount(retryCount);
-        task.setFinishedAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        task.setFinishedAt(now);
+        task.setUpdatedAt(now);
         taskMapper.updateById(task);
         refreshBatchProgress(task.getBatchId(), false);
     }
@@ -1367,7 +1410,9 @@ public class BatchArticleGenerationService {
     private void markTaskFailed(BatchArticleGenerationTask task, Exception ex) {
         task.setStatus(STATUS_FAILED);
         task.setErrorMessage(errorMessage(ex));
-        task.setFinishedAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        task.setFinishedAt(now);
+        task.setUpdatedAt(now);
         taskMapper.updateById(task);
         refreshBatchProgress(task.getBatchId(), false);
     }
