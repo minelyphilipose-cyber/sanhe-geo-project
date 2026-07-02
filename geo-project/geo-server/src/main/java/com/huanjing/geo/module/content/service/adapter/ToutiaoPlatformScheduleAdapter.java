@@ -8,7 +8,7 @@ import java.util.Locale;
 @Component
 public class ToutiaoPlatformScheduleAdapter implements SelfMediaPlatformScheduleAdapter {
     private static final int DEFAULT_FILL_LEAD_MINUTES = 10;
-    private static final int PLATFORM_SCHEDULE_FILL_LEAD_MINUTES = 130;
+    private static final int PLATFORM_SCHEDULE_FILL_LEAD_MINUTES = 150;
     private static final int PLATFORM_SCHEDULE_MIN_REMAINING_MINUTES = 120;
     private static final int PLATFORM_SCHEDULE_MAX_ATTEMPTS = 4;
 

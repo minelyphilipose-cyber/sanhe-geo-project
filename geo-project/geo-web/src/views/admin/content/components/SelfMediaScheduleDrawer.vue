@@ -970,6 +970,12 @@ function failureText(row: SelfMediaPublishSchedule) {
   const message = displayFailureMessage(row)
   const stage = failureStageText(row)
   const drift = scheduleDriftReasonLabel(row.scheduleDriftReason)
+  if (row.status === 'cancelled') {
+    if (code && message) return `已取消：${code}，${message}`
+    if (code) return `已取消：${code}`
+    if (message) return `已取消：${message}`
+    return '已取消'
+  }
   if (stage && code && message) return `${code}（${stage}）：${message}`
   if (stage && code) return `${code}（${stage}）`
   if (stage && message) return `${stage}：${message}`
@@ -1121,6 +1127,8 @@ function failureCodeLabel(code?: string | null) {
   if (!code) return ''
   const labels: Record<string, string> = {
     CANCELLED_BY_OPERATOR: '操作员已取消',
+    REPLACED_BY_OPERATOR_QUICK_SCHEDULE: '已由快速排期替换',
+    REPLACED_BY_OPERATOR_QUICK_DISPATCH: '已由手动触发替换',
     MANUAL_CONFIRMED_FAILED: '人工确认失败',
     PUBLISH_RESULT_MANUAL_FAILED: '人工确认发布失败',
     PLATFORM_CAPABILITY_UNVERIFIED: '平台能力未验证',

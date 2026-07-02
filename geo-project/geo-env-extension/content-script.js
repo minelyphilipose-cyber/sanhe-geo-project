@@ -1047,12 +1047,23 @@ function findToutiaoScheduleOption(target, control) {
       text: normalizeText(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || ''),
     }))
     .filter((item) => sameToutiaoScheduleOptionValue(item.text, target))
-    .filter((item) => !controlRect || item.rect.top >= controlRect.top - 20)
+    .filter((item) => isToutiaoScheduleOptionNearControl(item.rect, controlRect))
     .sort((left, right) => {
       const leftDistance = controlRect ? Math.hypot(left.rect.left - controlRect.left, left.rect.top - controlRect.top) : 0
       const rightDistance = controlRect ? Math.hypot(right.rect.left - controlRect.left, right.rect.top - controlRect.top) : 0
       return leftDistance - rightDistance || left.text.length - right.text.length
     })[0]?.el || null
+}
+
+function isToutiaoScheduleOptionNearControl(optionRect, controlRect) {
+  if (!controlRect) return true
+  if (!optionRect || optionRect.width <= 0 || optionRect.height <= 0) return false
+  if (optionRect.top < controlRect.bottom - 8) return false
+  const optionCenter = optionRect.left + optionRect.width / 2
+  const controlCenter = controlRect.left + controlRect.width / 2
+  const overlapsControlColumn = optionRect.right >= controlRect.left - 8 && optionRect.left <= controlRect.right + 8
+  const centerAligned = Math.abs(optionCenter - controlCenter) <= Math.max(72, controlRect.width * 0.75)
+  return overlapsControlColumn || centerAligned
 }
 
 function sameToutiaoScheduleOptionValue(left, right) {

@@ -470,6 +470,9 @@
                 创建排期
               </el-button>
             </div>
+            <small v-if="selfMediaScheduleCreateDisabledReason" class="auto-schedule-submit-hint">
+              {{ selfMediaScheduleCreateDisabledReason }}
+            </small>
           </div>
         </div>
       </div>
@@ -1392,7 +1395,7 @@ const selfMediaDetailPlatformGroups = computed(() => {
   return Array.from(groups.values())
 })
 const canCreateSelfMediaSchedule = computed(() => {
-  if (!canUpdateProject.value || !selfMediaScheduleConfig.value?.autoScheduleEnabled) return false
+  if (!canUpdateProject.value || !selfMediaScheduleForm.autoScheduleEnabled) return false
   if (!selfMediaScheduleMonth.value) return false
   if (!activeSelfMediaAccounts.value.length) return false
   if (selfMediaCalendarMissing.value) return false
@@ -1400,6 +1403,25 @@ const canCreateSelfMediaSchedule = computed(() => {
   if (['processing', 'created', 'partial_failed'].includes(status || '')) return false
   if (selfMediaPreviewHasInsufficientSlots.value) return canDecideSelfMediaScheduleCarryOver.value
   return true
+})
+const selfMediaScheduleCreateDisabledReason = computed(() => {
+  if (canCreateSelfMediaSchedule.value) {
+    if (selfMediaScheduleForm.autoScheduleEnabled && !selfMediaScheduleConfig.value?.autoScheduleEnabled) {
+      return '点击创建时会先保存当前自动排期配置。'
+    }
+    return ''
+  }
+  if (!canUpdateProject.value) return '当前账号缺少项目更新权限，无法创建自动排期。'
+  if (!selfMediaScheduleForm.autoScheduleEnabled) return '请先开启自动创建排期。'
+  if (!selfMediaScheduleMonth.value) return '请选择目标月份。'
+  if (!activeSelfMediaAccounts.value.length) return '当前品牌暂无启用的自媒体账号。'
+  if (selfMediaCalendarMissing.value) return '目标年份工作日历缺失，暂不能创建排期。'
+  const status = selfMediaScheduleBatch.value?.status
+  if (['processing', 'created', 'partial_failed'].includes(status || '')) return '当前月份已有批次，请进入明细处理或选择其他月份。'
+  if (selfMediaPreviewHasInsufficientSlots.value && !canDecideSelfMediaScheduleCarryOver.value) {
+    return '目标月份可用排期容量不足，请联系交付负责人确认结转补排。'
+  }
+  return ''
 })
 const channelQuotaGroups = computed(() => {
   const base = channelQuotaItems.value.filter((item) => !isSelfMediaQuotaChannel(item.channelCode))
@@ -2019,6 +2041,9 @@ async function createSelfMediaSchedule() {
   const current = project.value
   if (!current || !canCreateSelfMediaSchedule.value) return
   try {
+    if (selfMediaScheduleForm.autoScheduleEnabled && !selfMediaScheduleConfig.value?.autoScheduleEnabled) {
+      await persistSelfMediaScheduleConfig(false)
+    }
     const preview = await runSelfMediaSchedulePrecheck()
     if (preview?.enough === false || (preview?.slotGroups || []).some((group) => group.enough === false)) {
       const required = preview?.requestedCount || 0
@@ -3138,6 +3163,13 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 8px;
   padding-top: 2px;
+}
+.auto-schedule-submit-hint {
+  display: block;
+  text-align: right;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 18px;
 }
 .auto-schedule-detail-head {
   display: flex;

@@ -77,6 +77,8 @@ public final class SelfMediaPublishFailureCodes {
             entry("MANUAL_REQUIRED_BY_OPERATOR", "操作员已转人工处理", false, "由操作员人工处理，修复后可重新触发自动处理。"),
             entry("MANUAL_CONFIRMED_FAILED", "人工确认失败", false, "已由操作员确认失败。"),
             entry("CANCELLED_BY_OPERATOR", "操作员已取消", false, "已取消，无需继续处理。"),
+            entry("REPLACED_BY_OPERATOR_QUICK_SCHEDULE", "已由快速排期替换", false, "原排期已取消，系统不会继续处理。"),
+            entry("REPLACED_BY_OPERATOR_QUICK_DISPATCH", "已由手动触发替换", false, "原排期已取消，系统不会继续处理。"),
             entry("BAIJIAHAO_APP_ID_REQUIRED", "百家号 ID/app_id 未填写", false, "在品牌详情的百家号账号中填写百家号 ID/app_id。"),
             entry("BAIJIAHAO_COVER_REQUIRED", "百家号缺少文章封面", false, "为文章补充封面素材后重新创建排期。"),
             entry("BAIJIAHAO_COVER_UPLOAD_ENTRY_NOT_FOUND", "百家号封面上传入口未找到", false, "页面结构可能变化，请人工核对封面区域并更新适配器。"),
