@@ -60,7 +60,9 @@ FROM (
          '兼容历史口腔医疗合规链路'
 ) seed
 WHERE NOT EXISTS (
-  SELECT 1 FROM special_industry_profile existing WHERE existing.industry_code = seed.industry_code
+  SELECT 1
+  FROM special_industry_profile existing
+  WHERE existing.industry_code = seed.industry_code COLLATE utf8mb4_unicode_ci
 );
 
 INSERT INTO special_industry_profile (
@@ -89,5 +91,7 @@ FROM sys_dict_item item
 WHERE item.dict_type = 'compliance_industry'
   AND item.dict_key <> 'none'
   AND NOT EXISTS (
-    SELECT 1 FROM special_industry_profile existing WHERE existing.industry_code = item.dict_key
+    SELECT 1
+    FROM special_industry_profile existing
+    WHERE existing.industry_code = item.dict_key COLLATE utf8mb4_unicode_ci
   );
