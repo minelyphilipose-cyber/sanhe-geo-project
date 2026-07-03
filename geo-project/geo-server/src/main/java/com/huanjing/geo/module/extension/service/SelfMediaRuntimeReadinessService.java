@@ -1,5 +1,7 @@
 package com.huanjing.geo.module.extension.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.extension.config.SelfMediaRuntimeProperties;
 import com.huanjing.geo.module.extension.dto.RuntimeReadinessQuery;
 import com.huanjing.geo.module.extension.dto.RuntimeReadinessResult;
@@ -25,10 +27,15 @@ public class SelfMediaRuntimeReadinessService {
     public static final String HELPER_CAPACITY_FULL = "HELPER_CAPACITY_FULL";
     public static final String ADSPOWER_API_DOWN = "ADSPOWER_API_DOWN";
     public static final String ACCOUNT_NOT_VERIFIED = "ACCOUNT_NOT_VERIFIED";
+    public static final String EXTENSION_VERSION_TOO_LOW = "EXTENSION_VERSION_TOO_LOW";
+    public static final String HELPER_VERSION_TOO_LOW = "HELPER_VERSION_TOO_LOW";
+    public static final String EXTENSION_CAPABILITY_UNSUPPORTED = "EXTENSION_CAPABILITY_UNSUPPORTED";
+    public static final String HELPER_CAPABILITY_UNSUPPORTED = "HELPER_CAPABILITY_UNSUPPORTED";
 
     private final ExtensionRuntimeStatusMapper extensionRuntimeStatusMapper;
     private final LocalAgentRuntimeStatusMapper localAgentRuntimeStatusMapper;
     private final SelfMediaRuntimeProperties properties;
+    private final ObjectMapper objectMapper;
 
     public RuntimeReadinessResult evaluate(RuntimeReadinessQuery query) {
         List<String> blockedReasons = new ArrayList<>();
@@ -46,6 +53,12 @@ public class SelfMediaRuntimeReadinessService {
             if (!"verified".equalsIgnoreCase(extension.getLoginStatus())) {
                 blockedReasons.add(ACCOUNT_NOT_VERIFIED);
             }
+            if (versionBelow(extension.getExtensionVersion(), properties.getGate().getMinExtensionVersion())) {
+                blockedReasons.add(EXTENSION_VERSION_TOO_LOW);
+            }
+            if (!supportsCapability(extension.getCapabilitiesJson(), query.requiredExtensionFeature())) {
+                blockedReasons.add(EXTENSION_CAPABILITY_UNSUPPORTED);
+            }
         }
 
         if (helper == null) {
@@ -62,6 +75,12 @@ public class SelfMediaRuntimeReadinessService {
                     && helper.getCapacity() != null
                     && helper.getRunningTaskCount() >= helper.getCapacity()) {
                 blockedReasons.add(HELPER_CAPACITY_FULL);
+            }
+            if (versionBelow(helper.getHelperVersion(), properties.getGate().getMinHelperVersion())) {
+                blockedReasons.add(HELPER_VERSION_TOO_LOW);
+            }
+            if (!supportsCapability(helper.getCapabilitiesJson(), query.requiredHelperFeature())) {
+                blockedReasons.add(HELPER_CAPABILITY_UNSUPPORTED);
             }
         }
 
@@ -84,10 +103,75 @@ public class SelfMediaRuntimeReadinessService {
     }
 
     private LocalAgentRuntimeStatus latestHelper(RuntimeReadinessQuery query) {
-        if (query == null || query.operatorId() == null) {
+        if (query == null) {
+            return null;
+        }
+        if (query.localAgentSessionId() != null) {
+            LocalAgentRuntimeStatus row = localAgentRuntimeStatusMapper.selectLatestBySessionId(query.localAgentSessionId());
+            if (row != null) {
+                return row;
+            }
+        }
+        if (query.operatorId() == null) {
             return null;
         }
         List<LocalAgentRuntimeStatus> rows = localAgentRuntimeStatusMapper.selectRecentByOperatorId(query.operatorId(), 1);
         return rows == null || rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private boolean supportsCapability(String capabilitiesJson, String requiredFeature) {
+        if (!StringUtils.hasText(requiredFeature)) {
+            return true;
+        }
+        if (!StringUtils.hasText(capabilitiesJson)) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(capabilitiesJson);
+            JsonNode value = root.path(requiredFeature);
+            return value.isBoolean() ? value.asBoolean() : "true".equalsIgnoreCase(value.asText(null));
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean versionBelow(String actual, String minimum) {
+        if (!StringUtils.hasText(minimum)) {
+            return false;
+        }
+        if (!StringUtils.hasText(actual)) {
+            return true;
+        }
+        return compareVersion(actual, minimum) < 0;
+    }
+
+    private int compareVersion(String left, String right) {
+        int[] leftParts = versionParts(left);
+        int[] rightParts = versionParts(right);
+        int length = Math.max(leftParts.length, rightParts.length);
+        for (int index = 0; index < length; index++) {
+            int leftValue = index < leftParts.length ? leftParts[index] : 0;
+            int rightValue = index < rightParts.length ? rightParts[index] : 0;
+            if (leftValue != rightValue) {
+                return Integer.compare(leftValue, rightValue);
+            }
+        }
+        return 0;
+    }
+
+    private int[] versionParts(String value) {
+        String[] tokens = String.valueOf(value).trim().split("[^0-9]+");
+        List<Integer> parts = new ArrayList<>();
+        for (String token : tokens) {
+            if (!StringUtils.hasText(token)) {
+                continue;
+            }
+            try {
+                parts.add(Integer.parseInt(token));
+            } catch (NumberFormatException ignored) {
+                parts.add(0);
+            }
+        }
+        return parts.stream().mapToInt(Integer::intValue).toArray();
     }
 }

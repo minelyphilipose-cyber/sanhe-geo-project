@@ -19,7 +19,7 @@ class SelfMediaClaimGateServiceTest {
     void observeOnlyRecordsWouldBlockWithoutBlockingClaim() {
         SelfMediaRuntimeReadinessService readinessService = mock(SelfMediaRuntimeReadinessService.class);
         SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
-        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, 20L, "toutiao", "claim", "fill");
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, null, 20L, "toutiao", "claim", "fill");
         when(readinessService.evaluate(query)).thenReturn(RuntimeReadinessResult.blocked(
                 List.of(SelfMediaRuntimeReadinessService.EXTENSION_NOT_SEEN),
                 null,
@@ -45,7 +45,7 @@ class SelfMediaClaimGateServiceTest {
         brandPlatformRule.setMode(SelfMediaClaimGateService.MODE_OBSERVE_ONLY);
         brandRule.getPlatforms().put("toutiao", brandPlatformRule);
         properties.getGate().getBrands().put(10L, brandRule);
-        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, 20L, "toutiao", "claim", "fill");
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, null, 20L, "toutiao", "claim", "fill");
         when(readinessService.evaluate(query)).thenReturn(RuntimeReadinessResult.blocked(
                 List.of(SelfMediaRuntimeReadinessService.EXTENSION_NOT_SEEN),
                 null,
@@ -65,7 +65,7 @@ class SelfMediaClaimGateServiceTest {
         SelfMediaRuntimeReadinessService readinessService = mock(SelfMediaRuntimeReadinessService.class);
         SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
         properties.getGate().setDefaultMode(SelfMediaClaimGateService.MODE_MANUAL_REQUIRED_TERMINAL);
-        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, 20L, "toutiao", "claim", "fill");
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, null, 20L, "toutiao", "claim", "fill");
         when(readinessService.evaluate(query)).thenReturn(RuntimeReadinessResult.blocked(
                 List.of("BROWSER_ENVIRONMENT_DISABLED"),
                 null,

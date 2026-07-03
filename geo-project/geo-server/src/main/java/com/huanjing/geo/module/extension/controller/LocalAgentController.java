@@ -128,6 +128,7 @@ public class LocalAgentController {
         SelfMediaPublishScheduleService.ClaimedScheduleTask claimed =
                 scheduleService.claimNextTaskForLocalAgent(
                         session.getOperatorId(),
+                        session.getId(),
                         platform,
                         SELF_MEDIA_SCHEDULE_LOCK_MINUTES
                 );
@@ -173,6 +174,7 @@ public class LocalAgentController {
         SelfMediaPublishScheduleVO schedule =
                 scheduleService.claimNextPublishCheckForLocalAgent(
                         session.getOperatorId(),
+                        session.getId(),
                         platform,
                         SELF_MEDIA_PUBLISH_CHECK_LOCK_MINUTES
                 );

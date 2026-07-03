@@ -22,6 +22,8 @@ public class SelfMediaRuntimeProperties {
         private int extensionFreshnessMinutes = 10;
         private int helperFreshnessMinutes = 2;
         private int retryAfterSeconds = 30;
+        private String minExtensionVersion;
+        private String minHelperVersion;
         private GateRule global = new GateRule();
         private Map<String, GateRule> platforms = new HashMap<>();
         private Map<Long, BrandRule> brands = new HashMap<>();

@@ -1094,7 +1094,7 @@ public class SelfMediaPublishScheduleService {
 
     @Transactional
     public SelfMediaPublishScheduleVO claimNext(String queueKind, int lockMinutes) {
-        SelfMediaPublishSchedule claimed = claimNextRow(queueKind, lockMinutes, null, null, null);
+        SelfMediaPublishSchedule claimed = claimNextRow(queueKind, lockMinutes, null, null, null, null);
         return claimed == null ? null : SelfMediaPublishScheduleVO.from(claimed);
     }
 
@@ -1104,7 +1104,7 @@ public class SelfMediaPublishScheduleService {
         if (normalizedPlatforms.isEmpty()) {
             return null;
         }
-        SelfMediaPublishSchedule claimed = claimNextRow(queueKind, lockMinutes, null, null, normalizedPlatforms);
+        SelfMediaPublishSchedule claimed = claimNextRow(queueKind, lockMinutes, null, null, null, normalizedPlatforms);
         return claimed == null ? null : SelfMediaPublishScheduleVO.from(claimed);
     }
 
@@ -1178,6 +1178,11 @@ public class SelfMediaPublishScheduleService {
 
     @Transactional(noRollbackFor = BizException.class)
     public ClaimedScheduleTask claimNextTaskForLocalAgent(Long operatorId, String platform, int lockMinutes) {
+        return claimNextTaskForLocalAgent(operatorId, null, platform, lockMinutes);
+    }
+
+    @Transactional(noRollbackFor = BizException.class)
+    public ClaimedScheduleTask claimNextTaskForLocalAgent(Long operatorId, Long localAgentSessionId, String platform, int lockMinutes) {
         lastLocalAgentClaimBlock.remove();
         if (operatorId == null || operatorId <= 0) {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
@@ -1198,6 +1203,7 @@ public class SelfMediaPublishScheduleService {
                 SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION,
                 lockMinutes,
                 operatorId,
+                localAgentSessionId,
                 normalizedPlatform,
                 allowedPlatforms
         );
@@ -1237,6 +1243,11 @@ public class SelfMediaPublishScheduleService {
 
     @Transactional
     public SelfMediaPublishScheduleVO claimNextPublishCheckForLocalAgent(Long operatorId, String platform, int lockMinutes) {
+        return claimNextPublishCheckForLocalAgent(operatorId, null, platform, lockMinutes);
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleVO claimNextPublishCheckForLocalAgent(Long operatorId, Long localAgentSessionId, String platform, int lockMinutes) {
         lastLocalAgentClaimBlock.remove();
         if (operatorId == null || operatorId <= 0) {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
@@ -1264,6 +1275,7 @@ public class SelfMediaPublishScheduleService {
                 SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT,
                 lockMinutes,
                 operatorId,
+                localAgentSessionId,
                 normalizedPlatform,
                 allowedPlatforms
         );
@@ -1454,17 +1466,18 @@ public class SelfMediaPublishScheduleService {
                                                   int lockMinutes,
                                                   Long operatorId,
                                                   String platform) {
-        return claimNextRow(queueKind, lockMinutes, operatorId, platform, null);
+        return claimNextRow(queueKind, lockMinutes, operatorId, null, platform, null);
     }
 
     private SelfMediaPublishSchedule claimNextRow(String queueKind,
                                                   int lockMinutes,
                                                   Long operatorId,
+                                                  Long localAgentSessionId,
                                                   String platform,
                                                   Set<String> allowedPlatforms) {
         QueueClaimProfile profile = requireClaimProfile(queueKind);
         return claimNextRow(queueKind, profile.expectedStatuses(), profile.targetStatus(), lockMinutes,
-                operatorId, platform, allowedPlatforms);
+                operatorId, localAgentSessionId, platform, allowedPlatforms);
     }
 
     private SelfMediaPublishSchedule claimNextRow(String queueKind,
@@ -1473,7 +1486,7 @@ public class SelfMediaPublishScheduleService {
                                                   int lockMinutes,
                                                   Long operatorId,
                                                   String platform) {
-        return claimNextRow(queueKind, expectedStatuses, targetStatus, lockMinutes, operatorId, platform, null);
+        return claimNextRow(queueKind, expectedStatuses, targetStatus, lockMinutes, operatorId, null, platform, null);
     }
 
     private SelfMediaPublishSchedule claimNextRow(String queueKind,
@@ -1481,6 +1494,7 @@ public class SelfMediaPublishScheduleService {
                                                   String targetStatus,
                                                   int lockMinutes,
                                                   Long operatorId,
+                                                  Long localAgentSessionId,
                                                   String platform,
                                                   Set<String> allowedPlatforms) {
         LocalDateTime now = LocalDateTime.now();
@@ -1506,7 +1520,7 @@ public class SelfMediaPublishScheduleService {
                 markPublishResultCheckAttemptLimitExceeded(candidate);
                 continue;
             }
-            if (applyLocalAgentClaimGate(queueKind, expectedStatuses, targetStatus, operatorId, candidate, now)) {
+            if (applyLocalAgentClaimGate(queueKind, expectedStatuses, targetStatus, operatorId, localAgentSessionId, candidate, now)) {
                 continue;
             }
             boolean environmentLockAcquired = false;
@@ -1541,6 +1555,7 @@ public class SelfMediaPublishScheduleService {
                                              List<String> expectedStatuses,
                                              String targetStatus,
                                              Long operatorId,
+                                             Long localAgentSessionId,
                                              SelfMediaPublishSchedule candidate,
                                              LocalDateTime now) {
         if (operatorId == null || claimGateService == null || gateDiagnosticsWriter == null || candidate == null) {
@@ -1549,6 +1564,7 @@ public class SelfMediaPublishScheduleService {
         ClaimGateEvaluation evaluation = claimGateService.evaluate(new RuntimeReadinessQuery(
                 candidate.getBrandId(),
                 operatorId,
+                localAgentSessionId,
                 candidate.getBrowserEnvironmentId(),
                 candidate.getPlatform(),
                 requiredHelperFeature(queueKind),
