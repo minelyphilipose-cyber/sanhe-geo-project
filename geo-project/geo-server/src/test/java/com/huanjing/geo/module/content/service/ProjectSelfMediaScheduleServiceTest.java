@@ -650,6 +650,72 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     @Test
+    void createForProjectSupplementsExistingCreatedBatch() {
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        ProjectSelfMediaScheduleBatch batch = new ProjectSelfMediaScheduleBatch();
+        batch.setId(33L);
+        batch.setProjectId(7L);
+        batch.setBrandId(8L);
+        batch.setCompanyId(6L);
+        batch.setTargetMonth("2026-06");
+        batch.setStatus("created");
+        batch.setPlannedCount(1);
+        batch.setCreatedCount(1);
+        batch.setRequestedCount(1);
+        batch.setCreatedBy(99L);
+        batch.setRequestPayload("""
+                {
+                  "targetMonth": "2026-06",
+                  "scheduleStrategy": "platform_schedule",
+                  "includeAdjustedWorkdays": false,
+                  "plans": [
+                    {"generationBatchId": 44, "generationTaskId": 55, "selfMediaAccountId": 20, "platform": "toutiao"}
+                  ]
+                }
+                """);
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        SelfMediaAccount newAccount = account(21L, "active");
+        when(selfMediaAccountMapper.selectById(21L)).thenReturn(newAccount);
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 1));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(21, 10)));
+        when(scheduleAdapterRouter.rules("toutiao", "platform_schedule"))
+                .thenReturn(SelfMediaPlatformScheduleRules.defaults());
+        KeywordGroupResult question = new KeywordGroupResult();
+        question.setKeywordText("测试问题");
+        question.setSceneCode("news_brief");
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'")).thenReturn(List.of(question));
+        BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(45L, 1, "pending", false, false, List.of());
+        when(generationService.createSystemBatch(any(), eq(99L))).thenReturn(generation);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(56L);
+        task.setBatchId(45L);
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
+
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setArticleIds(List.of());
+        request.setSelfMediaAccountIds(List.of(21L));
+        request.setSupplementExistingBatch(true);
+        var response = service.createForProject(7L, request, "manual", "supplement-key");
+
+        assertTrue(response.getCreated());
+        assertEquals(1, response.getPlannedCount());
+        ArgumentCaptor<ProjectSelfMediaScheduleBatch> captor = ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
+        verify(batchMapper).updateById(captor.capture());
+        ProjectSelfMediaScheduleBatch updated = captor.getValue();
+        assertEquals("processing", updated.getStatus());
+        assertEquals(2, updated.getPlannedCount());
+        assertTrue(updated.getRequestPayload().contains("\"generationTaskId\":55"));
+        assertTrue(updated.getRequestPayload().contains("\"generationTaskId\":56"));
+        assertTrue(updated.getRequestPayload().contains("\"idempotencyKey\":\"supplement-key\""));
+    }
+
+    @Test
     void createForProjectUsesTemplateSceneTopicForThirdPartyPerspective() {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());

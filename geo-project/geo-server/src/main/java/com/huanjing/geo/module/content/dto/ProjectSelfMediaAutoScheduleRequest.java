@@ -23,4 +23,6 @@ public class ProjectSelfMediaAutoScheduleRequest {
     private String decisionStrategy;
 
     private String decisionReason;
+
+    private Boolean supplementExistingBatch;
 }

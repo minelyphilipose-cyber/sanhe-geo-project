@@ -222,6 +222,7 @@ export interface ProjectSelfMediaAutoSchedulePayload {
   includeAdjustedWorkdays?: boolean
   decisionStrategy?: string
   decisionReason?: string
+  supplementExistingBatch?: boolean
 }
 
 export interface ProjectBusinessCalendarStatus {

@@ -458,12 +458,84 @@ public class ProjectSelfMediaScheduleService {
             if (sameIdempotencyKey(existed, idempotencyKey)) {
                 return acceptedExistingBatchResponse(autoRequest, existed);
             }
+            if (Boolean.TRUE.equals(request.getSupplementExistingBatch())) {
+                if (STATUS_PROCESSING.equals(normalizeText(existed.getStatus()))) {
+                    throw new BizException(ERROR_CODE, "该项目本月自动化排期正在处理中，请等待完成后再补排");
+                }
+                return supplementGenerationBatch(project, config, request, triggerMode, operator.getId(), existed, idempotencyKey);
+            }
             throw new BizException(ERROR_CODE, "该项目本月已创建过自动化排期，不能重复创建");
         }
         if (isFailedBatchWithGenerationPlan(existed)) {
             throw new BizException(ERROR_CODE, "该项目本月已有失败批次且已生成文章计划，请进入批次明细使用补排期/重试处理，避免重复生成文章");
         }
         return acceptGenerationBatch(project, config, request, triggerMode, operator.getId(), existed, idempotencyKey);
+    }
+
+    private SelfMediaPublishAutoScheduleResponse supplementGenerationBatch(Project project,
+                                                                           ProjectSelfMediaScheduleConfig config,
+                                                                           ProjectSelfMediaAutoScheduleRequest request,
+                                                                           String triggerMode,
+                                                                           Long operatorId,
+                                                                           ProjectSelfMediaScheduleBatch batch,
+                                                                           String idempotencyKey) {
+        SelfMediaPublishAutoScheduleRequest autoRequest = toAutoRequest(project, config, request);
+        List<Long> accountIds = autoRequest.getSelfMediaAccountIds().isEmpty()
+                ? selectBrandAccountIds(project.getBrandId())
+                : autoRequest.getSelfMediaAccountIds();
+        AccountPublishPlanResult planResult = buildAccountPublishPlans(project, autoRequest.getTargetMonth(), accountIds);
+        List<AccountPublishPlan> plans = planResult.plans();
+        if (plans.isEmpty()) {
+            throw new BizException(ERROR_CODE, "该项目本月没有可补排的自媒体账号或剩余额度");
+        }
+        SelfMediaPublishAutoScheduleResponse capacity = evaluateCapacity(autoRequest, plans);
+        applyPlanBuildWarnings(capacity, planResult);
+        if (!Boolean.TRUE.equals(capacity.getEnough())) {
+            String decisionStrategy = normalizeText(request.getDecisionStrategy());
+            if (!STRATEGY_CARRY_OVER.equals(decisionStrategy)) {
+                throwCapacityInsufficient(capacity);
+            }
+            String decisionReason = trimToNull(request.getDecisionReason());
+            if (!StringUtils.hasText(decisionReason)) {
+                throw new BizException(
+                        ERROR_CODE,
+                        "结转补排必须填写决策原因",
+                        400,
+                        Map.of("errorCode", ERROR_DECISION_REASON_REQUIRED)
+                );
+            }
+            currentUserService.ensurePermission(PERM_SELF_MEDIA_SCHEDULE_LATE_START_DECIDE);
+            CarryOverSplit split = splitPlansByCapacity(plans, capacity);
+            CarryOverResult result = createCarryOver(
+                    project,
+                    batch.getId(),
+                    autoRequest.getTargetMonth(),
+                    capacity,
+                    split.carryOverPlans(),
+                    operatorId,
+                    decisionReason
+            );
+            if (split.currentMonthPlans().isEmpty()) {
+                SelfMediaPublishAutoScheduleResponse response = acceptedResponse(autoRequest, 0);
+                response.setCreated(false);
+                response.setDecisionStrategy(STRATEGY_CARRY_OVER);
+                applyCapacityFields(response, capacity);
+                applyCarryOverResult(response, result);
+                return response;
+            }
+            return appendGenerationPlansToBatch(
+                    project,
+                    autoRequest,
+                    triggerMode,
+                    operatorId,
+                    batch,
+                    idempotencyKey,
+                    split.currentMonthPlans(),
+                    capacity,
+                    result
+            );
+        }
+        return appendGenerationPlansToBatch(project, autoRequest, triggerMode, operatorId, batch, idempotencyKey, plans, capacity, null);
     }
 
     public int createDueEnabledProjects(String targetMonth, int limit) {
@@ -977,6 +1049,68 @@ public class ProjectSelfMediaScheduleService {
                 capacity,
                 null
         );
+    }
+
+    private SelfMediaPublishAutoScheduleResponse appendGenerationPlansToBatch(Project project,
+                                                                              SelfMediaPublishAutoScheduleRequest autoRequest,
+                                                                              String triggerMode,
+                                                                              Long operatorId,
+                                                                              ProjectSelfMediaScheduleBatch batch,
+                                                                              String idempotencyKey,
+                                                                              List<AccountPublishPlan> plans,
+                                                                              SelfMediaPublishAutoScheduleResponse capacity,
+                                                                              CarryOverResult carryOverResult) {
+        GenerationPayload existingPayload = readGenerationPayload(batch.getRequestPayload());
+        List<GenerationPlan> existingPlans = existingPayload == null || existingPayload.plans() == null
+                ? List.of()
+                : existingPayload.plans();
+        batch.setTriggerMode(StringUtils.hasText(triggerMode) ? triggerMode : TRIGGER_MANUAL);
+        batch.setScheduleStrategy(autoRequest.getScheduleStrategy());
+        batch.setStatus(STATUS_PROCESSING);
+        batch.setFailureMessage(null);
+        batch.setUpdatedBy(operatorId);
+        batch.setRequestedCount(safeCount(batch.getRequestedCount()) + plans.size());
+        batch.setDeficitCount(safeCount(batch.getDeficitCount()) + (capacity == null ? 0 : safeCount(capacity.getDeficitCount())));
+        batch.setCarryOverCount(safeCount(batch.getCarryOverCount()) + (carryOverResult == null ? 0 : safeCount(carryOverResult.count())));
+        batch.setDecisionOperatorId(carryOverResult == null ? batch.getDecisionOperatorId() : operatorId);
+        batch.setDecisionReason(carryOverResult == null ? batch.getDecisionReason() : trimMessage(carryOverResult.reason()));
+        batch.setCapacitySnapshotJson(capacity == null ? batch.getCapacitySnapshotJson() : toJson(capacity));
+
+        try {
+            List<GenerationPlan> newGenerationPlans = createGenerationBatches(project, batch, plans, operatorId);
+            List<GenerationPlan> mergedPlans = new ArrayList<>(existingPlans);
+            mergedPlans.addAll(newGenerationPlans);
+            batch.setArticleCount(mergedPlans.size());
+            batch.setAccountCount((int) mergedPlans.stream().map(GenerationPlan::selfMediaAccountId).distinct().count());
+            batch.setPlannedCount(mergedPlans.size());
+            batch.setGenerationBatchIds(toJson(mergedPlans.stream()
+                    .map(GenerationPlan::generationBatchId)
+                    .distinct()
+                    .toList()));
+            batch.setRequestPayload(toJson(new GenerationPayload(
+                    autoRequest.getTargetMonth(),
+                    autoRequest.getScheduleStrategy(),
+                    Boolean.TRUE.equals(autoRequest.getIncludeAdjustedWorkdays()),
+                    StringUtils.hasText(idempotencyKey) ? idempotencyKey.trim() : null,
+                    mergedPlans
+            )));
+            batchMapper.updateById(batch);
+            consumePendingCarryOvers(plans);
+            SelfMediaPublishAutoScheduleResponse response = acceptedResponse(autoRequest, newGenerationPlans.size());
+            response.setCreated(true);
+            response.setPlannedCount(newGenerationPlans.size());
+            if (carryOverResult != null) {
+                response.setDecisionStrategy(STRATEGY_CARRY_OVER);
+                applyCapacityFields(response, carryOverResult.capacity());
+                applyCarryOverResult(response, carryOverResult);
+            }
+            return response;
+        } catch (RuntimeException ex) {
+            batch.setStatus(STATUS_PARTIAL_FAILED);
+            batch.setFailureMessage(trimMessage(ex.getMessage()));
+            batchMapper.updateById(batch);
+            throw ex;
+        }
     }
 
     private SelfMediaPublishAutoScheduleResponse acceptGenerationBatchWithPlans(Project project,

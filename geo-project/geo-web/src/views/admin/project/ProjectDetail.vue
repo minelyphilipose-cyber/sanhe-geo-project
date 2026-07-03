@@ -467,7 +467,7 @@
                 :loading="selfMediaScheduleCreating"
                 @click="createSelfMediaSchedule"
               >
-                创建排期
+                {{ selfMediaScheduleSubmitLabel }}
               </el-button>
             </div>
             <small v-if="selfMediaScheduleCreateDisabledReason" class="auto-schedule-submit-hint">
@@ -1400,10 +1400,12 @@ const canCreateSelfMediaSchedule = computed(() => {
   if (!activeSelfMediaAccounts.value.length) return false
   if (selfMediaCalendarMissing.value) return false
   const status = selfMediaScheduleBatch.value?.status
-  if (['processing', 'created', 'partial_failed'].includes(status || '')) return false
+  if (status === 'processing') return false
   if (selfMediaPreviewHasInsufficientSlots.value) return canDecideSelfMediaScheduleCarryOver.value
   return true
 })
+const isSelfMediaScheduleSupplementMode = computed(() => ['created', 'partial_failed'].includes(selfMediaScheduleBatch.value?.status || ''))
+const selfMediaScheduleSubmitLabel = computed(() => isSelfMediaScheduleSupplementMode.value ? '补充排期' : '创建排期')
 const selfMediaScheduleCreateDisabledReason = computed(() => {
   if (canCreateSelfMediaSchedule.value) {
     if (selfMediaScheduleForm.autoScheduleEnabled && !selfMediaScheduleConfig.value?.autoScheduleEnabled) {
@@ -1417,7 +1419,7 @@ const selfMediaScheduleCreateDisabledReason = computed(() => {
   if (!activeSelfMediaAccounts.value.length) return '当前品牌暂无启用的自媒体账号。'
   if (selfMediaCalendarMissing.value) return '目标年份工作日历缺失，暂不能创建排期。'
   const status = selfMediaScheduleBatch.value?.status
-  if (['processing', 'created', 'partial_failed'].includes(status || '')) return '当前月份已有批次，请进入明细处理或选择其他月份。'
+  if (status === 'processing') return '当前月份批次正在处理中，请完成后再补充排期。'
   if (selfMediaPreviewHasInsufficientSlots.value && !canDecideSelfMediaScheduleCarryOver.value) {
     return '目标月份可用排期容量不足，请联系交付负责人确认结转补排。'
   }
@@ -1745,6 +1747,7 @@ function selfMediaSchedulePayload(extra?: Partial<ProjectSelfMediaAutoSchedulePa
     targetMonth: selfMediaScheduleMonth.value,
     selfMediaAccountIds: selectedSelfMediaAccountIds.value.length ? selectedSelfMediaAccountIds.value : undefined,
     includeAdjustedWorkdays: selfMediaScheduleForm.includeAdjustedWorkdays,
+    supplementExistingBatch: isSelfMediaScheduleSupplementMode.value || undefined,
     ...extra,
   }
 }
@@ -2040,6 +2043,7 @@ async function runSelfMediaSchedulePrecheck() {
 async function createSelfMediaSchedule() {
   const current = project.value
   if (!current || !canCreateSelfMediaSchedule.value) return
+  const supplementMode = isSelfMediaScheduleSupplementMode.value
   try {
     if (selfMediaScheduleForm.autoScheduleEnabled && !selfMediaScheduleConfig.value?.autoScheduleEnabled) {
       await persistSelfMediaScheduleConfig(false)
@@ -2067,7 +2071,10 @@ async function createSelfMediaSchedule() {
       )
       const decisionReason = String(value || '').trim()
       selfMediaScheduleCreating.value = true
-      const idempotencyKey = createIdempotencyKey(`project-self-media-${current.id}-${selfMediaScheduleMonth.value}-carry-over`)
+      const idempotencyPrefix = supplementMode
+        ? `project-self-media-${current.id}-${selfMediaScheduleMonth.value}-supplement-carry-over`
+        : `project-self-media-${current.id}-${selfMediaScheduleMonth.value}-carry-over`
+      const idempotencyKey = createIdempotencyKey(idempotencyPrefix)
       const { data } = await createProjectSelfMediaAutoSchedule(
         current.id,
         selfMediaSchedulePayload({
@@ -2082,16 +2089,22 @@ async function createSelfMediaSchedule() {
       return
     }
     await ElMessageBox.confirm(
-      `确认创建 ${selfMediaScheduleMonth.value} 的自媒体自动排期？系统会按剩余额度生成文章，并安排发布时间。`,
-      '创建自动排期',
-      { type: 'warning', confirmButtonText: '确认创建', cancelButtonText: '取消' },
+      supplementMode
+        ? `确认补充 ${selfMediaScheduleMonth.value} 的自媒体自动排期？系统只会按当前剩余额度追加生成文章和发布时间，不会重建已有排期。`
+        : `确认创建 ${selfMediaScheduleMonth.value} 的自媒体自动排期？系统会按剩余额度生成文章，并安排发布时间。`,
+      supplementMode ? '补充自动排期' : '创建自动排期',
+      { type: 'warning', confirmButtonText: supplementMode ? '确认补排' : '确认创建', cancelButtonText: '取消' },
     )
     selfMediaScheduleCreating.value = true
-    const idempotencyKey = createIdempotencyKey(`project-self-media-${current.id}-${selfMediaScheduleMonth.value}`)
+    const idempotencyKey = createIdempotencyKey(
+      supplementMode
+        ? `project-self-media-${current.id}-${selfMediaScheduleMonth.value}-supplement`
+        : `project-self-media-${current.id}-${selfMediaScheduleMonth.value}`,
+    )
     const { data } = await createProjectSelfMediaAutoSchedule(current.id, selfMediaSchedulePayload(), idempotencyKey)
     selfMediaPreview.value = data.data
     const carryOverText = data.data?.carryOverCount ? `，已结转 ${data.data.carryOverCount} 条到 ${data.data.carryOverTargetMonth || '下月'}` : ''
-    ElMessage.success(`自动排期已提交，后台正在生成文章并安排发布时间${carryOverText}`)
+    ElMessage.success(`${supplementMode ? '补充排期' : '自动排期'}已提交，后台正在生成文章并安排发布时间${carryOverText}`)
     await loadSelfMediaScheduleBatch()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
