@@ -145,7 +145,7 @@ class BatchArticleGenerationServiceTest {
                 promptBuilder,
                 promptContextFactory,
                 medicalArticleGenerationService,
-                new SpecialIndustryService(),
+                specialIndustryService(),
                 specialIndustryTemplateRouteService,
                 medicalComplianceChecker,
                 mock(SpecialIndustryComplianceAlertService.class),
@@ -159,6 +159,16 @@ class BatchArticleGenerationServiceTest {
                 transactionManager,
                 (Executor) Runnable::run
         );
+    }
+
+    private SpecialIndustryService specialIndustryService() {
+        com.huanjing.geo.module.content.mapper.SpecialIndustryProfileMapper profileMapper =
+                mock(com.huanjing.geo.module.content.mapper.SpecialIndustryProfileMapper.class);
+        com.huanjing.geo.module.system.mapper.SysDictItemMapper mapper =
+                mock(com.huanjing.geo.module.system.mapper.SysDictItemMapper.class);
+        when(profileMapper.selectList(any())).thenReturn(List.of());
+        when(mapper.selectList(any())).thenReturn(List.of());
+        return new SpecialIndustryService(profileMapper, mapper);
     }
 
     @Test

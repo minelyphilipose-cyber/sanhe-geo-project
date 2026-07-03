@@ -12,8 +12,10 @@ import com.huanjing.geo.module.content.mapper.MedicalComplianceKernelMapper;
 import com.huanjing.geo.module.content.mapper.MedicalComplianceRuleMapper;
 import com.huanjing.geo.module.content.mapper.MedicalGenerationHistoryMapper;
 import com.huanjing.geo.module.content.mapper.MedicalTopicAngleMapper;
+import com.huanjing.geo.module.content.mapper.SpecialIndustryProfileMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.Test;
 
@@ -64,6 +66,7 @@ class MedicalArticleConfigServiceTest {
     private static MedicalArticleConfigService newService(MedicalTopicAngleMapper topicAngleMapper,
                                                           CurrentUserService currentUserService) {
         return new MedicalArticleConfigService(
+                mock(SpecialIndustryProfileMapper.class),
                 topicAngleMapper,
                 mock(MedicalComplianceRuleMapper.class),
                 mock(MedicalComplianceKernelMapper.class),
@@ -76,7 +79,17 @@ class MedicalArticleConfigServiceTest {
                 mock(BatchArticleGenerationBatchMapper.class),
                 mock(BatchArticleGenerationTaskMapper.class),
                 mock(MedicalArticleComplianceChecker.class),
-                currentUserService
+                currentUserService,
+                specialIndustryService(),
+                mock(SysDictItemMapper.class)
         );
+    }
+
+    private static SpecialIndustryService specialIndustryService() {
+        SpecialIndustryProfileMapper profileMapper = mock(SpecialIndustryProfileMapper.class);
+        SysDictItemMapper mapper = mock(SysDictItemMapper.class);
+        when(profileMapper.selectList(any())).thenReturn(List.of());
+        when(mapper.selectList(any())).thenReturn(List.of());
+        return new SpecialIndustryService(profileMapper, mapper);
     }
 }
