@@ -16,6 +16,8 @@ import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleSave
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.GenerationHistoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.RuleHitSummaryVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.SpecialIndustryProfileSaveRequest;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.SpecialIndustryProfileVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleCategoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleVO;
@@ -30,6 +32,7 @@ import com.huanjing.geo.module.content.entity.MedicalComplianceKernel;
 import com.huanjing.geo.module.content.entity.MedicalComplianceRule;
 import com.huanjing.geo.module.content.entity.MedicalGenerationHistory;
 import com.huanjing.geo.module.content.entity.MedicalTopicAngle;
+import com.huanjing.geo.module.content.entity.SpecialIndustryProfile;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationBatchMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
@@ -39,12 +42,15 @@ import com.huanjing.geo.module.content.mapper.MedicalComplianceKernelMapper;
 import com.huanjing.geo.module.content.mapper.MedicalComplianceRuleMapper;
 import com.huanjing.geo.module.content.mapper.MedicalGenerationHistoryMapper;
 import com.huanjing.geo.module.content.mapper.MedicalTopicAngleMapper;
+import com.huanjing.geo.module.content.mapper.SpecialIndustryProfileMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -64,6 +70,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class MedicalArticleConfigService {
 
+    private static final String DICT_TYPE_COMPLIANCE_INDUSTRY = "compliance_industry";
+
+    private final SpecialIndustryProfileMapper profileMapper;
     private final MedicalTopicAngleMapper topicAngleMapper;
     private final MedicalComplianceRuleMapper ruleMapper;
     private final MedicalComplianceKernelMapper kernelMapper;
@@ -78,6 +87,59 @@ public class MedicalArticleConfigService {
     private final MedicalArticleComplianceChecker complianceChecker;
     private final CurrentUserService currentUserService;
     private final SpecialIndustryService specialIndustryService;
+    private final SysDictItemMapper sysDictItemMapper;
+
+    public Page<SpecialIndustryProfileVO> pageProfiles(Boolean enabled,
+                                                       String keyword,
+                                                       long current,
+                                                       long size) {
+        currentUserService.ensurePermission("project.read");
+        LambdaQueryWrapper<SpecialIndustryProfile> wrapper = new LambdaQueryWrapper<SpecialIndustryProfile>()
+                .eq(enabled != null, SpecialIndustryProfile::getEnabled, enabled)
+                .and(StringUtils.hasText(keyword), q -> q
+                        .like(SpecialIndustryProfile::getIndustryCode, trim(keyword))
+                        .or()
+                        .like(SpecialIndustryProfile::getIndustryName, trim(keyword))
+                        .or()
+                        .like(SpecialIndustryProfile::getKeywords, trim(keyword)))
+                .orderByAsc(SpecialIndustryProfile::getSortOrder, SpecialIndustryProfile::getId);
+        Page<SpecialIndustryProfile> page = profileMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<SpecialIndustryProfileVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        result.setRecords(page.getRecords().stream().map(this::toProfileVO).toList());
+        return result;
+    }
+
+    public List<SpecialIndustryProfileVO> listProfiles(Boolean enabled) {
+        currentUserService.ensurePermission("project.read");
+        return profileMapper.selectList(new LambdaQueryWrapper<SpecialIndustryProfile>()
+                        .eq(enabled != null, SpecialIndustryProfile::getEnabled, enabled)
+                        .orderByAsc(SpecialIndustryProfile::getSortOrder, SpecialIndustryProfile::getId))
+                .stream()
+                .map(this::toProfileVO)
+                .toList();
+    }
+
+    @Transactional
+    public SpecialIndustryProfileVO createProfile(SpecialIndustryProfileSaveRequest req) {
+        currentUserService.ensurePermission("content.prompt_template.manage");
+        ensureProfileUnique(null, req.industryCode());
+        SpecialIndustryProfile row = new SpecialIndustryProfile();
+        fillProfile(row, req);
+        profileMapper.insert(row);
+        upsertComplianceIndustryDict(row);
+        return toProfileVO(row);
+    }
+
+    @Transactional
+    public SpecialIndustryProfileVO updateProfile(Long id, SpecialIndustryProfileSaveRequest req) {
+        currentUserService.ensurePermission("content.prompt_template.manage");
+        SpecialIndustryProfile row = requireProfile(id);
+        ensureProfileUnique(id, req.industryCode());
+        fillProfile(row, req);
+        profileMapper.updateById(row);
+        upsertComplianceIndustryDict(row);
+        return toProfileVO(row);
+    }
 
     public WorkbenchOverviewVO overview() {
         currentUserService.ensurePermission("project.read");
@@ -452,6 +514,24 @@ public class MedicalArticleConfigService {
         return row;
     }
 
+    private SpecialIndustryProfile requireProfile(Long id) {
+        SpecialIndustryProfile row = profileMapper.selectById(id);
+        if (row == null) {
+            throw new BizException(404, "Special industry profile not found");
+        }
+        return row;
+    }
+
+    private void ensureProfileUnique(Long currentId, String industryCode) {
+        String code = trim(industryCode).toLowerCase(java.util.Locale.ROOT);
+        SpecialIndustryProfile existed = profileMapper.selectOne(new LambdaQueryWrapper<SpecialIndustryProfile>()
+                .eq(SpecialIndustryProfile::getIndustryCode, code)
+                .last("LIMIT 1"));
+        if (existed != null && !Objects.equals(existed.getId(), currentId)) {
+            throw new BizException(400, "特殊行业编码已存在");
+        }
+    }
+
     private MedicalComplianceRule requireRule(Long id) {
         MedicalComplianceRule row = ruleMapper.selectById(id);
         if (row == null) {
@@ -470,6 +550,42 @@ public class MedicalArticleConfigService {
         row.setRecommendedFocus(trimToNull(req.recommendedFocus()));
         row.setEnabled(req.enabled() == null || req.enabled());
         row.setSortOrder(req.sortOrder() == null ? 0 : req.sortOrder());
+    }
+
+    private void fillProfile(SpecialIndustryProfile row, SpecialIndustryProfileSaveRequest req) {
+        row.setIndustryCode(trim(req.industryCode()).toLowerCase(java.util.Locale.ROOT));
+        row.setIndustryName(trim(req.industryName()));
+        row.setRegulatoryDomain(StringUtils.hasText(req.regulatoryDomain()) ? trim(req.regulatoryDomain()).toLowerCase(java.util.Locale.ROOT) : "custom");
+        row.setKeywords(trimToNull(req.keywords()));
+        row.setQualificationSchemaJson(trimToNull(req.qualificationSchemaJson()));
+        row.setReadinessPolicyJson(trimToNull(req.readinessPolicyJson()));
+        row.setPromptLabelsJson(trimToNull(req.promptLabelsJson()));
+        row.setEnabled(req.enabled() == null || req.enabled());
+        row.setSortOrder(req.sortOrder() == null ? 100 : req.sortOrder());
+        row.setRemark(trimToNull(req.remark()));
+    }
+
+    private void upsertComplianceIndustryDict(SpecialIndustryProfile row) {
+        SysDictItem item = sysDictItemMapper.selectOne(new LambdaQueryWrapper<SysDictItem>()
+                .eq(SysDictItem::getDictType, DICT_TYPE_COMPLIANCE_INDUSTRY)
+                .eq(SysDictItem::getDictKey, row.getIndustryCode())
+                .last("LIMIT 1"));
+        if (item == null) {
+            item = new SysDictItem();
+            item.setDictType(DICT_TYPE_COMPLIANCE_INDUSTRY);
+            item.setDictKey(row.getIndustryCode());
+            item.setDictValue(row.getIndustryName());
+            item.setSortOrder(row.getSortOrder());
+            item.setEnabled(row.getEnabled());
+            item.setRemark(row.getKeywords());
+            sysDictItemMapper.insert(item);
+            return;
+        }
+        item.setDictValue(row.getIndustryName());
+        item.setSortOrder(row.getSortOrder());
+        item.setEnabled(row.getEnabled());
+        item.setRemark(StringUtils.hasText(row.getKeywords()) ? row.getKeywords() : row.getRemark());
+        sysDictItemMapper.updateById(item);
     }
 
     private void fill(MedicalComplianceRule row, ComplianceRuleSaveRequest req) {
@@ -498,6 +614,24 @@ public class MedicalArticleConfigService {
         return new TopicAngleVO(row.getId(), row.getIndustryCode(), row.getIndustryName(), row.getCategoryCode(),
                 row.getCategoryName(), row.getTopicAngle(), row.getRecommendedFocus(), row.getEnabled(),
                 row.getSortOrder(), row.getCreatedAt(), row.getUpdatedAt());
+    }
+
+    private SpecialIndustryProfileVO toProfileVO(SpecialIndustryProfile row) {
+        return new SpecialIndustryProfileVO(
+                row.getId(),
+                row.getIndustryCode(),
+                row.getIndustryName(),
+                row.getRegulatoryDomain(),
+                row.getKeywords(),
+                row.getQualificationSchemaJson(),
+                row.getReadinessPolicyJson(),
+                row.getPromptLabelsJson(),
+                row.getEnabled(),
+                row.getSortOrder(),
+                row.getRemark(),
+                row.getCreatedAt(),
+                row.getUpdatedAt()
+        );
     }
 
     private ComplianceRuleVO toVO(MedicalComplianceRule row) {

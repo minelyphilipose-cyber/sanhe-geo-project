@@ -50,7 +50,7 @@ public class MedicalArticleGenerationService {
     private final SpecialIndustryService specialIndustryService;
 
     public Optional<String> detectIndustryCode(Brand brand) {
-        return specialIndustryService.detectMedicalIndustryCode(brand);
+        return specialIndustryService.detectSpecialIndustryCode(brand);
     }
 
     public String resolveChannelTier(String channelGroupCode, String channelSubCode) {
@@ -72,14 +72,14 @@ public class MedicalArticleGenerationService {
         Optional<String> industry = detectIndustryCode(brand);
         if (industry.isEmpty()) {
             if (topicConfig != null && StringUtils.hasText(topicConfig.getMedicalIndustryCode())) {
-                throw new BizException(400, "品牌未配置行业合规类型，不能生成医疗文章");
+                throw new BizException(400, "品牌未配置特殊行业类型，不能生成特殊行业文章");
             }
             return Optional.empty();
         }
         String industryCode = industry.get();
         if (topicConfig != null && StringUtils.hasText(topicConfig.getMedicalIndustryCode())
                 && !industryCode.equals(topicConfig.getMedicalIndustryCode().trim())) {
-            throw new BizException(400, "医疗行业与品牌行业不匹配，不能生成医疗文章");
+            throw new BizException(400, "特殊行业与品牌行业不匹配，不能生成特殊行业文章");
         }
         String channelTier = resolveChannelTier(channelGroupCode, channelSubCode);
         List<BrandOffering> enabledOfferings = enabledMedicalOfferings(brand.getId(), industryCode);
@@ -113,8 +113,8 @@ public class MedicalArticleGenerationService {
                 style.getStylePrompt(),
                 Boolean.TRUE.equals(style.getHighRisk()),
                 trimToNull(offering.getQualificationRef()),
-                trimToNull(brand.getMedicalLicense()),
-                trimToNull(brand.getDiagnosisScope()),
+                qualificationSnapshot(brand, industryCode),
+                scopeSnapshot(brand, industryCode),
                 trimToNull(brand.getMedicalAdReviewNo())
         ));
     }
@@ -127,19 +127,19 @@ public class MedicalArticleGenerationService {
             return prompt;
         }
         String diffBlock = """
-                # 医疗差异化变量
-                - 本篇医疗行业：%s
+                # 特殊行业差异化变量
+                - 本篇特殊行业：%s
                 - 本篇渠道档位：%s
-                - 本篇项目品类：%s
+                - 本篇项目/服务品类：%s
                 - 本篇选题角度：%s
                 - 本篇结构骨架：%s
-                - 本篇科普侧重：%s
-                - 项目资质引用：%s
-                - 医疗机构执业许可：%s
-                - 诊疗科目范围：%s
-                - 医疗广告审查证明编号：%s
+                - 本篇内容侧重：%s
+                - 项目/服务资质引用：%s
+                - 主体资质信息：%s
+                - 服务/业务范围：%s
+                - 审查/备案编号：%s
                 """.formatted(
-                context.industryCode(),
+                specialIndustryService.industryLabel(context.industryCode()),
                 context.channelTier(),
                 context.categoryName(),
                 context.topicAngle(),
@@ -220,7 +220,7 @@ public class MedicalArticleGenerationService {
             MedicalTopicAngle angle = topicAngleMapper.selectById(topicConfig.getTopicAngleId());
             if (angle == null || angle.getDeletedAt() != null || !Boolean.TRUE.equals(angle.getEnabled())
                     || !industryCode.equals(angle.getIndustryCode()) || !allowedCategories.contains(angle.getCategoryCode())) {
-                throw new BizException(400, "医疗选题不属于该品牌已启用资质项目");
+            throw new BizException(400, "特殊行业选题不属于该品牌已启用资质项目");
             }
             return angle;
         }
@@ -232,7 +232,7 @@ public class MedicalArticleGenerationService {
                 .isNull(MedicalTopicAngle::getDeletedAt)
                 .orderByAsc(MedicalTopicAngle::getSortOrder, MedicalTopicAngle::getId));
         if (candidates.isEmpty()) {
-            throw new BizException(400, "医疗选题库没有可用选题，请先维护 topic angle");
+            throw new BizException(400, "特殊行业选题库没有可用选题，请先维护选题角度");
         }
         Set<Long> recentTopicIds = recentHistory(project.getId()).stream()
                 .map(MedicalGenerationHistory::getTopicAngleId)
@@ -311,7 +311,7 @@ public class MedicalArticleGenerationService {
                 .orderByDesc(MedicalComplianceKernel::getVersionNo, MedicalComplianceKernel::getId)
                 .last("LIMIT 1"));
         if (kernel == null) {
-            throw new BizException(400, "医疗合规内核未配置：" + industryCode + "/" + channelTier);
+            throw new BizException(400, "特殊行业合规内核未配置：" + industryCode + "/" + channelTier);
         }
         return kernel;
     }
@@ -332,12 +332,34 @@ public class MedicalArticleGenerationService {
                     .last("LIMIT 1"));
         }
         if (style == null) {
-            throw new BizException(400, "医疗渠道文体模块未配置：" + channelGroupCode + "/" + channelSubCode);
+            throw new BizException(400, "特殊行业渠道文体模块未配置：" + channelGroupCode + "/" + channelSubCode);
         }
         if (!channelTier.equals(style.getChannelTier())) {
-            throw new BizException(400, "医疗渠道文体模块档位不匹配：" + channelGroupCode);
+            throw new BizException(400, "特殊行业渠道文体模块档位不匹配：" + channelGroupCode);
         }
         return style;
+    }
+
+    private String qualificationSnapshot(Brand brand, String industryCode) {
+        if (brand == null) {
+            return null;
+        }
+        if (specialIndustryService.isMedicalIndustry(industryCode)) {
+            return trimToNull(brand.getMedicalLicense());
+        }
+        String qualification = trimToNull(brand.getBrandQualificationDescription());
+        return qualification != null ? qualification : trimToNull(brand.getMedicalLicense());
+    }
+
+    private String scopeSnapshot(Brand brand, String industryCode) {
+        if (brand == null) {
+            return null;
+        }
+        if (specialIndustryService.isMedicalIndustry(industryCode)) {
+            return trimToNull(brand.getDiagnosisScope());
+        }
+        String scope = trimToNull(brand.getMainBusiness());
+        return scope != null ? scope : trimToNull(brand.getDiagnosisScope());
     }
 
     private String enrichSnapshot(String raw, MedicalPromptContext context) {

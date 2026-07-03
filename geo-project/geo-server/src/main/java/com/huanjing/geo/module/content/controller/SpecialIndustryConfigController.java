@@ -13,6 +13,8 @@ import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleSave
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.BatchTraceVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.GenerationHistoryVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.SpecialIndustryProfileSaveRequest;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.SpecialIndustryProfileVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleCategoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleVO;
@@ -40,6 +42,30 @@ public class SpecialIndustryConfigController {
     @GetMapping("/overview")
     public R<WorkbenchOverviewVO> overview() {
         return R.ok(service.overview());
+    }
+
+    @GetMapping("/profiles")
+    public R<Page<SpecialIndustryProfileVO>> profiles(@RequestParam(required = false) Boolean enabled,
+                                                      @RequestParam(required = false) String keyword,
+                                                      @RequestParam(defaultValue = "1") long current,
+                                                      @RequestParam(defaultValue = "10") long size) {
+        return R.ok(service.pageProfiles(enabled, keyword, current, size));
+    }
+
+    @GetMapping("/profiles/options")
+    public R<java.util.List<SpecialIndustryProfileVO>> profileOptions(@RequestParam(required = false) Boolean enabled) {
+        return R.ok(service.listProfiles(enabled == null ? true : enabled));
+    }
+
+    @PostMapping("/profiles")
+    public R<SpecialIndustryProfileVO> createProfile(@Valid @RequestBody SpecialIndustryProfileSaveRequest req) {
+        return R.ok(service.createProfile(req));
+    }
+
+    @PutMapping("/profiles/{id}")
+    public R<SpecialIndustryProfileVO> updateProfile(@PathVariable Long id,
+                                                     @Valid @RequestBody SpecialIndustryProfileSaveRequest req) {
+        return R.ok(service.updateProfile(id, req));
     }
 
     @GetMapping("/topic-angles")

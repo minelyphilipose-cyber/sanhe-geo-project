@@ -130,7 +130,7 @@
         </div>
 
         <template v-if="isMedicalComplianceIndustry">
-          <div class="brand-section-bar"><span />医疗合规信息<i /></div>
+          <div class="brand-section-bar"><span />特殊行业合规信息<i /></div>
           <el-alert
             class="is-wide"
             type="warning"
@@ -140,17 +140,17 @@
           />
           <div class="brand-form-grid">
             <el-form-item label="机构类型"><el-input v-model="form.institutionType" maxlength="128" /></el-form-item>
-            <el-form-item label="医疗广告审查证明编号"><el-input v-model="form.medicalAdReviewNo" maxlength="128" /></el-form-item>
-            <el-form-item class="is-wide" label="医疗机构执业许可">
+            <el-form-item label="审查/备案编号"><el-input v-model="form.medicalAdReviewNo" maxlength="128" /></el-form-item>
+            <el-form-item class="is-wide" label="主体资质/许可信息">
               <el-input v-model="form.medicalLicense" type="textarea" :rows="2" maxlength="500" show-word-limit />
             </el-form-item>
-            <el-form-item class="is-wide" label="诊疗科目范围">
+            <el-form-item class="is-wide" label="服务/业务范围">
               <el-input v-model="form.diagnosisScope" type="textarea" :rows="2" maxlength="1000" show-word-limit />
             </el-form-item>
-            <el-form-item class="is-wide" label="医师/执业人员可公示信息">
+            <el-form-item class="is-wide" label="执业/服务人员可公示信息">
               <el-input v-model="form.practitionerInfoPublic" type="textarea" :rows="2" />
             </el-form-item>
-            <el-form-item class="is-wide" label="医疗合规备注">
+            <el-form-item class="is-wide" label="特殊行业合规备注">
               <el-input v-model="form.complianceNotesMedical" type="textarea" :rows="2" />
             </el-form-item>
           </div>

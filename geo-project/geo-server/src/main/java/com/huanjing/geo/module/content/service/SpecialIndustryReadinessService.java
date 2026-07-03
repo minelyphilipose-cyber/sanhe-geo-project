@@ -48,7 +48,7 @@ public class SpecialIndustryReadinessService {
             return;
         }
         Brand brand = brandMapper.selectById(project.getBrandId());
-        Optional<String> industry = detectMedicalIndustryCode(brand);
+        Optional<String> industry = specialIndustryService.detectSpecialIndustryCode(brand);
         if (industry.isEmpty()) {
             return;
         }
@@ -59,11 +59,25 @@ public class SpecialIndustryReadinessService {
     }
 
     public String questionGenerationGuidance(Brand brand) {
-        Optional<String> industry = detectMedicalIndustryCode(brand);
+        Optional<String> industry = specialIndustryService.detectSpecialIndustryCode(brand);
         if (industry.isEmpty()) {
             return "";
         }
         String industryName = specialIndustryService.industryLabel(industry.get());
+        if (!specialIndustryService.isMedicalIndustry(industry.get())) {
+            return """
+
+                    ## 特殊行业合规约束
+                    当前品牌属于%s强监管行业。生成问题池时必须提前规避资质、承诺、收益、结果和诱导决策风险：
+                    1. 不生成保证收益、保证结果、保证通过、保证胜诉、内部渠道、百分百安全等绝对化问题。
+                    2. 不生成诱导用户立即购买、报名、开户、签约、借贷、委托或规避监管的问题。
+                    3. A 类可覆盖选择入口，但应表达为资质判断、服务边界、风险提示、适用条件、流程透明等理性决策问题。
+                    4. B 类优先覆盖方案差异、费用构成、适用人群、风险边界、合规资质、合同/服务条款。
+                    5. C 类优先覆盖概念科普、流程常识、材料准备、注意事项，不出现强成交词和确定性承诺。
+                    6. 问题中避免“稳赚、保过、包赢、无风险、内部名额、快速下款、百分百成功”等高风险表达。
+                    7. 遇到高风险决策相关问题，使用“需要结合资质/条件评估”“有哪些风险和注意事项”这类安全问法。
+                    """.formatted(industryName);
+        }
         return """
 
                 ## 特殊行业合规约束
@@ -83,8 +97,13 @@ public class SpecialIndustryReadinessService {
         if (!industryCode.equals(trimToNull(brand.getComplianceIndustryCode()))) {
             issues.add("品牌需明确配置合规行业类型");
         }
-        requireText(issues, brand.getMedicalLicense(), "缺少医疗机构执业许可信息");
-        requireText(issues, brand.getDiagnosisScope(), "缺少诊疗科目范围");
+        boolean medicalDomain = specialIndustryService.isMedicalIndustry(industryCode);
+        if (medicalDomain) {
+            requireText(issues, brand.getMedicalLicense(), "缺少医疗机构执业许可信息");
+            requireText(issues, brand.getDiagnosisScope(), "缺少诊疗科目范围");
+        } else {
+            requireText(issues, brand.getBrandQualificationDescription(), "缺少特殊行业资质说明");
+        }
 
         List<ProjectChannelAllocation> allocations = channelAllocationMapper.selectList(
                 new LambdaQueryWrapper<ProjectChannelAllocation>()
@@ -93,32 +112,32 @@ public class SpecialIndustryReadinessService {
         );
         if (allocations.stream().anyMatch(row -> "official_site".equals(row.getChannelCode()))
                 && !StringUtils.hasText(brand.getMedicalAdReviewNo())) {
-            issues.add("官网档缺少医疗广告审查证明编号");
+            issues.add(medicalDomain ? "官网档缺少医疗广告审查证明编号" : "官网档缺少审查/备案编号");
         }
 
         List<BrandOffering> offerings = activeMedicalOfferings(brand.getId(), industryCode);
         if (offerings.isEmpty()) {
-            issues.add("缺少已启用的医疗资质项目");
+            issues.add("缺少已启用的特殊行业资质项目");
             return issues;
         }
         Set<String> categoryCodes = new LinkedHashSet<>();
         for (BrandOffering offering : offerings) {
             if (!StringUtils.hasText(offering.getMedicalCategoryCode())) {
-                issues.add("医疗资质项目缺少品类编码：" + defaultText(offering.getOfferingName(), String.valueOf(offering.getId())));
+                issues.add("特殊行业资质项目缺少品类编码：" + defaultText(offering.getOfferingName(), String.valueOf(offering.getId())));
                 continue;
             }
             categoryCodes.add(offering.getMedicalCategoryCode().trim());
             if (!StringUtils.hasText(offering.getQualificationRef())) {
-                issues.add("医疗资质项目缺少资质引用：" + defaultText(offering.getOfferingName(), offering.getMedicalCategoryCode()));
+                issues.add("特殊行业资质项目缺少资质引用：" + defaultText(offering.getOfferingName(), offering.getMedicalCategoryCode()));
             }
         }
         if (!categoryCodes.isEmpty() && countTopicAngles(industryCode, categoryCodes) <= 0) {
-            issues.add("医疗选题库缺少可用选题角度");
+            issues.add("特殊行业选题库缺少可用选题角度");
         }
 
         for (String tier : requiredTiers(allocations)) {
             if (!hasKernel(industryCode, tier)) {
-                issues.add("缺少医疗合规内核：" + industryCode + "/" + tier);
+                issues.add("缺少特殊行业合规内核：" + industryCode + "/" + tier);
             }
         }
         for (ProjectChannelAllocation allocation : allocations) {
@@ -128,7 +147,7 @@ public class SpecialIndustryReadinessService {
             }
             String tier = resolveChannelTier(channel.groupCode());
             if (!hasChannelStyle(channel.groupCode(), channel.subCode(), tier)) {
-                issues.add("缺少医疗渠道文体模块：" + allocation.getChannelCode());
+                issues.add("缺少特殊行业渠道文体模块：" + allocation.getChannelCode());
             }
         }
         return issues.stream().distinct().toList();

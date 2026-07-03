@@ -863,6 +863,22 @@ export interface SpecialIndustryTopicAngleCategory {
   topicAngleCount: number
 }
 
+export interface SpecialIndustryProfile {
+  id: number
+  industryCode: string
+  industryName: string
+  regulatoryDomain: 'medical' | 'finance' | 'education' | 'legal' | 'custom' | string
+  keywords?: string | null
+  qualificationSchemaJson?: string | null
+  readinessPolicyJson?: string | null
+  promptLabelsJson?: string | null
+  enabled: boolean
+  sortOrder: number
+  remark?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
 export interface MedicalComplianceRule {
   id: number
   ruleType: string
@@ -1000,6 +1016,22 @@ export type SpecialIndustryComplianceKernel = MedicalComplianceKernel
 export type SpecialIndustryChannelStyleModule = MedicalChannelStyleModule
 export type SpecialIndustryComplianceHitLog = MedicalComplianceHitLog
 export type SpecialIndustryGenerationHistory = MedicalGenerationHistory
+
+export function getSpecialIndustryProfiles(params?: Record<string, any>) {
+  return request.get<R<PageResult<SpecialIndustryProfile>>>('/content/special-industry/profiles', { params })
+}
+
+export function getSpecialIndustryProfileOptions(params?: { enabled?: boolean }) {
+  return request.get<R<SpecialIndustryProfile[]>>('/content/special-industry/profiles/options', { params })
+}
+
+export function createSpecialIndustryProfile(data: Partial<SpecialIndustryProfile>) {
+  return request.post<R<SpecialIndustryProfile>>('/content/special-industry/profiles', data)
+}
+
+export function updateSpecialIndustryProfile(id: number, data: Partial<SpecialIndustryProfile>) {
+  return request.put<R<SpecialIndustryProfile>>(`/content/special-industry/profiles/${id}`, data)
+}
 
 export function getSpecialIndustryTopicAngles(params?: Record<string, any>) {
   return request.get<R<PageResult<SpecialIndustryTopicAngle>>>('/content/special-industry/topic-angles', { params })

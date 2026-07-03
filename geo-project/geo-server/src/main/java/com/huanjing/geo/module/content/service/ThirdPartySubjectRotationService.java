@@ -446,14 +446,14 @@ public class ThirdPartySubjectRotationService {
         if (row.getSubjectProjectId() == null) {
             return excluded("no_active_project", "品牌没有可用的 active 项目");
         }
-        if (isMedicalOrOral(row)) {
-            return excluded("medical_or_oral_excluded", "医疗/口腔暂不进入第三方轮换池");
+        if (isSpecialIndustry(row)) {
+            return excluded("special_industry_excluded", "特殊行业暂不进入第三方轮换池");
         }
         return new PoolDecision(true, null, null);
     }
 
-    private boolean isMedicalOrOral(ThirdPartySubjectPoolBrandRow row) {
-        return specialIndustryService.detectMedicalIndustryCode(
+    private boolean isSpecialIndustry(ThirdPartySubjectPoolBrandRow row) {
+        return specialIndustryService.detectSpecialIndustryCode(
                 row.getComplianceIndustryCode(),
                 row.getIndustry()
         ).isPresent();

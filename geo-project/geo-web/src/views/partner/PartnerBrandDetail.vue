@@ -519,11 +519,11 @@ const textItems = computed(() => [
 
 const specialIndustryItems = computed(() => [
   { label: '行业合规类型', value: complianceIndustryLabel(brand.value?.complianceIndustryCode) },
-  { label: '医疗机构许可证', value: brand.value?.medicalLicense || '-' },
+  { label: '主体资质/许可信息', value: brand.value?.medicalLicense || '-' },
   { label: '诊疗范围', value: brand.value?.diagnosisScope || '-' },
   { label: '机构类型', value: brand.value?.institutionType || '-' },
   { label: '公开执业信息', value: brand.value?.practitionerInfoPublic || '-' },
-  { label: '广告审查编号', value: brand.value?.medicalAdReviewNo || '-' },
+  { label: '审查/备案编号', value: brand.value?.medicalAdReviewNo || '-' },
   { label: '合规备注', value: brand.value?.complianceNotesMedical || '-' },
   { label: '禁用词', value: normalizeForbiddenPhrases(brand.value?.forbiddenPhrases) },
 ])

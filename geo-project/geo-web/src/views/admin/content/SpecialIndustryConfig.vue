@@ -2,8 +2,8 @@
   <div class="special-industry-config-page">
     <div class="admin-page-header">
       <div>
-        <h2>特殊行业文章配置</h2>
-        <p>维护医疗/医美等特殊行业文章生成所需的选题角度、合规规则、合规内核和渠道文体模块。</p>
+        <h2>特殊行业配置中心</h2>
+        <p>统一维护金融、教育、法律、医疗等强监管行业的识别、选题、规则、内核和渠道模块。</p>
       </div>
       <div class="header-actions">
         <el-button v-if="activeTab === 'rules'" @click="openRuleTester">规则测试</el-button>
@@ -12,6 +12,7 @@
     </div>
 
     <el-tabs v-model="activeTab" @tab-change="loadCurrent">
+      <el-tab-pane label="行业管理" name="industries" />
       <el-tab-pane label="选题角度" name="angles" />
       <el-tab-pane label="合规规则" name="rules" />
       <el-tab-pane label="合规内核" name="kernels" />
@@ -58,7 +59,28 @@
 
     <el-dialog v-model="editorVisible" :title="editingId ? '编辑配置' : '新增配置'" width="820px">
       <el-form class="special-industry-form" :model="form" label-position="top">
-        <template v-if="activeTab === 'angles'">
+        <template v-if="activeTab === 'industries'">
+          <el-form-item label="行业编码"><el-input v-model="form.industryCode" placeholder="如 finance、education、legal；保存后会同步行业字典" /></el-form-item>
+          <el-form-item label="行业名称"><el-input v-model="form.industryName" placeholder="如 金融、教育、法律" /></el-form-item>
+          <el-form-item label="监管域">
+            <el-select v-model="form.regulatoryDomain" style="width: 100%">
+              <el-option label="医疗" value="medical" />
+              <el-option label="金融" value="finance" />
+              <el-option label="教育" value="education" />
+              <el-option label="法律" value="legal" />
+              <el-option label="通用特殊行业" value="custom" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="排序"><el-input-number v-model="form.sortOrder" :min="0" style="width: 100%" /></el-form-item>
+          <el-form-item label="识别关键词"><el-input v-model="form.keywords" placeholder="多个关键词用逗号分隔，如 金融,理财,贷款" /></el-form-item>
+          <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
+          <el-form-item label="资质字段 Schema"><el-input v-model="form.qualificationSchemaJson" type="textarea" :rows="4" placeholder='如 [{"key":"brandQualificationDescription","label":"行业资质说明","required":true}]' /></el-form-item>
+          <el-form-item label="启用前校验策略"><el-input v-model="form.readinessPolicyJson" type="textarea" :rows="4" placeholder='如 {"requireProjectQualification":true,"requireBrandQualificationDescription":true}' /></el-form-item>
+          <el-form-item label="提示词展示标签"><el-input v-model="form.promptLabelsJson" type="textarea" :rows="4" placeholder='如 {"industryLabel":"金融行业","licenseLabel":"资质说明"}' /></el-form-item>
+          <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" placeholder="说明行业适用范围、客户类型或配置注意事项" /></el-form-item>
+        </template>
+
+        <template v-else-if="activeTab === 'angles'">
           <el-form-item label="行业"><MedicalIndustrySelect v-model="form.industryCode" /></el-form-item>
           <el-form-item label="品类编码"><el-input v-model="form.categoryCode" placeholder="如 skin_laser、implant_tooth；需与客户项目资质品类一致" /></el-form-item>
           <el-form-item label="品类名称"><el-input v-model="form.categoryName" placeholder="运营可读名称，如 皮肤光电、种植牙" /></el-form-item>
@@ -151,22 +173,27 @@ import { ElMessage, ElOption, ElSelect } from 'element-plus'
 import {
   createSpecialIndustryChannelStyleModule,
   createSpecialIndustryComplianceKernel,
+  createSpecialIndustryProfile,
   createSpecialIndustryComplianceRule,
   createSpecialIndustryTopicAngle,
   getSpecialIndustryChannelStyleModules,
   getSpecialIndustryComplianceHitLogs,
   getSpecialIndustryComplianceKernels,
+  getSpecialIndustryProfiles,
+  getSpecialIndustryProfileOptions,
   getSpecialIndustryComplianceRules,
   getSpecialIndustryTopicAngles,
   testSpecialIndustryRules,
   updateSpecialIndustryChannelStyleModule,
+  updateSpecialIndustryProfile,
   updateSpecialIndustryComplianceRule,
   updateSpecialIndustryTopicAngle,
+  type SpecialIndustryProfile,
   type SpecialIndustryRuleTestResult,
 } from '@/api/content'
 import { useDictStore } from '@/stores/dict'
 
-type TabName = 'angles' | 'rules' | 'kernels' | 'styles' | 'logs'
+type TabName = 'industries' | 'angles' | 'rules' | 'kernels' | 'styles' | 'logs'
 type ColumnConfig = {
   prop: string
   label: string
@@ -174,9 +201,10 @@ type ColumnConfig = {
   tag?: boolean
 }
 
-const activeTab = ref<TabName>('angles')
+const activeTab = ref<TabName>('industries')
 const dictStore = useDictStore()
 const records = ref<any[]>([])
+const industryOptions = ref<SpecialIndustryProfile[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const ruleTesting = ref(false)
@@ -200,6 +228,11 @@ const ruleTestForm = reactive({
 })
 
 const guideMap: Record<TabName, { title: string, description: string, tips: string[] }> = {
+  industries: {
+    title: '行业管理用于控制“哪些行业进入特殊链路”',
+    description: '这里是特殊行业的统一入口。新增金融、教育、法律等行业后，品牌行业识别、选题角度、合规规则和生成链路都会按该配置联动。',
+    tips: ['行业编码会同步到旧行业字典，保证历史字段和旧页面继续兼容。', '识别关键词用于从品牌行业文本中自动判断特殊行业，建议覆盖客户常用叫法。', '监管域决定默认校验口径：医疗域保留医疗许可校验，其他行业走通用资质说明。'],
+  },
   angles: {
     title: '选题角度用于控制“能写什么”',
     description: '生成医疗/医美文章前会先按客户项目资质筛选可用选题。这里维护的是合规、克制、可复用的选题方向，不是营销标题库。',
@@ -227,6 +260,11 @@ const guideMap: Record<TabName, { title: string, description: string, tips: stri
   },
 }
 const currentGuide = computed(() => guideMap[activeTab.value])
+const specialIndustryOptions = computed(() =>
+  industryOptions.value.length
+    ? industryOptions.value.map((item) => ({ dictKey: item.industryCode, dictValue: item.industryName }))
+    : dictStore.options('compliance_industry').filter((item) => item.dictKey && item.dictKey !== 'none'),
+)
 
 const tierLabels: Record<string, string> = {
   education: '科普',
@@ -288,7 +326,23 @@ const actionLabels: Record<string, string> = {
   rejected: '驳回',
 }
 
+const domainLabels: Record<string, string> = {
+  medical: '医疗',
+  finance: '金融',
+  education: '教育',
+  legal: '法律',
+  custom: '通用',
+}
+
 const columns = computed<ColumnConfig[]>(() => {
+  if (activeTab.value === 'industries') return [
+    { prop: 'industryCode', label: '行业编码', tag: true },
+    { prop: 'industryName', label: '行业名称' },
+    { prop: 'regulatoryDomain', label: '监管域', tag: true },
+    { prop: 'keywords', label: '识别关键词', width: 220 },
+    { prop: 'sortOrder', label: '排序' },
+    { prop: 'enabled', label: '启用', tag: true },
+  ]
   if (activeTab.value === 'angles') return [
     { prop: 'industryCode', label: '行业', tag: true },
     { prop: 'categoryName', label: '品类' },
@@ -338,10 +392,9 @@ const MedicalIndustrySelect = defineComponent({
       clearable: props.clearable,
       style: 'width: 100%',
       'onUpdate:modelValue': (value: string) => emit('update:modelValue', value),
-    }, () => [
-      h(ElOption, { label: '医美', value: 'medical_beauty' }),
-      h(ElOption, { label: '口腔', value: 'oral' }),
-    ])
+    }, () => specialIndustryOptions.value.map((item) =>
+      h(ElOption, { label: item.dictValue || item.dictKey, value: item.dictKey }),
+    ))
   },
 })
 
@@ -402,6 +455,11 @@ function actionLabel(value?: string | null) {
   return actionLabels[value] || value
 }
 
+function domainLabel(value?: string | null) {
+  if (!value) return '通用'
+  return domainLabels[value] || value
+}
+
 function booleanLabel(value: unknown) {
   return value === true || value === 1 || value === '1' || value === 'true' ? '是' : '否'
 }
@@ -419,6 +477,7 @@ function formatColumnValue(row: Record<string, any>, column: ColumnConfig) {
   if (column.prop === 'channelGroupCode') return channelGroupLabel(value)
   if (column.prop === 'channelSubCode') return channelSubLabel(value)
   if (column.prop === 'recommendedFocus') return focusLabel(value)
+  if (column.prop === 'regulatoryDomain') return domainLabel(value)
   if (column.prop === 'ruleType') return ruleTypeLabel(value)
   if (column.prop === 'severity') return severityLabel(value)
   if (column.prop === 'action') return actionLabel(value)
@@ -429,6 +488,7 @@ function formatColumnValue(row: Record<string, any>, column: ColumnConfig) {
 function columnTagType(prop: string, value: unknown): 'success' | 'warning' | 'danger' | 'info' {
   if (prop === 'enabled') return value === true || value === 1 || value === '1' || value === 'true' ? 'success' : 'info'
   if (prop === 'highRisk') return value === true || value === 1 || value === '1' || value === 'true' ? 'danger' : 'info'
+  if (prop === 'regulatoryDomain') return value === 'medical' ? 'warning' : 'info'
   if (prop === 'severity') return value === 'block' ? 'danger' : 'warning'
   if (prop === 'action') return value === 'discard' || value === 'block' ? 'danger' : 'warning'
   return 'info'
@@ -436,7 +496,19 @@ function columnTagType(prop: string, value: unknown): 'success' | 'warning' | 'd
 
 function resetForm() {
   Object.keys(form).forEach((key) => delete form[key])
-  Object.assign(form, { enabled: true, sortOrder: 100, matchMode: 'contains', severity: 'block', versionNo: 1, requireManualPublishReview: false, highRisk: false })
+  Object.assign(form, {
+    enabled: true,
+    sortOrder: 100,
+    regulatoryDomain: 'custom',
+    qualificationSchemaJson: '[{"key":"brandQualificationDescription","label":"行业资质说明","required":true}]',
+    readinessPolicyJson: '{"requireProjectQualification":true,"requireBrandQualificationDescription":true,"requireAdReviewNoForOfficialSite":false}',
+    promptLabelsJson: '{"industryLabel":"特殊行业","qualificationRefLabel":"项目资质引用","licenseLabel":"行业资质说明","scopeLabel":"业务范围","reviewNoLabel":"审查/备案编号"}',
+    matchMode: 'contains',
+    severity: 'block',
+    versionNo: 1,
+    requireManualPublishReview: false,
+    highRisk: false,
+  })
 }
 
 async function loadCurrent() {
@@ -444,6 +516,7 @@ async function loadCurrent() {
   try {
     const params = { current: pagination.current, size: pagination.size }
     const api = {
+      industries: getSpecialIndustryProfiles,
       angles: getSpecialIndustryTopicAngles,
       rules: getSpecialIndustryComplianceRules,
       kernels: getSpecialIndustryComplianceKernels,
@@ -453,6 +526,9 @@ async function loadCurrent() {
     const { data } = await api(params)
     records.value = data.data.records || []
     pagination.total = data.data.total || 0
+    if (activeTab.value === 'industries') {
+      await loadIndustryOptions()
+    }
   } finally {
     loading.value = false
   }
@@ -477,10 +553,20 @@ function openRuleTester() {
   ruleTesterVisible.value = true
 }
 
+async function loadIndustryOptions() {
+  const { data } = await getSpecialIndustryProfileOptions({ enabled: true })
+  industryOptions.value = data.data || []
+}
+
 async function submit() {
   saving.value = true
   try {
-    if (activeTab.value === 'angles') {
+    if (activeTab.value === 'industries') {
+      const payload = industryProfilePayload()
+      editingId.value ? await updateSpecialIndustryProfile(editingId.value, payload) : await createSpecialIndustryProfile(payload)
+      await dictStore.ensureLoaded()
+      await loadIndustryOptions()
+    } else if (activeTab.value === 'angles') {
       const payload = topicAnglePayload()
       editingId.value ? await updateSpecialIndustryTopicAngle(editingId.value, payload) : await createSpecialIndustryTopicAngle(payload)
     } else if (activeTab.value === 'rules') {
@@ -498,11 +584,29 @@ async function submit() {
   }
 }
 
+function industryProfilePayload() {
+  return {
+    ...form,
+    industryCode: String(form.industryCode || '').trim(),
+    industryName: String(form.industryName || '').trim(),
+    keywords: nullableText(form.keywords),
+    qualificationSchemaJson: nullableText(form.qualificationSchemaJson),
+    readinessPolicyJson: nullableText(form.readinessPolicyJson),
+    promptLabelsJson: nullableText(form.promptLabelsJson),
+    remark: nullableText(form.remark),
+  }
+}
+
 function topicAnglePayload() {
   return {
     ...form,
     industryName: industryLabel(form.industryCode),
   }
+}
+
+function nullableText(value: unknown) {
+  const text = typeof value === 'string' ? value.trim() : ''
+  return text || null
 }
 
 async function submitRuleTest() {
@@ -527,6 +631,7 @@ async function submitRuleTest() {
 
 onMounted(async () => {
   await dictStore.ensureLoaded()
+  await loadIndustryOptions()
   await loadCurrent()
 })
 </script>

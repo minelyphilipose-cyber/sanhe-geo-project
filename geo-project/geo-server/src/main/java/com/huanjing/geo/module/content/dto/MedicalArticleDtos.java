@@ -9,6 +9,37 @@ import java.util.List;
 
 public class MedicalArticleDtos {
 
+    public record SpecialIndustryProfileSaveRequest(
+            @NotBlank @Size(max = 32) String industryCode,
+            @NotBlank @Size(max = 64) String industryName,
+            @Size(max = 32) String regulatoryDomain,
+            @Size(max = 500) String keywords,
+            String qualificationSchemaJson,
+            String readinessPolicyJson,
+            String promptLabelsJson,
+            Boolean enabled,
+            Integer sortOrder,
+            @Size(max = 500) String remark
+    ) {
+    }
+
+    public record SpecialIndustryProfileVO(
+            Long id,
+            String industryCode,
+            String industryName,
+            String regulatoryDomain,
+            String keywords,
+            String qualificationSchemaJson,
+            String readinessPolicyJson,
+            String promptLabelsJson,
+            Boolean enabled,
+            Integer sortOrder,
+            String remark,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt
+    ) {
+    }
+
     public record TopicAngleSaveRequest(
             @NotBlank @Size(max = 32) String industryCode,
             @Size(max = 64) String industryName,
