@@ -5,6 +5,7 @@ import com.huanjing.geo.module.extension.entity.ExtensionSession;
 import com.huanjing.geo.module.extension.service.ExtensionCookieCaptureService;
 import com.huanjing.geo.module.extension.service.ExtensionSessionService;
 import com.huanjing.geo.module.extension.service.ExtensionVersionService;
+import com.huanjing.geo.module.partner.service.PartnerFeatureAccessGuard;
 import org.junit.jupiter.api.Test;
 
 import static org.mockito.Mockito.mock;
@@ -23,7 +24,7 @@ class ExtensionControllerCookieCaptureTest {
         session.setOperatorId(99L);
         when(sessionService.requireActiveSession("ext.token")).thenReturn(session);
         ExtensionController controller = new ExtensionController(null, sessionService, versionService,
-                null, null, captureService, null, null, null, null, null);
+                null, null, captureService, null, null, null, mock(PartnerFeatureAccessGuard.class), null, null, null);
 
         controller.captureCookies("ext.token", request());
 

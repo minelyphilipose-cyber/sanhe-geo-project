@@ -7,7 +7,8 @@ public record LocalAgentSelfMediaScheduleClaimResponse(
         SelfMediaPublishScheduleVO schedule,
         DistributionTask task,
         Launch launch,
-        String claimBlockedReason
+        String claimBlockedReason,
+        Integer retryAfterSeconds
 ) {
     public record Launch(
             Long taskId,

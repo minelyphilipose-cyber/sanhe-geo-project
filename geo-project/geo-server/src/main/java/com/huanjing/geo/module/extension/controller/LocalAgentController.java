@@ -23,11 +23,14 @@ import com.huanjing.geo.module.extension.dto.LocalAgentPairingIntentResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentSelfMediaPublishCheckClaimResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentSelfMediaScheduleClaimResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentSelfMediaSchedulePlatformsResponse;
+import com.huanjing.geo.module.extension.dto.LocalAgentRuntimeStatusReportRequest;
+import com.huanjing.geo.module.extension.dto.LocalAgentRuntimeStatusVO;
 import com.huanjing.geo.module.extension.dto.LocalAgentSessionVO;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignResponse;
 import com.huanjing.geo.module.extension.entity.LocalAgentSession;
 import com.huanjing.geo.module.extension.service.LocalAgentSessionService;
+import com.huanjing.geo.module.extension.service.SelfMediaRuntimeStatusService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -65,6 +68,7 @@ public class LocalAgentController {
     private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private final SemiAutoPlatformProperties semiAutoPlatformProperties;
     private final ObjectMapper objectMapper;
+    private final SelfMediaRuntimeStatusService runtimeStatusService;
 
     @PostMapping("/pairing-intents")
     public R<LocalAgentPairingIntentResponse> registerPairingIntent(
@@ -96,6 +100,14 @@ public class LocalAgentController {
         return R.ok(service.signRequest(sessionId, request));
     }
 
+    @PostMapping("/runtime-status")
+    public R<LocalAgentRuntimeStatusVO> reportRuntimeStatus(
+            @RequestBody(required = false) LocalAgentRuntimeStatusReportRequest body,
+            HttpServletRequest request) {
+        LocalAgentSession session = verifySignedRequest(request);
+        return R.ok(runtimeStatusService.reportLocalAgent(session, body));
+    }
+
     @PostMapping("/sessions/{sessionId}/revoke")
     public R<Void> revoke(@PathVariable Long sessionId) {
         service.revoke(sessionId);
@@ -124,7 +136,8 @@ public class LocalAgentController {
                     null,
                     null,
                     null,
-                    claimBlockedReason(platform)
+                    claimBlockedReason(platform),
+                    null
             ));
         }
         DistributionTask task = claimed.task();
@@ -147,7 +160,7 @@ public class LocalAgentController {
                         task.getEnvironmentKey(),
                         task.getProviderProfileId()
                 );
-        return R.ok(new LocalAgentSelfMediaScheduleClaimResponse(claimed.schedule(), task, launch, null));
+        return R.ok(new LocalAgentSelfMediaScheduleClaimResponse(claimed.schedule(), task, launch, null, null));
     }
 
     @GetMapping("/self-media-schedules/publish-checks/claim-next")
@@ -165,7 +178,8 @@ public class LocalAgentController {
             return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(
                     null,
                     null,
-                    claimBlockedReason(platform)
+                    claimBlockedReason(platform),
+                    null
             ));
         }
         SelfMediaAccount account = schedule.getSelfMediaAccountId() == null
@@ -196,7 +210,7 @@ public class LocalAgentController {
                         environment == null ? null : environment.getName(),
                         environment == null ? null : environment.getProviderProfileId()
                 );
-        return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(schedule, launch, null));
+        return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(schedule, launch, null, null));
     }
 
     @PostMapping("/self-media-schedules/{scheduleId}/heartbeat")

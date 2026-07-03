@@ -8,6 +8,7 @@ import com.huanjing.geo.module.content.mapper.BrowserEnvironmentMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
 import com.huanjing.geo.module.extension.service.LocalAgentSessionService;
+import com.huanjing.geo.module.extension.service.SelfMediaRuntimeStatusService;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -25,7 +26,8 @@ class LocalAgentControllerBaijiahaoAppIdTest {
             mock(BrowserEnvironmentMapper.class),
             mock(BrowserEnvironmentAccountMapper.class),
             mock(SemiAutoPlatformProperties.class),
-            new ObjectMapper()
+            new ObjectMapper(),
+            mock(SelfMediaRuntimeStatusService.class)
     );
 
     @Test

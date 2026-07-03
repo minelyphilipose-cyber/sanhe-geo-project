@@ -16,6 +16,8 @@ import com.huanjing.geo.module.extension.dto.ExtensionSessionVO;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionRuntimeConfigResponse;
+import com.huanjing.geo.module.extension.dto.ExtensionRuntimeStatusReportRequest;
+import com.huanjing.geo.module.extension.dto.ExtensionRuntimeStatusVO;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListItemResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
@@ -37,6 +39,8 @@ import com.huanjing.geo.module.extension.service.ExtensionTaskListService;
 import com.huanjing.geo.module.extension.service.ExtensionTaskStateService;
 import com.huanjing.geo.module.extension.service.ExtensionVersionService;
 import com.huanjing.geo.module.extension.service.LocalAgentSessionService;
+import com.huanjing.geo.module.extension.service.SelfMediaRuntimeStatusService;
+import com.huanjing.geo.module.partner.service.PartnerFeatureAccessGuard;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -66,12 +70,15 @@ public class ExtensionController {
     private final ExtensionTaskListService taskListService;
     private final ExtensionTaskStateService taskStateService;
     private final CurrentUserService currentUserService;
+    private final PartnerFeatureAccessGuard partnerFeatureAccessGuard;
     private final BrowserEnvironmentService browserEnvironmentService;
     private final LocalAgentSessionService localAgentSessionService;
+    private final SelfMediaRuntimeStatusService runtimeStatusService;
 
     @PostMapping("/bind-codes")
     public R<BindCodeCreateResponse> createBindCode(@Valid @RequestBody BindCodeCreateRequest request) {
         SysUser current = currentUserService.requireCurrentUser();
+        ensureInternalExtensionUser(current.getId());
         return R.ok(bindCodeService.create(request.brandId(), current.getId()));
     }
 
@@ -81,6 +88,7 @@ public class ExtensionController {
         versionService.requireSupported(platform, request.extensionVersion());
         ExtensionBindCodeService.BindCodePayload payload =
                 bindCodeService.consume(request.bindCode(), request.brandId(), clientIp(servletRequest));
+        ensureInternalExtensionUser(payload.operatorId());
         return R.ok(sessionService.createBoundSession(
                 payload.brandId(),
                 payload.operatorId(),
@@ -111,17 +119,20 @@ public class ExtensionController {
     @PostMapping("/token/{sessionId}/revoke")
     public R<Void> revokeToken(@PathVariable Long sessionId) {
         SysUser current = currentUserService.requireCurrentUser();
+        ensureInternalExtensionUser(current.getId());
         sessionService.revoke(sessionId, current.getId());
         return R.ok();
     }
 
     @GetMapping("/brands/{brandId}/sessions")
     public R<List<ExtensionSessionVO>> listBrandSessions(@PathVariable Long brandId) {
+        partnerFeatureAccessGuard.ensureInternalDeliveryFeature("local agent operations");
         return R.ok(sessionService.listActiveByBrand(brandId));
     }
 
     @PostMapping("/brands/{brandId}/sessions/{sessionId}/revoke")
     public R<Void> revokeBrandSession(@PathVariable Long brandId, @PathVariable Long sessionId) {
+        partnerFeatureAccessGuard.ensureInternalDeliveryFeature("local agent operations");
         sessionService.revokeForBrand(brandId, sessionId);
         return R.ok();
     }
@@ -133,6 +144,7 @@ public class ExtensionController {
             HttpServletRequest servletRequest
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         String platform = StringUtils.hasText(request.platform()) ? request.platform() : "chrome";
         String version = StringUtils.hasText(request.extensionVersion())
                 ? request.extensionVersion()
@@ -152,6 +164,7 @@ public class ExtensionController {
             HttpServletRequest servletRequest
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         String platform = StringUtils.hasText(request.platform()) ? request.platform() : "chrome";
         String version = StringUtils.hasText(request.extensionVersion())
                 ? request.extensionVersion()
@@ -169,6 +182,7 @@ public class ExtensionController {
             @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(taskListService.listTasksForSessionOperator(session.getOperatorId()));
     }
@@ -178,6 +192,7 @@ public class ExtensionController {
             @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(cookieCaptureService.listAccounts(session.getOperatorId()));
     }
@@ -189,6 +204,7 @@ public class ExtensionController {
             @RequestParam(required = false) String platform
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(browserEnvironmentService.extensionRuntimeConfig(
                 session.getBrandId(),
@@ -198,6 +214,18 @@ public class ExtensionController {
         ));
     }
 
+    @PostMapping("/runtime-status")
+    public R<ExtensionRuntimeStatusVO> reportRuntimeStatus(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @RequestBody(required = false) ExtensionRuntimeStatusReportRequest request
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
+        String version = request == null ? session.getExtensionVersion() : firstText(request.extensionVersion(), session.getExtensionVersion());
+        versionService.requireSupported("chrome", version);
+        return R.ok(runtimeStatusService.reportExtension(session, request));
+    }
+
     @PostMapping("/browser-environment-accounts/{id}/login-status")
     public R<BrowserEnvironmentAccountVO> reportBrowserEnvironmentLoginStatus(
             @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
@@ -205,6 +233,7 @@ public class ExtensionController {
             @Valid @RequestBody BrowserEnvironmentLoginStatusRequest request
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(browserEnvironmentService.reportLoginStatusForExtension(
                 id,
@@ -219,6 +248,7 @@ public class ExtensionController {
             @Valid @RequestBody BrowserEnvironmentLoginStatusRequest request
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(browserEnvironmentService.reportLoginStatusForExtensionByEnvironmentAndPlatform(
                 request,
@@ -233,6 +263,7 @@ public class ExtensionController {
             @Valid @RequestBody BrowserEnvironmentBrandLoginStatusRequest request
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         if (!brandId.equals(session.getBrandId())) {
             return R.fail(403, "brandId does not match extension session");
@@ -250,6 +281,7 @@ public class ExtensionController {
             @Valid @RequestBody LocalAgentExtensionSignRequest request
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(localAgentSessionService.signRequestForExtension(session, request));
     }
@@ -260,6 +292,7 @@ public class ExtensionController {
             @Valid @RequestBody ExtensionCookieCaptureRequest request
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported(request.platform(), request.extensionVersion());
         return R.ok(cookieCaptureService.capture(request, session.getOperatorId(), session.getId()));
     }
@@ -271,6 +304,7 @@ public class ExtensionController {
             @RequestBody(required = false) Map<String, Object> request
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(taskStateService.ackFilled(taskId, session.getOperatorId(), session.getId(), request));
     }
@@ -281,6 +315,7 @@ public class ExtensionController {
             @PathVariable Long taskId
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(taskStateService.heartbeat(
                 taskId,
@@ -296,6 +331,7 @@ public class ExtensionController {
             @Valid @RequestBody(required = false) ExtensionTaskPublishReportRequest request
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(taskStateService.published(taskId, session.getOperatorId(), session.getId(), request));
     }
@@ -306,6 +342,7 @@ public class ExtensionController {
             @PathVariable Long taskId
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(taskStateService.abandon(taskId, session.getOperatorId(), session.getId()));
     }
@@ -317,8 +354,13 @@ public class ExtensionController {
             @RequestBody(required = false) Map<String, Object> request
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        ensureInternalExtensionUser(session.getOperatorId());
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(taskStateService.fail(taskId, session.getOperatorId(), session.getId(), request));
+    }
+
+    private void ensureInternalExtensionUser(Long operatorId) {
+        partnerFeatureAccessGuard.ensureInternalDeliveryUser(operatorId, "local agent operations");
     }
 
     private String clientIp(HttpServletRequest request) {
@@ -327,5 +369,17 @@ public class ExtensionController {
             return forwarded.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    private String firstText(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 }
