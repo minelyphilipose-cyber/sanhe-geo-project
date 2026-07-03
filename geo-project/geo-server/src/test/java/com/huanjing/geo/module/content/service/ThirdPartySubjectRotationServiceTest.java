@@ -1,38 +1,87 @@
 package com.huanjing.geo.module.content.service;
 
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.SubjectBrandLastSelectedRow;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolBrandRow;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
+import com.huanjing.geo.module.content.entity.ThirdPartySubjectPoolItem;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
+import com.huanjing.geo.module.content.mapper.ThirdPartySubjectPoolItemMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
+import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class ThirdPartySubjectRotationServiceTest {
 
-    private final BrandMapper brandMapper = mock(BrandMapper.class);
-    private final BatchArticleGenerationTaskMapper taskMapper = mock(BatchArticleGenerationTaskMapper.class);
-    private final ThirdPartySubjectRotationService service =
-            new ThirdPartySubjectRotationService(brandMapper, taskMapper, new SpecialIndustryService());
+    @Mock
+    private BrandMapper brandMapper;
+    @Mock
+    private BatchArticleGenerationTaskMapper taskMapper;
+    @Mock
+    private ThirdPartySubjectPoolItemMapper poolItemMapper;
+    @Mock
+    private SysDictItemMapper sysDictItemMapper;
+    @Mock
+    private SpecialIndustryService specialIndustryService;
+    @Mock
+    private ArticleModelResolver articleModelResolver;
+    @Mock
+    private CurrentUserService currentUserService;
+
+    @Test
+    void convertsStandardIndustryKeysToLabelsBeforeLlmMatching() {
+        List<String> labels = service().toIndustryLabels(
+                List.of("home_decoration", "全屋智能"),
+                Map.of("home_decoration", "家装家居")
+        );
+
+        assertThat(labels).containsExactly("家装家居", "全屋智能");
+    }
+
+    @Test
+    void ignoresLlmMatchedIndustriesOutsideCandidateSet() {
+        Set<String> matched = service().parseMatchedIndustries(
+                """
+                        {"matchedIndustries":["智能家居","不存在行业","房产家居行业"]}
+                        """,
+                List.of("智能家居", "房产家居")
+        );
+
+        assertThat(matched).containsExactly("智能家居");
+    }
 
     @Test
     void resolveKeepsSourceWhenPerspectiveIsCustomer() {
-        Project sourceProject = project(10L, 1L);
-        Brand sourceBrand = brand(1L, "[\"__ALL__\"]");
+        Project sourceProject = sourceProject();
+        Brand sourceBrand = sourceBrand();
 
-        ThirdPartySubjectRotationService.RotationResult result = service.resolve(
+        ThirdPartySubjectRotationService.RotationResult result = service().resolve(
                 sourceProject,
                 sourceBrand,
                 ArticlePromptChannels.SELF_MEDIA,
@@ -41,46 +90,23 @@ class ThirdPartySubjectRotationServiceTest {
 
         assertThat(result.rotated()).isFalse();
         assertThat(result.subjectBrandId()).isEqualTo(1L);
-        assertThat(result.subjectProjectId()).isEqualTo(10L);
-        verifyNoInteractions(brandMapper, taskMapper);
+        assertThat(result.subjectProjectId()).isEqualTo(1001L);
+        verifyNoInteractions(brandMapper, taskMapper, poolItemMapper);
     }
 
     @Test
-    void resolveKeepsSourceWhenPerspectiveIsNotThirdParty() {
-        Project sourceProject = project(10L, 1L);
-        Brand sourceBrand = brand(1L, "[\"__ALL__\"]");
+    void resolveChoosesOnlyConfirmedSubjects() {
+        Brand sourceBrand = sourceBrand();
+        Project sourceProject = sourceProject();
+        ThirdPartySubjectPoolItem confirmed = poolItem(3L, 3003L);
+        ThirdPartySubjectPoolBrandRow unconfirmedEligible = eligibleRow(2L, "未确认品牌", "智能家居", 3002L);
+        ThirdPartySubjectPoolBrandRow confirmedEligible = eligibleRow(3L, "已确认品牌", "装修服务", 3003L);
+        stubNoMedical();
+        when(poolItemMapper.selectList(any())).thenReturn(List.of(confirmed));
+        when(brandMapper.selectThirdPartySubjectPoolRows()).thenReturn(List.of(unconfirmedEligible, confirmedEligible));
+        when(taskMapper.selectLastSelectedBySourceBrand(anyLong(), anyList())).thenReturn(List.of());
 
-        ThirdPartySubjectRotationService.RotationResult result = service.resolve(
-                sourceProject,
-                sourceBrand,
-                ArticlePromptChannels.SELF_MEDIA,
-                "some_future_non_customer_perspective"
-        );
-
-        assertThat(result.rotated()).isFalse();
-        assertThat(result.subjectBrandId()).isEqualTo(1L);
-        assertThat(result.subjectProjectId()).isEqualTo(10L);
-        verifyNoInteractions(brandMapper, taskMapper);
-    }
-
-    @Test
-    void resolvePicksNeverSelectedCandidateBeforeRecentlySelectedOne() {
-        Project sourceProject = project(10L, 1L);
-        Brand sourceBrand = brand(1L, "[\"__ALL__\"]");
-        SubjectBrandLastSelectedRow row = new SubjectBrandLastSelectedRow();
-        row.setSubjectBrandId(2L);
-        row.setLastSelectedTaskId(100L);
-        row.setLastSelectedAt(LocalDateTime.now().minusDays(1));
-
-        when(brandMapper.lockActiveBrandById(1L)).thenReturn(1L);
-        when(brandMapper.selectThirdPartySubjectPoolRows()).thenReturn(List.of(
-                poolRow(1L, "百业观察", "综合", true, "signed", true, 10L, null),
-                poolRow(2L, "已选过品牌", "消费电子", true, "signed", true, 20L, null),
-                poolRow(3L, "未选过品牌", "消费电子", true, "signed", true, 30L, null)
-        ));
-        when(taskMapper.selectLastSelectedBySourceBrand(1L, List.of(2L, 3L))).thenReturn(List.of(row));
-
-        ThirdPartySubjectRotationService.RotationResult result = service.resolve(
+        ThirdPartySubjectRotationService.RotationResult result = service().resolve(
                 sourceProject,
                 sourceBrand,
                 ArticlePromptChannels.SELF_MEDIA,
@@ -88,29 +114,24 @@ class ThirdPartySubjectRotationServiceTest {
         );
 
         assertThat(result.rotated()).isTrue();
-        assertThat(result.sourceBrandId()).isEqualTo(1L);
         assertThat(result.subjectBrandId()).isEqualTo(3L);
-        assertThat(result.subjectProjectId()).isEqualTo(30L);
-        verify(brandMapper).lockActiveBrandById(1L);
+        assertThat(result.subjectProjectId()).isEqualTo(3003L);
     }
 
     @Test
-    void resolveUsesTaskIdWhenCandidatesShareSameSelectedTime() {
-        Project sourceProject = project(10L, 1L);
-        Brand sourceBrand = brand(1L, "[\"__ALL__\"]");
-        LocalDateTime sameTime = LocalDateTime.now().minusMinutes(5);
-        SubjectBrandLastSelectedRow earlierRow = lastSelectedRow(2L, 100L, sameTime);
-        SubjectBrandLastSelectedRow laterRow = lastSelectedRow(3L, 101L, sameTime);
-
-        when(brandMapper.lockActiveBrandById(1L)).thenReturn(1L);
+    void resolvePicksNeverSelectedConfirmedSubjectBeforeRecentlySelectedOne() {
+        Brand sourceBrand = sourceBrand();
+        Project sourceProject = sourceProject();
+        SubjectBrandLastSelectedRow selectedRow = lastSelectedRow(2L, 100L, LocalDateTime.now().minusDays(1));
+        stubNoMedical();
+        when(poolItemMapper.selectList(any())).thenReturn(List.of(poolItem(2L, 2002L), poolItem(3L, 3003L)));
         when(brandMapper.selectThirdPartySubjectPoolRows()).thenReturn(List.of(
-                poolRow(2L, "较早选中品牌", "消费电子", true, "signed", true, 20L, null),
-                poolRow(3L, "较晚选中品牌", "消费电子", true, "signed", true, 30L, null)
+                eligibleRow(2L, "已选过品牌", "智能家居", 2002L),
+                eligibleRow(3L, "未选过品牌", "智能家居", 3003L)
         ));
-        when(taskMapper.selectLastSelectedBySourceBrand(1L, List.of(2L, 3L)))
-                .thenReturn(List.of(earlierRow, laterRow));
+        when(taskMapper.selectLastSelectedBySourceBrand(1L, List.of(2L, 3L))).thenReturn(List.of(selectedRow));
 
-        ThirdPartySubjectRotationService.RotationResult result = service.resolve(
+        ThirdPartySubjectRotationService.RotationResult result = service().resolve(
                 sourceProject,
                 sourceBrand,
                 ArticlePromptChannels.SELF_MEDIA,
@@ -118,94 +139,117 @@ class ThirdPartySubjectRotationServiceTest {
         );
 
         assertThat(result.rotated()).isTrue();
-        assertThat(result.subjectBrandId()).isEqualTo(2L);
-        assertThat(result.subjectProjectId()).isEqualTo(20L);
+        assertThat(result.subjectBrandId()).isEqualTo(3L);
+        assertThat(result.subjectProjectId()).isEqualTo(3003L);
     }
 
     @Test
-    void previewPoolSplitsCandidatesAndExcludedRowsWithReasons() {
-        Brand sourceBrand = brand(1L, "[\"消费电子\"]");
-        SubjectBrandLastSelectedRow selectedRow = new SubjectBrandLastSelectedRow();
-        selectedRow.setSubjectBrandId(2L);
-        selectedRow.setLastSelectedTaskId(200L);
-        selectedRow.setLastSelectedAt(LocalDateTime.now().minusHours(2));
+    void resolveFailsWhenConfirmedSubjectBecomesIneligible() {
+        Brand sourceBrand = sourceBrand();
+        Project sourceProject = sourceProject();
+        ThirdPartySubjectPoolBrandRow unavailableConfirmed = eligibleRow(2L, "失效品牌", "智能家居", null);
+        stubNoMedical();
+        when(poolItemMapper.selectList(any())).thenReturn(List.of(poolItem(2L, 2002L)));
+        when(brandMapper.selectThirdPartySubjectPoolRows()).thenReturn(List.of(unavailableConfirmed));
 
+        assertThatThrownBy(() -> service().resolve(
+                sourceProject,
+                sourceBrand,
+                ArticlePromptChannels.SELF_MEDIA,
+                TemplatePerspectiveCodes.INDUSTRY_NEUTRAL
+        ))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("已确认的第三方主体当前均不可用");
+    }
+
+    @Test
+    void previewPoolCountsConfirmedAvailableAndUnavailableSeparately() {
+        Brand sourceBrand = sourceBrand();
+        ThirdPartySubjectPoolItem availableItem = poolItem(2L, 2002L);
+        ThirdPartySubjectPoolItem unavailableItem = poolItem(3L, 3003L);
+        ThirdPartySubjectPoolBrandRow availableConfirmed = eligibleRow(2L, "可用品牌", "智能家居", 2002L);
+        ThirdPartySubjectPoolBrandRow unavailableConfirmed = eligibleRow(3L, "失效品牌", "装修服务", null);
+        ThirdPartySubjectPoolBrandRow availableUnconfirmed = eligibleRow(4L, "未入池品牌", "全屋智能", 4004L);
+        stubNoMedical();
         when(brandMapper.selectById(1L)).thenReturn(sourceBrand);
+        when(poolItemMapper.selectList(any())).thenReturn(List.of(availableItem, unavailableItem));
         when(brandMapper.selectThirdPartySubjectPoolRows()).thenReturn(List.of(
-                poolRow(1L, "百业观察", "消费电子", true, "signed", true, 10L, null),
-                poolRow(2L, "华为", "消费电子", true, "signed", true, 20L, null),
-                poolRow(3L, "小米", "消费电子", true, "signed", true, 30L, null),
-                poolRow(4L, "口腔品牌", "口腔", true, "signed", true, 40L, "oral"),
-                poolRow(5L, "未签约品牌", "消费电子", true, "trial", true, 50L, null),
-                poolRow(6L, "餐饮品牌", "餐饮", true, "signed", true, 60L, null),
-                poolRow(7L, "关闭推广品牌", "消费电子", false, "signed", true, 70L, null),
-                poolRow(8L, "无项目品牌", "消费电子", true, "signed", true, null, null)
+                availableConfirmed,
+                unavailableConfirmed,
+                availableUnconfirmed
         ));
-        when(taskMapper.selectLastSelectedBySourceBrand(1L, List.of(2L, 3L))).thenReturn(List.of(selectedRow));
+        when(taskMapper.selectLastSelectedBySourceBrand(anyLong(), anyList())).thenReturn(List.of());
 
-        ThirdPartySubjectPoolPreviewResponse response = service.previewPool(1L);
+        ThirdPartySubjectPoolPreviewResponse response = service().previewPool(1L, 10, 10);
 
-        assertThat(response.validSource()).isTrue();
+        assertThat(response.candidateCount()).isEqualTo(1);
+        assertThat(response.confirmedCount()).isEqualTo(2);
+        assertThat(response.unavailableCount()).isEqualTo(1);
+        assertThat(response.candidates())
+                .extracting(ThirdPartySubjectPoolPreviewResponse.Item::brandId)
+                .containsExactly(2L, 3L);
+        assertThat(response.candidates())
+                .filteredOn(item -> item.brandId().equals(3L))
+                .singleElement()
+                .satisfies(item -> {
+                    assertThat(item.available()).isFalse();
+                    assertThat(item.reasonCode()).isEqualTo("no_active_project");
+                });
+        assertThat(response.availableSubjects())
+                .extracting(ThirdPartySubjectPoolPreviewResponse.Item::brandId)
+                .containsExactly(4L);
+    }
+
+    @Test
+    void previewPoolKeepsConfirmedCountsWhenDisplayRowsAreLimited() {
+        Brand sourceBrand = sourceBrand();
+        stubNoMedical();
+        when(brandMapper.selectById(1L)).thenReturn(sourceBrand);
+        when(poolItemMapper.selectList(any())).thenReturn(List.of(poolItem(2L, 2002L), poolItem(3L, 3003L)));
+        when(brandMapper.selectThirdPartySubjectPoolRows()).thenReturn(List.of(
+                eligibleRow(2L, "可用品牌A", "智能家居", 2002L),
+                eligibleRow(3L, "可用品牌B", "装修服务", 3003L),
+                eligibleRow(4L, "未签约品牌", "智能家居", 4004L),
+                eligibleRow(5L, "无项目品牌", "全屋智能", null)
+        ));
+        when(taskMapper.selectLastSelectedBySourceBrand(anyLong(), anyList())).thenReturn(List.of());
+
+        ThirdPartySubjectPoolPreviewResponse response = service().previewPool(1L, 1, 1);
+
         assertThat(response.candidateCount()).isEqualTo(2);
-        assertThat(response.candidates()).extracting(ThirdPartySubjectPoolPreviewResponse.Item::brandId)
-                .containsExactly(3L, 2L);
-        assertThat(response.candidates().get(0).lastSelectedAt()).isNull();
-        assertThat(response.excluded()).extracting(ThirdPartySubjectPoolPreviewResponse.Item::reasonCode)
-                .contains(
-                        "source_self",
-                        "medical_or_oral_excluded",
-                        "company_not_signed",
-                        "industry_not_matched",
-                        "promotion_disabled",
-                        "no_active_project"
-                );
-    }
-
-    @Test
-    void previewPoolMarksAllRowsExcludedWhenSourceHasNoCoverage() {
-        Brand sourceBrand = brand(1L, null);
-
-        when(brandMapper.selectById(1L)).thenReturn(sourceBrand);
-        when(brandMapper.selectThirdPartySubjectPoolRows()).thenReturn(List.of(
-                poolRow(2L, "华为", "消费电子", true, "signed", true, 20L, null)
-        ));
-
-        ThirdPartySubjectPoolPreviewResponse response = service.previewPool(1L);
-
-        assertThat(response.validSource()).isFalse();
-        assertThat(response.candidates()).isEmpty();
-        assertThat(response.excluded()).singleElement()
-                .extracting(ThirdPartySubjectPoolPreviewResponse.Item::reasonCode)
-                .isEqualTo("source_not_configured");
-    }
-
-    @Test
-    void previewPoolKeepsTotalCountsWhenDisplayRowsAreLimited() {
-        Brand sourceBrand = brand(1L, "[\"消费电子\"]");
-
-        when(brandMapper.selectById(1L)).thenReturn(sourceBrand);
-        when(brandMapper.selectThirdPartySubjectPoolRows()).thenReturn(List.of(
-                poolRow(2L, "华为", "消费电子", true, "signed", true, 20L, null),
-                poolRow(3L, "小米", "消费电子", true, "signed", true, 30L, null),
-                poolRow(4L, "未签约品牌A", "消费电子", true, "trial", true, 40L, null),
-                poolRow(5L, "未签约品牌B", "消费电子", true, "trial", true, 50L, null)
-        ));
-        when(taskMapper.selectLastSelectedBySourceBrand(1L, List.of(2L, 3L))).thenReturn(List.of());
-
-        ThirdPartySubjectPoolPreviewResponse response = service.previewPool(1L, 1, 1);
-
-        assertThat(response.candidateCount()).isEqualTo(2);
-        assertThat(response.excludedCount()).isEqualTo(2);
+        assertThat(response.confirmedCount()).isEqualTo(2);
         assertThat(response.candidateDisplayCount()).isEqualTo(1);
         assertThat(response.excludedDisplayCount()).isEqualTo(1);
         assertThat(response.candidates()).hasSize(1);
         assertThat(response.excluded()).hasSize(1);
     }
 
-    private Project project(Long id, Long brandId) {
+    private ThirdPartySubjectRotationService service() {
+        return new ThirdPartySubjectRotationService(
+                brandMapper,
+                taskMapper,
+                poolItemMapper,
+                sysDictItemMapper,
+                specialIndustryService,
+                articleModelResolver,
+                null,
+                currentUserService
+        );
+    }
+
+    private Brand sourceBrand() {
+        Brand brand = new Brand();
+        brand.setId(1L);
+        brand.setBrandName("信源品牌");
+        brand.setCoverableIndustries("[\"家装家居\",\"智能家居\",\"装修服务\",\"全屋智能\"]");
+        return brand;
+    }
+
+    private Project sourceProject() {
         Project project = new Project();
-        project.setId(id);
-        project.setBrandId(brandId);
+        project.setId(1001L);
+        project.setBrandId(1L);
+        project.setBrandName("信源品牌");
         return project;
     }
 
@@ -217,33 +261,34 @@ class ThirdPartySubjectRotationServiceTest {
         return row;
     }
 
-    private Brand brand(Long id, String coverableIndustries) {
-        Brand brand = new Brand();
-        brand.setId(id);
-        brand.setCoverableIndustries(coverableIndustries);
-        brand.setBrandName("brand-" + id);
-        return brand;
+    private ThirdPartySubjectPoolBrandRow eligibleRow(Long brandId, String brandName, String industry, Long subjectProjectId) {
+        ThirdPartySubjectPoolBrandRow row = new ThirdPartySubjectPoolBrandRow();
+        row.setBrandId(brandId);
+        row.setBrandName(brandName);
+        row.setIndustry(industry);
+        row.setComplianceIndustryCode(industry);
+        row.setAllowThirdPartyPromotion(true);
+        row.setCompanyId(brandId + 1000L);
+        row.setCompanyName(brandName + "公司");
+        row.setCompanyStatus("signed");
+        row.setHasActivePackage(true);
+        row.setSubjectProjectId(subjectProjectId);
+        return row;
     }
 
-    private ThirdPartySubjectPoolBrandRow poolRow(Long id,
-                                                  String name,
-                                                  String industry,
-                                                  boolean allowThirdPartyPromotion,
-                                                  String companyStatus,
-                                                  boolean hasActivePackage,
-                                                  Long subjectProjectId,
-                                                  String complianceIndustryCode) {
-        ThirdPartySubjectPoolBrandRow row = new ThirdPartySubjectPoolBrandRow();
-        row.setBrandId(id);
-        row.setBrandName(name);
-        row.setIndustry(industry);
-        row.setAllowThirdPartyPromotion(allowThirdPartyPromotion);
-        row.setCompanyStatus(companyStatus);
-        row.setHasActivePackage(hasActivePackage);
-        row.setSubjectProjectId(subjectProjectId);
-        row.setComplianceIndustryCode(complianceIndustryCode);
-        row.setCompanyId(id + 1000);
-        row.setCompanyName("company-" + id);
-        return row;
+    private ThirdPartySubjectPoolItem poolItem(Long subjectBrandId, Long subjectProjectId) {
+        ThirdPartySubjectPoolItem item = new ThirdPartySubjectPoolItem();
+        item.setId(subjectBrandId);
+        item.setSourceBrandId(1L);
+        item.setSubjectBrandId(subjectBrandId);
+        item.setSubjectProjectId(subjectProjectId);
+        item.setMatchSource("direct");
+        item.setMatchedIndustry("智能家居");
+        item.setConfirmedAt(LocalDateTime.now());
+        return item;
+    }
+
+    private void stubNoMedical() {
+        when(specialIndustryService.detectMedicalIndustryCode(any(), any())).thenReturn(Optional.empty());
     }
 }

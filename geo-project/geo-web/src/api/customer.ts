@@ -174,6 +174,9 @@ export interface ThirdPartySubjectPoolItem {
   companyName?: string | null
   subjectProjectId?: number | null
   lastSelectedAt?: string | null
+  available?: boolean | null
+  matchSource?: string | null
+  matchedIndustry?: string | null
   reasonCode?: string | null
   reason?: string | null
 }
@@ -184,12 +187,19 @@ export interface ThirdPartySubjectPoolPreview {
   coverableIndustries: string[]
   includeAllIndustries: boolean
   validSource: boolean
+  confirmed?: boolean
+  lastConfirmedAt?: string | null
+  llmFailed?: boolean
+  llmFailureMessage?: string | null
   candidateCount: number
   excludedCount: number
+  unavailableCount?: number
+  confirmedCount?: number
   candidateDisplayCount: number
   excludedDisplayCount: number
   candidates: ThirdPartySubjectPoolItem[]
   excluded: ThirdPartySubjectPoolItem[]
+  availableSubjects?: ThirdPartySubjectPoolItem[]
 }
 
 export function getThirdPartySubjectPool(
@@ -197,6 +207,23 @@ export function getThirdPartySubjectPool(
   params?: { candidateLimit?: number; excludedLimit?: number },
 ) {
   return request.get<R<ThirdPartySubjectPoolPreview>>(`/brands/${brandId}/third-party-subject-pool`, { params })
+}
+
+export function suggestThirdPartySubjectPool(
+  brandId: number,
+  data: { coverableIndustries: string[]; mode: 'initial' | 'incremental' | string },
+) {
+  return request.post<R<ThirdPartySubjectPoolPreview>>(`/brands/${brandId}/third-party-subject-pool/suggest`, data)
+}
+
+export function saveThirdPartySubjectPool(
+  brandId: number,
+  data: {
+    coverableIndustries: string[]
+    subjects: Array<{ brandId: number; matchSource?: string | null; matchedIndustry?: string | null }>
+  },
+) {
+  return request.put<R<ThirdPartySubjectPoolPreview>>(`/brands/${brandId}/third-party-subject-pool`, data)
 }
 
 export function createBrand(data: Record<string, any>) {

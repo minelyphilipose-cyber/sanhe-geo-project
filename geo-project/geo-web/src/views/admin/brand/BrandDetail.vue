@@ -580,21 +580,72 @@
           <div class="flex items-center gap-2">
             <span>第三方主体池预览</span>
             <el-tag :type="subjectPool?.validSource ? 'success' : 'warning'">
-              {{ subjectPool?.validSource ? `可候选 ${subjectPool.candidateCount}` : '待配置覆盖行业' }}
+              {{ subjectPoolStatusText }}
             </el-tag>
+            <el-tag v-if="subjectPool?.unavailableCount" type="danger">失效 {{ subjectPool.unavailableCount }}</el-tag>
           </div>
-          <el-button link type="primary" :loading="subjectPoolLoading" @click="loadSubjectPool">刷新</el-button>
+          <el-button link type="primary" :loading="subjectPoolLoading" @click="loadSubjectPool">刷新页面数据</el-button>
         </div>
       </template>
       <div v-if="subjectPool" class="subject-pool-wrap">
+        <el-form label-position="top" class="subject-pool-config">
+          <el-form-item label="信源可覆盖行业">
+            <el-select
+              v-model="subjectPoolDraftIndustries"
+              multiple
+              clearable
+              filterable
+              allow-create
+              default-first-option
+              placeholder="选择或输入覆盖行业"
+              style="width: 100%"
+            >
+              <el-option label="全部行业" value="__ALL__" />
+              <el-option
+                v-for="tag in availableBrandIndustries"
+                :key="tag"
+                :label="industryLabel(tag)"
+                :value="tag"
+              />
+            </el-select>
+          </el-form-item>
+          <div class="subject-pool-actions">
+            <el-button
+              type="primary"
+              :loading="subjectPoolSuggesting"
+              :disabled="!subjectPoolDraftIndustries.length"
+              @click="generateSubjectPoolSuggestion(subjectPool?.confirmed ? 'incremental' : 'initial')"
+            >
+              {{ subjectPool?.confirmed ? '刷新覆盖' : '生成覆盖品牌' }}
+            </el-button>
+            <el-button
+              type="success"
+              :loading="subjectPoolSaving"
+              :disabled="!subjectPoolDraftIndustries.length"
+              @click="confirmSubjectPool"
+            >
+              确认主体池
+            </el-button>
+            <span v-if="subjectPool?.lastConfirmedAt" class="subject-pool-limit-note">
+              最近确认：{{ subjectPool.lastConfirmedAt }}
+            </span>
+          </div>
+        </el-form>
+        <el-alert
+          v-if="subjectPool?.llmFailed"
+          type="warning"
+          show-icon
+          :closable="false"
+          :title="subjectPool.llmFailureMessage || '模型匹配失败，可手动选择主体'"
+        />
         <div class="subject-pool-summary">
           <div>
             <span>信源可覆盖行业</span>
-            <strong>{{ subjectPoolCoverageText }}</strong>
+            <strong>{{ subjectPoolDraftCoverageText }}</strong>
           </div>
           <div>
             <span>候选主体</span>
-            <strong>{{ subjectPool.candidateCount }}</strong>
+            <strong>{{ subjectPoolDraftItems.length }}</strong>
           </div>
           <div>
             <span>排除品牌</span>
@@ -602,7 +653,7 @@
           </div>
         </div>
         <el-alert
-          v-if="!subjectPool.validSource"
+          v-if="!subjectPoolDraftIndustries.length"
           type="warning"
           show-icon
           :closable="false"
@@ -615,7 +666,25 @@
             </el-button>
           </div>
         </el-alert>
-        <el-table :data="subjectPool.candidates" border empty-text="暂无可轮换主体">
+        <div class="subject-pool-manual-add">
+          <el-select
+            v-model="subjectPoolManualAddIds"
+            multiple
+            filterable
+            clearable
+            placeholder="从合格品牌中手动添加"
+            style="width: 420px; max-width: 100%"
+          >
+            <el-option
+              v-for="item in subjectPoolManualOptions"
+              :key="item.brandId"
+              :label="`${item.brandName || item.brandId}（${industryLabel(item.industry)}）`"
+              :value="item.brandId"
+            />
+          </el-select>
+          <el-button :disabled="!subjectPoolManualAddIds.length" @click="addManualSubjectPoolItems">添加</el-button>
+        </div>
+        <el-table :data="subjectPoolDraftItems" border empty-text="暂无可轮换主体">
           <el-table-column label="候选品牌" min-width="180">
             <template #default="{ row }">
               <div class="detail-task-cell">
@@ -630,13 +699,25 @@
           <el-table-column label="主体项目" width="120">
             <template #default="{ row }">{{ row.subjectProjectId || '-' }}</template>
           </el-table-column>
+          <el-table-column label="来源" width="120">
+            <template #default="{ row }">{{ subjectPoolMatchSourceLabel(row.matchSource) }}</template>
+          </el-table-column>
           <el-table-column label="最近选中" width="180">
             <template #default="{ row }">{{ row.lastSelectedAt || '从未选中' }}</template>
           </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.available === false ? 'danger' : 'success'">
+                {{ row.available === false ? '已失效' : '可用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90">
+            <template #default="{ row }">
+              <el-button link type="danger" @click="removeSubjectPoolItem(row.brandId)">移除</el-button>
+            </template>
+          </el-table-column>
         </el-table>
-        <div v-if="subjectPool.candidateDisplayCount < subjectPool.candidateCount" class="subject-pool-limit-note">
-          候选主体较多，当前仅展示前 {{ subjectPool.candidateDisplayCount }} / {{ subjectPool.candidateCount }} 条。
-        </div>
         <el-collapse v-if="subjectPool.excluded.length" class="subject-pool-excluded">
           <el-collapse-item :title="`查看排除项 ${subjectPool.excludedDisplayCount}/${subjectPool.excludedCount}`" name="excluded">
             <div v-if="subjectPool.excludedDisplayCount < subjectPool.excludedCount" class="subject-pool-limit-note">
@@ -847,7 +928,16 @@
             ref="coverableIndustriesFieldRef"
             label="信源覆盖行业"
           >
-            <el-select v-model="brandForm.coverableIndustries" multiple clearable filterable placeholder="不选择则不作为第三方信源" style="width: 100%">
+            <el-select
+              v-model="brandForm.coverableIndustries"
+              multiple
+              clearable
+              filterable
+              allow-create
+              default-first-option
+              placeholder="不选择则不作为第三方信源，可手动输入"
+              style="width: 100%"
+            >
               <el-option label="全部行业" value="__ALL__" />
               <el-option
                 v-for="tag in availableBrandIndustries"
@@ -1217,12 +1307,15 @@ import {
   getBrandDetail,
   getBrandOfferings,
   getThirdPartySubjectPool,
+  suggestThirdPartySubjectPool,
+  saveThirdPartySubjectPool,
   testBrandGeoSite,
   updateBrand,
   deleteBrand,
   getCompanyDetail,
   updateBrandOffering,
   type ThirdPartySubjectPoolPreview,
+  type ThirdPartySubjectPoolItem,
 } from '@/api/customer'
 import {
   createBrowserEnvironment,
@@ -1309,6 +1402,11 @@ const perspectiveConfigVisible = ref(false)
 const brand = ref<Brand | null>(null)
 const subjectPool = ref<ThirdPartySubjectPoolPreview | null>(null)
 const subjectPoolLoading = ref(false)
+const subjectPoolSuggesting = ref(false)
+const subjectPoolSaving = ref(false)
+const subjectPoolDraftIndustries = ref<string[]>([])
+const subjectPoolDraftItems = ref<ThirdPartySubjectPoolItem[]>([])
+const subjectPoolManualAddIds = ref<number[]>([])
 const coverableIndustriesFieldRef = ref<any>(null)
 const selfMediaAccounts = ref<SemiAutoSelfMediaAccount[]>([])
 const browserEnvironments = ref<BrowserEnvironment[]>([])
@@ -1793,6 +1891,19 @@ const brandTextInfoItems = computed(() => [
 ])
 
 const subjectPoolCoverageText = computed(() => coverableIndustryLabels(subjectPool.value?.coverableIndustries || []))
+const subjectPoolDraftCoverageText = computed(() => coverableIndustryLabels(subjectPoolDraftIndustries.value))
+const subjectPoolStatusText = computed(() => {
+  if (!subjectPool.value) return '暂无数据'
+  if (!subjectPoolDraftIndustries.value.length) return '待配置覆盖行业'
+  if (!subjectPool.value.confirmed && !subjectPoolDraftItems.value.length) return '待生成覆盖品牌'
+  if (!subjectPool.value.confirmed && subjectPoolDraftItems.value.length) return '待确认主体池'
+  if (subjectPoolDraftItems.value.length === 0) return '主体池为空'
+  return `可候选 ${subjectPoolDraftItems.value.filter((item) => item.available !== false).length}`
+})
+const subjectPoolManualOptions = computed(() => {
+  const selected = new Set(subjectPoolDraftItems.value.map((item) => item.brandId))
+  return (subjectPool.value?.availableSubjects || []).filter((item) => !selected.has(item.brandId))
+})
 
 function industryLabel(value?: string | null) {
   if (!value) return '-'
@@ -2425,11 +2536,115 @@ async function loadSubjectPool() {
   try {
     const { data } = await getThirdPartySubjectPool(brandId)
     subjectPool.value = data.data || null
+    subjectPoolDraftIndustries.value = parseCoverableIndustries(subjectPool.value?.coverableIndustries || brand.value?.coverableIndustries)
+    subjectPoolDraftItems.value = [...(subjectPool.value?.candidates || [])]
+    subjectPoolManualAddIds.value = []
   } catch {
     subjectPool.value = null
+    subjectPoolDraftIndustries.value = []
+    subjectPoolDraftItems.value = []
+    subjectPoolManualAddIds.value = []
   } finally {
     subjectPoolLoading.value = false
   }
+}
+
+async function generateSubjectPoolSuggestion(mode: 'initial' | 'incremental') {
+  if (!hasValidId) return
+  const coverableIndustries = normalizeSubjectPoolIndustries(subjectPoolDraftIndustries.value)
+  if (!coverableIndustries.length) {
+    ElMessage.warning('请先填写信源可覆盖行业')
+    return
+  }
+  subjectPoolSuggesting.value = true
+  try {
+    const { data } = await suggestThirdPartySubjectPool(brandId, { coverableIndustries, mode })
+    subjectPool.value = data.data || null
+    subjectPoolDraftIndustries.value = coverableIndustries
+    const existing = mode === 'incremental' ? subjectPoolDraftItems.value : []
+    subjectPoolDraftItems.value = mergeSubjectPoolItems(existing, subjectPool.value?.candidates || [])
+    subjectPoolManualAddIds.value = []
+    if (subjectPool.value?.llmFailed) {
+      ElMessage.warning(subjectPool.value.llmFailureMessage || '模型匹配失败，可手动选择主体')
+    } else {
+      ElMessage.success(mode === 'incremental' ? '刷新覆盖完成，请确认主体池' : '覆盖品牌已生成，请确认主体池')
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '生成覆盖品牌失败')
+  } finally {
+    subjectPoolSuggesting.value = false
+  }
+}
+
+async function confirmSubjectPool() {
+  if (!hasValidId) return
+  const coverableIndustries = normalizeSubjectPoolIndustries(subjectPoolDraftIndustries.value)
+  if (!coverableIndustries.length) {
+    ElMessage.warning('请先填写信源可覆盖行业')
+    return
+  }
+  subjectPoolSaving.value = true
+  try {
+    const { data } = await saveThirdPartySubjectPool(brandId, {
+      coverableIndustries,
+      subjects: subjectPoolDraftItems.value.map((item) => ({
+        brandId: item.brandId,
+        matchSource: item.matchSource || 'manual',
+        matchedIndustry: item.matchedIndustry || item.industry || null,
+      })),
+    })
+    subjectPool.value = data.data || null
+    subjectPoolDraftIndustries.value = parseCoverableIndustries(subjectPool.value?.coverableIndustries || coverableIndustries)
+    subjectPoolDraftItems.value = [...(subjectPool.value?.candidates || [])]
+    subjectPoolManualAddIds.value = []
+    if (brand.value) {
+      brand.value.coverableIndustries = subjectPoolDraftIndustries.value
+    }
+    ElMessage.success('第三方主体池已确认')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '确认主体池失败')
+  } finally {
+    subjectPoolSaving.value = false
+  }
+}
+
+function addManualSubjectPoolItems() {
+  if (!subjectPoolManualAddIds.value.length) return
+  const optionMap = new Map((subjectPool.value?.availableSubjects || []).map((item) => [item.brandId, item]))
+  const additions = subjectPoolManualAddIds.value
+    .map((id) => optionMap.get(id))
+    .filter((item): item is ThirdPartySubjectPoolItem => !!item)
+    .map((item) => ({ ...item, matchSource: 'manual', matchedIndustry: item.matchedIndustry || item.industry || null }))
+  subjectPoolDraftItems.value = mergeSubjectPoolItems(subjectPoolDraftItems.value, additions)
+  subjectPoolManualAddIds.value = []
+}
+
+function removeSubjectPoolItem(brandId: number) {
+  subjectPoolDraftItems.value = subjectPoolDraftItems.value.filter((item) => item.brandId !== brandId)
+}
+
+function mergeSubjectPoolItems(base: ThirdPartySubjectPoolItem[], additions: ThirdPartySubjectPoolItem[]) {
+  const map = new Map<number, ThirdPartySubjectPoolItem>()
+  for (const item of base) {
+    if (item?.brandId) map.set(item.brandId, item)
+  }
+  for (const item of additions) {
+    if (item?.brandId) map.set(item.brandId, item)
+  }
+  return Array.from(map.values())
+}
+
+function normalizeSubjectPoolIndustries(values: string[]) {
+  const list = (values || []).map((item) => String(item || '').trim()).filter(Boolean)
+  if (list.some((item) => item.toUpperCase() === '__ALL__')) return ['__ALL__']
+  return Array.from(new Set(list))
+}
+
+function subjectPoolMatchSourceLabel(value?: string | null) {
+  if (value === 'direct') return '直接匹配'
+  if (value === 'llm') return '模型匹配'
+  if (value === 'manual') return '人工添加'
+  return '-'
 }
 
 async function refreshSubjectPoolForPerspective() {
@@ -3509,6 +3724,21 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.subject-pool-config {
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.subject-pool-actions,
+.subject-pool-manual-add {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .subject-pool-summary {

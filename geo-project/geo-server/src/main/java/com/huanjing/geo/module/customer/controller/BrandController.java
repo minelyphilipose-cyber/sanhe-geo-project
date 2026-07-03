@@ -15,6 +15,7 @@ import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.entity.BrandProfileVersion;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
+import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolDtos;
 import com.huanjing.geo.module.content.service.ThirdPartySubjectRotationService;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
@@ -72,6 +73,20 @@ public class BrandController {
                                                                          @RequestParam(required = false) Integer excludedLimit) {
         brandService.detail(id);
         return R.ok(thirdPartySubjectRotationService.previewPool(id, candidateLimit, excludedLimit));
+    }
+
+    @PostMapping("/{id}/third-party-subject-pool/suggest")
+    public R<ThirdPartySubjectPoolPreviewResponse> suggestThirdPartySubjectPool(@PathVariable Long id,
+                                                                                @RequestBody(required = false) ThirdPartySubjectPoolDtos.SuggestRequest req) {
+        brandService.requireBrandWithAccess(id, true);
+        return R.ok(thirdPartySubjectRotationService.suggestPool(id, req));
+    }
+
+    @PutMapping("/{id}/third-party-subject-pool")
+    public R<ThirdPartySubjectPoolPreviewResponse> saveThirdPartySubjectPool(@PathVariable Long id,
+                                                                             @Valid @RequestBody ThirdPartySubjectPoolDtos.SaveRequest req) {
+        brandService.requireBrandWithAccess(id, true);
+        return R.ok(thirdPartySubjectRotationService.savePool(id, req));
     }
 
     @PostMapping("/{id}/geo-site/test")
