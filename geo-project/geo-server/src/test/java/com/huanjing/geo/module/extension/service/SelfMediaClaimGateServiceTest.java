@@ -78,4 +78,23 @@ class SelfMediaClaimGateServiceTest {
 
         assertTrue(evaluation.markManualRequired());
     }
+
+    @Test
+    void capabilityUnsupportedIsTerminalReason() {
+        SelfMediaRuntimeReadinessService readinessService = mock(SelfMediaRuntimeReadinessService.class);
+        SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
+        properties.getGate().setDefaultMode(SelfMediaClaimGateService.MODE_MANUAL_REQUIRED_TERMINAL);
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, null, 20L, "toutiao", "claim", "fill");
+        when(readinessService.evaluate(query)).thenReturn(RuntimeReadinessResult.blocked(
+                List.of(SelfMediaRuntimeReadinessService.EXTENSION_CAPABILITY_UNSUPPORTED),
+                null,
+                1L,
+                30
+        ));
+        SelfMediaClaimGateService service = new SelfMediaClaimGateService(readinessService, properties);
+
+        ClaimGateEvaluation evaluation = service.evaluate(query);
+
+        assertTrue(evaluation.markManualRequired());
+    }
 }

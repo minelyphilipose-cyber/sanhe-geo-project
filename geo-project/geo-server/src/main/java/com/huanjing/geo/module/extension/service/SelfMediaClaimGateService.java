@@ -22,6 +22,8 @@ public class SelfMediaClaimGateService {
             "ACCOUNT_MISMATCH",
             "EXTENSION_VERSION_TOO_LOW",
             "HELPER_VERSION_TOO_LOW",
+            "EXTENSION_CAPABILITY_UNSUPPORTED",
+            "HELPER_CAPABILITY_UNSUPPORTED",
             "BROWSER_ENVIRONMENT_DISABLED"
     );
 
