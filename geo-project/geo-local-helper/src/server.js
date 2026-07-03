@@ -17,6 +17,7 @@ const SESSION_PATH = new URL('session.json', RUNTIME_DIR)
 const SESSIONS_DIR = new URL('sessions/', RUNTIME_DIR)
 const NONCES_PATH = new URL('nonces.json', RUNTIME_DIR)
 const SETTINGS_PATH = new URL('settings.json', RUNTIME_DIR)
+const MACHINE_ID_PATH = new URL('machine-id', RUNTIME_DIR)
 const TEMP_FILES_DIR = new URL('temp-files/', RUNTIME_DIR)
 const tasksById = new Map()
 const extensionBindIntentsByHash = new Map()
@@ -36,6 +37,7 @@ const PUBLISH_CHECK_TASK_ID_OFFSET = 900_000_000_000
 const PUPPETEER_DISCONNECT_TIMEOUT_MS = 2_000
 const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
 const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
+const LOCAL_AGENT_RUNTIME_STATUS_HEARTBEAT_MS = 60_000
 const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
 const RUNTIME_TASK_MAX_RECORDS = 200
 const RUNTIME_TASK_TERMINAL_TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -70,6 +72,10 @@ let lastScheduleHeartbeatStatus = null
 let cachedSelfMediaSchedulePlatforms = null
 let cachedSelfMediaSchedulePlatformsAt = 0
 let lastSelfMediaSchedulePlatformsError = null
+let machineIdCache = null
+let localAgentRuntimeStatusInFlight = false
+let lastLocalAgentRuntimeStatus = null
+let lastAdspowerApiStatus = { ok: false, checkedAt: null, error: null }
 
 process.on('uncaughtException', (error) => {
   console.error('GEO local helper uncaught exception:', error?.stack || error?.message || error)
@@ -384,6 +390,99 @@ async function loadLegacyRuntimeSession(profileKey) {
 async function saveRuntimeSession(session, profileKey = runtimeSettings.activeProfile || DEFAULT_PROFILE_KEY) {
   await fs.mkdir(SESSIONS_DIR, { recursive: true })
   await fs.writeFile(runtimeSessionPath(profileKey), JSON.stringify(session, null, 2), 'utf8')
+}
+
+async function getMachineId() {
+  if (machineIdCache) return machineIdCache
+  try {
+    const value = String(await fs.readFile(MACHINE_ID_PATH, 'utf8')).trim()
+    if (value) {
+      machineIdCache = value
+      return machineIdCache
+    }
+  } catch {
+    // First run has no machine id yet.
+  }
+  machineIdCache = crypto.randomUUID()
+  await fs.mkdir(RUNTIME_DIR, { recursive: true })
+  await fs.writeFile(MACHINE_ID_PATH, `${machineIdCache}\n`, 'utf8')
+  return machineIdCache
+}
+
+function activeRuntimeTaskCount() {
+  return listTasks().filter((task) => !isTerminalStatus(task.status)).length
+}
+
+async function probeAdspowerApi(config) {
+  try {
+    await adspowerGet(config, '/api/v1/user/list?page=1&page_size=1')
+    lastAdspowerApiStatus = { ok: true, checkedAt: nowIso(), error: null }
+  } catch (error) {
+    lastAdspowerApiStatus = {
+      ok: false,
+      checkedAt: nowIso(),
+      error: String(error?.message || error || '').slice(0, 500),
+    }
+  }
+  return lastAdspowerApiStatus
+}
+
+async function reportLocalAgentRuntimeStatus(config, options = {}) {
+  if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) {
+    return { ok: false, skipped: true, reason: 'not_paired' }
+  }
+  if (localAgentRuntimeStatusInFlight && !options.force) {
+    return { ok: false, skipped: true, reason: 'in_flight' }
+  }
+  localAgentRuntimeStatusInFlight = true
+  try {
+    if (options.probeAdspower !== false) {
+      await probeAdspowerApi(config)
+    }
+    const packageInfo = await readPackageInfo()
+    const body = JSON.stringify({
+      machineId: await getMachineId(),
+      activeProfile: config.activeProfile || runtimeSettings.activeProfile || DEFAULT_PROFILE_KEY,
+      helperVersion: packageInfo.version || '0.0.0',
+      protocolVersion: '1',
+      helperName: config.helperName || packageInfo.name || 'geo-local-helper',
+      adspowerApiOk: Boolean(lastAdspowerApiStatus.ok),
+      adspowerApiBase: effectiveAdspowerConfig(config).apiBase,
+      runningTaskCount: activeRuntimeTaskCount(),
+      capacity: Number(config.localAgentCapacity || 1) || 1,
+      supportedPlatforms: cachedSelfMediaSchedulePlatforms || [],
+      capabilities: {
+        adspowerLaunch: true,
+        claim: true,
+        publishCheck: true,
+        extensionStatusProbe: true,
+      },
+      lastErrorCode: options.lastErrorCode || null,
+      lastErrorMessage: options.lastErrorMessage || lastAdspowerApiStatus.error || null,
+    })
+    const status = await signedTrustedBackendRequest(config, '/api/v1/local-agent/runtime-status', {
+      method: 'POST',
+      body,
+      signatureBodyText: '',
+    })
+    lastLocalAgentRuntimeStatus = {
+      at: nowIso(),
+      ok: true,
+      reason: options.reason || 'report',
+      status,
+    }
+    return { ok: true, status }
+  } catch (error) {
+    lastLocalAgentRuntimeStatus = {
+      at: nowIso(),
+      ok: false,
+      reason: options.reason || 'report',
+      error: String(error?.message || error || '').slice(0, 500),
+    }
+    return { ok: false, error: lastLocalAgentRuntimeStatus.error }
+  } finally {
+    localAgentRuntimeStatusInFlight = false
+  }
 }
 
 async function loadRuntimeTasks() {
@@ -837,6 +936,7 @@ async function handlePairingStatus(req, res, config) {
       pairedAt: nowIso(),
     }
     await saveRuntimeSession(runtimeSession)
+    reportLocalAgentRuntimeStatus(config, { reason: 'paired', force: true }).catch(() => null)
     pendingPairing = null
     sendJson(req, res, config, 200, { ok: true, paired: true, pending: false, session: publicSession() })
   } catch (error) {
@@ -4126,6 +4226,10 @@ async function route(req, res, config) {
       },
       backendReports: backendReportSummary(),
       runtimeTasks: runtimeTaskStorageSummary(),
+      runtimeStatus: {
+        last: lastLocalAgentRuntimeStatus,
+        adspowerApi: lastAdspowerApiStatus,
+      },
       config: {
         host: config.host,
         port: config.port,
@@ -4223,6 +4327,10 @@ function startSchedulePoller(config) {
       return
     }
     schedulePollInFlight = true
+    reportLocalAgentRuntimeStatus(config, {
+      reason: 'schedule_poll_before',
+      probeAdspower: false,
+    }).catch(() => null)
     pollSelfMediaSchedules(config)
       .then((result) => {
         lastSchedulePollStatus = {
@@ -4233,6 +4341,10 @@ function startSchedulePoller(config) {
           kind: result?.kind || null,
           outcome: result?.outcome || null,
         }
+        reportLocalAgentRuntimeStatus(config, {
+          reason: 'schedule_poll_after',
+          probeAdspower: false,
+        }).catch(() => null)
       })
       .catch((error) => {
         lastSchedulePollStatus = {
@@ -4240,6 +4352,12 @@ function startSchedulePoller(config) {
           ok: false,
           error: error.message,
         }
+        reportLocalAgentRuntimeStatus(config, {
+          reason: 'schedule_poll_failed',
+          probeAdspower: false,
+          lastErrorCode: 'SCHEDULE_POLL_FAILED',
+          lastErrorMessage: error.message,
+        }).catch(() => null)
         console.error('GEO self-media schedule poll failed:', error.message)
       })
       .finally(() => {
@@ -4288,6 +4406,15 @@ function startScheduleHeartbeat(config) {
   }
   setTimeout(tick, 5_000).unref?.()
   setInterval(tick, Math.max(intervalMs, 15_000)).unref?.()
+}
+
+function startLocalAgentRuntimeStatusReporter(config) {
+  const tick = (reason, force = false) => {
+    if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return
+    reportLocalAgentRuntimeStatus(config, { reason, force }).catch(() => null)
+  }
+  setTimeout(() => tick('startup', true), 2_000).unref?.()
+  setInterval(() => tick('heartbeat'), LOCAL_AGENT_RUNTIME_STATUS_HEARTBEAT_MS).unref?.()
 }
 
 async function pollSelfMediaSchedules(config) {
@@ -4355,6 +4482,7 @@ function normalizePlatformList(raw) {
 
 startSchedulePoller(config)
 startScheduleHeartbeat(config)
+startLocalAgentRuntimeStatusReporter(config)
 startEventLoopWatchdog(config)
 
 function startEventLoopWatchdog(config) {

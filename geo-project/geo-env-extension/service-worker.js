@@ -29,6 +29,9 @@ const autoLoginReportAtByKey = new Map()
 const autoPollTabUpdatedAtByKey = new Map()
 const bindIntentInFlight = new Set()
 const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
+const RUNTIME_STATUS_HEARTBEAT_MS = 60 * 1000
+let runtimeStatusReportInFlight = false
+let lastRuntimeStatusReportAt = 0
 
 function normalizeBaseUrl(value) {
   return String(value || '').replace(/\/+$/, '')
@@ -246,6 +249,92 @@ async function refreshExtensionSession(config, session, options = {}) {
   }
 }
 
+async function reportRuntimeStatus(options = {}) {
+  const { config, session } = await getConfig()
+  if (!session?.extensionToken) return { ok: false, skipped: true, reason: 'not_bound' }
+  const providerProfileId = firstText(options.providerProfileId, config.providerProfileId)
+  const installId = await getInstallId()
+  if (!providerProfileId || !installId) {
+    return { ok: false, skipped: true, reason: 'missing_runtime_identity' }
+  }
+  if (runtimeStatusReportInFlight && !options.force) {
+    return { ok: false, skipped: true, reason: 'in_flight' }
+  }
+  const now = Date.now()
+  if (!options.force && now - lastRuntimeStatusReportAt < 10_000) {
+    return { ok: false, skipped: true, reason: 'throttled' }
+  }
+  runtimeStatusReportInFlight = true
+  try {
+    const activeSession = await refreshExtensionSession(config, session)
+    const activeTab = await currentActivePlatformTab().catch(() => null)
+    const platform = normalizePlatform(firstText(
+      options.detectedPlatform,
+      options.platform,
+      inferPlatformFromUrl(activeTab?.url || ''),
+      config.platform,
+    ))
+    const body = {
+      installId,
+      environmentKey: firstText(options.environmentKey, config.environmentKey),
+      providerProfileId,
+      platform: platform || null,
+      extensionVersion: EXTENSION_VERSION,
+      protocolVersion: '1',
+      currentUrl: firstText(options.currentUrl, activeTab?.url),
+      detectedPlatform: platform || null,
+      detectedAccountName: firstText(options.detectedAccountName),
+      detectedPlatformAccountId: firstText(options.detectedPlatformAccountId),
+      loginStatus: firstText(options.loginStatus, 'unknown'),
+      runtimeStage: firstText(options.runtimeStage, 'extension_seen'),
+      runtimeStageMessage: firstText(options.runtimeStageMessage),
+      capabilities: {
+        fill: true,
+        schedule: true,
+        accountDetect: true,
+        publishSubmit: true,
+        publishCheck: false,
+      },
+      lastTaskId: options.lastTaskId || null,
+      lastErrorCode: firstText(options.lastErrorCode),
+      lastErrorMessage: firstText(options.lastErrorMessage),
+    }
+    const status = await apiRequest(config, '/api/v1/extension/runtime-status', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, activeSession.extensionToken)
+    lastRuntimeStatusReportAt = Date.now()
+    return { ok: true, status }
+  } catch (error) {
+    await appendEventLog({
+      type: 'runtime_status',
+      ok: false,
+      reason: options.reason || 'report',
+      error: error.message,
+    })
+    return { ok: false, error: error.message }
+  } finally {
+    runtimeStatusReportInFlight = false
+  }
+}
+
+async function currentActivePlatformTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+  const active = tabs.find((tab) => inferPlatformFromUrl(tab?.url || ''))
+  if (active) return active
+  const allTabs = await chrome.tabs.query({})
+  return allTabs.find((tab) => inferPlatformFromUrl(tab?.url || '')) || null
+}
+
+function scheduleRuntimeStatusHeartbeat() {
+  setTimeout(() => {
+    reportRuntimeStatus({ reason: 'startup', runtimeStage: 'extension_seen', force: true }).catch(() => null)
+  }, 1500)
+  setInterval(() => {
+    reportRuntimeStatus({ reason: 'heartbeat', runtimeStage: 'extension_seen' }).catch(() => null)
+  }, RUNTIME_STATUS_HEARTBEAT_MS)
+}
+
 function requestBodyText(init = {}) {
   if (init.body == null) return ''
   if (typeof init.body === 'string') return init.body
@@ -354,6 +443,7 @@ async function bindExtension(bindCode) {
     reason: 'bind',
     error: error.message,
   }))
+  await reportRuntimeStatus({ reason: 'bind', runtimeStage: 'extension_bound', force: true }).catch(() => null)
   return session
 }
 
@@ -633,6 +723,14 @@ async function refreshRuntimeConfig(options = {}) {
     platform: nextConfig.platform,
     status: selected.loginStatus || '-',
   })
+  await reportRuntimeStatus({
+    reason: options.reason || 'runtime_config',
+    environmentKey: nextConfig.environmentKey,
+    providerProfileId: nextConfig.providerProfileId,
+    platform: nextConfig.platform,
+    loginStatus: selected.loginStatus || 'unknown',
+    runtimeStage: 'runtime_config_refreshed',
+  }).catch(() => null)
   return { applied: true, config: nextConfig, session: activeSession, runtime }
 }
 
@@ -1890,6 +1988,15 @@ async function reportLoginStatus(config, session, report) {
     method: 'POST',
     body: JSON.stringify(body),
   }, session.extensionToken)
+  await reportRuntimeStatus({
+    reason: 'login_status',
+    environmentKey: report.environmentKey || config.environmentKey,
+    platform: report.platform,
+    detectedAccountName: accountNames[0] || null,
+    detectedPlatformAccountId: accountIds[0] || null,
+    loginStatus: backendStatus?.loginStatus || body.loginStatus,
+    runtimeStage: 'account_detected',
+  }).catch(() => null)
   return backendStatus
 }
 
@@ -3382,6 +3489,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!isAutoPollReadyUrl(readyUrl)) return
   triggerAutoPollFromTabComplete(tabId, readyUrl)
 })
+
+scheduleRuntimeStatusHeartbeat()
 
 function triggerAutoPollFromTabComplete(tabId, urlValue) {
   const platform = inferPlatformFromUrl(urlValue)
