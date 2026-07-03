@@ -45,14 +45,19 @@ import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.extension.dto.ClaimGateEvaluation;
+import com.huanjing.geo.module.extension.dto.RuntimeReadinessQuery;
 import com.huanjing.geo.module.extension.entity.LocalAgentSession;
 import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
+import com.huanjing.geo.module.extension.service.SelfMediaClaimGateService;
+import com.huanjing.geo.module.extension.service.SelfMediaGateDiagnosticsWriter;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -189,6 +194,12 @@ public class SelfMediaPublishScheduleService {
     private final ArticleTemplateAllocationService templateAllocationService;
     private final TemplatePerspectiveService perspectiveService;
     private final ObjectMapper objectMapper;
+    private final ThreadLocal<LocalAgentClaimBlock> lastLocalAgentClaimBlock = new ThreadLocal<>();
+
+    @Autowired(required = false)
+    SelfMediaClaimGateService claimGateService;
+    @Autowired(required = false)
+    SelfMediaGateDiagnosticsWriter gateDiagnosticsWriter;
 
     @Transactional
     public SelfMediaPublishScheduleCreateResponse createSchedules(SelfMediaPublishScheduleCreateRequest request,
@@ -1167,6 +1178,7 @@ public class SelfMediaPublishScheduleService {
 
     @Transactional(noRollbackFor = BizException.class)
     public ClaimedScheduleTask claimNextTaskForLocalAgent(Long operatorId, String platform, int lockMinutes) {
+        lastLocalAgentClaimBlock.remove();
         if (operatorId == null || operatorId <= 0) {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
         }
@@ -1225,6 +1237,7 @@ public class SelfMediaPublishScheduleService {
 
     @Transactional
     public SelfMediaPublishScheduleVO claimNextPublishCheckForLocalAgent(Long operatorId, String platform, int lockMinutes) {
+        lastLocalAgentClaimBlock.remove();
         if (operatorId == null || operatorId <= 0) {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
         }
@@ -1255,6 +1268,12 @@ public class SelfMediaPublishScheduleService {
                 allowedPlatforms
         );
         return claimed == null ? null : SelfMediaPublishScheduleVO.from(claimed);
+    }
+
+    public LocalAgentClaimBlock consumeLastLocalAgentClaimBlock() {
+        LocalAgentClaimBlock block = lastLocalAgentClaimBlock.get();
+        lastLocalAgentClaimBlock.remove();
+        return block;
     }
 
     @Transactional
@@ -1487,6 +1506,9 @@ public class SelfMediaPublishScheduleService {
                 markPublishResultCheckAttemptLimitExceeded(candidate);
                 continue;
             }
+            if (applyLocalAgentClaimGate(queueKind, expectedStatuses, targetStatus, operatorId, candidate, now)) {
+                continue;
+            }
             boolean environmentLockAcquired = false;
             if (requiresEnvironmentLock(candidate)) {
                 if (!environmentLockService.tryAcquire(candidate.getBrowserEnvironmentId(),
@@ -1501,7 +1523,9 @@ public class SelfMediaPublishScheduleService {
                     expectedStatuses,
                     targetStatus,
                     now,
-                    lockedUntil
+                    lockedUntil,
+                    operatorId,
+                    claimRuntimeStage(targetStatus)
             );
             if (updated > 0) {
                 return scheduleMapper.selectById(candidate.getId());
@@ -1511,6 +1535,94 @@ public class SelfMediaPublishScheduleService {
             }
         }
         return null;
+    }
+
+    private boolean applyLocalAgentClaimGate(String queueKind,
+                                             List<String> expectedStatuses,
+                                             String targetStatus,
+                                             Long operatorId,
+                                             SelfMediaPublishSchedule candidate,
+                                             LocalDateTime now) {
+        if (operatorId == null || claimGateService == null || gateDiagnosticsWriter == null || candidate == null) {
+            return false;
+        }
+        ClaimGateEvaluation evaluation = claimGateService.evaluate(new RuntimeReadinessQuery(
+                candidate.getBrandId(),
+                operatorId,
+                candidate.getBrowserEnvironmentId(),
+                candidate.getPlatform(),
+                requiredHelperFeature(queueKind),
+                requiredExtensionFeature(queueKind)
+        ));
+        String diagnosticsJson = gateDiagnosticsWriter.mergeClaimGate(candidate.getDiagnosticsJson(), evaluation);
+        String primaryReason = primaryGateReason(evaluation);
+        scheduleMapper.updateClaimGateDiagnostics(
+                candidate.getId(),
+                diagnosticsJson,
+                evaluation.wouldBlock() ? "claim_blocked" : "claim_gate_passed",
+                primaryReason,
+                now
+        );
+        candidate.setDiagnosticsJson(diagnosticsJson);
+        rememberClaimBlock(evaluation);
+        if (evaluation.markManualRequired()) {
+            String failureMessage = "运行态准入失败：" + primaryReason;
+            int updated = scheduleMapper.markClaimGateManualRequired(
+                    candidate.getId(),
+                    queueKind,
+                    expectedStatuses,
+                    primaryReason,
+                    failureMessage,
+                    diagnosticsJson,
+                    now
+            );
+            if (updated > 0) {
+                SelfMediaPublishSchedule latest = scheduleMapper.selectById(candidate.getId());
+                reconcileAlerts(latest == null ? candidate : latest);
+            }
+            return true;
+        }
+        return evaluation.blockClaim();
+    }
+
+    private void rememberClaimBlock(ClaimGateEvaluation evaluation) {
+        if (evaluation == null || (!evaluation.blockClaim() && !evaluation.markManualRequired())) {
+            return;
+        }
+        lastLocalAgentClaimBlock.set(new LocalAgentClaimBlock(
+                primaryGateReason(evaluation),
+                evaluation.blockedReasons(),
+                evaluation.retryAfterSeconds(),
+                evaluation
+        ));
+    }
+
+    private String primaryGateReason(ClaimGateEvaluation evaluation) {
+        if (evaluation == null || evaluation.blockedReasons() == null || evaluation.blockedReasons().isEmpty()) {
+            return null;
+        }
+        return evaluation.blockedReasons().get(0);
+    }
+
+    private String requiredHelperFeature(String queueKind) {
+        if (SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK.equals(queueKind)) {
+            return "publishCheck";
+        }
+        return "claim";
+    }
+
+    private String requiredExtensionFeature(String queueKind) {
+        if (SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK.equals(queueKind)) {
+            return null;
+        }
+        return "fill";
+    }
+
+    private String claimRuntimeStage(String targetStatus) {
+        if (SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(targetStatus)) {
+            return "publish_checking";
+        }
+        return "claimed";
     }
 
     private boolean isPublishResultCheckAttemptLimitExceeded(String queueKind, SelfMediaPublishSchedule row) {
@@ -1786,6 +1898,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureCode(null);
         row.setFailureMessage(null);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        applyRuntimeStage(row, "publish_submitted", "平台发布或定时提交完成");
         scheduleMapper.updateById(row);
         syncArticleForActiveSchedule(row);
         confirmScheduleQuotaIfPresent(row);
@@ -1874,6 +1987,15 @@ public class SelfMediaPublishScheduleService {
         return null;
     }
 
+    private void applyRuntimeStage(SelfMediaPublishSchedule row, String stage, String message) {
+        if (row == null) {
+            return;
+        }
+        row.setRuntimeStage(stage);
+        row.setRuntimeStageAt(LocalDateTime.now());
+        row.setRuntimeStageMessage(message);
+    }
+
     private <T> List<T> defaultList(List<T> values) {
         return values == null ? List.of() : values;
     }
@@ -1897,6 +2019,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureCode(null);
         row.setFailureMessage(null);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        applyRuntimeStage(row, "content_filled", "内容填充完成");
         scheduleMapper.updateById(row);
         syncArticleForActiveSchedule(row);
         return SelfMediaPublishScheduleVO.from(row);
@@ -1910,6 +2033,7 @@ public class SelfMediaPublishScheduleService {
         }
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        applyRuntimeStage(row, "publish_submitting", "准备提交平台发布或定时");
         scheduleMapper.updateById(row);
         syncArticleForActiveSchedule(row);
         return SelfMediaPublishScheduleVO.from(row);
@@ -1924,6 +2048,7 @@ public class SelfMediaPublishScheduleService {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setLockedUntil(null);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        applyRuntimeStage(row, "publish_checking", "发布结果待继续复查");
         if (isPendingPlatformScheduledDiagnostics(diagnosticsJson)) {
             row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
             row.setNextAttemptAt(nextPendingPlatformScheduleCheckAt(row));
@@ -3820,6 +3945,12 @@ public class SelfMediaPublishScheduleService {
     }
 
     private record QueueClaimProfile(List<String> expectedStatuses, String targetStatus) {
+    }
+
+    public record LocalAgentClaimBlock(String reason,
+                                       List<String> reasons,
+                                       Integer retryAfterSeconds,
+                                       ClaimGateEvaluation evaluation) {
     }
 
     public record ClaimedScheduleTask(SelfMediaPublishScheduleVO schedule, DistributionTask task) {

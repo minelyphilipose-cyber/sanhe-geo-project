@@ -132,12 +132,14 @@ public class LocalAgentController {
                         SELF_MEDIA_SCHEDULE_LOCK_MINUTES
                 );
         if (claimed == null) {
+            SelfMediaPublishScheduleService.LocalAgentClaimBlock block =
+                    scheduleService.consumeLastLocalAgentClaimBlock();
             return R.ok(new LocalAgentSelfMediaScheduleClaimResponse(
                     null,
                     null,
                     null,
-                    claimBlockedReason(platform),
-                    null
+                    block == null ? claimBlockedReason(platform) : block.reason(),
+                    block == null ? null : block.retryAfterSeconds()
             ));
         }
         DistributionTask task = claimed.task();
@@ -175,11 +177,13 @@ public class LocalAgentController {
                         SELF_MEDIA_PUBLISH_CHECK_LOCK_MINUTES
                 );
         if (schedule == null) {
+            SelfMediaPublishScheduleService.LocalAgentClaimBlock block =
+                    scheduleService.consumeLastLocalAgentClaimBlock();
             return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(
                     null,
                     null,
-                    claimBlockedReason(platform),
-                    null
+                    block == null ? claimBlockedReason(platform) : block.reason(),
+                    block == null ? null : block.retryAfterSeconds()
             ));
         }
         SelfMediaAccount account = schedule.getSelfMediaAccountId() == null

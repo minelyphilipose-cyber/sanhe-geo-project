@@ -668,6 +668,10 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                 locked_until = #{lockedUntil},
                 last_attempt_at = #{now},
                 attempt_count = COALESCE(attempt_count, 0) + 1,
+                runtime_stage = #{runtimeStage},
+                runtime_stage_at = #{now},
+                runtime_stage_message = #{queueKind},
+                runtime_worker_id = #{operatorId},
                 updated_at = #{now}
             WHERE id = #{scheduleId}
               AND queue_kind = #{queueKind}
@@ -684,7 +688,63 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                            @Param("expectedStatuses") List<String> expectedStatuses,
                            @Param("targetStatus") String targetStatus,
                            @Param("now") LocalDateTime now,
-                           @Param("lockedUntil") LocalDateTime lockedUntil);
+                           @Param("lockedUntil") LocalDateTime lockedUntil,
+                           @Param("operatorId") Long operatorId,
+                           @Param("runtimeStage") String runtimeStage);
+
+    default int claimQueueSchedule(Long scheduleId,
+                                   String queueKind,
+                                   List<String> expectedStatuses,
+                                   String targetStatus,
+                                   LocalDateTime now,
+                                   LocalDateTime lockedUntil) {
+        return claimQueueSchedule(scheduleId, queueKind, expectedStatuses, targetStatus, now, lockedUntil, null, null);
+    }
+
+    @Update("""
+            UPDATE self_media_publish_schedule
+            SET diagnostics_json = #{diagnosticsJson},
+                runtime_stage = #{runtimeStage},
+                runtime_stage_at = #{now},
+                runtime_stage_message = #{runtimeStageMessage},
+                updated_at = #{now}
+            WHERE id = #{scheduleId}
+            """)
+    int updateClaimGateDiagnostics(@Param("scheduleId") Long scheduleId,
+                                   @Param("diagnosticsJson") String diagnosticsJson,
+                                   @Param("runtimeStage") String runtimeStage,
+                                   @Param("runtimeStageMessage") String runtimeStageMessage,
+                                   @Param("now") LocalDateTime now);
+
+    @Update("""
+            <script>
+            UPDATE self_media_publish_schedule
+            SET status = 'manual_required',
+                locked_until = NULL,
+                next_attempt_at = NULL,
+                failure_code = #{failureCode},
+                failure_message = #{failureMessage},
+                diagnostics_json = #{diagnosticsJson},
+                runtime_stage = 'manual_required',
+                runtime_stage_at = #{now},
+                runtime_stage_message = #{failureMessage},
+                updated_at = #{now}
+            WHERE id = #{scheduleId}
+              AND queue_kind = #{queueKind}
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND (locked_until IS NULL OR locked_until &lt; #{now})
+            </script>
+            """)
+    int markClaimGateManualRequired(@Param("scheduleId") Long scheduleId,
+                                    @Param("queueKind") String queueKind,
+                                    @Param("expectedStatuses") List<String> expectedStatuses,
+                                    @Param("failureCode") String failureCode,
+                                    @Param("failureMessage") String failureMessage,
+                                    @Param("diagnosticsJson") String diagnosticsJson,
+                                    @Param("now") LocalDateTime now);
 
     @Update("""
             <script>
