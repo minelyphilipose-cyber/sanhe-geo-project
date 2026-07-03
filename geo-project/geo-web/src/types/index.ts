@@ -1737,6 +1737,52 @@ export interface SelfMediaScheduleCapability {
   updatedAt?: string | null
 }
 
+export interface SelfMediaRuntimeEnvironment {
+  brandId: number
+  brandName?: string | null
+  platform: string
+  selfMediaAccountId?: number | null
+  accountName?: string | null
+  platformAccountId?: string | null
+  browserEnvironmentId?: number | null
+  environmentName?: string | null
+  environmentKey?: string | null
+  providerProfileId?: string | null
+  browserEnvironmentAccountId?: number | null
+  loginStatus?: string | null
+  expectedAccountName?: string | null
+  expectedPlatformAccountId?: string | null
+  extension?: {
+    installId?: string | null
+    extensionVersion?: string | null
+    protocolVersion?: string | null
+    lastSeenAt?: string | null
+    runtimeStage?: string | null
+    runtimeStageMessage?: string | null
+    lastErrorCode?: string | null
+    lastErrorMessage?: string | null
+  } | null
+  helper?: {
+    sessionId?: number | null
+    machineId?: string | null
+    activeProfile?: string | null
+    helperVersion?: string | null
+    protocolVersion?: string | null
+    adspowerApiOk?: boolean | null
+    runningTaskCount?: number | null
+    capacity?: number | null
+    lastSeenAt?: string | null
+    lastErrorCode?: string | null
+    lastErrorMessage?: string | null
+  } | null
+  readiness: {
+    ready: boolean
+    blockedReasons: string[]
+    retryAfterSeconds?: number | null
+    gateMode?: string | null
+  }
+}
+
 export interface SelfMediaAccountPlatformOption {
   platform: string
   label: string

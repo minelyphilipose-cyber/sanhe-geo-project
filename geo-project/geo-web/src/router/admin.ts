@@ -156,6 +156,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '自媒体自动化态势', icon: 'DataLine', permissions: ['content.read'] },
     },
     {
+      path: 'monitoring/self-media-runtime',
+      name: 'SelfMediaRuntimeEnvironment',
+      component: () => import('@/views/admin/content/SelfMediaRuntimeEnvironment.vue'),
+      meta: { title: '自媒体运行环境', icon: 'Monitor', permissions: ['content.read'] },
+    },
+    {
       path: 'content/execution',
       name: 'ContentExecution',
       component: () => import('@/views/admin/content/ContentExecution.vue'),

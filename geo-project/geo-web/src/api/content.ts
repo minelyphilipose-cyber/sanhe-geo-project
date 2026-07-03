@@ -12,6 +12,7 @@ import type {
   SelfMediaAccountPlatformOption,
   SelfMediaAutomationOverview,
   SelfMediaCookieStatusBatchResponse,
+  SelfMediaRuntimeEnvironment,
   SelfMediaScheduleCapability,
   SelfMediaPublishSchedule,
   SelfMediaPublishScheduleCreateResponse,
@@ -1414,6 +1415,18 @@ export function getSelfMediaPublishSchedules(params?: {
 
 export function getSelfMediaAutomationOverview() {
   return request.get<R<SelfMediaAutomationOverview>>('/content/self-media-automation/overview')
+}
+
+export function getSelfMediaRuntimeEnvironments(params?: {
+  brandId?: number
+  platform?: string
+  ready?: boolean
+  blockedReason?: string
+  keyword?: string
+  page?: number
+  size?: number
+}) {
+  return request.get<R<PageResult<SelfMediaRuntimeEnvironment>>>('/admin/self-media/runtime-environments', { params })
 }
 
 export function createSelfMediaPublishSchedules(data: {
