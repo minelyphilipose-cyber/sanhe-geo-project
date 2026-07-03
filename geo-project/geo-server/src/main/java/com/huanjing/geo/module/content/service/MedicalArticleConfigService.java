@@ -77,6 +77,7 @@ public class MedicalArticleConfigService {
     private final BatchArticleGenerationTaskMapper taskMapper;
     private final MedicalArticleComplianceChecker complianceChecker;
     private final CurrentUserService currentUserService;
+    private final SpecialIndustryService specialIndustryService;
 
     public WorkbenchOverviewVO overview() {
         currentUserService.ensurePermission("project.read");
@@ -460,8 +461,9 @@ public class MedicalArticleConfigService {
     }
 
     private void fill(MedicalTopicAngle row, TopicAngleSaveRequest req) {
-        row.setIndustryCode(trim(req.industryCode()));
-        row.setIndustryName(trim(req.industryName()));
+        String industryCode = trim(req.industryCode());
+        row.setIndustryCode(industryCode);
+        row.setIndustryName(StringUtils.hasText(req.industryName()) ? trim(req.industryName()) : specialIndustryService.industryLabel(industryCode));
         row.setCategoryCode(trim(req.categoryCode()));
         row.setCategoryName(trim(req.categoryName()));
         row.setTopicAngle(trim(req.topicAngle()));

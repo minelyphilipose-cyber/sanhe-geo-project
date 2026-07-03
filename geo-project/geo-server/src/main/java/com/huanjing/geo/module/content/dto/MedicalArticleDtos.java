@@ -11,7 +11,7 @@ public class MedicalArticleDtos {
 
     public record TopicAngleSaveRequest(
             @NotBlank @Size(max = 32) String industryCode,
-            @NotBlank @Size(max = 64) String industryName,
+            @Size(max = 64) String industryName,
             @NotBlank @Size(max = 64) String categoryCode,
             @NotBlank @Size(max = 128) String categoryName,
             @NotBlank @Size(max = 500) String topicAngle,

@@ -481,7 +481,8 @@ async function submit() {
   saving.value = true
   try {
     if (activeTab.value === 'angles') {
-      editingId.value ? await updateSpecialIndustryTopicAngle(editingId.value, form) : await createSpecialIndustryTopicAngle(form)
+      const payload = topicAnglePayload()
+      editingId.value ? await updateSpecialIndustryTopicAngle(editingId.value, payload) : await createSpecialIndustryTopicAngle(payload)
     } else if (activeTab.value === 'rules') {
       editingId.value ? await updateSpecialIndustryComplianceRule(editingId.value, form) : await createSpecialIndustryComplianceRule(form)
     } else if (activeTab.value === 'kernels') {
@@ -494,6 +495,13 @@ async function submit() {
     await loadCurrent()
   } finally {
     saving.value = false
+  }
+}
+
+function topicAnglePayload() {
+  return {
+    ...form,
+    industryName: industryLabel(form.industryCode),
   }
 }
 
