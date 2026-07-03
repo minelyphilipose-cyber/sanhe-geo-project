@@ -52,4 +52,16 @@ public interface LocalAgentRuntimeStatusMapper extends BaseMapper<LocalAgentRunt
             """)
     List<LocalAgentRuntimeStatus> selectRecentByOperatorId(@Param("operatorId") Long operatorId,
                                                            @Param("limit") int limit);
+
+    @Select("""
+            SELECT lar.*
+            FROM local_agent_runtime_status lar
+            JOIN local_agent_session las
+              ON las.id = lar.session_id
+             AND las.status = 'active'
+            WHERE las.brand_id = #{brandId}
+            ORDER BY lar.last_seen_at DESC, lar.updated_at DESC
+            LIMIT 1
+            """)
+    LocalAgentRuntimeStatus selectLatestByBrandId(@Param("brandId") Long brandId);
 }
