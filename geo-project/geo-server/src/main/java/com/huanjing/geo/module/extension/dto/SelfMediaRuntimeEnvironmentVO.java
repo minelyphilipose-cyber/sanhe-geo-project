@@ -53,7 +53,8 @@ public record SelfMediaRuntimeEnvironmentVO(
             boolean ready,
             List<String> blockedReasons,
             Integer retryAfterSeconds,
-            String gateMode
+            String gateMode,
+            String scope
     ) {
     }
 }

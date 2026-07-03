@@ -63,7 +63,7 @@
 
     <section class="metric-grid">
       <div class="metric-panel" :class="pageStats.blocked ? 'is-warning' : 'is-success'">
-        <span>当前页可接任务</span>
+        <span>当前页观测可接</span>
         <strong>{{ pageStats.ready }} / {{ records.length }}</strong>
         <small>不可接 {{ pageStats.blocked }}</small>
       </div>
@@ -137,8 +137,8 @@
                 <el-tag size="small" :type="row.helper?.lastSeenAt ? 'success' : 'info'">
                   {{ row.helper?.helperVersion || '未上报' }}
                 </el-tag>
-                <el-tag size="small" :type="row.helper?.adspowerApiOk === false ? 'danger' : 'info'">
-                  AdsPower {{ row.helper?.adspowerApiOk === false ? '异常' : '正常' }}
+                <el-tag size="small" :type="adspowerApiTone(row.helper?.adspowerApiOk)">
+                  AdsPower {{ adspowerApiLabel(row.helper?.adspowerApiOk) }}
                 </el-tag>
               </div>
               <span>{{ helperCapacityText(row) }}</span>
@@ -150,7 +150,7 @@
             <el-tag :type="loginStatusTone(row.loginStatus)" size="small">{{ loginStatusLabel(row.loginStatus) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="准入" min-width="190">
+        <el-table-column label="观测准入" min-width="190">
           <template #default="{ row }">
             <div class="cell-stack">
               <div class="inline-tags">
@@ -230,7 +230,7 @@
             <span>Profile</span><strong class="mono">{{ activeRow.helper?.activeProfile || '-' }}</strong>
             <span>版本</span><strong>{{ activeRow.helper?.helperVersion || '-' }}</strong>
             <span>协议</span><strong>{{ activeRow.helper?.protocolVersion || '-' }}</strong>
-            <span>AdsPower</span><strong>{{ activeRow.helper?.adspowerApiOk === false ? '异常' : '正常' }}</strong>
+            <span>AdsPower</span><strong>{{ adspowerApiLabel(activeRow.helper?.adspowerApiOk) }}</strong>
             <span>容量</span><strong>{{ helperCapacityText(activeRow) }}</strong>
             <span>最近上报</span><strong>{{ formatTime(activeRow.helper?.lastSeenAt) }}</strong>
             <span>错误码</span><strong>{{ activeRow.helper?.lastErrorCode || '-' }}</strong>
@@ -239,7 +239,7 @@
         </section>
 
         <section class="detail-section">
-          <h3>准入</h3>
+          <h3>观测准入</h3>
           <div class="readiness-line">
             <el-tag :type="activeRow.readiness?.ready ? 'success' : 'danger'">
               {{ activeRow.readiness?.ready ? '可接任务' : '不可接任务' }}
@@ -249,6 +249,7 @@
               {{ activeRow.readiness.retryAfterSeconds }} 秒后重试
             </el-tag>
           </div>
+          <div class="scope-line">{{ readinessScopeLabel(activeRow.readiness?.scope) }}</div>
           <div class="reason-list">
             <el-tag
               v-for="reason in activeRow.readiness?.blockedReasons || []"
@@ -322,7 +323,7 @@ const pageStats = computed(() => {
   const ready = records.value.filter((item) => item.readiness?.ready).length
   const extensionSeen = records.value.filter((item) => Boolean(item.extension?.lastSeenAt)).length
   const helperSeen = records.value.filter((item) => Boolean(item.helper?.lastSeenAt)).length
-  const accountIssues = records.value.filter((item) => item.loginStatus && item.loginStatus !== 'verified').length
+  const accountIssues = records.value.filter((item) => item.loginStatus !== 'verified').length
   return {
     ready,
     blocked: records.value.length - ready,
@@ -421,6 +422,25 @@ function gateModeLabel(mode?: string | null) {
     manual_required_terminal: '终态',
   }
   return mode ? map[mode] || mode : '-'
+}
+
+function readinessScopeLabel(scope?: string | null) {
+  const map: Record<string, string> = {
+    brand_latest_helper: '按品牌最近助手上报观测，真实领取仍以当前签名助手为准',
+  }
+  return scope ? map[scope] || scope : '-'
+}
+
+function adspowerApiLabel(value?: boolean | null) {
+  if (value === true) return '正常'
+  if (value === false) return '异常'
+  return '未上报'
+}
+
+function adspowerApiTone(value?: boolean | null): TagTone {
+  if (value === true) return 'success'
+  if (value === false) return 'danger'
+  return 'info'
 }
 
 function stageLabel(stage?: string | null) {
@@ -647,6 +667,12 @@ function latestSeen(values: Array<string | null | undefined>) {
 .reason-list {
   align-items: flex-start;
   min-height: 24px;
+}
+
+.scope-line {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 @media (max-width: 980px) {

@@ -1780,6 +1780,7 @@ export interface SelfMediaRuntimeEnvironment {
     blockedReasons: string[]
     retryAfterSeconds?: number | null
     gateMode?: string | null
+    scope?: string | null
   }
 }
 

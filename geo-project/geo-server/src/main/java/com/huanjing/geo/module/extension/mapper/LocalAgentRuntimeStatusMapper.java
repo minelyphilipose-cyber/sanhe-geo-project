@@ -54,7 +54,7 @@ public interface LocalAgentRuntimeStatusMapper extends BaseMapper<LocalAgentRunt
                                                            @Param("limit") int limit);
 
     @Select("""
-            SELECT lar.*
+            SELECT lar.*, las.brand_id AS brandId
             FROM local_agent_runtime_status lar
             JOIN local_agent_session las
               ON las.id = lar.session_id
@@ -64,4 +64,20 @@ public interface LocalAgentRuntimeStatusMapper extends BaseMapper<LocalAgentRunt
             LIMIT 1
             """)
     LocalAgentRuntimeStatus selectLatestByBrandId(@Param("brandId") Long brandId);
+
+    @Select("""
+            <script>
+            SELECT lar.*, las.brand_id AS brandId
+            FROM local_agent_runtime_status lar
+            JOIN local_agent_session las
+              ON las.id = lar.session_id
+             AND las.status = 'active'
+            WHERE las.brand_id IN
+            <foreach collection="brandIds" item="id" open="(" separator="," close=")">
+              #{id}
+            </foreach>
+            ORDER BY las.brand_id ASC, lar.last_seen_at DESC, lar.updated_at DESC
+            </script>
+            """)
+    List<LocalAgentRuntimeStatus> selectLatestByBrandIds(@Param("brandIds") List<Long> brandIds);
 }

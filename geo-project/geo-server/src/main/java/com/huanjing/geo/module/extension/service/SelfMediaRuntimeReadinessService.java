@@ -38,9 +38,13 @@ public class SelfMediaRuntimeReadinessService {
     private final ObjectMapper objectMapper;
 
     public RuntimeReadinessResult evaluate(RuntimeReadinessQuery query) {
+        return evaluate(query, latestExtension(query), latestHelper(query));
+    }
+
+    public RuntimeReadinessResult evaluate(RuntimeReadinessQuery query,
+                                           ExtensionRuntimeStatus extension,
+                                           LocalAgentRuntimeStatus helper) {
         List<String> blockedReasons = new ArrayList<>();
-        ExtensionRuntimeStatus extension = latestExtension(query);
-        LocalAgentRuntimeStatus helper = latestHelper(query);
         LocalDateTime now = LocalDateTime.now();
 
         if (extension == null) {

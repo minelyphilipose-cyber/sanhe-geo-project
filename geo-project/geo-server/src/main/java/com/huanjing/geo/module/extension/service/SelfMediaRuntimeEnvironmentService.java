@@ -16,14 +16,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class SelfMediaRuntimeEnvironmentService {
+
+    private static final String READINESS_SCOPE_BRAND_LATEST_HELPER = "brand_latest_helper";
+    private static final int RECENT_EXTENSION_STATUS_LIMIT_PER_ENVIRONMENT = 6;
 
     private final SelfMediaRuntimeEnvironmentMapper runtimeEnvironmentMapper;
     private final ExtensionRuntimeStatusMapper extensionRuntimeStatusMapper;
@@ -46,19 +52,12 @@ public class SelfMediaRuntimeEnvironmentService {
 
         List<SelfMediaRuntimeEnvironmentBaseRow> baseRows =
                 runtimeEnvironmentMapper.selectRuntimeEnvironmentRows(brandId, normalizedPlatform, normalizedKeyword);
-        Map<Long, LocalAgentRuntimeStatus> helperByBrand = new HashMap<>();
-        Map<String, ExtensionRuntimeStatus> extensionByEnvironmentPlatform = new HashMap<>();
+        Map<Long, LocalAgentRuntimeStatus> helperByBrand = latestHelpersByBrand(baseRows);
+        Map<Long, List<ExtensionRuntimeStatus>> extensionByEnvironment = recentExtensionsByEnvironment(baseRows);
         List<SelfMediaRuntimeEnvironmentVO> matched = new ArrayList<>();
         for (SelfMediaRuntimeEnvironmentBaseRow row : baseRows) {
-            LocalAgentRuntimeStatus helper = helperByBrand.computeIfAbsent(
-                    row.getBrandId(),
-                    id -> localAgentRuntimeStatusMapper.selectLatestByBrandId(id)
-            );
-            String extensionKey = row.getBrowserEnvironmentId() + ":" + normalize(row.getPlatform());
-            ExtensionRuntimeStatus extension = extensionByEnvironmentPlatform.computeIfAbsent(
-                    extensionKey,
-                    ignored -> latestExtension(row.getBrowserEnvironmentId(), row.getPlatform())
-            );
+            LocalAgentRuntimeStatus helper = helperByBrand.get(row.getBrandId());
+            ExtensionRuntimeStatus extension = latestExtension(extensionByEnvironment.get(row.getBrowserEnvironmentId()), row.getPlatform());
             RuntimeReadinessResult readiness = readinessService.evaluate(new RuntimeReadinessQuery(
                     row.getBrandId(),
                     helper == null ? null : helper.getOperatorId(),
@@ -67,7 +66,7 @@ public class SelfMediaRuntimeEnvironmentService {
                     row.getPlatform(),
                     "claim",
                     "fill"
-            ));
+            ), extension, helper);
             String gateMode = runtimeProperties.getGate().modeFor(row.getBrandId(), row.getPlatform());
             SelfMediaRuntimeEnvironmentVO vo = toVO(row, extension, helper, readiness, gateMode);
             if (ready != null && readiness.ready() != ready) {
@@ -88,15 +87,53 @@ public class SelfMediaRuntimeEnvironmentService {
         return result;
     }
 
-    private ExtensionRuntimeStatus latestExtension(Long browserEnvironmentId, String platform) {
-        if (browserEnvironmentId == null) {
+    private Map<Long, LocalAgentRuntimeStatus> latestHelpersByBrand(List<SelfMediaRuntimeEnvironmentBaseRow> baseRows) {
+        List<Long> brandIds = baseRows.stream()
+                .map(SelfMediaRuntimeEnvironmentBaseRow::getBrandId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (brandIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<LocalAgentRuntimeStatus> rows = localAgentRuntimeStatusMapper.selectLatestByBrandIds(brandIds);
+        Map<Long, LocalAgentRuntimeStatus> result = new HashMap<>();
+        for (LocalAgentRuntimeStatus row : rows) {
+            if (row.getBrandId() != null) {
+                result.putIfAbsent(row.getBrandId(), row);
+            }
+        }
+        return result;
+    }
+
+    private Map<Long, List<ExtensionRuntimeStatus>> recentExtensionsByEnvironment(List<SelfMediaRuntimeEnvironmentBaseRow> baseRows) {
+        List<Long> environmentIds = baseRows.stream()
+                .map(SelfMediaRuntimeEnvironmentBaseRow::getBrowserEnvironmentId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (environmentIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return extensionRuntimeStatusMapper.selectRecentByEnvironmentIds(environmentIds, RECENT_EXTENSION_STATUS_LIMIT_PER_ENVIRONMENT)
+                .stream()
+                .filter(row -> row.getBrowserEnvironmentId() != null)
+                .collect(Collectors.groupingBy(ExtensionRuntimeStatus::getBrowserEnvironmentId));
+    }
+
+    private ExtensionRuntimeStatus latestExtension(List<ExtensionRuntimeStatus> rows, String platform) {
+        if (rows == null || rows.isEmpty()) {
             return null;
         }
-        List<ExtensionRuntimeStatus> rows = extensionRuntimeStatusMapper.selectLatestByEnvironmentAndPlatform(
-                browserEnvironmentId,
-                normalize(platform)
-        );
-        return rows == null || rows.isEmpty() ? null : rows.get(0);
+        String normalizedPlatform = normalize(platform);
+        for (ExtensionRuntimeStatus row : rows) {
+            if (normalizedPlatform == null
+                    || equalsIgnoreCase(row.getDetectedPlatform(), normalizedPlatform)
+                    || equalsIgnoreCase(row.getPlatform(), normalizedPlatform)) {
+                return row;
+            }
+        }
+        return null;
     }
 
     private SelfMediaRuntimeEnvironmentVO toVO(SelfMediaRuntimeEnvironmentBaseRow row,
@@ -125,7 +162,8 @@ public class SelfMediaRuntimeEnvironmentService {
                         readiness.ready(),
                         readiness.blockedReasons(),
                         readiness.retryAfterSeconds(),
-                        gateMode
+                        gateMode,
+                        READINESS_SCOPE_BRAND_LATEST_HELPER
                 )
         );
     }

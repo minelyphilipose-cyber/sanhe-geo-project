@@ -51,4 +51,26 @@ public interface ExtensionRuntimeStatusMapper extends BaseMapper<ExtensionRuntim
             """)
     List<ExtensionRuntimeStatus> selectLatestByEnvironmentAndPlatform(@Param("browserEnvironmentId") Long browserEnvironmentId,
                                                                       @Param("platform") String platform);
+
+    @Select("""
+            <script>
+            SELECT *
+            FROM (
+              SELECT ers.*,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY ers.browser_environment_id
+                       ORDER BY ers.last_seen_at DESC, ers.updated_at DESC
+                     ) AS rn
+              FROM extension_runtime_status ers
+              WHERE ers.browser_environment_id IN
+              <foreach collection="browserEnvironmentIds" item="id" open="(" separator="," close=")">
+                #{id}
+              </foreach>
+            ) ranked
+            WHERE ranked.rn &lt;= #{limit}
+            ORDER BY ranked.browser_environment_id ASC, ranked.last_seen_at DESC, ranked.updated_at DESC
+            </script>
+            """)
+    List<ExtensionRuntimeStatus> selectRecentByEnvironmentIds(@Param("browserEnvironmentIds") List<Long> browserEnvironmentIds,
+                                                              @Param("limit") int limit);
 }
