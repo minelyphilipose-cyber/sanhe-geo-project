@@ -1,6 +1,6 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.1.6'
+const EXTENSION_VERSION = '0.1.7'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
 const ACTIVE_PROFILE_KEY = 'geoEnvActiveProfile'
