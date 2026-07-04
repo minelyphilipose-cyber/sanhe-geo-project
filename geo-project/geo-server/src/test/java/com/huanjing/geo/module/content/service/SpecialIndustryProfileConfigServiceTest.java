@@ -138,4 +138,29 @@ class SpecialIndustryProfileConfigServiceTest {
         assertThat(dictItem.getEnabled()).isFalse();
         assertThat(dictItem.getRemark()).isEqualTo("升学,培训");
     }
+
+    @Test
+    void createProfileGeneratesHiddenDefaultsWhenAdvancedJsonIsOmitted() {
+        SpecialIndustryProfileVO vo = service.createProfile(new SpecialIndustryProfileSaveRequest(
+                "legal",
+                "法律",
+                "legal",
+                "律所,法律咨询",
+                null,
+                null,
+                null,
+                true,
+                50,
+                null
+        ));
+
+        ArgumentCaptor<SpecialIndustryProfile> profileCaptor = ArgumentCaptor.forClass(SpecialIndustryProfile.class);
+        verify(profileMapper).insert(profileCaptor.capture());
+        SpecialIndustryProfile profile = profileCaptor.getValue();
+        assertThat(profile.getQualificationSchemaJson()).contains("brandQualificationDescription");
+        assertThat(profile.getReadinessPolicyJson()).contains("requireBrandQualificationDescription");
+        assertThat(profile.getPromptLabelsJson()).contains("法律行业").contains("审查/备案编号");
+        assertThat(vo.qualificationSchemaJson()).contains("brandQualificationDescription");
+        assertThat(vo.promptLabelsJson()).contains("法律行业");
+    }
 }

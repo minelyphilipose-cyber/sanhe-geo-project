@@ -555,11 +555,12 @@ public class MedicalArticleConfigService {
     private void fillProfile(SpecialIndustryProfile row, SpecialIndustryProfileSaveRequest req) {
         row.setIndustryCode(trim(req.industryCode()).toLowerCase(java.util.Locale.ROOT));
         row.setIndustryName(trim(req.industryName()));
-        row.setRegulatoryDomain(StringUtils.hasText(req.regulatoryDomain()) ? trim(req.regulatoryDomain()).toLowerCase(java.util.Locale.ROOT) : "custom");
+        String domain = StringUtils.hasText(req.regulatoryDomain()) ? trim(req.regulatoryDomain()).toLowerCase(java.util.Locale.ROOT) : "custom";
+        row.setRegulatoryDomain(domain);
         row.setKeywords(trimToNull(req.keywords()));
-        row.setQualificationSchemaJson(trimToNull(req.qualificationSchemaJson()));
-        row.setReadinessPolicyJson(trimToNull(req.readinessPolicyJson()));
-        row.setPromptLabelsJson(trimToNull(req.promptLabelsJson()));
+        row.setQualificationSchemaJson(defaultIfBlank(req.qualificationSchemaJson(), row.getQualificationSchemaJson(), defaultQualificationSchema(domain)));
+        row.setReadinessPolicyJson(defaultIfBlank(req.readinessPolicyJson(), row.getReadinessPolicyJson(), defaultReadinessPolicy(domain)));
+        row.setPromptLabelsJson(defaultIfBlank(req.promptLabelsJson(), row.getPromptLabelsJson(), defaultPromptLabels(domain, row.getIndustryName())));
         row.setEnabled(req.enabled() == null || req.enabled());
         row.setSortOrder(req.sortOrder() == null ? 100 : req.sortOrder());
         row.setRemark(trimToNull(req.remark()));
@@ -586,6 +587,42 @@ public class MedicalArticleConfigService {
         item.setEnabled(row.getEnabled());
         item.setRemark(StringUtils.hasText(row.getKeywords()) ? row.getKeywords() : row.getRemark());
         sysDictItemMapper.updateById(item);
+    }
+
+    private String defaultIfBlank(String requested, String existed, String fallback) {
+        if (StringUtils.hasText(requested)) {
+            return trim(requested);
+        }
+        if (StringUtils.hasText(existed)) {
+            return existed;
+        }
+        return fallback;
+    }
+
+    private String defaultQualificationSchema(String domain) {
+        if ("medical".equals(domain)) {
+            return "[{\"key\":\"medicalLicense\",\"label\":\"医疗机构执业许可\",\"required\":true},{\"key\":\"diagnosisScope\",\"label\":\"诊疗科目范围\",\"required\":true},{\"key\":\"medicalAdReviewNo\",\"label\":\"医疗广告审查证明编号\",\"requiredForOfficialSite\":true}]";
+        }
+        return "[{\"key\":\"brandQualificationDescription\",\"label\":\"行业资质说明\",\"required\":true}]";
+    }
+
+    private String defaultReadinessPolicy(String domain) {
+        if ("medical".equals(domain)) {
+            return "{\"requireProjectQualification\":true,\"requireMedicalLicense\":true,\"requireDiagnosisScope\":true,\"requireAdReviewNoForOfficialSite\":true}";
+        }
+        return "{\"requireProjectQualification\":true,\"requireBrandQualificationDescription\":true,\"requireAdReviewNoForOfficialSite\":false}";
+    }
+
+    private String defaultPromptLabels(String domain, String industryName) {
+        String label = jsonText(StringUtils.hasText(industryName) ? industryName : "特殊行业");
+        if ("medical".equals(domain)) {
+            return "{\"industryLabel\":\"" + label + "行业\",\"qualificationRefLabel\":\"项目资质引用\",\"licenseLabel\":\"医疗机构执业许可\",\"scopeLabel\":\"诊疗科目范围\",\"reviewNoLabel\":\"医疗广告审查证明编号\"}";
+        }
+        return "{\"industryLabel\":\"" + label + "行业\",\"qualificationRefLabel\":\"项目资质引用\",\"licenseLabel\":\"行业资质说明\",\"scopeLabel\":\"业务范围\",\"reviewNoLabel\":\"审查/备案编号\"}";
+    }
+
+    private String jsonText(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private void fill(MedicalComplianceRule row, ComplianceRuleSaveRequest req) {

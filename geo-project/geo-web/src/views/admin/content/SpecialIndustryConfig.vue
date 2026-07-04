@@ -57,7 +57,7 @@
       />
     </el-card>
 
-    <el-dialog v-model="editorVisible" :title="editingId ? '编辑配置' : '新增配置'" width="820px">
+    <el-dialog v-model="editorVisible" :title="editingId ? '编辑配置' : '新增配置'" width="720px">
       <el-form class="special-industry-form" :model="form" label-position="top">
         <template v-if="activeTab === 'industries'">
           <el-form-item label="行业编码"><el-input v-model="form.industryCode" placeholder="如 finance、education、legal；保存后会同步行业字典" /></el-form-item>
@@ -74,9 +74,6 @@
           <el-form-item label="排序"><el-input-number v-model="form.sortOrder" :min="0" style="width: 100%" /></el-form-item>
           <el-form-item label="识别关键词"><el-input v-model="form.keywords" placeholder="多个关键词用逗号分隔，如 金融,理财,贷款" /></el-form-item>
           <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
-          <el-form-item label="资质字段 Schema"><el-input v-model="form.qualificationSchemaJson" type="textarea" :rows="4" placeholder='如 [{"key":"brandQualificationDescription","label":"行业资质说明","required":true}]' /></el-form-item>
-          <el-form-item label="启用前校验策略"><el-input v-model="form.readinessPolicyJson" type="textarea" :rows="4" placeholder='如 {"requireProjectQualification":true,"requireBrandQualificationDescription":true}' /></el-form-item>
-          <el-form-item label="提示词展示标签"><el-input v-model="form.promptLabelsJson" type="textarea" :rows="4" placeholder='如 {"industryLabel":"金融行业","licenseLabel":"资质说明"}' /></el-form-item>
           <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" placeholder="说明行业适用范围、客户类型或配置注意事项" /></el-form-item>
         </template>
 
@@ -500,9 +497,6 @@ function resetForm() {
     enabled: true,
     sortOrder: 100,
     regulatoryDomain: 'custom',
-    qualificationSchemaJson: '[{"key":"brandQualificationDescription","label":"行业资质说明","required":true}]',
-    readinessPolicyJson: '{"requireProjectQualification":true,"requireBrandQualificationDescription":true,"requireAdReviewNoForOfficialSite":false}',
-    promptLabelsJson: '{"industryLabel":"特殊行业","qualificationRefLabel":"项目资质引用","licenseLabel":"行业资质说明","scopeLabel":"业务范围","reviewNoLabel":"审查/备案编号"}',
     matchMode: 'contains',
     severity: 'block',
     versionNo: 1,
@@ -590,9 +584,6 @@ function industryProfilePayload() {
     industryCode: String(form.industryCode || '').trim(),
     industryName: String(form.industryName || '').trim(),
     keywords: nullableText(form.keywords),
-    qualificationSchemaJson: nullableText(form.qualificationSchemaJson),
-    readinessPolicyJson: nullableText(form.readinessPolicyJson),
-    promptLabelsJson: nullableText(form.promptLabelsJson),
     remark: nullableText(form.remark),
   }
 }
