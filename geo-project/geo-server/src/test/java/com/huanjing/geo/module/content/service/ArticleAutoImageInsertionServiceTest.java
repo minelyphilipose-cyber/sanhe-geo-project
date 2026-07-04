@@ -82,7 +82,7 @@ class ArticleAutoImageInsertionServiceTest {
     }
 
     @Test
-    void insertForChannel_addsImagesForSupportedSelfMediaExceptXiaohongshu() {
+    void insertForChannel_addsImagesForSupportedSelfMediaExceptExcludedPlatforms() {
         BrandMaterial image = material(1L, "配图.png", "https://cdn.example.com/image.png");
         when(folderMapper.selectList(any())).thenReturn(List.of(folder(100L, "插图_1")));
         when(brandMaterialMapper.selectList(any())).thenReturn(List.of(image));
@@ -101,9 +101,11 @@ class ArticleAutoImageInsertionServiceTest {
 
         String douyin = service.insertForChannel(project(), "self_media", "douyin", "正文", null);
         String xiaohongshu = service.insertForChannel(project(), "self_media", "xiaohongshu", "正文", null);
+        String toutiao = service.insertForChannel(project(), "self_media", "toutiao", "正文", null);
 
         assertThat(douyin).contains("![配图.png](https://app.example.com/api/public/brand-materials/1/stream)");
         assertThat(xiaohongshu).isEqualTo("正文");
+        assertThat(toutiao).isEqualTo("正文");
     }
 
     @Test

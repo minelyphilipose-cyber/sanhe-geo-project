@@ -43,7 +43,7 @@ public class ArticleAutoImageInsertionService {
             ArticlePromptChannels.FORUM, ChannelImagePolicy.body(),
             ArticlePromptChannels.INDUSTRY_SITE, ChannelImagePolicy.body()
     );
-    private static final Set<String> SELF_MEDIA_EXCLUDED_SUB_CODES = Set.of("xiaohongshu");
+    private static final Set<String> SELF_MEDIA_EXCLUDED_SUB_CODES = Set.of("xiaohongshu", "toutiao");
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "webp");
     private static final Set<String> TRAILING_SECTIONS = Set.of("结语", "总结", "免责声明", "联系方式", "联系我们");
 
