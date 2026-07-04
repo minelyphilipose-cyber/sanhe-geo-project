@@ -21,6 +21,8 @@ public record CookieCredentialMeta(
         LocalDateTime capturedAt,
         LocalDateTime validFrom,
         LocalDateTime validUntil,
+        LocalDateTime expiresAt,
+        String expirySource,
         LocalDateTime destroyedAt,
         LocalDateTime createdAt
 ) {
@@ -45,6 +47,8 @@ public record CookieCredentialMeta(
                 credential.getCapturedAt(),
                 credential.getValidFrom(),
                 credential.getValidUntil(),
+                credential.getExpiresAt(),
+                credential.getExpirySource(),
                 credential.getDestroyedAt(),
                 credential.getCreatedAt()
         );

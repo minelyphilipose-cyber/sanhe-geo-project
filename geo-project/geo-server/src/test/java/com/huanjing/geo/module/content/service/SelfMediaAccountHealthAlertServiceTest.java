@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.module.content.credential.entity.SelfMediaCookieCredential;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaCookieCredentialMapper;
@@ -13,8 +14,10 @@ import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformSchedule
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleMode;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
 import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.entity.BrandOperatorAssignment;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.mapper.BrandOperatorAssignmentMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -40,7 +43,9 @@ class SelfMediaAccountHealthAlertServiceTest {
 
     private SelfMediaAccountMapper accountMapper;
     private SelfMediaCookieCredentialMapper credentialMapper;
+    private BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private BrandMapper brandMapper;
+    private BrandOperatorAssignmentMapper brandOperatorAssignmentMapper;
     private CompanyMapper companyMapper;
     private SelfMediaPlatformScheduleAdapterRouter platformRouter;
     private SystemAlertService systemAlertService;
@@ -50,6 +55,7 @@ class SelfMediaAccountHealthAlertServiceTest {
     static void initTableInfo() {
         initTableInfo(SelfMediaAccount.class);
         initTableInfo(Brand.class);
+        initTableInfo(BrandOperatorAssignment.class);
         initTableInfo(Company.class);
     }
 
@@ -57,14 +63,18 @@ class SelfMediaAccountHealthAlertServiceTest {
     void setUp() {
         accountMapper = mock(SelfMediaAccountMapper.class);
         credentialMapper = mock(SelfMediaCookieCredentialMapper.class);
+        browserEnvironmentAccountMapper = mock(BrowserEnvironmentAccountMapper.class);
         brandMapper = mock(BrandMapper.class);
+        brandOperatorAssignmentMapper = mock(BrandOperatorAssignmentMapper.class);
         companyMapper = mock(CompanyMapper.class);
         platformRouter = mock(SelfMediaPlatformScheduleAdapterRouter.class);
         systemAlertService = mock(SystemAlertService.class);
         service = new SelfMediaAccountHealthAlertService(
                 accountMapper,
                 credentialMapper,
+                browserEnvironmentAccountMapper,
                 brandMapper,
+                brandOperatorAssignmentMapper,
                 companyMapper,
                 platformRouter,
                 systemAlertService
@@ -82,6 +92,7 @@ class SelfMediaAccountHealthAlertServiceTest {
         when(platformRouter.contract("toutiao")).thenReturn(Optional.of(
                 contract("toutiao", "今日头条", SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION)
         ));
+        when(brandOperatorAssignmentMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
     }
 
     @Test
@@ -108,7 +119,7 @@ class SelfMediaAccountHealthAlertServiceTest {
         assertEquals("OFFICIAL_CREDENTIAL_EXPIRED", contextCaptor.getValue().get("issueCode"));
         assertEquals("三和医疗", contextCaptor.getValue().get("companyName"));
         assertEquals("三和口腔", contextCaptor.getValue().get("brandName"));
-        assertEquals("/admin/content/publish-platforms", contextCaptor.getValue().get("route"));
+        assertEquals("/admin/brands/10?tab=self-media&accountId=11", contextCaptor.getValue().get("route"));
     }
 
     @Test

@@ -481,6 +481,16 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="登录授权" min-width="170">
+          <template #default="{ row }">
+            <el-tag size="small" :type="cookieCredentialRiskTag(row)">
+              {{ cookieCredentialRiskLabel(row) }}
+            </el-tag>
+            <div v-if="row.cookieCredentialExpiresAt" class="table-subtext">
+              到期：{{ row.cookieCredentialExpiresAt }}
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="最近上报" min-width="210">
           <template #default="{ row }">
             <div>{{ browserEnvironmentLastReportTime(row) }}</div>
@@ -499,6 +509,14 @@
         <el-table-column v-if="canUpdateBrand" label="操作" width="320" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openSelfMediaAccountEdit(row)">编辑</el-button>
+            <el-button
+              link
+              type="primary"
+              :loading="checkingSelfMediaAccountId === row.id"
+              @click="checkSelfMediaAuth(row)"
+            >
+              重新检测
+            </el-button>
             <el-button
               v-if="!browserEnvironmentAccountOf(row)"
               link
@@ -1296,6 +1314,7 @@ import {
   getSelfMediaAccountsByBrand,
   getWechatMpAuthUrl,
   getSpecialIndustryTopicAngleCategories,
+  checkSelfMediaAccountAuth,
   updateSelfMediaAccount,
   type BrandChannelTemplatePerspective,
   type SpecialIndustryTopicAngleCategory,
@@ -1376,6 +1395,8 @@ type SemiAutoSelfMediaAccount = SelfMediaAccount & {
   cookieCredentialStatus?: string | null
   cookieCredentialVersion?: number | null
   cookieCredentialCapturedAt?: string | null
+  cookieCredentialExpiresAt?: string | null
+  cookieCredentialExpirySource?: string | null
 }
 type BrowserEnvironmentRow = BrowserEnvironment & {
   extensionSession?: ExtensionSession | null
@@ -1432,6 +1453,7 @@ const extensionBindCode = ref<ExtensionBindCode | null>(null)
 const extensionBindCodeLoading = ref(false)
 const extensionEnvironmentOpening = ref(false)
 const loginStatusSyncing = ref(false)
+const checkingSelfMediaAccountId = ref<number | null>(null)
 const environmentBindingVisible = ref(false)
 const environmentBindingSaving = ref(false)
 const environmentBindingTargetAccount = ref<SemiAutoSelfMediaAccount | null>(null)
@@ -2073,6 +2095,36 @@ function browserEnvironmentLoginStatusReason(account: SelfMediaAccount) {
 function browserEnvironmentLoginStatusIsProblem(account: SelfMediaAccount) {
   const status = browserEnvironmentAccountOf(account)?.loginStatus
   return Boolean(status && status !== 'logged_in' && status !== 'unknown')
+}
+
+function cookieCredentialRiskLabel(account: SelfMediaAccount) {
+  if (!account.cookieCredentialStatus || account.cookieCredentialStatus === 'none') return '未采集'
+  if (account.cookieCredentialStatus === 'expired') return '已过期'
+  if (!account.cookieCredentialExpiresAt) return '未记录到期'
+  const days = daysUntil(account.cookieCredentialExpiresAt)
+  if (days === null) return '到期未知'
+  if (days < 0) return '已过期'
+  if (days <= 3) return '即将到期'
+  if (days <= 7) return '临期'
+  return '正常'
+}
+
+function cookieCredentialRiskTag(account: SelfMediaAccount): 'success' | 'warning' | 'danger' | 'info' {
+  if (!account.cookieCredentialStatus || account.cookieCredentialStatus === 'none') return 'warning'
+  if (account.cookieCredentialStatus === 'expired') return 'danger'
+  if (!account.cookieCredentialExpiresAt) return 'info'
+  const days = daysUntil(account.cookieCredentialExpiresAt)
+  if (days === null) return 'info'
+  if (days < 0) return 'danger'
+  if (days <= 7) return 'warning'
+  return 'success'
+}
+
+function daysUntil(value?: string | null) {
+  if (!value) return null
+  const time = Date.parse(value)
+  if (Number.isNaN(time)) return null
+  return Math.ceil((time - Date.now()) / 86_400_000)
 }
 
 function browserEnvironmentOptionLabel(environment: BrowserEnvironment) {
@@ -3073,6 +3125,17 @@ async function loadSelfMediaAccounts() {
 async function loadSelfMediaAccountContext() {
   await loadSelfMediaAccountPlatformOptions()
   await loadSelfMediaAccounts()
+}
+
+async function checkSelfMediaAuth(account: SelfMediaAccount) {
+  checkingSelfMediaAccountId.value = account.id
+  try {
+    await checkSelfMediaAccountAuth(account.id)
+    ElMessage.success('账号授权状态已重新检测')
+    await loadSelfMediaAccounts()
+  } finally {
+    checkingSelfMediaAccountId.value = null
+  }
 }
 
 async function loadSelfMediaAccountPlatformOptions() {

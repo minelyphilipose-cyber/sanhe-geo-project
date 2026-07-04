@@ -103,6 +103,18 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '合伙人启动工单', icon: 'Tickets', permissions: ['delivery.assignment.manage'] },
     },
     {
+      path: 'partner-start-requests/customers/:id',
+      name: 'PartnerSubmittedCustomerDetail',
+      component: () => import('@/views/partner/PartnerCustomerDetail.vue'),
+      meta: { title: '合伙人客户详情', hidden: true, permissions: ['delivery.assignment.manage', 'company.read'] },
+    },
+    {
+      path: 'partner-start-requests/projects/:id',
+      name: 'PartnerSubmittedProjectDetail',
+      component: () => import('@/views/partner/PartnerProjectDetail.vue'),
+      meta: { title: '合伙人项目详情', hidden: true, permissions: ['delivery.assignment.manage', 'project.read'] },
+    },
+    {
       path: 'projects/:id',
       name: 'ProjectDetail',
       component: () => import('@/views/admin/project/ProjectDetail.vue'),
@@ -166,6 +178,12 @@ const adminRoutes: RouteRecordRaw = {
       name: 'SelfMediaRuntimeEnvironment',
       component: () => import('@/views/admin/content/SelfMediaRuntimeEnvironment.vue'),
       meta: { title: '自媒体运行环境', icon: 'Monitor', permissions: ['content.read'] },
+    },
+    {
+      path: 'monitoring/account-auth-health',
+      name: 'AccountAuthHealth',
+      component: () => import('@/views/admin/content/AccountAuthHealth.vue'),
+      meta: { title: '账号授权健康', icon: 'Warning', permissions: ['content.read'] },
     },
     {
       path: 'content/execution',

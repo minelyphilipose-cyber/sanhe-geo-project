@@ -36,6 +36,8 @@ public class SelfMediaCookieCredential {
     private LocalDateTime capturedAt;
     private LocalDateTime validFrom;
     private LocalDateTime validUntil;
+    private LocalDateTime expiresAt;
+    private String expirySource;
     private LocalDateTime destroyedAt;
     private LocalDateTime createdAt;
 }

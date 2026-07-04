@@ -52,16 +52,38 @@
           <el-table-column label="接入方式" width="120">
             <template #default="scope">{{ methodLabel(scope.row.integrationMethod) }}</template>
           </el-table-column>
+          <el-table-column label="Cookie 风险" min-width="170">
+            <template #default="scope">
+              <template v-if="isForumSite(scope.row)">
+                <el-tag size="small" :type="cookieRiskTag(scope.row)">
+                  {{ cookieRiskLabel(scope.row) }}
+                </el-tag>
+                <div v-if="scope.row.cookieExpiresAt" class="table-subtext">
+                  到期：{{ scope.row.cookieExpiresAt }}
+                </div>
+              </template>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="100">
             <template #default="scope">
               <el-tag :type="scope.row.status === 'active' ? 'success' : 'info'">{{ statusLabel(scope.row.status) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="updatedAt" label="更新时间" width="170" />
-          <el-table-column label="操作" width="240" fixed="right">
+          <el-table-column label="操作" width="300" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
               <el-button link type="primary" @click="test(scope.row.id)">测试连通</el-button>
+              <el-button
+                v-if="isForumSite(scope.row)"
+                link
+                type="primary"
+                :loading="refreshingRiskId === scope.row.id"
+                @click="refreshForumRisk(scope.row.id)"
+              >
+                刷新风险
+              </el-button>
               <el-button
                 link
                 :type="scope.row.status === 'active' ? 'warning' : 'success'"
@@ -163,6 +185,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { createPublishSite, getPublishSites, testPublishSite, updatePublishSite, updatePublishSiteStatus } from '@/api/publishSite'
+import { refreshAccountAuthHealthOverview } from '@/api/accountAuthHealth'
 import type { PublishSite } from '@/types'
 import { useDictStore } from '@/stores/dict'
 
@@ -174,6 +197,7 @@ interface HeaderRow {
 const dictStore = useDictStore()
 const loading = ref(false)
 const saving = ref(false)
+const refreshingRiskId = ref<number | null>(null)
 const rows = ref<PublishSite[]>([])
 
 const query = reactive({
@@ -242,6 +266,8 @@ function buildHeaders() {
 function methodLabel(v?: string) {
   if (v === 'rest_api') return 'REST API'
   if (v === 'manual') return '手动分发'
+  if (v === 'forum_playwright') return '论坛自动化'
+  if (v === 'discuz_http') return 'Discuz HTTP'
   return v || '-'
 }
 
@@ -249,6 +275,31 @@ function statusLabel(v?: string) {
   if (v === 'active') return '启用'
   if (v === 'suspended') return '停用'
   return v || '-'
+}
+
+function isForumSite(row: PublishSite) {
+  return row.integrationMethod === 'forum_playwright' || row.integrationMethod === 'discuz_http'
+}
+
+function cookieRiskLabel(row: PublishSite) {
+  if (row.cookieRiskStatus === 'missing') return '未配置'
+  if (row.cookieRiskStatus === 'expired') return '已过期'
+  if (row.cookieRiskStatus === 'expiring') {
+    if (typeof row.cookieDaysUntilExpiry === 'number') {
+      return row.cookieDaysUntilExpiry <= 3 ? '即将到期' : '临期'
+    }
+    return '临期'
+  }
+  if (row.cookieRiskStatus === 'unknown') return '到期未知'
+  if (row.cookieRiskStatus === 'normal') return '正常'
+  return row.cookieRiskStatus || '未记录'
+}
+
+function cookieRiskTag(row: PublishSite): 'success' | 'warning' | 'danger' | 'info' {
+  if (row.cookieRiskStatus === 'expired' || row.cookieRiskStatus === 'missing') return 'danger'
+  if (row.cookieRiskStatus === 'expiring') return 'warning'
+  if (row.cookieRiskStatus === 'normal') return 'success'
+  return 'info'
 }
 
 function resetForm() {
@@ -370,6 +421,17 @@ async function test(id: number) {
   }
 }
 
+async function refreshForumRisk(id: number) {
+  refreshingRiskId.value = id
+  try {
+    await refreshAccountAuthHealthOverview()
+    await load()
+    ElMessage.success('论坛 Cookie 风险已重新检测')
+  } finally {
+    refreshingRiskId.value = null
+  }
+}
+
 onMounted(async () => {
   await dictStore.ensureLoaded()
   await load()
@@ -388,6 +450,13 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr) auto;
   gap: 8px;
+}
+
+.table-subtext {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 @media (max-width: 720px) {

@@ -33,6 +33,12 @@ public class PublishSite {
     private Boolean credentialConfigured;
     @TableField(exist = false)
     private String credentialStatus;
+    @TableField(exist = false)
+    private String cookieRiskStatus;
+    @TableField(exist = false)
+    private LocalDateTime cookieExpiresAt;
+    @TableField(exist = false)
+    private Long cookieDaysUntilExpiry;
     private String requestHeaderTemplate;
     private String requestBodyTemplate;
     private String responseUrlPath;

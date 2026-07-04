@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -24,8 +25,10 @@ import java.util.List;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     public static final String ACCESS_TOKEN_HEADER = "X-Access-Token";
+    private static final String LOGIN_SESSION_KEY_PREFIX = "login:session:";
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final RedisTemplate<String, Object> redisTemplate;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -42,6 +45,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Integer tokenVersion = claims.get("tokenVersion", Integer.class);
                 if (tokenVersion == null) {
                     tokenVersion = 0;
+                }
+                if (!isCurrentLoginSession(userId, tokenVersion)) {
+                    filterChain.doFilter(request, response);
+                    return;
                 }
 
                 LoginUser loginUser = new LoginUser(userId, username, role, tokenVersion);
@@ -70,5 +77,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return bearer.substring(7);
         }
         return null;
+    }
+
+    private boolean isCurrentLoginSession(Long userId, Integer tokenVersion) {
+        Object current = redisTemplate.opsForValue().get(LOGIN_SESSION_KEY_PREFIX + userId);
+        return current != null && String.valueOf(tokenVersion).equals(String.valueOf(current));
     }
 }

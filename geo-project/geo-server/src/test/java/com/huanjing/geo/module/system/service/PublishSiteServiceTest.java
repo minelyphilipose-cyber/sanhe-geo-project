@@ -1,15 +1,21 @@
 package com.huanjing.geo.module.system.service;
 
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.huanjing.geo.module.system.entity.PublishSite;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.PublishSiteMapper;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -50,6 +56,30 @@ class PublishSiteServiceTest {
         assertFalse((Boolean) result.get("reachable"));
         assertEquals("ping", result.get("testType"));
         assertEquals("连通测试失败，请确认域名 DNS 解析已生效，且目标服务器允许 Ping。", result.get("message"));
+    }
+
+    @Test
+    void forumCredentialAccountsContainerDoesNotDefaultRootExpiry() {
+        TestPublishSiteService service = new TestPublishSiteService();
+        LocalDateTime accountExpiry = LocalDateTime.now().plusDays(60).withNano(0);
+        String expiresAt = accountExpiry.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        String rawCredential = "{\"accounts\":[{\"username\":\"forum-user\",\"password\":\"secret\",\"expiresAt\":\""
+                + expiresAt + "\"}]}";
+
+        String normalized = ReflectionTestUtils.invokeMethod(
+                service,
+                "withDefaultForumCookieExpiry",
+                "discuz_http",
+                rawCredential
+        );
+        JSONObject root = JSONUtil.parseObj(normalized);
+        JSONObject account = root.getJSONArray("accounts").getJSONObject(0);
+        LocalDateTime nearest = ReflectionTestUtils.invokeMethod(service, "nearestForumCookieExpiresAt", normalized);
+
+        assertNull(root.getStr("expiresAt"));
+        assertEquals(expiresAt, account.getStr("expiresAt"));
+        assertEquals("manual", account.getStr("expirySource"));
+        assertEquals(accountExpiry, nearest);
     }
 
     private void givenManagerUser() {

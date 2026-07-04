@@ -99,6 +99,8 @@ public class CredentialVaultService {
         credential.setCapturedBy(command.capturedBy());
         credential.setCapturedAt(now);
         credential.setValidFrom(now);
+        credential.setExpiresAt(now.plusDays(defaultCookieValidDays(account.getPlatform())));
+        credential.setExpirySource("platform_policy");
         credential.setCreatedAt(now);
         credentialMapper.insert(credential);
 
@@ -275,8 +277,17 @@ public class CredentialVaultService {
         meta.setCapturedAt(credential.getCapturedAt());
         meta.setValidFrom(credential.getValidFrom());
         meta.setValidUntil(credential.getValidUntil());
+        meta.setExpiresAt(credential.getExpiresAt());
+        meta.setExpirySource(credential.getExpirySource());
         meta.setDestroyedAt(credential.getDestroyedAt());
         meta.setCreatedAt(credential.getCreatedAt());
         return meta;
+    }
+
+    private long defaultCookieValidDays(String platform) {
+        if ("xiaohongshu".equalsIgnoreCase(String.valueOf(platform))) {
+            return 7;
+        }
+        return 30;
     }
 }

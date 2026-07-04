@@ -184,6 +184,31 @@ class SystemAlertServiceTest {
         verify(systemAlertMapper, never()).insert(any());
     }
 
+    @Test
+    void resolveOpenByDedupeKeyPrefixExceptKeepsActiveKeysOpen() {
+        SystemAlert active = new SystemAlert();
+        active.setId(12L);
+        active.setDedupeKey("forum_cookie_auth:7:user-a:FORUM_COOKIE_EXPIRED");
+        active.setIsResolved(false);
+        SystemAlert stale = new SystemAlert();
+        stale.setId(13L);
+        stale.setDedupeKey("forum_cookie_auth:7:site:FORUM_COOKIE_MISSING");
+        stale.setIsResolved(false);
+        when(systemAlertMapper.selectList(any())).thenReturn(List.of(active, stale));
+
+        systemAlertService.resolveOpenByDedupeKeyPrefixExcept(
+                "forum_cookie_auth:7:",
+                List.of("forum_cookie_auth:7:user-a:FORUM_COOKIE_EXPIRED"),
+                null
+        );
+
+        ArgumentCaptor<SystemAlert> captor = ArgumentCaptor.forClass(SystemAlert.class);
+        verify(systemAlertMapper).updateById(captor.capture());
+        SystemAlert updated = captor.getValue();
+        assertEquals(13L, updated.getId());
+        assertEquals(true, updated.getIsResolved());
+    }
+
     private SysUser user() {
         SysUser user = new SysUser();
         user.setId(7L);

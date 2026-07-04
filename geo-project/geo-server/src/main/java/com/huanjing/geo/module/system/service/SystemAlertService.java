@@ -14,9 +14,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -232,6 +235,28 @@ public class SystemAlertService {
                 .likeRight(SystemAlert::getDedupeKey, dedupeKeyPrefix.trim())
                 .eq(SystemAlert::getIsResolved, false));
         for (SystemAlert alert : alerts) {
+            alert.setIsResolved(true);
+            alert.setResolvedBy(resolvedBy);
+            alert.setResolvedAt(LocalDateTime.now());
+            systemAlertMapper.updateById(alert);
+        }
+    }
+
+    public void resolveOpenByDedupeKeyPrefixExcept(String dedupeKeyPrefix,
+                                                   Collection<String> activeDedupeKeys,
+                                                   Long resolvedBy) {
+        if (!StringUtils.hasText(dedupeKeyPrefix)) {
+            return;
+        }
+        Set<String> activeKeys = activeDedupeKeys == null ? Set.of() : new HashSet<>(activeDedupeKeys);
+        List<SystemAlert> alerts = systemAlertMapper.selectList(new LambdaQueryWrapper<SystemAlert>()
+                .likeRight(SystemAlert::getDedupeKey, dedupeKeyPrefix.trim())
+                .eq(SystemAlert::getIsResolved, false));
+        for (SystemAlert alert : alerts) {
+            String dedupeKey = alert.getDedupeKey();
+            if (StringUtils.hasText(dedupeKey) && activeKeys.contains(dedupeKey.trim())) {
+                continue;
+            }
             alert.setIsResolved(true);
             alert.setResolvedBy(resolvedBy);
             alert.setResolvedAt(LocalDateTime.now());

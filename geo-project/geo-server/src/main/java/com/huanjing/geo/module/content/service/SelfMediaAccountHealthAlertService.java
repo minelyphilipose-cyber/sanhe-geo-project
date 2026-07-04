@@ -2,15 +2,20 @@ package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.content.credential.entity.SelfMediaCookieCredential;
+import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
+import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaCookieCredentialMapper;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.entity.BrandOperatorAssignment;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.mapper.BrandOperatorAssignmentMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +45,7 @@ public class SelfMediaAccountHealthAlertService {
     private static final String FALLBACK_RECIPIENT_ROLE = "delivery_manager";
     private static final String AUTH_MODE_COOKIE = "COOKIE";
     private static final String STATUS_ACTIVE = "active";
+    private static final List<String> BRAND_OPERATOR_ROLES = List.of("PRIMARY", "SECONDARY");
     private static final Set<String> ALL_ISSUE_CODES = Set.of(
             "OFFICIAL_CREDENTIAL_MISSING",
             "OFFICIAL_CREDENTIAL_EXPIRED",
@@ -52,7 +58,9 @@ public class SelfMediaAccountHealthAlertService {
 
     private final SelfMediaAccountMapper accountMapper;
     private final SelfMediaCookieCredentialMapper credentialMapper;
+    private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private final BrandMapper brandMapper;
+    private final BrandOperatorAssignmentMapper brandOperatorAssignmentMapper;
     private final CompanyMapper companyMapper;
     private final SelfMediaPlatformScheduleAdapterRouter platformRouter;
     private final SystemAlertService systemAlertService;
@@ -158,19 +166,43 @@ public class SelfMediaAccountHealthAlertService {
                 : companyMapper.selectBatchIds(companyIds).stream()
                 .filter(company -> company.getDeletedAt() == null)
                 .collect(Collectors.toMap(Company::getId, Function.identity()));
+        Map<Long, Long> assignedOperatorByBrandId = loadAssignedOperators(brandIds);
 
         Map<Long, BrandContext> result = new LinkedHashMap<>();
         for (Map.Entry<Long, Brand> entry : brandById.entrySet()) {
             Brand brand = entry.getValue();
             Company company = companyById.get(entry.getValue().getCompanyId());
+            Long recipientUserId = assignedOperatorByBrandId.get(brand.getId());
+            if (recipientUserId == null && company != null) {
+                recipientUserId = company.getOwnerId();
+            }
             result.put(entry.getKey(), new BrandContext(
-                    company == null ? null : company.getOwnerId(),
-                    company == null || company.getOwnerId() == null ? FALLBACK_RECIPIENT_ROLE : null,
+                    recipientUserId,
+                    recipientUserId == null ? FALLBACK_RECIPIENT_ROLE : null,
                     company == null ? null : company.getCompanyName(),
                     brand.getBrandName()
             ));
         }
         return result;
+    }
+
+    private Map<Long, Long> loadAssignedOperators(List<Long> brandIds) {
+        if (brandIds.isEmpty()) {
+            return Map.of();
+        }
+        return brandOperatorAssignmentMapper.selectList(new LambdaQueryWrapper<BrandOperatorAssignment>()
+                        .in(BrandOperatorAssignment::getBrandId, brandIds)
+                        .eq(BrandOperatorAssignment::getStatus, STATUS_ACTIVE)
+                        .in(BrandOperatorAssignment::getRole, BRAND_OPERATOR_ROLES)
+                        .orderByAsc(BrandOperatorAssignment::getBrandId)
+                        .orderByDesc(BrandOperatorAssignment::getAssignedAt, BrandOperatorAssignment::getId))
+                .stream()
+                .collect(Collectors.toMap(
+                        BrandOperatorAssignment::getBrandId,
+                        BrandOperatorAssignment::getOperatorId,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new
+                ));
     }
 
     private HealthIssue detectIssue(SelfMediaAccount account,
@@ -195,11 +227,13 @@ public class SelfMediaAccountHealthAlertService {
         if (credential == null) {
             return issue("COOKIE_CREDENTIAL_MISSING", "high", "平台 Cookie 登录凭据缺失或已失效");
         }
-        LocalDateTime capturedAt = credential.getCapturedAt();
-        if (capturedAt == null) {
+        LocalDateTime expiresAt = credential.getExpiresAt();
+        if (expiresAt == null && credential.getCapturedAt() != null) {
+            expiresAt = credential.getCapturedAt().plusDays(cookieValidDays(account.getPlatform()));
+        }
+        if (expiresAt == null) {
             return issue("COOKIE_CREDENTIAL_MISSING", "high", "平台 Cookie 登录授权记录时间缺失");
         }
-        LocalDateTime expiresAt = capturedAt.plusDays(cookieValidDays(account.getPlatform()));
         long daysUntilExpiry = daysUntil(now, expiresAt);
         if (!expiresAt.isAfter(now)) {
             return issue("COOKIE_CREDENTIAL_EXPIRED", "high", expiredMessage("平台登录授权", daysUntilExpiry), expiresAt, daysUntilExpiry);
@@ -279,7 +313,23 @@ public class SelfMediaAccountHealthAlertService {
                 brandContext.recipientRole(),
                 prefix + issue.code()
         );
+        if ("COOKIE_CREDENTIAL_EXPIRED".equals(issue.code())) {
+            markBrowserLoginExpired(account);
+        }
         return 1;
+    }
+
+    private void markBrowserLoginExpired(SelfMediaAccount account) {
+        BrowserEnvironmentAccount binding = browserEnvironmentAccountMapper.selectActiveBySelfMediaAccountId(account.getId());
+        if (binding == null || BrowserEnvironmentConstants.LOGIN_EXPIRED.equals(binding.getLoginStatus())) {
+            return;
+        }
+        binding.setLoginStatus(BrowserEnvironmentConstants.LOGIN_EXPIRED);
+        binding.setLastVerifiedAt(LocalDateTime.now());
+        binding.setLastErrorCode("COOKIE_CREDENTIAL_EXPIRED");
+        binding.setLastErrorMessage("cookie credential expired by health scan");
+        binding.setUpdatedAt(LocalDateTime.now());
+        browserEnvironmentAccountMapper.updateById(binding);
     }
 
     private String message(SelfMediaAccount account, HealthIssue issue, BrandContext brandContext) {
@@ -308,7 +358,7 @@ public class SelfMediaAccountHealthAlertService {
         context.put("daysUntilExpiry", issue.daysUntilExpiry());
         context.put("lastAuthCheckedAt", account.getLastAuthCheckedAt());
         context.put("lastAuthError", account.getLastAuthError());
-        context.put("route", "/admin/content/publish-platforms");
+        context.put("route", "/admin/brands/" + account.getBrandId() + "?tab=self-media&accountId=" + account.getId());
         return context;
     }
 

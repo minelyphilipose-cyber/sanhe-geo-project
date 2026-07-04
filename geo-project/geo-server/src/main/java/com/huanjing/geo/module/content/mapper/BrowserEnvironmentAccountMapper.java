@@ -35,7 +35,12 @@ public interface BrowserEnvironmentAccountMapper extends BaseMapper<BrowserEnvir
               ON be.id = bea.browser_environment_id
              AND be.deleted_at IS NULL
             WHERE bea.deleted_at IS NULL
-              AND be.environment_key = #{environmentKey}
+              AND (
+                    be.environment_key = #{environmentKey}
+                 OR be.name = #{environmentKey}
+                 OR REPLACE(be.environment_key, '-', '_') = REPLACE(#{environmentKey}, '-', '_')
+                 OR REPLACE(be.name, '-', '_') = REPLACE(#{environmentKey}, '-', '_')
+              )
               AND bea.platform = #{platform}
             ORDER BY bea.id ASC
             LIMIT 2

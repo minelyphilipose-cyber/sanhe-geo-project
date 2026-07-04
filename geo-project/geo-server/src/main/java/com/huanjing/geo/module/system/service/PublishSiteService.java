@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.system.service;
 
 import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
@@ -17,6 +18,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.net.URI;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -39,6 +42,7 @@ public class PublishSiteService {
     private static final Set<String> METHOD_SET = Set.of("rest_api", "ftp", "email", "manual", "forum_playwright", "discuz_http");
     private static final Set<String> HTTP_METHOD_SET = Set.of("POST", "PUT");
     private static final Set<String> AUTH_SET = Set.of("api_key", "bearer_token", "basic_auth", "oauth2", "cookie", "account_cookie");
+    private static final int DEFAULT_FORUM_COOKIE_VALID_DAYS = 30;
 
     private final PublishSiteMapper publishSiteMapper;
     private final SysDictItemMapper sysDictItemMapper;
@@ -174,9 +178,69 @@ public class PublishSiteService {
                 ? ("degraded".equalsIgnoreCase(site.getCurrentHealthStatus()) ? "expired_or_failed" : "configured")
                 : "missing");
         if (isForumSite(site)) {
-            site.setApiCredential(platformCredentialService.resolveCredential(site.getCredentialRef(), site.getApiCredentialEncrypted()));
+            String credential = platformCredentialService.resolveCredential(site.getCredentialRef(), site.getApiCredentialEncrypted());
+            site.setApiCredential(credential);
+            attachForumCookieRisk(site, credential);
         }
         return site;
+    }
+
+    private void attachForumCookieRisk(PublishSite site, String credential) {
+        if (!StringUtils.hasText(credential)) {
+            site.setCookieRiskStatus("missing");
+            return;
+        }
+        LocalDateTime nearest = nearestForumCookieExpiresAt(credential);
+        if (nearest == null) {
+            site.setCookieRiskStatus("unknown");
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        long days = java.time.temporal.ChronoUnit.DAYS.between(now.toLocalDate(), nearest.toLocalDate());
+        site.setCookieExpiresAt(nearest);
+        site.setCookieDaysUntilExpiry(days);
+        if (!nearest.isAfter(now)) {
+            site.setCookieRiskStatus("expired");
+        } else if (nearest.isBefore(now.plusDays(7))) {
+            site.setCookieRiskStatus("expiring");
+        } else {
+            site.setCookieRiskStatus("normal");
+        }
+    }
+
+    private LocalDateTime nearestForumCookieExpiresAt(String credential) {
+        try {
+            JSONObject root = JSONUtil.parseObj(credential);
+            List<LocalDateTime> values = new ArrayList<>();
+            Object accounts = root.get("accounts");
+            if (accounts instanceof JSONArray array) {
+                for (Object item : array) {
+                    if (item instanceof JSONObject account) {
+                        collectForumCookieExpiresAt(account, values);
+                    }
+                }
+            } else {
+                collectForumCookieExpiresAt(root, values);
+            }
+            return values.stream().min(LocalDateTime::compareTo).orElse(null);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private void collectForumCookieExpiresAt(JSONObject object, List<LocalDateTime> values) {
+        if (!isUsableForumCredential(object)) {
+            return;
+        }
+        LocalDateTime expiresAt = parseDateTime(object.getStr("expiresAt"), null);
+        if (expiresAt != null) {
+            values.add(expiresAt);
+            return;
+        }
+        LocalDateTime capturedAt = parseDateTime(object.getStr("capturedAt"), null);
+        if (capturedAt != null) {
+            values.add(capturedAt.plusDays(DEFAULT_FORUM_COOKIE_VALID_DAYS));
+        }
     }
 
     private boolean headerContainsAdminToken(String requestHeaderTemplate) {
@@ -188,6 +252,10 @@ public class PublishSiteService {
 
     private boolean isForumSite(PublishSite site) {
         String method = site.getIntegrationMethod();
+        return isForumIntegrationMethod(method);
+    }
+
+    private boolean isForumIntegrationMethod(String method) {
         return "discuz_http".equalsIgnoreCase(method) || "forum_playwright".equalsIgnoreCase(method);
     }
 
@@ -224,7 +292,8 @@ public class PublishSiteService {
         site.setAuthType(StringUtils.hasText(authType) ? authType.trim().toLowerCase(Locale.ROOT) : null);
         site.setCredentialRef(StringUtils.hasText(credentialRef) ? credentialRef.trim() : null);
         if (StringUtils.hasText(apiCredential)) {
-            site.setApiCredentialEncrypted(platformCredentialService.encryptForStorage(apiCredential));
+            site.setApiCredentialEncrypted(platformCredentialService.encryptForStorage(
+                    withDefaultForumCookieExpiry(integrationMethod, apiCredential)));
         }
         site.setRequestHeaderTemplate(normalizeJsonObject(requestHeaderTemplate));
         site.setRequestBodyTemplate(normalizeJsonObject(requestBodyTemplate));
@@ -232,6 +301,70 @@ public class PublishSiteService {
         site.setContentConstraints(normalizeJsonObject(contentConstraints));
         site.setCurrentHealthStatus(StringUtils.hasText(currentHealthStatus) ? currentHealthStatus.trim().toLowerCase(Locale.ROOT) : "normal");
         site.setRemark(remark);
+    }
+
+    private String withDefaultForumCookieExpiry(String integrationMethod, String apiCredential) {
+        if (!isForumIntegrationMethod(integrationMethod) || !StringUtils.hasText(apiCredential)) {
+            return apiCredential;
+        }
+        try {
+            JSONObject root = JSONUtil.parseObj(apiCredential);
+            LocalDateTime now = LocalDateTime.now();
+            Object accounts = root.get("accounts");
+            if (accounts instanceof JSONArray array) {
+                for (Object item : array) {
+                    if (item instanceof JSONObject account) {
+                        applyDefaultExpiry(account, now);
+                    }
+                }
+            } else {
+                applyDefaultExpiry(root, now);
+            }
+            return root.toString();
+        } catch (Exception ignored) {
+            return apiCredential;
+        }
+    }
+
+    private void applyDefaultExpiry(JSONObject object, LocalDateTime now) {
+        if (!isUsableForumCredential(object)) {
+            return;
+        }
+        String capturedAt = object.getStr("capturedAt");
+        if (!StringUtils.hasText(capturedAt)) {
+            capturedAt = now.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            object.set("capturedAt", capturedAt);
+        }
+        if (!StringUtils.hasText(object.getStr("expiresAt"))) {
+            LocalDateTime base = parseDateTime(capturedAt, now);
+            object.set("expiresAt", base.plusDays(DEFAULT_FORUM_COOKIE_VALID_DAYS).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            object.set("expirySource", "default");
+        } else if (!StringUtils.hasText(object.getStr("expirySource"))) {
+            object.set("expirySource", "manual");
+        }
+    }
+
+    private boolean isUsableForumCredential(JSONObject object) {
+        if (object == null) {
+            return false;
+        }
+        String status = object.getStr("status", "active");
+        if (StringUtils.hasText(status) && !"active".equalsIgnoreCase(status)) {
+            return false;
+        }
+        return StringUtils.hasText(object.getStr("cookie"))
+                || (StringUtils.hasText(object.getStr("username")) && StringUtils.hasText(object.getStr("password")));
+    }
+
+    private LocalDateTime parseDateTime(String value, LocalDateTime fallback) {
+        if (!StringUtils.hasText(value)) {
+            return fallback;
+        }
+        try {
+            return LocalDateTime.parse(value.trim(), DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        } catch (Exception ignored) {
+            return fallback;
+        }
     }
 
     private void validate(String siteName,

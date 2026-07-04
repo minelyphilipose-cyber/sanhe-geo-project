@@ -17,7 +17,7 @@ public interface SelfMediaCookieCredentialMapper extends BaseMapper<SelfMediaCoo
             SELECT id, self_media_account_id, brand_id, platform, version,
                    master_key_id, cipher_alg, cookie_iv_base64, aad_context, user_agent,
                    captured_fingerprint_json, required_cookie_status,
-                   captured_by, captured_at, valid_from, valid_until,
+                   captured_by, captured_at, valid_from, valid_until, expires_at, expiry_source,
                    destroyed_at, created_at
             FROM self_media_cookie_credential
             WHERE self_media_account_id = #{accountId}
@@ -33,7 +33,7 @@ public interface SelfMediaCookieCredentialMapper extends BaseMapper<SelfMediaCoo
             SELECT id, self_media_account_id, brand_id, platform, version,
                    master_key_id, cipher_alg, cookie_iv_base64, aad_context, user_agent,
                    captured_fingerprint_json, required_cookie_status,
-                   captured_by, captured_at, valid_from, valid_until,
+                   captured_by, captured_at, valid_from, valid_until, expires_at, expiry_source,
                    destroyed_at, created_at
             FROM self_media_cookie_credential
             WHERE valid_until IS NULL
@@ -74,7 +74,7 @@ public interface SelfMediaCookieCredentialMapper extends BaseMapper<SelfMediaCoo
             SELECT id, self_media_account_id, brand_id, platform, version,
                    master_key_id, cipher_alg, cookie_iv_base64, aad_context, user_agent,
                    captured_fingerprint_json, required_cookie_status,
-                   captured_by, captured_at, valid_from, valid_until,
+                   captured_by, captured_at, valid_from, valid_until, expires_at, expiry_source,
                    destroyed_at, created_at
             FROM self_media_cookie_credential
             WHERE self_media_account_id = #{accountId}

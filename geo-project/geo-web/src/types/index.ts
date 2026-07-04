@@ -1862,6 +1862,70 @@ export interface PublishSite {
   updatedAt?: string
 }
 
+export interface AccountAuthHealthOverview {
+  generatedAt: string
+  summary: AccountAuthHealthSummary
+  riskItems: AccountAuthHealthRiskItem[]
+  alertGroups: AccountAuthHealthAlertGroup[]
+  trendBuckets: AccountAuthHealthTrendBucket[]
+}
+
+export interface AccountAuthHealthSummary {
+  totalTargets: number
+  normalCount: number
+  expiringCount: number
+  expiredCount: number
+  missingCount: number
+  unknownCount: number
+  openAlertCount: number
+  highPriorityCount: number
+  dueInSevenDays: number
+  dueInThirtyDays: number
+}
+
+export interface AccountAuthHealthRiskItem {
+  targetType: 'self_media' | 'forum' | string
+  targetId: number
+  targetKey?: string | null
+  displayName?: string | null
+  platform?: string | null
+  platformLabel?: string | null
+  brandId?: number | null
+  brandName?: string | null
+  companyName?: string | null
+  ownerUserId?: number | null
+  ownerName?: string | null
+  riskStatus: 'normal' | 'expiring' | 'expired' | 'missing' | 'unknown' | string
+  severity?: string | null
+  expiresAt?: string | null
+  daysUntilExpiry?: number | null
+  expirySource?: string | null
+  expirySourceLabel?: string | null
+  actionRoute?: string | null
+  actionLabel?: string | null
+  actionHint?: string | null
+}
+
+export interface AccountAuthHealthAlertGroup {
+  groupKey: string
+  targetType: 'self_media' | 'forum' | string
+  issueCode: string
+  severity: string
+  count: number
+  latestCreatedAt?: string | null
+  title: string
+  sampleMessage?: string | null
+  actionRoute?: string | null
+  actionLabel?: string | null
+}
+
+export interface AccountAuthHealthTrendBucket {
+  date: string
+  selfMediaCount: number
+  forumCount: number
+  totalCount: number
+}
+
 export interface ActivityLog {
   id: number
   userId: number | null
