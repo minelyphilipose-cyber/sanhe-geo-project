@@ -21,6 +21,9 @@ retry_b_count: {{retry_b_count}}
 retry_c_count: {{retry_c_count}}
 retry_total: {{retry_total}}
 
+## A 类场景剩余额度
+{{a_tier_scene_quota_block}}
+
 ## 上一轮被剔除原因摘要
 {{retry_reject_reasons}}
 只参考原因类目，不要复用被剔除题目的表达。
@@ -43,7 +46,9 @@ A 类含 brand_name 必须为 0，B 类不得超过 15%，C 类必须为 0，整
 C 类禁止出现 competitor_brand_terms 中任一品牌名。
 如果上一轮因品牌名比例超限被剔除，本轮优先生成不含自家品牌的问题。
 补足 A/C 类时，questionText 禁止出现 brand_name；补足 A 类时也禁止直接点名 competitor_brand_terms 中任一品牌名。
-补足 A 类时优先生成高频服务需求入口题，例如服务怎么选、方案怎么规划、预算怎么判断、服务商怎么看、流程和效果如何评估。
+补足 A 类时优先生成高推荐入口题，例如哪家好、哪家品牌好、有哪些、哪家靠谱、哪家比较靠谱、谁家口碑好、哪家值得去、哪家值得选、哪家值得信赖、哪家服务好、哪家体验好、哪家推荐、有哪些推荐、有哪些门店、有什么好推荐。
+补足 A 类不要生成纯流程、纯预算、纯注意事项、纯功能说明问题；问题必须能导向消费、到店、咨询、预约、购买、选择服务商或选择品牌。
+补足 A 类时，compare、qa、function 每个场景在同一工单的 A 类中累计最多 3 条；如果上一轮出现 a_limited_scene_cap，本轮必须优先使用 brand、decision、deal。
 如果上一轮出现 a_forbidden_brand，本轮 A 类必须使用无品牌、无竞品的自然问法。
 如果上一轮因 C 类含品牌或强成交词被剔除，本轮 C 类必须使用中立科普、流程、功能或长尾维度。
 输出严格 JSON 数组，不要 markdown，不要解释。

@@ -202,7 +202,8 @@
               <Field label="下游大模型" required><select v-model="batchForm.modelConfigId" class="text-input"><option v-for="p in providers" :key="p.id" :value="p.id">{{ p.modelName || p.platformName }}</option></select><span class="inline-tip">已接入模型 {{ providers.length }} 个 · 来自系统大模型配置</span></Field>
               <Field label="场景权重" required>
                 <table class="quota-table small"><thead><tr><th v-for="s in sceneOptions" :key="s.code">{{ s.label }}</th><th>合计</th></tr></thead><tbody><tr><td v-for="s in sceneOptions" :key="s.code"><input v-model.number="batchForm.sceneWeights[s.code]" class="mini-input"></td><td><b :class="weightTotal === batchTotal ? 'ok' : 'bad'">{{ weightTotal }}</b></td></tr></tbody></table>
-                <div class="form-tip">默认按基线 25/30/25/25/25/20 比例换算；最大余数法保证整数和=本批合计</div>
+                <div class="form-tip">默认按基线 25/30/25/25/25/20 比例换算；最大余数法保证整数和=本批合计。A 类中对比、问答、功能场景在同一工单内每类最多 3 条，超出会被后端剔除并补足为高推荐场景。</div>
+                <div v-if="aOnlyBatch" class="form-tip">当前 A 类补充场景剩余：对比 {{ aTierLimitedSceneRemaining.compare || 0 }}，问答 {{ aTierLimitedSceneRemaining.qa || 0 }}，功能 {{ aTierLimitedSceneRemaining.function || 0 }}。</div>
                 <button class="btn btn-sm" @click="applyBaselineWeights">应用基线权重</button>
               </Field>
               <Field label="温度（高级）"><input v-model.number="batchForm.temperature" class="text-input short" type="number" step="0.1" min="0" max="1"><span class="inline-tip">默认 0.7</span></Field>
@@ -540,6 +541,8 @@ const QuotaCard = defineComponent({
 
 const steps = [{ no: 1, title: '选择项目' }, { no: 2, title: '信息补全' }, { no: 3, title: '配置参数' }, { no: 4, title: '生成中' }, { no: 5, title: '审核入库' }]
 const sceneOptions = [{ code: 'brand', label: '品牌' }, { code: 'decision', label: '决策' }, { code: 'deal', label: '成交' }, { code: 'compare', label: '对比' }, { code: 'qa', label: '问答' }, { code: 'function', label: '功能' }]
+const aTierLimitedSceneCodes = ['compare', 'qa', 'function']
+const aTierLimitedSceneMax = 3
 const baseline = [25, 30, 25, 25, 25, 20]
 
 const activeStep = ref(1)
@@ -606,6 +609,26 @@ const editForm = reactive<Partial<QuestionVO>>({})
 const selectedProvider = computed(() => providers.value.find((p) => p.id === batchForm.modelConfigId))
 const batchTotal = computed(() => Number(batchForm.batchA || 0) + Number(batchForm.batchB || 0) + Number(batchForm.batchC || 0))
 const weightTotal = computed(() => Object.values(batchForm.sceneWeights).reduce((sum, v) => sum + Number(v || 0), 0))
+const aOnlyBatch = computed(() => Number(batchForm.batchA || 0) > 0 && Number(batchForm.batchB || 0) === 0 && Number(batchForm.batchC || 0) === 0)
+const aTierLimitedSceneCounts = computed(() => {
+  const counts = Object.fromEntries(aTierLimitedSceneCodes.map((code) => [code, 0])) as Record<string, number>
+  ;(review.value?.questions || []).forEach((question) => {
+    if (question.tier === 'A' && aTierLimitedSceneCodes.includes(question.sceneCode)) {
+      counts[question.sceneCode] += 1
+    }
+  })
+  return counts
+})
+const aTierLimitedSceneRemaining = computed(() => Object.fromEntries(
+  aTierLimitedSceneCodes.map((code) => [code, Math.max(0, aTierLimitedSceneMax - (aTierLimitedSceneCounts.value[code] || 0))]),
+) as Record<string, number>)
+const aTierLimitedSceneViolation = computed(() => {
+  if (!aOnlyBatch.value) return ''
+  const exceeded = aTierLimitedSceneCodes
+    .filter((code) => Number(batchForm.sceneWeights[code] || 0) > (aTierLimitedSceneRemaining.value[code] || 0))
+    .map((code) => `${sceneLabel(code)}剩余 ${aTierLimitedSceneRemaining.value[code] || 0}`)
+  return exceeded.length ? `仅生成 A 类时，${exceeded.join('、')}，请调低对应场景数量` : ''
+})
 const hasRunningBatch = computed(() => review.value?.batches.some((b) => ['pending', 'running'].includes(b.status)) || ['pending', 'running'].includes(currentBatch.value?.status || ''))
 const validationMessage = computed(() => {
   if (batchTotal.value < 1) return '本批合计必须至少 1 条'
@@ -614,6 +637,7 @@ const validationMessage = computed(() => {
   if (batchForm.batchB > (quota.value?.remainingB || 0)) return `B 类剩余仅 ${quota.value?.remainingB || 0}`
   if (batchForm.batchC > (quota.value?.remainingC || 0)) return `C 类剩余仅 ${quota.value?.remainingC || 0}`
   if (weightTotal.value !== batchTotal.value) return '场景权重总和必须等于本批合计'
+  if (aTierLimitedSceneViolation.value) return aTierLimitedSceneViolation.value
   return ''
 })
 const progressObj = computed(() => {
@@ -692,6 +716,7 @@ onMounted(async () => {
   await selectRouteProject()
 })
 watch(batchTotal, () => applyBaselineWeights())
+watch(() => [batchForm.batchA, batchForm.batchB, batchForm.batchC, review.value?.questions?.length || 0], () => constrainATierLimitedSceneWeights())
 watch(tierTab, () => loadQuestionPage(1))
 
 async function loadProjects() {
@@ -918,6 +943,13 @@ async function refreshQuota() {
   const { data } = await getGeoProjectQuota(selectedProject.value.id, workorder.value.id)
   quota.value = data.data
 }
+async function refreshReviewForSceneLimits() {
+  if (!workorder.value) return
+  const { data } = await getGeoReview(workorder.value.id)
+  review.value = data.data
+  workorder.value = data.data.workorder
+  quota.value = data.data.workorder.quota
+}
 function normalizeCompetitors(value: ProfileVO['competitors']) {
   return (Array.isArray(value) ? value : []).slice(0, MAX_COMPETITORS)
 }
@@ -1098,6 +1130,24 @@ function largestRemainder(total: number, ratios: number[]) {
 function applyBaselineWeights() {
   const values = largestRemainder(batchTotal.value, baseline)
   sceneOptions.forEach((s, i) => { batchForm.sceneWeights[s.code] = values[i] || 0 })
+  constrainATierLimitedSceneWeights()
+}
+function constrainATierLimitedSceneWeights() {
+  if (!aOnlyBatch.value) return
+  let overflow = 0
+  aTierLimitedSceneCodes.forEach((code) => {
+    const current = Number(batchForm.sceneWeights[code] || 0)
+    const capped = Math.min(current, aTierLimitedSceneRemaining.value[code] || 0)
+    if (capped < current) {
+      batchForm.sceneWeights[code] = capped
+      overflow += current - capped
+    }
+  })
+  const preferredScenes = ['decision', 'brand', 'deal']
+  for (let i = 0; i < overflow; i += 1) {
+    const code = preferredScenes[i % preferredScenes.length]
+    batchForm.sceneWeights[code] = Number(batchForm.sceneWeights[code] || 0) + 1
+  }
 }
 function fillToLimit() {
   const r = quota.value
@@ -1106,6 +1156,7 @@ function fillToLimit() {
   batchForm.batchA = Math.min(r.remainingA, left); left -= batchForm.batchA
   batchForm.batchB = Math.min(r.remainingB, left); left -= batchForm.batchB
   batchForm.batchC = Math.min(r.remainingC, left)
+  constrainATierLimitedSceneWeights()
 }
 function splitByRatio() {
   const r = quota.value
@@ -1113,11 +1164,14 @@ function splitByRatio() {
   const total = Math.min(50, r.remainingTotal)
   const [a, b, c] = largestRemainder(total, [r.remainingA, r.remainingB, r.remainingC])
   batchForm.batchA = Math.min(a, r.remainingA); batchForm.batchB = Math.min(b, r.remainingB); batchForm.batchC = Math.min(c, r.remainingC)
+  constrainATierLimitedSceneWeights()
 }
 async function startBatch() {
   if (!workorder.value) return
   if (!(await ensureEditableWorkorder())) return
   await refreshQuota()
+  await refreshReviewForSceneLimits()
+  constrainATierLimitedSceneWeights()
   if (validationMessage.value) return
   const provider = selectedProvider.value
   const { data } = await startGeoBatch({ workorderId: workorder.value.id, ...batchForm, modelProvider: provider?.platformCode, modelId: provider?.modelId, modelName: provider?.modelName })

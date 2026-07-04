@@ -12,6 +12,10 @@ compare: {{w_compare}}
 qa: {{w_qa}}
 function: {{w_function}}
 场景权重是软引导，允许各场景数量相对目标上下浮动 30%，但 total_count 和 A/B/C 数量必须严格满足。
+A 类必须以 brand、decision、deal 为主要供给。compare、qa、function 在 A 类中只允许少量补充，每个场景在同一工单的 A 类累计最多 3 条；如果难以产出高推荐表达，请把 A 类数量转移到 brand、decision、deal。
+
+## A 类场景剩余额度
+{{a_tier_scene_quota_block}}
 
 ## 客户资料
 company_name: {{company_name}}

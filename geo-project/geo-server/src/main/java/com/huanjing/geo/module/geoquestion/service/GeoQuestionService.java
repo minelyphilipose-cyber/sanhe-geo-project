@@ -34,8 +34,10 @@ import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
+import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -61,9 +63,12 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GeoQuestionService {
     private static final int BATCH_LIMIT = 50;
+    private static final int QUESTION_BATCH_DELETE_CHUNK_SIZE = 500;
     private static final int QUESTION_GENERATION_TIMEOUT_MS = 600_000;
     private static final int MAX_GENERATION_RETRY = 2;
     private static final List<String> SCENES = List.of("brand", "decision", "deal", "compare", "qa", "function");
+    private static final Set<String> A_TIER_LIMITED_SCENES = Set.of("compare", "qa", "function");
+    private static final int MAX_A_TIER_LIMITED_SCENE_COUNT = 3;
     private static final Set<String> STRONG_DEAL_WORDS = Set.of(
             "哪家好", "怎么选", "报价", "价格", "多少钱", "找谁装", "联系方式", "避坑",
             "靠谱吗", "比较靠谱", "推荐", "排行", "排名", "选哪个", "值得买吗",
@@ -80,8 +85,14 @@ public class GeoQuestionService {
     );
     private static final Set<String> GENERIC_COMPETITOR_TERMS = Set.of("本地服务商", "服务商", "门店", "装修公司", "本地门店", "本地智能家居门店");
     private static final Set<String> QUESTION_GENERATION_PLATFORM_CODES = Set.of("qwen", "deepseek", "mimo");
+    private static final String PARTNER_REVIEW_INPUTTING = "inputting";
+    private static final String PARTNER_REVIEW_PENDING_OWNER = "pending_owner_review";
+    private static final String PARTNER_REVIEW_RETURNED = "returned";
+    private static final String PARTNER_REVIEW_SUBMITTED_TO_HQ = "submitted_to_hq";
     private static final String SYSTEM_PROMPT = "prompts/geo-question/system-prompt.txt";
     private static final String ABC_TIER_PROMPT = "prompts/geo-question/abc-tier-definition.txt";
+    private static final String PARTNER_CORE_PROMPT = "prompts/geo-question/partner-core-question-prompt.txt";
+    private static final String PARTNER_CORE_USER_INPUT_TEMPLATE = "prompts/geo-question/partner-core-user-input-template.txt";
     private static final String USER_INPUT_TEMPLATE = "prompts/geo-question/user-input-template.txt";
     private static final String RETRY_PROMPT = "prompts/geo-question/retry-prompt.txt";
     private static final TypeReference<List<Map<String, Object>>> QUESTION_MAP_LIST = new TypeReference<>() {};
@@ -91,6 +102,7 @@ public class GeoQuestionService {
     private final CompanyService companyService;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
+    private final CurrentUserService currentUserService;
     private final LlmCallFacade llmCallFacade;
     private final LlmProperties llmProperties;
     private final GeoQuestionWorkorderMapper workorderMapper;
@@ -156,6 +168,8 @@ public class GeoQuestionService {
             existing.setPackageBindingId(quota.getPackageBindingId());
             existing.setPackageName(quota.getPackageName());
             existing.setStatus("draft");
+            existing.setPartnerReviewStatus(PARTNER_REVIEW_INPUTTING);
+            existing.setPartnerReviewUpdatedAt(LocalDateTime.now());
             existing.setVersionLabel("v1.0");
             existing.setTargetA(n(quota.getQuotaLimitA()));
             existing.setTargetB(n(quota.getQuotaLimitB()));
@@ -188,10 +202,7 @@ public class GeoQuestionService {
             throw new BizException(400, "当前项目未配置问题额度，不能进入拓词管理");
         }
         CompanyKeywordGroupQuotaVO quota = companyService.keywordGroupQuota(project.getCompanyId());
-        GeoQuestionWorkorder existing = workorderMapper.selectOne(new LambdaQueryWrapper<GeoQuestionWorkorder>()
-                .eq(GeoQuestionWorkorder::getProjectId, projectId)
-                .eq(GeoQuestionWorkorder::getStatus, "draft")
-                .last("LIMIT 1"));
+        GeoQuestionWorkorder existing = selectCurrentProjectWorkorder(projectId);
         if (existing == null) {
             existing = new GeoQuestionWorkorder();
             existing.setCompanyId(project.getCompanyId());
@@ -199,6 +210,8 @@ public class GeoQuestionService {
             existing.setPackageBindingId(quota.getPackageBindingId());
             existing.setPackageName(quota.getPackageName());
             existing.setStatus("draft");
+            existing.setPartnerReviewStatus(PARTNER_REVIEW_INPUTTING);
+            existing.setPartnerReviewUpdatedAt(LocalDateTime.now());
             existing.setVersionLabel("v1.0");
             existing.setTargetA(allocation.a());
             existing.setTargetB(allocation.b());
@@ -207,7 +220,7 @@ public class GeoQuestionService {
             existing.setCreatedAt(LocalDateTime.now());
             existing.setUpdatedAt(LocalDateTime.now());
             workorderMapper.insert(existing);
-        } else {
+        } else if (!PARTNER_REVIEW_SUBMITTED_TO_HQ.equals(partnerReviewStatus(existing))) {
             syncDraftWorkorderQuota(
                     existing,
                     quota.getPackageBindingId(),
@@ -218,6 +231,32 @@ public class GeoQuestionService {
             );
         }
         return toWorkorderVO(existing, quotaSnapshotByProject(projectId, existing.getId()));
+    }
+
+    private GeoQuestionWorkorder selectCurrentProjectWorkorder(Long projectId) {
+        List<GeoQuestionWorkorder> workorders = workorderMapper.selectList(new LambdaQueryWrapper<GeoQuestionWorkorder>()
+                .eq(GeoQuestionWorkorder::getProjectId, projectId)
+                .in(GeoQuestionWorkorder::getStatus, List.of("draft", "paused", "committed"))
+                .orderByDesc(GeoQuestionWorkorder::getUpdatedAt));
+        if (workorders == null || workorders.isEmpty()) {
+            return null;
+        }
+        return workorders.stream()
+                .sorted(Comparator
+                        .comparingInt((GeoQuestionWorkorder item) -> currentWorkorderRank(item)).reversed()
+                        .thenComparing(GeoQuestionWorkorder::getUpdatedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(GeoQuestionWorkorder::getId, Comparator.nullsLast(Comparator.reverseOrder())))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private int currentWorkorderRank(GeoQuestionWorkorder workorder) {
+        String reviewStatus = partnerReviewStatus(workorder);
+        if (PARTNER_REVIEW_SUBMITTED_TO_HQ.equals(reviewStatus)) return 90;
+        if (PARTNER_REVIEW_PENDING_OWNER.equals(reviewStatus)) return 80;
+        if ("committed".equals(workorder.getStatus())) return 70;
+        if (n(itemCounts(workorder.getId()).get("A")) > 0) return 50;
+        return 10;
     }
 
     private void syncDraftWorkorderQuota(GeoQuestionWorkorder workorder,
@@ -389,11 +428,16 @@ public class GeoQuestionService {
         vo.setProjectId(projectId);
         vo.setProjectName(project.getProjectName());
         vo.setBrandName(defaultText(project.getBrandName(), brand == null ? vo.getBrandName() : brand.getBrandName()));
+        vo.setCoreBusiness(projectProfileCoreBusiness(project, brand, vo.getCoreBusiness()));
         vo.setTargetRegion(projectRegion(project, vo.getTargetRegion()));
         vo.setTargetCustomer(defaultText(project.getTargetAudience(), vo.getTargetCustomer()));
+        if (brand != null) {
+            vo.setCoreAdvantage(defaultText(brand.getBusinessIntro(),
+                    defaultText(brand.getBrandPositioning(), defaultText(brand.getDescription(), vo.getCoreAdvantage()))));
+        }
         vo.setBenchmarkSpecs(defaultText(project.getCustomStatement(), vo.getBenchmarkSpecs()));
         vo.setCompetitors(projectCompetitorConfigService.profileCompetitors(projectId, vo.getCompetitors()));
-        vo.setCoreNeeds(projectCoreNeeds(projectId));
+        vo.setCoreNeeds(projectCoreNeeds(project));
         return vo;
     }
 
@@ -406,6 +450,7 @@ public class GeoQuestionService {
         if (workorder == null) {
             throw new BizException(404, "进行中的问题池工单不存在");
         }
+        ensurePartnerReviewEditable(workorder);
         GeoQuestionProfileDraft draft = draftMapper.selectOne(new LambdaQueryWrapper<GeoQuestionProfileDraft>()
                 .eq(GeoQuestionProfileDraft::getWorkorderId, req.getWorkorderId())
                 .last("LIMIT 1"));
@@ -469,9 +514,10 @@ public class GeoQuestionService {
         if (total > BATCH_LIMIT) throw new BizException(400, "单批合计不得超过 50");
         validateSceneWeights(req.getSceneWeights(), total);
         GeoQuestionWorkorder workorder = workorderMapper.selectById(req.getWorkorderId());
-        if (workorder == null || !List.of("draft", "paused").contains(workorder.getStatus())) {
+        if (workorder == null || !canEditQuestionsByWorkorderStatus(workorder)) {
             throw new BizException(404, "进行中的问题池工单不存在");
         }
+        ensurePartnerReviewEditable(workorder);
         workorderMapper.lockById(workorder.getId());
         releaseStaleRunningFlags(workorder.getId());
         QuotaSnapshot snapshot = quotaSnapshot(workorder);
@@ -481,6 +527,8 @@ public class GeoQuestionService {
         if (runningBatch(workorder.getId()) != null) {
             throw new BizException(400, "当前工单已有运行中批次，请等待完成后继续生成");
         }
+        Map<String, Integer> sceneWeights = adjustedSceneWeightsForATierCaps(workorder.getId(), req);
+        req.setSceneWeights(sceneWeights);
         AiPlatformConfig modelConfig = resolveRequestedModel(req);
         String modelId = generationModelId(modelConfig);
 
@@ -500,7 +548,7 @@ public class GeoQuestionService {
         batch.setModelProvider(modelConfig.getPlatformCode());
         batch.setModelId(modelId);
         batch.setModelName(generationModelName(modelConfig, modelId));
-        batch.setSceneWeightsJson(writeJson(req.getSceneWeights()));
+        batch.setSceneWeightsJson(writeJson(sceneWeights));
         batch.setTemperature(req.getTemperature() == null ? new BigDecimal("0.70") : req.getTemperature());
         batch.setParamSnapshot(writeJson(req));
         batch.setPromptSnapshot(buildPromptSnapshot(workorder, req));
@@ -519,6 +567,32 @@ public class GeoQuestionService {
         log(batch.getId(), "quota_reserved", "预占额度 A=" + a + " B=" + b + " C=" + c);
         scheduleBatchAfterCommit(batch.getId());
         return batch(batch.getId());
+    }
+
+    @Transactional
+    public BatchVO startPartnerCoreQuestionBatch(Long workorderId, PartnerCoreQuestionGenerateRequest req) {
+        GeoQuestionWorkorder workorder = workorderMapper.selectById(workorderId);
+        if (workorder == null || workorder.getProjectId() == null || !canEditQuestionsByWorkorderStatus(workorder)) {
+            throw new BizException(404, "当前项目拓词工单不存在");
+        }
+        ensurePartnerReviewEditable(workorder);
+        QuotaSnapshot snapshot = quotaSnapshot(workorder);
+        int remaining = n(snapshot.getRemainingA());
+        if (remaining <= 0) {
+            throw new BizException(400, "当前项目核心问题额度已用完");
+        }
+        int requested = req == null || req.getCount() == null ? BATCH_LIMIT : Math.max(1, req.getCount());
+        int generateCount = Math.min(BATCH_LIMIT, Math.min(requested, remaining));
+        BatchStartRequest batchReq = new BatchStartRequest();
+        batchReq.setWorkorderId(workorderId);
+        batchReq.setBatchA(generateCount);
+        batchReq.setBatchB(0);
+        batchReq.setBatchC(0);
+        batchReq.setModelConfigId(randomGeoQuestionModelId());
+        batchReq.setSceneWeights(defaultPartnerSceneWeights(generateCount));
+        batchReq.setTemperature(existingQuestionCount(workorderId) > 0 ? new BigDecimal("0.82") : new BigDecimal("0.72"));
+        batchReq.setPartnerCoreOnly(true);
+        return startBatch(batchReq);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -618,6 +692,7 @@ public class GeoQuestionService {
     public void deleteQuestion(Long id) {
         GeoQuestionItem item = itemMapper.selectById(id);
         if (item == null) throw new BizException(404, "Question not found");
+        ensurePartnerReviewEditable(requireWorkorder(item.getWorkorderId()));
         item.setStatus("deleted");
         item.setDeletedAt(LocalDateTime.now());
         item.setUpdatedAt(LocalDateTime.now());
@@ -625,9 +700,37 @@ public class GeoQuestionService {
     }
 
     @Transactional
+    public int deleteQuestions(QuestionBatchDeleteRequest req) {
+        List<Long> ids = req == null || req.getIds() == null
+                ? Collections.emptyList()
+                : req.getIds().stream()
+                .filter(Objects::nonNull)
+                .filter(id -> id > 0)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            throw new BizException(400, "请选择要删除的问题");
+        }
+        ensureQuestionsEditable(ids);
+        int deleted = 0;
+        LocalDateTime now = LocalDateTime.now();
+        for (int start = 0; start < ids.size(); start += QUESTION_BATCH_DELETE_CHUNK_SIZE) {
+            List<Long> chunk = ids.subList(start, Math.min(start + QUESTION_BATCH_DELETE_CHUNK_SIZE, ids.size()));
+            deleted += itemMapper.update(null, new LambdaUpdateWrapper<GeoQuestionItem>()
+                    .in(GeoQuestionItem::getId, chunk)
+                    .ne(GeoQuestionItem::getStatus, "deleted")
+                    .set(GeoQuestionItem::getStatus, "deleted")
+                    .set(GeoQuestionItem::getDeletedAt, now)
+                    .set(GeoQuestionItem::getUpdatedAt, now));
+        }
+        return deleted;
+    }
+
+    @Transactional
     public RegenerateQuestionVO regenerateQuestion(Long id, RegenerateQuestionRequest req) {
         GeoQuestionItem item = itemMapper.selectById(id);
         if (item == null || "deleted".equals(item.getStatus())) throw new BizException(404, "Question not found");
+        ensurePartnerReviewEditable(requireWorkorder(item.getWorkorderId()));
         String oldText = item.getQuestionText();
         GeneratedQuestionSpec replacement = invokeQuestionReplacement(item);
         item.setQuestionText(replacement.questionText());
@@ -664,6 +767,7 @@ public class GeoQuestionService {
     public QuestionVO updateQuestion(Long id, QuestionUpdateRequest req) {
         GeoQuestionItem item = itemMapper.selectById(id);
         if (item == null || "deleted".equals(item.getStatus())) throw new BizException(404, "Question not found");
+        ensurePartnerReviewEditable(requireWorkorder(item.getWorkorderId()));
         if (req == null || !StringUtils.hasText(req.getQuestionText())) throw new BizException(400, "问题文本不能为空");
         item.setQuestionText(req.getQuestionText().trim());
         item.setSceneCode(defaultText(req.getSceneCode(), item.getSceneCode()));
@@ -724,9 +828,10 @@ public class GeoQuestionService {
     @Transactional
     public ReviewVO createManualQuestions(Long workorderId, ManualQuestionCreateRequest req) {
         GeoQuestionWorkorder workorder = workorderMapper.selectById(workorderId);
-        if (workorder == null || !List.of("draft", "paused").contains(workorder.getStatus())) {
+        if (workorder == null || !canEditQuestionsByWorkorderStatus(workorder)) {
             throw new BizException(404, "可录入的问题池工单不存在");
         }
+        ensurePartnerReviewEditable(workorder);
         if (req == null || req.getItems() == null || req.getItems().isEmpty()) {
             throw new BizException(400, "请至少录入 1 条问题");
         }
@@ -874,6 +979,7 @@ public class GeoQuestionService {
     public GeoQuestionVersion commit(Long workorderId, CommitRequest req) {
         GeoQuestionWorkorder workorder = workorderMapper.selectById(workorderId);
         if (workorder == null) throw new BizException(404, "Workorder not found");
+        ensurePartnerReviewEditable(workorder);
         if (!List.of("draft", "paused", "committed").contains(workorder.getStatus())) {
             throw new BizException(400, "当前工单已入库，不能重复提交");
         }
@@ -927,7 +1033,61 @@ public class GeoQuestionService {
         return version;
     }
 
+    @Transactional
+    public WorkorderVO submitPartnerReview(Long workorderId) {
+        GeoQuestionWorkorder workorder = requireWorkorder(workorderId);
+        SysUser operator = requirePartnerStaffOperator(workorder);
+        ensureStaffOwnsWorkorder(operator, workorder);
+        ensurePartnerReviewEditable(workorder);
+        ensureWorkorderReadyForOwnerReview(workorder);
+        updatePartnerReview(workorder, PARTNER_REVIEW_PENDING_OWNER, null, true, false, false);
+        return toWorkorderVO(workorderMapper.selectById(workorderId), quotaSnapshot(workorder));
+    }
+
+    @Transactional
+    public WorkorderVO returnPartnerReview(Long workorderId, PartnerReviewReturnRequest req) {
+        GeoQuestionWorkorder workorder = requireWorkorder(workorderId);
+        SysUser operator = requirePartnerOwnerOperator(workorder);
+        ensureOwnerCanAccessWorkorder(operator, workorder);
+        if (PARTNER_REVIEW_SUBMITTED_TO_HQ.equals(partnerReviewStatus(workorder))) {
+            throw new BizException(400, "当前项目已提交总部，不能退回修改");
+        }
+        if (!PARTNER_REVIEW_PENDING_OWNER.equals(partnerReviewStatus(workorder))) {
+            throw new BizException(400, "当前拓词组尚未提交负责人复核，不能退回");
+        }
+        String reason = req == null ? null : req.getReason();
+        if (!StringUtils.hasText(reason)) {
+            throw new BizException(400, "退回原因不能为空");
+        }
+        updatePartnerReview(workorder, PARTNER_REVIEW_RETURNED, reason.trim(), false, true, false);
+        return toWorkorderVO(workorderMapper.selectById(workorderId), quotaSnapshot(workorder));
+    }
+
+    @Transactional
+    public WorkorderVO submitPartnerReviewToHq(Long workorderId) {
+        GeoQuestionWorkorder workorder = requireWorkorder(workorderId);
+        SysUser operator = requirePartnerOwnerOperator(workorder);
+        ensureOwnerCanAccessWorkorder(operator, workorder);
+        if (PARTNER_REVIEW_SUBMITTED_TO_HQ.equals(partnerReviewStatus(workorder))) {
+            throw new BizException(400, "当前项目已提交总部，请勿重复提交");
+        }
+        if (!PARTNER_REVIEW_PENDING_OWNER.equals(partnerReviewStatus(workorder))) {
+            throw new BizException(400, "请先由交付员工提交负责人复核");
+        }
+        ensureWorkorderReadyForOwnerReview(workorder);
+        CommitRequest commitReq = new CommitRequest();
+        commitReq.setVersionLabel("v1.0");
+        commit(workorderId, commitReq);
+        workorder = requireWorkorder(workorderId);
+        updatePartnerReview(workorder, PARTNER_REVIEW_SUBMITTED_TO_HQ, null, false, false, true);
+        return toWorkorderVO(workorderMapper.selectById(workorderId), quotaSnapshot(workorder));
+    }
+
     private void validateCommittedWorkorderCanRecommit(GeoQuestionWorkorder workorder) {
+        if (isPartnerWorkorder(workorder)
+                && !PARTNER_REVIEW_SUBMITTED_TO_HQ.equals(partnerReviewStatus(workorder))) {
+            return;
+        }
         if (workorder.getProjectId() == null) {
             return;
         }
@@ -935,6 +1095,158 @@ public class GeoQuestionService {
         if (!"paused".equals(project.getStatus())) {
             throw new BizException(400, "项目暂停后才能重新入库正式版本");
         }
+    }
+
+    private GeoQuestionWorkorder requireWorkorder(Long workorderId) {
+        GeoQuestionWorkorder workorder = workorderId == null ? null : workorderMapper.selectById(workorderId);
+        if (workorder == null) {
+            throw new BizException(404, "Workorder not found");
+        }
+        return workorder;
+    }
+
+    private void ensurePartnerReviewEditable(GeoQuestionWorkorder workorder) {
+        if (workorder == null || !isPartnerWorkorder(workorder)) {
+            return;
+        }
+        String status = partnerReviewStatus(workorder);
+        if (PARTNER_REVIEW_SUBMITTED_TO_HQ.equals(status)) {
+            throw new BizException(400, "当前项目已提交总部，不能继续修改拓词组");
+        }
+        SysUser operator = currentUserService.requireCurrentUser();
+        String role = normalizeRole(operator.getRole());
+        if ("partner_staff".equals(role) && PARTNER_REVIEW_PENDING_OWNER.equals(status)) {
+            throw new BizException(400, "当前拓词组已提交负责人复核，请等待负责人退回后再修改");
+        }
+    }
+
+    private void ensureQuestionsEditable(List<Long> questionIds) {
+        List<GeoQuestionItem> items = itemMapper.selectList(new LambdaQueryWrapper<GeoQuestionItem>()
+                .in(GeoQuestionItem::getId, questionIds)
+                .ne(GeoQuestionItem::getStatus, "deleted"));
+        if (items.isEmpty()) {
+            throw new BizException(400, "请选择有效的问题");
+        }
+        Set<Long> workorderIds = items.stream()
+                .map(GeoQuestionItem::getWorkorderId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        for (Long workorderId : workorderIds) {
+            ensurePartnerReviewEditable(requireWorkorder(workorderId));
+        }
+    }
+
+    private void ensureWorkorderReadyForOwnerReview(GeoQuestionWorkorder workorder) {
+        if (!"committed".equals(workorder.getStatus())) {
+            throw new BizException(400, "请先确认核心问题入项目拓词组");
+        }
+        if (runningBatch(workorder.getId()) != null) {
+            throw new BizException(400, "当前工单已有运行中批次，请等待完成后再提交");
+        }
+        List<GeoQuestionItem> questions = allQuestions(workorder.getId());
+        validateNoDuplicateQuestions(questions);
+        int expected = n(workorder.getTargetA());
+        int actual = (int) questions.stream()
+                .filter(item -> "A".equalsIgnoreCase(item.getTier()))
+                .count();
+        if (expected <= 0 || actual != expected) {
+            throw new BizException(400, "核心问题数量需等于项目分配额度 " + expected + " 个，当前 " + actual + " 个");
+        }
+    }
+
+    private void updatePartnerReview(GeoQuestionWorkorder workorder,
+                                     String status,
+                                     String returnReason,
+                                     boolean markSubmitted,
+                                     boolean markReturned,
+                                     boolean markHqSubmitted) {
+        LocalDateTime now = LocalDateTime.now();
+        workorder.setPartnerReviewStatus(status);
+        workorder.setPartnerReviewReturnReason(returnReason);
+        if (markSubmitted) {
+            workorder.setPartnerReviewSubmittedAt(now);
+            workorder.setPartnerReviewReturnedAt(null);
+        }
+        if (markReturned) {
+            workorder.setPartnerReviewReturnedAt(now);
+        }
+        if (markHqSubmitted) {
+            workorder.setPartnerReviewHqSubmittedAt(now);
+        }
+        workorder.setPartnerReviewUpdatedAt(now);
+        workorder.setUpdatedAt(now);
+        workorderMapper.updateById(workorder);
+    }
+
+    private SysUser requirePartnerStaffOperator(GeoQuestionWorkorder workorder) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        if (!"partner_staff".equals(normalizeRole(operator.getRole()))) {
+            throw new BizException(403, "仅合伙人交付员工可以提交负责人复核");
+        }
+        currentUserService.ensurePermission("company.update");
+        ensurePartnerWorkorderAccess(operator, workorder);
+        return operator;
+    }
+
+    private SysUser requirePartnerOwnerOperator(GeoQuestionWorkorder workorder) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        if (!"partner".equals(normalizeRole(operator.getRole()))) {
+            throw new BizException(403, "仅合伙人负责人可以执行该操作");
+        }
+        currentUserService.ensurePermission("company.read");
+        ensurePartnerWorkorderAccess(operator, workorder);
+        return operator;
+    }
+
+    private void ensureStaffOwnsWorkorder(SysUser operator, GeoQuestionWorkorder workorder) {
+        Company company = companyMapper.selectById(workorder.getCompanyId());
+        if (company == null || company.getDeletedAt() != null) {
+            throw new BizException(404, "客户不存在或已删除");
+        }
+        if (company.getPartnerStaffOwnerId() == null || !company.getPartnerStaffOwnerId().equals(operator.getId())) {
+            throw new BizException(403, "当前客户未分配给该交付员工");
+        }
+    }
+
+    private void ensureOwnerCanAccessWorkorder(SysUser operator, GeoQuestionWorkorder workorder) {
+        ensurePartnerWorkorderAccess(operator, workorder);
+    }
+
+    private void ensurePartnerWorkorderAccess(SysUser operator, GeoQuestionWorkorder workorder) {
+        Company company = companyMapper.selectById(workorder.getCompanyId());
+        if (company == null || company.getDeletedAt() != null) {
+            throw new BizException(404, "客户不存在或已删除");
+        }
+        currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "geo question workorder");
+    }
+
+    private boolean isPartnerWorkorder(GeoQuestionWorkorder workorder) {
+        if (workorder == null || workorder.getCompanyId() == null) {
+            return false;
+        }
+        Company company = companyMapper.selectById(workorder.getCompanyId());
+        return company != null && "partner".equals(company.getSourceType()) && company.getPartnerId() != null;
+    }
+
+    private String partnerReviewStatus(GeoQuestionWorkorder workorder) {
+        String status = workorder == null ? null : workorder.getPartnerReviewStatus();
+        return StringUtils.hasText(status) ? status.trim() : PARTNER_REVIEW_INPUTTING;
+    }
+
+    private boolean canEditQuestionsByWorkorderStatus(GeoQuestionWorkorder workorder) {
+        if (workorder == null) {
+            return false;
+        }
+        if (List.of("draft", "paused").contains(workorder.getStatus())) {
+            return true;
+        }
+        return "committed".equals(workorder.getStatus())
+                && isPartnerWorkorder(workorder)
+                && !PARTNER_REVIEW_SUBMITTED_TO_HQ.equals(partnerReviewStatus(workorder));
+    }
+
+    private String normalizeRole(String role) {
+        return StringUtils.hasText(role) ? role.trim().toLowerCase(Locale.ROOT) : "";
     }
 
     private KeywordGroup createCommittedKeywordGroup(GeoQuestionWorkorder workorder) {
@@ -1169,7 +1481,7 @@ public class GeoQuestionService {
         saveLlmResponse(batch.getId(), result.responseText(), result);
         List<GeneratedQuestionSpec> parsed = parseGeneratedQuestions(result.responseText(), batch);
         log(batch.getId(), "question_generation_parsed", "已解析模型生成问题 " + parsed.size() + " 条");
-        String rejectReasons = validationRejectSummary(parsed, context, accepted);
+        String rejectReasons = validationRejectSummary(parsed, batch, context, accepted);
         accepted.addAll(filterGeneratedQuestions(parsed, batch, context, accepted));
 
         for (int retry = 1; retry <= MAX_GENERATION_RETRY && !hasEnoughQuestions(accepted, batch, total); retry++) {
@@ -1181,7 +1493,7 @@ public class GeoQuestionService {
             saveLlmResponse(batch.getId(), retryResult.responseText(), retryResult);
             List<GeneratedQuestionSpec> retryParsed = parseGeneratedQuestions(retryResult.responseText(), batch);
             log(batch.getId(), "question_generation_retry_parsed", "第 " + retry + " 次补足已解析问题 " + retryParsed.size() + " 条");
-            rejectReasons = validationRejectSummary(retryParsed, context, accepted);
+            rejectReasons = validationRejectSummary(retryParsed, batch, context, accepted);
             accepted.addAll(filterGeneratedQuestions(retryParsed, batch, context, accepted));
         }
 
@@ -1265,6 +1577,54 @@ public class GeoQuestionService {
         return config;
     }
 
+    private Long randomGeoQuestionModelId() {
+        List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
+                .eq(AiPlatformConfig::getEnabled, true)
+                .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
+                .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
+                .isNotNull(AiPlatformConfig::getModelId)
+                .apply("TRIM(model_id) <> ''"));
+        if (configs == null || configs.isEmpty()) {
+            throw new BizException(400, "暂无可用的核心问题生成模型");
+        }
+        Collections.shuffle(configs);
+        return configs.get(0).getId();
+    }
+
+    private Map<String, Integer> defaultPartnerSceneWeights(int total) {
+        Map<String, Integer> weights = new LinkedHashMap<>();
+        weights.put("brand", Math.max(0, Math.round(total * 0.34f)));
+        weights.put("decision", Math.max(0, Math.round(total * 0.38f)));
+        weights.put("deal", Math.max(0, Math.round(total * 0.18f)));
+        weights.put("compare", Math.min(3, Math.max(0, Math.round(total * 0.05f))));
+        weights.put("qa", Math.min(3, Math.max(0, Math.round(total * 0.03f))));
+        weights.put("function", Math.min(3, Math.max(0, Math.round(total * 0.02f))));
+        int allocated = weights.values().stream().mapToInt(Integer::intValue).sum();
+        for (String scene : List.of("decision", "brand", "deal")) {
+            if (allocated >= total) break;
+            int add = Math.min(total - allocated, Math.max(1, Math.round(total * ("decision".equals(scene) ? 0.04f : 0.03f))));
+            weights.computeIfPresent(scene, (key, value) -> value + add);
+            allocated += add;
+        }
+        while (weights.values().stream().mapToInt(Integer::intValue).sum() < total) {
+            for (String scene : List.of("decision", "brand", "deal")) {
+                if (weights.values().stream().mapToInt(Integer::intValue).sum() >= total) {
+                    break;
+                }
+                weights.computeIfPresent(scene, (key, value) -> value + 1);
+            }
+        }
+        while (weights.values().stream().mapToInt(Integer::intValue).sum() > total) {
+            for (String scene : List.of("function", "qa", "compare", "deal", "brand", "decision")) {
+                if (weights.values().stream().mapToInt(Integer::intValue).sum() <= total) {
+                    break;
+                }
+                weights.computeIfPresent(scene, (key, value) -> Math.max(0, value - 1));
+            }
+        }
+        return weights;
+    }
+
     private String generationModelId(AiPlatformConfig config) {
         if (config == null) {
             return null;
@@ -1288,6 +1648,7 @@ public class GeoQuestionService {
         try {
             List<Map<String, Object>> rows = objectMapper.readValue(json, QUESTION_MAP_LIST);
             List<GeneratedQuestionSpec> specs = new ArrayList<>();
+            boolean partnerCoreOnly = isPartnerCoreBatch(batch);
             for (Map<String, Object> row : rows) {
                 String text = firstText(row, "questionText", "question_text", "问题文本");
                 if (!StringUtils.hasText(text)) continue;
@@ -1296,7 +1657,7 @@ public class GeoQuestionService {
                 }
                 specs.add(new GeneratedQuestionSpec(
                         text.trim(),
-                        normalizeTier(firstText(row, "tier", "分级")),
+                        partnerCoreOnly ? "A" : normalizeTier(firstText(row, "tier", "分级")),
                         normalizeScene(firstText(row, "sceneCode", "scene_code", "场景")),
                         null,
                         null,
@@ -1350,9 +1711,11 @@ public class GeoQuestionService {
         log(batch.getId(), "question_generation_validating", "开始校验模型生成问题");
         List<GeneratedQuestionSpec> result = new ArrayList<>();
         Set<String> seen = accepted.stream().map(GeneratedQuestionSpec::questionText).map(this::dedupeQuestionText).collect(Collectors.toSet());
+        seen.addAll(existingQuestionDedupeKeys(batch.getWorkorderId()));
+        Map<String, Integer> aTierLimitedSceneCounts = aTierLimitedSceneCounts(batch.getWorkorderId(), accepted);
         Map<String, Integer> rejectCounts = new LinkedHashMap<>();
         for (GeneratedQuestionSpec spec : specs) {
-            String reason = rejectReason(spec, context);
+            String reason = rejectReason(spec, context, isPartnerCoreBatch(batch));
             if (reason != null) {
                 rejectCounts.merge(reason, 1, Integer::sum);
                 continue;
@@ -1361,6 +1724,14 @@ public class GeoQuestionService {
             if (!seen.add(key)) {
                 rejectCounts.merge("duplicate", 1, Integer::sum);
                 continue;
+            }
+            if ("A".equals(spec.tier()) && A_TIER_LIMITED_SCENES.contains(spec.sceneCode())) {
+                int count = aTierLimitedSceneCounts.getOrDefault(spec.sceneCode(), 0);
+                if (count >= MAX_A_TIER_LIMITED_SCENE_COUNT) {
+                    rejectCounts.merge("a_limited_scene_cap", 1, Integer::sum);
+                    continue;
+                }
+                aTierLimitedSceneCounts.put(spec.sceneCode(), count + 1);
             }
             result.add(spec);
         }
@@ -1375,18 +1746,31 @@ public class GeoQuestionService {
     }
 
     private String validationRejectSummary(List<GeneratedQuestionSpec> specs,
+                                           GeoQuestionBatch batch,
                                            GenerationContext context,
                                            List<GeneratedQuestionSpec> accepted) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         Set<String> seen = accepted.stream().map(GeneratedQuestionSpec::questionText).map(this::dedupeQuestionText).collect(Collectors.toSet());
+        seen.addAll(existingQuestionDedupeKeys(batch.getWorkorderId()));
+        Map<String, Integer> aTierLimitedSceneCounts = aTierLimitedSceneCounts(batch.getWorkorderId(), accepted);
+        boolean partnerCoreOnly = isPartnerCoreBatch(batch);
         for (GeneratedQuestionSpec spec : specs) {
-            String reason = rejectReason(spec, context);
+            String reason = rejectReason(spec, context, partnerCoreOnly);
             if (reason != null) {
                 counts.merge(reason, 1, Integer::sum);
                 continue;
             }
             if (!seen.add(dedupeQuestionText(spec.questionText()))) {
                 counts.merge("duplicate", 1, Integer::sum);
+                continue;
+            }
+            if ("A".equals(spec.tier()) && A_TIER_LIMITED_SCENES.contains(spec.sceneCode())) {
+                int count = aTierLimitedSceneCounts.getOrDefault(spec.sceneCode(), 0);
+                if (count >= MAX_A_TIER_LIMITED_SCENE_COUNT) {
+                    counts.merge("a_limited_scene_cap", 1, Integer::sum);
+                    continue;
+                }
+                aTierLimitedSceneCounts.put(spec.sceneCode(), count + 1);
             }
         }
         return counts.isEmpty() ? "无" : summarizeRejectCounts(counts);
@@ -1398,15 +1782,100 @@ public class GeoQuestionService {
                 .collect(Collectors.joining("，"));
     }
 
-    private String rejectReason(GeneratedQuestionSpec spec, GenerationContext context) {
+    private Map<String, Integer> adjustedSceneWeightsForATierCaps(Long workorderId, BatchStartRequest req) {
+        Map<String, Integer> weights = new LinkedHashMap<>();
+        for (String scene : SCENES) {
+            weights.put(scene, n(req.getSceneWeights() == null ? null : req.getSceneWeights().get(scene)));
+        }
+        int batchA = n(req.getBatchA());
+        int batchB = n(req.getBatchB());
+        int batchC = n(req.getBatchC());
+        if (batchA <= 0 || batchB > 0 || batchC > 0) {
+            return weights;
+        }
+
+        Map<String, Integer> remaining = aTierLimitedSceneRemaining(workorderId, List.of());
+        int overflow = 0;
+        for (String scene : A_TIER_LIMITED_SCENES) {
+            int current = weights.getOrDefault(scene, 0);
+            int capped = Math.min(current, remaining.getOrDefault(scene, 0));
+            if (capped < current) {
+                weights.put(scene, capped);
+                overflow += current - capped;
+            }
+        }
+        redistributeSceneWeight(weights, overflow);
+        return weights;
+    }
+
+    private void redistributeSceneWeight(Map<String, Integer> weights, int count) {
+        if (count <= 0) return;
+        List<String> preferredScenes = List.of("decision", "brand", "deal");
+        for (int i = 0; i < count; i++) {
+            String scene = preferredScenes.get(i % preferredScenes.size());
+            weights.put(scene, weights.getOrDefault(scene, 0) + 1);
+        }
+    }
+
+    private Map<String, Integer> aTierLimitedSceneCounts(Long workorderId, List<GeneratedQuestionSpec> accepted) {
+        Map<String, Integer> counts = new HashMap<>();
+        if (workorderId != null) {
+            allQuestions(workorderId).stream()
+                    .filter(item -> "A".equalsIgnoreCase(item.getTier()))
+                    .map(GeoQuestionItem::getSceneCode)
+                    .filter(A_TIER_LIMITED_SCENES::contains)
+                    .forEach(sceneCode -> counts.merge(sceneCode, 1, Integer::sum));
+        }
+        if (accepted != null) {
+            accepted.stream()
+                    .filter(spec -> "A".equals(spec.tier()))
+                    .map(GeneratedQuestionSpec::sceneCode)
+                    .filter(A_TIER_LIMITED_SCENES::contains)
+                    .forEach(sceneCode -> counts.merge(sceneCode, 1, Integer::sum));
+        }
+        return counts;
+    }
+
+    private Map<String, Integer> aTierLimitedSceneRemaining(Long workorderId, List<GeneratedQuestionSpec> accepted) {
+        Map<String, Integer> counts = aTierLimitedSceneCounts(workorderId, accepted);
+        Map<String, Integer> remaining = new LinkedHashMap<>();
+        for (String scene : A_TIER_LIMITED_SCENES) {
+            remaining.put(scene, Math.max(0, MAX_A_TIER_LIMITED_SCENE_COUNT - counts.getOrDefault(scene, 0)));
+        }
+        return remaining;
+    }
+
+    private String aTierSceneQuotaBlock(Long workorderId, List<GeneratedQuestionSpec> accepted) {
+        Map<String, Integer> remaining = aTierLimitedSceneRemaining(workorderId, accepted);
+        String fullScenes = remaining.entrySet().stream()
+                .filter(entry -> entry.getValue() <= 0)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.joining("、"));
+        return """
+                A 类非高推荐补充场景本轮可生成数量：
+                compare: %d
+                qa: %d
+                function: %d
+                已满场景：%s
+                如果存在已满场景，本轮不要生成对应 sceneCode 的 A 类问题；A 类缺口必须转移到 brand、decision、deal。
+                """.formatted(
+                remaining.getOrDefault("compare", 0),
+                remaining.getOrDefault("qa", 0),
+                remaining.getOrDefault("function", 0),
+                StringUtils.hasText(fullScenes) ? fullScenes : "无"
+        ).trim();
+    }
+
+    private String rejectReason(GeneratedQuestionSpec spec, GenerationContext context, boolean partnerCoreOnly) {
         if (spec == null || !StringUtils.hasText(spec.questionText())) return "empty";
         String text = spec.questionText().trim();
         if (!SCENES.contains(spec.sceneCode())) return "scene_invalid";
         if (!Set.of("A", "B", "C").contains(spec.tier())) return "tier_invalid";
         int length = text.length();
-        if ("A".equals(spec.tier()) && (length < 15 || length > 40)) return "a_length";
-        if ("B".equals(spec.tier()) && (length < 10 || length > 40)) return "b_length";
-        if ("C".equals(spec.tier()) && (length < 6 || length > 30)) return "c_length";
+        if (partnerCoreOnly && (length < 5 || length > 25)) return "core_length";
+        if (!partnerCoreOnly && "A".equals(spec.tier()) && (length < 15 || length > 40)) return "a_length";
+        if (!partnerCoreOnly && "B".equals(spec.tier()) && (length < 10 || length > 40)) return "b_length";
+        if (!partnerCoreOnly && "C".equals(spec.tier()) && (length < 6 || length > 30)) return "c_length";
         if (("A".equals(spec.tier()) || "B".equals(spec.tier())) && !context.needIds().contains(spec.relatedNeedText())) {
             return "need_invalid";
         }
@@ -1495,9 +1964,15 @@ public class GeoQuestionService {
         need.put("C", n(batch.getRequestC()));
         Map<String, Integer> actual = new HashMap<>();
         actual.put("A", 0); actual.put("B", 0); actual.put("C", 0);
+        Set<String> persistedKeys = existingQuestionDedupeKeys(batch.getWorkorderId());
         int generated = 0;
         for (GeneratedQuestionSpec spec : specs) {
             if (actual.getOrDefault(spec.tier(), 0) >= need.getOrDefault(spec.tier(), 0)) continue;
+            String questionKey = dedupeQuestionText(spec.questionText());
+            if (!persistedKeys.add(questionKey)) {
+                log(batch.getId(), "question_generation_persist_duplicate_skipped", "落库前发现重复问题，已跳过：" + spec.questionText());
+                continue;
+            }
             GeoQuestionBatch latest = batchMapper.selectById(batch.getId());
             if (Boolean.TRUE.equals(latest.getCancelRequested())) {
                 finishBatch(batch.getId(), "cancelled", generated > 0, null);
@@ -1817,6 +2292,12 @@ public class GeoQuestionService {
         vo.setProjectName(project == null ? null : project.getProjectName());
         vo.setPackageName(workorder.getPackageName());
         vo.setStatus(workorder.getStatus());
+        vo.setPartnerReviewStatus(partnerReviewStatus(workorder));
+        vo.setPartnerReviewReturnReason(workorder.getPartnerReviewReturnReason());
+        vo.setPartnerReviewSubmittedAt(workorder.getPartnerReviewSubmittedAt());
+        vo.setPartnerReviewReturnedAt(workorder.getPartnerReviewReturnedAt());
+        vo.setPartnerReviewHqSubmittedAt(workorder.getPartnerReviewHqSubmittedAt());
+        vo.setPartnerReviewUpdatedAt(workorder.getPartnerReviewUpdatedAt());
         vo.setTargetA(n(workorder.getTargetA()));
         vo.setTargetB(n(workorder.getTargetB()));
         vo.setTargetC(n(workorder.getTargetC()));
@@ -1836,6 +2317,12 @@ public class GeoQuestionService {
         vo.setWorkorderNo("WO-" + workorder.getId());
         vo.setPackageName(workorder.getPackageName());
         vo.setStatus(workorder.getStatus());
+        vo.setPartnerReviewStatus(partnerReviewStatus(workorder));
+        vo.setPartnerReviewReturnReason(workorder.getPartnerReviewReturnReason());
+        vo.setPartnerReviewSubmittedAt(workorder.getPartnerReviewSubmittedAt());
+        vo.setPartnerReviewReturnedAt(workorder.getPartnerReviewReturnedAt());
+        vo.setPartnerReviewHqSubmittedAt(workorder.getPartnerReviewHqSubmittedAt());
+        vo.setPartnerReviewUpdatedAt(workorder.getPartnerReviewUpdatedAt());
         vo.setTargetA(n(workorder.getTargetA()));
         vo.setTargetB(n(workorder.getTargetB()));
         vo.setTargetC(n(workorder.getTargetC()));
@@ -1920,10 +2407,26 @@ public class GeoQuestionService {
         if (StringUtils.hasText(project.getProvinceName())) parts.add(project.getProvinceName());
         if (StringUtils.hasText(project.getCityName())) parts.add(project.getCityName());
         if (StringUtils.hasText(project.getDistrictName())) parts.add(project.getDistrictName());
-        return parts.isEmpty() ? fallback : String.join(" / ", parts);
+        parts.addAll(splitTags(project.getTargetRegions()));
+        List<String> distinct = orderedDistinct(parts);
+        return distinct.isEmpty() ? fallback : String.join(" / ", distinct);
     }
 
-    private List<Map<String, Object>> projectCoreNeeds(Long projectId) {
+    private List<String> projectProfileCoreBusiness(Project project, Brand brand, List<String> fallback) {
+        List<String> values = new ArrayList<>();
+        if (brand != null) {
+            values.addAll(splitTags(brand.getMainBusiness()));
+            values.addAll(splitTags(brand.getCoreProducts()));
+        }
+        values.addAll(splitTags(project.getCoreKeywords()));
+        if (values.isEmpty() && fallback != null) {
+            values.addAll(fallback);
+        }
+        return orderedDistinct(values);
+    }
+
+    private List<Map<String, Object>> projectCoreNeeds(Project project) {
+        Long projectId = project.getId();
         List<ProjectCustomerRequirement> requirements = projectCustomerRequirementMapper.selectList(
                 new LambdaQueryWrapper<ProjectCustomerRequirement>()
                         .eq(ProjectCustomerRequirement::getProjectId, projectId)
@@ -1941,10 +2444,35 @@ public class GeoQuestionService {
             item.put("urgent", false);
             coreNeeds.add(item);
         }
+        if (coreNeeds.isEmpty()) {
+            for (String text : projectDefaultCoreNeedTexts(project)) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("text", text);
+                item.put("scene", "brand");
+                item.put("urgent", false);
+                coreNeeds.add(item);
+            }
+        }
         return coreNeeds;
     }
 
+    private List<String> projectDefaultCoreNeedTexts(Project project) {
+        List<String> values = new ArrayList<>();
+        values.addAll(splitTags(project.getCoreKeywords()));
+        if (StringUtils.hasText(project.getTargetAudience())) values.add(project.getTargetAudience());
+        if (StringUtils.hasText(project.getPrimaryGoal())) values.add(project.getPrimaryGoal());
+        return orderedDistinct(values);
+    }
+
     private String buildPromptSnapshot(GeoQuestionWorkorder workorder, BatchStartRequest req) {
+        if (Boolean.TRUE.equals(req.getPartnerCoreOnly())) {
+            return readPromptResource(SYSTEM_PROMPT)
+                    + "\n\n"
+                    + readPromptResource(PARTNER_CORE_PROMPT)
+                    + questionGenerationGuidance(workorder)
+                    + "\n\n"
+                    + renderPartnerCoreUserInputPrompt(workorder, req);
+        }
         String userInput = renderUserInputPrompt(workorder, req);
         return readPromptResource(SYSTEM_PROMPT)
                 + "\n\n"
@@ -1973,6 +2501,9 @@ public class GeoQuestionService {
                                     List<GeneratedQuestionSpec> accepted,
                                     Map<String, Integer> missing,
                                     String rejectReasons) {
+        if (isPartnerCoreBatch(batch)) {
+            return buildPartnerCoreRetryPrompt(batch, context, accepted, missing, rejectReasons);
+        }
         String template = readPromptResource(RETRY_PROMPT);
         Map<String, String> values = new LinkedHashMap<>();
         values.put("brand_name", context.brandName());
@@ -1989,6 +2520,7 @@ public class GeoQuestionService {
                 .map(GeneratedQuestionSpec::questionText)
                 .limit(30)
                 .collect(Collectors.joining("\n")));
+        values.put("a_tier_scene_quota_block", aTierSceneQuotaBlock(batch.getWorkorderId(), accepted));
         values.put("core_needs_block", context.coreNeedsBlock());
         values.put("core_needs_id_list", context.needIds().isEmpty() ? "general" : String.join("\n", context.needIds()));
         for (Map.Entry<String, String> entry : values.entrySet()) {
@@ -2000,6 +2532,65 @@ public class GeoQuestionService {
                 + questionGenerationGuidance(workorderMapper.selectById(batch.getWorkorderId()))
                 + "\n\n"
                 + template;
+    }
+
+    private String buildPartnerCoreRetryPrompt(GeoQuestionBatch batch,
+                                               GenerationContext context,
+                                               List<GeneratedQuestionSpec> accepted,
+                                               Map<String, Integer> missing,
+                                               String rejectReasons) {
+        int retryCount = Math.max(0, missing.getOrDefault("A", 0));
+        return readPromptResource(SYSTEM_PROMPT)
+                + "\n\n"
+                + readPromptResource(PARTNER_CORE_PROMPT)
+                + questionGenerationGuidance(workorderMapper.selectById(batch.getWorkorderId()))
+                + "\n\n"
+                + """
+                ## 补足生成
+                请继续补足 %d 条核心问题。
+                以下是本批已接受问题，请不要重复，也不要改写成近似表达：
+                %s
+
+                以下是当前工单已有核心问题，同样必须避开：
+                %s
+
+                本轮扩展策略：
+                %s
+
+                上一轮被系统过滤的主要原因：
+                %s
+
+                ## 客户上下文
+                brand_name: %s
+                target_region: %s
+                core_business: %s
+                industry: %s
+                competitor_brand_terms:
+                %s
+
+                core_needs:
+                %s
+
+                relatedNeedText 必须从以下需求编号中选择：
+                %s
+
+                输出严格 JSON 数组，数量必须精确等于 %d。
+                每个对象只能包含 questionText、sceneCode、relatedNeedText、designReason。
+                """.formatted(
+                retryCount,
+                accepted.stream().map(GeneratedQuestionSpec::questionText).limit(50).collect(Collectors.joining("\n")),
+                existingQuestionsBlock(batch.getWorkorderId()),
+                partnerCoreDiversityStrategy(loadProfileSnapshot(workorderMapper.selectById(batch.getWorkorderId())), existingQuestionCount(batch.getWorkorderId())),
+                rejectReasons,
+                context.brandName(),
+                context.targetRegion(),
+                context.coreBusiness(),
+                context.industry(),
+                context.competitorTerms().isEmpty() ? "无" : String.join("\n", context.competitorTerms()),
+                context.coreNeedsBlock(),
+                context.needIds().isEmpty() ? "need_default_1\nneed_default_2\nneed_default_3" : String.join("\n", context.needIds()),
+                retryCount
+        );
     }
 
     private String questionGenerationGuidance(GeoQuestionWorkorder workorder) {
@@ -2054,10 +2645,102 @@ public class GeoQuestionService {
         values.put("w_compare", String.valueOf(n(weights.get("compare"))));
         values.put("w_qa", String.valueOf(n(weights.get("qa"))));
         values.put("w_function", String.valueOf(n(weights.get("function"))));
+        values.put("a_tier_scene_quota_block", aTierSceneQuotaBlock(workorder.getId(), List.of()));
         for (Map.Entry<String, String> entry : values.entrySet()) {
             template = template.replace("{{" + entry.getKey() + "}}", entry.getValue());
         }
         return template;
+    }
+
+    private String renderPartnerCoreUserInputPrompt(GeoQuestionWorkorder workorder, BatchStartRequest req) {
+        String template = readPromptResource(PARTNER_CORE_USER_INPUT_TEMPLATE);
+        Map<String, Object> profile = loadProfileSnapshot(workorder);
+        int total = n(req.getBatchA());
+        Map<String, String> values = new LinkedHashMap<>();
+        Map<String, Integer> weights = req.getSceneWeights() == null ? Collections.emptyMap() : req.getSceneWeights();
+        values.put("company_name", value(profile, "companyName"));
+        values.put("brand_name", value(profile, "brandName"));
+        values.put("brand_relation", value(profile, "brandRelation"));
+        values.put("core_business", renderList(profile.get("coreBusiness")));
+        values.put("target_region", value(profile, "targetRegion"));
+        values.put("industry", value(profile, "industry"));
+        values.put("target_customer", value(profile, "targetCustomer"));
+        values.put("main_competitors_block", renderCompetitors(profile.get("competitors")));
+        values.put("competitor_brand_terms", renderCompetitorBrandTerms(profile.get("competitors")));
+        values.put("core_advantage", value(profile, "coreAdvantage"));
+        values.put("benchmark_specs", defaultText(value(profile, "benchmarkSpecs"), "无"));
+        values.put("core_needs_block", renderCoreNeeds(profile));
+        int existingCount = existingQuestionCount(workorder.getId());
+        values.put("total_count", String.valueOf(total));
+        values.put("w_brand", String.valueOf(n(weights.get("brand"))));
+        values.put("w_decision", String.valueOf(n(weights.get("decision"))));
+        values.put("w_deal", String.valueOf(n(weights.get("deal"))));
+        values.put("w_compare", String.valueOf(n(weights.get("compare"))));
+        values.put("w_qa", String.valueOf(n(weights.get("qa"))));
+        values.put("w_function", String.valueOf(n(weights.get("function"))));
+        values.put("existing_questions_block", existingQuestionsBlock(workorder.getId()));
+        values.put("generation_round", String.valueOf(existingCount / BATCH_LIMIT + 1));
+        values.put("diversity_strategy", partnerCoreDiversityStrategy(profile, existingCount));
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            template = template.replace("{{" + entry.getKey() + "}}", entry.getValue());
+        }
+        return template;
+    }
+
+    private int existingQuestionCount(Long workorderId) {
+        if (workorderId == null) return 0;
+        return Math.toIntExact(itemMapper.selectCount(new LambdaQueryWrapper<GeoQuestionItem>()
+                .eq(GeoQuestionItem::getWorkorderId, workorderId)
+                .ne(GeoQuestionItem::getStatus, "deleted")));
+    }
+
+    private String existingQuestionsBlock(Long workorderId) {
+        if (workorderId == null) return "无";
+        List<String> questions = allQuestions(workorderId).stream()
+                .map(GeoQuestionItem::getQuestionText)
+                .filter(StringUtils::hasText)
+                .limit(150)
+                .toList();
+        return questions.isEmpty() ? "无" : String.join("\n", questions);
+    }
+
+    private Set<String> existingQuestionDedupeKeys(Long workorderId) {
+        if (workorderId == null) return new LinkedHashSet<>();
+        return allQuestions(workorderId).stream()
+                .map(GeoQuestionItem::getQuestionText)
+                .map(this::dedupeQuestionText)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private String partnerCoreDiversityStrategy(Map<String, Object> profile, int existingCount) {
+        String business = renderList(profile.get("coreBusiness"));
+        String regions = value(profile, "targetRegion");
+        String targetCustomer = value(profile, "targetCustomer");
+        String coreNeeds = renderCoreNeeds(profile);
+        if (existingCount <= 0) {
+            return """
+                    - 第一批优先覆盖主营业务、核心需求和最强转化问法。
+                    - 问题可以围绕主品类、区域推荐、口碑判断、靠谱度判断和品牌选择展开。
+                    - 同一疑问结尾不要连续超过 2 条。
+                    """.trim();
+        }
+        return """
+                - 当前已有 %d 条问题，本轮必须生成增量问题，不要重复已有问题的品类、句式和场景。
+                - 从以下维度中至少覆盖 4 类：细分服务/产品、目标人群、到店或使用场景、区县/商圈/附近、口碑评价、服务体验、专业度、性价比、适合人群、周末/家庭/朋友/商务等消费场景。
+                - 如果主营业务是综合型或场所型，必须拆到具体服务、门店类型、消费品类或人群场景，不要继续生成“综合体/商场/平台/行业哪家好”这类泛问题。
+                - 优先使用尚未明显覆盖的业务词：%s。
+                - 可变化使用的区域表达：%s。
+                - 可变化使用的人群表达：%s。
+                - 可变化参考的核心需求：%s。
+                - 每 10 条问题中，完全相同疑问结尾最多 2 条；同一品类词最多 3 条。
+                """.formatted(
+                existingCount,
+                defaultText(business, "客户主营业务和项目核心关键词"),
+                defaultText(regions, "目标区域、本地、附近、区县或商圈"),
+                defaultText(targetCustomer, "目标客户画像"),
+                defaultText(coreNeeds, "客户核心需求")
+        ).trim();
     }
 
     @SuppressWarnings("unchecked")
@@ -2085,6 +2768,18 @@ public class GeoQuestionService {
             return profile.get(key);
         } catch (JsonProcessingException e) {
             throw new BizException(400, "工单信息补全草稿格式错误");
+        }
+    }
+
+    private boolean isPartnerCoreBatch(GeoQuestionBatch batch) {
+        if (batch == null || !StringUtils.hasText(batch.getParamSnapshot())) {
+            return false;
+        }
+        try {
+            Map<?, ?> params = objectMapper.readValue(batch.getParamSnapshot(), Map.class);
+            return Boolean.TRUE.equals(params.get("partnerCoreOnly"));
+        } catch (JsonProcessingException ignored) {
+            return false;
         }
     }
 
@@ -2378,6 +3073,17 @@ public class GeoQuestionService {
             }
         }
         return Arrays.stream(value.split("[,，/、\\s]+")).filter(StringUtils::hasText).limit(8).collect(Collectors.toList());
+    }
+
+    private List<String> orderedDistinct(List<String> values) {
+        if (values == null || values.isEmpty()) return new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                seen.add(value.trim());
+            }
+        }
+        return new ArrayList<>(seen);
     }
 
     private List<Map<String, Object>> defaultCompetitors(String competitors) {
