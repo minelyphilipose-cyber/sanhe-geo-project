@@ -24,17 +24,17 @@
             <p>{{ hitPlatformLabel(item) }} · 核心问题</p>
             <h2>{{ item.questionTitle }}</h2>
           </div>
-          <span class="detail-status" :class="{ building: !item.mentioned }">{{ rightStatus(item) }}</span>
+          <span class="detail-status" :class="{ building: !hasPositiveSignal(item) }">{{ rightStatus(item) }}</span>
         </section>
 
         <section class="result-card">
           <div class="result-card__head">
             <span>命中结论</span>
-            <strong>{{ item.mentioned ? '该平台回答已提及品牌' : '相关内容建设中' }}</strong>
+            <strong>{{ resultTitle(item) }}</strong>
           </div>
           <div class="tag-row detail-tags">
-            <span class="tag" :class="item.mentioned ? 'platform-tag' : 'building'">
-              {{ item.mentioned ? hitPlatformLabel(item) : '持续覆盖' }}
+            <span class="tag" :class="hasPositiveSignal(item) ? 'platform-tag' : 'building'">
+              {{ hasPositiveSignal(item) ? hitPlatformLabel(item) : '持续覆盖' }}
             </span>
             <span v-for="tag in statusTags(item)" :key="tag.text" class="tag" :class="tag.kind">
               {{ tag.text }}
@@ -57,11 +57,11 @@
             <h3>{{ hitPlatformLabel(item) }} 原始回答</h3>
           </div>
           <article
-            v-if="item.mentioned && renderedResponse"
+            v-if="renderedResponse"
             class="answer-content markdown-answer"
             v-html="renderedResponse"
           />
-          <p v-else-if="item.mentioned" class="empty-answer">
+          <p v-else-if="hasPositiveSignal(item)" class="empty-answer">
             该条历史监测记录未保留原始回答文本，命中结论以系统分析结果为准。
           </p>
           <p v-else class="empty-answer">该核心问题相关场景内容正在持续建设与覆盖，暂无命中平台问答详情。</p>
@@ -110,7 +110,7 @@
           <div class="meta-grid">
             <div>
               <span>命中平台</span>
-              <strong>{{ item.mentioned ? hitPlatformLabel(item) : '暂无' }}</strong>
+              <strong>{{ hasPositiveSignal(item) ? hitPlatformLabel(item) : '暂无' }}</strong>
             </div>
             <div>
               <span>监测时间</span>
@@ -188,9 +188,27 @@ function rightStatus(row: QuestionMonitorItem) {
   return '建设中'
 }
 
+function hasPositiveSignal(row: QuestionMonitorItem) {
+  return hasBrandMentionSignal(row)
+}
+
+function hasBrandMentionSignal(row: QuestionMonitorItem) {
+  return row.mentioned
+    || metricBool(row.recommended)
+    || metricBool(row.firstRecommend)
+    || Boolean(row.rankPosition?.available && row.rankPosition.value)
+}
+
+function resultTitle(row: QuestionMonitorItem) {
+  if (metricBool(row.firstRecommend)) return '该平台回答已首推品牌'
+  if (metricBool(row.recommended)) return '该平台回答已推荐品牌'
+  if (row.mentioned) return '该平台回答已提及品牌'
+  return '相关内容建设中'
+}
+
 function statusTags(row: QuestionMonitorItem) {
   const tags: Array<{ text: string; kind: string }> = []
-  if (row.mentioned) {
+  if (hasBrandMentionSignal(row)) {
     tags.push({ text: '已提及品牌', kind: 'success' })
   }
   if (metricBool(row.recommended)) tags.push({ text: '推荐', kind: 'success' })
@@ -224,7 +242,7 @@ function rankText(row: QuestionMonitorItem) {
 
 function analysisRows(row: QuestionMonitorItem) {
   return [
-    { label: '品牌提及', value: row.mentioned ? '已提及品牌' : '建设中' },
+    { label: '品牌提及', value: hasBrandMentionSignal(row) ? '已提及品牌' : '建设中' },
     { label: '推荐判定', value: metricStatus(row.recommended, '已推荐', '未推荐') },
     { label: '首推/排名', value: rankText(row) },
     { label: '分析进度', value: judgeState(row) },

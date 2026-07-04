@@ -38,9 +38,9 @@
           v-for="item in displayedQuestionItems"
           :key="item.keywordResultId || item.pollResultId || item.questionTitle"
           class="question-item"
-          :class="{ 'question-item--clickable': item.mentioned && item.pollResultId }"
-          :role="item.mentioned && item.pollResultId ? 'button' : undefined"
-          :tabindex="item.mentioned && item.pollResultId ? 0 : undefined"
+          :class="{ 'question-item--clickable': canOpenQuestionDetail(item) }"
+          :role="canOpenQuestionDetail(item) ? 'button' : undefined"
+          :tabindex="canOpenQuestionDetail(item) ? 0 : undefined"
           @click="openQuestionDetail(item)"
           @keyup.enter="openQuestionDetail(item)"
         >
@@ -56,14 +56,14 @@
           <div class="question-main">
             <div class="question-title-row">
               <h3>{{ item.questionTitle }}</h3>
-              <span class="question-rank" :class="{ building: !item.mentioned }">
+              <span class="question-rank" :class="{ building: !hasPositiveSignal(item) }">
                 {{ rightStatus(item) }}
-                <MobileIcon v-if="item.mentioned" name="chevronRight" />
+                <MobileIcon v-if="canOpenQuestionDetail(item)" name="chevronRight" />
               </span>
             </div>
             <div class="tag-row">
-              <span class="tag" :class="item.mentioned ? 'platform-tag' : 'building'">
-                {{ item.mentioned ? hitPlatformLabel(item) : '持续覆盖' }}
+              <span class="tag" :class="hasPositiveSignal(item) ? 'platform-tag' : 'building'">
+                {{ hasPositiveSignal(item) ? hitPlatformLabel(item) : '持续覆盖' }}
               </span>
               <span v-for="tag in statusTags(item)" :key="tag.text" class="tag" :class="tag.kind">
                 {{ tag.text }}
@@ -205,9 +205,24 @@ function rightStatus(item: QuestionMonitorItem) {
   return '建设中'
 }
 
+function hasPositiveSignal(item: QuestionMonitorItem) {
+  return hasBrandMentionSignal(item)
+}
+
+function hasBrandMentionSignal(item: QuestionMonitorItem) {
+  return item.mentioned
+    || metricBool(item.recommended)
+    || metricBool(item.firstRecommend)
+    || Boolean(item.rankPosition?.available && item.rankPosition.value)
+}
+
+function canOpenQuestionDetail(item: QuestionMonitorItem) {
+  return hasPositiveSignal(item) && Boolean(item.pollResultId)
+}
+
 function statusTags(item: QuestionMonitorItem) {
   const tags: Array<{ text: string; kind: string }> = []
-  if (item.mentioned) {
+  if (hasBrandMentionSignal(item)) {
     tags.push({ text: '已提及品牌', kind: 'success' })
   }
   if (metricBool(item.recommended)) {
@@ -255,7 +270,7 @@ function publicEvidence(value?: string | null) {
 }
 
 function openQuestionDetail(item: QuestionMonitorItem) {
-  if (!item.mentioned || !item.pollResultId) return
+  if (!canOpenQuestionDetail(item)) return
   sessionStorage.setItem(QUESTION_DETAIL_CACHE_KEY, JSON.stringify(item))
   router.push({
     name: 'MobileDashboardQuestionDetail',

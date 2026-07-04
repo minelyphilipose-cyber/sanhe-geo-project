@@ -1000,16 +1000,7 @@ public class MobileDashboardAggregateService {
         List<MobileDashboardAggregateVO.QuestionMonitorItem> items = new ArrayList<>();
         for (List<QuestionMonitorRow> group : grouped.values()) {
             QuestionMonitorRow first = group.get(0);
-            QuestionMonitorRow displayRow = group.stream()
-                    .filter(QuestionMonitorRow::mentioned)
-                    .filter(row -> StringUtils.hasText(row.platformCode()))
-                    .filter(row -> StringUtils.hasText(row.responseText()))
-                    .findFirst()
-                    .orElseGet(() -> group.stream()
-                            .filter(QuestionMonitorRow::mentioned)
-                            .filter(row -> StringUtils.hasText(row.platformCode()))
-                            .findFirst()
-                            .orElse(first));
+            QuestionMonitorRow displayRow = chooseQuestionMonitorDisplayRow(group, first);
             boolean mentioned = group.stream().anyMatch(QuestionMonitorRow::mentioned);
             boolean hasSuccessfulJudge = group.stream().anyMatch(QuestionMonitorRow::rowJudgeReady);
             boolean recommended = group.stream().anyMatch(row -> row.rowJudgeReady() && Boolean.TRUE.equals(row.recommended()));
@@ -1074,6 +1065,44 @@ public class MobileDashboardAggregateService {
                         Comparator.nullsLast(Comparator.reverseOrder())
                 ));
         return items;
+    }
+
+    private QuestionMonitorRow chooseQuestionMonitorDisplayRow(List<QuestionMonitorRow> group, QuestionMonitorRow fallback) {
+        return group.stream()
+                .min(Comparator
+                        .comparingInt(this::questionMonitorDisplayPriority)
+                        .thenComparing(
+                                QuestionMonitorRow::rankPosition,
+                                Comparator.nullsLast(Integer::compareTo)
+                        )
+                        .thenComparing(
+                                QuestionMonitorRow::completedAt,
+                                Comparator.nullsLast(Comparator.reverseOrder())
+                        )
+                        .thenComparing(
+                                QuestionMonitorRow::pollResultId,
+                                Comparator.nullsLast(Comparator.reverseOrder())
+                        ))
+                .orElse(fallback);
+    }
+
+    private int questionMonitorDisplayPriority(QuestionMonitorRow row) {
+        if (row.rowJudgeReady() && Boolean.TRUE.equals(row.firstRecommend())) {
+            return 0;
+        }
+        if (row.rowJudgeReady() && row.rankPosition() != null) {
+            return 1;
+        }
+        if (row.rowJudgeReady() && Boolean.TRUE.equals(row.recommended())) {
+            return 2;
+        }
+        if (row.mentioned() && StringUtils.hasText(row.platformCode()) && StringUtils.hasText(row.responseText())) {
+            return 3;
+        }
+        if (row.mentioned() && StringUtils.hasText(row.platformCode())) {
+            return 4;
+        }
+        return 5;
     }
 
     private MobileDashboardAggregateVO.QuestionMonitorList toQuestionMonitorList(List<MobileDashboardAggregateVO.QuestionMonitorItem> items,

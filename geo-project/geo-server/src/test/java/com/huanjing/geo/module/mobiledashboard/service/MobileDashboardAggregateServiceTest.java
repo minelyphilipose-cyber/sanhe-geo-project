@@ -9,6 +9,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -630,6 +631,52 @@ public class MobileDashboardAggregateServiceTest {
     }
 
     @Test
+    void mergedQuestionMonitorItemDisplaysRowThatContributesTopStatus() throws Exception {
+        MobileDashboardAggregateService service = newService(jdbcTemplate());
+        Object mentionedOnly = questionMonitorRow(
+                1001L,
+                2001L,
+                "deepseek",
+                "阜阳颍州区全屋智能哪家好",
+                LocalDateTime.of(2026, 7, 4, 10, 0),
+                true,
+                true,
+                false,
+                false,
+                null,
+                null,
+                "DeepSeek answer"
+        );
+        Object firstRecommend = questionMonitorRow(
+                1001L,
+                2002L,
+                "doubao",
+                "阜阳颍州区全屋智能哪家好",
+                LocalDateTime.of(2026, 7, 4, 9, 0),
+                true,
+                true,
+                true,
+                true,
+                1,
+                "首推证据",
+                "Doubao answer"
+        );
+
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.QuestionMonitorItem> items =
+                (List<MobileDashboardAggregateVO.QuestionMonitorItem>) invoke(service, "mergeQuestionMonitorRows",
+                        List.of(mentionedOnly, firstRecommend), true, "ready");
+
+        assertThat(items).singleElement().satisfies(item -> {
+            assertThat(item.getPollResultId()).isEqualTo(2002L);
+            assertThat(item.getPlatformCode()).isEqualTo("doubao");
+            assertThat(item.getResponseText()).isEqualTo("Doubao answer");
+            assertThat(item.getFirstRecommend().getValue()).isTrue();
+            assertThat(item.getTags()).contains("mentioned", "recommended", "first_recommend");
+        });
+    }
+
+    @Test
     void contentTaskListIncludesConfirmedSelfMediaSchedulesWithoutPublishRecord() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         jdbcTemplate.execute("""
@@ -862,6 +909,38 @@ public class MobileDashboardAggregateServiceTest {
         constructor.setAccessible(true);
         return constructor.newInstance(totalPublished, monthPublished, monthContent, monthBuilding,
                 totalIndexed, monthIndexed, Map.of(), Map.of());
+    }
+
+    private static Object questionMonitorRow(Long keywordResultId,
+                                             Long pollResultId,
+                                             String platformCode,
+                                             String questionTitle,
+                                             LocalDateTime completedAt,
+                                             boolean mentioned,
+                                             boolean rowJudgeReady,
+                                             Boolean recommended,
+                                             Boolean firstRecommend,
+                                             Integer rankPosition,
+                                             String evidence,
+                                             String responseText) throws Exception {
+        Class<?> rowClass = Class.forName(
+                "com.huanjing.geo.module.mobiledashboard.service.MobileDashboardAggregateService$QuestionMonitorRow");
+        Constructor<?> constructor = rowClass.getDeclaredConstructor(
+                Long.class,
+                Long.class,
+                String.class,
+                String.class,
+                LocalDateTime.class,
+                boolean.class,
+                boolean.class,
+                Boolean.class,
+                Boolean.class,
+                Integer.class,
+                String.class,
+                String.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(keywordResultId, pollResultId, platformCode, questionTitle, completedAt,
+                mentioned, rowJudgeReady, recommended, firstRecommend, rankPosition, evidence, responseText);
     }
 
     public static String substringIndex(String value, String delimiter, int count) {
