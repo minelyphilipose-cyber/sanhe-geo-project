@@ -98,13 +98,21 @@
                   v-if="canCompleteEntry(scope.row)"
                   link
                   type="success"
-                  :loading="workflowSavingId === scope.row.id"
-                  @click="completeEntry(scope.row)"
+                  @click="goDetail(scope.row)"
                 >
-                  信息录入完成
+                  检查并提交
                 </el-button>
-                <el-button v-if="canSubmitWorkorder(scope.row)" link type="primary" @click="router.push('/partner/my-projects')">
+                <el-button v-if="canSubmitWorkorder(scope.row)" link type="primary" @click="goSubmitWorkorder(scope.row)">
                   查看并提交工单
+                </el-button>
+                <el-button
+                  v-if="canReturnEntry(scope.row)"
+                  link
+                  type="warning"
+                  :loading="workflowSavingId === scope.row.id"
+                  @click="openReturnEntry(scope.row)"
+                >
+                  退回修改
                 </el-button>
               </div>
             </template>
@@ -167,6 +175,31 @@
         </div>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="returnVisible" title="退回交付员工修改" width="560px" class="partner-form-dialog">
+      <div class="partner-dialog-tip">
+        <span class="partner-dialog-tip-icon">i</span>
+        <span>退回后客户会回到“项目与拓词录入中”，交付员工修改完成后需要再次提交负责人确认。</span>
+      </div>
+      <el-form label-position="top">
+        <el-form-item label="退回原因" required>
+          <el-input
+            v-model="returnForm.reason"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="请说明需要补充或修正的资料，方便交付员工按项处理"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="partner-dialog-footer">
+          <el-button @click="returnVisible = false">取消</el-button>
+          <el-button type="warning" :loading="workflowSavingId === returningCompany?.id" @click="submitReturnEntry">确认退回</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -175,15 +208,17 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
-  completeCompanyEntry,
   createCompany,
   getCompanyList,
   notifyCompanyProjectEntry,
   requestCompanyPackageReview,
+  returnCompanyEntry,
   updateCompany,
 } from '@/api/customer'
+import { getProjectList } from '@/api/project'
+import { getGeoProjectWorkorders } from '@/api/geoQuestion'
 import { getMyPartnerStaff, type PartnerStaff } from '@/api/partner'
-import type { Company } from '@/types'
+import type { Company, Project } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -205,11 +240,14 @@ const saving = ref(false)
 const keyword = ref('')
 const rows = ref<Company[]>([])
 const staffList = ref<PartnerStaff[]>([])
+const entryReadinessByCompanyId = ref<Record<number, { hasProject: boolean; allCoreQuestionsReady: boolean }>>({})
 const workflowSavingId = ref<number | null>(null)
 const formVisible = ref(false)
+const returnVisible = ref(false)
 const formRef = ref<FormInstance>()
 const formMode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
+const returningCompany = ref<Company | null>(null)
 const form = reactive({
   companyName: '',
   contactName: '',
@@ -220,6 +258,9 @@ const form = reactive({
   status: 'potential',
   regionCodes: [] as string[],
   remark: '',
+})
+const returnForm = reactive({
+  reason: '',
 })
 
 const rules: FormRules = {
@@ -266,7 +307,7 @@ function hasActivePackage(row: Company) {
 
 function effectiveWorkflowStatus(row: Company) {
   const status = normalizedWorkflowStatus(row.partnerWorkflowStatus)
-  if (!hasActivePackage(row) && ['package_bound', 'project_entry', 'entry_completed'].includes(status)) {
+  if (!hasActivePackage(row) && ['package_bound', 'project_entry', 'entry_completed', 'submitted_to_hq'].includes(status)) {
     return 'package_requested'
   }
   return status
@@ -279,6 +320,7 @@ function workflowStatusLabel(row: Company) {
     package_bound: '待通知继续录入',
     project_entry: '项目与拓词录入中',
     entry_completed: '待负责人确认',
+    submitted_to_hq: '已提交总部',
   }
   return mapping[effectiveWorkflowStatus(row)] || mapping.draft
 }
@@ -290,6 +332,7 @@ function workflowStatusHint(row: Company) {
     package_bound: '套餐已绑定，等待负责人通知',
     project_entry: '员工继续录入项目和核心问题',
     entry_completed: '负责人核对后提交总部工单',
+    submitted_to_hq: '总部已收到启动工单，等待总部处理',
   }
   return mapping[effectiveWorkflowStatus(row)] || mapping.draft
 }
@@ -297,6 +340,7 @@ function workflowStatusHint(row: Company) {
 function workflowStatusClass(row: Company) {
   const normalized = effectiveWorkflowStatus(row)
   if (normalized === 'entry_completed') return 'is-ready'
+  if (normalized === 'submitted_to_hq') return 'is-success'
   if (normalized === 'package_requested') return 'is-warning'
   if (normalized === 'project_entry') return 'is-success'
   if (normalized === 'package_bound') return 'is-info'
@@ -312,10 +356,18 @@ function canNotifyEntry(row: Company) {
 }
 
 function canCompleteEntry(row: Company) {
-  return isPartnerStaff.value && effectiveWorkflowStatus(row) === 'project_entry'
+  const readiness = entryReadinessByCompanyId.value[row.id]
+  return isPartnerStaff.value
+    && effectiveWorkflowStatus(row) === 'project_entry'
+    && Boolean(readiness?.hasProject)
+    && Boolean(readiness?.allCoreQuestionsReady)
 }
 
 function canSubmitWorkorder(row: Company) {
+  return isPartnerOwner.value && effectiveWorkflowStatus(row) === 'entry_completed'
+}
+
+function canReturnEntry(row: Company) {
   return isPartnerOwner.value && effectiveWorkflowStatus(row) === 'entry_completed'
 }
 
@@ -355,6 +407,10 @@ function openEdit(row: Company) {
 
 function goDetail(row: Company) {
   router.push(`/partner/customers/${row.id}`)
+}
+
+function goSubmitWorkorder(row: Company) {
+  router.push({ name: 'MyProjects', query: { companyId: row.id } })
 }
 
 function region(company: Company) {
@@ -409,23 +465,28 @@ async function notifyEntry(row: Company) {
   }
 }
 
-async function completeEntry(row: Company) {
-  try {
-    await ElMessageBox.confirm(
-      `确认客户「${row.companyName}」的项目与核心问题信息已经录入完成？提交后负责人会在工作台中处理。`,
-      '信息录入完成',
-      { type: 'warning', confirmButtonText: '确认完成', cancelButtonText: '取消' },
-    )
-  } catch {
+function openReturnEntry(row: Company) {
+  returningCompany.value = row
+  returnForm.reason = ''
+  returnVisible.value = true
+}
+
+async function submitReturnEntry() {
+  const row = returningCompany.value
+  const reason = returnForm.reason.trim()
+  if (!row) return
+  if (!reason) {
+    ElMessage.warning('请填写退回原因，方便交付员工明确修改方向')
     return
   }
   workflowSavingId.value = row.id
   try {
-    const { data } = await completeCompanyEntry(row.id)
+    const { data } = await returnCompanyEntry(row.id, { reason })
     patchRow(data.data)
-    ElMessage.success('已提交负责人确认')
+    returnVisible.value = false
+    ElMessage.success('已退回交付员工修改')
   } catch (err) {
-    ElMessage.error(errorMessage(err, '提交录入完成失败'))
+    ElMessage.error(errorMessage(err, '退回修改失败'))
   } finally {
     workflowSavingId.value = null
   }
@@ -472,15 +533,17 @@ async function submit() {
 async function load() {
   loading.value = true
   try {
-    const [companyRes, staffRes] = await Promise.all([
+    const [companyRes, projectRes, staffRes] = await Promise.all([
       getCompanyList({
       current: 1,
       size: 200,
       keyword: keyword.value || undefined,
       }),
+      getProjectList({ current: 1, size: 500 }),
       isPartnerOwner.value ? getMyPartnerStaff() : Promise.resolve(null),
     ])
     rows.value = companyRes.data.data.records || []
+    entryReadinessByCompanyId.value = await buildEntryReadiness(projectRes.data.data.records || [])
     if (staffRes) {
       staffList.value = staffRes.data.data || []
     }
@@ -490,6 +553,41 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+async function buildEntryReadiness(projects: Project[]) {
+  const next: Record<number, { hasProject: boolean; allCoreQuestionsReady: boolean }> = {}
+  const projectReadiness: Array<{ companyId: number; ready: boolean }> = []
+  for (const project of projects) {
+    if (!project.companyId) continue
+    next[project.companyId] = next[project.companyId] || { hasProject: false, allCoreQuestionsReady: false }
+    next[project.companyId].hasProject = true
+  }
+  await Promise.all(projects.map(async (project) => {
+    if (!project.companyId) return
+    const allocatedCount = projectCoreQuestionLimit(project)
+    let ready = false
+    try {
+      const { data } = await getGeoProjectWorkorders(project.id)
+      const workorders = data.data || []
+      const actualCount = workorders
+        .filter((item) => item.status === 'committed')
+        .reduce((sum, item) => sum + Number(item.countTotal || 0), 0)
+      ready = allocatedCount > 0 && actualCount === allocatedCount
+    } catch {
+      // Readiness is an affordance only; backend keeps the authoritative validation.
+    }
+    projectReadiness.push({ companyId: project.companyId, ready })
+  }))
+  for (const companyId of Object.keys(next).map(Number)) {
+    const items = projectReadiness.filter((item) => item.companyId === companyId)
+    next[companyId].allCoreQuestionsReady = items.length > 0 && items.every((item) => item.ready)
+  }
+  return next
+}
+
+function projectCoreQuestionLimit(project: Project) {
+  return Number(project.planCoreQuestionLimit ?? project.planKeywordGroupLimitA ?? project.planKeywordGroupLimit ?? 0)
 }
 
 onMounted(async () => {

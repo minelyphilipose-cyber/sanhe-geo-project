@@ -50,14 +50,14 @@
         </div>
       </div>
 
-      <section class="partner-surface brand-section">
+      <section class="partner-surface brand-section core-section">
         <SectionHead title="基础信息" subtitle="用于客户、品牌和项目归属识别。" />
         <div class="info-grid">
           <InfoTile v-for="item in coreItems" :key="item.label" :label="item.label" :value="item.value" />
         </div>
       </section>
 
-      <section class="partner-surface brand-section">
+      <section class="partner-surface brand-section contact-section">
         <SectionHead title="联系方式" subtitle="展示可见、可公开或可用于跟进的信息。" />
         <div class="info-grid">
           <InfoTile v-for="item in contactItems" :key="item.label" :label="item.label" :value="item.value" />
@@ -71,14 +71,14 @@
         </div>
       </section>
 
-      <section class="partner-surface brand-section">
+      <section class="partner-surface brand-section intro-section">
         <SectionHead title="介绍素材" subtitle="用于后续诊断报告、项目资料和核心问题准备。" />
         <div class="info-grid is-text">
           <InfoTile v-for="item in textItems" :key="item.label" :label="item.label" :value="item.value" wide />
         </div>
       </section>
 
-      <section class="partner-surface brand-section">
+      <section class="partner-surface brand-section product-section">
         <SectionHead title="产品信息" :subtitle="productSectionSubtitle">
           <el-button v-if="canManageBrand" type="primary" @click="openOfferingCreate">新增产品</el-button>
         </SectionHead>
@@ -124,7 +124,7 @@
         </DataState>
       </section>
 
-      <section class="partner-surface brand-section">
+      <section class="partner-surface brand-section asset-section">
         <SectionHead
           title="品牌图片资产"
           subtitle="文章正文插图优先使用“插图”开头的启用文件夹，封面优先使用名为“封面”的启用文件夹。请在这两类文件夹中补充可公开使用的图片。"
@@ -136,8 +136,16 @@
         </SectionHead>
         <input ref="imageInputRef" type="file" class="hidden-input" multiple accept="image/*,.svg" @change="handleImageSelected" />
         <DataState :loading="assetLoading" :empty="!assetLoading && imageFolders.length === 0" empty-text="暂无图库文件夹">
-          <div class="asset-layout">
-            <div class="folder-list">
+          <div class="asset-layout asset-workspace">
+            <div class="asset-folder-board">
+              <div class="asset-board-head">
+                <div>
+                  <strong>图库文件夹</strong>
+                  <span>按图片用途归档，封面与插图是文章生成前的必要素材。</span>
+                </div>
+                <el-tag type="primary" round>{{ imageFolders.length }} 个文件夹</el-tag>
+              </div>
+              <div class="folder-list">
               <button
                 v-for="folder in imageFolders"
                 :key="folder.id"
@@ -153,28 +161,38 @@
                   </el-tag>
                 </div>
                 <strong>{{ folderMaterialCount(folder.id) }} 张</strong>
-                <small>{{ folderDescription(folder) }}</small>
-                <div v-if="folder.tags?.length" class="folder-tags">
-                  <el-tag v-for="tag in folder.tags" :key="tag" size="small" type="info">{{ tag }}</el-tag>
+                <div v-if="folderDisplayTags(folder).length" class="folder-tags">
+                  <el-tag v-for="tag in folderDisplayTags(folder)" :key="tag" size="small" type="info">{{ tag }}</el-tag>
                 </div>
                 <div v-if="canManageBrand" class="folder-actions">
                   <el-button size="small" @click.stop="openFolderEdit(folder)">编辑</el-button>
                   <el-button size="small" type="danger" @click.stop="confirmDeleteFolder(folder)">删除</el-button>
                 </div>
               </button>
+              </div>
             </div>
+
             <div class="asset-panel">
               <div class="asset-panel-head">
                 <div>
                   <strong>{{ selectedFolder?.folderName || '图库' }}</strong>
-                  <span>{{ selectedFolderMaterials.length }} 张图片</span>
+                  <span>共 {{ selectedFolderMaterials.length }} 张图片<span v-if="assetSearchKeyword">，筛选 {{ filteredSelectedFolderMaterials.length }} 张</span></span>
                 </div>
-                <el-button v-if="canManageBrand" size="small" type="primary" :loading="uploading" @click="triggerImageUpload">
-                  上传到当前文件夹
-                </el-button>
+                <div class="asset-panel-tools">
+                  <el-input
+                    v-model="assetSearchKeyword"
+                    :prefix-icon="Search"
+                    clearable
+                    size="small"
+                    placeholder="搜索文件名"
+                  />
+                  <el-button v-if="canManageBrand" size="small" type="primary" :loading="uploading" @click="triggerImageUpload">
+                    上传到当前文件夹
+                  </el-button>
+                </div>
               </div>
-              <div v-if="selectedFolderMaterials.length" class="material-grid">
-                <div v-for="mat in selectedFolderMaterials" :key="mat.id" class="material-card">
+              <div v-if="filteredSelectedFolderMaterials.length" class="material-grid">
+                <div v-for="mat in filteredSelectedFolderMaterials" :key="mat.id" class="material-card">
                   <div class="material-thumb">
                     <img v-if="materialPreviewUrl(mat)" :src="materialPreviewUrl(mat)" :alt="mat.fileName" />
                     <span v-else>{{ fileTypeLabel(mat.fileType) }}</span>
@@ -193,7 +211,7 @@
                   </div>
                 </div>
               </div>
-              <DataState v-else :loading="false" :empty="true" empty-text="当前文件夹暂无图片" />
+              <DataState v-else :loading="false" :empty="true" :empty-text="assetSearchKeyword ? '没有匹配的图片' : '当前文件夹暂无图片'" />
             </div>
           </div>
         </DataState>
@@ -219,9 +237,6 @@
               <el-option label="启用" value="active" />
               <el-option label="停用" value="disabled" />
             </el-select>
-          </el-form-item>
-          <el-form-item label="优先级">
-            <el-input-number v-model="offeringForm.priority" :min="0" :max="999" style="width: 100%" />
           </el-form-item>
           <template v-if="isSpecialIndustryBrand">
             <el-form-item label="作为特殊行业项目">
@@ -325,6 +340,7 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
   createBrandImageFolder,
@@ -371,6 +387,7 @@ const companyName = ref('')
 const imageFolders = ref<BrandImageFolder[]>([])
 const materialPreviewMap = ref<Record<number, string>>({})
 const selectedFolderId = ref<number | null>(null)
+const assetSearchKeyword = ref('')
 const offerings = ref<BrandOffering[]>([])
 const specialCategoryOptions = ref<SpecialIndustryTopicAngleCategory[]>([])
 const folderTagOptions = ref<string[]>([])
@@ -439,7 +456,6 @@ const offeringForm = reactive({
   qualificationDescription: '',
   remark: '',
   status: 'active' as 'active' | 'disabled',
-  priority: 50,
   useScenarios: '',
   medicalProjectEnabled: false,
   medicalIndustryCode: '',
@@ -470,6 +486,11 @@ const selectedFolderMaterials = computed(() => {
   const folder = selectedFolder.value
   if (!folder) return []
   return (folder.materials || []).filter((item) => item.category === 'brand_image' && isImageType(item.fileType))
+})
+const filteredSelectedFolderMaterials = computed(() => {
+  const keyword = assetSearchKeyword.value.trim().toLowerCase()
+  if (!keyword) return selectedFolderMaterials.value
+  return selectedFolderMaterials.value.filter((item) => (item.fileName || '').toLowerCase().includes(keyword))
 })
 const imageMaterialCount = computed(() =>
   imageFolders.value.reduce((sum, folder) => sum + folderMaterialCount(folder.id), 0)
@@ -571,13 +592,18 @@ function folderMaterialCount(folderId: number) {
 
 function selectFolder(folderId: number) {
   selectedFolderId.value = folderId
+  assetSearchKeyword.value = ''
 }
 
-function folderDescription(folder: BrandImageFolder) {
-  if (folder.description) return folder.description
-  if (folder.folderName === '插图') return '文章正文插图、场景图等内容素材'
-  if (folder.folderName === '封面') return '文章封面、首图等封面素材'
-  return folder.tags?.length ? folder.tags.join('、') : '品牌图片素材'
+function defaultArticleFolderTags(folder: Pick<BrandImageFolder, 'folderName'>) {
+  const folderName = (folder.folderName || '').trim()
+  if (folderName.startsWith('插图')) return ['插图', '场景图']
+  if (folderName === '封面') return ['封面', '首图']
+  return []
+}
+
+function folderDisplayTags(folder: BrandImageFolder) {
+  return Array.from(new Set([...defaultArticleFolderTags(folder), ...(folder.tags || [])].map((tag) => tag.trim()).filter(Boolean)))
 }
 
 function materialPreviewUrl(material: BrandMaterial) {
@@ -590,6 +616,10 @@ function isActiveArticleIllustrationFolder(folder: Pick<BrandImageFolder, 'folde
 
 function isActiveArticleCoverFolder(folder: Pick<BrandImageFolder, 'folderName' | 'status'>) {
   return folder.status === 'active' && (folder.folderName || '').trim() === '封面'
+}
+
+function isRequiredArticleFolder(folder: Pick<BrandImageFolder, 'folderName' | 'status'>) {
+  return isActiveArticleIllustrationFolder(folder) || isActiveArticleCoverFolder(folder)
 }
 
 function hasRequiredArticleFolders(folders: Array<Pick<BrandImageFolder, 'id' | 'folderName' | 'status'>>) {
@@ -795,7 +825,7 @@ function openFolderEdit(folder: BrandImageFolder) {
   folderForm.folderName = folder.folderName || ''
   folderForm.status = folder.status === 'disabled' ? 'disabled' : 'active'
   folderForm.description = folder.description || ''
-  folderForm.tags = [...(folder.tags || [])]
+  folderForm.tags = folderDisplayTags(folder)
   folderDialogVisible.value = true
   void searchFolderTags('')
 }
@@ -883,7 +913,6 @@ function resetOfferingForm() {
   offeringForm.qualificationDescription = ''
   offeringForm.remark = ''
   offeringForm.status = 'active'
-  offeringForm.priority = 50
   offeringForm.useScenarios = ''
   offeringForm.medicalProjectEnabled = false
   offeringForm.medicalIndustryCode = isSpecialIndustryBrand.value ? brand.value?.complianceIndustryCode || '' : ''
@@ -908,7 +937,6 @@ function openOfferingEdit(offering: BrandOffering) {
   offeringForm.qualificationDescription = offering.qualificationDescription || ''
   offeringForm.remark = offering.remark || ''
   offeringForm.status = offering.status === 'disabled' ? 'disabled' : 'active'
-  offeringForm.priority = offering.priority ?? 50
   offeringForm.useScenarios = offering.useScenarios || ''
   offeringForm.medicalProjectEnabled = !!offering.medicalProjectEnabled
   offeringForm.medicalIndustryCode = offering.medicalIndustryCode || (isSpecialIndustryBrand.value ? brand.value?.complianceIndustryCode || '' : '')
@@ -968,7 +996,6 @@ async function submitOffering() {
       qualificationDescription: nullableText(offeringForm.qualificationDescription),
       remark: nullableText(offeringForm.remark),
       status: offeringForm.status,
-      priority: Number(offeringForm.priority) || 50,
       useScenarios: nullableText(offeringForm.useScenarios),
       medicalProjectEnabled: isSpecialIndustryBrand.value && offeringForm.medicalProjectEnabled,
       medicalIndustryCode: isSpecialIndustryBrand.value ? nullableText(offeringForm.medicalIndustryCode) : null,
@@ -1031,17 +1058,39 @@ watch(() => route.params.id, reload)
 <style scoped>
 .partner-brand-detail {
   display: grid;
-  gap: 18px;
+  gap: 14px;
+}
+
+.partner-brand-detail :deep(.partner-page-header) {
+  overflow: hidden;
+  position: relative;
+  border-color: #dbeafe;
+  background:
+    radial-gradient(circle at 92% 12%, rgba(14, 165, 233, 0.16) 0, rgba(14, 165, 233, 0.16) 120px, transparent 122px),
+    linear-gradient(135deg, #fff 0%, #f1f7ff 58%, #ecfdf5 100%);
+}
+
+.partner-brand-detail :deep(.partner-page-header)::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #2563eb 0%, #14b8a6 100%);
+  content: '';
 }
 
 .brand-hero {
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 22px;
+  overflow: hidden;
+  position: relative;
+  padding: 18px 20px;
   border: 1px solid #dbeafe;
   border-radius: 12px;
-  background: linear-gradient(135deg, #f8fbff 0%, #eff6ff 58%, #ecfdf5 100%);
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(20, 184, 166, 0.09) 100%),
+    #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
 }
 
 .brand-avatar {
@@ -1051,7 +1100,7 @@ watch(() => route.params.id, reload)
   width: 56px;
   height: 56px;
   border-radius: 14px;
-  background: #2563eb;
+  background: linear-gradient(135deg, #2563eb 0%, #14b8a6 100%);
   color: #fff;
   font-size: 24px;
   font-weight: 900;
@@ -1080,8 +1129,9 @@ watch(() => route.params.id, reload)
 
 .brand-hero p {
   margin: 8px 0 0;
+  max-width: 920px;
   color: #475569;
-  line-height: 1.7;
+  line-height: 1.65;
   font-weight: 650;
 }
 
@@ -1096,21 +1146,44 @@ watch(() => route.params.id, reload)
 
 .brand-metric-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
 }
 
 .brand-metric-card {
-  padding: 16px;
-  border: 1px solid #e2e8f0;
+  position: relative;
+  overflow: hidden;
+  min-height: 92px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
   border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+  background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+}
+
+.brand-metric-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: #2563eb;
+  content: '';
+}
+
+.brand-metric-card:nth-child(2)::before {
+  background: #0f766e;
+}
+
+.brand-metric-card:nth-child(3)::before {
+  background: #7c3aed;
 }
 
 .brand-metric-card.is-warning {
   border-color: #fde68a;
-  background: #fffbeb;
+  background: linear-gradient(180deg, #fff 0%, #fffbeb 100%);
+}
+
+.brand-metric-card.is-warning::before {
+  background: #f59e0b;
 }
 
 .brand-metric-card span,
@@ -1125,13 +1198,47 @@ watch(() => route.params.id, reload)
   display: block;
   margin: 8px 0 4px;
   color: #0f172a;
-  font-size: 24px;
+  font-size: 23px;
   line-height: 1;
   font-weight: 900;
 }
 
 .brand-section {
-  padding: 22px;
+  --section-accent: #2563eb;
+  --section-soft: #f8fbff;
+  --section-border: #dbeafe;
+  padding: 18px;
+  border-color: var(--section-border);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.045);
+}
+
+.core-section {
+  --section-accent: #2563eb;
+  --section-soft: #eff6ff;
+}
+
+.contact-section {
+  --section-accent: #0f766e;
+  --section-soft: #ecfdf5;
+  --section-border: #b8eee5;
+}
+
+.intro-section {
+  --section-accent: #7c3aed;
+  --section-soft: #f5f3ff;
+  --section-border: #ddd6fe;
+}
+
+.product-section {
+  --section-accent: #f59e0b;
+  --section-soft: #fffbeb;
+  --section-border: #fde68a;
+}
+
+.asset-section {
+  --section-accent: #0284c7;
+  --section-soft: #eff6ff;
+  --section-border: #bfdbfe;
 }
 
 .section-head {
@@ -1143,16 +1250,29 @@ watch(() => route.params.id, reload)
 }
 
 .section-head h2 {
+  position: relative;
+  padding-left: 12px;
   margin: 0;
   color: #0f172a;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 900;
 }
 
+.section-head h2::before {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--section-accent);
+  content: '';
+}
+
 .section-head p {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: #64748b;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.6;
   font-weight: 650;
 }
@@ -1164,7 +1284,7 @@ watch(() => route.params.id, reload)
 .info-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
 .info-grid.is-text {
@@ -1172,22 +1292,27 @@ watch(() => route.params.id, reload)
 }
 
 :deep(.info-tile) {
-  min-height: 86px;
-  padding: 14px 16px;
+  min-height: 78px;
+  padding: 12px 14px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+}
+
+:deep(.info-tile:hover) {
+  border-color: var(--section-border);
+  background: linear-gradient(180deg, #fff 0%, var(--section-soft) 100%);
 }
 
 :deep(.info-tile.is-wide) {
-  min-height: 98px;
+  min-height: 88px;
 }
 
 :deep(.info-label) {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 7px;
   color: #64748b;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.2;
   font-weight: 800;
 }
@@ -1219,27 +1344,62 @@ watch(() => route.params.id, reload)
 
 .asset-layout {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 18px;
-  align-items: stretch;
+  gap: 16px;
+}
+
+.asset-workspace {
+  grid-template-columns: 1fr;
+}
+
+.asset-folder-board {
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(16, 185, 129, 0.04)),
+    #ffffff;
+}
+
+.asset-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.asset-board-head strong,
+.asset-board-head span {
+  display: block;
+}
+
+.asset-board-head strong {
+  color: #0f172a;
+  font-weight: 900;
+}
+
+.asset-board-head span {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 700;
 }
 
 .folder-list {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   align-content: start;
-  gap: 10px;
-  max-height: 620px;
-  overflow: auto;
-  padding-right: 2px;
+  gap: 12px;
 }
 
 .folder-card {
   width: 100%;
-  min-height: 148px;
-  padding: 16px;
+  min-height: 124px;
+  padding: 14px;
   border: 1px solid #dbe4f0;
-  border-radius: 10px;
-  background: #fff;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
@@ -1248,8 +1408,12 @@ watch(() => route.params.id, reload)
 .folder-card:hover,
 .folder-card.active {
   border-color: #2563eb;
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.12);
   transform: translateY(-1px);
+}
+
+.folder-card.active {
+  background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
 }
 
 .folder-card-head {
@@ -1273,9 +1437,9 @@ watch(() => route.params.id, reload)
 
 .folder-card strong {
   display: block;
-  margin: 8px 0 4px;
+  margin: 10px 0 4px;
   color: #2563eb;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 900;
 }
 
@@ -1288,13 +1452,21 @@ watch(() => route.params.id, reload)
 .folder-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   margin-top: 10px;
+}
+
+.folder-tags :deep(.el-tag) {
+  border-color: #dbeafe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 800;
 }
 
 .folder-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 12px;
 }
 
@@ -1302,17 +1474,17 @@ watch(() => route.params.id, reload)
   min-width: 0;
   min-height: 420px;
   padding: 16px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #f8fafc;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
 }
 
 .asset-panel-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .asset-panel-head strong,
@@ -1332,11 +1504,23 @@ watch(() => route.params.id, reload)
   font-weight: 750;
 }
 
+.asset-panel-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 300px;
+}
+
+.asset-panel-tools :deep(.el-input) {
+  width: 190px;
+}
+
 .material-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
   gap: 12px;
-  max-height: 560px;
+  max-height: 620px;
   overflow: auto;
   padding-right: 2px;
 }
@@ -1347,10 +1531,11 @@ watch(() => route.params.id, reload)
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #fff;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.035);
 }
 
 .material-thumb {
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 4 / 3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1408,8 +1593,8 @@ watch(() => route.params.id, reload)
 
 .offering-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
 }
 
 .offering-empty-action {
@@ -1445,10 +1630,10 @@ watch(() => route.params.id, reload)
 .offering-card {
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border: 1px solid #e2e8f0;
+  padding: 14px;
+  border: 1px solid #fde68a;
   border-radius: 12px;
-  background: #fff;
+  background: linear-gradient(180deg, #fff 0%, #fffbeb 100%);
 }
 
 .offering-card-head {
@@ -1542,7 +1727,22 @@ watch(() => route.params.id, reload)
     grid-template-columns: 1fr;
   }
 
-  .folder-list,
+  .asset-panel-head,
+  .asset-board-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .asset-panel-tools {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+
+  .asset-panel-tools :deep(.el-input) {
+    width: 100%;
+  }
+
   .material-grid {
     max-height: none;
   }

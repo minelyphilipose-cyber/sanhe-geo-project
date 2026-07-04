@@ -3,6 +3,7 @@ package com.huanjing.geo.module.partner.service;
 import com.huanjing.geo.common.exception.BizException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.storage.MinioStorageService;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.partner.dto.PartnerCreateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerStaffCreateRequest;
@@ -52,6 +53,7 @@ class PartnerServiceTest {
     private SysRoleMapper sysRoleMapper;
     private SysUserRoleMapper sysUserRoleMapper;
     private CurrentUserService currentUserService;
+    private InternalScopeService internalScopeService;
     private PartnerService service;
 
     @BeforeEach
@@ -67,6 +69,7 @@ class PartnerServiceTest {
         sysUserRoleMapper = mock(SysUserRoleMapper.class);
         PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
         currentUserService = mock(CurrentUserService.class);
+        internalScopeService = mock(InternalScopeService.class);
         ActivityLogService activityLogService = mock(ActivityLogService.class);
         MinioStorageService minioStorageService = mock(MinioStorageService.class);
         ObjectMapper objectMapper = new ObjectMapper();
@@ -83,12 +86,14 @@ class PartnerServiceTest {
                 sysUserRoleMapper,
                 passwordEncoder,
                 currentUserService,
+                internalScopeService,
                 activityLogService,
                 minioStorageService,
                 objectMapper
         );
 
         when(currentUserService.requireCurrentUser()).thenReturn(user());
+        when(internalScopeService.isSuperAdmin(any())).thenReturn(false);
         when(passwordEncoder.encode(any())).thenReturn("hashed-password");
         when(sysUserMapper.selectCount(any())).thenReturn(0L);
         when(sysRoleMapper.selectOne(any())).thenReturn(role());

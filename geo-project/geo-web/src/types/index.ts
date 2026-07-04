@@ -105,6 +105,7 @@ export type PartnerWorkflowStatus =
   | 'package_bound'
   | 'project_entry'
   | 'entry_completed'
+  | 'submitted_to_hq'
 
 /* ====================================================
    业务实体
@@ -1496,6 +1497,8 @@ export interface SelfMediaAccount {
   cookieCredentialStatus?: string | null
   cookieCredentialVersion?: number | null
   cookieCredentialCapturedAt?: string | null
+  cookieCredentialExpiresAt?: string | null
+  cookieCredentialExpirySource?: string | null
   cookieCredentialIdentityStatus?: 'matched' | 'mismatch' | 'unknown' | string | null
   cookieCredentialIdentityName?: string | null
   cookieCredentialIdentityMessage?: string | null
@@ -1849,6 +1852,9 @@ export interface PublishSite {
   responseUrlPath?: string | null
   contentConstraints?: string | null
   currentHealthStatus?: string | null
+  cookieRiskStatus?: 'normal' | 'expiring' | 'expired' | 'missing' | 'unknown' | string | null
+  cookieExpiresAt?: string | null
+  cookieDaysUntilExpiry?: number | null
   lastFailureAt?: string | null
   failureRate?: number | null
   remark?: string | null

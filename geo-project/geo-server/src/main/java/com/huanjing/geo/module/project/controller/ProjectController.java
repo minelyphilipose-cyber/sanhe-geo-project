@@ -48,12 +48,13 @@ public class ProjectController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String stage,
+            @RequestParam(required = false) String ownerType,
             @RequestParam(required = false) Long partnerId,
             @RequestParam(required = false) Long brandId,
             @RequestParam(defaultValue = "false") boolean excludeThirdPartySource
     ) {
         return R.ok(partnerResponseSanitizer.projectPage(
-                projectService.page(current, size, keyword, status, stage, partnerId, brandId, excludeThirdPartySource)
+                projectService.page(current, size, keyword, status, stage, ownerType, partnerId, brandId, excludeThirdPartySource)
         ));
     }
 

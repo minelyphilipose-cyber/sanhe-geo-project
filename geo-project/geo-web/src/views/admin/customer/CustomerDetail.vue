@@ -328,7 +328,7 @@
         <el-form-item label="归属" required>
           <el-select v-model="companyForm.ownerType" style="width: 100%">
             <el-option
-              v-for="item in dictStore.options('owner_type')"
+              v-for="item in ownerTypeOptions"
               :key="item.dictKey"
               :label="item.dictValue"
               :value="item.dictKey"
@@ -579,6 +579,7 @@ const keywordGroupQuota = ref<CompanyKeywordGroupQuota | null>(null)
 const distributionQuota = ref<CompanyDistributionQuota | null>(null)
 const packageBindingHistory = ref<CompanyPackageBinding[]>([])
 const packagePlanOptions = ref<PackagePlan[]>([])
+const ownerTypeOptions = computed(() => dictStore.options('owner_type').filter((item) => ['direct', 'partner'].includes(item.dictKey)))
 
 const companyFormRef = ref<FormInstance>()
 const brandFormRef = ref<FormInstance>()
@@ -919,8 +920,8 @@ async function loadBrands() {
 async function submitCompany() {
   const valid = await companyFormRef.value?.validate().catch(() => false)
   if (!valid) return
-  if ((companyForm.ownerType === 'partner' || companyForm.ownerType === 'joint') && !companyForm.partnerId) {
-    ElMessage.warning('归属为“合伙人/联合”的客户需填写合伙人ID')
+  if (companyForm.ownerType === 'partner' && !companyForm.partnerId) {
+    ElMessage.warning('归属为“合伙人”的客户需选择所属合伙人')
     return
   }
   saving.value = true

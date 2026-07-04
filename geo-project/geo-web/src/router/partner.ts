@@ -64,13 +64,19 @@ const partnerRoutes: RouteRecordRaw = {
       meta: { title: '项目管理', icon: 'Folder', roles: ['partner', 'partner_staff'], permissions: ['project.read'] },
     },
     {
+      path: 'projects/:id',
+      name: 'PartnerProjectDetail',
+      component: () => import('@/views/partner/PartnerProjectDetail.vue'),
+      meta: { title: '项目详情', hidden: true, roles: ['partner', 'partner_staff'], permissions: ['project.read'] },
+    },
+    {
       path: 'layered-keyword-groups',
       name: 'PartnerLayeredKeywordGroupManage',
       component: () => import('@/views/partner/PartnerKeywordManage.vue'),
       meta: {
         title: '拓词管理',
         icon: 'Collection',
-        roles: ['partner_staff'],
+        roles: ['partner', 'partner_staff'],
         permissions: ['keyword_group.read'],
       },
     },

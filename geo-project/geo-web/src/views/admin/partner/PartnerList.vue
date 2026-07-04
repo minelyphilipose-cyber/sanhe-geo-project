@@ -94,6 +94,13 @@
               </div>
             </template>
           </el-table-column>
+          <el-table-column label="维护客户" width="120">
+            <template #default="scope">
+              <el-button class="customer-count-link" link type="primary" @click="goPartnerCustomers(scope.row)">
+                {{ scope.row.customerCount || 0 }}
+              </el-button>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="110">
             <template #default="scope">
               <span class="admin-status-tag" :class="statusClass(scope.row.status)">
@@ -686,6 +693,10 @@ function goDetail(id: number) {
   router.push(`/admin/partners/${id}`)
 }
 
+function goPartnerCustomers(row: PartnerItem) {
+  router.push({ path: '/admin/customers', query: { scope: 'partner', partnerId: row.id } })
+}
+
 onMounted(async () => {
   await dictStore.ensureLoaded()
   await load()
@@ -718,6 +729,11 @@ const cityDisplayPreview = computed(() => {
 
 .filter-status {
   width: 140px;
+}
+
+.customer-count-link {
+  font-weight: 700;
+  font-size: 16px;
 }
 
 .partner-metric-grid {

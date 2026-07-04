@@ -6,11 +6,21 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.entity.BrandImageFolder;
+import com.huanjing.geo.module.customer.entity.BrandMaterial;
+import com.huanjing.geo.module.customer.mapper.BrandImageFolderMapper;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyPackageBindingMapper;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
+import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.partner.dto.PartnerProjectStartRequestVO;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
@@ -25,9 +35,15 @@ import com.huanjing.geo.module.project.dto.ProjectStartRequestRejectRequest;
 import com.huanjing.geo.module.project.dto.ProjectStartRequestSubmitRequest;
 import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.ProjectChannelAllocation;
+import com.huanjing.geo.module.project.entity.KeywordGroup;
+import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.entity.ProjectQuotaSnapshot;
 import com.huanjing.geo.module.project.entity.ProjectStartRequest;
 import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
+import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
+import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
+import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectQuotaSnapshotMapper;
 import com.huanjing.geo.module.project.mapper.ProjectStartRequestMapper;
@@ -35,14 +51,17 @@ import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.huanjing.geo.module.system.service.SystemAlertService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -60,11 +79,21 @@ class ProjectStartRequestServiceTest {
     private ProjectStartRequestMapper requestMapper;
     private ProjectQuotaSnapshotMapper quotaSnapshotMapper;
     private ProjectMapper projectMapper;
+    private BrandMapper brandMapper;
+    private BrandImageFolderMapper brandImageFolderMapper;
+    private BrandMaterialMapper brandMaterialMapper;
+    private SelfMediaAccountMapper selfMediaAccountMapper;
+    private BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private CompanyMapper companyMapper;
     private CompanyPackageBindingMapper bindingMapper;
+    private KeywordGroupMapper keywordGroupMapper;
+    private ProjectChannelAllocationMapper projectChannelAllocationMapper;
+    private ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private PartnerAccountMapper partnerAccountMapper;
     private PartnerAccountTxnMapper partnerAccountTxnMapper;
     private SysUserMapper sysUserMapper;
+    private KeywordGroupService keywordGroupService;
+    private JdbcTemplate jdbcTemplate;
     private ProjectDistributionChannelAllocationService channelAllocationService;
     private CurrentUserService currentUserService;
     private ProjectStartRequestService service;
@@ -74,26 +103,44 @@ class ProjectStartRequestServiceTest {
         requestMapper = mock(ProjectStartRequestMapper.class);
         quotaSnapshotMapper = mock(ProjectQuotaSnapshotMapper.class);
         projectMapper = mock(ProjectMapper.class);
+        brandMapper = mock(BrandMapper.class);
+        brandImageFolderMapper = mock(BrandImageFolderMapper.class);
+        brandMaterialMapper = mock(BrandMaterialMapper.class);
+        selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
+        browserEnvironmentAccountMapper = mock(BrowserEnvironmentAccountMapper.class);
         companyMapper = mock(CompanyMapper.class);
         bindingMapper = mock(CompanyPackageBindingMapper.class);
         PackagePlanMapper packagePlanMapper = mock(PackagePlanMapper.class);
+        projectChannelAllocationMapper = mock(ProjectChannelAllocationMapper.class);
+        keywordGroupMapper = mock(KeywordGroupMapper.class);
+        projectKeywordGroupRelMapper = mock(ProjectKeywordGroupRelMapper.class);
         PartnerMapper partnerMapper = mock(PartnerMapper.class);
         partnerAccountMapper = mock(PartnerAccountMapper.class);
         partnerAccountTxnMapper = mock(PartnerAccountTxnMapper.class);
         sysUserMapper = mock(SysUserMapper.class);
         CompanyPackageBindingService bindingService = mock(CompanyPackageBindingService.class);
         channelAllocationService = mock(ProjectDistributionChannelAllocationService.class);
+        keywordGroupService = mock(KeywordGroupService.class);
         currentUserService = mock(CurrentUserService.class);
         InternalScopeService internalScopeService = mock(InternalScopeService.class);
         ActivityLogService activityLogService = mock(ActivityLogService.class);
+        jdbcTemplate = mock(JdbcTemplate.class);
 
         service = new ProjectStartRequestService(
                 requestMapper,
                 quotaSnapshotMapper,
                 projectMapper,
+                brandMapper,
+                brandImageFolderMapper,
+                brandMaterialMapper,
+                selfMediaAccountMapper,
+                browserEnvironmentAccountMapper,
                 companyMapper,
                 bindingMapper,
                 packagePlanMapper,
+                projectChannelAllocationMapper,
+                keywordGroupMapper,
+                projectKeywordGroupRelMapper,
                 partnerMapper,
                 partnerAccountMapper,
                 partnerAccountTxnMapper,
@@ -101,13 +148,17 @@ class ProjectStartRequestServiceTest {
                 bindingService,
                 channelAllocationService,
                 new ProjectDisplayStatusResolver(),
+                keywordGroupService,
                 currentUserService,
                 internalScopeService,
                 activityLogService,
-                new ObjectMapper()
+                mock(SystemAlertService.class),
+                new ObjectMapper(),
+                jdbcTemplate
         );
 
         when(projectMapper.selectById(10L)).thenReturn(project("pending_start"));
+        when(brandMapper.selectById(60L)).thenReturn(brand());
         when(companyMapper.selectById(20L)).thenReturn(company());
         when(bindingMapper.selectActiveByCompanyId(20L)).thenReturn(binding());
         when(bindingService.requireActiveBinding(20L)).thenReturn(binding());
@@ -116,6 +167,24 @@ class ProjectStartRequestServiceTest {
         when(partnerAccountMapper.selectOne(any())).thenReturn(account());
         when(partnerAccountMapper.selectByPartnerIdForUpdate(100L)).thenReturn(account());
         when(sysUserMapper.selectById(70L)).thenReturn(internalOwner());
+        when(jdbcTemplate.queryForObject(any(String.class), any(Class.class), any())).thenReturn(1L);
+        ProjectKeywordGroupRel rel = new ProjectKeywordGroupRel();
+        rel.setProjectId(10L);
+        rel.setKeywordGroupId(500L);
+        when(projectKeywordGroupRelMapper.selectList(any())).thenReturn(List.of(rel));
+        KeywordGroup group = new KeywordGroup();
+        group.setId(500L);
+        group.setCompanyId(20L);
+        group.setDeleted(false);
+        when(keywordGroupMapper.selectList(any())).thenReturn(List.of(group));
+        when(keywordGroupService.calcSavedCountsByGroupIds(any())).thenReturn(java.util.Map.of(500L, 3L));
+        BrandImageFolder cover = imageFolder(901L, "封面");
+        BrandImageFolder illustration = imageFolder(902L, "插图");
+        when(brandImageFolderMapper.selectList(any())).thenReturn(List.of(cover, illustration));
+        BrandMaterial coverImage = imageMaterial(901L);
+        BrandMaterial illustrationImage = imageMaterial(902L);
+        when(brandMaterialMapper.selectList(any())).thenReturn(List.of(coverImage, illustrationImage));
+        when(projectChannelAllocationMapper.selectList(any())).thenReturn(List.of());
         when(channelAllocationService.partnerVisibleAllocationSnapshot(any()))
                 .thenReturn("[{\"channelCode\":\"official_site\",\"channelName\":\"Agent官网\",\"periodType\":\"month\",\"quotaLimit\":10,\"allocatedCount\":3}]");
         doAnswer(invocation -> {
@@ -168,6 +237,26 @@ class ProjectStartRequestServiceTest {
         assertNotNull(snapshotCaptor.getValue().getPartnerAllocatedQuotaJson());
 
         verify(projectMapper).update(any(), any());
+
+        ArgumentCaptor<Company> companyCaptor = ArgumentCaptor.forClass(Company.class);
+        verify(companyMapper).updateById(companyCaptor.capture());
+        assertEquals("submitted_to_hq", companyCaptor.getValue().getPartnerWorkflowStatus());
+        assertNotNull(companyCaptor.getValue().getPartnerWorkflowUpdatedAt());
+    }
+
+    @Test
+    void submitFailsWhenCompanyEntryWasReturned() {
+        when(currentUserService.requireCurrentUser()).thenReturn(user("partner"));
+        Company company = company();
+        company.setPartnerWorkflowStatus("project_entry");
+        when(companyMapper.selectById(20L)).thenReturn(company);
+
+        BizException ex = assertThrows(BizException.class, () -> service.submit(10L, submitRequest()));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("交付资料已退回或尚未提交负责人确认，请等待交付员工补齐后重新提交负责人确认", ex.getMessage());
+        verify(requestMapper, never()).insert(any(ProjectStartRequest.class));
+        verify(quotaSnapshotMapper, never()).insert(any(ProjectQuotaSnapshot.class));
     }
 
     @Test
@@ -319,6 +408,39 @@ class ProjectStartRequestServiceTest {
                 .findFirst()
                 .orElse("");
         org.junit.jupiter.api.Assertions.assertTrue(projectUpdateSql.contains("deduction_txn_no"));
+    }
+
+    @Test
+    void approveAssignsInternalOwnerWhenPartnerCompanyOwnerIsPartnerStaff() {
+        SysUser reviewer = user("delivery_manager");
+        reviewer.setId(9L);
+        reviewer.setPartnerId(null);
+        when(currentUserService.requireCurrentUser()).thenReturn(reviewer);
+        when(projectMapper.selectById(10L)).thenReturn(project("submitted"));
+        Company partnerCompany = company();
+        partnerCompany.setOwnerType("partner");
+        partnerCompany.setOwnerId(7L);
+        when(companyMapper.selectById(20L)).thenReturn(partnerCompany);
+        SysUser partnerStaff = user("partner_staff");
+        partnerStaff.setId(7L);
+        when(sysUserMapper.selectById(7L)).thenReturn(partnerStaff);
+        ProjectStartRequest request = submittedRequest();
+        request.setPointsRequiredSnapshot(BigDecimal.ZERO);
+        when(requestMapper.selectById(99L)).thenReturn(request);
+        when(requestMapper.update(any(), any())).thenReturn(1);
+        when(quotaSnapshotMapper.update(any(), any())).thenReturn(1);
+        ProjectQuotaSnapshot locked = new ProjectQuotaSnapshot();
+        locked.setStatus("locked");
+        when(quotaSnapshotMapper.selectLatestByStartRequestId(99L)).thenReturn(locked);
+
+        ProjectStartRequestApproveRequest req = new ProjectStartRequestApproveRequest();
+        req.setAssignedInternalOwnerId(70L);
+        AdminProjectStartRequestVO vo = service.approve(99L, req);
+
+        assertEquals("approved", vo.getStatus());
+        ArgumentCaptor<Company> companyCaptor = ArgumentCaptor.forClass(Company.class);
+        verify(companyMapper).updateById(companyCaptor.capture());
+        assertEquals(70L, companyCaptor.getValue().getOwnerId());
     }
 
     @Test
@@ -511,6 +633,84 @@ class ProjectStartRequestServiceTest {
     }
 
     @Test
+    void setupReadyFailsWhenRequiredSelfMediaConfigurationMissing() {
+        SysUser operator = internalOwner();
+        operator.setId(70L);
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(currentUserService.hasPermission("delivery.assignment.manage")).thenReturn(false);
+        ProjectStartRequest request = submittedRequest();
+        request.setStatus("approved");
+        request.setAssignedInternalOwnerId(70L);
+        when(requestMapper.selectById(99L)).thenReturn(request);
+        when(projectMapper.selectById(10L)).thenReturn(project("approved_pending_setup"));
+        when(projectChannelAllocationMapper.selectList(any())).thenReturn(List.of(channelAllocation("self_media:wechat", 13)));
+
+        BizException ex = assertThrows(BizException.class, () -> service.markSetupReady(99L, null));
+
+        assertEquals(400, ex.getCode());
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("公众号未配置启用的自媒体账号"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) ex.getData();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> missingItems = (List<Map<String, Object>>) data.get("missingItems");
+        assertEquals("PROJECT_SETUP_NOT_READY", data.get("errorCode"));
+        assertEquals("self_media_account", missingItems.get(0).get("type"));
+        assertEquals("wechat", missingItems.get(0).get("platform"));
+        verify(projectMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void setupReadyFailsWhenBrowserEnvironmentBindingMissing() {
+        SysUser operator = internalOwner();
+        operator.setId(70L);
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(currentUserService.hasPermission("delivery.assignment.manage")).thenReturn(false);
+        ProjectStartRequest request = submittedRequest();
+        request.setStatus("approved");
+        request.setAssignedInternalOwnerId(70L);
+        when(requestMapper.selectById(99L)).thenReturn(request);
+        when(projectMapper.selectById(10L)).thenReturn(project("approved_pending_setup"));
+        when(projectChannelAllocationMapper.selectList(any())).thenReturn(List.of(channelAllocation("self_media:wechat", 13)));
+        when(selfMediaAccountMapper.selectOne(any())).thenReturn(selfMediaAccount("wechat_mp"));
+
+        BizException ex = assertThrows(BizException.class, () -> service.markSetupReady(99L, null));
+
+        assertEquals(400, ex.getCode());
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("公众号未绑定启用的指纹浏览器环境"));
+        verify(projectMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void setupReadyPassesWhenRequiredSelfMediaConfigurationExists() {
+        SysUser operator = internalOwner();
+        operator.setId(70L);
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(currentUserService.hasPermission("delivery.assignment.manage")).thenReturn(false);
+        ProjectStartRequest request = submittedRequest();
+        request.setStatus("approved");
+        request.setAssignedInternalOwnerId(70L);
+        when(requestMapper.selectById(99L)).thenReturn(request);
+        when(projectMapper.selectById(10L)).thenReturn(project("approved_pending_setup"));
+        when(projectChannelAllocationMapper.selectList(any())).thenReturn(List.of(channelAllocation("self_media:wechat", 13)));
+        SelfMediaAccount account = selfMediaAccount("wechat_mp");
+        when(selfMediaAccountMapper.selectOne(any())).thenReturn(account);
+        BrowserEnvironmentAccount environmentAccount = new BrowserEnvironmentAccount();
+        environmentAccount.setId(901L);
+        environmentAccount.setSelfMediaAccountId(account.getId());
+        when(browserEnvironmentAccountMapper.selectActiveBySelfMediaAccountId(account.getId())).thenReturn(environmentAccount);
+        when(projectMapper.update(any(), any())).thenReturn(1);
+        ProjectQuotaSnapshot snapshot = new ProjectQuotaSnapshot();
+        snapshot.setStatus("locked");
+        when(quotaSnapshotMapper.selectLatestByStartRequestId(99L)).thenReturn(snapshot);
+        when(partnerAccountTxnMapper.selectByBizTypeAndProjectId("partner_project_first_order", 10L)).thenReturn(pointsTxn());
+
+        AdminProjectStartRequestVO vo = service.markSetupReady(99L, null);
+
+        assertEquals("setup_ready", vo.getProjectStatus());
+        verify(projectMapper).update(any(), any());
+    }
+
+    @Test
     void setupReadyRejectsUnassignedInternalOperatorWithoutManagerPermission() {
         SysUser operator = internalOwner();
         operator.setId(71L);
@@ -586,9 +786,15 @@ class ProjectStartRequestServiceTest {
         Project project = new Project();
         project.setId(10L);
         project.setCompanyId(20L);
+        project.setBrandId(60L);
+        project.setProjectName("启动项目");
         project.setPartnerId(100L);
         project.setOwnerType("partner");
         project.setStatus(status);
+        project.setPlanKeywordGroupLimit(3);
+        project.setTargetRegions("合肥");
+        project.setCoreKeywords("核心关键词");
+        project.setTargetAudience("目标受众");
         return project;
     }
 
@@ -606,8 +812,59 @@ class ProjectStartRequestServiceTest {
     private Company company() {
         Company company = new Company();
         company.setId(20L);
+        company.setCompanyName("测试客户");
+        company.setIndustry("本地生活");
+        company.setContactName("张三");
+        company.setContactPhone("13800000000");
         company.setOwnerId(70L);
+        company.setPartnerWorkflowStatus("entry_completed");
         return company;
+    }
+
+    private Brand brand() {
+        Brand brand = new Brand();
+        brand.setId(60L);
+        brand.setCompanyId(20L);
+        brand.setBrandName("测试品牌");
+        brand.setBrandShortName("测试");
+        brand.setIndustry("本地生活");
+        brand.setMainBusiness("服务");
+        return brand;
+    }
+
+    private BrandImageFolder imageFolder(Long id, String name) {
+        BrandImageFolder folder = new BrandImageFolder();
+        folder.setId(id);
+        folder.setBrandId(60L);
+        folder.setFolderName(name);
+        folder.setStatus("active");
+        return folder;
+    }
+
+    private BrandMaterial imageMaterial(Long folderId) {
+        BrandMaterial material = new BrandMaterial();
+        material.setBrandId(60L);
+        material.setFolderId(folderId);
+        material.setCategory("brand_image");
+        return material;
+    }
+
+    private ProjectChannelAllocation channelAllocation(String channelCode, int allocatedCount) {
+        ProjectChannelAllocation allocation = new ProjectChannelAllocation();
+        allocation.setProjectId(10L);
+        allocation.setCompanyId(20L);
+        allocation.setChannelCode(channelCode);
+        allocation.setAllocatedCount(allocatedCount);
+        return allocation;
+    }
+
+    private SelfMediaAccount selfMediaAccount(String platform) {
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setId(801L);
+        account.setBrandId(60L);
+        account.setPlatform(platform);
+        account.setStatus("active");
+        return account;
     }
 
     private PackagePlan plan() {

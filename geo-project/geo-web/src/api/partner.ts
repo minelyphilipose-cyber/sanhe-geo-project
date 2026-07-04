@@ -14,6 +14,7 @@ export interface PartnerItem {
   contactPhone?: string | null
   city?: string | null
   remark?: string | null
+  customerCount?: number | null
   createdAt: string
 }
 

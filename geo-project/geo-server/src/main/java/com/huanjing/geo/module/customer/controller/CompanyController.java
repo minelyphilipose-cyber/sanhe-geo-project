@@ -7,6 +7,7 @@ import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
 import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyOwnerTransferRequest;
 import com.huanjing.geo.module.customer.dto.CompanyPackageBindRequest;
+import com.huanjing.geo.module.customer.dto.CompanyPartnerEntryReturnRequest;
 import com.huanjing.geo.module.customer.dto.CompanyPartnerStaffAssignRequest;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
@@ -16,6 +17,8 @@ import com.huanjing.geo.module.customer.entity.CompanyAccountTxn;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.customer.service.CompanyService;
 import com.huanjing.geo.module.partner.service.PartnerResponseSanitizer;
+import com.huanjing.geo.module.project.dto.PartnerSubmissionReadinessVO;
+import com.huanjing.geo.module.project.service.ProjectStartRequestService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +35,7 @@ public class CompanyController {
     private final CompanyService companyService;
     private final CompanyPackageBindingService companyPackageBindingService;
     private final PartnerResponseSanitizer partnerResponseSanitizer;
+    private final ProjectStartRequestService projectStartRequestService;
 
     @GetMapping
     public R<?> page(
@@ -92,6 +96,16 @@ public class CompanyController {
     @PostMapping("/{id}/partner-workflow/complete-entry")
     public R<?> completePartnerEntry(@PathVariable Long id) {
         return R.ok(partnerResponseSanitizer.company(companyService.completePartnerEntry(id)));
+    }
+
+    @PostMapping("/{id}/partner-workflow/return-entry")
+    public R<?> returnPartnerEntry(@PathVariable Long id, @Valid @RequestBody CompanyPartnerEntryReturnRequest req) {
+        return R.ok(partnerResponseSanitizer.company(companyService.returnPartnerEntry(id, req)));
+    }
+
+    @GetMapping("/{id}/partner-workflow/submission-readiness")
+    public R<PartnerSubmissionReadinessVO> partnerSubmissionReadiness(@PathVariable Long id) {
+        return R.ok(projectStartRequestService.partnerSubmissionReadiness(id));
     }
 
     @GetMapping("/{id}/partner-staff-options")

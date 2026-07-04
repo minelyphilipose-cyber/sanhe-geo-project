@@ -9,6 +9,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.storage.MinioStorageService;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.customer.service.CompanyService;
@@ -35,6 +36,7 @@ import com.huanjing.geo.module.partner.mapper.PartnerAccountTxnMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerDiscountHistoryMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerRechargeOrderMapper;
+import com.huanjing.geo.module.project.service.ProjectFlowPolicy;
 import com.huanjing.geo.module.system.entity.SysRole;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.entity.SysUserRole;
@@ -62,6 +64,7 @@ import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -73,6 +76,18 @@ public class PartnerService {
     private static final String DEFAULT_PARTNER_LEVEL = "custom";
     private static final long MAX_VOUCHER_FILE_SIZE = 10L * 1024 * 1024;
     private static final int MAX_OFFLINE_REFERENCE_LENGTH = 12000;
+    private static final Set<String> HQ_VISIBLE_PARTNER_PROJECT_STATUSES = Set.of(
+            ProjectFlowPolicy.SUBMITTED,
+            ProjectFlowPolicy.REJECTED,
+            ProjectFlowPolicy.APPROVED_PENDING_SETUP,
+            ProjectFlowPolicy.SETUP_READY,
+            ProjectFlowPolicy.ACTIVE,
+            ProjectFlowPolicy.PAUSED,
+            ProjectFlowPolicy.COMPLETED,
+            ProjectFlowPolicy.ARCHIVED,
+            ProjectFlowPolicy.CANCELLED,
+            ProjectFlowPolicy.EXPIRED
+    );
 
     private final PartnerMapper partnerMapper;
     private final PartnerAccountMapper partnerAccountMapper;
@@ -85,6 +100,7 @@ public class PartnerService {
     private final SysUserRoleMapper sysUserRoleMapper;
     private final PasswordEncoder passwordEncoder;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
     private final ActivityLogService activityLogService;
     private final MinioStorageService minioStorageService;
     private final ObjectMapper objectMapper;
@@ -110,7 +126,34 @@ public class PartnerService {
             wrapper.eq(Partner::getStatus, status);
         }
 
-        return partnerMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<Partner> page = partnerMapper.selectPage(new Page<>(current, size), wrapper);
+        attachCustomerCounts(page.getRecords(), user);
+        return page;
+    }
+
+    private void attachCustomerCounts(List<Partner> partners, SysUser user) {
+        if (partners == null || partners.isEmpty()) {
+            return;
+        }
+        boolean canSeeAllPartnerCustomers = internalScopeService.isSuperAdmin(user);
+        for (Partner partner : partners) {
+            LambdaQueryWrapper<Company> wrapper = new LambdaQueryWrapper<Company>()
+                    .eq(Company::getPartnerId, partner.getId())
+                    .eq(Company::getOwnerType, "partner")
+                    .isNull(Company::getDeletedAt);
+            if (!canSeeAllPartnerCustomers) {
+                wrapper.inSql(Company::getId, visiblePartnerCompanySql());
+            }
+            Long count = companyMapper.selectCount(wrapper);
+            partner.setCustomerCount(count == null ? 0L : count);
+        }
+    }
+
+    private String visiblePartnerCompanySql() {
+        String statuses = HQ_VISIBLE_PARTNER_PROJECT_STATUSES.stream()
+                .map(status -> "'" + status + "'")
+                .collect(Collectors.joining(","));
+        return "SELECT DISTINCT p.company_id FROM project p WHERE p.deleted_at IS NULL AND p.owner_type = 'partner' AND p.status IN (" + statuses + ")";
     }
 
     public Partner detail(Long id) {

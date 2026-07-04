@@ -33,6 +33,10 @@ public class InternalScopeService {
         return hasAnyRole(user, GLOBAL_INTERNAL_ROLES);
     }
 
+    public boolean isSuperAdmin(SysUser user) {
+        return hasAnyRole(user, Set.of("super_admin"));
+    }
+
     public boolean requiresOwnerScope(SysUser user) {
         if (user == null || user.getId() == null || isGlobalInternal(user)) {
             return false;

@@ -3,8 +3,12 @@ package com.huanjing.geo.module.mobiledashboard.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.mobiledashboard.dto.ProjectCompetitorConfigRequest;
 import com.huanjing.geo.module.mobiledashboard.dto.ProjectCompetitorConfigVO;
+import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,22 +33,24 @@ public class ProjectCompetitorConfigService {
     private static final int MAX_COMPETITORS = 3;
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {
     };
-    private static final Set<String> QA_STATUSES = Set.of("pending", "passed", "failed");
+    private static final String QA_STATUS_PASSED = "passed";
 
     private final JdbcTemplate jdbcTemplate;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
+    private final ProjectMapper projectMapper;
     private final ObjectMapper objectMapper;
 
     public List<ProjectCompetitorConfigVO> list(Long projectId) {
         currentUserService.ensurePermission("project.read");
-        requireProject(projectId);
+        requireAccessibleProject(projectId);
         return loadAll(projectId);
     }
 
     @Transactional
     public List<ProjectCompetitorConfigVO> replace(Long projectId, ProjectCompetitorConfigRequest request) {
         currentUserService.ensurePermission("project.competitor.manage");
-        requireProject(projectId);
+        requireAccessibleProject(projectId);
         List<ProjectCompetitorConfigRequest.Item> items = request == null || request.getItems() == null
                 ? List.of()
                 : request.getItems();
@@ -107,7 +113,7 @@ public class ProjectCompetitorConfigService {
             item.setDisadvantages(mapString(map, "disadvantages", existing == null ? null : existing.getDisadvantages()));
             item.setDisplayOrder(order++);
             item.setActive(true);
-            item.setQaStatus(existing == null ? "pending" : existing.getQaStatus());
+            item.setQaStatus(QA_STATUS_PASSED);
             items.add(item);
             if (items.size() >= MAX_COMPETITORS) {
                 break;
@@ -170,12 +176,25 @@ public class ProjectCompetitorConfigService {
         return version == null || version <= 0 ? 1 : version;
     }
 
+    private Project requireAccessibleProject(Long projectId) {
+        if (projectId == null || projectId <= 0) {
+            throw new BizException(400, "projectId is required");
+        }
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || project.getDeletedAt() != null) {
+            throw new BizException(404, "Project not found");
+        }
+        SysUser user = currentUserService.requireCurrentUser();
+        internalScopeService.ensureProjectAccess(user, project, "project");
+        return project;
+    }
+
     private void requireProject(Long projectId) {
         if (projectId == null || projectId <= 0) {
             throw new BizException(400, "projectId is required");
         }
-        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(1) FROM project WHERE id = ?", Integer.class, projectId);
-        if (count == null || count <= 0) {
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
     }
@@ -228,10 +247,7 @@ public class ProjectCompetitorConfigService {
             if (!orders.add(displayOrder)) {
                 throw new BizException(400, "displayOrder duplicated: " + displayOrder);
             }
-            String qaStatus = normalizeQaStatus(item.getQaStatus());
-            if (StringUtils.hasText(qaStatus) && !QA_STATUSES.contains(qaStatus)) {
-                throw new BizException(400, "Invalid qaStatus: " + qaStatus);
-            }
+            item.setQaStatus(QA_STATUS_PASSED);
         }
     }
 
@@ -257,7 +273,7 @@ public class ProjectCompetitorConfigService {
         String status = Boolean.FALSE.equals(item.getActive()) ? "disabled" : "active";
         boolean matchingChanged = !existing.getCompetitorName().equals(item.getCompetitorName().trim())
                 || !existing.getAliases().equals(normalizeAliases(item.getAliases()));
-        String qaStatus = matchingChanged ? "pending" : normalizeQaStatus(item.getQaStatus());
+        String qaStatus = normalizeQaStatus(item.getQaStatus());
         jdbcTemplate.update("""
                 UPDATE project_competitor_config
                    SET competitor_name = ?,
@@ -290,8 +306,7 @@ public class ProjectCompetitorConfigService {
     }
 
     private String normalizeQaStatus(String value) {
-        String normalized = StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : "pending";
-        return QA_STATUSES.contains(normalized) ? normalized : "pending";
+        return QA_STATUS_PASSED;
     }
 
     private List<String> parseAliases(String raw) {

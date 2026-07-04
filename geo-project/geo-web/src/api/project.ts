@@ -20,7 +20,9 @@ export function getProjectList(params: {
   keyword?: string
   status?: string
   stage?: string
+  ownerType?: string
   partnerId?: number
+  companyId?: number
   brandId?: number
   excludeThirdPartySource?: boolean
 }) {
@@ -29,6 +31,88 @@ export function getProjectList(params: {
 
 export function getProjectDetail(id: number) {
   return request.get<R<Project>>(`/projects/${id}`)
+}
+
+export interface PartnerProjectStartRequest {
+  id: number
+  requestNo: string
+  projectId: number
+  companyId: number
+  partnerId: number
+  status: string
+  submittedAt?: string | null
+}
+
+export function submitPartnerProjectStartRequest(id: number, data?: { requestId?: string; remark?: string }) {
+  return request.post<R<PartnerProjectStartRequest>>(`/partner/projects/${id}/start-requests`, data || {})
+}
+
+export interface AdminProjectStartRequest {
+  id: number
+  requestNo: string
+  status: string
+  projectId: number
+  projectStatus?: string | null
+  projectDisplayStatus?: string | null
+  projectName?: string | null
+  companyId: number
+  companyName?: string | null
+  partnerId: number
+  partnerName?: string | null
+  brandId?: number | null
+  brandName?: string | null
+  applicantUserId?: number | null
+  applicantUserName?: string | null
+  submittedAt?: string | null
+  reviewedBy?: number | null
+  reviewerName?: string | null
+  reviewedAt?: string | null
+  assignedInternalOwnerId?: number | null
+  assignedInternalOwnerName?: string | null
+  defaultInternalOwnerId?: number | null
+  defaultInternalOwnerName?: string | null
+  pointsRequiredSnapshot?: number | string | null
+  discountRateSnapshot?: number | string | null
+  packageSnapshotJson?: string | null
+  partnerAllocatedQuotaJson?: string | null
+  internalDeliverySnapshotJson?: string | null
+  rejectReasonCode?: string | null
+  rejectReasonText?: string | null
+  quotaSnapshotStatus?: string | null
+  quotaLockedAt?: string | null
+  quotaReleasedAt?: string | null
+  pointsTxnId?: number | null
+  pointsTxnNo?: string | null
+  pointsTxnAmount?: number | string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export function getAdminProjectStartRequests(params: {
+  current?: number
+  size?: number
+  status?: string
+  partnerId?: number
+  companyId?: number
+  projectId?: number
+}) {
+  return request.get<R<PageResult<AdminProjectStartRequest>>>('/admin/project-start-requests', { params })
+}
+
+export function getAdminProjectStartRequestDetail(id: number) {
+  return request.get<R<AdminProjectStartRequest>>(`/admin/project-start-requests/${id}`)
+}
+
+export function approveAdminProjectStartRequest(id: number, data: { assignedInternalOwnerId?: number | null; reviewRemark?: string }) {
+  return request.post<R<AdminProjectStartRequest>>(`/admin/project-start-requests/${id}/approve`, data)
+}
+
+export function rejectAdminProjectStartRequest(id: number, data: { rejectReasonCode?: string; rejectReasonText?: string }) {
+  return request.post<R<AdminProjectStartRequest>>(`/admin/project-start-requests/${id}/reject`, data)
+}
+
+export function markAdminProjectStartRequestSetupReady(id: number, data?: { remark?: string }, silentError = false) {
+  return request.post<R<AdminProjectStartRequest>>(`/admin/project-start-requests/${id}/setup-ready`, data || {}, { silentError } as any)
 }
 
 export interface ProjectSelfMediaScheduleConfig {

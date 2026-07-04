@@ -18,6 +18,7 @@ import com.huanjing.geo.module.customer.mapper.BrandProfileVersionMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.service.ProjectFlowPolicy;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
@@ -48,6 +49,18 @@ public class BrandService {
     private static final Set<String> GEO_SITE_STATUS = Set.of("active", "disabled");
     private static final String GEO_SITE_ADMIN_CONTENT_PATH = "/api/v1/admin/content";
     private static final String DICT_TYPE_COMPLIANCE_INDUSTRY = "compliance_industry";
+    private static final Set<String> HQ_VISIBLE_PARTNER_PROJECT_STATUSES = Set.of(
+            ProjectFlowPolicy.SUBMITTED,
+            ProjectFlowPolicy.REJECTED,
+            ProjectFlowPolicy.APPROVED_PENDING_SETUP,
+            ProjectFlowPolicy.SETUP_READY,
+            ProjectFlowPolicy.ACTIVE,
+            ProjectFlowPolicy.PAUSED,
+            ProjectFlowPolicy.COMPLETED,
+            ProjectFlowPolicy.ARCHIVED,
+            ProjectFlowPolicy.CANCELLED,
+            ProjectFlowPolicy.EXPIRED
+    );
 
     private final BrandMapper brandMapper;
     private final BrandMaterialMapper brandMaterialMapper;
@@ -83,9 +96,43 @@ public class BrandService {
         if (scopePartnerId != null) {
             wrapper.inSql(Brand::getCompanyId, "select id from company where partner_id = " + scopePartnerId);
         }
+        applyInternalPartnerVisibility(wrapper, user);
         internalScopeService.applyBrandScope(wrapper, user);
 
         return brandMapper.selectPage(new Page<>(current, size), wrapper);
+    }
+
+    private void applyInternalPartnerVisibility(LambdaQueryWrapper<Brand> wrapper, SysUser user) {
+        if (currentUserService.isPartnerUser(user) || internalScopeService.isSuperAdmin(user)) {
+            return;
+        }
+        wrapper.inSql(Brand::getCompanyId,
+                "select c.id from company c where c.deleted_at is null and (c.owner_type <> 'partner' or c.id in ("
+                        + visiblePartnerCompanySql() + "))");
+    }
+
+    private void ensureInternalPartnerBrandVisible(SysUser user, Company company) {
+        if (currentUserService.isPartnerUser(user) || company == null || !"partner".equals(company.getOwnerType())) {
+            return;
+        }
+        if (internalScopeService.isSuperAdmin(user)) {
+            return;
+        }
+        Long visibleProjectCount = projectMapper.selectCount(new LambdaQueryWrapper<Project>()
+                .eq(Project::getCompanyId, company.getId())
+                .eq(Project::getOwnerType, "partner")
+                .in(Project::getStatus, HQ_VISIBLE_PARTNER_PROJECT_STATUSES)
+                .isNull(Project::getDeletedAt));
+        if (visibleProjectCount == null || visibleProjectCount <= 0) {
+            throw new BizException(403, "合伙人品牌尚未提交总部，当前账号无权查看");
+        }
+    }
+
+    private String visiblePartnerCompanySql() {
+        String statuses = HQ_VISIBLE_PARTNER_PROJECT_STATUSES.stream()
+                .map(status -> "'" + status + "'")
+                .collect(Collectors.joining(","));
+        return "SELECT DISTINCT p.company_id FROM project p WHERE p.deleted_at IS NULL AND p.owner_type = 'partner' AND p.status IN (" + statuses + ")";
     }
 
     public Brand detail(Long id) {
@@ -94,6 +141,7 @@ public class BrandService {
         Brand brand = requireBrand(id);
         Company company = requireCompany(brand.getCompanyId());
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
+        ensureInternalPartnerBrandVisible(user, company);
         internalScopeService.ensureCompanyAccess(user, company, "brand");
         return brand;
     }
@@ -104,6 +152,7 @@ public class BrandService {
         Brand brand = requireBrand(id);
         Company company = requireCompany(brand.getCompanyId());
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
+        ensureInternalPartnerBrandVisible(user, company);
         internalScopeService.ensureCompanyAccess(user, company, "brand");
         return brand;
     }

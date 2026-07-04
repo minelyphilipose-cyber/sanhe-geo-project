@@ -110,7 +110,7 @@ function toEditRow(item: ProjectCompetitorConfig): CompetitorEditRow {
     disadvantages: item.disadvantages || '',
     displayOrder: item.displayOrder || 1,
     active: item.status !== 'disabled',
-    qaStatus: item.qaStatus || 'pending',
+    qaStatus: item.qaStatus || 'passed',
     configVersion: item.configVersion,
   }
 }
@@ -153,7 +153,7 @@ function toPayload(): ProjectCompetitorConfigPayloadItem[] {
       disadvantages: row.disadvantages?.trim() || null,
       displayOrder: index + 1,
       active: true,
-      qaStatus: row.qaStatus || 'pending',
+      qaStatus: 'passed',
     }))
 }
 
@@ -169,7 +169,7 @@ function addRow() {
     disadvantages: '',
     displayOrder: rows.value.length + 1,
     active: true,
-    qaStatus: 'pending',
+    qaStatus: 'passed',
   })
 }
 

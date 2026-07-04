@@ -58,6 +58,37 @@ export function completeCompanyEntry(id: number) {
   return request.post<R<Company>>(`/companies/${id}/partner-workflow/complete-entry`)
 }
 
+export function returnCompanyEntry(id: number, data: { reason?: string }) {
+  return request.post<R<Company>>(`/companies/${id}/partner-workflow/return-entry`, data)
+}
+
+export interface PartnerSubmissionReadinessItem {
+  key: string
+  category: string
+  title: string
+  description: string
+  ready: boolean
+  severity?: string | null
+  actionText?: string | null
+  projectId?: number | null
+  projectName?: string | null
+}
+
+export interface PartnerSubmissionReadiness {
+  companyId: number
+  companyName?: string | null
+  ready: boolean
+  totalCount: number
+  readyCount: number
+  pendingCount: number
+  checkedAt?: string | null
+  items: PartnerSubmissionReadinessItem[]
+}
+
+export function getCompanySubmissionReadiness(id: number) {
+  return request.get<R<PartnerSubmissionReadiness>>(`/companies/${id}/partner-workflow/submission-readiness`)
+}
+
 export function deleteCompany(id: number) {
   return request.delete<R<void>>(`/companies/${id}`)
 }

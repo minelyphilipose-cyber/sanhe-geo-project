@@ -17,6 +17,12 @@ public class GeoQuestionWorkorder {
     private Long packageBindingId;
     private String packageName;
     private String status;
+    private String partnerReviewStatus;
+    private String partnerReviewReturnReason;
+    private LocalDateTime partnerReviewSubmittedAt;
+    private LocalDateTime partnerReviewReturnedAt;
+    private LocalDateTime partnerReviewHqSubmittedAt;
+    private LocalDateTime partnerReviewUpdatedAt;
     private String versionLabel;
     private Integer targetA;
     private Integer targetB;

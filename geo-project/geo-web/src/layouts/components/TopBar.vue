@@ -9,11 +9,13 @@
     </div>
 
     <div class="topbar__right">
-      <el-badge :value="alertCount" :hidden="alertCount === 0" :max="99">
-        <el-button text circle @click="$router.push('/admin/alerts')">
-          <el-icon :size="18"><Bell /></el-icon>
-        </el-button>
-      </el-badge>
+      <el-tooltip v-if="canViewAlertCenter" content="告警中心" placement="bottom">
+        <el-badge :value="alertCount" :hidden="alertCount === 0" :max="99">
+          <el-button text circle aria-label="告警中心" @click="openAlertCenter">
+            <el-icon :size="18"><Bell /></el-icon>
+          </el-button>
+        </el-badge>
+      </el-tooltip>
 
       <el-dropdown trigger="click" @command="handleCommand">
         <div class="topbar__user">
@@ -74,6 +76,9 @@ const avatarLetter = computed(() =>
   (userStore.displayName || 'U').charAt(0).toUpperCase(),
 )
 const showAvatarImage = computed(() => !!userStore.avatarUrl && !avatarLoadFailed.value)
+const canViewAlertCenter = computed(() =>
+  userStore.hasPermission(['content.distribution.retry', 'dispatch.alert.resolve', 'system.alert.resolve']),
+)
 
 const roleLabel = computed(() => {
   const r = userStore.role
@@ -92,6 +97,10 @@ const breadcrumbs = computed(() => {
 watch(() => userStore.avatarUrl, () => {
   avatarLoadFailed.value = false
 })
+
+async function openAlertCenter() {
+  await router.push('/admin/alerts')
+}
 
 async function handleCommand(cmd: string) {
   if (cmd === 'profile') {

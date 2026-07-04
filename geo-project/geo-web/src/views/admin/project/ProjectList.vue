@@ -12,6 +12,10 @@
     </div>
 
     <div class="admin-filter-panel">
+      <el-tabs v-model="scopeTab" class="scope-tabs" @tab-change="onScopeTabChange">
+        <el-tab-pane label="总部直营" name="direct" />
+        <el-tab-pane label="合伙人经营" name="partner" />
+      </el-tabs>
       <div class="admin-filter-controls">
         <el-input v-model="query.keyword" placeholder="搜索项目名称" clearable style="width: 240px" @keyup.enter="load" />
         <el-select v-model="query.status" placeholder="状态" clearable style="width: 140px" @change="load">
@@ -383,6 +387,12 @@ const presetBrandId = computed(() => {
 const fromCustomerBrandPath = computed(() => {
   return route.query.source === 'customer_brand' && !!presetCompanyId.value && !!presetBrandId.value
 })
+const scopeTab = ref<'direct' | 'partner'>(route.query.scope === 'partner' || route.query.partnerId ? 'partner' : 'direct')
+const scopedPartnerId = computed(() => {
+  if (scopeTab.value !== 'partner') return undefined
+  const raw = Number(route.query.partnerId)
+  return Number.isFinite(raw) && raw > 0 ? raw : undefined
+})
 const lockCompanyBrandSelection = computed(() => formMode.value === 'create' && fromCustomerBrandPath.value)
 const selectedBrand = computed(() => brandOptions.value.find((item) => item.id === form.brandId) || null)
 const brandForbiddenPhraseList = computed(() => parseStringArray(selectedBrand.value?.forbiddenPhrases))
@@ -657,6 +667,8 @@ async function load() {
       size: page.size,
       keyword: query.keyword || undefined,
       status: query.status || undefined,
+      ownerType: scopeTab.value,
+      partnerId: scopedPartnerId.value,
     })
     rows.value = data.data.records || []
     page.total = data.data.total || 0
@@ -666,6 +678,11 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function onScopeTabChange() {
+  page.current = 1
+  load()
 }
 
 function onPageChange(v: number) {
@@ -858,7 +875,6 @@ function projectStatusLabel(status?: string | null) {
 function projectCustomerLabel(project: Project) {
   if (project.ownerType === 'direct') return '直营客户'
   if (project.ownerType === 'partner' || project.sourceType === 'partner') return '合伙人客户'
-  if (project.ownerType === 'joint') return '合作客户'
   return dictStore.label('owner_type', project.ownerType) || '客户'
 }
 
@@ -925,6 +941,14 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.scope-tabs {
+  margin-bottom: 12px;
+}
+
+.scope-tabs :deep(.el-tabs__header) {
+  margin-bottom: 0;
+}
+
 .keyword-summary {
   margin-top: 8px;
   font-size: 12px;

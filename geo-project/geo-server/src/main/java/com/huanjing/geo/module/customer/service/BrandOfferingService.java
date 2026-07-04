@@ -25,6 +25,7 @@ import java.util.Locale;
 public class BrandOfferingService {
 
     private static final List<String> STATUSES = List.of("active", "disabled");
+    private static final int DEFAULT_PRIORITY_STEP = 10;
 
     private final BrandOfferingMapper offeringMapper;
     private final BrandService brandService;
@@ -52,6 +53,9 @@ public class BrandOfferingService {
         BrandOffering offering = new BrandOffering();
         offering.setBrandId(brandId);
         applyRequest(offering, req);
+        if (req.getPriority() == null) {
+            offering.setPriority(nextPriority(brandId));
+        }
         offering.setCreatedBy(operator.getId());
         offeringMapper.insert(offering);
         brandProfileService.createProfileVersionSnapshot(brand, operator.getId(), "offering.create");
@@ -97,7 +101,11 @@ public class BrandOfferingService {
         offering.setQualificationDescription(trimToNull(req.getQualificationDescription()));
         offering.setRemark(trimToNull(req.getRemark()));
         offering.setStatus(normalizeStatus(req.getStatus()));
-        offering.setPriority(req.getPriority() == null ? 50 : Math.max(0, req.getPriority()));
+        if (req.getPriority() != null) {
+            offering.setPriority(Math.max(0, req.getPriority()));
+        } else if (offering.getPriority() == null) {
+            offering.setPriority(DEFAULT_PRIORITY_STEP);
+        }
         offering.setUseScenarios(trimToNull(req.getUseScenarios()));
         offering.setMedicalIndustryCode(trimToNull(req.getMedicalIndustryCode()));
         offering.setMedicalCategoryCode(trimToNull(req.getMedicalCategoryCode()));
@@ -177,5 +185,16 @@ public class BrandOfferingService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private int nextPriority(Long brandId) {
+        BrandOffering latest = offeringMapper.selectOne(new LambdaQueryWrapper<BrandOffering>()
+                .eq(BrandOffering::getBrandId, brandId)
+                .isNull(BrandOffering::getDeletedAt)
+                .orderByDesc(BrandOffering::getPriority)
+                .orderByDesc(BrandOffering::getId)
+                .last("LIMIT 1"));
+        Integer currentMax = latest == null || latest.getPriority() == null ? 0 : latest.getPriority();
+        return currentMax + DEFAULT_PRIORITY_STEP;
     }
 }

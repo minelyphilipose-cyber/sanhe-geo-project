@@ -97,6 +97,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '项目管理', icon: 'Folder', permissions: ['project.read'] },
     },
     {
+      path: 'partner-start-requests',
+      name: 'PartnerStartRequestWorkbench',
+      component: () => import('@/views/admin/partner/PartnerStartRequestWorkbench.vue'),
+      meta: { title: '合伙人启动工单', icon: 'Tickets', permissions: ['delivery.assignment.manage'] },
+    },
+    {
       path: 'projects/:id',
       name: 'ProjectDetail',
       component: () => import('@/views/admin/project/ProjectDetail.vue'),

@@ -44,7 +44,7 @@
           </div>
         </section>
 
-        <section class="detail-card">
+        <section class="detail-card workflow-card">
           <div class="section-head">
             <div>
               <h2>协作进度</h2>
@@ -75,8 +75,17 @@
               >
                 信息录入完成
               </el-button>
-              <el-button v-if="canSubmitWorkorder" type="primary" plain @click="router.push('/partner/my-projects')">
+              <el-button v-if="canSubmitWorkorder" type="primary" plain @click="goSubmitWorkorder">
                 查看项目并提交工单
+              </el-button>
+              <el-button
+                v-if="canReturnEntry"
+                type="warning"
+                plain
+                :loading="workflowSubmitting"
+                @click="openReturnEntry"
+              >
+                退回修改
               </el-button>
             </div>
           </div>
@@ -96,80 +105,119 @@
           </div>
         </section>
 
-        <section class="detail-grid">
-          <div class="detail-card">
-            <div class="section-head">
-              <div>
-                <h2>客户信息</h2>
-                <p>展示协作所需的客户基础资料。</p>
-              </div>
-            </div>
-            <div class="info-grid">
-              <div v-for="item in infoItems" :key="item.label" class="info-item">
-                <span>{{ item.label }}</span>
-                <strong>{{ item.value }}</strong>
-              </div>
+        <section class="detail-card customer-info-card">
+          <div class="section-head">
+            <div>
+              <h2>客户信息</h2>
+              <p>展示协作所需的客户基础资料。</p>
             </div>
           </div>
-
-          <div class="detail-card">
-            <div class="section-head">
-              <div>
-                <h2>客户套餐</h2>
-                <p>套餐绑定后，交付员工才能继续录入项目和核心问题。</p>
-              </div>
-              <div v-if="canManagePackage" class="section-actions">
-                <el-button v-if="!activePackageBinding" type="primary" @click="openPackageBind">绑定套餐</el-button>
-                <el-button v-else type="danger" plain @click="confirmUnbindPackage">解绑套餐</el-button>
-              </div>
-            </div>
-
-            <div v-if="activePackageBinding" class="package-summary">
-              <div>
-                <span>套餐名称</span>
-                <strong>{{ activePackageBinding.packageName }}</strong>
-              </div>
-              <div>
-                <span>服务周期</span>
-                <strong>{{ activePackageBinding.serviceMonths }} 个月</strong>
-              </div>
-              <div>
-                <span>核心问题额度</span>
-                <strong>{{ coreQuestionQuotaLimit }} 个</strong>
-              </div>
-              <div>
-                <span>已用核心问题</span>
-                <strong>{{ usedCoreQuestionCount }} 个</strong>
-              </div>
-              <div>
-                <span>剩余核心问题</span>
-                <strong>{{ remainingCoreQuestionCount }} 个</strong>
-              </div>
-              <div>
-                <span>绑定时间</span>
-                <strong>{{ formatDateTimeSeconds(activePackageBinding.boundAt) }}</strong>
-              </div>
-            </div>
-            <div v-if="activePackageBinding" class="package-channel-summary">
-              <div class="package-channel-title">可见渠道额度</div>
-              <div v-if="visibleChannelQuotaItems.length > 0" class="package-channel-grid">
-                <div v-for="item in visibleChannelQuotaItems" :key="item.channelCode" class="package-channel-item">
-                  <span>{{ item.channelName }}</span>
-                  <strong>{{ item.remainingCount ?? item.quotaLimit }} / {{ item.quotaLimit }}</strong>
-                  <small>{{ channelPeriodText(item.periodType) }}</small>
-                </div>
-              </div>
-              <div v-else class="package-channel-empty">当前套餐暂无合伙人可见渠道额度</div>
-            </div>
-            <div v-else class="empty-action">
-              <strong>当前客户未绑定套餐</strong>
-              <span>请由合伙人负责人选择合伙人套餐，绑定后再通知交付员工继续录入项目和核心问题。</span>
-              <el-button v-if="canManagePackage" type="primary" @click="openPackageBind">绑定合伙人套餐</el-button>
+          <div class="info-grid">
+            <div v-for="item in infoItems" :key="item.label" class="info-item">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
             </div>
           </div>
         </section>
 
-        <section class="detail-card">
+        <section v-loading="packageLoading" class="detail-card package-card">
+          <div class="section-head">
+            <div>
+              <h2>客户套餐</h2>
+              <p>套餐绑定后，交付员工才能继续录入项目和核心问题。</p>
+            </div>
+            <div v-if="canManagePackage" class="section-actions">
+              <el-button v-if="!activePackageBinding" type="primary" @click="openPackageBind">绑定套餐</el-button>
+              <el-button v-else type="danger" plain @click="confirmUnbindPackage">解绑套餐</el-button>
+            </div>
+          </div>
+
+          <div v-if="activePackageBinding" class="package-summary">
+            <div>
+              <span>套餐名称</span>
+              <strong>{{ activePackageBinding.packageName }}</strong>
+            </div>
+            <div>
+              <span>服务周期</span>
+              <strong>{{ activePackageBinding.serviceMonths }} 个月</strong>
+            </div>
+            <div>
+              <span>核心问题额度</span>
+              <strong>{{ coreQuestionQuotaLimit }} 个</strong>
+            </div>
+            <div>
+              <span>已用核心问题</span>
+              <strong>{{ usedCoreQuestionCount }} 个</strong>
+            </div>
+            <div>
+              <span>剩余核心问题</span>
+              <strong>{{ remainingCoreQuestionCount }} 个</strong>
+            </div>
+            <div>
+              <span>可见发布额度</span>
+              <strong>{{ visibleChannelQuotaSummaryText }}</strong>
+            </div>
+            <div>
+              <span>绑定时间</span>
+              <strong>{{ formatDateTimeSeconds(activePackageBinding.boundAt) }}</strong>
+            </div>
+          </div>
+          <div v-if="activePackageBinding" class="package-channel-summary">
+            <div class="package-channel-title">
+              <span>可见渠道额度</span>
+              <el-tag size="small" type="info">{{ visibleChannelTableItems.length }} 个渠道</el-tag>
+            </div>
+            <el-table
+              v-if="visibleChannelTableItems.length > 0"
+              :data="visibleChannelTableItems"
+              border
+              table-layout="fixed"
+              :row-class-name="quotaRowClassName"
+            >
+              <el-table-column label="平台" min-width="160">
+                <template #default="scope">
+                  <div class="quota-channel-cell">
+                    <span>{{ scope.row.channelName }}</span>
+                    <el-tag v-if="!scope.row.enabled" size="small" type="info">未开通</el-tag>
+                    <el-tag v-else-if="scope.row.status === 'exceeded'" size="small" type="danger">超额</el-tag>
+                    <el-tag v-else-if="scope.row.status === 'warning'" size="small" type="warning">预警</el-tag>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="周期" width="110">
+                <template #default="scope">{{ scope.row.enabled ? channelPeriodText(scope.row.periodType) : '-' }}</template>
+              </el-table-column>
+              <el-table-column label="已用 / 额度" min-width="220">
+                <template #default="scope">
+                  <span v-if="!scope.row.enabled">未开通</span>
+                  <div v-else class="quota-used-cell">
+                    <span>{{ scope.row.usedCount }} / {{ scope.row.quotaLimit }}</span>
+                    <el-progress
+                      :percentage="quotaPercentage(scope.row)"
+                      :status="quotaProgressStatus(scope.row)"
+                      :show-text="false"
+                      :stroke-width="8"
+                    />
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="剩余额度" width="120">
+                <template #default="scope">{{ quotaRemainingText(scope.row) }}</template>
+              </el-table-column>
+              <el-table-column label="下次重置" width="150">
+                <template #default="scope">{{ nextResetText(scope.row) }}</template>
+              </el-table-column>
+            </el-table>
+            <div v-else class="package-channel-empty">当前套餐暂无合伙人可见渠道额度</div>
+          </div>
+          <div v-else class="empty-action">
+            <strong>当前客户未绑定套餐</strong>
+            <span>请由合伙人负责人选择合伙人套餐，绑定后再通知交付员工继续录入项目和核心问题。</span>
+            <el-button v-if="canManagePackage" type="primary" @click="openPackageBind">绑定合伙人套餐</el-button>
+          </div>
+        </section>
+
+        <section class="detail-card brand-list-card">
           <div class="section-head">
             <div>
               <h2>品牌资料</h2>
@@ -203,6 +251,43 @@
             </el-table>
           </DataState>
         </section>
+
+        <section v-if="showSubmissionChecklist" v-loading="submissionReadinessLoading" class="detail-card checklist-card">
+          <div class="section-head">
+            <div>
+              <h2>提交前检查清单</h2>
+              <p>交付员工按清单补齐资料，全部完成后才能提交负责人确认。</p>
+            </div>
+            <div class="section-actions checklist-summary">
+              <span>{{ submissionReadyCount }} / {{ submissionTotalCount }}</span>
+              <el-button plain @click="loadSubmissionReadiness">刷新检查</el-button>
+            </div>
+          </div>
+          <div class="checklist-status" :class="{ ready: submissionReady }">
+            <strong>{{ submissionReady ? '资料已完整，可以提交负责人确认' : `还有 ${submissionPendingCount} 项需要补充` }}</strong>
+            <span>{{ submissionReady ? '负责人侧只负责核对并提交总部工单。' : '请先处理待补充项，避免负责人提交总部时被拦截。' }}</span>
+          </div>
+          <div class="checklist-grid">
+            <div
+              v-for="item in submissionChecklistItems"
+              :key="item.key"
+              class="checklist-item"
+              :class="{ done: item.ready }"
+            >
+              <div class="checklist-icon">{{ item.ready ? '✓' : '!' }}</div>
+              <div class="checklist-body">
+                <div class="checklist-title">
+                  <strong>{{ item.title }}</strong>
+                  <el-tag size="small" :type="item.ready ? 'success' : 'danger'" round>
+                    {{ item.ready ? '已完成' : '待补充' }}
+                  </el-tag>
+                </div>
+                <p>{{ item.description }}</p>
+                <span>{{ item.ready ? '无需处理' : item.actionText || '去补充' }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
       </template>
     </DataState>
 
@@ -227,6 +312,28 @@
         <el-button type="primary" :loading="packageSubmitting" @click="submitPackageBind">确认绑定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="returnEntryVisible" title="退回交付员工修改" width="560px" class="partner-package-dialog">
+      <el-form label-position="top">
+        <el-form-item label="退回原因" required>
+          <el-input
+            v-model="returnEntryForm.reason"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="请说明需要补充或修正的客户、品牌、项目、竞品、核心问题或图片资产内容"
+          />
+        </el-form-item>
+      </el-form>
+      <div class="package-bind-tip">
+        退回后协作状态会回到“项目与拓词录入中”，交付员工修改完成后需要再次提交负责人确认。
+      </div>
+      <template #footer>
+        <el-button @click="returnEntryVisible = false">取消</el-button>
+        <el-button type="warning" :loading="workflowSubmitting" @click="submitReturnEntry">确认退回</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -234,6 +341,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import dayjs from 'dayjs'
 import DataState from '@/components/ui/DataState.vue'
 import {
   bindCompanyPackage,
@@ -241,14 +349,21 @@ import {
   getActiveCompanyPackageBinding,
   getBrandList,
   getCompanyDetail,
+  getCompanyDistributionQuotas,
   getCompanyKeywordGroupQuota,
+  getCompanySubmissionReadiness,
   notifyCompanyProjectEntry,
   requestCompanyPackageReview,
+  returnCompanyEntry,
   unbindCompanyPackage,
+  type PartnerSubmissionReadiness,
+  type PartnerSubmissionReadinessItem,
 } from '@/api/customer'
+import { getGeoProjectWorkorders } from '@/api/geoQuestion'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
+import { getProjectList } from '@/api/project'
 import { useUserStore } from '@/stores/user'
-import type { Brand, Company, CompanyKeywordGroupQuota, CompanyPackageBinding, PackagePlan } from '@/types'
+import type { Brand, Company, CompanyDistributionQuota, CompanyKeywordGroupQuota, CompanyPackageBinding, PackagePlan, Project } from '@/types'
 import { errorMessage } from '@/utils/error'
 import { formatDateTimeSeconds } from '@/utils/format'
 import { regionDisplayFromPayload } from '@/constants/region'
@@ -261,18 +376,41 @@ const companyId = Number(route.params.id)
 const loading = ref(false)
 const brandLoading = ref(false)
 const packageLoading = ref(false)
+const submissionReadinessLoading = ref(false)
 const workflowSubmitting = ref(false)
 const packageSubmitting = ref(false)
 const packageBindVisible = ref(false)
+const returnEntryVisible = ref(false)
 
 const company = ref<Company | null>(null)
 const brands = ref<Brand[]>([])
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
 const keywordQuota = ref<CompanyKeywordGroupQuota | null>(null)
+const distributionQuota = ref<CompanyDistributionQuota | null>(null)
+const submissionReadiness = ref<PartnerSubmissionReadiness | null>(null)
+const entryReadiness = ref<{ hasProject: boolean; allCoreQuestionsReady: boolean }>({ hasProject: false, allCoreQuestionsReady: false })
 const packagePlanOptions = ref<PackagePlan[]>([])
 const packageBindForm = reactive({
   packagePlanId: null as number | null,
 })
+const returnEntryForm = reactive({
+  reason: '',
+})
+
+type ChannelQuotaRow = {
+  channelCode: string
+  channelName: string
+  enabled: boolean
+  periodType?: string | null
+  quotaLimit: number
+  usageQuotaLimit?: number | null
+  limitMismatch?: boolean
+  usedCount: number
+  remainingCount: number
+  usageRate?: number
+  nextResetAt?: string | null
+  status?: string | null
+}
 
 const isPartnerOwner = computed(() => userStore.role === 'partner')
 const isPartnerStaff = computed(() => userStore.role === 'partner_staff')
@@ -280,7 +418,7 @@ const canManagePackage = computed(() => isPartnerOwner.value)
 
 const effectiveWorkflowStatus = computed(() => {
   const status = String(company.value?.partnerWorkflowStatus || 'draft')
-  if (!activePackageBinding.value && ['package_bound', 'project_entry', 'entry_completed'].includes(status)) {
+  if (!activePackageBinding.value && ['package_bound', 'project_entry', 'entry_completed', 'submitted_to_hq'].includes(status)) {
     return 'package_requested'
   }
   return status
@@ -293,11 +431,12 @@ const workflowMeta = computed(() => {
     package_bound: { label: '待通知继续录入', hint: '套餐已绑定，等待负责人通知员工' },
     project_entry: { label: '项目与拓词录入中', hint: '交付员工继续录入项目和核心问题' },
     entry_completed: { label: '待负责人确认', hint: '负责人核对资料后提交总部工单' },
+    submitted_to_hq: { label: '已提交总部', hint: '总部已收到启动工单，等待总部处理' },
   }
   return map[effectiveWorkflowStatus.value] || map.draft
 })
 
-const workflowOrder = ['draft', 'package_requested', 'package_bound', 'project_entry', 'entry_completed']
+const workflowOrder = ['draft', 'package_requested', 'package_bound', 'project_entry', 'entry_completed', 'submitted_to_hq']
 const workflowSteps = computed(() => {
   const currentIndex = Math.max(workflowOrder.indexOf(effectiveWorkflowStatus.value), 0)
   return [
@@ -306,6 +445,7 @@ const workflowSteps = computed(() => {
     { key: 'package_bound', title: '通知继续', desc: '通知员工继续录入项目资料' },
     { key: 'project_entry', title: '项目与核心问题', desc: '录入项目和核心问题' },
     { key: 'entry_completed', title: '负责人确认', desc: '核对后提交总部工单' },
+    { key: 'submitted_to_hq', title: '已提交总部', desc: '等待总部审批与启动配置' },
   ].map((step, index) => ({
     ...step,
     index: index + 1,
@@ -316,8 +456,17 @@ const workflowSteps = computed(() => {
 
 const canRequestPackage = computed(() => isPartnerStaff.value && effectiveWorkflowStatus.value === 'draft')
 const canNotifyEntry = computed(() => isPartnerOwner.value && effectiveWorkflowStatus.value === 'package_bound')
-const canCompleteEntry = computed(() => isPartnerStaff.value && effectiveWorkflowStatus.value === 'project_entry')
+const canCompleteEntry = computed(() => isPartnerStaff.value
+  && effectiveWorkflowStatus.value === 'project_entry'
+  && submissionReady.value)
 const canSubmitWorkorder = computed(() => isPartnerOwner.value && effectiveWorkflowStatus.value === 'entry_completed')
+const canReturnEntry = computed(() => isPartnerOwner.value && effectiveWorkflowStatus.value === 'entry_completed')
+const showSubmissionChecklist = computed(() => isPartnerStaff.value && ['project_entry', 'entry_completed'].includes(effectiveWorkflowStatus.value))
+const submissionChecklistItems = computed<PartnerSubmissionReadinessItem[]>(() => submissionReadiness.value?.items || [])
+const submissionReady = computed(() => Boolean(submissionReadiness.value?.ready))
+const submissionTotalCount = computed(() => submissionReadiness.value?.totalCount || submissionChecklistItems.value.length)
+const submissionReadyCount = computed(() => submissionReadiness.value?.readyCount || submissionChecklistItems.value.filter((item) => item.ready).length)
+const submissionPendingCount = computed(() => submissionReadiness.value?.pendingCount ?? Math.max(submissionTotalCount.value - submissionReadyCount.value, 0))
 
 const regionText = computed(() => company.value ? regionDisplayFromPayload(company.value) || company.value.city || '-' : '-')
 const roleText = computed(() => company.value?.partnerStaffOwnerName ? `交付员工：${company.value.partnerStaffOwnerName}` : '未分配交付员工')
@@ -349,8 +498,66 @@ const remainingCoreQuestionCount = computed(() => (
 ))
 
 const visibleChannelQuotaItems = computed(() => (
+  distributionQuota.value?.items || []
+).filter((item) => item.enabled !== false))
+
+const fallbackChannelQuotaItems = computed(() => (
   activePackageBinding.value?.visibleChannelQuotas || []
 ).filter((item) => item.enabled !== false))
+
+const visibleChannelTableItems = computed<ChannelQuotaRow[]>(() => {
+  if (visibleChannelQuotaItems.value.length > 0) {
+    return visibleChannelQuotaItems.value.map((item) => ({
+      channelCode: item.channelCode,
+      channelName: item.channelName,
+      enabled: item.enabled !== false,
+      periodType: item.periodType,
+      quotaLimit: Number(item.quotaLimit || 0),
+      usageQuotaLimit: item.usageQuotaLimit,
+      limitMismatch: item.limitMismatch,
+      usedCount: Number(item.usedCount || 0),
+      remainingCount: Number(item.remainingCount || 0),
+      usageRate: item.usageRate,
+      nextResetAt: item.nextResetAt,
+      status: item.status,
+    }))
+  }
+  return fallbackChannelQuotaItems.value.map((item) => {
+    const source = item as any
+    return {
+      channelCode: item.channelCode,
+      channelName: item.channelName,
+      enabled: item.enabled !== false,
+      periodType: item.periodType,
+      usedCount: Number(source.usedCount || 0),
+      quotaLimit: Number(item.quotaLimit || 0),
+      remainingCount: Number(item.remainingCount ?? item.quotaLimit ?? 0),
+      limitMismatch: false,
+      status: 'normal',
+      nextResetAt: null,
+    }
+  })
+})
+
+const totalVisibleChannelLimit = computed(() => visibleChannelQuotaItems.value
+  .reduce((sum, item) => sum + Number(item.quotaLimit || 0), 0))
+
+const totalVisibleChannelRemaining = computed(() => visibleChannelQuotaItems.value
+  .reduce((sum, item) => sum + Number(item.remainingCount || 0), 0))
+
+const visibleChannelQuotaSummaryText = computed(() => {
+  if (!activePackageBinding.value) return '未绑定套餐'
+  if (visibleChannelQuotaItems.value.length > 0) {
+    return `${totalVisibleChannelRemaining.value} / ${totalVisibleChannelLimit.value}`
+  }
+  if (fallbackChannelQuotaItems.value.length > 0) {
+    const totalLimit = fallbackChannelQuotaItems.value.reduce((sum, item) => sum + Number(item.quotaLimit || 0), 0)
+    const totalRemaining = fallbackChannelQuotaItems.value
+      .reduce((sum, item) => sum + Number(item.remainingCount ?? item.quotaLimit ?? 0), 0)
+    return `${totalRemaining} / ${totalLimit}`
+  }
+  return '暂无额度'
+})
 
 const keywordQuotaText = computed(() => {
   if (!activePackageBinding.value) return '未绑定套餐'
@@ -391,13 +598,53 @@ function packagePlanLabel(plan: PackagePlan) {
 
 function channelPeriodText(periodType?: string | null) {
   const mapping: Record<string, string> = {
-    day: '每日额度',
-    week: '每周额度',
-    month: '每月额度',
+    day: '日',
+    week: '周',
+    month: '月',
     total: '总额度',
     none: '总额度',
   }
   return mapping[String(periodType || 'none')] || String(periodType || '-')
+}
+
+function quotaPercentage(row: { enabled?: boolean; quotaLimit?: number | null; usedCount?: number | null }) {
+  if (!row.enabled) return 0
+  const limit = Number(row.quotaLimit || 0)
+  const used = Number(row.usedCount || 0)
+  if (limit <= 0) return used > 0 ? 100 : 0
+  return Math.min(100, Math.round((used * 100) / limit))
+}
+
+function quotaProgressStatus(row: { enabled?: boolean; status?: string | null }) {
+  if (!row.enabled) return undefined
+  if (row.status === 'exceeded') return 'exception'
+  if (row.status === 'warning') return 'warning'
+  return undefined
+}
+
+function quotaRemainingText(row: { enabled?: boolean; status?: string | null; usedCount?: number | null; quotaLimit?: number | null; remainingCount?: number | null }) {
+  if (!row.enabled) return '-'
+  const used = Number(row.usedCount || 0)
+  const limit = Number(row.quotaLimit || 0)
+  if (row.status === 'exceeded') return `超出 ${Math.max(used - limit, 0)}`
+  return String(Number(row.remainingCount ?? Math.max(limit - used, 0)))
+}
+
+function nextResetText(row: { enabled?: boolean; periodType?: string | null; nextResetAt?: string | null }) {
+  if (!row.enabled) return '-'
+  if (row.periodType === 'total' || row.periodType === 'none') return '不重置'
+  if (!row.nextResetAt) return '-'
+  const date = dayjs(row.nextResetAt)
+  if (!date.isValid()) return '-'
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  return `${date.format('M月D日')} ${weekdays[date.day()]}`
+}
+
+function quotaRowClassName({ row }: { row: { enabled?: boolean; status?: string | null } }) {
+  if (!row.enabled) return 'quota-row-disabled'
+  if (row.status === 'exceeded') return 'quota-row-danger'
+  if (row.status === 'warning') return 'quota-row-warning'
+  return ''
 }
 
 async function loadCompany() {
@@ -427,18 +674,75 @@ async function loadBrands() {
 async function loadPackageInfo() {
   packageLoading.value = true
   try {
-    const [bindingRes, quotaRes] = await Promise.all([
+    const [bindingRes, quotaRes, distributionRes] = await Promise.all([
       getActiveCompanyPackageBinding(companyId),
       getCompanyKeywordGroupQuota(companyId).catch(() => null),
+      getCompanyDistributionQuotas(companyId).catch(() => null),
     ])
     activePackageBinding.value = bindingRes.data.data
     keywordQuota.value = quotaRes?.data.data || null
+    distributionQuota.value = distributionRes?.data.data || null
   } catch (err) {
     activePackageBinding.value = null
+    keywordQuota.value = null
+    distributionQuota.value = null
     ElMessage.error(errorMessage(err, '加载客户套餐失败'))
   } finally {
     packageLoading.value = false
   }
+}
+
+async function loadEntryReadiness() {
+  try {
+    const { data } = await getProjectList({ current: 1, size: 500, companyId })
+    entryReadiness.value = await buildEntryReadiness(data.data.records || [])
+  } catch {
+    entryReadiness.value = { hasProject: false, allCoreQuestionsReady: false }
+  }
+}
+
+async function loadSubmissionReadiness() {
+  if (!isPartnerStaff.value && !isPartnerOwner.value) {
+    submissionReadiness.value = null
+    return
+  }
+  submissionReadinessLoading.value = true
+  try {
+    const { data } = await getCompanySubmissionReadiness(companyId)
+    submissionReadiness.value = data.data
+  } catch {
+    submissionReadiness.value = null
+  } finally {
+    submissionReadinessLoading.value = false
+  }
+}
+
+async function buildEntryReadiness(projects: Project[]) {
+  const relatedProjects = projects.filter((project) => Number(project.companyId || 0) === companyId)
+  if (!relatedProjects.length) {
+    return { hasProject: false, allCoreQuestionsReady: false }
+  }
+  const results = await Promise.all(relatedProjects.map(async (project) => {
+    const allocatedCount = projectCoreQuestionLimit(project)
+    if (allocatedCount <= 0) return false
+    try {
+      const { data } = await getGeoProjectWorkorders(project.id)
+      const actualCount = (data.data || [])
+        .filter((item) => item.status === 'committed')
+        .reduce((sum, item) => sum + Number(item.countTotal || 0), 0)
+      return actualCount === allocatedCount
+    } catch {
+      return false
+    }
+  }))
+  return {
+    hasProject: true,
+    allCoreQuestionsReady: results.length > 0 && results.every(Boolean),
+  }
+}
+
+function projectCoreQuestionLimit(project: Project) {
+  return Number(project.planCoreQuestionLimit ?? project.planKeywordGroupLimitA ?? project.planKeywordGroupLimit ?? 0)
 }
 
 async function loadPackagePlanOptions() {
@@ -452,7 +756,7 @@ async function loadPackagePlanOptions() {
 }
 
 async function reloadAll() {
-  await Promise.all([loadCompany(), loadBrands(), loadPackageInfo()])
+  await Promise.all([loadCompany(), loadBrands(), loadPackageInfo(), loadEntryReadiness(), loadSubmissionReadiness()])
 }
 
 async function openPackageBind() {
@@ -529,6 +833,13 @@ async function notifyEntry() {
 }
 
 async function completeEntry() {
+  if (!submissionReady.value) {
+    await loadSubmissionReadiness()
+  }
+  if (!submissionReady.value) {
+    ElMessage.warning(`提交前检查未通过，还有 ${submissionPendingCount.value || 1} 项需要补充`)
+    return
+  }
   workflowSubmitting.value = true
   try {
     await completeCompanyEntry(companyId)
@@ -536,6 +847,30 @@ async function completeEntry() {
     await reloadAll()
   } catch (err) {
     ElMessage.error(errorMessage(err, '提交录入完成失败'))
+  } finally {
+    workflowSubmitting.value = false
+  }
+}
+
+function openReturnEntry() {
+  returnEntryForm.reason = ''
+  returnEntryVisible.value = true
+}
+
+async function submitReturnEntry() {
+  const reason = returnEntryForm.reason.trim()
+  if (!reason) {
+    ElMessage.warning('请填写退回原因，方便交付员工明确修改方向')
+    return
+  }
+  workflowSubmitting.value = true
+  try {
+    await returnCompanyEntry(companyId, { reason })
+    ElMessage.success('已退回交付员工修改')
+    returnEntryVisible.value = false
+    await reloadAll()
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '退回修改失败'))
   } finally {
     workflowSubmitting.value = false
   }
@@ -549,13 +884,17 @@ function goBrandDetail(id: number) {
   router.push(`/partner/brands/${id}`)
 }
 
+function goSubmitWorkorder() {
+  router.push({ name: 'MyProjects', query: { companyId: companyId } })
+}
+
 onMounted(reloadAll)
 </script>
 
 <style scoped>
 .partner-customer-detail {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .partner-detail-nav {
@@ -570,20 +909,32 @@ onMounted(reloadAll)
 .detail-hero,
 .detail-card,
 .metric-card {
-  border: 1px solid #dbeafe;
+  border: 1px solid var(--card-border, #dbeafe);
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
 }
 
 .detail-hero {
   display: flex;
-  min-height: 140px;
+  min-height: 126px;
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  padding: 24px;
-  background: linear-gradient(135deg, #fff 0%, #f0f7ff 58%, #ecfdf5 100%);
+  overflow: hidden;
+  position: relative;
+  padding: 22px 24px;
+  background:
+    radial-gradient(circle at 92% 8%, rgba(14, 165, 233, 0.16) 0, rgba(14, 165, 233, 0.16) 120px, transparent 122px),
+    linear-gradient(135deg, #fff 0%, #f1f7ff 56%, #ecfdf5 100%);
+}
+
+.detail-hero::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #2563eb 0%, #14b8a6 100%);
+  content: '';
 }
 
 .detail-hero__main {
@@ -600,7 +951,7 @@ onMounted(reloadAll)
   flex: 0 0 auto;
   place-items: center;
   border-radius: 14px;
-  background: #2563eb;
+  background: linear-gradient(135deg, #2563eb 0%, #14b8a6 100%);
   color: #fff;
   font-size: 26px;
   font-weight: 900;
@@ -615,7 +966,7 @@ onMounted(reloadAll)
 .detail-hero h1 {
   margin: 5px 0 8px;
   color: #0f172a;
-  font-size: 26px;
+  font-size: 25px;
   font-weight: 900;
   letter-spacing: 0;
 }
@@ -655,13 +1006,15 @@ onMounted(reloadAll)
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
 .metric-card {
   position: relative;
   overflow: hidden;
-  padding: 16px;
+  min-height: 96px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #fff 0%, var(--metric-soft, #f8fbff) 100%);
 }
 
 .metric-card::before {
@@ -682,40 +1035,65 @@ onMounted(reloadAll)
 
 .metric-card strong {
   display: block;
-  margin: 9px 0 7px;
+  margin: 8px 0 6px;
   color: #0f172a;
-  font-size: 24px;
+  font-size: 23px;
   font-weight: 900;
 }
 
 .metric-card.is-blue {
   --metric-color: #2563eb;
+  --metric-soft: #eff6ff;
 }
 
 .metric-card.is-green {
   --metric-color: #10b981;
+  --metric-soft: #ecfdf5;
 }
 
 .metric-card.is-amber {
   --metric-color: #f59e0b;
+  --metric-soft: #fffbeb;
 }
 
 .metric-card.is-purple {
   --metric-color: #7c3aed;
+  --metric-soft: #f5f3ff;
 }
 
 .metric-card.is-slate {
   --metric-color: #64748b;
+  --metric-soft: #f8fafc;
 }
 
 .detail-card {
-  padding: 20px;
+  --section-accent: #2563eb;
+  --section-soft: #f8fbff;
+  --card-border: #dbeafe;
+  padding: 18px;
 }
 
-.detail-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.7fr);
-  gap: 16px;
+.workflow-card {
+  --section-accent: #f59e0b;
+  --section-soft: #fffbeb;
+  --card-border: #fde68a;
+}
+
+.customer-info-card {
+  --section-accent: #2563eb;
+  --section-soft: #eff6ff;
+}
+
+.package-card {
+  --section-accent: #0f766e;
+  --section-soft: #ecfdf5;
+  --card-border: #b8eee5;
+}
+
+.brand-list-card {
+  --section-accent: #7c3aed;
+  --section-soft: #f5f3ff;
+  --card-border: #ddd6fe;
 }
 
 .section-head {
@@ -727,10 +1105,23 @@ onMounted(reloadAll)
 }
 
 .section-head h2 {
+  position: relative;
+  padding-left: 12px;
   margin: 0;
   color: #0f172a;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 900;
+}
+
+.section-head h2::before {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--section-accent);
+  content: '';
 }
 
 .section-head p {
@@ -749,15 +1140,15 @@ onMounted(reloadAll)
 
 .workflow-steps {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
 }
 
 .workflow-step {
   display: flex;
   gap: 10px;
-  min-height: 82px;
-  padding: 14px;
+  min-height: 78px;
+  padding: 13px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #f8fafc;
@@ -806,12 +1197,135 @@ onMounted(reloadAll)
 
 .workflow-step.active {
   border-color: #fde68a;
-  background: #fffbeb;
+  background: linear-gradient(180deg, #fff 0%, #fffbeb 100%);
 }
 
 .workflow-step.active > span {
   background: #f59e0b;
   color: #fff;
+}
+
+.checklist-card {
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.checklist-summary {
+  align-items: center;
+}
+
+.checklist-summary span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  height: 34px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.checklist-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.checklist-status.ready {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.checklist-status strong {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.checklist-status span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.checklist-item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fffafa;
+}
+
+.checklist-item.done {
+  border-color: #bbf7d0;
+  background: #f8fffb;
+}
+
+.checklist-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #fee2e2;
+  color: #dc2626;
+  font-weight: 900;
+}
+
+.checklist-item.done .checklist-icon {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.checklist-body {
+  min-width: 0;
+}
+
+.checklist-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.checklist-title strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checklist-body p {
+  margin: 8px 0 6px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.checklist-body > span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .info-grid {
@@ -822,11 +1336,17 @@ onMounted(reloadAll)
 
 .info-item,
 .package-summary > div {
-  min-height: 72px;
-  padding: 13px;
+  min-height: 68px;
+  padding: 12px 13px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+}
+
+.info-item:hover,
+.package-summary > div:hover {
+  border-color: var(--card-border, #dbeafe);
+  background: linear-gradient(180deg, #fff 0%, var(--section-soft, #f8fbff) 100%);
 }
 
 .info-item span,
@@ -850,52 +1370,98 @@ onMounted(reloadAll)
 
 .package-summary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
 .package-channel-summary {
   margin-top: 12px;
   padding: 12px;
-  border: 1px solid #dbeafe;
+  border: 1px solid #b8eee5;
   border-radius: 12px;
-  background: #f8fbff;
+  background: linear-gradient(180deg, #fff 0%, #f0fdfa 100%);
 }
 
 .package-channel-title {
-  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
   color: #0f172a;
   font-size: 13px;
   font-weight: 900;
 }
 
-.package-channel-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.package-channel-item {
-  padding: 11px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #fff;
-}
-
-.package-channel-item span,
-.package-channel-item small {
-  display: block;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.package-channel-item strong {
-  display: block;
-  margin: 6px 0 3px;
+.package-channel-title span {
   color: #0f172a;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 900;
+}
+
+.quota-channel-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.quota-channel-cell span {
+  overflow: hidden;
+  color: #334155;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-used-cell {
+  display: grid;
+  gap: 8px;
+}
+
+.quota-used-cell span {
+  color: #334155;
+  font-weight: 800;
+}
+
+.package-channel-summary :deep(.el-table th.el-table__cell) {
+  height: 42px;
+  background: #f0fdfa;
+  color: #334155;
+  font-weight: 900;
+}
+
+.package-channel-summary :deep(.el-table td.el-table__cell) {
+  height: 48px;
+}
+
+.brand-list-card :deep(.el-table) {
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.brand-list-card :deep(.el-table th.el-table__cell) {
+  height: 42px;
+  background: #f5f3ff;
+  color: #334155;
+  font-weight: 900;
+}
+
+.brand-list-card :deep(.el-table td.el-table__cell) {
+  height: 48px;
+}
+
+.package-channel-summary :deep(.quota-row-disabled) {
+  color: #94a3b8;
+  background: #f8fafc;
+}
+
+.package-channel-summary :deep(.quota-row-warning) {
+  background: #fffbeb;
+}
+
+.package-channel-summary :deep(.quota-row-danger) {
+  background: #fff1f2;
 }
 
 .package-channel-empty {
@@ -943,7 +1509,7 @@ onMounted(reloadAll)
 
 @media (max-width: 1200px) {
   .metric-grid,
-  .detail-grid,
+  .package-summary,
   .workflow-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -956,11 +1522,10 @@ onMounted(reloadAll)
   }
 
   .metric-grid,
-  .detail-grid,
   .workflow-steps,
   .info-grid,
-  .package-summary,
-  .package-channel-grid {
+  .checklist-grid,
+  .package-summary {
     grid-template-columns: 1fr;
   }
 }

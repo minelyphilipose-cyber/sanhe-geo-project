@@ -12,16 +12,12 @@
     </div>
 
     <div class="admin-filter-panel">
+      <el-tabs v-model="scopeTab" class="scope-tabs" @tab-change="onScopeTabChange">
+        <el-tab-pane label="总部直营" name="direct" />
+        <el-tab-pane label="合伙人经营" name="partner" />
+      </el-tabs>
       <div class="admin-filter-controls">
         <el-input v-model="query.keyword" placeholder="搜索公司名称" clearable style="width: 260px" @keyup.enter="load" />
-        <el-select v-model="query.ownerType" placeholder="归属类型" clearable style="width: 140px" @change="load">
-          <el-option
-            v-for="item in dictStore.options('owner_type')"
-            :key="item.dictKey"
-            :label="item.dictValue"
-            :value="item.dictKey"
-          />
-        </el-select>
         <el-button @click="load">查询</el-button>
       </div>
     </div>
@@ -156,7 +152,7 @@
         <el-form-item label="归属类型" required>
           <el-select v-model="form.ownerType" style="width: 100%">
             <el-option
-              v-for="item in dictStore.options('owner_type')"
+              v-for="item in ownerTypeOptions"
               :key="item.dictKey"
               :label="item.dictValue"
               :value="item.dictKey"
@@ -215,7 +211,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
@@ -227,6 +223,7 @@ import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const dictStore = useDictStore()
 const canCreateCompany = computed(() => userStore.hasPermission('company.create'))
@@ -240,7 +237,14 @@ const rows = ref<Company[]>([])
 const partnerOptions = ref<PartnerItem[]>([])
 const salesOwnerOptions = ref<SalesOwnerOption[]>([])
 const page = reactive({ current: 1, size: 10, total: 0 })
-const query = reactive({ keyword: '', ownerType: '' })
+const query = reactive({ keyword: '' })
+const scopeTab = ref<'direct' | 'partner'>(route.query.scope === 'partner' || route.query.partnerId ? 'partner' : 'direct')
+const scopedPartnerId = computed(() => {
+  if (scopeTab.value !== 'partner') return undefined
+  const raw = Number(route.query.partnerId)
+  return Number.isFinite(raw) && raw > 0 ? raw : undefined
+})
+const ownerTypeOptions = computed(() => dictStore.options('owner_type').filter((item) => ['direct', 'partner'].includes(item.dictKey)))
 
 const formVisible = ref(false)
 const formRef = ref<FormInstance>()
@@ -347,7 +351,6 @@ function regionParts(company: Company) {
 function customerIdentityLabel(company: Company) {
   if (company.ownerType === 'direct') return '直营客户'
   if (company.ownerType === 'partner' || company.sourceType === 'partner') return '合伙人客户'
-  if (company.ownerType === 'joint') return '合作客户'
   return dictStore.label('owner_type', company.ownerType) || '客户'
 }
 
@@ -377,7 +380,8 @@ async function load() {
       current: page.current,
       size: page.size,
       keyword: query.keyword || undefined,
-      ownerType: query.ownerType || undefined,
+      ownerType: scopeTab.value,
+      partnerId: scopedPartnerId.value,
     })
     rows.value = data.data.records || []
     page.total = data.data.total || 0
@@ -387,6 +391,11 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function onScopeTabChange() {
+  page.current = 1
+  load()
 }
 
 async function loadPartners() {
@@ -447,7 +456,7 @@ async function submit() {
   if (!valid) {
     return
   }
-  if ((form.ownerType === 'partner' || form.ownerType === 'joint' || form.sourceType === 'partner') && !form.partnerId) {
+  if ((form.ownerType === 'partner' || form.sourceType === 'partner') && !form.partnerId) {
     ElMessage.warning('当前客户需选择所属合伙人')
     return
   }
@@ -520,6 +529,14 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.scope-tabs {
+  margin-bottom: 12px;
+}
+
+.scope-tabs :deep(.el-tabs__header) {
+  margin-bottom: 0;
+}
+
 .customer-empty-text {
   color: #94a3b8;
 }

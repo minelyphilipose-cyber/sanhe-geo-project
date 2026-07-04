@@ -57,7 +57,7 @@ const partnerGroups: MenuGroup[] = [
       { path: '/partner/my-customers', name: 'MyCustomers', title: '客户管理', icon: 'User', roles: ['partner', 'partner_staff'], permissions: ['company.read'] },
       { path: '/partner/staff', name: 'PartnerStaffManage', title: '交付员工', icon: 'UserFilled', roles: ['partner'], permissions: ['partner.staff.manage'] },
       { path: '/partner/my-projects', name: 'MyProjects', title: '项目管理', icon: 'Folder', roles: ['partner', 'partner_staff'], permissions: ['project.read'] },
-      { path: '/partner/layered-keyword-groups', name: 'PartnerLayeredKeywordGroupManage', title: '拓词管理', icon: 'Collection', roles: ['partner_staff'], permissions: ['keyword_group.read'] },
+      { path: '/partner/layered-keyword-groups', name: 'PartnerLayeredKeywordGroupManage', title: '拓词管理', icon: 'Collection', roles: ['partner', 'partner_staff'], permissions: ['keyword_group.read'] },
       { path: '/partner/balance', name: 'PartnerBalance', title: '余额与扣款', icon: 'Wallet', roles: ['partner'], permissions: ['partner.read'] },
       { path: '/partner/presale/report', name: 'PartnerPresaleReportList', title: 'AI可见度诊断报告', icon: 'Document', roles: ['partner'], permissions: ['presale.report.list'] },
     ],

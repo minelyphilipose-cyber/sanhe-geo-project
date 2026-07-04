@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.partner.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -24,6 +25,8 @@ public class Partner {
     private String contactPhone;
     private String city;
     private String remark;
+    @TableField(exist = false)
+    private Long customerCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

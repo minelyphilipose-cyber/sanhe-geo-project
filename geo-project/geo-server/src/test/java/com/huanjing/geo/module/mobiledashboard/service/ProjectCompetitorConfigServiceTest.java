@@ -1,8 +1,10 @@
 package com.huanjing.geo.module.mobiledashboard.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.mobiledashboard.dto.ProjectCompetitorConfigRequest;
 import com.huanjing.geo.module.mobiledashboard.dto.ProjectCompetitorConfigVO;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -45,26 +47,26 @@ class ProjectCompetitorConfigServiceTest {
     }
 
     @Test
-    void updateExisting_bumpsVersionAndResetsQaWhenNameChanges() throws Exception {
+    void updateExisting_bumpsVersionAndKeepsQaPassedWhenNameChanges() throws Exception {
         CapturedUpdate update = updateExisting(
                 existing("竞品一", List.of("旧别名"), 1, "active", "passed"),
                 item(7L, "竞品二", List.of("旧别名"), 1, true, "passed")
         );
 
         assertThat(update.args()[0]).isEqualTo("竞品二");
-        assertThat(update.args()[6]).isEqualTo("pending");
+        assertThat(update.args()[6]).isEqualTo("passed");
         assertThat(update.args()[7]).isEqualTo(true);
         assertThat(update.args()[9]).isEqualTo(1);
     }
 
     @Test
-    void updateExisting_bumpsVersionAndResetsQaWhenAliasesChange() throws Exception {
+    void updateExisting_bumpsVersionAndKeepsQaPassedWhenAliasesChange() throws Exception {
         CapturedUpdate update = updateExisting(
                 existing("竞品一", List.of("旧别名"), 1, "active", "passed"),
                 item(7L, "竞品一", List.of("新别名"), 1, true, "passed")
         );
 
-        assertThat(update.args()[6]).isEqualTo("pending");
+        assertThat(update.args()[6]).isEqualTo("passed");
         assertThat(update.args()[7]).isEqualTo(true);
         assertThat(update.args()[9]).isEqualTo(1);
     }
@@ -75,6 +77,8 @@ class ProjectCompetitorConfigServiceTest {
         ProjectCompetitorConfigService service = new ProjectCompetitorConfigService(
                 jdbcTemplate,
                 mock(CurrentUserService.class),
+                mock(InternalScopeService.class),
+                mock(ProjectMapper.class),
                 new ObjectMapper()
         );
         Method method = ProjectCompetitorConfigService.class.getDeclaredMethod(

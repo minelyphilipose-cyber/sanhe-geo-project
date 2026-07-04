@@ -36,6 +36,12 @@ public class GeoQuestionDtos {
         private String projectName;
         private String packageName;
         private String status;
+        private String partnerReviewStatus;
+        private String partnerReviewReturnReason;
+        private LocalDateTime partnerReviewSubmittedAt;
+        private LocalDateTime partnerReviewReturnedAt;
+        private LocalDateTime partnerReviewHqSubmittedAt;
+        private LocalDateTime partnerReviewUpdatedAt;
         private Integer targetA;
         private Integer targetB;
         private Integer targetC;
@@ -51,6 +57,12 @@ public class GeoQuestionDtos {
         private String workorderNo;
         private String packageName;
         private String status;
+        private String partnerReviewStatus;
+        private String partnerReviewReturnReason;
+        private LocalDateTime partnerReviewSubmittedAt;
+        private LocalDateTime partnerReviewReturnedAt;
+        private LocalDateTime partnerReviewHqSubmittedAt;
+        private LocalDateTime partnerReviewUpdatedAt;
         private Integer targetA;
         private Integer targetB;
         private Integer targetC;
@@ -149,6 +161,17 @@ public class GeoQuestionDtos {
         private String modelName;
         private Map<String, Integer> sceneWeights;
         private BigDecimal temperature;
+        private Boolean partnerCoreOnly;
+    }
+
+    @Data
+    public static class PartnerCoreQuestionGenerateRequest {
+        private Integer count;
+    }
+
+    @Data
+    public static class QuestionBatchDeleteRequest {
+        private List<Long> ids;
     }
 
     @Data
@@ -276,5 +299,10 @@ public class GeoQuestionDtos {
     @Data
     public static class CommitRequest {
         private String versionLabel;
+    }
+
+    @Data
+    public static class PartnerReviewReturnRequest {
+        private String reason;
     }
 }

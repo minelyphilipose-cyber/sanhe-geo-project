@@ -1,0 +1,60 @@
+## 本次生成数量
+total_count: {{total_count}}
+
+## 场景分布参考
+brand: {{w_brand}}
+decision: {{w_decision}}
+deal: {{w_deal}}
+compare: {{w_compare}}
+qa: {{w_qa}}
+function: {{w_function}}
+场景分布以高转化为优先，brand、decision、deal 是主要供给。
+compare、qa、function 只用于少量补充，每个场景最多 3 条；如果难以产出高转化表达，请把数量转移到 brand、decision、deal。
+问题总数必须严格等于 total_count。
+
+## 客户资料
+company_name: {{company_name}}
+brand_name: {{brand_name}}
+brand_relation: {{brand_relation}}
+core_business: {{core_business}}
+target_region: {{target_region}}
+industry: {{industry}}
+target_customer: {{target_customer}}
+core_advantage: {{core_advantage}}
+benchmark_specs: {{benchmark_specs}}
+
+## 主竞品
+main_competitors:
+{{main_competitors_block}}
+
+competitor_brand_terms:
+{{competitor_brand_terms}}
+以上 competitor_brand_terms 是主竞品具体品牌名列表，已过滤“本地服务商”“门店”“装修公司”等泛指条目。生成的问题不要直接出现这些具体品牌名。
+
+## 核心需求
+core_needs:
+{{core_needs_block}}
+
+如果 core_needs 是系统默认推导，也必须从其中的 need_default_N 中选择 relatedNeedText。
+生成时不要把“默认推导”“待补全”写进 questionText。
+
+## 当前工单已有核心问题
+existing_questions:
+{{existing_questions_block}}
+
+新的 questionText 不得与 existing_questions 中任意问题重复，也不要只替换少量词做近似改写。
+
+## 本轮扩展策略
+generation_round: {{generation_round}}
+diversity_strategy:
+{{diversity_strategy}}
+
+本轮必须优先执行 diversity_strategy。不要继续集中生成已有问题中已经覆盖过的通用问法、相同品类和相同场景。
+
+## 品牌匹配
+客户自有品牌名只以 brand_name 完整字符串为准，不拆子串。
+questionText 不要出现客户自有品牌名；可以围绕客户业务、区域、服务能力和用户需求生成问题。
+
+## 输出格式
+输出严格 JSON 数组，数量必须精确等于 total_count。
+每个元素只能包含 questionText、sceneCode、relatedNeedText、designReason。

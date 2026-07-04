@@ -53,10 +53,31 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column v-if="canUpdateProject" label="操作" width="100" fixed="right">
+          <el-table-column label="操作" width="230" fixed="right">
             <template #default="scope">
               <div class="partner-row-actions">
-                <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+                <el-button link type="primary" @click="openDetail(scope.row)">详情</el-button>
+                <el-button
+                  v-if="canSubmitStartRequest(scope.row)"
+                  link
+                  type="primary"
+                  :loading="submittingStartRequestId === scope.row.id"
+                  @click="submitStartRequest(scope.row)"
+                >
+                  提交工单
+                </el-button>
+                <el-button
+                  v-if="canReturnEntry(scope.row)"
+                  link
+                  type="warning"
+                  :loading="returningCompanyId === scope.row.companyId"
+                  @click="openReturnEntry(scope.row)"
+                >
+                  退回修改
+                </el-button>
+                <span v-else-if="isPartnerOwner && scope.row.status === 'submitted'" class="partner-row-note">工单已提交</span>
+                <el-button v-if="canUpdateProject" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+                <el-button v-if="canDeleteProject" link type="danger" @click="removeProject(scope.row)">删除</el-button>
               </div>
             </template>
           </el-table-column>
@@ -112,11 +133,44 @@
           </div>
         </div>
 
+        <div class="form-section">
+          <div class="form-section-head">
+            <div>
+              <div class="form-section-title">竞品信息</div>
+              <p>用于后续诊断识别竞品提及。请录入竞品全名和常见简称/别名。</p>
+            </div>
+            <el-button size="small" plain :disabled="form.competitors.length >= 3" @click="addCompetitor">添加竞品</el-button>
+          </div>
+          <div class="competitor-list">
+            <div v-for="(item, index) in form.competitors" :key="item.uid" class="competitor-row">
+              <div class="competitor-index">{{ index + 1 }}</div>
+              <el-form-item label="竞品全名" required>
+                <el-input v-model="item.competitorName" maxlength="128" placeholder="请输入竞品全名" />
+              </el-form-item>
+              <el-form-item label="简称/别名">
+                <el-select
+                  v-model="item.aliases"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  collapse-tags
+                  collapse-tags-tooltip
+                  style="width: 100%"
+                  placeholder="输入后回车，可添加多个"
+                />
+              </el-form-item>
+              <el-button link type="danger" :disabled="form.competitors.length <= 1" @click="removeCompetitor(index)">删除</el-button>
+            </div>
+          </div>
+        </div>
+
         <div v-if="formMode === 'edit'" class="form-section">
           <div class="form-section-title">核心问题与额度</div>
           <el-form-item label="核心问题组" prop="keywordGroupIds">
             <div class="w-full">
               <el-select
+                v-if="!keywordGroupLocked"
                 v-model="form.keywordGroupIds"
                 style="width: 100%"
                 multiple
@@ -135,16 +189,31 @@
                   :value="kg.id"
                 />
               </el-select>
+              <div v-else class="locked-keyword-groups">
+                <div v-if="selectedKeywordGroups.length" class="locked-keyword-group-list">
+                  <span v-for="kg in selectedKeywordGroups" :key="kg.id" class="locked-keyword-group-tag">
+                    {{ kg.name }}（核心问题 {{ keywordGroupCoreCount(kg) }} 条）
+                  </span>
+                </div>
+                <div v-else class="locked-keyword-group-empty">暂无已绑定核心问题组</div>
+                <div class="locked-keyword-group-tip">项目拓词组已提交总部并锁定，核心问题组仅可查看，不可删除或调整。</div>
+              </div>
               <div class="keyword-summary">{{ keywordGroupSummary }}</div>
             </div>
           </el-form-item>
           <el-form-item label="核心问题额度">
             <div class="keyword-quota-panel">
-              <div class="channel-note">默认填入当前客户套餐核心问题剩余额度，最大不可超过可分配数量。</div>
+              <div class="channel-note">{{ coreQuestionQuotaNote }}</div>
               <div class="quota-row">
                 <span>核心问题</span>
-                <el-input-number v-model="form.coreQuestionLimit" :min="0" :max="coreQuestionMax" controls-position="right" />
-                <small>可分配 {{ coreQuestionMax }}</small>
+                <el-input-number
+                  v-model="form.coreQuestionLimit"
+                  :min="0"
+                  :max="coreQuestionMax"
+                  :disabled="keywordGroupLocked"
+                  controls-position="right"
+                />
+                <small>{{ coreQuestionQuotaInputTip }}</small>
               </div>
             </div>
           </el-form-item>
@@ -227,21 +296,54 @@
         <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="returnVisible" title="退回交付员工修改" width="560px" class="partner-form-dialog">
+      <div class="project-form-tip">
+        <span class="tip-dot">i</span>
+        <span>退回后客户会回到“项目与拓词录入中”，交付员工修改完成后需要再次提交负责人确认。</span>
+      </div>
+      <el-form label-position="top">
+        <el-form-item label="退回原因" required>
+          <el-input
+            v-model="returnForm.reason"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="请说明需要补充或修正的项目、品牌、竞品、核心问题或图片资产内容"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="returnVisible = false">取消</el-button>
+        <el-button type="warning" :loading="returningCompanyId === returningProject?.companyId" @click="submitReturnEntry">确认退回</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { getBrandList, getCompanyList } from '@/api/customer'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { getBrandList, getCompanyList, returnCompanyEntry } from '@/api/customer'
 import {
   createProject,
+  deleteProject,
   getProjectChannelAllocationQuota,
   getProjectKeywordGroupQuota,
   getKeywordGroupPage,
   getProjectList,
+  submitPartnerProjectStartRequest,
   updateProject,
 } from '@/api/project'
+import {
+  getProjectMobileDashboardCompetitors,
+  updateProjectMobileDashboardCompetitors,
+  type ProjectCompetitorConfig,
+  type ProjectCompetitorConfigPayloadItem,
+} from '@/api/mobileDashboard'
+import { getGeoProjectWorkorders } from '@/api/geoQuestion'
 import type { Brand, Company, KeywordGroup, Project, ProjectChannelAllocationItem, ProjectKeywordGroupQuota } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
@@ -252,12 +354,18 @@ import { errorMessage } from '@/utils/error'
 
 const dictStore = useDictStore()
 const userStore = useUserStore()
+const route = useRoute()
+const router = useRouter()
+const isPartnerOwner = computed(() => userStore.role === 'partner')
 const isPartnerStaff = computed(() => userStore.role === 'partner_staff')
 const canCreateProject = computed(() => isPartnerStaff.value && userStore.hasPermission('project.create'))
 const canUpdateProject = computed(() => isPartnerStaff.value && userStore.hasPermission('project.update'))
+const canDeleteProject = computed(() => isPartnerStaff.value && userStore.hasPermission('project.delete'))
 
 const loading = ref(false)
 const saving = ref(false)
+const submittingStartRequestId = ref<number | null>(null)
+const returningCompanyId = ref<number | null>(null)
 const brandLoading = ref(false)
 const keywordGroupLoading = ref(false)
 const keyword = ref('')
@@ -267,7 +375,10 @@ const brandOptions = ref<Brand[]>([])
 const keywordGroupOptions = ref<KeywordGroup[]>([])
 const channelQuotaItems = ref<ProjectChannelAllocationItem[]>([])
 const keywordQuota = ref<ProjectKeywordGroupQuota | null>(null)
+const keywordGroupLocked = ref(false)
 const allocationVersion = ref<number | null>(null)
+const returnVisible = ref(false)
+const returningProject = ref<Project | null>(null)
 const partnerVisibleSelfMediaChannels = new Set([
   'self_media:wechat',
   'self_media:douyin',
@@ -282,6 +393,13 @@ const formVisible = ref(false)
 const formRef = ref<FormInstance>()
 const formMode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
+
+interface CompetitorFormItem {
+  uid: number
+  id?: number
+  competitorName: string
+  aliases: string[]
+}
 
 const form = reactive({
   projectName: '',
@@ -298,6 +416,10 @@ const form = reactive({
   deliveryMode: 'managed',
   primaryGoal: '',
   remark: '',
+  competitors: [] as CompetitorFormItem[],
+})
+const returnForm = reactive({
+  reason: '',
 })
 
 const rules: FormRules = {
@@ -321,6 +443,11 @@ const pageSubtitle = computed(() => (
     ? '创建并维护分配客户下的项目资料；项目创建后再进入拓词管理准备核心问题。'
     : '查看合伙人名下项目资料和交付进度；项目资料录入与维护由交付员工处理。'
 ))
+const scopedCompanyId = computed(() => {
+  const raw = Array.isArray(route.query.companyId) ? route.query.companyId[0] : route.query.companyId
+  const id = Number(raw)
+  return Number.isFinite(id) && id > 0 ? id : undefined
+})
 
 const keywordGroupSummary = computed(() => {
   const selected = new Set(form.keywordGroupIds)
@@ -332,19 +459,95 @@ const keywordGroupSummary = computed(() => {
   }
   return `已选 ${form.keywordGroupIds.length} 个核心问题组，核心问题 ${saved} 条`
 })
+const selectedKeywordGroups = computed(() => {
+  const optionMap = new Map(keywordGroupOptions.value.map((item) => [item.id, item]))
+  return form.keywordGroupIds.map((id) => optionMap.get(id) || ({
+    id,
+    companyId: form.companyId || 0,
+    name: `核心问题组 #${id}`,
+    savedCoreQuestionCount: 0,
+    createdAt: '',
+    updatedAt: '',
+  } as KeywordGroup))
+})
 
-const coreQuestionMax = computed(() => Math.max(keywordQuota.value?.inputMaxCoreQuestionCount ?? 0, 0))
+const lockedCoreQuestionCount = computed(() => keywordGroupLocked.value ? Math.max(Number(form.coreQuestionLimit || 0), 0) : 0)
+const rawCoreQuestionMax = computed(() => Math.max(keywordQuota.value?.inputMaxCoreQuestionCount ?? 0, 0))
+const rawAllocatedCoreQuestionCount = computed(() => keywordQuota.value?.activeAllocatedCoreQuestionCount ?? keywordQuota.value?.activeAllocatedCountA ?? 0)
+const rawRemainingCoreQuestionCount = computed(() => keywordQuota.value?.remainingCoreQuestionCount ?? keywordQuota.value?.remainingCountA ?? 0)
+const coreQuestionMax = computed(() => keywordGroupLocked.value ? lockedCoreQuestionCount.value : rawCoreQuestionMax.value)
 const coreQuestionQuotaLimit = computed(() => keywordQuota.value?.coreQuestionQuotaLimit ?? keywordQuota.value?.quotaLimitA ?? 0)
-const allocatedCoreQuestionCount = computed(() => keywordQuota.value?.activeAllocatedCoreQuestionCount ?? keywordQuota.value?.activeAllocatedCountA ?? 0)
-const remainingCoreQuestionCount = computed(() => keywordQuota.value?.remainingCoreQuestionCount ?? keywordQuota.value?.remainingCountA ?? 0)
+const allocatedCoreQuestionCount = computed(() => rawAllocatedCoreQuestionCount.value + lockedCoreQuestionCount.value)
+const remainingCoreQuestionCount = computed(() => Math.max(rawRemainingCoreQuestionCount.value - lockedCoreQuestionCount.value, 0))
+const coreQuestionQuotaNote = computed(() => keywordGroupLocked.value
+  ? '项目拓词组已锁定，核心问题额度仅可查看，不可再修改。'
+  : '默认填入当前客户套餐核心问题剩余额度，最大不可超过可分配数量。')
+const coreQuestionQuotaInputTip = computed(() => keywordGroupLocked.value ? '已锁定' : `可分配 ${coreQuestionMax.value}`)
 const selectedCompanyName = computed(() => {
   const company = companyOptions.value.find((item) => item.id === form.companyId)
   return company?.companyName?.trim() || ''
 })
+let competitorUid = 1
+
+function newCompetitorItem(source?: Partial<CompetitorFormItem>): CompetitorFormItem {
+  return {
+    uid: competitorUid++,
+    id: source?.id,
+    competitorName: source?.competitorName || '',
+    aliases: [...(source?.aliases || [])],
+  }
+}
+
+function addCompetitor() {
+  if (form.competitors.length >= 3) {
+    ElMessage.warning('竞品最多添加 3 个')
+    return
+  }
+  form.competitors.push(newCompetitorItem())
+}
+
+function removeCompetitor(index: number) {
+  form.competitors.splice(index, 1)
+  if (form.competitors.length === 0) {
+    addCompetitor()
+  }
+}
+
+function normalizeCompetitorPayload(): ProjectCompetitorConfigPayloadItem[] | null {
+  const items = form.competitors
+    .map((item, index) => ({
+      id: item.id,
+      competitorName: item.competitorName.trim(),
+      aliases: item.aliases.map((alias) => String(alias).trim()).filter((alias, aliasIndex, arr) => alias && arr.indexOf(alias) === aliasIndex),
+      advantages: null,
+      disadvantages: null,
+      displayOrder: index + 1,
+      active: true,
+      qaStatus: 'passed',
+    }))
+    .filter((item) => item.competitorName)
+  if (items.length === 0) {
+    ElMessage.warning('请至少添加 1 个竞品全名')
+    return null
+  }
+  return items
+}
+
+function applyCompetitors(items: ProjectCompetitorConfig[]) {
+  const activeItems = (items || [])
+    .filter((item) => item.status !== 'disabled')
+    .slice(0, 3)
+    .map((item) => newCompetitorItem({
+      id: item.id,
+      competitorName: item.competitorName || '',
+      aliases: item.aliases || [],
+    }))
+  form.competitors = activeItems.length ? activeItems : [newCompetitorItem()]
+}
 
 function isPartnerVisibleQuotaChannel(item: ProjectChannelAllocationItem) {
   const code = String(item.channelCode || '')
-  return code === 'official_site' || partnerVisibleSelfMediaChannels.has(code)
+  return item.enabled && (code === 'official_site' || partnerVisibleSelfMediaChannels.has(code))
 }
 
 function keywordGroupCoreCount(group: KeywordGroup) {
@@ -367,6 +570,44 @@ function projectStatusClass(status?: string | null) {
   if (status === 'rejected') return 'is-danger'
   if (status === 'completed' || status === 'archived' || status === 'cancelled' || status === 'expired') return 'is-muted'
   return ''
+}
+
+function canSubmitStartRequest(row: Project) {
+  if (!isPartnerOwner.value) return false
+  if (!isCompanyEntryCompleted(row)) return false
+  return ['draft', 'pending_start', 'rejected'].includes(String(row.status || ''))
+}
+
+function effectiveCompanyWorkflowStatus(company?: Company | null) {
+  if (!company) return 'draft'
+  const status = String(company.partnerWorkflowStatus || 'draft')
+  if (!company.activePackageBindingId && !company.activePackageName && ['package_bound', 'project_entry', 'entry_completed', 'submitted_to_hq'].includes(status)) {
+    return 'package_requested'
+  }
+  return status
+}
+
+function canReturnEntry(row: Project) {
+  if (!isPartnerOwner.value) return false
+  return isCompanyEntryCompleted(row)
+}
+
+function isCompanyEntryCompleted(row: Project) {
+  if (!row.companyId) return false
+  const company = companyOptions.value.find((item) => item.id === row.companyId)
+  return effectiveCompanyWorkflowStatus(company) === 'entry_completed'
+}
+
+function channelPeriodText(periodType?: string | null) {
+  if (!periodType || periodType === 'none') return '-'
+  const map: Record<string, string> = {
+    day: '日',
+    week: '周',
+    month: '月',
+    quarter: '季度',
+    year: '年',
+  }
+  return map[periodType] || periodType
 }
 
 function withSelectedCompanyNameForPackageError(message: string) {
@@ -405,6 +646,7 @@ function resetForm() {
   form.companyId = null
   form.brandId = null
   form.keywordGroupIds = []
+  keywordGroupLocked.value = false
   form.coreQuestionLimit = 0
   keywordQuota.value = null
   form.channelAllocations = {}
@@ -417,6 +659,7 @@ function resetForm() {
   form.deliveryMode = 'managed'
   form.primaryGoal = ''
   form.remark = ''
+  form.competitors = [newCompetitorItem()]
 }
 
 async function onCompanyChange() {
@@ -503,10 +746,7 @@ function channelInputMax(item: ProjectChannelAllocationItem) {
 }
 
 function channelQuotaText(item: ProjectChannelAllocationItem) {
-  if (!item.enabled) {
-    return '套餐未启用'
-  }
-  const periodType = item.periodType === 'none' ? '-' : item.periodType || '-'
+  const periodType = channelPeriodText(item.periodType)
   return `剩余 ${item.remainingCount || 0} / 总量 ${item.quotaLimit}（${periodType}）`
 }
 
@@ -520,6 +760,7 @@ function openCreate() {
 async function openEdit(row: Project) {
   formMode.value = 'edit'
   editingId.value = row.id
+  keywordGroupLocked.value = projectHasLockedKeywordGroups(row)
   form.projectName = row.projectName
   form.projectAliases = row.projectAliases || ''
   form.companyId = row.companyId || null
@@ -533,6 +774,7 @@ async function openEdit(row: Project) {
   form.deliveryMode = row.deliveryMode || 'managed'
   form.primaryGoal = row.primaryGoal || ''
   form.remark = row.remark || ''
+  form.competitors = [newCompetitorItem()]
   await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId)])
   try {
     await loadChannelAllocationQuota(form.companyId, editingId.value)
@@ -541,7 +783,87 @@ async function openEdit(row: Project) {
     resetPackageQuota()
     ElMessage.error(withSelectedCompanyNameForPackageError(errorMessage(err, '加载客户套餐额度失败')))
   }
+  await Promise.all([
+    loadProjectCompetitors(row.id),
+    loadKeywordGroupLockState(row.id),
+  ])
   formVisible.value = true
+}
+
+function openDetail(row: Project) {
+  router.push({ name: 'PartnerProjectDetail', params: { id: row.id } })
+}
+
+function projectHasLockedKeywordGroups(row: Project) {
+  return Boolean(
+    (row.selectedCoreQuestionSavedKeywords ?? row.selectedKeywordSavedKeywordsA ?? 0) > 0
+    || ['submitted', 'approved_pending_setup', 'setup_ready', 'active', 'completed'].includes(String(row.status || '')),
+  )
+}
+
+async function removeProject(row: Project) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除项目「${row.projectName}」？删除后项目资料、额度分配将按后端规则释放，该操作不可撤销。`,
+      '删除项目',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+    await deleteProject(row.id)
+    ElMessage.success('删除成功')
+    await load()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(errorMessage(err, '删除失败'))
+  }
+}
+
+async function submitStartRequest(row: Project) {
+  try {
+    await ElMessageBox.confirm(
+      `确认将项目「${row.projectName}」提交总部启动工单？提交前请确认项目资料、竞品信息、核心问题和展示渠道额度均已核对无误。`,
+      '提交总部工单',
+      { type: 'warning', confirmButtonText: '确认提交', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  submittingStartRequestId.value = row.id
+  try {
+    await submitPartnerProjectStartRequest(row.id)
+    ElMessage.success('工单已提交总部')
+    await load()
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '提交工单失败'))
+  } finally {
+    submittingStartRequestId.value = null
+  }
+}
+
+function openReturnEntry(row: Project) {
+  returningProject.value = row
+  returnForm.reason = ''
+  returnVisible.value = true
+}
+
+async function submitReturnEntry() {
+  const row = returningProject.value
+  const reason = returnForm.reason.trim()
+  if (!row?.companyId) return
+  if (!reason) {
+    ElMessage.warning('请填写退回原因，方便交付员工明确修改方向')
+    return
+  }
+  returningCompanyId.value = row.companyId
+  try {
+    await returnCompanyEntry(row.companyId, { reason })
+    returnVisible.value = false
+    ElMessage.success('已退回交付员工修改')
+    await Promise.all([loadCompanies(), load()])
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '退回修改失败'))
+  } finally {
+    returningCompanyId.value = null
+  }
 }
 
 async function submit() {
@@ -554,6 +876,10 @@ async function submit() {
   }
 
   if (!form.companyId || !form.brandId) {
+    return
+  }
+  const competitors = normalizeCompetitorPayload()
+  if (!competitors) {
     return
   }
 
@@ -584,19 +910,34 @@ async function submit() {
       coreKeywords: form.coreKeywords || undefined,
       targetAudience: form.targetAudience || undefined,
       primaryGoal: form.primaryGoal || undefined,
+      keywordGroupLimitA: form.coreQuestionLimit,
+      keywordGroupLimitB: 0,
+      keywordGroupLimitC: 0,
       remark: form.remark || undefined,
     }
 
     if (formMode.value === 'create') {
-      await createProject(payload, true)
+      const { data } = await createProject(payload, true)
+      if (data.data?.id) {
+        formMode.value = 'edit'
+        editingId.value = data.data.id
+        await saveProjectCompetitors(data.data.id, competitors)
+      }
     } else if (editingId.value) {
-      await updateProject(editingId.value, {
-        ...payload,
-        keywordGroupIds: form.keywordGroupIds,
-        keywordGroupLimitA: form.coreQuestionLimit,
-        keywordGroupLimitB: 0,
-        keywordGroupLimitC: 0,
-      }, true)
+      const {
+        keywordGroupLimitA: _keywordGroupLimitA,
+        keywordGroupLimitB: _keywordGroupLimitB,
+        keywordGroupLimitC: _keywordGroupLimitC,
+        ...lockedUpdatePayload
+      } = payload
+      const updatePayload = keywordGroupLocked.value
+        ? lockedUpdatePayload
+        : {
+            ...payload,
+            keywordGroupIds: form.keywordGroupIds,
+          }
+      await updateProject(editingId.value, updatePayload, true)
+      await saveProjectCompetitors(editingId.value, competitors)
     }
 
     formVisible.value = false
@@ -631,6 +972,18 @@ async function loadBrands(companyId?: number | null) {
   }
 }
 
+async function loadKeywordGroupLockState(projectId: number) {
+  try {
+    const { data } = await getGeoProjectWorkorders(projectId)
+    keywordGroupLocked.value = keywordGroupLocked.value || (data.data || []).some((item) =>
+      item.partnerReviewStatus === 'submitted_to_hq'
+      || ['committed', 'completed', 'active'].includes(String(item.status || '')),
+    )
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '加载项目拓词组锁定状态失败'))
+  }
+}
+
 async function loadKeywordGroups(companyId?: number | null) {
   if (!companyId) {
     keywordGroupOptions.value = []
@@ -652,6 +1005,20 @@ async function loadKeywordGroups(companyId?: number | null) {
   }
 }
 
+async function loadProjectCompetitors(projectId: number) {
+  try {
+    const { data } = await getProjectMobileDashboardCompetitors(projectId)
+    applyCompetitors(data.data || [])
+  } catch (err) {
+    form.competitors = [newCompetitorItem()]
+    ElMessage.error(errorMessage(err, '加载竞品信息失败'))
+  }
+}
+
+async function saveProjectCompetitors(projectId: number, competitors: ProjectCompetitorConfigPayloadItem[]) {
+  await updateProjectMobileDashboardCompetitors(projectId, competitors)
+}
+
 async function load() {
   loading.value = true
   try {
@@ -659,6 +1026,7 @@ async function load() {
       current: 1,
       size: 200,
       keyword: keyword.value || undefined,
+      companyId: scopedCompanyId.value,
     })
     rows.value = data.data.records || []
   } catch {
@@ -669,10 +1037,23 @@ async function load() {
   }
 }
 
+async function openEditFromRouteQuery() {
+  const raw = Number(route.query.editProjectId)
+  if (!canUpdateProject.value || !Number.isFinite(raw) || raw <= 0) {
+    return
+  }
+  const row = rows.value.find((item) => item.id === raw)
+  if (row) {
+    await openEdit(row)
+  }
+  router.replace({ name: 'MyProjects', query: {} })
+}
+
 onMounted(async () => {
   await dictStore.ensureLoaded()
   await loadCompanies()
   await load()
+  await openEditFromRouteQuery()
 })
 </script>
 
@@ -741,6 +1122,32 @@ onMounted(async () => {
   background: linear-gradient(180deg, #2563eb, #14b8a6);
 }
 
+.form-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.form-section-head .form-section-title {
+  margin-bottom: 4px;
+}
+
+.form-section-head p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 700;
+}
+
+.partner-row-note {
+  color: #047857;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .form-grid {
   display: grid;
   gap: 16px 18px;
@@ -779,6 +1186,48 @@ onMounted(async () => {
   color: #64748b;
   font-weight: 700;
 }
+
+.locked-keyword-groups {
+  display: grid;
+  gap: 10px;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.locked-keyword-group-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.locked-keyword-group-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.locked-keyword-group-empty {
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.locked-keyword-group-tip {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .keyword-quota-panel {
   width: 100%;
   display: grid;
@@ -870,12 +1319,45 @@ onMounted(async () => {
   font-size: 13px;
   font-weight: 700;
 }
+.competitor-list {
+  display: grid;
+  gap: 10px;
+}
+.competitor-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) 48px;
+  align-items: end;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+.competitor-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 4px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
 
 @media (max-width: 768px) {
   .two-columns {
     grid-template-columns: 1fr;
   }
   .core-quota-overview {
+    grid-template-columns: 1fr;
+  }
+  .form-section-head {
+    flex-direction: column;
+  }
+  .competitor-row {
     grid-template-columns: 1fr;
   }
 }

@@ -48,6 +48,12 @@ export interface WorkorderVO {
   projectName?: string
   packageName?: string
   status: string
+  partnerReviewStatus?: 'inputting' | 'pending_owner_review' | 'returned' | 'submitted_to_hq' | string
+  partnerReviewReturnReason?: string
+  partnerReviewSubmittedAt?: string
+  partnerReviewReturnedAt?: string
+  partnerReviewHqSubmittedAt?: string
+  partnerReviewUpdatedAt?: string
   targetA: number
   targetB: number
   targetC: number
@@ -62,6 +68,12 @@ export interface WorkorderListItem {
   workorderNo: string
   packageName?: string
   status: string
+  partnerReviewStatus?: string
+  partnerReviewReturnReason?: string
+  partnerReviewSubmittedAt?: string
+  partnerReviewReturnedAt?: string
+  partnerReviewHqSubmittedAt?: string
+  partnerReviewUpdatedAt?: string
   targetA: number
   targetB: number
   targetC: number
@@ -227,6 +239,10 @@ export function startGeoBatch(data: Record<string, any>) {
   return request.post<R<BatchVO>>('/geo/batch/start', data)
 }
 
+export function startPartnerCoreQuestionBatch(workorderId: number, data?: { count?: number }) {
+  return request.post<R<BatchVO>>(`/geo/partner/workorder/${workorderId}/core-questions/generate`, data || {})
+}
+
 export function getGeoBatch(id: number) {
   return request.get<R<BatchVO>>(`/geo/batch/${id}`)
 }
@@ -263,8 +279,24 @@ export function deleteGeoQuestion(id: number) {
   return request.delete<R<void>>(`/geo/question/${id}`)
 }
 
+export function batchDeleteGeoQuestions(ids: number[]) {
+  return request.post<R<number>>('/geo/questions/batch-delete', { ids })
+}
+
 export function commitGeoWorkorder(id: number, versionLabel: string) {
   return request.post<R<any>>(`/geo/workorder/${id}/commit`, { versionLabel })
+}
+
+export function submitGeoPartnerReview(id: number) {
+  return request.post<R<WorkorderVO>>(`/geo/workorder/${id}/partner-review/submit`)
+}
+
+export function returnGeoPartnerReview(id: number, reason: string) {
+  return request.post<R<WorkorderVO>>(`/geo/workorder/${id}/partner-review/return`, { reason })
+}
+
+export function submitGeoPartnerReviewToHq(id: number) {
+  return request.post<R<WorkorderVO>>(`/geo/workorder/${id}/partner-review/submit-hq`)
 }
 
 export function exportGeoWorkorder(id: number) {

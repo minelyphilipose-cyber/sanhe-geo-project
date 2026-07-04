@@ -106,6 +106,6 @@ public class ProjectStateGuard {
     }
 
     private boolean isPartnerOwned(Project project) {
-        return "partner".equals(project.getOwnerType()) || "joint".equals(project.getOwnerType());
+        return "partner".equals(project.getOwnerType());
     }
 }

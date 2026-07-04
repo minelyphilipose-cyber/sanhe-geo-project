@@ -9,11 +9,22 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.entity.BrandImageFolder;
+import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
+import com.huanjing.geo.module.customer.mapper.BrandImageFolderMapper;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyPackageBindingMapper;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
+import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
 import com.huanjing.geo.module.partner.dto.PartnerChannelQuotaVO;
 import com.huanjing.geo.module.partner.dto.PartnerProjectStartRequestVO;
@@ -23,24 +34,34 @@ import com.huanjing.geo.module.partner.mapper.PartnerAccountMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerAccountTxnMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
 import com.huanjing.geo.module.project.dto.AdminProjectStartRequestVO;
+import com.huanjing.geo.module.project.dto.PartnerSubmissionReadinessItemVO;
+import com.huanjing.geo.module.project.dto.PartnerSubmissionReadinessVO;
 import com.huanjing.geo.module.project.dto.ProjectSetupReadyRequest;
 import com.huanjing.geo.module.project.dto.ProjectStartRequestApproveRequest;
 import com.huanjing.geo.module.project.dto.ProjectStartRequestRejectRequest;
 import com.huanjing.geo.module.project.dto.ProjectStartRequestSubmitRequest;
+import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.ProjectChannelAllocation;
+import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.entity.ProjectQuotaSnapshot;
 import com.huanjing.geo.module.project.entity.ProjectStartRequest;
+import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
+import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
 import com.huanjing.geo.module.project.mapper.ProjectQuotaSnapshotMapper;
 import com.huanjing.geo.module.project.mapper.ProjectStartRequestMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -49,10 +70,13 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -68,13 +92,27 @@ public class ProjectStartRequestService {
     private static final String SNAPSHOT_STATUS_RELEASED = "released";
     private static final String FIRST_ORDER_BIZ_TYPE = "partner_project_first_order";
     private static final DateTimeFormatter REQUEST_NO_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final String BRAND_IMAGE_CATEGORY = "brand_image";
+    private static final String COVER_FOLDER_NAME = "封面";
+    private static final String ILLUSTRATION_FOLDER_PREFIX = "插图";
+    private static final String PARTNER_WORKFLOW_ENTRY_COMPLETED = "entry_completed";
+    private static final String PARTNER_WORKFLOW_SUBMITTED_TO_HQ = "submitted_to_hq";
+    private static final int BRAND_IMAGE_FOLDER_MAX_COUNT = 80;
 
     private final ProjectStartRequestMapper requestMapper;
     private final ProjectQuotaSnapshotMapper quotaSnapshotMapper;
     private final ProjectMapper projectMapper;
+    private final BrandMapper brandMapper;
+    private final BrandImageFolderMapper brandImageFolderMapper;
+    private final BrandMaterialMapper brandMaterialMapper;
+    private final SelfMediaAccountMapper selfMediaAccountMapper;
+    private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private final CompanyMapper companyMapper;
     private final CompanyPackageBindingMapper bindingMapper;
     private final PackagePlanMapper packagePlanMapper;
+    private final ProjectChannelAllocationMapper projectChannelAllocationMapper;
+    private final KeywordGroupMapper keywordGroupMapper;
+    private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final PartnerMapper partnerMapper;
     private final PartnerAccountMapper partnerAccountMapper;
     private final PartnerAccountTxnMapper partnerAccountTxnMapper;
@@ -82,10 +120,13 @@ public class ProjectStartRequestService {
     private final CompanyPackageBindingService companyPackageBindingService;
     private final ProjectDistributionChannelAllocationService channelAllocationService;
     private final ProjectDisplayStatusResolver displayStatusResolver;
+    private final KeywordGroupService keywordGroupService;
     private final CurrentUserService currentUserService;
     private final InternalScopeService internalScopeService;
     private final ActivityLogService activityLogService;
+    private final SystemAlertService systemAlertService;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbcTemplate;
 
     @Transactional
     public PartnerProjectStartRequestVO submit(Long projectId, ProjectStartRequestSubmitRequest req) {
@@ -94,6 +135,7 @@ public class ProjectStartRequestService {
         Project project = requireProject(projectId);
         ensureProjectOwnedByPartner(project, operator);
         ensureProjectSubmittable(project);
+        validatePartnerSubmissionMaterials(project);
 
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
         PackagePlan plan = requirePartnerPackagePlan(binding);
@@ -126,6 +168,7 @@ public class ProjectStartRequestService {
                     && Objects.equals(existing.getProjectId(), project.getId())
                     && Objects.equals(existing.getPartnerId(), project.getPartnerId())
                     && STATUS_SUBMITTED.equals(existing.getStatus())) {
+                markCompanySubmittedToHq(project.getCompanyId());
                 return toPartnerVO(project, existing);
             }
             throw new BizException(409, "项目已有待审批申请", 409,
@@ -134,6 +177,7 @@ public class ProjectStartRequestService {
 
         insertQuotaSnapshot(project, request, partnerAllocatedQuotaJson);
         updateProjectStatusFromSubmittable(project.getId(), ProjectFlowPolicy.SUBMITTED);
+        markCompanySubmittedToHq(project.getCompanyId());
         project.setStatus(ProjectFlowPolicy.SUBMITTED);
 
         activityLogService.logAction(
@@ -149,6 +193,7 @@ public class ProjectStartRequestService {
                         "remark", Objects.toString(trimToNull(req == null ? null : req.getRemark()), "")
                 )
         );
+        notifyInternalReviewers(request, project);
         return toPartnerVO(project, request);
     }
 
@@ -219,7 +264,7 @@ public class ProjectStartRequestService {
         if (firstOrder) {
             lockCompanyPackageBinding(binding, project.getId(), request.getId(), now);
         }
-        assignInitialCompanyOwnerIfMissing(company, owner);
+        assignCompanyOwnerAfterApproval(company, owner);
 
         request.setStatus(STATUS_APPROVED);
         request.setReviewedBy(operator.getId());
@@ -247,6 +292,7 @@ public class ProjectStartRequestService {
                         "reviewRemark", Objects.toString(trimToNull(req == null ? null : req.getReviewRemark()), "")
                 )
         );
+        notifyAssignedOwner(request, project, owner);
         return toAdminVO(project, request, quotaSnapshotMapper.selectLatestByStartRequestId(request.getId()), pointsTxn);
     }
 
@@ -286,6 +332,7 @@ public class ProjectStartRequestService {
                         "rejectReasonCode", Objects.toString(request.getRejectReasonCode(), "")
                 )
         );
+        notifyPartnerRejected(request, project);
         return toAdminVO(project, request, quotaSnapshotMapper.selectLatestByStartRequestId(request.getId()), null);
     }
 
@@ -301,6 +348,7 @@ public class ProjectStartRequestService {
         }
         Project project = requireProject(request.getProjectId());
         ensureSetupReadyOperator(operator, project, request);
+        validateProjectSetupReadiness(project);
 
         int updated = projectMapper.update(null, new UpdateWrapper<Project>()
                 .eq("id", project.getId())
@@ -358,6 +406,72 @@ public class ProjectStartRequestService {
         return toAdminVO(request);
     }
 
+    @Transactional
+    public PartnerSubmissionReadinessVO partnerSubmissionReadiness(Long companyId) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        Company company = requireCompany(companyId);
+        if (!"partner".equals(company.getOwnerType()) || company.getPartnerId() == null) {
+            throw new BizException(400, "仅合伙人客户需要提交前检查");
+        }
+        currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(operator, company, "company");
+
+        PartnerSubmissionReadinessVO vo = new PartnerSubmissionReadinessVO();
+        vo.setCompanyId(company.getId());
+        vo.setCompanyName(company.getCompanyName());
+        vo.setCheckedAt(LocalDateTime.now());
+
+        List<PartnerSubmissionReadinessItemVO> items = new ArrayList<>();
+        items.add(checkItem("company.basic", "客户资料", "客户基础资料", "客户名称、行业、联系人、联系电话需完整", null,
+                () -> {
+                    requireText(company.getCompanyName(), "请先补齐客户名称");
+                    requireText(company.getIndustry(), "请先补齐客户行业");
+                    requireText(company.getContactName(), "请先补齐客户联系人");
+                    requireText(company.getContactPhone(), "请先补齐客户联系电话");
+                }));
+        items.add(checkItem("company.package", "客户套餐", "合伙人套餐", "客户需绑定有效合伙人套餐", null,
+                () -> {
+                    CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(company.getId());
+                    requirePartnerPackagePlan(binding);
+                }));
+
+        List<Project> projects = projectMapper.selectList(new LambdaQueryWrapper<Project>()
+                .eq(Project::getCompanyId, company.getId())
+                .eq(Project::getOwnerType, "partner")
+                .isNull(Project::getDeletedAt)
+                .orderByDesc(Project::getUpdatedAt)
+                .orderByDesc(Project::getId));
+        if (projects.isEmpty()) {
+            items.add(notReadyItem("project.exists", "项目资料", "项目信息", "请先至少创建 1 个项目", "新增项目", null));
+        }
+        for (Project project : projects) {
+            items.addAll(projectReadinessItems(project, company));
+        }
+
+        long readyCount = items.stream().filter(item -> Boolean.TRUE.equals(item.getReady())).count();
+        vo.setItems(items);
+        vo.setTotalCount(items.size());
+        vo.setReadyCount((int) readyCount);
+        vo.setPendingCount(items.size() - (int) readyCount);
+        vo.setReady(!items.isEmpty() && readyCount == items.size());
+        return vo;
+    }
+
+    public void ensurePartnerSubmissionReady(Long companyId) {
+        PartnerSubmissionReadinessVO readiness = partnerSubmissionReadiness(companyId);
+        if (Boolean.TRUE.equals(readiness.getReady())) {
+            return;
+        }
+        String summary = readiness.getItems().stream()
+                .filter(item -> !Boolean.TRUE.equals(item.getReady()))
+                .map(PartnerSubmissionReadinessItemVO::getTitle)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .limit(3)
+                .collect(java.util.stream.Collectors.joining("、"));
+        throw new BizException(400, "提交前检查未通过，请先补齐：" + summary);
+    }
+
     private void ensureSetupReadyOperator(SysUser operator, Project project, ProjectStartRequest request) {
         if (currentUserService.isPartnerUser(operator)) {
             throw new BizException(403, "Partner users cannot mark project setup ready");
@@ -371,6 +485,214 @@ public class ProjectStartRequestService {
         }
         currentUserService.ensurePermission("project.update");
         internalScopeService.ensureProjectAccess(operator, project, "project");
+    }
+
+    private void validateProjectSetupReadiness(Project project) {
+        if (project == null || project.getId() == null || project.getBrandId() == null) {
+            throw new BizException(400, "项目信息不完整，无法标记配置完成");
+        }
+        List<ProjectChannelAllocation> allocations = projectChannelAllocationMapper.selectList(
+                new LambdaQueryWrapper<ProjectChannelAllocation>()
+                        .eq(ProjectChannelAllocation::getProjectId, project.getId())
+                        .gt(ProjectChannelAllocation::getAllocatedCount, 0)
+        );
+        LinkedHashSet<String> requiredPlatforms = new LinkedHashSet<>();
+        for (ProjectChannelAllocation allocation : allocations) {
+            String platform = selfMediaPlatformFromChannel(allocation.getChannelCode());
+            if (StringUtils.hasText(platform)) {
+                requiredPlatforms.add(platform);
+            }
+        }
+        if (requiredPlatforms.isEmpty()) {
+            return;
+        }
+
+        List<Map<String, Object>> missingItems = new ArrayList<>();
+        List<String> missingMessages = new ArrayList<>();
+        for (String platform : requiredPlatforms) {
+            SelfMediaAccount account = activeSelfMediaAccount(project.getBrandId(), platform);
+            String label = selfMediaPlatformLabel(platform);
+            if (account == null) {
+                String message = label + "未配置启用的自媒体账号";
+                missingMessages.add(message);
+                missingItems.add(setupMissingItem("self_media_account", platform, label, message));
+                continue;
+            }
+            BrowserEnvironmentAccount environmentAccount = browserEnvironmentAccountMapper.selectActiveBySelfMediaAccountId(account.getId());
+            if (environmentAccount == null) {
+                String message = label + "未绑定启用的指纹浏览器环境";
+                missingMessages.add(message);
+                missingItems.add(setupMissingItem("browser_environment", platform, label, message));
+            }
+        }
+        if (!missingItems.isEmpty()) {
+            throw new BizException(400, "项目启动配置未完成：" + String.join("；", missingMessages), 400,
+                    Map.of("errorCode", "PROJECT_SETUP_NOT_READY", "missingItems", missingItems));
+        }
+    }
+
+    private List<PartnerSubmissionReadinessItemVO> projectReadinessItems(Project project, Company company) {
+        List<PartnerSubmissionReadinessItemVO> items = new ArrayList<>();
+        String prefix = "project." + project.getId() + ".";
+        Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
+        items.add(checkItem(prefix + "basic", "项目资料", "项目基础资料", "项目名称、目标区域、核心关键词、目标受众需完整",
+                project, () -> validateProjectBasic(project)));
+        items.add(checkItem(prefix + "brand", "品牌资料", "品牌基础资料", "品牌名称、简称、行业、主营业务需完整",
+                project, () -> validateBrandBasic(brand, company)));
+        items.add(checkItem(prefix + "competitor", "竞品信息", "项目竞品", "至少添加 1 个有效竞品信息",
+                project, () -> validateProjectCompetitors(project.getId())));
+        items.add(checkItem(prefix + "keywords", "核心问题", "项目核心问题", "核心问题组数量需等于项目分配额度",
+                project, () -> validateProjectKeywordGroups(project)));
+        items.add(checkItem(prefix + "channels", "展示渠道", "展示渠道额度", "项目展示渠道需有有效分配额度",
+                project, () -> channelAllocationService.validateActivation(project)));
+        items.add(checkItem(prefix + "images", "品牌资产", "品牌图片资产", "需有封面和插图文件夹，且每个要求文件夹至少 1 张图片",
+                project, () -> {
+                    if (brand == null) {
+                        throw new BizException(400, "请先选择有效品牌");
+                    }
+                    validateBrandArticleImages(brand.getId());
+                }));
+        return items;
+    }
+
+    private void validateProjectBasic(Project project) {
+        requireText(project.getProjectName(), "请先补齐项目名称");
+        requireText(firstText(project.getTargetRegions(), project.getCityName(), project.getProvinceName()), "请先补齐项目目标区域");
+        requireText(project.getCoreKeywords(), "请先补齐项目核心关键词");
+        requireText(project.getTargetAudience(), "请先补齐项目目标受众");
+    }
+
+    private void validateBrandBasic(Brand brand, Company company) {
+        if (brand == null || brand.getDeletedAt() != null) {
+            throw new BizException(400, "请先选择有效品牌");
+        }
+        requireText(brand.getBrandName(), "请先补齐品牌名称");
+        requireText(brand.getBrandShortName(), "请先补齐品牌简称/别名");
+        requireText(firstText(brand.getIndustry(), company == null ? null : company.getIndustry()), "请先补齐品牌行业");
+        requireText(firstText(brand.getMainBusiness(), brand.getBusinessIntro(), company == null ? null : company.getBusinessDirection()), "请先补齐品牌主营业务");
+    }
+
+    private PartnerSubmissionReadinessItemVO checkItem(String key,
+                                                       String category,
+                                                       String title,
+                                                       String successDescription,
+                                                       Project project,
+                                                       Runnable checker) {
+        PartnerSubmissionReadinessItemVO item = new PartnerSubmissionReadinessItemVO();
+        item.setKey(key);
+        item.setCategory(category);
+        item.setTitle(project == null ? title : projectDisplayTitle(project, title));
+        item.setReady(true);
+        item.setSeverity("success");
+        item.setDescription(successDescription);
+        item.setActionText("已完成");
+        if (project != null) {
+            item.setProjectId(project.getId());
+            item.setProjectName(projectDisplayName(project));
+        }
+        try {
+            checker.run();
+        } catch (BizException ex) {
+            item.setReady(false);
+            item.setSeverity("danger");
+            item.setDescription(ex.getMessage());
+            item.setActionText(actionText(category));
+        } catch (RuntimeException ex) {
+            item.setReady(false);
+            item.setSeverity("danger");
+            item.setDescription("检查失败，请刷新后重试");
+            item.setActionText("刷新检查");
+        }
+        return item;
+    }
+
+    private PartnerSubmissionReadinessItemVO notReadyItem(String key,
+                                                          String category,
+                                                          String title,
+                                                          String description,
+                                                          String actionText,
+                                                          Project project) {
+        PartnerSubmissionReadinessItemVO item = new PartnerSubmissionReadinessItemVO();
+        item.setKey(key);
+        item.setCategory(category);
+        item.setTitle(project == null ? title : projectDisplayTitle(project, title));
+        item.setDescription(description);
+        item.setReady(false);
+        item.setSeverity("danger");
+        item.setActionText(actionText);
+        if (project != null) {
+            item.setProjectId(project.getId());
+            item.setProjectName(projectDisplayName(project));
+        }
+        return item;
+    }
+
+    private String projectDisplayTitle(Project project, String title) {
+        return "项目「" + projectDisplayName(project) + "」" + title;
+    }
+
+    private String projectDisplayName(Project project) {
+        if (project == null) {
+            return "-";
+        }
+        return StringUtils.hasText(project.getProjectName()) ? project.getProjectName() : String.valueOf(project.getId());
+    }
+
+    private String actionText(String category) {
+        return switch (category) {
+            case "客户资料" -> "补充客户资料";
+            case "客户套餐" -> "联系负责人绑定套餐";
+            case "项目资料" -> "编辑项目";
+            case "品牌资料", "品牌资产" -> "维护品牌资料";
+            case "竞品信息" -> "补充竞品";
+            case "核心问题" -> "进入拓词管理";
+            case "展示渠道" -> "调整项目额度";
+            default -> "去补充";
+        };
+    }
+
+    private Map<String, Object> setupMissingItem(String type, String platform, String label, String message) {
+        return Map.of(
+                "type", type,
+                "platform", Objects.toString(platform, ""),
+                "label", Objects.toString(label, ""),
+                "message", Objects.toString(message, "")
+        );
+    }
+
+    private SelfMediaAccount activeSelfMediaAccount(Long brandId, String platform) {
+        String publishPlatform = ArticlePromptChannels.normalizeSelfMediaPublishPlatform(platform);
+        SelfMediaAccount account = activeSelfMediaAccountByStoredPlatform(brandId, publishPlatform);
+        if (account != null) {
+            return account;
+        }
+        return activeSelfMediaAccountByStoredPlatform(brandId, ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(platform));
+    }
+
+    private SelfMediaAccount activeSelfMediaAccountByStoredPlatform(Long brandId, String platform) {
+        if (brandId == null || !StringUtils.hasText(platform)) {
+            return null;
+        }
+        return selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getBrandId, brandId)
+                .eq(SelfMediaAccount::getPlatform, platform)
+                .eq(SelfMediaAccount::getStatus, "active")
+                .isNull(SelfMediaAccount::getDeletedAt)
+                .orderByDesc(SelfMediaAccount::getUpdatedAt)
+                .orderByDesc(SelfMediaAccount::getId)
+                .last("LIMIT 1"));
+    }
+
+    private String selfMediaPlatformFromChannel(String channelCode) {
+        String prefix = ArticlePromptChannels.SELF_MEDIA + ":";
+        if (!StringUtils.hasText(channelCode) || !channelCode.startsWith(prefix)) {
+            return null;
+        }
+        return ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(channelCode.substring(prefix.length()));
+    }
+
+    private String selfMediaPlatformLabel(String platform) {
+        return ArticlePromptChannels.channelName(ArticlePromptChannels.SELF_MEDIA, platform);
     }
 
     private void ensurePartnerOwner(SysUser operator) {
@@ -420,7 +742,7 @@ public class ProjectStartRequestService {
     private void ensureProjectOwnedByPartner(Project project, SysUser operator) {
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         internalScopeService.ensureProjectAccess(operator, project, "project");
-        if (!"partner".equals(project.getOwnerType()) && !"joint".equals(project.getOwnerType())) {
+        if (!"partner".equals(project.getOwnerType())) {
             throw new BizException(400, "Only partner project can submit start request");
         }
     }
@@ -431,6 +753,261 @@ public class ProjectStartRequestService {
         if (!display.submittable()) {
             throw new BizException(400, "Project is not submittable in current status");
         }
+    }
+
+    private void markCompanySubmittedToHq(Long companyId) {
+        if (companyId == null) {
+            return;
+        }
+        Company company = companyMapper.selectById(companyId);
+        if (company == null || company.getDeletedAt() != null) {
+            return;
+        }
+        if (PARTNER_WORKFLOW_SUBMITTED_TO_HQ.equals(company.getPartnerWorkflowStatus())) {
+            return;
+        }
+        company.setPartnerWorkflowStatus(PARTNER_WORKFLOW_SUBMITTED_TO_HQ);
+        company.setPartnerWorkflowUpdatedAt(LocalDateTime.now());
+        companyMapper.updateById(company);
+    }
+
+    private void notifyInternalReviewers(ProjectStartRequest request, Project project) {
+        Map<String, Object> context = notificationContext(request, project);
+        String message = "合伙人提交了项目启动工单：" + Objects.toString(project.getProjectName(), request.getRequestNo());
+        for (String role : List.of("delivery_manager", "manager", "super_admin")) {
+            systemAlertService.createOrRefreshRecipientAlert(
+                    "partner_project_start_request_submitted",
+                    "warn",
+                    "project_start_request",
+                    message,
+                    context,
+                    null,
+                    role,
+                    "partner-start-request:submitted:" + request.getId() + ":" + role
+            );
+        }
+    }
+
+    private void notifyAssignedOwner(ProjectStartRequest request, Project project, SysUser owner) {
+        if (owner == null || owner.getId() == null) {
+            return;
+        }
+        systemAlertService.createOrRefreshRecipientAlert(
+                "partner_project_start_request_approved",
+                "info",
+                "project_start_request",
+                "合伙人项目已通过审批，请补齐启动配置：" + Objects.toString(project.getProjectName(), request.getRequestNo()),
+                notificationContext(request, project),
+                owner.getId(),
+                null,
+                "partner-start-request:approved:" + request.getId() + ":" + owner.getId()
+        );
+    }
+
+    private void notifyPartnerRejected(ProjectStartRequest request, Project project) {
+        Map<String, Object> context = notificationContext(request, project);
+        String message = "项目启动工单已驳回，请交付员工修改后重新提交负责人复核：" + Objects.toString(project.getProjectName(), request.getRequestNo());
+        Set<Long> recipients = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getPartnerId, request.getPartnerId())
+                        .in(SysUser::getRole, List.of("partner", "partner_staff"))
+                        .eq(SysUser::getIsActive, true))
+                .stream()
+                .map(SysUser::getId)
+                .filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+        for (Long userId : recipients) {
+            systemAlertService.createOrRefreshRecipientAlert(
+                    "partner_project_start_request_rejected",
+                    "warn",
+                    "project_start_request",
+                    message,
+                    context,
+                    userId,
+                    null,
+                    "partner-start-request:rejected:" + request.getId() + ":" + userId
+            );
+        }
+    }
+
+    private Map<String, Object> notificationContext(ProjectStartRequest request, Project project) {
+        return Map.of(
+                "requestId", request.getId(),
+                "requestNo", Objects.toString(request.getRequestNo(), ""),
+                "projectId", project.getId(),
+                "projectName", Objects.toString(project.getProjectName(), ""),
+                "companyId", request.getCompanyId(),
+                "partnerId", request.getPartnerId()
+        );
+    }
+
+    private void validatePartnerSubmissionMaterials(Project project) {
+        Company company = requireCompany(project.getCompanyId());
+        Brand brand = requireBrand(project.getBrandId());
+
+        if (!PARTNER_WORKFLOW_ENTRY_COMPLETED.equals(company.getPartnerWorkflowStatus())) {
+            throw new BizException(400, "交付资料已退回或尚未提交负责人确认，请等待交付员工补齐后重新提交负责人确认");
+        }
+
+        requireText(company.getCompanyName(), "请先补齐客户名称");
+        requireText(company.getIndustry(), "请先补齐客户行业");
+        requireText(company.getContactName(), "请先补齐客户联系人");
+        requireText(company.getContactPhone(), "请先补齐客户联系电话");
+        requireText(brand.getBrandName(), "请先补齐品牌名称");
+        requireText(brand.getBrandShortName(), "请先补齐品牌简称/别名");
+        requireText(firstText(brand.getIndustry(), company.getIndustry()), "请先补齐品牌行业");
+        requireText(firstText(brand.getMainBusiness(), brand.getBusinessIntro(), company.getBusinessDirection()), "请先补齐品牌主营业务");
+        requireText(project.getProjectName(), "请先补齐项目名称");
+        requireText(firstText(project.getTargetRegions(), project.getCityName(), project.getProvinceName()), "请先补齐项目目标区域");
+        requireText(project.getCoreKeywords(), "请先补齐项目核心关键词");
+        requireText(project.getTargetAudience(), "请先补齐项目目标受众");
+
+        validateProjectCompetitors(project.getId());
+        validateProjectKeywordGroups(project);
+        validateBrandArticleImages(brand.getId());
+    }
+
+    private Brand requireBrand(Long brandId) {
+        Brand brand = brandId == null ? null : brandMapper.selectById(brandId);
+        if (brand == null || brand.getDeletedAt() != null) {
+            throw new BizException(400, "请先选择有效品牌");
+        }
+        return brand;
+    }
+
+    private void validateProjectCompetitors(Long projectId) {
+        Long count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(1)
+                  FROM project_competitor_config
+                 WHERE project_id = ?
+                   AND status = 'active'
+                   AND competitor_name IS NOT NULL
+                   AND TRIM(competitor_name) <> ''
+                """, Long.class, projectId);
+        if (count == null || count <= 0) {
+            throw new BizException(400, "请先至少添加 1 个竞品信息");
+        }
+    }
+
+    private void validateProjectKeywordGroups(Project project) {
+        int target = defaultInt(project.getPlanKeywordGroupLimit(), 0);
+        if (target <= 0) {
+            target = defaultInt(project.getPlanKeywordGroupLimitA(), 0)
+                    + defaultInt(project.getPlanKeywordGroupLimitB(), 0)
+                    + defaultInt(project.getPlanKeywordGroupLimitC(), 0);
+        }
+        if (target <= 0) {
+            throw new BizException(400, "请先为项目分配核心问题额度");
+        }
+        List<Long> groupIds = selectedKeywordGroupIds(project);
+        if (groupIds.isEmpty()) {
+            throw new BizException(400, "请先在拓词管理中确认核心问题组");
+        }
+        long savedCount = keywordGroupService.calcSavedCountsByGroupIds(groupIds)
+                .values()
+                .stream()
+                .mapToLong(Long::longValue)
+                .sum();
+        if (savedCount != target) {
+            throw new BizException(400, "核心问题数量未达项目分配额度：" + savedCount + " / " + target);
+        }
+    }
+
+    private List<Long> selectedKeywordGroupIds(Project project) {
+        List<Long> relIds = projectKeywordGroupRelMapper.selectList(
+                        new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                                .eq(ProjectKeywordGroupRel::getProjectId, project.getId()))
+                .stream()
+                .map(ProjectKeywordGroupRel::getKeywordGroupId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (!relIds.isEmpty()) {
+            return keywordGroupMapper.selectList(new LambdaQueryWrapper<KeywordGroup>()
+                            .in(KeywordGroup::getId, relIds)
+                            .eq(KeywordGroup::getCompanyId, project.getCompanyId())
+                            .eq(KeywordGroup::getDeleted, false))
+                    .stream()
+                    .map(KeywordGroup::getId)
+                    .toList();
+        }
+        return keywordGroupMapper.selectList(new LambdaQueryWrapper<KeywordGroup>()
+                        .eq(KeywordGroup::getProjectId, project.getId())
+                        .eq(KeywordGroup::getCompanyId, project.getCompanyId())
+                        .eq(KeywordGroup::getDeleted, false))
+                .stream()
+                .map(KeywordGroup::getId)
+                .toList();
+    }
+
+    private void validateBrandArticleImages(Long brandId) {
+        List<BrandImageFolder> folders = brandImageFolderMapper.selectList(new LambdaQueryWrapper<BrandImageFolder>()
+                .eq(BrandImageFolder::getBrandId, brandId)
+                .eq(BrandImageFolder::getStatus, "active"));
+        List<Long> coverFolderIds = folders.stream()
+                .filter(folder -> COVER_FOLDER_NAME.equals(trimToNull(folder.getFolderName())))
+                .map(BrandImageFolder::getId)
+                .toList();
+        List<Long> illustrationFolderIds = folders.stream()
+                .filter(folder -> StringUtils.hasText(folder.getFolderName())
+                        && folder.getFolderName().trim().startsWith(ILLUSTRATION_FOLDER_PREFIX))
+                .map(BrandImageFolder::getId)
+                .toList();
+        if (coverFolderIds.isEmpty() || illustrationFolderIds.isEmpty()) {
+            throw new BizException(400, "品牌图片资产需保留启用的“封面”文件夹和至少一个“插图”开头的文件夹");
+        }
+        Map<Long, Long> counts = imageCountsByFolder(brandId, folders.stream().map(BrandImageFolder::getId).toList());
+        for (BrandImageFolder folder : folders) {
+            long count = counts.getOrDefault(folder.getId(), 0L);
+            if (count > BRAND_IMAGE_FOLDER_MAX_COUNT) {
+                throw new BizException(400, "图片文件夹“" + folder.getFolderName() + "”最多上传 " + BRAND_IMAGE_FOLDER_MAX_COUNT + " 张图片");
+            }
+        }
+        long coverCount = coverFolderIds.stream().mapToLong(id -> counts.getOrDefault(id, 0L)).sum();
+        long illustrationCount = illustrationFolderIds.stream().mapToLong(id -> counts.getOrDefault(id, 0L)).sum();
+        if (coverCount <= 0) {
+            throw new BizException(400, "品牌图片资产的“封面”文件夹中至少需要 1 张图片");
+        }
+        if (illustrationCount <= 0) {
+            throw new BizException(400, "品牌图片资产的“插图”文件夹中至少需要 1 张图片");
+        }
+    }
+
+    private Map<Long, Long> imageCountsByFolder(Long brandId, List<Long> folderIds) {
+        if (folderIds == null || folderIds.isEmpty()) {
+            return Map.of();
+        }
+        return brandMaterialMapper.selectList(new LambdaQueryWrapper<BrandMaterial>()
+                        .eq(BrandMaterial::getBrandId, brandId)
+                        .eq(BrandMaterial::getCategory, BRAND_IMAGE_CATEGORY)
+                        .in(BrandMaterial::getFolderId, folderIds))
+                .stream()
+                .filter(material -> material.getFolderId() != null)
+                .collect(java.util.stream.Collectors.groupingBy(
+                        BrandMaterial::getFolderId,
+                        java.util.stream.Collectors.counting()
+                ));
+    }
+
+    private void requireText(String value, String message) {
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(400, message);
+        }
+    }
+
+    private String firstText(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private int defaultInt(Integer value, int fallback) {
+        return value == null ? fallback : value;
     }
 
     private PackagePlan requirePartnerPackagePlan(CompanyPackageBinding binding) {
@@ -607,14 +1184,16 @@ public class ProjectStartRequestService {
 
     private SysUser resolveInternalOwner(Company company, Long requestedOwnerId) {
         if (company.getOwnerId() != null) {
-            if (requestedOwnerId != null && !requestedOwnerId.equals(company.getOwnerId())) {
-                throw new BizException(400, "Customer owner change must use owner transfer before approval");
-            }
             SysUser existingOwner = sysUserMapper.selectById(company.getOwnerId());
-            if (existingOwner == null || !Boolean.TRUE.equals(existingOwner.getIsActive()) || !"operator".equals(existingOwner.getRole())) {
+            if (existingOwner != null && Boolean.TRUE.equals(existingOwner.getIsActive()) && "operator".equals(existingOwner.getRole())) {
+                if (requestedOwnerId != null && !requestedOwnerId.equals(company.getOwnerId())) {
+                    throw new BizException(400, "Customer owner change must use owner transfer before approval");
+                }
+                return existingOwner;
+            }
+            if (!"partner".equals(company.getOwnerType())) {
                 throw new BizException(400, "Customer owner is inactive, transfer customer owner before approval");
             }
-            return existingOwner;
         }
         if (requestedOwnerId == null) {
             throw new BizException(400, "Assigned internal owner is required");
@@ -626,8 +1205,8 @@ public class ProjectStartRequestService {
         return owner;
     }
 
-    private void assignInitialCompanyOwnerIfMissing(Company company, SysUser owner) {
-        if (company.getOwnerId() != null) {
+    private void assignCompanyOwnerAfterApproval(Company company, SysUser owner) {
+        if (company.getOwnerId() != null && company.getOwnerId().equals(owner.getId())) {
             return;
         }
         company.setOwnerId(owner.getId());
@@ -696,13 +1275,27 @@ public class ProjectStartRequestService {
         vo.setProjectId(request.getProjectId());
         vo.setProjectStatus(project == null ? null : project.getStatus());
         vo.setProjectDisplayStatus(project == null ? null : displayStatusResolver.resolveStatus(project, request));
+        vo.setProjectName(project == null ? null : project.getProjectName());
+        vo.setBrandId(project == null ? null : project.getBrandId());
+        vo.setBrandName(project == null ? null : project.getBrandName());
         vo.setCompanyId(request.getCompanyId());
+        Company company = companyMapper.selectById(request.getCompanyId());
+        vo.setCompanyName(company == null ? null : company.getCompanyName());
+        if (company != null && company.getOwnerId() != null) {
+            vo.setDefaultInternalOwnerId(company.getOwnerId());
+            vo.setDefaultInternalOwnerName(userName(company.getOwnerId()));
+        }
         vo.setPartnerId(request.getPartnerId());
+        Partner partner = partnerMapper.selectById(request.getPartnerId());
+        vo.setPartnerName(partner == null ? null : partner.getPartnerName());
         vo.setApplicantUserId(request.getApplicantUserId());
+        vo.setApplicantUserName(userName(request.getApplicantUserId()));
         vo.setSubmittedAt(request.getSubmittedAt());
         vo.setReviewedBy(request.getReviewedBy());
+        vo.setReviewerName(userName(request.getReviewedBy()));
         vo.setReviewedAt(request.getReviewedAt());
         vo.setAssignedInternalOwnerId(request.getAssignedInternalOwnerId());
+        vo.setAssignedInternalOwnerName(userName(request.getAssignedInternalOwnerId()));
         vo.setPointsRequiredSnapshot(request.getPointsRequiredSnapshot());
         vo.setDiscountRateSnapshot(request.getDiscountRateSnapshot());
         vo.setPackageSnapshotJson(request.getPackageSnapshotJson());
@@ -723,6 +1316,17 @@ public class ProjectStartRequestService {
         vo.setCreatedAt(request.getCreatedAt());
         vo.setUpdatedAt(request.getUpdatedAt());
         return vo;
+    }
+
+    private String userName(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null) {
+            return null;
+        }
+        return StringUtils.hasText(user.getDisplayName()) ? user.getDisplayName() : user.getUsername();
     }
 
     private AdminProjectStartRequestVO toAdminVO(ProjectStartRequest request) {

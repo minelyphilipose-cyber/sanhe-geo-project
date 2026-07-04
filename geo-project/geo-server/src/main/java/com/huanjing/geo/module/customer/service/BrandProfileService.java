@@ -37,6 +37,7 @@ public class BrandProfileService {
 
     private static final long MAX_UPLOAD_FILE_SIZE = 10L * 1024 * 1024;
     private static final Set<String> MATERIAL_CATEGORIES = Set.of("brand_image", "case", "qualification", "other");
+    private static final int BRAND_IMAGE_FOLDER_MAX_COUNT = 80;
 
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
@@ -155,6 +156,7 @@ public class BrandProfileService {
                             brand.getId(),
                             brandImageFolderService.ensureDefaultFolder(brandId, operator.getId()).getId()).getId()
                     : brandImageFolderService.requireActiveFolderForSelection(brand.getId(), folderId).getId();
+            ensureBrandImageFolderCapacity(brand.getId(), targetFolderId);
         }
         if (file == null || file.isEmpty()) {
             throw new BizException(400, "Upload file is empty");
@@ -212,6 +214,16 @@ public class BrandProfileService {
                 null
         );
         return material;
+    }
+
+    private void ensureBrandImageFolderCapacity(Long brandId, Long folderId) {
+        Long count = brandMaterialMapper.selectCount(new LambdaQueryWrapper<BrandMaterial>()
+                .eq(BrandMaterial::getBrandId, brandId)
+                .eq(BrandMaterial::getFolderId, folderId)
+                .eq(BrandMaterial::getCategory, "brand_image"));
+        if (count != null && count >= BRAND_IMAGE_FOLDER_MAX_COUNT) {
+            throw new BizException(400, "当前图片文件夹最多上传 " + BRAND_IMAGE_FOLDER_MAX_COUNT + " 张图片");
+        }
     }
 
     @Transactional

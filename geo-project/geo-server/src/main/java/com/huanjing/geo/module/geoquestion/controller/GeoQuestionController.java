@@ -89,6 +89,21 @@ public class GeoQuestionController {
         return R.ok(geoQuestionService.commit(id, req));
     }
 
+    @PostMapping("/api/geo/workorder/{id:\\d+}/partner-review/submit")
+    public R<WorkorderVO> submitPartnerReview(@PathVariable Long id) {
+        return R.ok(geoQuestionService.submitPartnerReview(id));
+    }
+
+    @PostMapping("/api/geo/workorder/{id:\\d+}/partner-review/return")
+    public R<WorkorderVO> returnPartnerReview(@PathVariable Long id, @RequestBody PartnerReviewReturnRequest req) {
+        return R.ok(geoQuestionService.returnPartnerReview(id, req));
+    }
+
+    @PostMapping("/api/geo/workorder/{id:\\d+}/partner-review/submit-hq")
+    public R<WorkorderVO> submitPartnerReviewToHq(@PathVariable Long id) {
+        return R.ok(geoQuestionService.submitPartnerReviewToHq(id));
+    }
+
     @GetMapping("/api/geo/workorder/{id:\\d+}/export")
     public ResponseEntity<byte[]> export(@PathVariable Long id) {
         String filename = java.net.URLEncoder.encode("问题池工单-" + id + ".csv", StandardCharsets.UTF_8);
@@ -111,6 +126,12 @@ public class GeoQuestionController {
     @PostMapping("/api/geo/batch/start")
     public R<BatchVO> startBatch(@RequestBody BatchStartRequest req) {
         return R.ok(geoQuestionService.startBatch(req));
+    }
+
+    @PostMapping("/api/geo/partner/workorder/{id:\\d+}/core-questions/generate")
+    public R<BatchVO> generatePartnerCoreQuestions(@PathVariable Long id,
+                                                   @RequestBody(required = false) PartnerCoreQuestionGenerateRequest req) {
+        return R.ok(geoQuestionService.startPartnerCoreQuestionBatch(id, req));
     }
 
     @GetMapping("/api/geo/batch/{id:\\d+}")
@@ -138,6 +159,11 @@ public class GeoQuestionController {
     @PutMapping("/api/geo/question/{id:\\d+}")
     public R<QuestionVO> updateQuestion(@PathVariable Long id, @RequestBody QuestionUpdateRequest req) {
         return R.ok(geoQuestionService.updateQuestion(id, req));
+    }
+
+    @PostMapping("/api/geo/questions/batch-delete")
+    public R<Integer> batchDeleteQuestions(@RequestBody QuestionBatchDeleteRequest req) {
+        return R.ok(geoQuestionService.deleteQuestions(req));
     }
 
     @DeleteMapping("/api/geo/question/{id:\\d+}")

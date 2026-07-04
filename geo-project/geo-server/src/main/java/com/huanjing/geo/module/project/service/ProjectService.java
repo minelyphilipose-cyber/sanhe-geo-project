@@ -59,9 +59,11 @@ import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.ProjectCustomerRequirement;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.ProjectStartRequest;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.mapper.ProjectStartRequestMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.report.entity.PostsaleReportSnapshot;
 import com.huanjing.geo.module.report.entity.Report;
@@ -98,12 +100,25 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ProjectService {
 
-    private static final Set<String> OWNER_TYPES = Set.of("direct", "partner", "joint");
+    private static final Set<String> OWNER_TYPES = Set.of("direct", "partner");
+    private static final Set<String> HQ_VISIBLE_PARTNER_PROJECT_STATUSES = Set.of(
+            ProjectFlowPolicy.SUBMITTED,
+            ProjectFlowPolicy.REJECTED,
+            ProjectFlowPolicy.APPROVED_PENDING_SETUP,
+            ProjectFlowPolicy.SETUP_READY,
+            ProjectFlowPolicy.ACTIVE,
+            ProjectFlowPolicy.PAUSED,
+            ProjectFlowPolicy.COMPLETED,
+            ProjectFlowPolicy.ARCHIVED,
+            ProjectFlowPolicy.CANCELLED,
+            ProjectFlowPolicy.EXPIRED
+    );
     private static final int CUSTOMER_REQUIREMENT_MAX_COUNT = 20;
     private static final int CUSTOMER_REQUIREMENT_MIN_LENGTH = 10;
     private static final int CUSTOMER_REQUIREMENT_MAX_LENGTH = 100;
 
     private final ProjectMapper projectMapper;
+    private final ProjectStartRequestMapper projectStartRequestMapper;
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
     private final CompanyPackageBindingService companyPackageBindingService;
@@ -139,10 +154,14 @@ public class ProjectService {
     private final SpecialIndustryReadinessService specialIndustryReadinessService;
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
-        return page(current, size, keyword, status, stage, partnerId, brandId, false);
+        return page(current, size, keyword, status, stage, null, partnerId, brandId, false);
     }
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId, boolean excludeThirdPartySource) {
+        return page(current, size, keyword, status, stage, null, partnerId, brandId, excludeThirdPartySource);
+    }
+
+    public Page<Project> page(long current, long size, String keyword, String status, String stage, String ownerType, Long partnerId, Long brandId, boolean excludeThirdPartySource) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         expireOverdueProjects();
@@ -164,6 +183,9 @@ public class ProjectService {
         if (StringUtils.hasText(stage)) {
             wrapper.eq(Project::getStage, stage);
         }
+        if (StringUtils.hasText(ownerType)) {
+            wrapper.eq(Project::getOwnerType, ownerType);
+        }
         if (brandId != null) {
             wrapper.eq(Project::getBrandId, brandId);
         }
@@ -175,6 +197,7 @@ public class ProjectService {
         if (scopePartnerId != null) {
             wrapper.eq(Project::getPartnerId, scopePartnerId);
         }
+        applyInternalPartnerVisibility(wrapper, user, ownerType, scopePartnerId);
         if (internalScopeService.isSalesUser(user)) {
             List<Long> signedCompanyIds = companyMapper.selectList(
                     new LambdaQueryWrapper<Company>()
@@ -201,11 +224,36 @@ public class ProjectService {
         return page;
     }
 
+    private void applyInternalPartnerVisibility(LambdaQueryWrapper<Project> wrapper, SysUser user, String ownerType, Long scopePartnerId) {
+        if (currentUserService.isPartnerUser(user) || internalScopeService.isSuperAdmin(user)) {
+            return;
+        }
+        boolean partnerQuery = "partner".equals(ownerType) || scopePartnerId != null;
+        if (partnerQuery) {
+            wrapper.in(Project::getStatus, HQ_VISIBLE_PARTNER_PROJECT_STATUSES);
+        } else if (!StringUtils.hasText(ownerType)) {
+            wrapper.and(w -> w.ne(Project::getOwnerType, "partner").or().in(Project::getStatus, HQ_VISIBLE_PARTNER_PROJECT_STATUSES));
+        }
+    }
+
+    private void ensureInternalPartnerProjectVisible(SysUser user, Project project) {
+        if (currentUserService.isPartnerUser(user) || project == null || !"partner".equals(project.getOwnerType())) {
+            return;
+        }
+        if (internalScopeService.isSuperAdmin(user)) {
+            return;
+        }
+        if (!HQ_VISIBLE_PARTNER_PROJECT_STATUSES.contains(project.getStatus())) {
+            throw new BizException(403, "合伙人项目尚未提交总部，当前账号无权查看");
+        }
+    }
+
     public Project detail(Long id) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         Project project = requireProject(id);
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
+        ensureInternalPartnerProjectVisible(user, project);
         internalScopeService.ensureProjectAccess(user, project, "project");
         ensureSalesProjectAccess(user, project);
         attachThirdPartySourceFlag(Collections.singletonList(project), List.of());
@@ -527,6 +575,7 @@ public class ProjectService {
         Project project = requireProject(id);
         internalScopeService.ensureProjectAccess(operator, project, "project");
         projectStateGuard.ensureCanDelete(project, operator);
+        ensurePartnerProjectCanDelete(project);
         if ("active".equals(project.getStatus())) {
             channelAllocationService.lockCompany(project.getCompanyId());
             channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.delete", true);
@@ -543,6 +592,16 @@ public class ProjectService {
                 null,
                 null
         );
+    }
+
+    private void ensurePartnerProjectCanDelete(Project project) {
+        if (!"partner".equals(project.getOwnerType())) {
+            return;
+        }
+        ProjectStartRequest latest = projectStartRequestMapper.selectLatestByProjectId(project.getId());
+        if (latest != null) {
+            throw new BizException(400, "合伙人项目已提交过总部，不能删除");
+        }
     }
 
     private void purgeProjectRelations(Long projectId) {
@@ -694,8 +753,8 @@ public class ProjectService {
         if ("direct".equals(ownerType) && partnerId != null) {
             throw new BizException(400, "direct project must not bind partner_id");
         }
-        if (("partner".equals(ownerType) || "joint".equals(ownerType)) && partnerId == null) {
-            throw new BizException(400, "partner/joint project must bind partner_id");
+        if ("partner".equals(ownerType) && partnerId == null) {
+            throw new BizException(400, "partner project must bind partner_id");
         }
     }
 
@@ -745,7 +804,7 @@ public class ProjectService {
             return;
         }
         if (companyPartnerId == null) {
-            throw new BizException(400, "Selected brand belongs to direct company, cannot create partner/joint project");
+            throw new BizException(400, "Selected brand belongs to direct company, cannot create partner project");
         }
         if (!companyPartnerId.equals(projectPartnerId)) {
             throw new BizException(400, "Project partner_id must match company partner_id");

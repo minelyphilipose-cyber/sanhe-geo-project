@@ -17,6 +17,7 @@ import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaItemVO;
 import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyOwnerTransferRequest;
+import com.huanjing.geo.module.customer.dto.CompanyPartnerEntryReturnRequest;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyPartnerStaffAssignRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
@@ -30,10 +31,16 @@ import com.huanjing.geo.module.customer.mapper.CompanyAccountMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyAccountTxnMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.geoquestion.entity.GeoQuestionItem;
+import com.huanjing.geo.module.geoquestion.entity.GeoQuestionWorkorder;
+import com.huanjing.geo.module.geoquestion.mapper.GeoQuestionItemMapper;
+import com.huanjing.geo.module.geoquestion.mapper.GeoQuestionWorkorderMapper;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
 import com.huanjing.geo.module.project.service.KeywordGroupService;
+import com.huanjing.geo.module.project.service.ProjectStartRequestService;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
+import com.huanjing.geo.module.project.service.ProjectFlowPolicy;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysDictItem;
@@ -73,7 +80,7 @@ import cn.hutool.core.util.RandomUtil;
 @RequiredArgsConstructor
 public class CompanyService {
 
-    private static final Set<String> OWNER_TYPES = Set.of("direct", "partner", "joint");
+    private static final Set<String> OWNER_TYPES = Set.of("direct", "partner");
     private static final Set<String> SOURCE_TYPES = Set.of("internal", "partner");
     private static final Set<String> STATUSES = Set.of("potential", "signed", "inactive");
     public static final String PARTNER_WORKFLOW_DRAFT = "draft";
@@ -81,7 +88,30 @@ public class CompanyService {
     public static final String PARTNER_WORKFLOW_PACKAGE_BOUND = "package_bound";
     public static final String PARTNER_WORKFLOW_PROJECT_ENTRY = "project_entry";
     public static final String PARTNER_WORKFLOW_ENTRY_COMPLETED = "entry_completed";
+    public static final String PARTNER_WORKFLOW_SUBMITTED_TO_HQ = "submitted_to_hq";
     private static final Set<String> DISTRIBUTION_PERIOD_TYPES = Set.of("day", "week", "month", "total");
+    private static final Set<String> HQ_VISIBLE_PARTNER_PROJECT_STATUSES = Set.of(
+            ProjectFlowPolicy.SUBMITTED,
+            ProjectFlowPolicy.REJECTED,
+            ProjectFlowPolicy.APPROVED_PENDING_SETUP,
+            ProjectFlowPolicy.SETUP_READY,
+            ProjectFlowPolicy.ACTIVE,
+            ProjectFlowPolicy.PAUSED,
+            ProjectFlowPolicy.COMPLETED,
+            ProjectFlowPolicy.ARCHIVED,
+            ProjectFlowPolicy.CANCELLED,
+            ProjectFlowPolicy.EXPIRED
+    );
+    private static final Set<String> PARTNER_SUBMITTED_TO_HQ_PROJECT_STATUSES = Set.of(
+            ProjectFlowPolicy.SUBMITTED,
+            ProjectFlowPolicy.APPROVED_PENDING_SETUP,
+            ProjectFlowPolicy.SETUP_READY,
+            ProjectFlowPolicy.ACTIVE,
+            ProjectFlowPolicy.PAUSED,
+            ProjectFlowPolicy.COMPLETED,
+            ProjectFlowPolicy.ARCHIVED,
+            ProjectFlowPolicy.EXPIRED
+    );
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final List<ChannelDefinition> DISTRIBUTION_CHANNELS = distributionChannels();
 
@@ -99,7 +129,10 @@ public class CompanyService {
     private final KeywordGroupService keywordGroupService;
     private final KeywordGroupMapper keywordGroupMapper;
     private final ProjectMapper projectMapper;
+    private final GeoQuestionWorkorderMapper geoQuestionWorkorderMapper;
+    private final GeoQuestionItemMapper geoQuestionItemMapper;
     private final ActivityLogService activityLogService;
+    private final ProjectStartRequestService projectStartRequestService;
 
     public Page<Company> page(long current, long size, String keyword, String ownerType, Long partnerId) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -119,6 +152,7 @@ public class CompanyService {
         if (scopePartnerId != null) {
             wrapper.eq(Company::getPartnerId, scopePartnerId);
         }
+        applyInternalPartnerVisibility(wrapper, user, ownerType, scopePartnerId);
         if (internalScopeService.isSalesUser(user)) {
             wrapper.eq(Company::getSalesOwnerId, user.getId());
         } else {
@@ -127,7 +161,45 @@ public class CompanyService {
 
         Page<Company> result = companyMapper.selectPage(new Page<>(current, size), wrapper);
         attachOwnerNames(result.getRecords());
+        applySubmittedToHqWorkflow(result.getRecords());
         return result;
+    }
+
+    private void applyInternalPartnerVisibility(LambdaQueryWrapper<Company> wrapper, SysUser user, String ownerType, Long scopePartnerId) {
+        if (currentUserService.isPartnerUser(user) || internalScopeService.isSuperAdmin(user)) {
+            return;
+        }
+        boolean partnerQuery = "partner".equals(ownerType) || scopePartnerId != null;
+        if (partnerQuery) {
+            wrapper.inSql(Company::getId, visiblePartnerCompanySql());
+        } else if (!StringUtils.hasText(ownerType)) {
+            wrapper.and(w -> w.ne(Company::getOwnerType, "partner").or().inSql(Company::getId, visiblePartnerCompanySql()));
+        }
+    }
+
+    private String visiblePartnerCompanySql() {
+        String statuses = HQ_VISIBLE_PARTNER_PROJECT_STATUSES.stream()
+                .map(status -> "'" + status + "'")
+                .collect(Collectors.joining(","));
+        return "SELECT DISTINCT p.company_id FROM project p WHERE p.deleted_at IS NULL AND p.owner_type = 'partner' AND p.status IN (" + statuses + ")";
+    }
+
+    private void ensureInternalPartnerCompanyVisible(SysUser user, Company company) {
+        if (currentUserService.isPartnerUser(user) || company == null || !"partner".equals(company.getOwnerType())) {
+            return;
+        }
+        if (internalScopeService.isSuperAdmin(user)) {
+            return;
+        }
+        Long visibleProjectCount = projectMapper.selectCount(
+                new LambdaQueryWrapper<com.huanjing.geo.module.project.entity.Project>()
+                        .eq(com.huanjing.geo.module.project.entity.Project::getCompanyId, company.getId())
+                        .eq(com.huanjing.geo.module.project.entity.Project::getOwnerType, "partner")
+                        .in(com.huanjing.geo.module.project.entity.Project::getStatus, HQ_VISIBLE_PARTNER_PROJECT_STATUSES)
+                        .isNull(com.huanjing.geo.module.project.entity.Project::getDeletedAt));
+        if (visibleProjectCount == null || visibleProjectCount <= 0) {
+            throw new BizException(403, "合伙人客户尚未提交总部，当前账号无权查看");
+        }
     }
 
     public Company detail(Long id) {
@@ -135,9 +207,11 @@ public class CompanyService {
         currentUserService.ensurePermission("company.read");
         Company company = requireCompany(id);
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        ensureInternalPartnerCompanyVisible(user, company);
         internalScopeService.ensureCompanyAccess(user, company, "company");
         ensureSalesCompanyAccess(user, company);
         attachOwnerInfo(company);
+        applySubmittedToHqWorkflow(List.of(company));
         return company;
     }
 
@@ -376,8 +450,7 @@ public class CompanyService {
         if (companyPackageBindingService.activeBinding(id) == null) {
             throw new BizException(400, "客户尚未绑定有效套餐，请先提交负责人添加客户套餐");
         }
-        ensureCompanyHasProject(company.getId());
-        ensureCompanyHasKeywordGroup(company.getId());
+        projectStartRequestService.ensurePartnerSubmissionReady(company.getId());
         Map<String, Object> before = snapshotCompany(company);
         updatePartnerWorkflow(company, PARTNER_WORKFLOW_ENTRY_COMPLETED);
         activityLogService.logAction(
@@ -388,6 +461,31 @@ public class CompanyService {
                 before,
                 snapshotCompany(company),
                 null
+        );
+        attachOwnerInfo(company);
+        return company;
+    }
+
+    @Transactional
+    public Company returnPartnerEntry(Long id, CompanyPartnerEntryReturnRequest req) {
+        SysUser operator = requirePartnerOwnerOperator();
+        Company company = requireCompany(id);
+        currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
+        if (!PARTNER_WORKFLOW_ENTRY_COMPLETED.equals(company.getPartnerWorkflowStatus())) {
+            throw new BizException(400, "仅待负责人确认的客户可以退回修改");
+        }
+        Map<String, Object> before = snapshotCompany(company);
+        updatePartnerWorkflow(company, PARTNER_WORKFLOW_PROJECT_ENTRY);
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("reason", req == null ? null : trimToNull(req.getReason()));
+        activityLogService.logAction(
+                operator.getId(),
+                "company.partner_workflow.return_entry",
+                "company",
+                company.getId(),
+                before,
+                snapshotCompany(company),
+                extra
         );
         attachOwnerInfo(company);
         return company;
@@ -854,8 +952,8 @@ public class CompanyService {
         if ("direct".equals(ownerType) && partnerId != null) {
             throw new BizException(400, "direct company must not bind partner_id");
         }
-        if (("partner".equals(ownerType) || "joint".equals(ownerType)) && partnerId == null) {
-            throw new BizException(400, "partner/joint company must bind partner_id");
+        if ("partner".equals(ownerType) && partnerId == null) {
+            throw new BizException(400, "partner company must bind partner_id");
         }
     }
 
@@ -918,6 +1016,29 @@ public class CompanyService {
         companyMapper.updateById(company);
     }
 
+    private void applySubmittedToHqWorkflow(List<Company> companies) {
+        if (companies == null || companies.isEmpty()) {
+            return;
+        }
+        for (Company company : companies) {
+            if (company == null
+                    || !"partner".equals(company.getOwnerType())
+                    || !PARTNER_WORKFLOW_ENTRY_COMPLETED.equals(company.getPartnerWorkflowStatus())) {
+                continue;
+            }
+            Long submittedProjectCount = projectMapper.selectCount(
+                    new LambdaQueryWrapper<com.huanjing.geo.module.project.entity.Project>()
+                            .eq(com.huanjing.geo.module.project.entity.Project::getCompanyId, company.getId())
+                            .eq(com.huanjing.geo.module.project.entity.Project::getOwnerType, "partner")
+                            .in(com.huanjing.geo.module.project.entity.Project::getStatus, PARTNER_SUBMITTED_TO_HQ_PROJECT_STATUSES)
+                            .isNull(com.huanjing.geo.module.project.entity.Project::getDeletedAt)
+            );
+            if (submittedProjectCount != null && submittedProjectCount > 0) {
+                company.setPartnerWorkflowStatus(PARTNER_WORKFLOW_SUBMITTED_TO_HQ);
+            }
+        }
+    }
+
     private SysUser requirePartnerStaffOperator() {
         SysUser operator = currentUserService.requireCurrentUser();
         if (!"partner_staff".equals(operator.getRole())) {
@@ -970,15 +1091,64 @@ public class CompanyService {
         }
     }
 
-    private void ensureCompanyHasKeywordGroup(Long companyId) {
-        Long count = keywordGroupMapper.selectCount(
-                new LambdaQueryWrapper<KeywordGroup>()
-                        .eq(KeywordGroup::getCompanyId, companyId)
-                        .eq(KeywordGroup::getDeleted, false)
+    private void ensureCompanyHasProjectCoreQuestions(Long companyId) {
+        List<com.huanjing.geo.module.project.entity.Project> projects = projectMapper.selectList(
+                new LambdaQueryWrapper<com.huanjing.geo.module.project.entity.Project>()
+                        .eq(com.huanjing.geo.module.project.entity.Project::getCompanyId, companyId)
+                        .isNull(com.huanjing.geo.module.project.entity.Project::getDeletedAt)
         );
-        if (count == null || count == 0) {
-            throw new BizException(400, "请先为项目创建核心问题，再标记录入完成");
+        if (projects == null || projects.isEmpty()) {
+            throw new BizException(400, "请先录入至少一个项目信息，再标记录入完成");
         }
+        for (com.huanjing.geo.module.project.entity.Project project : projects) {
+            int expectedCount = projectCoreQuestionLimit(project);
+            if (expectedCount <= 0) {
+                throw new BizException(400, "项目「" + projectDisplayName(project) + "」尚未分配核心问题额度，请先在项目中分配额度");
+            }
+            int actualCount = projectGeoQuestionCount(project.getId());
+            if (actualCount != expectedCount) {
+                throw new BizException(400, "项目「" + projectDisplayName(project) + "」核心问题需先确认入项目拓词组，数量需等于分配额度 "
+                        + expectedCount + " 个，当前已入库 " + actualCount + " 个");
+            }
+        }
+    }
+
+    private int projectCoreQuestionLimit(com.huanjing.geo.module.project.entity.Project project) {
+        if (project == null) {
+            return 0;
+        }
+        return defaultInt(project.getPlanKeywordGroupLimitA(), defaultInt(project.getPlanKeywordGroupLimit(), 0));
+    }
+
+    private int projectGeoQuestionCount(Long projectId) {
+        if (projectId == null) {
+            return 0;
+        }
+        List<Long> workorderIds = geoQuestionWorkorderMapper.selectList(
+                        new LambdaQueryWrapper<GeoQuestionWorkorder>()
+                                .eq(GeoQuestionWorkorder::getProjectId, projectId)
+                                .eq(GeoQuestionWorkorder::getStatus, "committed")
+                                .select(GeoQuestionWorkorder::getId)
+                ).stream()
+                .map(GeoQuestionWorkorder::getId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        if (workorderIds.isEmpty()) {
+            return 0;
+        }
+        Long count = geoQuestionItemMapper.selectCount(
+                new LambdaQueryWrapper<GeoQuestionItem>()
+                        .in(GeoQuestionItem::getWorkorderId, workorderIds)
+                        .isNull(GeoQuestionItem::getDeletedAt)
+        );
+        return count == null ? 0 : count.intValue();
+    }
+
+    private String projectDisplayName(com.huanjing.geo.module.project.entity.Project project) {
+        if (project == null) {
+            return "-";
+        }
+        return StringUtils.hasText(project.getProjectName()) ? project.getProjectName() : String.valueOf(project.getId());
     }
 
     private void ensureSalesCompanyAccess(SysUser user, Company company) {

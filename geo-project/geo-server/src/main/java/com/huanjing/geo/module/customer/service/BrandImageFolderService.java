@@ -50,6 +50,8 @@ public class BrandImageFolderService {
     private static final String ARTICLE_FOLDER_RULE_MESSAGE =
             "不能这样修改：文章自动生成需要至少一个启用且名称以“插图”开头的文件夹，并保留一个启用且名称为“封面”的文件夹。";
     private static final List<String> REQUIRED_ARTICLE_IMAGE_FOLDERS = List.of(ILLUSTRATION_FOLDER_PREFIX, COVER_FOLDER_NAME);
+    private static final List<String> ILLUSTRATION_FOLDER_TAGS = List.of("插图", "场景图");
+    private static final List<String> COVER_FOLDER_TAGS = List.of("封面", "首图");
     private static final int MAX_TAG_LENGTH = 10;
 
     private final BrandMapper brandMapper;
@@ -144,7 +146,7 @@ public class BrandImageFolderService {
         folder.setCreatedBy(operator.getId());
         folderMapper.insert(folder);
         replaceProjects(folder, normalizeProjectIds(brand.getId(), req.getProjectIds()));
-        replaceTags(folder.getId(), normalizeTags(req.getTags()));
+        replaceTags(folder.getId(), normalizeTagsWithArticleDefaults(folder.getFolderName(), req.getTags()));
         return listFolders(brand.getId(), null, null, false, false).stream()
                 .filter(item -> folder.getId().equals(item.getId()))
                 .findFirst()
@@ -163,7 +165,7 @@ public class BrandImageFolderService {
         folder.setStatus(status);
         folderMapper.updateById(folder);
         replaceProjects(folder, normalizeProjectIds(brand.getId(), req.getProjectIds()));
-        replaceTags(folder.getId(), normalizeTags(req.getTags()));
+        replaceTags(folder.getId(), normalizeTagsWithArticleDefaults(folder.getFolderName(), req.getTags()));
         return listFolders(brand.getId(), null, null, false, false).stream()
                 .filter(item -> folder.getId().equals(item.getId()))
                 .findFirst()
@@ -238,6 +240,7 @@ public class BrandImageFolderService {
                 existing.setStatus(STATUS_ACTIVE);
                 folderMapper.updateById(existing);
             }
+            ensureFolderTags(existing.getId(), articleFolderTags(folderName));
             return existing;
         }
         BrandImageFolder folder = new BrandImageFolder();
@@ -248,7 +251,40 @@ public class BrandImageFolderService {
         folder.setDefaultFlag(false);
         folder.setCreatedBy(operatorId == null ? 0L : operatorId);
         folderMapper.insert(folder);
+        ensureFolderTags(folder.getId(), articleFolderTags(folderName));
         return folder;
+    }
+
+    private List<String> articleFolderTags(String folderName) {
+        if (COVER_FOLDER_NAME.equals(folderName)) {
+            return COVER_FOLDER_TAGS;
+        }
+        if (StringUtils.hasText(folderName) && folderName.trim().startsWith(ILLUSTRATION_FOLDER_PREFIX)) {
+            return ILLUSTRATION_FOLDER_TAGS;
+        }
+        return List.of();
+    }
+
+    private void ensureFolderTags(Long folderId, List<String> tags) {
+        if (folderId == null || tags == null || tags.isEmpty()) {
+            return;
+        }
+        List<BrandImageFolderTag> existingRows = folderTagMapper.selectList(new LambdaQueryWrapper<BrandImageFolderTag>()
+                .eq(BrandImageFolderTag::getFolderId, folderId));
+        Set<String> existingTags = (existingRows == null ? List.<BrandImageFolderTag>of() : existingRows)
+                .stream()
+                .map(BrandImageFolderTag::getTagName)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toSet());
+        for (String tag : tags) {
+            if (existingTags.contains(tag)) {
+                continue;
+            }
+            BrandImageFolderTag row = new BrandImageFolderTag();
+            row.setFolderId(folderId);
+            row.setTagName(tag);
+            folderTagMapper.insert(row);
+        }
     }
 
     private String articleFolderDescription(String folderName) {
@@ -516,6 +552,12 @@ public class BrandImageFolderService {
             result.add(trimmed);
         }
         return new ArrayList<>(result);
+    }
+
+    private List<String> normalizeTagsWithArticleDefaults(String folderName, List<String> tags) {
+        LinkedHashSet<String> merged = new LinkedHashSet<>(articleFolderTags(folderName));
+        merged.addAll(normalizeTags(tags));
+        return new ArrayList<>(merged);
     }
 
     private String normalizeSearch(String value) {

@@ -372,16 +372,8 @@ function pendingTypeColor(type: string): string {
   return map[type] || '#6B7280'
 }
 
-function hasActivePackage(company: Company) {
-  return Boolean(company.activePackageBindingId || company.activePackageName)
-}
-
 function effectiveWorkflowStatus(company: Company) {
-  const status = String(company.partnerWorkflowStatus || 'draft')
-  if (!hasActivePackage(company) && ['package_bound', 'project_entry', 'entry_completed'].includes(status)) {
-    return 'package_requested'
-  }
-  return status
+  return String(company.partnerWorkflowStatus || 'draft')
 }
 
 function formatRelativeTime(dateStr: string | null): string {
