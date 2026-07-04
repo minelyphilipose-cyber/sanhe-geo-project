@@ -76,6 +76,7 @@ const sidebarGroups: MenuGroup[] = [
       { path: '/admin/layered-keyword-groups', name: 'LayeredKeywordGroupManage', title: '拓词管理', icon: 'Collection', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['keyword_group.read'] },
       { path: '/admin/content/execution', name: 'ContentExecution', title: '内容与执行', icon: 'Memo', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['content.read'] },
       { path: '/admin/content/special-industry-compliance', name: 'SpecialIndustryComplianceWorkbench', title: '行业专项', icon: 'Files', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['content.read'] },
+      { path: '/admin/partner-start-requests', name: 'PartnerStartRequestWorkbench', title: '合伙人启动工单', icon: 'Tickets', roles: ['delivery_manager', 'manager', 'super_admin'], permissions: ['delivery.assignment.manage'] },
     ],
   },
   {

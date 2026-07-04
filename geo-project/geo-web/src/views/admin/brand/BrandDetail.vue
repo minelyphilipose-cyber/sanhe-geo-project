@@ -981,8 +981,8 @@
 
         <div class="brand-section-bar"><span />总部交付配置<i /></div>
         <div class="brand-form-grid">
-          <el-form-item label="默认发布位置">
-            <el-input v-model="brandForm.selfMediaPublishLocationName" maxlength="64" placeholder="用于头条等自媒体发布页添加位置" />
+          <el-form-item label="头条默认发布城市">
+            <CityNameSelect v-model="brandForm.selfMediaPublishLocationName" placeholder="选择头条添加位置城市" />
           </el-form-item>
           <el-form-item label="Agent 官网名称">
             <el-input v-model="brandForm.geoSiteName" placeholder="如：品牌 Agent 官网" />
@@ -1352,6 +1352,7 @@ import { getPublishSites } from '@/api/publishSite'
 import type { Brand, BrandOffering, PublishSite, SelfMediaAccount, SelfMediaAccountPlatformOption } from '@/types'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
+import CityNameSelect from '@/components/ui/CityNameSelect.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { isValidMobile, nullableText } from '@/utils/form'
@@ -1877,7 +1878,7 @@ const brandContactInfoItems = computed(() => [
 ])
 
 const brandDeliveryConfigItems = computed(() => [
-  { label: '自媒体默认发布位置', value: brand.value?.selfMediaPublishLocationName || '-' },
+  { label: '头条默认发布城市', value: brand.value?.selfMediaPublishLocationName || '-' },
   { label: 'Agent 官网名称', value: brand.value?.geoSiteName || '-' },
   { label: 'Agent 官网域名', value: brand.value?.geoSiteDomain || '-' },
   { label: '行业资讯站', value: brand.value?.industrySiteName || '-' },

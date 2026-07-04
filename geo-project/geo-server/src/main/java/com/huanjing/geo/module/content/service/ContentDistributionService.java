@@ -62,6 +62,8 @@ import java.math.RoundingMode;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -73,6 +75,7 @@ public class ContentDistributionService {
     private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
     private static final Set<String> LOCKED_ARTICLE_STATUS = Set.of("published", "distributed");
+    private static final Pattern TOUTIAO_CITY_PATTERN = Pattern.compile("([\\u4e00-\\u9fa5]{2,12}?市)");
     private static final List<String> ACTIVE_DISTRIBUTION_TASK_STATUS = List.of(
             "pending",
             "token_issued",
@@ -738,8 +741,12 @@ public class ContentDistributionService {
         if (target == null || project == null || project.getBrandId() == null) {
             return target;
         }
+        SelfMediaAccount account = target.account();
+        if (account == null || !"toutiao".equalsIgnoreCase(account.getPlatform())) {
+            return target;
+        }
         Brand brand = brandService.requireExistingBrand(project.getBrandId());
-        String locationName = resolveBrandSelfMediaPublishLocationName(brand);
+        String locationName = resolveBrandToutiaoPublishCityName(brand);
         if (!StringUtils.hasText(locationName)) {
             return target;
         }
@@ -1798,8 +1805,12 @@ public class ContentDistributionService {
         if (payloadNode == null || project == null || project.getBrandId() == null) {
             return;
         }
+        String platform = payloadNode.path("platform").asText(null);
+        if (!"toutiao".equalsIgnoreCase(platform)) {
+            return;
+        }
         Brand brand = brandService.requireExistingBrand(project.getBrandId());
-        String locationName = resolveBrandSelfMediaPublishLocationName(brand);
+        String locationName = resolveBrandToutiaoPublishCityName(brand);
         if (!StringUtils.hasText(locationName)) {
             return;
         }
@@ -1809,6 +1820,10 @@ public class ContentDistributionService {
         if (!platformOptions.hasNonNull("locationName")) {
             platformOptions.put("locationName", locationName);
         }
+    }
+
+    private String resolveBrandToutiaoPublishCityName(Brand brand) {
+        return normalizeToutiaoPublishCityName(resolveBrandSelfMediaPublishLocationName(brand));
     }
 
     private String resolveBrandSelfMediaPublishLocationName(Brand brand) {
@@ -1825,6 +1840,38 @@ public class ContentDistributionService {
             return brand.getServiceArea().trim();
         }
         return null;
+    }
+
+    private String normalizeToutiaoPublishCityName(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String text = value.trim();
+        String[] segments = text.split("[/,，、;；|｜\\s]+");
+        for (String segment : segments) {
+            String normalized = normalizeToutiaoPublishCitySegment(segment);
+            if (StringUtils.hasText(normalized)) {
+                return normalized;
+            }
+        }
+        return normalizeToutiaoPublishCitySegment(text);
+    }
+
+    private String normalizeToutiaoPublishCitySegment(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String text = value.trim()
+                .replaceFirst("^(北京|上海|天津|重庆)市", "$1")
+                .replaceFirst("^(河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|海南|四川|贵州|云南|陕西|甘肃|青海|台湾)省?", "")
+                .replaceFirst("^(内蒙古|广西壮族|西藏|宁夏回族|新疆维吾尔)(自治区)?", "")
+                .replaceFirst("^(香港|澳门)特别行政区", "$1");
+        Matcher cityMatcher = TOUTIAO_CITY_PATTERN.matcher(text);
+        if (cityMatcher.find()) {
+            text = cityMatcher.group(1);
+        }
+        text = text.replaceFirst("[省市县区]$", "").trim();
+        return StringUtils.hasText(text) ? text : null;
     }
 
     private String jsonColumnPayload(String payload) {

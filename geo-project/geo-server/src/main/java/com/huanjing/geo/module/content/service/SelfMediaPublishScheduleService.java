@@ -95,6 +95,7 @@ public class SelfMediaPublishScheduleService {
     private static final int QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES = 10;
     private static final int PUBLISH_CHECK_TOTAL_ATTEMPTS = 4;
     private static final int PUBLISH_RESULT_INITIAL_DELAY_MINUTES = 60;
+    private static final int PUBLISH_RESULT_RECHECK_DELAY_MINUTES = 2;
     private static final int[] PUBLISH_CHECK_RETRY_DELAYS_MINUTES = {5, 15};
     private static final int FAILURE_MESSAGE_MAX_LENGTH = 512;
     private static final int[] SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES = {3, 8};
@@ -642,6 +643,8 @@ public class SelfMediaPublishScheduleService {
                                                           String articleTitle,
                                                           Long selfMediaAccountId,
                                                           String selfMediaAccountName,
+                                                          LocalDateTime plannedPublishStart,
+                                                          LocalDateTime plannedPublishEnd,
                                                           Long current,
                                                           Long size) {
         if (brandId != null && brandId <= 0) {
@@ -674,6 +677,15 @@ public class SelfMediaPublishScheduleService {
         }
         if (StringUtils.hasText(failureCode)) {
             wrapper.eq(SelfMediaPublishSchedule::getFailureCode, failureCode.trim());
+        }
+        if (plannedPublishStart != null && plannedPublishEnd != null && plannedPublishStart.isAfter(plannedPublishEnd)) {
+            fail("INVALID_PLANNED_PUBLISH_RANGE", "计划发布时间开始时间不能晚于结束时间");
+        }
+        if (plannedPublishStart != null) {
+            wrapper.ge(SelfMediaPublishSchedule::getPlannedPublishAt, plannedPublishStart);
+        }
+        if (plannedPublishEnd != null) {
+            wrapper.le(SelfMediaPublishSchedule::getPlannedPublishAt, plannedPublishEnd);
         }
         if (articleId != null) {
             wrapper.eq(SelfMediaPublishSchedule::getArticleId, articleId);
@@ -1646,7 +1658,7 @@ public class SelfMediaPublishScheduleService {
             return false;
         }
         int attempts = row.getAttemptCount() == null ? 0 : row.getAttemptCount();
-        int maxAttempts = row.getMaxAttempts() == null ? resolvePublishCheckMaxAttempts(row) : row.getMaxAttempts();
+        int maxAttempts = effectivePublishCheckMaxAttempts(row);
         return maxAttempts > 0 && attempts >= maxAttempts;
     }
 
@@ -1741,10 +1753,7 @@ public class SelfMediaPublishScheduleService {
     }
 
     private void recoverTimedOutPublishCheck(SelfMediaPublishSchedule row) {
-        int maxAttempts = Math.max(
-                row.getMaxAttempts() == null ? resolvePublishCheckMaxAttempts(row) : row.getMaxAttempts(),
-                resolvePublishCheckMaxAttempts(row)
-        );
+        int maxAttempts = effectivePublishCheckMaxAttempts(row);
         LocalDateTime nextAttemptAt = nextPublishCheckRetryAt(row, maxAttempts);
         row.setMaxAttempts(maxAttempts);
         row.setLockedUntil(null);
@@ -2568,7 +2577,10 @@ public class SelfMediaPublishScheduleService {
         String previousStatus = normalize(row.getStatus());
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
-        row.setNextAttemptAt(LocalDateTime.now());
+        row.setNextAttemptAt(nextBrandSafeAttemptAt(
+                row.getBrandId(),
+                LocalDateTime.now().plusMinutes(PUBLISH_RESULT_RECHECK_DELAY_MINUTES),
+                row.getId()));
         row.setLockedUntil(null);
         row.setFailureCode(null);
         row.setFailureMessage(null);
@@ -2579,7 +2591,7 @@ public class SelfMediaPublishScheduleService {
                 "previousAttemptCount", row.getAttemptCount(),
                 "previousMaxAttempts", row.getMaxAttempts()
         ));
-        row.setMaxAttempts(Math.max(row.getMaxAttempts() == null ? 0 : row.getMaxAttempts(),
+        row.setMaxAttempts(Math.max(effectivePublishCheckMaxAttempts(row),
                 (row.getAttemptCount() == null ? 0 : row.getAttemptCount()) + 1));
         touch(row);
         scheduleMapper.updateById(row);
@@ -2924,6 +2936,12 @@ public class SelfMediaPublishScheduleService {
                 .map(SelfMediaPlatformCapabilityContract::publishCheckMaxAttempts)
                 .filter(value -> value > 0)
                 .orElse(PUBLISH_CHECK_TOTAL_ATTEMPTS);
+    }
+
+    private int effectivePublishCheckMaxAttempts(SelfMediaPublishSchedule row) {
+        int configured = resolvePublishCheckMaxAttempts(row);
+        int recorded = row == null || row.getMaxAttempts() == null ? 0 : row.getMaxAttempts();
+        return Math.max(recorded, configured);
     }
 
     private LocalDateTime nextPublishCheckRetryAt(SelfMediaPublishSchedule row, int maxAttempts) {

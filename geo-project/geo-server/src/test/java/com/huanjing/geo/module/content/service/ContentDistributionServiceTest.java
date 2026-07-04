@@ -471,6 +471,22 @@ class ContentDistributionServiceTest {
     }
 
     @Test
+    void distributeTo_selfMedia_toutiaoAddsNormalizedCityLocation() {
+        givenCommonData();
+        selfMediaAdapter.platform = "toutiao";
+        selfMediaAdapter.result = SubmitResult.success(200, "{}", "{\"item_id\":\"item-1\"}", null, "item-1");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));
+        Brand brand = new Brand();
+        brand.setId(30L);
+        brand.setSelfMediaPublishLocationName("安徽省阜阳市");
+        when(brandService.requireExistingBrand(30L)).thenReturn(brand);
+
+        contentDistributionService.distributeTo(1L, selfMediaTarget("toutiao"));
+
+        assertEquals("阜阳", selfMediaAdapter.capturedTarget.platformOptions().get("locationName"));
+    }
+
+    @Test
     void distributeTo_selfMedia_orphanDistributingArticle_recoversAndCreatesNewTask() {
         givenCommonData();
         when(articleDraftMapper.selectById(1L)).thenReturn(articleWithStatus("distributing"));

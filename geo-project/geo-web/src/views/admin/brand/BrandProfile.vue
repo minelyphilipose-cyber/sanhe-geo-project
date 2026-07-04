@@ -50,7 +50,7 @@
             <el-descriptions-item label="微信">{{ brand?.wechat || '-' }}</el-descriptions-item>
             <el-descriptions-item label="对外公开电话">{{ brand?.publicPhone || '-' }}</el-descriptions-item>
             <el-descriptions-item label="对外公开地址">{{ brand?.publicAddress || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="自媒体默认发布位置">{{ brand?.selfMediaPublishLocationName || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="头条默认发布城市">{{ brand?.selfMediaPublishLocationName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="Agent 官网名称">{{ brand?.geoSiteName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="Agent 官网域名">{{ brand?.geoSiteDomain || '-' }}</el-descriptions-item>
             <el-descriptions-item label="行业资讯站">{{ brand?.industrySiteName || '-' }}</el-descriptions-item>
@@ -121,8 +121,8 @@
               <el-form-item label="对外公开地址">
                 <el-input v-model="infoForm.publicAddress" />
               </el-form-item>
-              <el-form-item label="默认发布位置">
-                <el-input v-model="infoForm.selfMediaPublishLocationName" maxlength="64" placeholder="用于头条等自媒体发布页添加位置" />
+              <el-form-item label="头条默认发布城市">
+                <CityNameSelect v-model="infoForm.selfMediaPublishLocationName" placeholder="选择头条添加位置城市" />
               </el-form-item>
               <el-form-item label="Agent 官网名称">
                 <el-input v-model="infoForm.geoSiteName" placeholder="如：品牌 Agent 官网" />
@@ -273,6 +273,7 @@ import {
 import { getPublishSites } from '@/api/publishSite'
 import type { Brand, BrandStatementView, BrandMaterial, BrandProfileVersion, PublishSite } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
+import CityNameSelect from '@/components/ui/CityNameSelect.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { isValidMobile, nullableText } from '@/utils/form'

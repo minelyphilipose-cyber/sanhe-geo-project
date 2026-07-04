@@ -1272,13 +1272,25 @@ async function backendRequest(backendBase, accessToken, path, init = {}) {
 }
 
 async function trustedBackendRequest(config, path, init = {}) {
-  const response = await fetchWithTimeout(`${String(config.trustedBackendBase).replace(/\/+$/, '')}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-    },
-  }, BACKEND_FETCH_TIMEOUT_MS)
+  const backendBase = String(config.trustedBackendBase || '').replace(/\/+$/, '')
+  const requestUrl = `${backendBase}${path}`
+  let response
+  try {
+    response = await fetchWithTimeout(requestUrl, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init.headers || {}),
+      },
+    }, BACKEND_FETCH_TIMEOUT_MS)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || '')
+    const backendError = new Error(
+      `无法连接后台地址 ${backendBase || '(未配置)'}：${message || 'network request failed'}。请检查本地助手当前后台地址、后端服务和网络/防火墙。`,
+    )
+    backendError.statusCode = 502
+    throw backendError
+  }
   const body = await responseJsonWithTimeout(response).catch(() => ({}))
   if (!response.ok || (body.code !== undefined && body.code !== 0)) {
     const details = body && Object.keys(body).length ? `; details=${JSON.stringify(body).slice(0, 600)}` : ''

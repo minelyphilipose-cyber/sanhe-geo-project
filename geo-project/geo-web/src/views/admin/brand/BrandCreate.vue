@@ -89,8 +89,8 @@
           <el-form-item label="手机号" prop="phone"><el-input v-model="form.phone" placeholder="请输入手机号" /></el-form-item>
           <el-form-item label="对外公开电话"><el-input v-model="form.publicPhone" /></el-form-item>
           <el-form-item label="对外公开地址"><el-input v-model="form.publicAddress" /></el-form-item>
-          <el-form-item label="默认发布位置">
-            <el-input v-model="form.selfMediaPublishLocationName" maxlength="64" placeholder="用于头条等自媒体发布页添加位置" />
+          <el-form-item label="头条默认发布城市">
+            <CityNameSelect v-model="form.selfMediaPublishLocationName" placeholder="选择头条添加位置城市" />
           </el-form-item>
           <el-form-item label="微信"><el-input v-model="form.wechat" /></el-form-item>
           <el-form-item class="is-wide" label="官网"><el-input v-model="form.website" /></el-form-item>
@@ -239,6 +239,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadRawFile } from 'element-plus'
+import CityNameSelect from '@/components/ui/CityNameSelect.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { useDictStore } from '@/stores/dict'
 import {

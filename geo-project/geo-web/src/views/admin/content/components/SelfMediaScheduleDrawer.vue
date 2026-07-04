@@ -6,6 +6,7 @@
         <el-input v-model="query.articleTitle" class="schedule-filter is-title" clearable placeholder="文章标题" @keyup.enter="search" />
         <el-input v-model="query.selfMediaAccountName" class="schedule-filter" clearable placeholder="账号名称" @keyup.enter="search" />
         <el-select v-model="query.platform" class="schedule-filter" clearable placeholder="平台">
+          <el-option label="微信公众号" value="wechat_mp" />
           <el-option label="今日头条" value="toutiao" />
           <el-option label="百家号" value="baijiahao" />
           <el-option label="知乎" value="zhihu" />
@@ -24,6 +25,19 @@
       </div>
       <el-collapse-transition>
         <div v-show="advancedFiltersVisible" class="schedule-filter-row is-advanced">
+          <div class="schedule-range-filter">
+            <el-date-picker
+              v-model="query.plannedRange"
+              class="schedule-filter is-range"
+              type="datetimerange"
+              start-placeholder="计划开始时间"
+              end-placeholder="计划结束时间"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              format="YYYY-MM-DD HH:mm"
+              clearable
+              style="width: 100%"
+            />
+          </div>
           <el-input v-model="query.failureCode" class="schedule-filter is-wide" clearable placeholder="失败码" @keyup.enter="search" />
           <el-select v-model="query.health" class="schedule-filter" clearable placeholder="健康" @change="query.healthGroup = ''">
             <el-option v-for="item in scheduleHealthOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -403,6 +417,7 @@ const query = reactive({
   platform: '',
   status: '',
   failureCode: '',
+  plannedRange: [] as string[] | null,
   health: '' as '' | ScheduleHealth,
   healthGroup: '' as '' | ScheduleHealthGroup,
 })
@@ -701,6 +716,8 @@ function queryParams() {
     platform: query.platform || undefined,
     status: query.status || undefined,
     failureCode: query.failureCode.trim() || undefined,
+    plannedPublishStart: query.plannedRange?.[0] || undefined,
+    plannedPublishEnd: query.plannedRange?.[1] || undefined,
     current: page.current,
     size: page.size,
   }
@@ -732,6 +749,7 @@ function resetQuery() {
   query.platform = ''
   query.status = ''
   query.failureCode = ''
+  query.plannedRange = []
   query.health = ''
   query.healthGroup = ''
   search()
@@ -996,6 +1014,9 @@ function failureStageText(row: SelfMediaPublishSchedule) {
 }
 
 function displayFailureMessage(row: SelfMediaPublishSchedule) {
+  if (String(row.failureMessage || '').toLowerCase().includes('cover material not found')) {
+    return '公众号封面素材不存在或不属于当前品牌。请打开文章详情更换封面素材后重新创建排期。'
+  }
   if (row.failureCode === 'WECHAT_API_UNAUTHORIZED') {
     const stage = failureStageText(row)
     if (stage.includes('草稿')) return '当前公众号缺少新增草稿权限。请确认客户公众号具备草稿箱/文章管理能力，并重新授权公众号。'
@@ -1157,6 +1178,9 @@ function failureCodeLabel(code?: string | null) {
     IDENTITY_EXPECTATION_MISSING: '缺少账号校验信息',
     COVER_MATERIAL_NOT_FOUND: '封面素材不存在',
     COVER_IMAGE_UNSUPPORTED: '封面图片类型不支持',
+    WECHAT_COVER_MATERIAL_NOT_FOUND: '微信公众号封面素材不存在',
+    WECHAT_COVER_MATERIAL_INVALID: '微信公众号封面格式不支持',
+    WECHAT_COVER_FILE_MISSING: '微信公众号封面文件缺失',
     MATERIAL_IMAGE_UNAVAILABLE: '素材图片不可用',
     PUBLIC_MATERIAL_NOT_FOUND: '素材公开链接失效',
     WORKS_LIST_VERIFY_TIMEOUT: '作品列表回查超时',
@@ -1475,10 +1499,19 @@ function hasPendingRetryRequest(row: SelfMediaPublishSchedule | null) {
 function isMaterialFailure(row: SelfMediaPublishSchedule | null) {
   if (!row) return false
   const code = row.failureCode || ''
-  if (['MATERIAL_IMAGE_UNAVAILABLE', 'PUBLIC_MATERIAL_NOT_FOUND', 'COVER_MATERIAL_NOT_FOUND', 'COVER_IMAGE_UNSUPPORTED'].includes(code)) return true
+  if ([
+    'MATERIAL_IMAGE_UNAVAILABLE',
+    'PUBLIC_MATERIAL_NOT_FOUND',
+    'COVER_MATERIAL_NOT_FOUND',
+    'COVER_IMAGE_UNSUPPORTED',
+    'WECHAT_COVER_MATERIAL_NOT_FOUND',
+    'WECHAT_COVER_MATERIAL_INVALID',
+    'WECHAT_COVER_FILE_MISSING',
+  ].includes(code)) return true
   const text = `${row.failureMessage || ''} ${row.diagnosticsJson || ''}`
   return text.includes('/api/public/brand-materials/')
     || text.includes('Material not found')
+    || text.includes('cover material not found')
     || text.includes('image content-type is not supported')
     || text.includes('content-type is not supported')
 }
@@ -1711,6 +1744,9 @@ function alertTypeLabel(value?: string | null) {
 }
 
 function recommendationText(row: SelfMediaPublishSchedule) {
+  if (row.failureCode === 'WECHAT_COVER_MATERIAL_NOT_FOUND') return '公众号封面素材不存在或不属于当前品牌。请打开文章详情更换封面素材后重新创建排期。'
+  if (row.failureCode === 'WECHAT_COVER_MATERIAL_INVALID') return '公众号封面素材格式不受支持。请更换 JPG、PNG、GIF 或 BMP 图片后重新创建排期。'
+  if (row.failureCode === 'WECHAT_COVER_FILE_MISSING') return '公众号封面素材文件缺失。请重新上传或更换封面素材后重新创建排期。'
   if (isMaterialFailure(row)) return '素材公开链接返回 404 或非图片内容。请点击“处理素材”打开文章，替换失效的封面/正文图片并保存，然后点击“立即重试”。'
   if (row.failureActionHint) return row.failureActionHint
   if (row.failureCode === 'LOCAL_AGENT_HEARTBEAT_TIMEOUT') return '本地助手执行心跳超时；确认本地助手、AdsPower 和平台页面正常后，可点击“立即重试”。'
@@ -1796,6 +1832,70 @@ function normalizePlatform(value?: string | null) {
 
 .schedule-filter.is-wide {
   width: 240px;
+}
+
+.schedule-range-filter {
+  flex: 0 0 520px;
+  width: 520px;
+  max-width: 520px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.schedule-filter.is-range {
+  width: 100% !important;
+  max-width: 100%;
+  min-width: 0 !important;
+}
+
+:deep(.schedule-filter.is-range.el-date-editor) {
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 32px;
+  padding: 0 10px;
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px #dcdfe6 inset;
+}
+
+:deep(.schedule-filter.is-range.el-date-editor:hover) {
+  box-shadow: 0 0 0 1px #c0c4cc inset;
+}
+
+:deep(.schedule-filter.is-range.el-date-editor.is-active) {
+  box-shadow: 0 0 0 1px #409eff inset;
+}
+
+:deep(.schedule-filter.is-range .el-range__icon) {
+  margin-right: 4px;
+  color: #a8abb2;
+}
+
+:deep(.schedule-filter.is-range .el-range-input) {
+  flex: 1 1 0;
+  width: 0 !important;
+  min-width: 0 !important;
+  font-size: 14px;
+  color: #606266;
+}
+
+:deep(.schedule-filter.is-range .el-range-input::placeholder) {
+  color: #a8abb2;
+}
+
+:deep(.schedule-filter.is-range .el-range-separator) {
+  flex: 0 0 18px;
+  min-width: 18px;
+  padding: 0;
+  color: #c0c4cc;
+  font-size: 13px;
+  line-height: 30px;
+}
+
+:deep(.schedule-filter.is-range .el-range__close-icon) {
+  margin-left: 4px;
 }
 
 .schedule-advanced-toggle {
