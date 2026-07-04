@@ -36,20 +36,30 @@ function buildApiError(message: string, code?: number, data?: unknown, status?: 
   return err
 }
 
+function normalizeMobileApiErrorMessage(message: string | undefined, code?: number, status?: number) {
+  if (code === 429 || status === 429) {
+    return '操作过于频繁，请稍后再试'
+  }
+  return message || '网络异常'
+}
+
 mobileRequest.interceptors.response.use(
   (response: AxiosResponse<R>) => {
     const res = response.data
     if (res.code !== 0) {
-      return Promise.reject(buildApiError(res.message || '请求失败', res.code, res.data, response.status))
+      const message = normalizeMobileApiErrorMessage(res.message || '请求失败', res.code, response.status)
+      return Promise.reject(buildApiError(message, res.code, res.data, response.status))
     }
     return response
   },
   (error: AxiosError<R>) => {
     const res = error.response?.data
     if (res && typeof res === 'object' && 'code' in res) {
-      return Promise.reject(buildApiError(res.message || '网络异常', res.code, res.data, error.response?.status))
+      const message = normalizeMobileApiErrorMessage(res.message, res.code, error.response?.status)
+      return Promise.reject(buildApiError(message, res.code, res.data, error.response?.status))
     }
-    return Promise.reject(buildApiError(error.message || '网络异常', undefined, error.response?.data, error.response?.status))
+    const message = normalizeMobileApiErrorMessage(error.message, undefined, error.response?.status)
+    return Promise.reject(buildApiError(message, undefined, error.response?.data, error.response?.status))
   },
 )
 

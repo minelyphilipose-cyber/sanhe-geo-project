@@ -31,7 +31,7 @@ public class PublicDashboardRateLimitFilter extends OncePerRequestFilter {
             "/api/public/dashboard/",
             "/api/public/mobile-dashboard/"
     );
-    private static final int LIMIT_PER_MINUTE = 30;
+    private static final int LIMIT_PER_MINUTE = 45;
     private static final DateTimeFormatter WINDOW_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
     private static final DefaultRedisScript<Long> LIMIT_SCRIPT = new DefaultRedisScript<>(
             "local current = tonumber(redis.call('GET', KEYS[1]) or '0') " +
@@ -79,7 +79,7 @@ public class PublicDashboardRateLimitFilter extends OncePerRequestFilter {
         response.setStatus(429);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.getWriter().write(objectMapper.writeValueAsString(R.fail(429, "Too many requests, please try again later")));
+        response.getWriter().write(objectMapper.writeValueAsString(R.fail(429, "操作过于频繁，请稍后再试")));
     }
 
     private String resolveClientIp(HttpServletRequest request) {
