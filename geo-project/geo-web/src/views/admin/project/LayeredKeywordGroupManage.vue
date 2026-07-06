@@ -554,7 +554,6 @@ const selectedProjectId = ref<number | null>(null)
 const workorder = ref<WorkorderVO>()
 const quota = ref<QuotaSnapshot>()
 const providers = ref<ProviderVO[]>([])
-const questionGenerationPlatformCodes = new Set(['qwen', 'deepseek', 'mimo'])
 const currentBatch = ref<BatchVO>()
 const review = ref<ReviewVO>()
 const questionPage = ref<QuestionPageVO>({ records: [], total: 0, current: 1, size: 20, pages: 0 })
@@ -747,7 +746,7 @@ async function selectRouteProject() {
 }
 async function loadProviders() {
   const { data } = await getLlmProviders()
-  providers.value = (data.data || []).filter((provider) => questionGenerationPlatformCodes.has(provider.platformCode))
+  providers.value = data.data || []
   batchForm.modelConfigId ||= providers.value[0]?.id
 }
 async function handleProjectChange(projectId: number | null) {

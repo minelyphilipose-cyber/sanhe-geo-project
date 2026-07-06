@@ -405,19 +405,16 @@
                   <span
                     class="switch-status"
                     :class="{
-                      'is-off':
-                        !form.enabled || !form.enabledForGeoQuestion || !canEnableGeoQuestion(form.platformCode),
+                      'is-off': !form.enabled || !form.enabledForGeoQuestion,
                     }"
                   >
                     {{
-                      form.enabled && form.enabledForGeoQuestion && canEnableGeoQuestion(form.platformCode)
-                        ? '启用'
-                        : '停用'
+                      form.enabled && form.enabledForGeoQuestion ? '启用' : '停用'
                     }}
                   </span>
                   <el-switch
-                    :model-value="form.enabled && form.enabledForGeoQuestion && canEnableGeoQuestion(form.platformCode)"
-                    :disabled="!form.enabled || !canEnableGeoQuestion(form.platformCode)"
+                    :model-value="form.enabled && form.enabledForGeoQuestion"
+                    :disabled="!form.enabled"
                     @update:model-value="form.enabledForGeoQuestion = $event"
                   />
                 </div>
@@ -659,9 +656,6 @@ watch(
 watch(
   () => form.platformCode,
   (value) => {
-    if (!canEnableGeoQuestion(value)) {
-      form.enabledForGeoQuestion = false
-    }
     if (!canEnablePresaleEvaluate(value)) {
       form.presaleEvaluateEnabled = false
     }
@@ -910,14 +904,9 @@ function isPresaleEnabled(row: AIPlatformConfigItem) {
 }
 
 const presaleEvaluateCodes = new Set(['deepseek', 'doubao', 'qwen', 'mimo', 'zhipu'])
-const geoQuestionCodes = new Set(['qwen', 'deepseek', 'mimo'])
 
 function canEnablePresaleEvaluate(platformCode: string) {
   return presaleEvaluateCodes.has((platformCode || '').trim())
-}
-
-function canEnableGeoQuestion(platformCode: string) {
-  return geoQuestionCodes.has((platformCode || '').trim())
 }
 
 onMounted(async () => {

@@ -34,7 +34,6 @@ public class AiPlatformConfigService {
     private static final Set<String> PRESALE_EVALUATE_PLATFORM_CODES = Set.of(
             "deepseek", "doubao", "qwen", "mimo", "zhipu"
     );
-    private static final Set<String> GEO_QUESTION_PLATFORM_CODES = Set.of("qwen", "deepseek", "mimo");
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
@@ -301,10 +300,6 @@ public class AiPlatformConfigService {
             }
         }
         if (Boolean.TRUE.equals(enabledForGeoQuestion)) {
-            String normalizedCode = platformCode.trim();
-            if (!GEO_QUESTION_PLATFORM_CODES.contains(normalizedCode)) {
-                throw new BizException(400, "GEO question generation model must be one of qwen/deepseek/mimo");
-            }
             if (!Boolean.TRUE.equals(enabled)) {
                 throw new BizException(400, "platform must be enabled when enabling GEO question generation");
             }

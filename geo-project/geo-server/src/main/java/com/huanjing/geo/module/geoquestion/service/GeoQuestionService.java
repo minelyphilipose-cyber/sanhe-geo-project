@@ -84,7 +84,6 @@ public class GeoQuestionService {
             "注意什么", "服务商", "口碑", "落地效果", "售后", "保障"
     );
     private static final Set<String> GENERIC_COMPETITOR_TERMS = Set.of("本地服务商", "服务商", "门店", "装修公司", "本地门店", "本地智能家居门店");
-    private static final Set<String> QUESTION_GENERATION_PLATFORM_CODES = Set.of("qwen", "deepseek", "mimo");
     private static final String PARTNER_REVIEW_INPUTTING = "inputting";
     private static final String PARTNER_REVIEW_PENDING_OWNER = "pending_owner_review";
     private static final String PARTNER_REVIEW_RETURNED = "returned";
@@ -488,7 +487,6 @@ public class GeoQuestionService {
     public List<ProviderVO> providers() {
         return aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
-                .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
                 .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
                 .isNotNull(AiPlatformConfig::getModelId)
                 .apply("TRIM(model_id) <> ''")
@@ -1542,7 +1540,6 @@ public class GeoQuestionService {
     private AiPlatformConfig resolveBatchModel(GeoQuestionBatch batch) {
         LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
-                .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
                 .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
                 .isNotNull(AiPlatformConfig::getModelId)
                 .apply("TRIM(model_id) <> ''")
@@ -1552,7 +1549,7 @@ public class GeoQuestionService {
         }
         AiPlatformConfig config = aiPlatformConfigMapper.selectOne(wrapper);
         if (config == null || !StringUtils.hasText(config.getApiUrl()) || !StringUtils.hasText(generationModelId(config))) {
-            throw new BizException(400, "拓词问题池生成只支持通义千问、DeepSeek、Mimo，请重新选择模型");
+            throw new BizException(400, "请选择已启用拓词问题生成的可用模型");
         }
         return config;
     }
@@ -1560,7 +1557,6 @@ public class GeoQuestionService {
     private AiPlatformConfig resolveRequestedModel(BatchStartRequest req) {
         LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
-                .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
                 .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
                 .isNotNull(AiPlatformConfig::getModelId)
                 .apply("TRIM(model_id) <> ''")
@@ -1572,7 +1568,7 @@ public class GeoQuestionService {
         }
         AiPlatformConfig config = aiPlatformConfigMapper.selectOne(wrapper);
         if (config == null || !StringUtils.hasText(config.getApiUrl()) || !StringUtils.hasText(generationModelId(config))) {
-            throw new BizException(400, "拓词问题池生成只支持通义千问、DeepSeek、Mimo，请重新选择模型");
+            throw new BizException(400, "请选择已启用拓词问题生成的可用模型");
         }
         return config;
     }
@@ -1580,7 +1576,6 @@ public class GeoQuestionService {
     private Long randomGeoQuestionModelId() {
         List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
-                .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
                 .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
                 .isNotNull(AiPlatformConfig::getModelId)
                 .apply("TRIM(model_id) <> ''"));
