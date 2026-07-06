@@ -80,7 +80,7 @@
 
       <section class="partner-surface brand-section product-section">
         <SectionHead title="产品信息" :subtitle="productSectionSubtitle">
-          <el-button v-if="canManageBrand" type="primary" @click="openOfferingCreate">新增产品</el-button>
+          <el-button v-if="canCreateOffering" type="primary" @click="openOfferingCreate">新增产品</el-button>
         </SectionHead>
         <DataState :loading="offeringLoading" :empty="false">
           <div v-if="!offeringLoading && offerings.length === 0" class="offering-empty-action" :class="{ 'is-required': isSpecialIndustryBrand }">
@@ -94,7 +94,7 @@
                 }}
               </p>
             </div>
-            <el-button v-if="canManageBrand" type="primary" @click="openOfferingCreate">添加产品信息</el-button>
+            <el-button v-if="canCreateOffering" type="primary" @click="openOfferingCreate">添加产品信息</el-button>
           </div>
           <div v-else class="offering-grid">
             <article v-for="item in offerings" :key="item.id" class="offering-card">
@@ -363,7 +363,7 @@ import { getSpecialIndustryTopicAngleCategories, type SpecialIndustryTopicAngleC
 import DataState from '@/components/ui/DataState.vue'
 import { useDictStore } from '@/stores/dict'
 import { useUserStore } from '@/stores/user'
-import type { Brand, BrandImageFolder, BrandMaterial, BrandOffering } from '@/types'
+import type { Brand, BrandImageFolder, BrandMaterial, BrandOffering, Company } from '@/types'
 import { nullableText } from '@/utils/form'
 import { errorMessage } from '@/utils/error'
 import { specialIndustryCodesFromOptions } from '@/utils/specialIndustry'
@@ -383,6 +383,7 @@ const offeringSaving = ref(false)
 const folderSaving = ref(false)
 const specialCategoryLoading = ref(false)
 const brand = ref<Brand | null>(null)
+const company = ref<Company | null>(null)
 const companyName = ref('')
 const imageFolders = ref<BrandImageFolder[]>([])
 const materialPreviewMap = ref<Record<number, string>>({})
@@ -396,7 +397,7 @@ const deletingMaterialIds = ref<number[]>([])
 const imageInputRef = ref<HTMLInputElement>()
 const offeringFormRef = ref<FormInstance>()
 const offeringVisible = ref(false)
-const articleFolderRuleMessage = '不能这样修改：文章自动生成需要至少一个启用且名称以“插图”开头的文件夹，并保留一个启用且名称为“封面”的文件夹。'
+const articleFolderRuleMessage = '图片资产中需至少一个名称以“插图”开头的文件夹，并保留一个名称为“封面”的文件夹。'
 const editingOffering = ref<BrandOffering | null>(null)
 const folderDialogVisible = ref(false)
 const editingFolderId = ref<number | null>(null)
@@ -404,6 +405,7 @@ const editingFolderId = ref<number | null>(null)
 const isPartnerStaff = computed(() => userStore.role === 'partner_staff')
 const canManageBrand = computed(() => isPartnerStaff.value && userStore.hasPermission('brand.update'))
 const brandId = computed(() => Number(route.params.id) || 0)
+const BRAND_DETAIL_EDITABLE_WORKFLOW_STATUSES = new Set(['draft', 'package_requested', 'package_bound', 'project_entry'])
 
 const SectionHead = defineComponent({
   name: 'SectionHead',
@@ -503,6 +505,10 @@ const brandInitial = computed(() => {
 const companyLabel = computed(() => (brand.value as any)?.companyName || companyName.value || '未关联客户')
 const statusLabel = computed(() => dictStore.label('brand_status', brand.value?.status) || (brand.value?.status === 'active' ? '启用' : '-'))
 const brandStatusClass = computed(() => (brand.value?.status === 'active' ? 'is-success' : 'is-muted'))
+const partnerWorkflowStatus = computed(() => company.value?.partnerWorkflowStatus || 'draft')
+const canCreateOffering = computed(() =>
+  canManageBrand.value && BRAND_DETAIL_EDITABLE_WORKFLOW_STATUSES.has(partnerWorkflowStatus.value),
+)
 const productSectionSubtitle = computed(() =>
   isSpecialIndustryBrand.value
     ? '特殊行业品牌至少需要一个产品、服务或诊疗项目，用于总部合规审核与内容生成。'
@@ -656,10 +662,11 @@ async function loadBrand() {
   if (!brandId.value) return
   loading.value = true
   companyName.value = ''
+  company.value = null
   try {
     const { data } = await getBrandDetail(brandId.value)
     brand.value = data.data
-    await loadCompanyName()
+    await loadCompanyContext()
   } catch {
     ElMessage.error('加载品牌详情失败')
   } finally {
@@ -667,13 +674,15 @@ async function loadBrand() {
   }
 }
 
-async function loadCompanyName() {
+async function loadCompanyContext() {
   const companyId = brand.value?.companyId
-  if (!companyId || (brand.value as any)?.companyName) return
+  if (!companyId) return
   try {
     const { data } = await getCompanyDetail(companyId)
-    companyName.value = data.data?.companyName || ''
+    company.value = data.data || null
+    companyName.value = (brand.value as any)?.companyName || data.data?.companyName || ''
   } catch {
+    company.value = null
     companyName.value = ''
   }
 }
@@ -922,6 +931,10 @@ function resetOfferingForm() {
 }
 
 function openOfferingCreate() {
+  if (!canCreateOffering.value) {
+    ElMessage.warning('当前客户已提交负责人确认，不能新增产品信息')
+    return
+  }
   editingOffering.value = null
   resetOfferingForm()
   offeringVisible.value = true

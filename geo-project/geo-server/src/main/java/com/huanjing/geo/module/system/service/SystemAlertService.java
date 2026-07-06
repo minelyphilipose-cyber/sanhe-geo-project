@@ -19,6 +19,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -183,19 +184,43 @@ public class SystemAlertService {
         }
     }
 
-    public Page<SystemAlertTodoVO> myTodos(long current, long size) {
+    public Page<SystemAlertTodoVO> myTodos(long current, long size, boolean includeResolved, boolean unreadOnly) {
         SysUser user = currentUserService.requireCurrentUser();
+        LambdaQueryWrapper<SystemAlert> wrapper = visibleAlertWrapper(user);
+        if (!includeResolved) {
+            wrapper.eq(SystemAlert::getIsResolved, false);
+        }
+        if (unreadOnly) {
+            wrapper.isNull(SystemAlert::getReadAt);
+        }
         Page<SystemAlert> page = systemAlertMapper.selectPage(new Page<>(current, size),
-                visibleAlertWrapper(user)
-                        .eq(SystemAlert::getIsResolved, false)
-                        .orderByDesc(SystemAlert::getCreatedAt));
+                wrapper.orderByDesc(SystemAlert::getCreatedAt));
         Page<SystemAlertTodoVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(page.getRecords().stream().map(this::toTodoVO).toList());
         return result;
     }
 
+    public long myUnreadCount() {
+        SysUser user = currentUserService.requireCurrentUser();
+        return systemAlertMapper.selectCount(visibleAlertWrapper(user)
+                .isNull(SystemAlert::getReadAt));
+    }
+
+    public void markRead(Long alertId) {
+        SysUser user = currentUserService.requireCurrentUser();
+        SystemAlert alert = systemAlertMapper.selectOne(visibleAlertWrapper(user)
+                .eq(SystemAlert::getId, alertId)
+                .last("LIMIT 1"));
+        if (alert == null) {
+            throw new BizException(404, "站内信不存在或无权查看");
+        }
+        if (alert.getReadAt() == null) {
+            alert.setReadAt(LocalDateTime.now());
+            systemAlertMapper.updateById(alert);
+        }
+    }
+
     public void resolve(Long alertId) {
-        currentUserService.ensurePermission("system.alert.resolve");
         SysUser user = currentUserService.requireCurrentUser();
         SystemAlert alert = systemAlertMapper.selectOne(visibleAlertWrapper(user)
                 .eq(SystemAlert::getId, alertId)
@@ -203,6 +228,10 @@ public class SystemAlertService {
                 .last("LIMIT 1"));
         if (alert == null) {
             throw new BizException(404, "待办不存在或已处理");
+        }
+        if (!currentUserService.hasPermission("system.alert.resolve")
+                && !Objects.equals(alert.getRecipientUserId(), user.getId())) {
+            throw new BizException(403, "No permission: system.alert.resolve");
         }
         alert.setIsResolved(true);
         alert.setResolvedBy(user.getId());
@@ -300,6 +329,7 @@ public class SystemAlertService {
         alert.setIsResolved(false);
         alert.setResolvedBy(null);
         alert.setResolvedAt(null);
+        alert.setReadAt(null);
     }
 
     private SystemAlertTodoVO toTodoVO(SystemAlert alert) {
@@ -310,6 +340,9 @@ public class SystemAlertService {
         vo.setSource(alert.getSource());
         vo.setMessage(alert.getMessage());
         vo.setContextJson(alert.getContextJson());
+        vo.setIsResolved(Boolean.TRUE.equals(alert.getIsResolved()));
+        vo.setResolvedAt(alert.getResolvedAt());
+        vo.setReadAt(alert.getReadAt());
         vo.setCreatedAt(alert.getCreatedAt());
         return vo;
     }

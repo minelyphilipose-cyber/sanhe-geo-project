@@ -9,9 +9,9 @@
     </div>
 
     <div class="topbar__right">
-      <el-tooltip v-if="canViewAlertCenter" content="告警中心" placement="bottom">
+      <el-tooltip v-if="canViewAlertCenter" :content="alertCenterLabel" placement="bottom">
         <el-badge :value="alertCount" :hidden="alertCount === 0" :max="99">
-          <el-button text circle aria-label="告警中心" @click="openAlertCenter">
+          <el-button text circle :aria-label="alertCenterLabel" @click="openAlertCenter">
             <el-icon :size="18"><Bell /></el-icon>
           </el-button>
         </el-badge>
@@ -49,10 +49,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { Bell, ArrowDown } from '@element-plus/icons-vue'
+import { getDispatchAlerts } from '@/api/dispatch'
+import { getMySystemAlertTodos, getMySystemAlertUnreadCount } from '@/api/systemAlert'
 import type { RoleType } from '@/types'
 
 const ROLE_LABELS: Record<RoleType, string> = {
@@ -71,14 +73,20 @@ const userStore = useUserStore()
 
 const alertCount = ref(0)
 const avatarLoadFailed = ref(false)
+let alertCountTimer: number | null = null
+const handleAlertCountChanged = () => {
+  loadAlertCount()
+}
 
 const avatarLetter = computed(() =>
   (userStore.displayName || 'U').charAt(0).toUpperCase(),
 )
 const showAvatarImage = computed(() => !!userStore.avatarUrl && !avatarLoadFailed.value)
 const canViewAlertCenter = computed(() =>
-  userStore.hasPermission(['content.distribution.retry', 'dispatch.alert.resolve', 'system.alert.resolve']),
+  userStore.isPartner
+  || userStore.hasPermission(['content.distribution.retry', 'dispatch.alert.resolve', 'system.alert.resolve']),
 )
+const alertCenterLabel = computed(() => (userStore.isPartner ? '站内信' : '告警中心'))
 
 const roleLabel = computed(() => {
   const r = userStore.role
@@ -98,8 +106,41 @@ watch(() => userStore.avatarUrl, () => {
   avatarLoadFailed.value = false
 })
 
+watch(() => route.path, (path) => {
+  if (path === '/partner/alerts') {
+    loadAlertCount()
+  }
+})
+
 async function openAlertCenter() {
-  await router.push('/admin/alerts')
+  await router.push(userStore.isPartner ? '/partner/alerts' : '/admin/alerts')
+}
+
+async function loadAlertCount() {
+  if (!canViewAlertCenter.value) {
+    alertCount.value = 0
+    return
+  }
+  try {
+    if (userStore.isPartner) {
+      const { data } = await getMySystemAlertUnreadCount()
+      alertCount.value = Number(data.data || 0)
+      return
+    }
+    const canViewDispatchAlerts = userStore.hasPermission(['content.distribution.retry', 'dispatch.alert.resolve'])
+    const canViewSystemAlerts = userStore.hasPermission('system.alert.resolve')
+    const [dispatchRes, systemRes] = await Promise.all([
+      canViewDispatchAlerts
+        ? getDispatchAlerts({ current: 1, size: 1, rangeType: 'last7', status: 'open' })
+        : Promise.resolve(null),
+      canViewSystemAlerts ? getMySystemAlertTodos({ current: 1, size: 1 }) : Promise.resolve(null),
+    ])
+    alertCount.value =
+      Number(dispatchRes?.data.data?.total || 0) +
+      Number(systemRes?.data.data?.total || 0)
+  } catch {
+    alertCount.value = 0
+  }
 }
 
 async function handleCommand(cmd: string) {
@@ -115,6 +156,23 @@ async function handleCommand(cmd: string) {
     }
   }
 }
+
+onMounted(async () => {
+  await loadAlertCount()
+  window.addEventListener('system-alert-count-changed', handleAlertCountChanged)
+  alertCountTimer = window.setInterval(() => {
+    if (document.hidden) return
+    loadAlertCount()
+  }, 60000)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('system-alert-count-changed', handleAlertCountChanged)
+  if (alertCountTimer) {
+    window.clearInterval(alertCountTimer)
+    alertCountTimer = null
+  }
+})
 </script>
 
 <style scoped>

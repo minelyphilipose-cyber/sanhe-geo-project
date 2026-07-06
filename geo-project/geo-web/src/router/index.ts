@@ -68,6 +68,7 @@ const publicPathPrefixes = [
   '/403',
   '/session-expired',
 ]
+const internalReadablePartnerRouteNames = new Set(['PartnerBrandDetail'])
 
 const router = createRouter({
   history: createWebHistory(),
@@ -206,7 +207,7 @@ router.beforeEach(async (to, _from, next) => {
     }
   }
 
-  if (!userStore.isPartner && to.path.startsWith('/partner')) {
+  if (!userStore.isPartner && to.path.startsWith('/partner') && !internalReadablePartnerRouteNames.has(String(to.name || ''))) {
     return next('/admin/overview')
   }
 

@@ -67,14 +67,6 @@
               >
                 通知继续录入
               </el-button>
-              <el-button
-                v-if="canCompleteEntry"
-                type="success"
-                :loading="workflowSubmitting"
-                @click="completeEntry"
-              >
-                信息录入完成
-              </el-button>
               <el-button v-if="canSubmitWorkorder" type="primary" plain @click="goSubmitWorkorder">
                 查看项目并提交工单
               </el-button>
@@ -252,42 +244,6 @@
           </DataState>
         </section>
 
-        <section v-if="showSubmissionChecklist" v-loading="submissionReadinessLoading" class="detail-card checklist-card">
-          <div class="section-head">
-            <div>
-              <h2>提交前检查清单</h2>
-              <p>交付员工按清单补齐资料，全部完成后才能提交负责人确认。</p>
-            </div>
-            <div class="section-actions checklist-summary">
-              <span>{{ submissionReadyCount }} / {{ submissionTotalCount }}</span>
-              <el-button plain @click="loadSubmissionReadiness">刷新检查</el-button>
-            </div>
-          </div>
-          <div class="checklist-status" :class="{ ready: submissionReady }">
-            <strong>{{ submissionReady ? '资料已完整，可以提交负责人确认' : `还有 ${submissionPendingCount} 项需要补充` }}</strong>
-            <span>{{ submissionReady ? '负责人侧只负责核对并提交总部工单。' : '请先处理待补充项，避免负责人提交总部时被拦截。' }}</span>
-          </div>
-          <div class="checklist-grid">
-            <div
-              v-for="item in submissionChecklistItems"
-              :key="item.key"
-              class="checklist-item"
-              :class="{ done: item.ready }"
-            >
-              <div class="checklist-icon">{{ item.ready ? '✓' : '!' }}</div>
-              <div class="checklist-body">
-                <div class="checklist-title">
-                  <strong>{{ item.title }}</strong>
-                  <el-tag size="small" :type="item.ready ? 'success' : 'danger'" round>
-                    {{ item.ready ? '已完成' : '待补充' }}
-                  </el-tag>
-                </div>
-                <p>{{ item.description }}</p>
-                <span>{{ item.ready ? '无需处理' : item.actionText || '去补充' }}</span>
-              </div>
-            </div>
-          </div>
-        </section>
       </template>
     </DataState>
 
@@ -345,19 +301,15 @@ import dayjs from 'dayjs'
 import DataState from '@/components/ui/DataState.vue'
 import {
   bindCompanyPackage,
-  completeCompanyEntry,
   getActiveCompanyPackageBinding,
   getBrandList,
   getCompanyDetail,
   getCompanyDistributionQuotas,
   getCompanyKeywordGroupQuota,
-  getCompanySubmissionReadiness,
   notifyCompanyProjectEntry,
   requestCompanyPackageReview,
   returnCompanyEntry,
   unbindCompanyPackage,
-  type PartnerSubmissionReadiness,
-  type PartnerSubmissionReadinessItem,
 } from '@/api/customer'
 import { getGeoProjectWorkorders } from '@/api/geoQuestion'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
@@ -376,7 +328,6 @@ const companyId = Number(route.params.id)
 const loading = ref(false)
 const brandLoading = ref(false)
 const packageLoading = ref(false)
-const submissionReadinessLoading = ref(false)
 const workflowSubmitting = ref(false)
 const packageSubmitting = ref(false)
 const packageBindVisible = ref(false)
@@ -387,7 +338,6 @@ const brands = ref<Brand[]>([])
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
 const keywordQuota = ref<CompanyKeywordGroupQuota | null>(null)
 const distributionQuota = ref<CompanyDistributionQuota | null>(null)
-const submissionReadiness = ref<PartnerSubmissionReadiness | null>(null)
 const entryReadiness = ref<{ hasProject: boolean; allCoreQuestionsReady: boolean }>({ hasProject: false, allCoreQuestionsReady: false })
 const packagePlanOptions = ref<PackagePlan[]>([])
 const packageBindForm = reactive({
@@ -456,17 +406,8 @@ const workflowSteps = computed(() => {
 
 const canRequestPackage = computed(() => isPartnerStaff.value && effectiveWorkflowStatus.value === 'draft')
 const canNotifyEntry = computed(() => isPartnerOwner.value && effectiveWorkflowStatus.value === 'package_bound')
-const canCompleteEntry = computed(() => isPartnerStaff.value
-  && effectiveWorkflowStatus.value === 'project_entry'
-  && submissionReady.value)
 const canSubmitWorkorder = computed(() => isPartnerOwner.value && effectiveWorkflowStatus.value === 'entry_completed')
 const canReturnEntry = computed(() => isPartnerOwner.value && effectiveWorkflowStatus.value === 'entry_completed')
-const showSubmissionChecklist = computed(() => isPartnerStaff.value && ['project_entry', 'entry_completed'].includes(effectiveWorkflowStatus.value))
-const submissionChecklistItems = computed<PartnerSubmissionReadinessItem[]>(() => submissionReadiness.value?.items || [])
-const submissionReady = computed(() => Boolean(submissionReadiness.value?.ready))
-const submissionTotalCount = computed(() => submissionReadiness.value?.totalCount || submissionChecklistItems.value.length)
-const submissionReadyCount = computed(() => submissionReadiness.value?.readyCount || submissionChecklistItems.value.filter((item) => item.ready).length)
-const submissionPendingCount = computed(() => submissionReadiness.value?.pendingCount ?? Math.max(submissionTotalCount.value - submissionReadyCount.value, 0))
 
 const regionText = computed(() => company.value ? regionDisplayFromPayload(company.value) || company.value.city || '-' : '-')
 const roleText = computed(() => company.value?.partnerStaffOwnerName ? `交付员工：${company.value.partnerStaffOwnerName}` : '未分配交付员工')
@@ -701,22 +642,6 @@ async function loadEntryReadiness() {
   }
 }
 
-async function loadSubmissionReadiness() {
-  if (!isPartnerStaff.value && !isPartnerOwner.value) {
-    submissionReadiness.value = null
-    return
-  }
-  submissionReadinessLoading.value = true
-  try {
-    const { data } = await getCompanySubmissionReadiness(companyId)
-    submissionReadiness.value = data.data
-  } catch {
-    submissionReadiness.value = null
-  } finally {
-    submissionReadinessLoading.value = false
-  }
-}
-
 async function buildEntryReadiness(projects: Project[]) {
   const relatedProjects = projects.filter((project) => Number(project.companyId || 0) === companyId)
   if (!relatedProjects.length) {
@@ -756,7 +681,7 @@ async function loadPackagePlanOptions() {
 }
 
 async function reloadAll() {
-  await Promise.all([loadCompany(), loadBrands(), loadPackageInfo(), loadEntryReadiness(), loadSubmissionReadiness()])
+  await Promise.all([loadCompany(), loadBrands(), loadPackageInfo(), loadEntryReadiness()])
 }
 
 async function openPackageBind() {
@@ -827,26 +752,6 @@ async function notifyEntry() {
     await reloadAll()
   } catch (err) {
     ElMessage.error(errorMessage(err, '通知继续录入失败'))
-  } finally {
-    workflowSubmitting.value = false
-  }
-}
-
-async function completeEntry() {
-  if (!submissionReady.value) {
-    await loadSubmissionReadiness()
-  }
-  if (!submissionReady.value) {
-    ElMessage.warning(`提交前检查未通过，还有 ${submissionPendingCount.value || 1} 项需要补充`)
-    return
-  }
-  workflowSubmitting.value = true
-  try {
-    await completeCompanyEntry(companyId)
-    ElMessage.success('已提交负责人确认')
-    await reloadAll()
-  } catch (err) {
-    ElMessage.error(errorMessage(err, '提交录入完成失败'))
   } finally {
     workflowSubmitting.value = false
   }
@@ -1205,129 +1110,6 @@ onMounted(reloadAll)
   color: #fff;
 }
 
-.checklist-card {
-  border-color: #bfdbfe;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-}
-
-.checklist-summary {
-  align-items: center;
-}
-
-.checklist-summary span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 64px;
-  height: 34px;
-  border-radius: 8px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 16px;
-  font-weight: 900;
-}
-
-.checklist-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid #fed7aa;
-  border-radius: 8px;
-  background: #fff7ed;
-  color: #9a3412;
-}
-
-.checklist-status.ready {
-  border-color: #a7f3d0;
-  background: #ecfdf5;
-  color: #047857;
-}
-
-.checklist-status strong {
-  font-size: 15px;
-  font-weight: 900;
-}
-
-.checklist-status span {
-  color: #64748b;
-  font-size: 13px;
-}
-
-.checklist-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.checklist-item {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  background: #fffafa;
-}
-
-.checklist-item.done {
-  border-color: #bbf7d0;
-  background: #f8fffb;
-}
-
-.checklist-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: #fee2e2;
-  color: #dc2626;
-  font-weight: 900;
-}
-
-.checklist-item.done .checklist-icon {
-  background: #dcfce7;
-  color: #16a34a;
-}
-
-.checklist-body {
-  min-width: 0;
-}
-
-.checklist-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.checklist-title strong {
-  min-width: 0;
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 900;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.checklist-body p {
-  margin: 8px 0 6px;
-  color: #475569;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.checklist-body > span {
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 800;
-}
-
 .info-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1524,7 +1306,6 @@ onMounted(reloadAll)
   .metric-grid,
   .workflow-steps,
   .info-grid,
-  .checklist-grid,
   .package-summary {
     grid-template-columns: 1fr;
   }

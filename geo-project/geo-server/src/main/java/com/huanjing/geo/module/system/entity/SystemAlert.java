@@ -23,6 +23,7 @@ public class SystemAlert {
     private Boolean isResolved;
     private Long resolvedBy;
     private LocalDateTime resolvedAt;
+    private LocalDateTime readAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

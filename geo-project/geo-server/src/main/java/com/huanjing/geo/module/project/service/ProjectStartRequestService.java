@@ -71,6 +71,7 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -310,6 +311,7 @@ public class ProjectStartRequestService {
         updateRequestForRejection(request, operator.getId(), req, now);
         releaseSubmittedQuotaSnapshot(request.getId(), now);
         updateProjectStatusFrom(project.getId(), ProjectFlowPolicy.SUBMITTED, ProjectFlowPolicy.REJECTED);
+        returnCompanyToPartnerOwnerReview(request.getCompanyId(), now);
 
         request.setStatus(STATUS_REJECTED);
         request.setReviewedBy(operator.getId());
@@ -332,7 +334,7 @@ public class ProjectStartRequestService {
                         "rejectReasonCode", Objects.toString(request.getRejectReasonCode(), "")
                 )
         );
-        notifyPartnerRejected(request, project);
+        notifyPartnerRejected(request, project, operator);
         return toAdminVO(project, request, quotaSnapshotMapper.selectLatestByStartRequestId(request.getId()), null);
     }
 
@@ -771,6 +773,22 @@ public class ProjectStartRequestService {
         companyMapper.updateById(company);
     }
 
+    private void returnCompanyToPartnerOwnerReview(Long companyId, LocalDateTime updatedAt) {
+        if (companyId == null) {
+            return;
+        }
+        Company company = companyMapper.selectById(companyId);
+        if (company == null || company.getDeletedAt() != null) {
+            return;
+        }
+        if (!PARTNER_WORKFLOW_SUBMITTED_TO_HQ.equals(company.getPartnerWorkflowStatus())) {
+            return;
+        }
+        company.setPartnerWorkflowStatus(PARTNER_WORKFLOW_ENTRY_COMPLETED);
+        company.setPartnerWorkflowUpdatedAt(updatedAt == null ? LocalDateTime.now() : updatedAt);
+        companyMapper.updateById(company);
+    }
+
     private void notifyInternalReviewers(ProjectStartRequest request, Project project) {
         Map<String, Object> context = notificationContext(request, project);
         String message = "合伙人提交了项目启动工单：" + Objects.toString(project.getProjectName(), request.getRequestNo());
@@ -804,12 +822,18 @@ public class ProjectStartRequestService {
         );
     }
 
-    private void notifyPartnerRejected(ProjectStartRequest request, Project project) {
-        Map<String, Object> context = notificationContext(request, project);
-        String message = "项目启动工单已驳回，请交付员工修改后重新提交负责人复核：" + Objects.toString(project.getProjectName(), request.getRequestNo());
+    private void notifyPartnerRejected(ProjectStartRequest request, Project project, SysUser sender) {
+        Map<String, Object> context = new HashMap<>(notificationContext(request, project));
+        context.put("route", "/partner/my-projects");
+        context.put("rejectReasonCode", Objects.toString(request.getRejectReasonCode(), ""));
+        context.put("rejectReasonText", Objects.toString(request.getRejectReasonText(), ""));
+        context.put("actionRoles", List.of("partner"));
+        context.put("actionRoleText", "合伙人负责人");
+        addSenderContext(context, sender);
+        String message = "项目启动工单已驳回，请负责人查看原因后退回交付员工修改：" + Objects.toString(project.getProjectName(), request.getRequestNo());
         Set<Long> recipients = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                         .eq(SysUser::getPartnerId, request.getPartnerId())
-                        .in(SysUser::getRole, List.of("partner", "partner_staff"))
+                        .eq(SysUser::getRole, "partner")
                         .eq(SysUser::getIsActive, true))
                 .stream()
                 .map(SysUser::getId)
@@ -838,6 +862,15 @@ public class ProjectStartRequestService {
                 "companyId", request.getCompanyId(),
                 "partnerId", request.getPartnerId()
         );
+    }
+
+    private void addSenderContext(Map<String, Object> context, SysUser sender) {
+        if (context == null || sender == null) {
+            return;
+        }
+        context.put("senderUserId", sender.getId());
+        context.put("senderName", userName(sender));
+        context.put("senderRole", Objects.toString(sender.getRole(), ""));
     }
 
     private void validatePartnerSubmissionMaterials(Project project) {
@@ -1281,9 +1314,10 @@ public class ProjectStartRequestService {
         vo.setCompanyId(request.getCompanyId());
         Company company = companyMapper.selectById(request.getCompanyId());
         vo.setCompanyName(company == null ? null : company.getCompanyName());
-        if (company != null && company.getOwnerId() != null) {
+        SysUser defaultInternalOwner = company == null ? null : activeInternalOperator(company.getOwnerId());
+        if (defaultInternalOwner != null) {
             vo.setDefaultInternalOwnerId(company.getOwnerId());
-            vo.setDefaultInternalOwnerName(userName(company.getOwnerId()));
+            vo.setDefaultInternalOwnerName(userName(defaultInternalOwner));
         }
         vo.setPartnerId(request.getPartnerId());
         Partner partner = partnerMapper.selectById(request.getPartnerId());
@@ -1326,7 +1360,25 @@ public class ProjectStartRequestService {
         if (user == null) {
             return null;
         }
+        return userName(user);
+    }
+
+    private String userName(SysUser user) {
+        if (user == null) {
+            return null;
+        }
         return StringUtils.hasText(user.getDisplayName()) ? user.getDisplayName() : user.getUsername();
+    }
+
+    private SysUser activeInternalOperator(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null || !Boolean.TRUE.equals(user.getIsActive()) || !"operator".equals(user.getRole())) {
+            return null;
+        }
+        return user;
     }
 
     private AdminProjectStartRequestVO toAdminVO(ProjectStartRequest request) {

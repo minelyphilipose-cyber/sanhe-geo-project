@@ -20,7 +20,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -54,7 +53,7 @@ class SystemAlertServiceTest {
         page.setRecords(List.of(alert));
         when(systemAlertMapper.selectPage(any(Page.class), any())).thenReturn(page);
 
-        Page<SystemAlertTodoVO> todos = systemAlertService.myTodos(1, 20);
+        Page<SystemAlertTodoVO> todos = systemAlertService.myTodos(1, 20, false, false);
 
         assertEquals(1, todos.getTotal());
         assertEquals(1, todos.getRecords().size());
@@ -70,7 +69,7 @@ class SystemAlertServiceTest {
         Page<SystemAlert> page = new Page<>(1, 20, 0);
         when(systemAlertMapper.selectPage(any(Page.class), any())).thenReturn(page);
 
-        systemAlertService.myTodos(1, 20);
+        systemAlertService.myTodos(1, 20, false, false);
 
         ArgumentCaptor<LambdaQueryWrapper<SystemAlert>> wrapperCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(systemAlertMapper).selectPage(any(Page.class), wrapperCaptor.capture());
@@ -87,10 +86,10 @@ class SystemAlertServiceTest {
         alert.setId(9L);
         alert.setIsResolved(false);
         when(systemAlertMapper.selectOne(any())).thenReturn(alert);
+        when(currentUserService.hasPermission("system.alert.resolve")).thenReturn(true);
 
         systemAlertService.resolve(9L);
 
-        verify(currentUserService).ensurePermission("system.alert.resolve");
         ArgumentCaptor<SystemAlert> captor = ArgumentCaptor.forClass(SystemAlert.class);
         verify(systemAlertMapper).updateById(captor.capture());
         SystemAlert updated = captor.getValue();
@@ -101,6 +100,41 @@ class SystemAlertServiceTest {
     }
 
     @Test
+    void markReadOnlySetsReadTime() {
+        SystemAlert alert = new SystemAlert();
+        alert.setId(9L);
+        alert.setIsResolved(false);
+        when(systemAlertMapper.selectOne(any())).thenReturn(alert);
+
+        systemAlertService.markRead(9L);
+
+        ArgumentCaptor<SystemAlert> captor = ArgumentCaptor.forClass(SystemAlert.class);
+        verify(systemAlertMapper).updateById(captor.capture());
+        SystemAlert updated = captor.getValue();
+        assertEquals(9L, updated.getId());
+        assertNotNull(updated.getReadAt());
+        assertEquals(false, updated.getIsResolved());
+        assertEquals(null, updated.getResolvedAt());
+    }
+
+    @Test
+    void resolveAllowsRecipientUserWithoutSystemPermission() {
+        SystemAlert alert = new SystemAlert();
+        alert.setId(9L);
+        alert.setIsResolved(false);
+        alert.setRecipientUserId(7L);
+        when(systemAlertMapper.selectOne(any())).thenReturn(alert);
+        when(currentUserService.hasPermission("system.alert.resolve")).thenReturn(false);
+
+        systemAlertService.resolve(9L);
+
+        ArgumentCaptor<SystemAlert> captor = ArgumentCaptor.forClass(SystemAlert.class);
+        verify(systemAlertMapper).updateById(captor.capture());
+        assertEquals(true, captor.getValue().getIsResolved());
+        assertEquals(7L, captor.getValue().getResolvedBy());
+    }
+
+    @Test
     void resolveRejectsMissingOrResolvedAlert() {
         when(systemAlertMapper.selectOne(any())).thenReturn(null);
 
@@ -108,13 +142,16 @@ class SystemAlertServiceTest {
     }
 
     @Test
-    void resolveRequiresSystemAlertPermission() {
-        doThrow(new BizException(403, "No permission: system.alert.resolve"))
-                .when(currentUserService).ensurePermission("system.alert.resolve");
+    void resolveRequiresPermissionWhenNotRecipientUser() {
+        SystemAlert alert = new SystemAlert();
+        alert.setId(9L);
+        alert.setIsResolved(false);
+        alert.setRecipientUserId(99L);
+        when(systemAlertMapper.selectOne(any())).thenReturn(alert);
+        when(currentUserService.hasPermission("system.alert.resolve")).thenReturn(false);
 
         assertThrows(BizException.class, () -> systemAlertService.resolve(9L));
 
-        verify(systemAlertMapper, never()).selectOne(any());
         verify(systemAlertMapper, never()).updateById(any());
     }
 

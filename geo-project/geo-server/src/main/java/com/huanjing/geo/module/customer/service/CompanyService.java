@@ -3,6 +3,7 @@ package com.huanjing.geo.module.customer.service;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
@@ -49,6 +50,7 @@ import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -133,6 +135,7 @@ public class CompanyService {
     private final GeoQuestionItemMapper geoQuestionItemMapper;
     private final ActivityLogService activityLogService;
     private final ProjectStartRequestService projectStartRequestService;
+    private final SystemAlertService systemAlertService;
 
     public Page<Company> page(long current, long size, String keyword, String ownerType, Long partnerId) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -453,6 +456,7 @@ public class CompanyService {
         projectStartRequestService.ensurePartnerSubmissionReady(company.getId());
         Map<String, Object> before = snapshotCompany(company);
         updatePartnerWorkflow(company, PARTNER_WORKFLOW_ENTRY_COMPLETED);
+        restoreRejectedPartnerProjectsForOwnerReview(company.getId());
         activityLogService.logAction(
                 operator.getId(),
                 "company.partner_workflow.complete_entry",
@@ -464,6 +468,16 @@ public class CompanyService {
         );
         attachOwnerInfo(company);
         return company;
+    }
+
+    private void restoreRejectedPartnerProjectsForOwnerReview(Long companyId) {
+        if (companyId == null) {
+            return;
+        }
+        projectMapper.update(null, new UpdateWrapper<com.huanjing.geo.module.project.entity.Project>()
+                .eq("company_id", companyId)
+                .eq("status", ProjectFlowPolicy.REJECTED)
+                .set("status", ProjectFlowPolicy.PENDING_START));
     }
 
     @Transactional
@@ -487,8 +501,71 @@ public class CompanyService {
                 snapshotCompany(company),
                 extra
         );
+        notifyPartnerStaffEntryReturned(company, req == null ? null : trimToNull(req.getReason()), operator);
         attachOwnerInfo(company);
         return company;
+    }
+
+    private void notifyPartnerStaffEntryReturned(Company company, String reason, SysUser sender) {
+        if (company == null || company.getPartnerId() == null) {
+            return;
+        }
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("companyId", company.getId());
+        context.put("companyName", java.util.Objects.toString(company.getCompanyName(), ""));
+        context.put("partnerId", company.getPartnerId());
+        context.put("route", "/partner/my-projects");
+        context.put("actionRoles", List.of("partner_staff"));
+        context.put("actionRoleText", "合伙人交付员工");
+        context.put("returnReason", java.util.Objects.toString(reason, ""));
+        addSenderContext(context, sender);
+
+        Set<Long> recipientIds = partnerStaffRecipientIds(company);
+        String message = "负责人已退回资料修改，请交付员工补充后重新提交负责人复核：" + java.util.Objects.toString(company.getCompanyName(), "未命名客户");
+        for (Long userId : recipientIds) {
+            systemAlertService.createOrRefreshRecipientAlert(
+                    "partner_company_entry_returned",
+                    "warn",
+                    "partner_workflow",
+                    message,
+                    context,
+                    userId,
+                    null,
+                    "partner-company-entry-returned:" + company.getId() + ":" + userId
+            );
+        }
+    }
+
+    private Set<Long> partnerStaffRecipientIds(Company company) {
+        Long staffOwnerId = company.getPartnerStaffOwnerId();
+        if (staffOwnerId != null) {
+            SysUser staffOwner = sysUserMapper.selectById(staffOwnerId);
+            if (staffOwner != null
+                    && Boolean.TRUE.equals(staffOwner.getIsActive())
+                    && "partner_staff".equals(staffOwner.getRole())) {
+                return Set.of(staffOwnerId);
+            }
+        }
+        List<SysUser> staffUsers = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getPartnerId, company.getPartnerId())
+                        .eq(SysUser::getRole, "partner_staff")
+                        .eq(SysUser::getIsActive, true));
+        if (staffUsers == null) {
+            return Set.of();
+        }
+        return staffUsers.stream()
+                .map(SysUser::getId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+    }
+
+    private void addSenderContext(Map<String, Object> context, SysUser sender) {
+        if (context == null || sender == null) {
+            return;
+        }
+        context.put("senderUserId", sender.getId());
+        context.put("senderName", displayName(sender));
+        context.put("senderRole", java.util.Objects.toString(sender.getRole(), ""));
     }
 
     public Company update(Long id, CompanyUpdateRequest req) {

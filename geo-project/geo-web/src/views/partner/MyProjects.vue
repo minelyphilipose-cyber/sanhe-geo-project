@@ -53,10 +53,38 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="230" fixed="right">
+          <el-table-column label="协作进度" min-width="230">
+            <template #default="scope">
+              <div class="workflow-cell" :class="projectWorkflowClass(scope.row)">
+                <span class="workflow-badge">
+                  <i />
+                  {{ projectWorkflowLabel(scope.row) }}
+                </span>
+                <small>{{ projectWorkflowHint(scope.row) }}</small>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="340" fixed="right">
             <template #default="scope">
               <div class="partner-row-actions">
                 <el-button link type="primary" @click="openDetail(scope.row)">详情</el-button>
+                <el-button
+                  v-if="canViewSubmissionChecklist(scope.row)"
+                  link
+                  type="primary"
+                  @click="openSubmissionChecklist(scope.row)"
+                >
+                  检查清单
+                </el-button>
+                <el-button
+                  v-if="canCompleteProjectEntry(scope.row)"
+                  link
+                  type="success"
+                  :loading="completingCompanyId === scope.row.companyId"
+                  @click="completeProjectEntry(scope.row)"
+                >
+                  提交负责人确认
+                </el-button>
                 <el-button
                   v-if="canSubmitStartRequest(scope.row)"
                   link
@@ -76,7 +104,7 @@
                   退回修改
                 </el-button>
                 <span v-else-if="isPartnerOwner && scope.row.status === 'submitted'" class="partner-row-note">工单已提交</span>
-                <el-button v-if="canUpdateProject" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+                <el-button v-if="canEditProject(scope.row)" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
                 <el-button v-if="canDeleteProject" link type="danger" @click="removeProject(scope.row)">删除</el-button>
               </div>
             </template>
@@ -297,6 +325,61 @@
       </template>
     </el-dialog>
 
+    <el-dialog
+      v-model="checklistVisible"
+      title="提交前检查清单"
+      width="920px"
+      class="partner-form-dialog project-checklist-dialog"
+    >
+      <DataState :loading="checklistLoading" :empty="!checklistLoading && !checklistReadiness" empty-text="暂无检查结果">
+        <div v-if="checklistReadiness" class="checklist-panel">
+          <div class="checklist-head">
+            <div>
+              <strong>{{ selectedChecklistProject?.projectName || '项目资料' }}</strong>
+              <span>交付员工按清单补齐资料，全部完成后提交负责人确认。</span>
+            </div>
+            <div class="checklist-summary">{{ checklistReadyCount }} / {{ checklistTotalCount }}</div>
+          </div>
+          <div class="checklist-status" :class="{ ready: checklistReady }">
+            <strong>{{ checklistReady ? '资料已完整，可提交负责人确认' : `还有 ${checklistPendingCount} 项需要补充` }}</strong>
+            <span>{{ checklistReady ? '负责人确认后再提交总部启动工单。' : '请先处理待补充项，避免负责人提交总部时被拦截。' }}</span>
+          </div>
+          <div class="checklist-grid">
+            <div
+              v-for="item in checklistItems"
+              :key="item.key"
+              class="checklist-item"
+              :class="{ done: item.ready }"
+            >
+              <div class="checklist-icon">{{ item.ready ? '✓' : '!' }}</div>
+              <div class="checklist-body">
+                <div class="checklist-title">
+                  <strong>{{ item.title }}</strong>
+                  <el-tag size="small" :type="item.ready ? 'success' : 'danger'" round>
+                    {{ item.ready ? '已完成' : '待补充' }}
+                  </el-tag>
+                </div>
+                <p>{{ item.description }}</p>
+                <span>{{ item.ready ? '无需处理' : item.actionText || '去补充' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </DataState>
+      <template #footer>
+        <el-button @click="checklistVisible = false">关闭</el-button>
+        <el-button plain @click="reloadSubmissionChecklist">刷新检查</el-button>
+        <el-button
+          v-if="selectedChecklistProject && canCompleteProjectEntry(selectedChecklistProject)"
+          type="primary"
+          :loading="completingCompanyId === selectedChecklistProject.companyId"
+          @click="completeProjectEntryFromChecklist"
+        >
+          提交负责人确认
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="returnVisible" title="退回交付员工修改" width="560px" class="partner-form-dialog">
       <div class="project-form-tip">
         <span class="tip-dot">i</span>
@@ -326,7 +409,15 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { getBrandList, getCompanyList, returnCompanyEntry } from '@/api/customer'
+import {
+  completeCompanyEntry,
+  getBrandList,
+  getCompanyList,
+  getCompanySubmissionReadiness,
+  returnCompanyEntry,
+  type PartnerSubmissionReadiness,
+  type PartnerSubmissionReadinessItem,
+} from '@/api/customer'
 import {
   createProject,
   deleteProject,
@@ -364,6 +455,7 @@ const canDeleteProject = computed(() => isPartnerStaff.value && userStore.hasPer
 
 const loading = ref(false)
 const saving = ref(false)
+const completingCompanyId = ref<number | null>(null)
 const submittingStartRequestId = ref<number | null>(null)
 const returningCompanyId = ref<number | null>(null)
 const brandLoading = ref(false)
@@ -371,12 +463,17 @@ const keywordGroupLoading = ref(false)
 const keyword = ref('')
 const rows = ref<Project[]>([])
 const companyOptions = ref<Company[]>([])
+const projectEntryReadinessById = ref<Record<number, boolean>>({})
 const brandOptions = ref<Brand[]>([])
 const keywordGroupOptions = ref<KeywordGroup[]>([])
 const channelQuotaItems = ref<ProjectChannelAllocationItem[]>([])
 const keywordQuota = ref<ProjectKeywordGroupQuota | null>(null)
 const keywordGroupLocked = ref(false)
 const allocationVersion = ref<number | null>(null)
+const checklistVisible = ref(false)
+const checklistLoading = ref(false)
+const checklistReadiness = ref<PartnerSubmissionReadiness | null>(null)
+const selectedChecklistProject = ref<Project | null>(null)
 const returnVisible = ref(false)
 const returningProject = ref<Project | null>(null)
 const partnerVisibleSelfMediaChannels = new Set([
@@ -487,6 +584,11 @@ const selectedCompanyName = computed(() => {
   const company = companyOptions.value.find((item) => item.id === form.companyId)
   return company?.companyName?.trim() || ''
 })
+const checklistItems = computed<PartnerSubmissionReadinessItem[]>(() => checklistReadiness.value?.items || [])
+const checklistReady = computed(() => Boolean(checklistReadiness.value?.ready))
+const checklistTotalCount = computed(() => checklistReadiness.value?.totalCount || checklistItems.value.length)
+const checklistReadyCount = computed(() => checklistReadiness.value?.readyCount || checklistItems.value.filter((item) => item.ready).length)
+const checklistPendingCount = computed(() => checklistReadiness.value?.pendingCount ?? Math.max(checklistTotalCount.value - checklistReadyCount.value, 0))
 let competitorUid = 1
 
 function newCompetitorItem(source?: Partial<CompetitorFormItem>): CompetitorFormItem {
@@ -574,28 +676,83 @@ function projectStatusClass(status?: string | null) {
 
 function canSubmitStartRequest(row: Project) {
   if (!isPartnerOwner.value) return false
-  if (!isCompanyEntryCompleted(row)) return false
-  return ['draft', 'pending_start', 'rejected'].includes(String(row.status || ''))
-}
-
-function effectiveCompanyWorkflowStatus(company?: Company | null) {
-  if (!company) return 'draft'
-  const status = String(company.partnerWorkflowStatus || 'draft')
-  if (!company.activePackageBindingId && !company.activePackageName && ['package_bound', 'project_entry', 'entry_completed', 'submitted_to_hq'].includes(status)) {
-    return 'package_requested'
-  }
-  return status
+  return companyWorkflowStatus(row.companyId) === 'entry_completed'
+    && String(row.status || '') === 'pending_start'
 }
 
 function canReturnEntry(row: Project) {
   if (!isPartnerOwner.value) return false
-  return isCompanyEntryCompleted(row)
+  return companyWorkflowStatus(row.companyId) === 'entry_completed'
+    && ['pending_start', 'rejected'].includes(String(row.status || ''))
 }
 
-function isCompanyEntryCompleted(row: Project) {
-  if (!row.companyId) return false
-  const company = companyOptions.value.find((item) => item.id === row.companyId)
-  return effectiveCompanyWorkflowStatus(company) === 'entry_completed'
+function projectWorkflowLabel(row: Project) {
+  const projectStatus = String(row.status || '')
+  const workflowStatus = companyWorkflowStatus(row.companyId)
+  if (projectStatus === 'submitted') return '已提交总部'
+  if (projectStatus === 'rejected') return workflowStatus === 'project_entry' ? '驳回修改中' : '总部驳回待负责人处理'
+  if (workflowStatus === 'entry_completed') return '待负责人提交总部'
+  if (workflowStatus === 'project_entry') return '项目资料录入中'
+  if (workflowStatus === 'package_bound') return '待通知继续录入'
+  if (workflowStatus === 'package_requested') return '待负责人加套餐'
+  return '资料准备中'
+}
+
+function projectWorkflowHint(row: Project) {
+  const projectStatus = String(row.status || '')
+  const workflowStatus = companyWorkflowStatus(row.companyId)
+  if (projectStatus === 'submitted') return '总部已收到启动工单，等待审批'
+  if (projectStatus === 'rejected') {
+    return workflowStatus === 'project_entry'
+      ? '交付员工修改完成后在项目列表提交负责人确认'
+      : '负责人查看驳回原因后退回交付员工修改'
+  }
+  if (workflowStatus === 'entry_completed') return '负责人核对后可提交总部工单'
+  if (workflowStatus === 'project_entry') return '交付员工补齐项目、品牌、竞品和核心问题'
+  if (workflowStatus === 'package_bound') return '负责人通知交付员工继续录入项目资料'
+  if (workflowStatus === 'package_requested') return '负责人先绑定客户套餐'
+  return '先完善客户与品牌基础资料'
+}
+
+function projectWorkflowClass(row: Project) {
+  const projectStatus = String(row.status || '')
+  const workflowStatus = companyWorkflowStatus(row.companyId)
+  if (projectStatus === 'rejected') return 'is-danger'
+  if (projectStatus === 'submitted' || workflowStatus === 'submitted_to_hq') return 'is-success'
+  if (workflowStatus === 'entry_completed') return 'is-ready'
+  if (workflowStatus === 'project_entry') return 'is-info'
+  if (workflowStatus === 'package_requested') return 'is-warning'
+  return 'is-draft'
+}
+
+function companyWorkflowStatus(companyId?: number | null) {
+  if (!companyId) return 'draft'
+  const company = companyOptions.value.find((item) => item.id === companyId)
+  return company?.partnerWorkflowStatus || 'draft'
+}
+
+function companyProjectsReady(companyId?: number | null) {
+  if (!companyId) return false
+  const projects = rows.value.filter((item) => item.companyId === companyId)
+  return projects.length > 0 && projects.every((item) => projectEntryReadinessById.value[item.id])
+}
+
+function canCompleteProjectEntry(row: Project) {
+  return isPartnerStaff.value
+    && companyWorkflowStatus(row.companyId) === 'project_entry'
+    && companyProjectsReady(row.companyId)
+}
+
+function canViewSubmissionChecklist(row: Project) {
+  return isPartnerStaff.value
+    && Boolean(row.companyId)
+    && ['project_entry', 'entry_completed'].includes(companyWorkflowStatus(row.companyId))
+}
+
+function canEditProject(row: Project) {
+  if (!canUpdateProject.value) return false
+  if (companyWorkflowStatus(row.companyId) !== 'project_entry') return false
+  return ['draft', 'pending_start', 'rejected'].includes(String(row.status || ''))
 }
 
 function channelPeriodText(periodType?: string | null) {
@@ -839,6 +996,67 @@ async function submitStartRequest(row: Project) {
   }
 }
 
+async function completeProjectEntry(row: Project) {
+  if (!row.companyId) return false
+  try {
+    await ElMessageBox.confirm(
+      `确认将项目「${row.projectName}」资料提交负责人复核？提交后负责人将在项目管理中核对并提交总部工单。`,
+      '提交负责人确认',
+      { type: 'warning', confirmButtonText: '确认提交', cancelButtonText: '取消' },
+    )
+  } catch {
+    return false
+  }
+  completingCompanyId.value = row.companyId
+  try {
+    await completeCompanyEntry(row.companyId)
+    ElMessage.success('已提交负责人确认')
+    await Promise.all([loadCompanies(), load()])
+    return true
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '提交负责人确认失败'))
+    return false
+  } finally {
+    completingCompanyId.value = null
+  }
+}
+
+async function openSubmissionChecklist(row: Project) {
+  selectedChecklistProject.value = row
+  checklistVisible.value = true
+  await loadSubmissionChecklist(row.companyId)
+}
+
+async function loadSubmissionChecklist(companyId?: number | null) {
+  if (!companyId) {
+    checklistReadiness.value = null
+    return
+  }
+  checklistLoading.value = true
+  try {
+    const { data } = await getCompanySubmissionReadiness(companyId)
+    checklistReadiness.value = data.data
+  } catch (err) {
+    checklistReadiness.value = null
+    ElMessage.error(errorMessage(err, '加载提交前检查清单失败'))
+  } finally {
+    checklistLoading.value = false
+  }
+}
+
+async function reloadSubmissionChecklist() {
+  await loadSubmissionChecklist(selectedChecklistProject.value?.companyId)
+}
+
+async function completeProjectEntryFromChecklist() {
+  const row = selectedChecklistProject.value
+  if (!row) return
+  const ok = await completeProjectEntry(row)
+  if (ok) {
+    checklistVisible.value = false
+  }
+}
+
 function openReturnEntry(row: Project) {
   returningProject.value = row
   returnForm.reason = ''
@@ -1029,12 +1247,41 @@ async function load() {
       companyId: scopedCompanyId.value,
     })
     rows.value = data.data.records || []
+    projectEntryReadinessById.value = isPartnerStaff.value
+      ? await buildProjectEntryReadiness(rows.value)
+      : {}
   } catch {
     rows.value = []
+    projectEntryReadinessById.value = {}
     ElMessage.error('加载项目失败')
   } finally {
     loading.value = false
   }
+}
+
+async function buildProjectEntryReadiness(projects: Project[]) {
+  const next: Record<number, boolean> = {}
+  await Promise.all(projects.map(async (project) => {
+    const allocatedCount = projectCoreQuestionLimit(project)
+    if (allocatedCount <= 0) {
+      next[project.id] = false
+      return
+    }
+    try {
+      const { data } = await getGeoProjectWorkorders(project.id)
+      const actualCount = (data.data || [])
+        .filter((item) => item.status === 'committed')
+        .reduce((sum, item) => sum + Number(item.countTotal || 0), 0)
+      next[project.id] = actualCount === allocatedCount
+    } catch {
+      next[project.id] = false
+    }
+  }))
+  return next
+}
+
+function projectCoreQuestionLimit(project: Project) {
+  return Number(project.planCoreQuestionLimit ?? project.planKeywordGroupLimitA ?? project.planKeywordGroupLimit ?? 0)
 }
 
 async function openEditFromRouteQuery() {
@@ -1043,8 +1290,10 @@ async function openEditFromRouteQuery() {
     return
   }
   const row = rows.value.find((item) => item.id === raw)
-  if (row) {
+  if (row && canEditProject(row)) {
     await openEdit(row)
+  } else if (row) {
+    ElMessage.warning('当前项目已进入负责人确认或总部处理阶段，不能继续编辑')
   }
   router.replace({ name: 'MyProjects', query: {} })
 }
@@ -1058,6 +1307,91 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+:deep(.partner-project-dialog .el-dialog__body) {
+  padding-top: 18px;
+}
+
+.workflow-cell {
+  --workflow-color: #64748b;
+  --workflow-bg: #f8fafc;
+  --workflow-border: #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+}
+
+.workflow-cell.is-draft {
+  --workflow-color: #64748b;
+  --workflow-bg: #f8fafc;
+  --workflow-border: #e2e8f0;
+}
+
+.workflow-cell.is-warning {
+  --workflow-color: #b45309;
+  --workflow-bg: #fffbeb;
+  --workflow-border: #fde68a;
+}
+
+.workflow-cell.is-info {
+  --workflow-color: #2563eb;
+  --workflow-bg: #eff6ff;
+  --workflow-border: #bfdbfe;
+}
+
+.workflow-cell.is-success {
+  --workflow-color: #047857;
+  --workflow-bg: #ecfdf5;
+  --workflow-border: #a7f3d0;
+}
+
+.workflow-cell.is-ready {
+  --workflow-color: #7c3aed;
+  --workflow-bg: #f5f3ff;
+  --workflow-border: #ddd6fe;
+}
+
+.workflow-cell.is-danger {
+  --workflow-color: #dc2626;
+  --workflow-bg: #fef2f2;
+  --workflow-border: #fecaca;
+}
+
+.workflow-badge {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--workflow-border);
+  border-radius: 999px;
+  padding: 5px 11px;
+  background: var(--workflow-bg);
+  color: var(--workflow-color);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.workflow-badge i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--workflow-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--workflow-color) 14%, transparent);
+}
+
+.workflow-cell small {
+  max-width: 100%;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 :deep(.partner-project-dialog .el-dialog__body) {
   padding-top: 18px;
 }
@@ -1347,6 +1681,151 @@ onMounted(async () => {
   font-weight: 900;
 }
 
+.checklist-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.checklist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #fff 0%, #f8fbff 100%);
+}
+
+.checklist-head strong {
+  display: block;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.checklist-head span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.checklist-summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  height: 36px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.checklist-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.checklist-status.ready {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.checklist-status strong {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.checklist-status span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.checklist-item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fffafa;
+}
+
+.checklist-item.done {
+  border-color: #bbf7d0;
+  background: #f8fffb;
+}
+
+.checklist-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #fee2e2;
+  color: #dc2626;
+  font-weight: 900;
+}
+
+.checklist-item.done .checklist-icon {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.checklist-body {
+  min-width: 0;
+}
+
+.checklist-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.checklist-title strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checklist-body p {
+  margin: 8px 0 6px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.checklist-body > span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 @media (max-width: 768px) {
   .two-columns {
     grid-template-columns: 1fr;
@@ -1358,6 +1837,14 @@ onMounted(async () => {
     flex-direction: column;
   }
   .competitor-row {
+    grid-template-columns: 1fr;
+  }
+  .checklist-head,
+  .checklist-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .checklist-grid {
     grid-template-columns: 1fr;
   }
 }

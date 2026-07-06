@@ -49,7 +49,12 @@ const partnerRoutes: RouteRecordRaw = {
       path: 'brands/:id',
       name: 'PartnerBrandDetail',
       component: () => import('@/views/partner/PartnerBrandDetail.vue'),
-      meta: { title: '品牌详情', hidden: true, roles: ['partner', 'partner_staff'], permissions: ['company.read'] },
+      meta: {
+        title: '品牌详情',
+        hidden: true,
+        roles: ['partner', 'partner_staff', 'operator', 'delivery_manager', 'manager', 'super_admin'],
+        permissions: ['company.read', 'delivery.assignment.manage'],
+      },
     },
     {
       path: 'staff',
@@ -78,6 +83,16 @@ const partnerRoutes: RouteRecordRaw = {
         icon: 'Collection',
         roles: ['partner', 'partner_staff'],
         permissions: ['keyword_group.read'],
+      },
+    },
+    {
+      path: 'alerts',
+      name: 'PartnerAlertCenter',
+      component: () => import('@/views/admin/alert/AlertCenter.vue'),
+      meta: {
+        title: '站内信',
+        icon: 'Bell',
+        roles: ['partner', 'partner_staff'],
       },
     },
     {

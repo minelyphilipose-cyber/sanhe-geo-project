@@ -106,10 +106,12 @@
               <div class="table-subtext">{{ projectStatusLabel(row.projectStatus) }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="260" fixed="right">
+          <el-table-column label="操作" width="340" fixed="right">
             <template #default="{ row }">
               <div class="admin-row-actions">
-                <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+                <el-button link type="primary" @click="openDetail(row)">工单详情</el-button>
+                <el-button link type="primary" @click="goSubmittedCustomer(row.companyId)">客户详情</el-button>
+                <el-button link type="primary" @click="goSubmittedProject(row.projectId)">项目详情</el-button>
                 <el-button v-if="row.status === 'submitted'" link type="primary" @click="openApprove(row)">审批通过</el-button>
                 <el-button v-if="row.status === 'submitted'" link type="danger" @click="openReject(row)">驳回</el-button>
                 <el-button
@@ -121,7 +123,6 @@
                 >
                   配置完成
                 </el-button>
-                <el-button link @click="goProject(row.projectId)">项目详情</el-button>
               </div>
             </template>
           </el-table-column>
@@ -140,30 +141,58 @@
       </DataState>
     </el-card>
 
-    <el-drawer v-model="detailVisible" title="启动工单详情" size="720px" class="start-request-drawer">
+    <el-drawer v-model="detailVisible" size="760px" class="start-request-drawer">
+      <template #header>
+        <div class="drawer-title-block">
+          <span>合伙人启动工单</span>
+          <strong>启动工单详情</strong>
+        </div>
+      </template>
       <template v-if="current">
+        <section class="drawer-hero">
+          <div class="drawer-hero-main">
+            <div class="admin-entity-avatar request-avatar">{{ initial(current.projectName || current.companyName) }}</div>
+            <div class="min-w-0">
+              <span>{{ current.partnerName || '合伙人' }}</span>
+              <strong>{{ current.projectName || '-' }}</strong>
+              <p>{{ current.companyName || '-' }} · {{ current.brandName || '-' }}</p>
+            </div>
+          </div>
+          <span class="admin-status-tag" :class="statusClass(current.status)">
+            {{ statusLabel(current.status) }}
+          </span>
+        </section>
+
+        <div class="drawer-action-bar">
+          <el-button plain @click="goSubmittedCustomer(current.companyId)">客户详情</el-button>
+          <el-button plain @click="goSubmittedProject(current.projectId)">项目详情</el-button>
+        </div>
+
         <section class="drawer-section">
           <div class="section-title">基础信息</div>
           <div class="detail-grid">
-            <div><span>工单编号</span><strong>{{ current.requestNo }}</strong></div>
-            <div><span>状态</span><strong>{{ statusLabel(current.status) }}</strong></div>
-            <div><span>客户</span><strong>{{ current.companyName || '-' }}</strong></div>
-            <div><span>项目</span><strong>{{ current.projectName || '-' }}</strong></div>
-            <div><span>品牌</span><strong>{{ current.brandName || '-' }}</strong></div>
-            <div><span>合伙人</span><strong>{{ current.partnerName || '-' }}</strong></div>
-            <div><span>申请人</span><strong>{{ current.applicantUserName || '-' }}</strong></div>
-            <div><span>运营负责人</span><strong>{{ current.assignedInternalOwnerName || current.defaultInternalOwnerName || '-' }}</strong></div>
+            <div class="detail-item"><span>工单编号</span><strong>{{ current.requestNo }}</strong></div>
+            <div class="detail-item"><span>项目状态</span><strong>{{ projectStatusLabel(current.projectStatus) }}</strong></div>
+            <div class="detail-item"><span>客户</span><strong>{{ current.companyName || '-' }}</strong></div>
+            <div class="detail-item"><span>项目</span><strong>{{ current.projectName || '-' }}</strong></div>
+            <div class="detail-item"><span>品牌</span><strong>{{ current.brandName || '-' }}</strong></div>
+            <div class="detail-item"><span>合伙人</span><strong>{{ current.partnerName || '-' }}</strong></div>
+            <div class="detail-item"><span>申请人</span><strong>{{ current.applicantUserName || '-' }}</strong></div>
+            <div class="detail-item"><span>运营负责人</span><strong>{{ current.assignedInternalOwnerName || current.defaultInternalOwnerName || '-' }}</strong></div>
           </div>
         </section>
         <section class="drawer-section">
           <div class="section-title">额度快照</div>
           <div class="quota-list">
             <div v-for="item in parsedQuota(current.partnerAllocatedQuotaJson)" :key="item.channelCode" class="quota-item">
-              <div>
+              <div class="quota-main">
                 <strong>{{ item.channelName || item.channelCode }}</strong>
-                <span>{{ item.periodType || '-' }}</span>
+                <span>{{ channelPeriodText(item.periodType) }}</span>
               </div>
-              <b>{{ item.allocatedCount || 0 }} / {{ item.quotaLimit || 0 }}</b>
+              <div class="quota-count">
+                <b>{{ item.allocatedCount || 0 }}</b>
+                <span>/ {{ item.quotaLimit || 0 }}</span>
+              </div>
             </div>
             <el-empty v-if="parsedQuota(current.partnerAllocatedQuotaJson).length === 0" description="暂无额度快照" :image-size="80" />
           </div>
@@ -179,7 +208,12 @@
       <el-form label-width="108px">
         <el-form-item label="运营负责人" required>
           <el-select v-model="approveForm.assignedInternalOwnerId" filterable style="width: 100%" placeholder="请选择运营负责人">
-            <el-option v-for="item in ownerOptions" :key="item.id" :label="item.displayName || item.username" :value="item.id" />
+            <el-option v-for="item in visibleOwnerOptions" :key="item.id" :label="ownerOptionLabel(item)" :value="item.id">
+              <div class="owner-option">
+                <span>{{ ownerDisplayName(item) }}</span>
+                <small v-if="item.username && item.username !== ownerDisplayName(item)">{{ item.username }}</small>
+              </div>
+            </el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="审批备注">
@@ -290,6 +324,14 @@ const filteredRows = computed(() => {
 const submittedCount = computed(() => rows.value.filter((row) => row.status === 'submitted').length)
 const approvedCount = computed(() => rows.value.filter((row) => row.status === 'approved').length)
 const rejectedCount = computed(() => rows.value.filter((row) => row.status === 'rejected').length)
+const ownerOptionIds = computed(() => new Set(ownerOptions.value.map((item) => item.id)))
+const visibleOwnerOptions = computed(() => {
+  const map = new Map<number, SalesOwnerOption>()
+  ownerOptions.value.forEach((item) => map.set(item.id, item))
+  hydrateRequestOwnerOption(map, current.value?.defaultInternalOwnerId, current.value?.defaultInternalOwnerName)
+  hydrateRequestOwnerOption(map, current.value?.assignedInternalOwnerId, current.value?.assignedInternalOwnerName)
+  return Array.from(map.values())
+})
 
 async function load() {
   loading.value = true
@@ -330,7 +372,7 @@ function openDetail(row: AdminProjectStartRequest) {
 
 function openApprove(row: AdminProjectStartRequest) {
   current.value = row
-  approveForm.assignedInternalOwnerId = row.defaultInternalOwnerId || row.assignedInternalOwnerId || undefined
+  approveForm.assignedInternalOwnerId = selectableOwnerId(row.defaultInternalOwnerId) || selectableOwnerId(row.assignedInternalOwnerId) || undefined
   approveForm.reviewRemark = ''
   approveVisible.value = true
 }
@@ -345,6 +387,10 @@ async function submitApprove() {
   if (!current.value) return
   if (!approveForm.assignedInternalOwnerId) {
     ElMessage.warning('请选择运营负责人')
+    return
+  }
+  if (!ownerOptionIds.value.has(approveForm.assignedInternalOwnerId)) {
+    ElMessage.warning('运营负责人必须选择总部内部运营人员')
     return
   }
   actionLoading.value = true
@@ -400,6 +446,14 @@ function goProject(projectId?: number) {
   if (projectId) router.push(`/admin/projects/${projectId}`)
 }
 
+function goSubmittedCustomer(companyId?: number) {
+  if (companyId) router.push(`/admin/partner-start-requests/customers/${companyId}`)
+}
+
+function goSubmittedProject(projectId?: number) {
+  if (projectId) router.push(`/admin/partner-start-requests/projects/${projectId}`)
+}
+
 function openSetupIssues(row: AdminProjectStartRequest, error: unknown) {
   const apiError = error as { data?: { errorCode?: string; missingItems?: SetupMissingItem[] } }
   if (apiError?.data?.errorCode !== 'PROJECT_SETUP_NOT_READY') {
@@ -436,8 +490,45 @@ function parsedQuota(raw?: string | null): any[] {
   }
 }
 
+function channelPeriodText(periodType?: string | null) {
+  const map: Record<string, string> = {
+    day: '按日',
+    week: '按周',
+    month: '按月',
+    quarter: '按季度',
+    year: '按年',
+    total: '总量',
+    none: '不限制',
+  }
+  return map[String(periodType || 'none')] || String(periodType || '-')
+}
+
 function initial(value?: string | null) {
   return String(value || '工').trim().slice(0, 1)
+}
+
+function selectableOwnerId(id?: number | null) {
+  return id && ownerOptionIds.value.has(id) ? id : undefined
+}
+
+function hydrateRequestOwnerOption(map: Map<number, SalesOwnerOption>, id?: number | null, name?: string | null) {
+  if (!id || !name) return
+  const existed = map.get(id)
+  if (!existed) {
+    return
+  }
+  if (!existed.displayName || existed.displayName === existed.username || /^\d+$/.test(existed.displayName)) {
+    map.set(id, { ...existed, displayName: name })
+  }
+}
+
+function ownerDisplayName(item: SalesOwnerOption) {
+  return item.displayName || item.username || `用户 ${item.id}`
+}
+
+function ownerOptionLabel(item: SalesOwnerOption) {
+  const name = ownerDisplayName(item)
+  return item.username && item.username !== name ? `${name}（${item.username}）` : name
 }
 
 function formatTime(value?: string | null) {
@@ -514,42 +605,139 @@ onMounted(async () => {
   gap: 10px;
 }
 
+.start-request-drawer :deep(.el-drawer__header) {
+  margin-bottom: 0;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.start-request-drawer :deep(.el-drawer__body) {
+  padding: 18px 24px 24px;
+  background: #f8fafc;
+}
+
+.drawer-title-block {
+  display: grid;
+  gap: 4px;
+}
+
+.drawer-title-block span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.drawer-title-block strong {
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.drawer-hero,
+.drawer-section {
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+}
+
+.drawer-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  overflow: hidden;
+  position: relative;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 96% 4%, rgba(20, 184, 166, 0.14) 0, rgba(20, 184, 166, 0.14) 112px, transparent 114px),
+    linear-gradient(135deg, #fff 0%, #f1f7ff 58%, #ecfdf5 100%);
+}
+
+.drawer-hero::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #2563eb 0%, #14b8a6 100%);
+  content: '';
+}
+
+.drawer-hero-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.drawer-hero-main span,
+.drawer-hero-main p {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.drawer-hero-main strong {
+  display: block;
+  margin: 5px 0 6px;
+  color: #0f172a;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.drawer-hero-main p {
+  margin: 0;
+}
+
+.drawer-action-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 12px 0;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.detail-grid > div,
-.quota-item,
+.drawer-section {
+  padding: 16px;
+}
+
+.detail-item,
 .reject-box {
   border: 1px solid #dbeafe;
   border-radius: 8px;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
   padding: 12px;
 }
 
-.detail-grid span,
-.quota-item span {
+.detail-item span {
   display: block;
   color: #64748b;
   font-size: 12px;
+  font-weight: 800;
   margin-bottom: 6px;
 }
 
-.detail-grid strong,
-.quota-item strong,
-.quota-item b {
+.detail-item strong {
   color: #0f172a;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .drawer-section + .drawer-section {
-  margin-top: 20px;
+  margin-top: 12px;
 }
 
 .section-title {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 900;
   margin-bottom: 12px;
   color: #0f172a;
 }
@@ -563,11 +751,72 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 14px;
+  min-height: 72px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+  padding: 12px 14px;
+}
+
+.quota-main {
+  min-width: 0;
+}
+
+.quota-main strong {
+  display: block;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-main span {
+  display: block;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.quota-count {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.quota-count b {
+  color: #0f172a;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.quota-count span {
+  font-size: 14px;
+  font-weight: 900;
 }
 
 .reject-box {
   line-height: 1.7;
   color: #475569;
+}
+
+@media (max-width: 768px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .drawer-hero {
+    flex-direction: column;
+  }
+
+  .drawer-action-bar {
+    justify-content: flex-start;
+  }
 }
 
 .setup-issue-intro {
@@ -633,5 +882,16 @@ onMounted(async () => {
 
 .setup-issue-tip {
   margin-top: 14px;
+}
+
+.owner-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.owner-option small {
+  color: #94a3b8;
 }
 </style>

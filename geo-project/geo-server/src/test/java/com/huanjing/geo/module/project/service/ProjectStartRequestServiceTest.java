@@ -96,6 +96,7 @@ class ProjectStartRequestServiceTest {
     private JdbcTemplate jdbcTemplate;
     private ProjectDistributionChannelAllocationService channelAllocationService;
     private CurrentUserService currentUserService;
+    private SystemAlertService systemAlertService;
     private ProjectStartRequestService service;
 
     @BeforeEach
@@ -124,6 +125,7 @@ class ProjectStartRequestServiceTest {
         currentUserService = mock(CurrentUserService.class);
         InternalScopeService internalScopeService = mock(InternalScopeService.class);
         ActivityLogService activityLogService = mock(ActivityLogService.class);
+        systemAlertService = mock(SystemAlertService.class);
         jdbcTemplate = mock(JdbcTemplate.class);
 
         service = new ProjectStartRequestService(
@@ -152,7 +154,7 @@ class ProjectStartRequestServiceTest {
                 currentUserService,
                 internalScopeService,
                 activityLogService,
-                mock(SystemAlertService.class),
+                systemAlertService,
                 new ObjectMapper(),
                 jdbcTemplate
         );
@@ -535,9 +537,15 @@ class ProjectStartRequestServiceTest {
         reviewer.setPartnerId(null);
         when(currentUserService.requireCurrentUser()).thenReturn(reviewer);
         when(projectMapper.selectById(10L)).thenReturn(project("submitted"));
+        Company submittedCompany = company();
+        submittedCompany.setPartnerWorkflowStatus("submitted_to_hq");
+        when(companyMapper.selectById(20L)).thenReturn(submittedCompany);
         when(requestMapper.selectById(99L)).thenReturn(submittedRequest());
         when(requestMapper.update(any(), any())).thenReturn(1);
         when(quotaSnapshotMapper.update(any(), any())).thenReturn(1);
+        SysUser partnerOwner = user("partner");
+        partnerOwner.setId(101L);
+        when(sysUserMapper.selectList(any())).thenReturn(List.of(partnerOwner));
         ProjectQuotaSnapshot released = new ProjectQuotaSnapshot();
         released.setStatus("released");
         released.setReleasedAt(java.time.LocalDateTime.now());
@@ -552,7 +560,31 @@ class ProjectStartRequestServiceTest {
         assertEquals("rejected", vo.getProjectStatus());
         assertEquals("released", vo.getQuotaSnapshotStatus());
         assertEquals("missing_account", vo.getRejectReasonCode());
+        assertEquals("entry_completed", submittedCompany.getPartnerWorkflowStatus());
+        assertNotNull(submittedCompany.getPartnerWorkflowUpdatedAt());
+        verify(companyMapper).updateById(submittedCompany);
         verify(partnerAccountTxnMapper, never()).insert(any());
+
+        ArgumentCaptor<Map> contextCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Long> recipientCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(systemAlertService).createOrRefreshRecipientAlert(
+                any(),
+                any(),
+                any(),
+                any(),
+                contextCaptor.capture(),
+                recipientCaptor.capture(),
+                any(),
+                any()
+        );
+        assertEquals(java.util.Set.of(101L), new java.util.HashSet<>(recipientCaptor.getAllValues()));
+        for (Map context : contextCaptor.getAllValues()) {
+            assertEquals("/partner/my-projects", context.get("route"));
+            assertEquals("missing_account", context.get("rejectReasonCode"));
+            assertEquals("资料不足", context.get("rejectReasonText"));
+            assertEquals(List.of("partner"), context.get("actionRoles"));
+            assertEquals("合伙人负责人", context.get("actionRoleText"));
+        }
     }
 
     @Test

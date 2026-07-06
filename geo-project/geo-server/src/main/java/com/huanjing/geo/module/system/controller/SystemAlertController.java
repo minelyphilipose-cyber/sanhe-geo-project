@@ -21,8 +21,21 @@ public class SystemAlertController {
 
     @GetMapping("/my-todos")
     public R<Page<SystemAlertTodoVO>> myTodos(@RequestParam(defaultValue = "1") long current,
-                                              @RequestParam(defaultValue = "20") long size) {
-        return R.ok(systemAlertService.myTodos(current, size));
+                                              @RequestParam(defaultValue = "20") long size,
+                                              @RequestParam(defaultValue = "false") boolean includeResolved,
+                                              @RequestParam(defaultValue = "false") boolean unreadOnly) {
+        return R.ok(systemAlertService.myTodos(current, size, includeResolved, unreadOnly));
+    }
+
+    @GetMapping("/my-unread-count")
+    public R<Long> myUnreadCount() {
+        return R.ok(systemAlertService.myUnreadCount());
+    }
+
+    @PostMapping("/{id}/read")
+    public R<Void> markRead(@PathVariable Long id) {
+        systemAlertService.markRead(id);
+        return R.ok();
     }
 
     @PostMapping("/{id}/resolve")

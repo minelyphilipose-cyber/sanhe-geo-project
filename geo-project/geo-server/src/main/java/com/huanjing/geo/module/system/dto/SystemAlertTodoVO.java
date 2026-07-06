@@ -12,5 +12,8 @@ public class SystemAlertTodoVO {
     private String source;
     private String message;
     private String contextJson;
+    private Boolean isResolved;
+    private LocalDateTime resolvedAt;
+    private LocalDateTime readAt;
     private LocalDateTime createdAt;
 }

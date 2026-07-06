@@ -743,6 +743,9 @@ export interface SystemAlertTodoItem {
   source: string
   message: string
   contextJson?: string | null
+  isResolved?: boolean
+  resolvedAt?: string | null
+  readAt?: string | null
   createdAt: string
 }
 
