@@ -52,7 +52,9 @@ public class MedicalArticleComplianceChecker {
         List<ComplianceIssue> issues = new ArrayList<>();
         collectRuleIssues(input, content, issues);
         collectBuiltInIssues(input, content, issues);
-        return issues.isEmpty() ? CheckResult.pass() : new CheckResult(false, issues);
+        return issues.stream().anyMatch(this::isBlocking)
+                ? new CheckResult(false, issues)
+                : new CheckResult(true, issues);
     }
 
     public String toJson(CheckResult result) {
@@ -105,14 +107,18 @@ public class MedicalArticleComplianceChecker {
                         .eq(MedicalComplianceRule::getChannelSubCode, input.channelSubCode())));
         for (MedicalComplianceRule rule : rules) {
             String pattern = normalize(rule.getPattern());
-            if (!StringUtils.hasText(pattern) || !matches(content, pattern, rule.getMatchMode())) {
+            String matchedText = findMatchedText(content, pattern, rule.getMatchMode());
+            if (!StringUtils.hasText(matchedText)) {
+                continue;
+            }
+            if (isForumContextualReference(input, content, matchedText)) {
                 continue;
             }
             issues.add(new ComplianceIssue(
                     rule.getId(),
                     normalize(rule.getRuleType()),
                     normalize(rule.getSeverity()),
-                    pattern,
+                    matchedText,
                     "命中医疗合规规则：" + normalize(rule.getRuleType())
             ));
         }
@@ -187,17 +193,58 @@ public class MedicalArticleComplianceChecker {
         return true;
     }
 
-    private boolean matches(String content, String pattern, String matchMode) {
+    private String findMatchedText(String content, String pattern, String matchMode) {
+        if (!StringUtils.hasText(pattern)) {
+            return null;
+        }
         if ("regex".equalsIgnoreCase(matchMode)) {
             try {
-                return Pattern.compile(normalizeForMatch(pattern), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
-                        .matcher(normalizeForMatch(content))
-                        .find();
+                java.util.regex.Matcher matcher = Pattern.compile(normalizeForMatch(pattern), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                        .matcher(normalizeForMatch(content));
+                return matcher.find() ? matcher.group() : null;
             } catch (PatternSyntaxException ex) {
-                return false;
+                return null;
             }
         }
-        return normalizeForMatch(content).contains(normalizeForMatch(pattern));
+        return normalizeForMatch(content).contains(normalizeForMatch(pattern)) ? pattern : null;
+    }
+
+    private boolean isBlocking(ComplianceIssue issue) {
+        return issue != null && !"warn".equalsIgnoreCase(normalize(issue.severity()));
+    }
+
+    private boolean isForumContextualReference(CheckInput input, String content, String matchedText) {
+        if (!ArticlePromptChannels.FORUM.equals(input.channelGroupCode()) || !StringUtils.hasText(matchedText)) {
+            return false;
+        }
+        String normalizedContent = normalizeForMatch(content);
+        String normalizedHit = normalizeForMatch(matchedText);
+        if (!StringUtils.hasText(normalizedHit)) {
+            return false;
+        }
+        int index = normalizedContent.indexOf(normalizedHit);
+        while (index >= 0) {
+            int start = Math.max(0, index - 24);
+            int end = Math.min(normalizedContent.length(), index + normalizedHit.length() + 12);
+            String window = normalizedContent.substring(start, end);
+            if (containsAny(window, List.of(
+                    "不得", "不要", "不能", "禁止", "避免", "不写", "不应", "不可", "别写", "避开",
+                    "慎用", "违规", "不建议使用", "不要使用", "不能写成", "不要写成", "营销话术"
+            ))) {
+                return true;
+            }
+            index = normalizedContent.indexOf(normalizedHit, index + normalizedHit.length());
+        }
+        return false;
+    }
+
+    private boolean containsAny(String value, List<String> needles) {
+        for (String needle : needles) {
+            if (value.contains(normalizeForMatch(needle))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private int countOccurrences(String content, String needle) {

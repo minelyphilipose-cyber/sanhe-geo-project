@@ -58,6 +58,20 @@ class MedicalArticleComplianceCheckerTest {
     }
 
     @Test
+    void warningRuleDoesNotBlockGeneration() {
+        MedicalComplianceRule rule = rule(17L, "soft_risk", "需要谨慎", "contains", "warn");
+        when(ruleMapper.selectList(any())).thenReturn(List.of(rule));
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("种植牙术前评估", "种植牙需要谨慎看待，重点关注风险、禁忌和个体差异。", false, 2)
+        );
+
+        assertThat(result.passed()).isTrue();
+        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::severity)
+                .contains("warn");
+    }
+
+    @Test
     void highRiskChannelRequiresRiskAndRationalHints() {
         when(ruleMapper.selectList(any())).thenReturn(List.of());
 
@@ -206,6 +220,23 @@ class MedicalArticleComplianceCheckerTest {
     }
 
     @Test
+    void acceptsForumMedicalBrandExposureAtFiveMentionLimit() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of());
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("星链口腔公开资料怎么核验",
+                        "星链口腔的公开资料需要结合风险核验。星链口腔的诊疗范围要看资质。"
+                                + "星链口腔不能作为推荐结论。星链口腔仍需医生评估。星链口腔只适合作为公开信息样本。",
+                        true,
+                        5,
+                        "forum",
+                        null)
+        );
+
+        assertThat(result.passed()).isTrue();
+    }
+
+    @Test
     void brandExposureLimitCountsBodyRatherThanTitle() {
         when(ruleMapper.selectList(any())).thenReturn(List.of());
 
@@ -234,6 +265,44 @@ class MedicalArticleComplianceCheckerTest {
                 );
     }
 
+    @Test
+    void forumAllowsContextualForbiddenPhraseReference() {
+        MedicalComplianceRule rule = rule(31L, "efficacy_claim", "保证效果", "contains");
+        when(ruleMapper.selectList(any())).thenReturn(List.of(rule));
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("医美咨询怎么避坑",
+                        "论坛里讨论医美项目时，不要使用保证效果这类营销话术，仍需关注风险、禁忌、个体差异和医生评估。",
+                        true,
+                        5,
+                        "forum",
+                        null)
+        );
+
+        assertThat(result.passed()).isTrue();
+        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                .doesNotContain("efficacy_claim");
+    }
+
+    @Test
+    void forumStillBlocksPromotionalForbiddenPhraseClaim() {
+        MedicalComplianceRule rule = rule(32L, "efficacy_claim", "保证效果", "contains");
+        when(ruleMapper.selectList(any())).thenReturn(List.of(rule));
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("医美项目怎么判断",
+                        "这个项目保证效果，适合多数人选择，但仍需关注风险、禁忌、个体差异和医生评估。",
+                        true,
+                        5,
+                        "forum",
+                        null)
+        );
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                .contains("efficacy_claim");
+    }
+
     private MedicalArticleComplianceChecker.CheckInput input(String title,
                                                             String content,
                                                             boolean highRisk,
@@ -245,6 +314,15 @@ class MedicalArticleComplianceCheckerTest {
                                                             String content,
                                                             boolean highRisk,
                                                             int brandExposureLimit,
+                                                            String channelSubCode) {
+        return input(title, content, highRisk, brandExposureLimit, "self_media", channelSubCode);
+    }
+
+    private MedicalArticleComplianceChecker.CheckInput input(String title,
+                                                            String content,
+                                                            boolean highRisk,
+                                                            int brandExposureLimit,
+                                                            String channelGroupCode,
                                                             String channelSubCode) {
         Brand brand = new Brand();
         brand.setId(3L);
@@ -274,7 +352,7 @@ class MedicalArticleComplianceCheckerTest {
                 2L,
                 4L,
                 3L,
-                "self_media",
+                channelGroupCode,
                 channelSubCode,
                 title,
                 content,
@@ -298,12 +376,16 @@ class MedicalArticleComplianceCheckerTest {
     }
 
     private MedicalComplianceRule rule(Long id, String ruleType, String pattern, String matchMode) {
+        return rule(id, ruleType, pattern, matchMode, "block");
+    }
+
+    private MedicalComplianceRule rule(Long id, String ruleType, String pattern, String matchMode, String severity) {
         MedicalComplianceRule rule = new MedicalComplianceRule();
         rule.setId(id);
         rule.setRuleType(ruleType);
         rule.setPattern(pattern);
         rule.setMatchMode(matchMode);
-        rule.setSeverity("block");
+        rule.setSeverity(severity);
         return rule;
     }
 }
