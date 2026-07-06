@@ -109,6 +109,34 @@ class ArticleAutoImageInsertionServiceTest {
     }
 
     @Test
+    void insertForChannel_stripsExistingImagesForToutiao() {
+        String result = service.insertForChannel(project(), "self_media", "toutiao", """
+                # 标题
+
+                第一段文字。
+
+                ![品牌配图](https://app.example.com/api/public/brand-materials/1/stream)
+
+                第二段文字。<img src="https://cdn.example.com/inline.png" alt="内嵌图">
+
+                <p><img src="https://cdn.example.com/block.png" alt="段落图"></p>
+
+                [保留链接](https://example.com)
+                """, null);
+
+        assertThat(result).contains("# 标题");
+        assertThat(result).contains("第一段文字。");
+        assertThat(result).contains("第二段文字。");
+        assertThat(result).contains("[保留链接](https://example.com)");
+        assertThat(result).doesNotContain("![");
+        assertThat(result).doesNotContain("<img");
+        assertThat(result).doesNotContain("brand-materials");
+        assertThat(result).doesNotContain("cdn.example.com");
+        verify(folderMapper, never()).selectList(any());
+        verify(brandMaterialMapper, never()).selectList(any());
+    }
+
+    @Test
     void insertForChannel_usesDynamicImageCountByArticleLength() {
         BrandMaterial first = material(1L, "第一张.png", "https://cdn.example.com/raw-a.png");
         BrandMaterial second = material(2L, "第二张.png", "https://cdn.example.com/raw-b.png");

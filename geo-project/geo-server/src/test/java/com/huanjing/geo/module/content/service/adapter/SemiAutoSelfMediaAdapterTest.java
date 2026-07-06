@@ -28,14 +28,47 @@ class SemiAutoSelfMediaAdapterTest {
         ToutiaoSemiAutoAdapter adapter = new ToutiaoSemiAutoAdapter(properties, new MarkdownToHtmlRenderer());
 
         PlatformFillProfile fillProfile = adapter.fillProfile();
-        String html = adapter.renderContent("**bold**\n\n<script>alert(1)</script>\n\n[link](javascript:alert(1))\n\n![x](https://img.example/a.png)", fillProfile);
+        String html = adapter.renderContent("**bold**\n\n<script>alert(1)</script>\n\n[link](https://example.com)\n\n![x](https://img.example/a.png)", fillProfile);
 
         assertEquals("https://configured.example/toutiao/publish", fillProfile.publishUrl());
         assertEquals(List.of(".toutiao.test"), fillProfile.cookieDomains());
         assertTrue(html.contains("<strong>bold</strong>"));
-        assertTrue(html.contains("<img src=\"https://img.example/a.png\""));
+        assertTrue(html.contains("<a href=\"https://example.com\""));
+        assertFalse(html.contains("<img"));
+        assertFalse(html.contains("img.example"));
         assertFalse(html.contains("<script"));
-        assertFalse(html.contains("javascript:"));
+    }
+
+    @Test
+    void toutiaoPrepareFillTaskStripsImagesBeforeRenderingPayload() {
+        SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
+        SemiAutoPlatformProperties.Platform profile = new SemiAutoPlatformProperties.Platform();
+        profile.setPublishUrl("https://configured.example/toutiao/publish");
+        profile.setAllowedHtmlTags(List.of("p", "strong", "a", "img"));
+        properties.setProfiles(Map.of(ToutiaoSemiAutoAdapter.PLATFORM, profile));
+        ToutiaoSemiAutoAdapter adapter = new ToutiaoSemiAutoAdapter(properties, new MarkdownToHtmlRenderer());
+
+        ArticleDraft article = new ArticleDraft();
+        article.setTitle("头条标题");
+
+        SemiAutoFillTask task = adapter.prepareFillTask(article, """
+                第一段文字。
+
+                ![品牌配图](https://app.example.com/api/public/brand-materials/1/stream)
+
+                第二段文字。<img src="https://cdn.example.com/inline.png" alt="内嵌图">
+
+                <p><img src="https://cdn.example.com/block.png" alt="段落图"></p>
+
+                [保留链接](https://example.com)
+                """, adapter.fillProfile());
+
+        assertTrue(task.renderedHtml().contains("<p>第一段文字。</p>"));
+        assertTrue(task.renderedHtml().contains("<p>第二段文字。</p>"));
+        assertTrue(task.renderedHtml().contains("<a href=\"https://example.com\""));
+        assertFalse(task.renderedHtml().contains("<img"));
+        assertFalse(task.renderedHtml().contains("brand-materials"));
+        assertFalse(task.renderedHtml().contains("cdn.example.com"));
     }
 
     @Test

@@ -37,13 +37,15 @@ public class ArticleAutoImageInsertionService {
     private static final int LONG_ARTICLE_TEXT_LENGTH = 1500;
     private static final Pattern MARKDOWN_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*]\\(([^)]+)\\)");
     private static final Pattern MARKDOWN_LINK_PATTERN = Pattern.compile("\\[[^\\]]*]\\(([^)]+)\\)");
+    private static final Pattern HTML_IMAGE_BLOCK_PATTERN = Pattern.compile("(?is)(?:<p\\b[^>]*>\\s*)?<img\\b[^>]*>(?:\\s*</p>)?");
     private static final Map<String, ChannelImagePolicy> CHANNEL_POLICIES = Map.of(
             ArticlePromptChannels.AGENT_SITE, ChannelImagePolicy.body(),
             ArticlePromptChannels.AUTHORITY_MEDIA, ChannelImagePolicy.body(),
             ArticlePromptChannels.FORUM, ChannelImagePolicy.body(),
             ArticlePromptChannels.INDUSTRY_SITE, ChannelImagePolicy.body()
     );
-    private static final Set<String> SELF_MEDIA_EXCLUDED_SUB_CODES = Set.of("xiaohongshu", "toutiao");
+    private static final Set<String> SELF_MEDIA_EXCLUDED_SUB_CODES = Set.of("xiaohongshu");
+    private static final Set<String> SELF_MEDIA_STRIP_IMAGE_SUB_CODES = Set.of("toutiao");
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "webp");
     private static final Set<String> TRAILING_SECTIONS = Set.of("结语", "总结", "免责声明", "联系方式", "联系我们");
 
@@ -61,8 +63,13 @@ public class ArticleAutoImageInsertionService {
                                    String contentMarkdown,
                                    String excludedImageUrl) {
         ChannelImagePolicy policy = resolvePolicy(channelGroupCode, channelSubCode);
-        if (policy.mode() == ImageInsertionMode.NONE || project == null || project.getBrandId() == null
-                || !StringUtils.hasText(contentMarkdown)) {
+        if (!StringUtils.hasText(contentMarkdown)) {
+            return contentMarkdown;
+        }
+        if (policy.mode() == ImageInsertionMode.STRIP) {
+            return stripImageReferences(contentMarkdown);
+        }
+        if (policy.mode() == ImageInsertionMode.NONE || project == null || project.getBrandId() == null) {
             return contentMarkdown;
         }
         Set<String> excludedUrls = existingImageUrls(contentMarkdown);
@@ -124,6 +131,9 @@ public class ArticleAutoImageInsertionService {
                 return ChannelImagePolicy.none();
             }
             subCode = ArticlePromptChannels.canonicalSubCode(ArticlePromptChannels.SELF_MEDIA, subCode);
+            if (SELF_MEDIA_STRIP_IMAGE_SUB_CODES.contains(subCode)) {
+                return ChannelImagePolicy.strip();
+            }
             if (!ArticlePromptChannels.SELF_MEDIA_SUBS.contains(subCode)
                     || SELF_MEDIA_EXCLUDED_SUB_CODES.contains(subCode)) {
                 return ChannelImagePolicy.none();
@@ -131,6 +141,15 @@ public class ArticleAutoImageInsertionService {
             return "douyin".equals(subCode) ? ChannelImagePolicy.head() : ChannelImagePolicy.body();
         }
         return CHANNEL_POLICIES.getOrDefault(groupCode, ChannelImagePolicy.none());
+    }
+
+    private String stripImageReferences(String markdown) {
+        String text = HTML_IMAGE_BLOCK_PATTERN.matcher(markdown).replaceAll("");
+        text = MARKDOWN_IMAGE_PATTERN.matcher(text).replaceAll("");
+        return text
+                .replaceAll("(?m)^[ \\t]+$", "")
+                .replaceAll("\\R{3,}", "\n\n")
+                .trim();
     }
 
     private String insertHeadImage(Project project, String contentMarkdown, Set<String> excludedUrls) {
@@ -427,6 +446,7 @@ public class ArticleAutoImageInsertionService {
 
     private enum ImageInsertionMode {
         NONE,
+        STRIP,
         BODY,
         HEAD
     }
@@ -434,6 +454,10 @@ public class ArticleAutoImageInsertionService {
     private record ChannelImagePolicy(ImageInsertionMode mode) {
         private static ChannelImagePolicy none() {
             return new ChannelImagePolicy(ImageInsertionMode.NONE);
+        }
+
+        private static ChannelImagePolicy strip() {
+            return new ChannelImagePolicy(ImageInsertionMode.STRIP);
         }
 
         private static ChannelImagePolicy body() {
