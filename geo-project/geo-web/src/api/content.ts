@@ -463,7 +463,9 @@ export interface BatchArticleGenerateNoticeItem {
 }
 
 export function createBatchContentArticles(data: BatchArticleGenerateRequest) {
-  return request.post<R<BatchArticleGenerateResponse>>('/content/articles/batch-generate', data)
+  return request.post<R<BatchArticleGenerateResponse>>('/content/articles/batch-generate', data, {
+    timeout: 180000,
+  })
 }
 
 export interface BatchArticleGenerationTask {

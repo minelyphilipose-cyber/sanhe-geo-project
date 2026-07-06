@@ -20,7 +20,7 @@
           {{ batchStatusText }}
         </span>
         <el-button @click="goBack">取消</el-button>
-        <el-button type="primary" :icon="Check" :disabled="!canSubmitBatchGeneration" :loading="batchSubmitting" @click="submitBatchGeneration">
+        <el-button type="primary" :icon="Check" :disabled="batchSubmitting" :loading="batchSubmitting" @click="submitBatchGeneration">
           生成文章
         </el-button>
       </div>
@@ -610,6 +610,13 @@ const canSubmitBatchGeneration = computed(() => Boolean(
   && batchGeneratedTotal.value > 0
   && !isBatchCountExceeded.value,
 ))
+const batchSubmitBlockReason = computed(() => {
+  if (!batchForm.projectId) return '请先选择归属项目'
+  if (!selectedTopics.value.length) return '请先添加至少一个文章主题'
+  if (batchGeneratedTotal.value <= 0) return '请先展开平台配置并填写生成数量'
+  if (isBatchCountExceeded.value) return `单次批量生成最多 ${MAX_BATCH_ARTICLE_COUNT} 篇文章，请减少生成条数`
+  return ''
+})
 const batchStatusText = computed(() => {
   if (isBatchCountExceeded.value) return `最多生成 ${MAX_BATCH_ARTICLE_COUNT} 篇`
   return canSubmitBatchGeneration.value ? `预计生成 ${batchGeneratedTotal.value} 篇` : '配置待完善'
@@ -1452,7 +1459,7 @@ async function submitBatchGeneration() {
     return
   }
   if (!canSubmitBatchGeneration.value) {
-    ElMessage.warning('请先选择项目、添加主题并配置生成数量')
+    ElMessage.warning(batchSubmitBlockReason.value || '请先选择项目、添加主题并配置生成数量')
     return
   }
   batchSubmitting.value = true
