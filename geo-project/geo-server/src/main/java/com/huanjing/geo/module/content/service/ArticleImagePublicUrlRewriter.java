@@ -36,7 +36,14 @@ public class ArticleImagePublicUrlRewriter {
         if (!StringUtils.hasText(markdown) || project == null || project.getBrandId() == null) {
             return markdown;
         }
-        Map<String, BrandMaterial> replacements = resolveMaterials(project.getBrandId(), extractImageUrls(markdown));
+        return rewriteForBrand(project.getBrandId(), markdown);
+    }
+
+    public String rewriteForBrand(Long brandId, String markdown) {
+        if (!StringUtils.hasText(markdown) || brandId == null) {
+            return markdown;
+        }
+        Map<String, BrandMaterial> replacements = resolveMaterials(brandId, extractImageUrls(markdown));
         if (replacements.isEmpty()) {
             return markdown;
         }

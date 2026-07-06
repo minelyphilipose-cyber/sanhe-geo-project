@@ -77,6 +77,11 @@ public class WechatMediaService {
     }
 
     public String ensureContentImageUrl(SelfMediaAccount account, String sourceUrl) {
+        Long brandId = account == null ? null : account.getBrandId();
+        return ensureContentImageUrl(account, brandId, sourceUrl);
+    }
+
+    public String ensureContentImageUrl(SelfMediaAccount account, Long brandId, String sourceUrl) {
         if (!StringUtils.hasText(sourceUrl)) {
             return null;
         }
@@ -84,7 +89,7 @@ public class WechatMediaService {
         if (normalized.startsWith("https://mmbiz.qpic.cn/") || normalized.startsWith("http://mmbiz.qpic.cn/")) {
             return normalized;
         }
-        ContentImageSource source = resolveContentImageSource(account, normalized);
+        ContentImageSource source = resolveContentImageSource(brandId, normalized);
         validateImageSize(source.bytes(), "content_image_too_large");
         String hash = sha256(source.bytes());
         SelfMediaMaterialMapping existed = findMappingByHash(account.getId(), hash, TYPE_IMAGE);
@@ -118,15 +123,15 @@ public class WechatMediaService {
         throw new BizException(400, "cover_file_missing");
     }
 
-    private ContentImageSource resolveContentImageSource(SelfMediaAccount account, String normalizedUrl) {
-        ContentImageSource materialSource = managedMaterialSource(account, normalizedUrl);
+    private ContentImageSource resolveContentImageSource(Long brandId, String normalizedUrl) {
+        ContentImageSource materialSource = managedMaterialSource(brandId, normalizedUrl);
         if (materialSource != null) {
             return materialSource;
         }
         return downloadImage(normalizedUrl);
     }
 
-    private ContentImageSource managedMaterialSource(SelfMediaAccount account, String url) {
+    private ContentImageSource managedMaterialSource(Long brandId, String url) {
         try {
             URI uri = URI.create(url);
             Matcher matcher = PUBLIC_MATERIAL_PATH_PATTERN.matcher(uri.getPath());
@@ -136,9 +141,8 @@ public class WechatMediaService {
             Long materialId = Long.valueOf(matcher.group(1));
             BrandMaterial material = brandMaterialMapper.selectById(materialId);
             if (material == null
-                    || account == null
-                    || account.getBrandId() == null
-                    || !account.getBrandId().equals(material.getBrandId())
+                    || brandId == null
+                    || !brandId.equals(material.getBrandId())
                     || !"brand_image".equals(material.getCategory())
                     || !StringUtils.hasText(material.getObjectKey())) {
                 return null;

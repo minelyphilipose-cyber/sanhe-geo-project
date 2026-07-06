@@ -39,7 +39,7 @@ public class SelfMediaPublishMaterialSelectionService {
     private final BrandMaterialMapper materialMapper;
 
     public Selection select(Project project, ArticleDraft article, String markdown) {
-        Long brandId = project == null ? null : project.getBrandId();
+        Long brandId = materialBrandId(project, article);
         if (brandId == null) {
             return Selection.empty();
         }
@@ -47,6 +47,13 @@ public class SelfMediaPublishMaterialSelectionService {
         Long coverId = resolveCoverMaterialId(brandId, article, contentImageIds);
         List<Long> imageIds = contentImageIds.isEmpty() && coverId != null ? List.of(coverId) : contentImageIds;
         return new Selection(coverId, imageIds);
+    }
+
+    private Long materialBrandId(Project project, ArticleDraft article) {
+        if (article != null && article.getSubjectBrandId() != null) {
+            return article.getSubjectBrandId();
+        }
+        return project == null ? null : project.getBrandId();
     }
 
     private Long resolveCoverMaterialId(Long brandId, ArticleDraft article, List<Long> contentImageIds) {

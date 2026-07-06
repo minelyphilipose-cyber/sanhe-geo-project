@@ -1071,7 +1071,8 @@ public class BatchArticleGenerationService {
             version.setArticleId(draft.getId());
             version.setVersionNo(1);
             version.setTitle(title);
-            version.setContentMarkdown(autoImageInsertionService.insertForChannel(project, task.getChannelGroupCode(),
+            Project imageProject = imageProject(project, task);
+            version.setContentMarkdown(autoImageInsertionService.insertForChannel(imageProject, task.getChannelGroupCode(),
                     task.getChannelSubCode(), content, coverImageUrl));
             version.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), result));
             version.setInputSnapshot(prompt.inputSnapshot());
@@ -1097,6 +1098,14 @@ public class BatchArticleGenerationService {
             return task.getSubjectBrandId();
         }
         return project == null ? null : project.getBrandId();
+    }
+
+    private Project imageProject(Project project, BatchArticleGenerationTask task) {
+        if (task == null || task.getSubjectProjectId() == null || task.getSubjectProjectId().equals(project == null ? null : project.getId())) {
+            return project;
+        }
+        Project subjectProject = projectMapper.selectById(task.getSubjectProjectId());
+        return subjectProject == null ? project : subjectProject;
     }
 
     private String resolveIndustrySiteCategory(BatchArticleGenerationTask task) {

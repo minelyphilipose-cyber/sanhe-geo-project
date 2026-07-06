@@ -95,7 +95,7 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         Project project = requireProject(article.getProjectId());
         String originalContent = requireLatestContent(article.getId());
         TargetContext.SelfMediaTarget target = buildTarget(row, article, project, account, originalContent);
-        String content = articleImagePublicUrlRewriter.rewrite(project, originalContent);
+        String content = articleImagePublicUrlRewriter.rewriteForBrand(materialBrandId(project, article), originalContent);
 
         DistributionTask task = createTask(row, article, account);
         SubmitResult result;
@@ -261,6 +261,10 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         options.put("scheduleId", row.getId());
         options.put("scheduleStrategy", row.getScheduleStrategy());
         options.put("publishAction", "publish");
+        Long materialBrandId = materialBrandId(project, article);
+        if (materialBrandId != null) {
+            options.put("materialBrandId", materialBrandId);
+        }
         if (row.getPlannedPublishAt() != null) {
             options.put("plannedPublishAt", row.getPlannedPublishAt().format(ISO));
         }
@@ -295,6 +299,13 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
                 requestId(row),
                 options
         );
+    }
+
+    private Long materialBrandId(Project project, ArticleDraft article) {
+        if (article != null && article.getSubjectBrandId() != null) {
+            return article.getSubjectBrandId();
+        }
+        return project == null ? null : project.getBrandId();
     }
 
     private DistributionTask createTask(SelfMediaPublishSchedule row, ArticleDraft article, SelfMediaAccount account) {

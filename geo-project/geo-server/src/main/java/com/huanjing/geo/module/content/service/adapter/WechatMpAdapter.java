@@ -115,11 +115,12 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
         String operationStage = STAGE_PREPARE_COVER_MATERIAL;
         try {
             Brand brand = brandService.requireExistingBrand(account.getBrandId());
+            Long materialBrandId = materialBrandId(account, mpTarget);
             operationStage = STAGE_PREPARE_COVER_MATERIAL;
-            String thumbMediaId = mediaService.ensureThumbMediaId(account, account.getBrandId(), mpTarget.coverMaterialId());
+            String thumbMediaId = mediaService.ensureThumbMediaId(account, materialBrandId, mpTarget.coverMaterialId());
             operationStage = STAGE_RENDER_CONTENT;
             String html = articleRenderService.renderOrFallbackForPublish(article, contentMarkdown);
-            String wechatHtml = htmlRewriter.rewrite(html, src -> mediaService.ensureContentImageUrl(account, src));
+            String wechatHtml = htmlRewriter.rewrite(html, src -> mediaService.ensureContentImageUrl(account, materialBrandId, src));
             WechatMpClient.DraftArticle draftArticle = buildDraftArticle(article, brand, account, wechatHtml, thumbMediaId);
             requestPayload = buildRequestPayload(account, mpTarget.coverMaterialId(), draftArticle);
             operationStage = STAGE_ADD_DRAFT;
@@ -271,6 +272,32 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
             throw new BizException(403, "微信公众号自动发布未开启，当前仅允许保存草稿");
         }
         return true;
+    }
+
+    private Long materialBrandId(SelfMediaAccount account, TargetContext.SelfMediaTarget target) {
+        Object value = target == null || target.platformOptions() == null
+                ? null
+                : target.platformOptions().get("materialBrandId");
+        Long parsed = parseLong(value);
+        if (parsed != null) {
+            return parsed;
+        }
+        return account == null ? null : account.getBrandId();
+    }
+
+    private Long parseLong(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            if (value instanceof Number number) {
+                return number.longValue();
+            }
+            String text = String.valueOf(value).trim();
+            return StringUtils.hasText(text) ? Long.valueOf(text) : null;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private String failureKind(int code, String message) {

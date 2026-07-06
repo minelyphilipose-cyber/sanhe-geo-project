@@ -262,6 +262,58 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
     }
 
     @Test
+    void scheduleUsesSubjectBrandAsMaterialBrandForThirdPartyArticles() {
+        adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
+                platformRouter,
+                List.of(new SubjectMaterialCheckingAdapter()),
+                scheduleMapper,
+                distributionTaskMapper,
+                articleDraftMapper,
+                articleDraftVersionMapper,
+                selfMediaAccountMapper,
+                projectMapper,
+                imagePublicUrlRewriter,
+                materialSelectionService,
+                capabilityService,
+                new ObjectMapper()
+        );
+        SelfMediaPublishSchedule row = scheduleRow();
+        ArticleDraft article = article();
+        article.setSubjectBrandId(60L);
+        article.setSubjectProjectId(31L);
+        when(scheduleMapper.selectById(10L)).thenReturn(row);
+        when(distributionTaskMapper.selectOne(any())).thenReturn(null);
+        when(articleDraftMapper.selectById(20L)).thenReturn(article);
+        when(projectMapper.selectById(30L)).thenReturn(project());
+        when(selfMediaAccountMapper.selectById(40L)).thenReturn(account());
+        ArticleDraftVersion version = new ArticleDraftVersion();
+        version.setContentMarkdown("![subject](https://cdn.local/subject.png)");
+        when(articleDraftVersionMapper.selectOne(any())).thenReturn(version);
+        when(capabilityService.automationOptions("wechat_mp")).thenReturn(Map.of());
+        when(materialSelectionService.select(any(), eq(article), eq("![subject](https://cdn.local/subject.png)")))
+                .thenReturn(new SelfMediaPublishMaterialSelectionService.Selection(188L, List.of(201L)));
+        when(imagePublicUrlRewriter.rewriteForBrand(eq(60L), eq("![subject](https://cdn.local/subject.png)")))
+                .thenReturn("rewritten-subject");
+        when(distributionTaskMapper.insert(any())).thenAnswer(invocation -> {
+            DistributionTask task = invocation.getArgument(0);
+            task.setId(99L);
+            return 1;
+        });
+        when(distributionTaskMapper.selectById(99L)).thenAnswer(invocation -> {
+            DistributionTask task = new DistributionTask();
+            task.setId(99L);
+            task.setStatus("submitted");
+            task.setPlatformPublishId("pub-1");
+            return task;
+        });
+
+        ScheduleExecutionResult result = adapter.schedule(SelfMediaPublishScheduleVO.from(row));
+
+        assertTrue(result.success());
+        verify(imagePublicUrlRewriter).rewriteForBrand(60L, "![subject](https://cdn.local/subject.png)");
+    }
+
+    @Test
     void scheduleFailureDiagnosticsIncludeOperationStage() {
         adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
                 platformRouter,
@@ -493,6 +545,17 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
             assertEquals(List.of(101L, 102L), target.imageMaterialIds());
             assertEquals(Boolean.TRUE, target.platformOptions().get("coverMaterialAutoSelected"));
             assertEquals(Boolean.TRUE, target.platformOptions().get("imageMaterialAutoSelected"));
+            return super.submitToTarget(article, contentMarkdown, target);
+        }
+    }
+
+    private static class SubjectMaterialCheckingAdapter extends FakeOfficialApiAdapter {
+        @Override
+        public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext.SelfMediaTarget target) {
+            assertEquals(188L, target.coverMaterialId());
+            assertEquals(List.of(201L), target.imageMaterialIds());
+            assertEquals(60L, target.platformOptions().get("materialBrandId"));
+            assertEquals("rewritten-subject", contentMarkdown);
             return super.submitToTarget(article, contentMarkdown, target);
         }
     }
