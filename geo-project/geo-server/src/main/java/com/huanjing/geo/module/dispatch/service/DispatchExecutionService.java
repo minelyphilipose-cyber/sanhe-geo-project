@@ -53,6 +53,7 @@ import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -88,9 +89,9 @@ public class DispatchExecutionService {
     private static final Pattern TOKEN_PATTERN = Pattern.compile("(?i)(api[_-]?key|token)\\s*[:=]\\s*([^\\s,;]+)");
     private static final Pattern PHONE_TEXT_PATTERN = Pattern.compile("(\\+?\\d[\\d\\-\\s()]{5,}\\d)");
     private static final int DB_TRANSIENT_RETRY_DELAY_MS = 200;
-    private static final int QUESTION_POLL_REQUEST_TIMEOUT_CAP_MS = 60_000;
     private static final int QUESTION_POLL_MIN_REQUEST_TIMEOUT_MS = 5_000;
     private static final int QUESTION_POLL_TASK_TIMEOUT_SAFETY_MS = 60_000;
+    private static final String QUESTION_POLL_MODEL_TIER_LOW = "low";
     private static final Set<String> QUESTION_TIERS = Set.of("A", "B", "C");
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
@@ -198,6 +199,7 @@ public class DispatchExecutionService {
         if (platform == null || !Boolean.TRUE.equals(platform.getEnabled())) {
             throw new BizException(400, "Question poll platform unavailable: " + shard.getPlatformCode());
         }
+        platform = resolveQuestionPollModelConfig(platform);
         List<PollBatchShardItem> items = pollBatchShardItemMapper.selectByShardId(shardId);
         if (items.isEmpty()) {
             pollShardPersistenceService.markShardCompleted(shardId);
@@ -262,10 +264,7 @@ public class DispatchExecutionService {
                                                       DispatchTask task,
                                                       int remainingItems) {
         int configuredTimeoutMs = dispatchProperties.getModelRequestTimeoutMs();
-        if (platform != null && platform.getTimeoutMs() != null && platform.getTimeoutMs() > 0) {
-            configuredTimeoutMs = Math.min(configuredTimeoutMs, platform.getTimeoutMs());
-        }
-        configuredTimeoutMs = Math.min(configuredTimeoutMs, QUESTION_POLL_REQUEST_TIMEOUT_CAP_MS);
+        configuredTimeoutMs = Math.min(configuredTimeoutMs, dispatchProperties.getQuestionPollRequestTimeoutCapMs());
 
         if (task == null || task.getTimeoutAt() == null) {
             return Math.max(configuredTimeoutMs, QUESTION_POLL_MIN_REQUEST_TIMEOUT_MS);
@@ -277,6 +276,23 @@ public class DispatchExecutionService {
         }
         int budgetedTimeoutMs = (int) Math.max(QUESTION_POLL_MIN_REQUEST_TIMEOUT_MS, remainingMs / Math.max(remainingItems, 1));
         return Math.min(configuredTimeoutMs, budgetedTimeoutMs);
+    }
+
+    private AiPlatformConfig resolveQuestionPollModelConfig(AiPlatformConfig platform) {
+        if (platform == null) {
+            return null;
+        }
+        if (!QUESTION_POLL_MODEL_TIER_LOW.equalsIgnoreCase(dispatchProperties.getQuestionPollModelTier())) {
+            return platform;
+        }
+        if (!StringUtils.hasText(platform.getLowModelId())) {
+            log.warn("Question poll low model requested but low_model_id is blank, platformCode={}", platform.getPlatformCode());
+            return platform;
+        }
+        AiPlatformConfig copy = new AiPlatformConfig();
+        BeanUtils.copyProperties(platform, copy);
+        copy.setModelId(platform.getLowModelId().trim());
+        return copy;
     }
 
     private PollResult buildPollResult(PollBatch batch,

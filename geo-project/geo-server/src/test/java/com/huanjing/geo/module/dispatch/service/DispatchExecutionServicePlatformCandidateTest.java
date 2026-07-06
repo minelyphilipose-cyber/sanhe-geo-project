@@ -108,13 +108,13 @@ class DispatchExecutionServicePlatformCandidateTest {
         properties.setModelRequestTimeoutMs(180_000);
         DispatchExecutionService service = service(mock(AiPlatformConfigMapper.class), properties);
         AiPlatformConfig platform = platform(3L, "qwen", "P1");
-        platform.setTimeoutMs(180_000);
+        platform.setTimeoutMs(60_000);
         DispatchTask task = new DispatchTask();
         task.setTimeoutAt(LocalDateTime.now().plusMinutes(61));
 
         Integer timeoutMs = resolveMonitoringRequestTimeoutMs(service, platform, task, 20);
 
-        assertEquals(60_000, timeoutMs);
+        assertEquals(120_000, timeoutMs);
     }
 
     @Test
@@ -142,6 +142,33 @@ class DispatchExecutionServicePlatformCandidateTest {
         Integer timeoutMs = resolveMonitoringRequestTimeoutMs(service, platform, task, 1);
 
         assertNull(timeoutMs);
+    }
+
+    @Test
+    void questionPollModelTierDefaultsToPrimaryModel() throws Exception {
+        DispatchExecutionService service = service(mock(AiPlatformConfigMapper.class));
+        AiPlatformConfig platform = platform(3L, "qwen", "P1");
+        platform.setModelId("qwen-max");
+        platform.setLowModelId("qwen-turbo");
+
+        AiPlatformConfig resolved = resolveQuestionPollModelConfig(service, platform);
+
+        assertEquals("qwen-max", resolved.getModelId());
+    }
+
+    @Test
+    void questionPollModelTierCanOptIntoLowModel() throws Exception {
+        DispatchProperties properties = new DispatchProperties();
+        properties.setQuestionPollModelTier("low");
+        DispatchExecutionService service = service(mock(AiPlatformConfigMapper.class), properties);
+        AiPlatformConfig platform = platform(3L, "qwen", "P1");
+        platform.setModelId("qwen-max");
+        platform.setLowModelId("qwen-turbo");
+
+        AiPlatformConfig resolved = resolveQuestionPollModelConfig(service, platform);
+
+        assertEquals("qwen-turbo", resolved.getModelId());
+        assertEquals("qwen-max", platform.getModelId());
     }
 
     @SuppressWarnings("unchecked")
@@ -179,6 +206,16 @@ class DispatchExecutionServicePlatformCandidateTest {
         );
         method.setAccessible(true);
         return (Integer) method.invoke(service, platform, task, remainingItems);
+    }
+
+    private static AiPlatformConfig resolveQuestionPollModelConfig(DispatchExecutionService service,
+                                                                   AiPlatformConfig platform) throws Exception {
+        Method method = DispatchExecutionService.class.getDeclaredMethod(
+                "resolveQuestionPollModelConfig",
+                AiPlatformConfig.class
+        );
+        method.setAccessible(true);
+        return (AiPlatformConfig) method.invoke(service, platform);
     }
 
     private static DispatchExecutionService service(AiPlatformConfigMapper platformMapper) {

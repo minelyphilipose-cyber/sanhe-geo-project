@@ -370,10 +370,12 @@ geo:
     task-retention-days: 90
     model-connect-timeout-ms: 10000
     model-request-timeout-ms: 180000
+    question-poll-request-timeout-cap-ms: ${DISPATCH_QUESTION_POLL_REQUEST_TIMEOUT_CAP_MS:120000}
     question-poll-shard-size: ${DISPATCH_QUESTION_POLL_SHARD_SIZE:20}
     question-poll-max-shard-size: ${DISPATCH_QUESTION_POLL_MAX_SHARD_SIZE:20}
     # 1 keeps legacy daily full polling. Set to 7 to roll A-tier questions across a weekly cycle.
     question-poll-cycle-days: ${DISPATCH_QUESTION_POLL_CYCLE_DAYS:7}
+    question-poll-model-tier: ${DISPATCH_QUESTION_POLL_MODEL_TIER:primary}
     resource-busy-retry-min-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MIN_SECONDS:30}
     resource-busy-retry-jitter-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_JITTER_SECONDS:30}
     resource-busy-retry-max-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MAX_SECONDS:900}

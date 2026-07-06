@@ -28,9 +28,11 @@ public class DispatchProperties {
     private int taskRetentionDays = 90;
     private int modelConnectTimeoutMs = 10000;
     private int modelRequestTimeoutMs = 45000;
+    private int questionPollRequestTimeoutCapMs = 120000;
     private int questionPollShardSize = 20;
     private int questionPollMaxShardSize = 20;
     private int questionPollCycleDays = 1;
+    private String questionPollModelTier = "primary";
     private int resourceBusyRetryMinSeconds = 30;
     private int resourceBusyRetryJitterSeconds = 30;
     private int resourceBusyRetryMaxSeconds = 900;
@@ -64,8 +66,18 @@ public class DispatchProperties {
         this.questionPollMaxShardSize = Math.max(1, questionPollMaxShardSize);
     }
 
+    public void setQuestionPollRequestTimeoutCapMs(int questionPollRequestTimeoutCapMs) {
+        this.questionPollRequestTimeoutCapMs = Math.max(1_000, questionPollRequestTimeoutCapMs);
+    }
+
     public void setQuestionPollCycleDays(int questionPollCycleDays) {
         this.questionPollCycleDays = Math.max(1, questionPollCycleDays);
+    }
+
+    public void setQuestionPollModelTier(String questionPollModelTier) {
+        this.questionPollModelTier = questionPollModelTier == null || questionPollModelTier.isBlank()
+                ? "primary"
+                : questionPollModelTier.trim();
     }
 
     public void setResourceBusyRetryMinSeconds(int resourceBusyRetryMinSeconds) {
