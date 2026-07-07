@@ -1,6 +1,6 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.1.7'
+const EXTENSION_VERSION = '0.1.8'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
 const ACTIVE_PROFILE_KEY = 'geoEnvActiveProfile'
@@ -386,7 +386,11 @@ async function helperRequest(config, path, init = {}, session = null) {
       headers.set(key, value)
     }
   } else if (signError) {
-    throw new Error(`本地助手签名失败：${signError.message}`)
+    const signMessage = String(signError.message || signError)
+    if (signMessage === 'Failed to fetch') {
+      throw new Error(`本地助手签名失败：后端签名接口不可访问(${normalizeBaseUrl(config.apiBase)})，请检查后端服务、网络或环境配置`)
+    }
+    throw new Error(`本地助手签名失败：${signMessage}`)
   } else {
     const helperHealth = await fetch(`${normalizeBaseUrl(config.helperBase)}/health`).then((response) => response.json()).catch(() => null)
     const pairedText = helperHealth?.paired ? 'paired=true' : 'paired=false'
@@ -592,19 +596,7 @@ async function pollOnce(options = {}) {
 
   let next = null
   let activeConfig = config
-  if (platform) {
-    next = await helperRequest(
-      config,
-      `/v1/extension/tasks/next?platform=${encodeURIComponent(platform)}`,
-      {},
-      session,
-    )
-    if (next.task?.environmentKey) {
-      activeConfig = { ...config, environmentKey: next.task.environmentKey }
-    }
-  }
-
-  const candidateKeys = next?.task ? [] : await resolveCandidateEnvironmentKeys(config, session, platform)
+  const candidateKeys = await resolveCandidateEnvironmentKeys(config, session, platform)
   for (const environmentKey of candidateKeys) {
     const scopedConfig = { ...config, environmentKey }
     const candidate = await helperRequest(
@@ -620,6 +612,13 @@ async function pollOnce(options = {}) {
     }
     next = candidate
   }
+  if (!candidateKeys.length) {
+    next = {
+      ok: true,
+      task: null,
+      status: 'ENVIRONMENT_KEY_REQUIRED',
+    }
+  }
   if (!next.task) {
     return {
       ok: true,
@@ -629,8 +628,13 @@ async function pollOnce(options = {}) {
   }
 
   try {
-    const identityTabId = options.identityTabId || await findActivePlatformTabId(next.task.platform)
-    const fillResult = await handleTask(activeConfig, session, next.task, { identityTabId })
+    assertTaskEnvironmentMatchesConfig(activeConfig, next.task)
+    const candidatePlatformTabId = options.identityTabId || await findActivePlatformTabId(next.task.platform)
+    const identityTabId = await ensureTaskIdentityTab(activeConfig, session, next.task, candidatePlatformTabId)
+    const fillResult = await handleTask(activeConfig, session, next.task, {
+      identityTabId,
+      fillTabId: candidatePlatformTabId,
+    })
     await helperRequest(activeConfig, `/v1/extension/tasks/${next.task.taskId}/complete`, {
       method: 'POST',
       body: JSON.stringify({ environmentKey: activeConfig.environmentKey, fillResult }),
@@ -708,6 +712,7 @@ async function refreshRuntimeConfig(options = {}) {
     helperBase: rawConfig.helperBase || runtime.helperBase || currentConfig.helperBase,
     brandId: rawConfig.brandId || runtime.brandId || currentConfig.brandId || null,
     environmentKey: selected.environmentKey || rawConfig.environmentKey || currentConfig.environmentKey,
+    providerProfileId: selected.providerProfileId || rawConfig.providerProfileId || currentConfig.providerProfileId || null,
     environmentAccountId: selected.browserEnvironmentAccountId || rawConfig.environmentAccountId || null,
     selfMediaAccountId: selected.selfMediaAccountId || rawConfig.selfMediaAccountId || null,
     platform: selected.platform || rawConfig.platform || currentConfig.platform,
@@ -880,7 +885,7 @@ function isRetryableTaskFailureCode(code) {
   ].includes(code)
 }
 
-async function autoPollOnce(reason, senderTabId) {
+async function autoPollOnce(reason, senderTabId, options = {}) {
   try {
     const { config, session } = await getConfig()
     if (config.autoRun === false) return { ok: true, skipped: true, reason: 'auto_run_disabled' }
@@ -891,6 +896,9 @@ async function autoPollOnce(reason, senderTabId) {
     }
     const tab = senderTabId ? await chrome.tabs.get(senderTabId).catch(() => null) : null
     const platform = inferPlatformFromUrl(tab?.url)
+    if (shouldSkipPassiveAutoPoll(platform, options.source)) {
+      return { ok: true, skipped: true, reason: 'passive_auto_poll_skipped', platform }
+    }
     let identityTabId = senderTabId
     let result = await pollOnce({ identityTabId, platform })
 
@@ -915,12 +923,20 @@ async function autoPollOnce(reason, senderTabId) {
   }
 }
 
+function shouldSkipPassiveAutoPoll(platform, source) {
+  return normalizePlatform(platform) === 'xiaohongshu'
+    && source === 'editor_ready'
+}
+
 async function findPendingHelperTaskForOtherPlatform(config, session, currentPlatform) {
   const normalizedCurrent = normalizePlatform(currentPlatform)
+  const environmentKey = String(config.environmentKey || '').trim()
+  if (!environmentKey) return null
   const tasks = await listHelperTasks(config, session)
   return tasks.find((task) => {
     const platform = normalizePlatform(task.platform)
     if (!platform || platform === normalizedCurrent) return false
+    if (String(task.environmentKey || '').trim() !== environmentKey) return false
     return isClaimableHelperTaskStatus(task.status)
   }) || null
 }
@@ -961,6 +977,10 @@ async function autoReportLoginStatusFromTab(config, session, tabId, options = {}
     await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: '跳过登录上报：content-script 未返回身份诊断' })
     return null
   }
+  if (!identityHasCandidates(identity)) {
+    await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: `跳过登录上报：未读取到平台账号身份，${identity.diagnostics || '-'}` })
+    return null
+  }
   const status = await reportLoginStatus(reportConfig, session, {
     environmentAccountId: options.environmentAccountId || null,
     environmentKey,
@@ -977,11 +997,6 @@ async function resolveCandidateEnvironmentKeys(config, session, platform) {
   const add = (value) => {
     const key = String(value || '').trim()
     if (key && !keys.includes(key)) keys.push(key)
-  }
-  for (const task of await listHelperTasks(config, session)) {
-    if (task.status === 'completed' || task.status === 'cancelled') continue
-    if (platform && task.platform && normalizePlatform(task.platform) !== normalizePlatform(platform)) continue
-    add(task.environmentKey)
   }
   add(config.environmentKey)
   return keys
@@ -1006,6 +1021,7 @@ async function listHelperTasks(config, session) {
 }
 
 async function handleTask(config, session, task, options = {}) {
+  assertTaskEnvironmentMatchesConfig(config, task)
   const taskApiConfig = task.backendBase ? { ...config, apiBase: task.backendBase } : config
   const precheckedIdentity = await verifyTaskIdentityOnTab(options.identityTabId || null, task)
   await reportTaskLoginStatus(taskApiConfig, session, task, precheckedIdentity).catch(() => {})
@@ -1031,17 +1047,31 @@ async function handleTask(config, session, task, options = {}) {
   payload.taskId = task.taskId
   payload.environmentKey = task.environmentKey || config.environmentKey || null
   payload.expectedAccountName = task.expectedAccountName || payload.expectedAccountName || null
+  payload.expectedPlatformAccountId = task.expectedPlatformAccountId || payload.expectedPlatformAccountId || null
+  const taskScheduledAt = firstText(
+    task.platformScheduledAt,
+    task.schedule?.platformScheduledAt,
+    task.schedule?.plannedPublishAt,
+  )
+  if (taskScheduledAt) {
+    payload.platformScheduledAt = payload.platformScheduledAt || taskScheduledAt
+    payload.scheduledAt = payload.scheduledAt || taskScheduledAt
+    payload.scheduleRequired = true
+  }
   assertExpectedIdentityPresent(payload)
   payload.precheckedIdentity = precheckedIdentity || null
 
-  const tab = await resolveFillTab(options.identityTabId, task.platform, payload.publishUrl)
-  await waitForFillContentScriptReady(tab.id, 30_000)
+  const tab = await resolveFillTab(options.fillTabId || null, task.platform, payload.publishUrl)
+  await waitForTabComplete(tab.id, 45_000).catch(() => null)
+  if (normalizePlatform(task.platform) === 'baijiahao') await delay(1200)
+  await waitForFillContentScriptReadyWithRecovery(tab.id, task.platform, 30_000)
+  await waitForPlatformShellReady(tab.id, task.platform)
   let fillResult
   try {
     const fillResponse = await sendFillMessageOnce(tab.id, {
       type: 'GEO_ENV_FILL_TASK',
       payload,
-    })
+    }, { platform: task.platform })
     fillResult = normalizeFillResult(fillResponse?.result || fillResponse, task)
   } catch (error) {
     try {
@@ -1059,6 +1089,66 @@ async function handleTask(config, session, task, options = {}) {
     body: JSON.stringify({ fillResult }),
   }, session.extensionToken)
   return fillResult
+}
+
+async function waitForPlatformShellReady(tabId, platform) {
+  if (normalizePlatform(platform) !== 'douyin') return
+  let latest = null
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    latest = await inspectDouyinShellState(tabId).catch(() => null)
+    if (!latest?.loadingShell) return
+    await delay(1200 + attempt * 300)
+    if (attempt === 3) {
+      await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
+      await waitForTabComplete(tabId, 45_000).catch(() => null)
+      await ensureContentScript(tabId).catch(() => null)
+    }
+  }
+  const error = new Error(`DOUYIN_ARTICLE_FORM_NOT_READY：抖音发布页仍在加载中，未出现文章编辑表单；${latest?.diagnostics || ''}`)
+  error.code = 'DOUYIN_ARTICLE_FORM_NOT_READY'
+  throw error
+}
+
+async function inspectDouyinShellState(tabId) {
+  const [state] = await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [0] },
+    func: () => {
+      const text = String(document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, '')
+      const inputs = Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"]'))
+        .filter((el) => {
+          const rect = el.getBoundingClientRect()
+          const style = getComputedStyle(el)
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+        })
+      const loadingShell = location.hostname === 'creator.douyin.com'
+        && /加载中|请稍候/.test(text)
+        && inputs.length === 0
+      return {
+        href: location.href,
+        inputCount: inputs.length,
+        loadingShell,
+        diagnostics: `href=${location.href}; inputCount=${inputs.length}; text=${text.slice(0, 160)}`,
+      }
+    },
+  })
+  return state?.result || null
+}
+
+function assertTaskEnvironmentMatchesConfig(config, task) {
+  const configEnvironmentKey = String(config?.environmentKey || '').trim()
+  const taskEnvironmentKey = String(task?.environmentKey || '').trim()
+  if (!configEnvironmentKey || !taskEnvironmentKey || configEnvironmentKey !== taskEnvironmentKey) {
+    const error = new Error(`任务环境不匹配，已阻止填充：当前环境=${configEnvironmentKey || '-'}，任务环境=${taskEnvironmentKey || '-'}`)
+    error.code = 'TASK_ENVIRONMENT_MISMATCH'
+    throw error
+  }
+  const configProviderProfileId = String(config?.providerProfileId || '').trim()
+  const taskProviderProfileId = String(task?.providerProfileId || '').trim()
+  if (configProviderProfileId && taskProviderProfileId && configProviderProfileId !== taskProviderProfileId) {
+    const error = new Error(`AdsPower 指纹实例不匹配，已阻止填充：当前 profile=${configProviderProfileId}，任务 profile=${taskProviderProfileId}`)
+    error.code = 'TASK_PROVIDER_PROFILE_MISMATCH'
+    throw error
+  }
 }
 
 async function ensureTaskIdentityTab(config, session, task, candidateTabId) {
@@ -1117,6 +1207,11 @@ function normalizeFillResult(fillResult, task = {}) {
 }
 
 async function recoverPublishAfterFillError(tabId, task, payload, error) {
+  const baijiahaoResult = await recoverBaijiahaoAfterMessageChannelClosed(tabId, task, payload, error).catch((baijiahaoError) => {
+    if (baijiahaoError !== error) throw baijiahaoError
+    return null
+  })
+  if (baijiahaoResult) return baijiahaoResult
   const douyinResult = await recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payload, error).catch((douyinError) => {
     if (douyinError !== error) throw douyinError
     return null
@@ -1128,6 +1223,66 @@ async function recoverPublishAfterFillError(tabId, task, payload, error) {
   })
   if (zhihuResult) return zhihuResult
   return recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload, error)
+}
+
+async function recoverBaijiahaoAfterMessageChannelClosed(tabId, task, payload, error) {
+  const message = error?.message || String(error || '')
+  if (normalizePlatform(task?.platform || payload?.platform) !== 'baijiahao' || !isMessageChannelClosedError(message)) {
+    throw error
+  }
+  await waitForTabComplete(tabId, 45_000).catch(() => null)
+  await delay(1500)
+  const state = await inspectBaijiahaoPostSubmitTab(tabId)
+  if (!state?.submittedLike) throw error
+  return {
+    titleFilled: true,
+    contentFilled: true,
+    tagsFilled: false,
+    publishOptions: {
+      filled: true,
+      scheduled: Boolean(payload?.platformScheduledAt || payload?.scheduledAt),
+      published: !Boolean(payload?.platformScheduledAt || payload?.scheduledAt),
+      publishVerification: state,
+      message: `百家号提交后页面跳转导致消息通道关闭，已检测到发布后页面(${state.pageUrl || '-'})，后续由发布回查确认最终状态`,
+    },
+    recoveredAfterMessageChannelClosed: true,
+    messageChannelClosedError: message,
+  }
+}
+
+async function inspectBaijiahaoPostSubmitTab(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null)
+  await ensureContentScript(tabId).catch(() => null)
+  const state = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const text = document.body?.innerText || document.body?.textContent || ''
+      const url = location.href
+      const postSubmitPath = location.hostname === 'baijiahao.baidu.com'
+        && (
+          location.pathname.includes('/builder/rc/clue')
+          || location.pathname.includes('/builder/rc/content')
+          || location.pathname.includes('/builder/rc/home')
+        )
+      const stillEditor = location.pathname.includes('/builder/rc/edit')
+        || /发布|定时发布|存草稿|请输入标题|请输入正文/.test(text)
+      const successText = /发布成功|提交成功|已发布|审核中|定时发布|发文成功/.test(text)
+      return {
+        pageUrl: url,
+        title: document.title || '',
+        textProbe: text.slice(0, 500),
+        submittedLike: postSubmitPath || successText || (location.hostname === 'baijiahao.baidu.com' && !stillEditor),
+        postSubmitPath,
+        successText,
+        stillEditor,
+      }
+    },
+  }).catch(() => null)
+  return state?.[0]?.result || {
+    pageUrl: tab?.url || '',
+    title: tab?.title || '',
+    submittedLike: Boolean(tab?.url && /baijiahao\.baidu\.com\/builder\/rc\/(clue|content|home)/.test(tab.url)),
+  }
 }
 
 async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payload, error) {
@@ -1158,6 +1313,12 @@ async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payloa
         recoveredAfterMessageChannelClosed: true,
         messageChannelClosedError: message,
       }
+    }
+    if (latest && latest.isManagePage === false && attempt < 4) {
+      await chrome.tabs.update(tabId, { url: defaultLoginReportUrl('douyin'), active: true }).catch(() => null)
+      await waitForTabComplete(tabId, 45_000).catch(() => null)
+      await delay(1600)
+      continue
     }
     if (latest?.isManagePage && attempt >= 1 && attempt < 4) {
       await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
@@ -1207,6 +1368,13 @@ function isMessageChannelClosedError(message) {
   return text.includes('message channel closed')
     || text.includes('receiving end does not exist')
     || text.includes('Extension context invalidated')
+}
+
+function isNoReceivingEndError(message) {
+  const text = String(message || '')
+  return text.includes('Receiving end does not exist')
+    || text.includes('Could not establish connection')
+    || text.includes('receiving end does not exist')
 }
 
 function buildDouyinManageVerifyContext(payload = {}) {
@@ -1317,8 +1485,11 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
 
       function isExpectedRecord(item) {
         if (!item.compactText.includes(normalizedTitle)) return false
-        if (scheduledAt && !scheduledVariants.some((value) => value && item.compactText.includes(normalizeCompact(value)))) return false
-        if (scheduledAt && !/定时发布中|定时|修改定时/.test(item.text)) return false
+        if (scheduledAt) {
+          if (/已发布|发布成功|审核中/.test(item.text)) return true
+          if (!scheduledVariants.some((value) => value && item.compactText.includes(normalizeCompact(value)))) return false
+          if (!/定时发布中|定时|修改定时/.test(item.text)) return false
+        }
         if (!scheduledAt && /草稿|未通过|删除作品/.test(item.text) && !/审核中|已发布|发布成功/.test(item.text)) return false
         return true
       }
@@ -1912,9 +2083,12 @@ async function reportActiveTabLoginStatus() {
   const response = await chrome.tabs.sendMessage(tab.id, {
     type: 'GEO_ENV_READ_IDENTITY',
     payload: { platform },
-  })
+  }, { frameId: 0 })
   if (!response?.ok) throw new Error(response?.error || '读取平台账号身份失败')
   const identity = response.result?.identity || null
+  if (!identityHasCandidates(identity)) {
+    throw new Error(`未读取到平台账号身份，请打开${platformReportPageHint(platform)}后重试；${identity?.diagnostics || ''}`)
+  }
   const reportConfig = { ...config, environmentKey }
   const status = await reportLoginStatus(reportConfig, session, {
     environmentAccountId: null,
@@ -1927,13 +2101,19 @@ async function reportActiveTabLoginStatus() {
   return { platform, environmentKey, detectedIdentity: identity, backendStatus: status }
 }
 
+function identityHasCandidates(identity) {
+  const accountIds = firstArray(identity?.accountIds, identity?.currentAccountIds)
+  const accountNames = firstArray(identity?.accountNames, identity?.currentAccountNames)
+  return accountIds.length > 0 || accountNames.length > 0
+}
+
 async function readIdentityFromTab(tabId, platform, options = {}) {
   let lastIdentity = null
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const response = await chrome.tabs.sendMessage(tabId, {
       type: 'GEO_ENV_READ_IDENTITY',
       payload: { platform },
-    }).catch(() => null)
+    }, { frameId: 0 }).catch(() => null)
     if (response?.ok) {
       const identity = response.result?.identity || null
       lastIdentity = identity
@@ -1947,15 +2127,40 @@ async function readIdentityFromTab(tabId, platform, options = {}) {
 }
 
 async function ensureContentScript(tabId) {
-  const ping = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' }).catch(() => null)
+  const ping = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' }, { frameId: 0 }).catch(() => null)
   const href = String(ping?.result?.href || '')
   const needsDouyinAdapter = href.includes('creator.douyin.com') && !ping?.result?.adapters?.douyin
-  if (ping?.ok && !needsDouyinAdapter) return
+  const oldContentScript = ping?.ok && ping.result?.contentScriptVersion && ping.result.contentScriptVersion !== EXTENSION_VERSION
+  if (oldContentScript) {
+    await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
+    await waitForTabComplete(tabId, 45_000).catch(() => null)
+    await delay(1200)
+  } else if (ping?.ok && !needsDouyinAdapter) {
+    return
+  }
+  await injectContentScripts(tabId, { allFrames: true })
+  await delay(200)
+}
+
+async function injectContentScripts(tabId, options = {}) {
+  const files = ['fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js']
+  await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [0] },
+    files,
+  })
+  if (!options.allFrames) return
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
-    files: ['fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js'],
+    files,
+  }).catch((error) => {
+    if (!isCannotAccessContentsError(error?.message || error)) throw error
   })
-  await delay(200)
+}
+
+function isCannotAccessContentsError(message) {
+  const text = String(message || '')
+  return text.includes('Cannot access contents of the page')
+    || text.includes('Extension manifest must request permission')
 }
 
 async function reportLoginStatus(config, session, report) {
@@ -1981,7 +2186,7 @@ async function reportLoginStatus(config, session, report) {
     errorCode: hasIdentity ? null : 'IDENTITY_NOT_READ',
     errorMessage: hasIdentity ? null : (identity.diagnostics || '未读取到平台账号身份'),
   }
-  if (!brandId || environmentAccountId) {
+  if (report.environmentKey) {
     body.environmentKey = report.environmentKey
   }
   const backendStatus = await apiRequest(config, path, {
@@ -2035,6 +2240,9 @@ function parseFillPayload(value) {
 async function resolveFillTab(candidateTabId, platform, publishUrl) {
   const candidate = candidateTabId ? await chrome.tabs.get(candidateTabId).catch(() => null) : null
   if (candidate?.id && candidate.url && isReusablePublishTab(platform, candidate.url, publishUrl)) {
+    if (shouldNormalizeReusablePublishTabUrl(platform, candidate.url, publishUrl)) {
+      return chrome.tabs.update(candidate.id, { url: publishUrl, active: true })
+    }
     await chrome.tabs.update(candidate.id, { active: true })
     return candidate
   }
@@ -2052,31 +2260,32 @@ function isReusablePublishTab(platform, currentUrlValue, publishUrlValue) {
   return currentUrl.pathname === publishUrl.pathname
 }
 
+function shouldNormalizeReusablePublishTabUrl(platform, currentUrlValue, publishUrlValue) {
+  if (normalizePlatform(platform) !== 'xiaohongshu') return false
+  const currentUrl = new URL(currentUrlValue)
+  const publishUrl = new URL(publishUrlValue)
+  return currentUrl.pathname === publishUrl.pathname
+    && currentUrl.search !== publishUrl.search
+    && publishUrl.searchParams.get('target') === 'article'
+}
+
 async function verifyTaskIdentityOnTab(tabId, task) {
   const requiresPrecheck = requiresIdentityPrecheck(task)
   const identityTabId = await resolveIdentityPrecheckTabId(tabId, task.platform, requiresPrecheck)
   if (!identityTabId) {
     if (requiresPrecheck) {
-      return {
-        method: 'accountNameWarning',
-        warning: true,
-        message: `账号名称未预检：未找到 ${platformReportPageHint(task.platform)}，将继续填充`,
-        currentAccountIds: [],
-        currentAccountNames: [],
-      }
+      const error = new Error(`账号名称未预检：未找到 ${platformReportPageHint(task.platform)}，已阻止填充`)
+      error.code = 'TASK_ACCOUNT_IDENTITY_NOT_CONFIRMED'
+      throw error
     }
     return null
   }
   const tab = await chrome.tabs.get(identityTabId).catch(() => null)
   if (!tab?.url || !isAllowedLoginReportUrl(task.platform, tab.url)) {
     if (requiresPrecheck) {
-      return {
-        method: 'accountNameWarning',
-        warning: true,
-        message: `账号名称未预检：当前页面不是 ${platformReportPageHint(task.platform)}，将继续填充`,
-        currentAccountIds: [],
-        currentAccountNames: [],
-      }
+      const error = new Error(`账号名称未预检：当前页面不是 ${platformReportPageHint(task.platform)}，已阻止填充`)
+      error.code = 'TASK_ACCOUNT_IDENTITY_NOT_CONFIRMED'
+      throw error
     }
     return null
   }
@@ -2088,18 +2297,20 @@ async function verifyTaskIdentityOnTab(tabId, task) {
       payload: {
         platform: task.platform,
         expectedAccountName: task.expectedAccountName || null,
+        expectedPlatformAccountId: task.expectedPlatformAccountId || null,
       },
     })
     if (!response?.ok) throw new Error(response?.error || '账号身份校验失败')
+    if (response.result?.warning) {
+      const error = new Error(response.result.message || '账号身份未确认，已阻止填充')
+      error.code = 'TASK_ACCOUNT_IDENTITY_MISMATCH'
+      throw error
+    }
     return response.result
   } catch (error) {
-    return {
-      method: 'accountNameWarning',
-      warning: true,
-      message: `账号名称未确认：${error?.message || String(error || '读取失败')}，将继续填充`,
-      currentAccountIds: [],
-      currentAccountNames: [],
-    }
+    const normalized = error instanceof Error ? error : new Error(String(error || '账号身份校验失败'))
+    normalized.code = normalized.code || 'TASK_ACCOUNT_IDENTITY_NOT_CONFIRMED'
+    throw normalized
   }
 }
 
@@ -2119,14 +2330,16 @@ async function resolveIdentityPrecheckTabId(candidateTabId, platform, requiresPr
 
 function requiresIdentityPrecheck(task) {
   if (!IDENTITY_PRECHECK_PLATFORMS.has(task.platform)) return false
-  return Boolean(task.expectedAccountName)
+  return Boolean(task.expectedAccountName || task.expectedPlatformAccountId)
 }
 
 function assertExpectedIdentityPresent(payload) {
   const platform = normalizePlatform(payload.platform)
   if (!IDENTITY_PRECHECK_PLATFORMS.has(platform)) return
-  if (!payload.expectedAccountName) {
-    console.warn('IDENTITY_EXPECTATION_MISSING：任务缺少 expectedAccountName，将跳过账号名称提示校验')
+  if (!payload.expectedAccountName && !payload.expectedPlatformAccountId) {
+    const error = new Error('IDENTITY_EXPECTATION_MISSING：任务缺少 expectedAccountName/expectedPlatformAccountId，已阻止填充以避免账号串门')
+    error.code = 'IDENTITY_EXPECTATION_MISSING'
+    throw error
   }
 }
 
@@ -2240,7 +2453,9 @@ function isAutoPollReadyUrl(urlValue) {
         && url.pathname.startsWith('/write')
     }
     if (platform === 'xiaohongshu') {
-      return url.hostname === 'creator.xiaohongshu.com' && url.pathname.includes('/publish/publish')
+      return url.hostname === 'creator.xiaohongshu.com'
+        && url.pathname.includes('/publish/publish')
+        && url.searchParams.get('published') !== 'true'
     }
     if (platform === 'baijiahao') {
       return url.hostname === 'baijiahao.baidu.com' && url.pathname.includes('/builder/rc/edit')
@@ -2314,11 +2529,11 @@ function inferPlatformFromUrl(urlValue) {
 function platformReportPageHint(platform) {
   const normalizedPlatform = normalizePlatform(platform)
   const hints = {
-    toutiao: '头条后台页(mp.toutiao.com)',
+    toutiao: '头条设置页(mp.toutiao.com/profile_v4/personal/info)',
     zhihu: '知乎创作中心(www.zhihu.com/creator/manage/creation/article)',
-    xiaohongshu: '小红书创作服务平台(creator.xiaohongshu.com)',
-    baijiahao: '百家号后台页(baijiahao.baidu.com)',
-    douyin: '抖音创作者中心(creator.douyin.com)',
+    xiaohongshu: '小红书创作者主页(creator.xiaohongshu.com/new/home?source=official)',
+    baijiahao: '百家号个人中心页(baijiahao.baidu.com/builder/rc/settings/accountSet)',
+    douyin: '抖音创作者中心首页(creator.douyin.com/creator-micro/home)',
   }
   return hints[normalizedPlatform] || `${platform || '对应平台'}后台页`
 }
@@ -2337,11 +2552,11 @@ function platformDisplayName(platform) {
 
 function defaultLoginReportUrl(platform) {
   const normalizedPlatform = normalizePlatform(platform)
-  if (normalizedPlatform === 'toutiao') return 'https://mp.toutiao.com/profile_v4'
+  if (normalizedPlatform === 'toutiao') return 'https://mp.toutiao.com/profile_v4/personal/info'
   if (normalizedPlatform === 'zhihu') return globalThis.__GEO_ZHIHU_PLATFORM__?.CREATOR_CENTER_URL || 'https://www.zhihu.com/creator/manage/creation/article'
-  if (normalizedPlatform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/'
-  if (normalizedPlatform === 'baijiahao') return 'https://baijiahao.baidu.com/'
-  if (normalizedPlatform === 'douyin') return 'https://creator.douyin.com/creator-micro/content/manage'
+  if (normalizedPlatform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/new/home?source=official'
+  if (normalizedPlatform === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/settings/accountSet'
+  if (normalizedPlatform === 'douyin') return 'https://creator.douyin.com/creator-micro/home'
   return null
 }
 
@@ -2425,7 +2640,7 @@ async function waitForContentScript(tabId, attempts, delayMs) {
   let lastError = null
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const response = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' })
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' }, { frameId: 0 })
       if (response?.ok) return response
     } catch (error) {
       lastError = error
@@ -2441,7 +2656,7 @@ async function waitForFillContentScriptReady(tabId, timeoutMs = 30_000) {
   while (Date.now() < deadline) {
     try {
       await ensureContentScript(tabId)
-      const response = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' })
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' }, { frameId: 0 })
       if (response?.ok) return response
     } catch (error) {
       lastError = error
@@ -2451,12 +2666,48 @@ async function waitForFillContentScriptReady(tabId, timeoutMs = 30_000) {
   throw lastError || new Error('页面脚本未就绪')
 }
 
-async function sendFillMessageOnce(tabId, message) {
-  const response = await withTimeout(
-    chrome.tabs.sendMessage(tabId, message),
-    90_000,
-    '页面填充执行超时，请检查定时发布弹窗或平台页面是否阻塞',
-  )
+async function waitForFillContentScriptReadyWithRecovery(tabId, platform, timeoutMs = 30_000) {
+  try {
+    return await waitForFillContentScriptReady(tabId, timeoutMs)
+  } catch (error) {
+    if (!isNoReceivingEndError(error?.message || error)) throw error
+    if (normalizePlatform(platform) === 'baijiahao') {
+      await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
+      await waitForTabComplete(tabId, 45_000).catch(() => null)
+      await delay(1800)
+    }
+    await ensureContentScript(tabId)
+    return waitForFillContentScriptReady(tabId, 15_000)
+  }
+}
+
+async function sendFillMessageOnce(tabId, message, options = {}) {
+  let response
+  const timeoutMs = fillMessageTimeoutMs(options.platform)
+  try {
+    response = await withTimeout(
+      chrome.tabs.sendMessage(tabId, message),
+      timeoutMs,
+      '页面填充执行超时，请检查定时发布弹窗或平台页面是否阻塞',
+    )
+  } catch (error) {
+    if (!options.channelRecovered && isRecoverableFillChannelError(error?.message || error, options.platform)) {
+      return retryFillMessageAfterChannelRecovery(tabId, message, options, error)
+    }
+    if (!isNoReceivingEndError(error?.message || error)) {
+      throw await enrichFillMessageError(tabId, options.platform, error)
+    }
+    await waitForFillContentScriptReadyWithRecovery(tabId, options.platform, 20_000)
+    try {
+      response = await withTimeout(
+        chrome.tabs.sendMessage(tabId, message),
+        timeoutMs,
+        '页面填充执行超时，请检查定时发布弹窗或平台页面是否阻塞',
+      )
+    } catch (retryError) {
+      throw await enrichFillMessageError(tabId, options.platform, retryError)
+    }
+  }
   if (!response?.ok) {
     const error = new Error(response?.error || '页面填充失败')
     if (response?.failureCode) error.code = response.failureCode
@@ -2467,13 +2718,49 @@ async function sendFillMessageOnce(tabId, message) {
   return response
 }
 
+function fillMessageTimeoutMs(platform) {
+  if (normalizePlatform(platform) === 'xiaohongshu') return 150_000
+  return 90_000
+}
+
+function isRecoverableFillChannelError(message, platform) {
+  return normalizePlatform(platform) === 'xiaohongshu'
+    && isMessageChannelClosedError(message)
+}
+
+async function retryFillMessageAfterChannelRecovery(tabId, message, options, originalError) {
+  await waitForTabComplete(tabId, 45_000).catch(() => null)
+  await delay(1200)
+  await waitForFillContentScriptReadyWithRecovery(tabId, options.platform, 20_000)
+  try {
+    return await sendFillMessageOnce(tabId, message, { ...options, channelRecovered: true })
+  } catch (retryError) {
+    retryError.originalMessage = originalError?.message || String(originalError || '')
+    throw retryError
+  }
+}
+
+async function enrichFillMessageError(tabId, platform, error) {
+  const message = error?.message || String(error || '')
+  if (!message.includes('页面填充执行超时') && !message.includes('超时')) return error
+  const snapshot = await captureFailureSnapshot(tabId, platform).catch(() => null)
+  if (!snapshot) return error
+  const page = snapshot.page || {}
+  const activeFillTask = page.activeFillTask || null
+  const stageText = activeFillTask?.stage ? `；stage=${activeFillTask.stage}` : ''
+  const diagnosticsText = page.diagnostics ? `；${String(page.diagnostics).slice(0, 800)}` : ''
+  const enriched = new Error(`${message}${stageText}${diagnosticsText}`)
+  enriched.code = error?.code || 'PAGE_LOAD_TIMEOUT'
+  enriched.diagnostics = page
+  enriched.failureSnapshot = snapshot
+  enriched.extensionVersion = EXTENSION_VERSION
+  return enriched
+}
+
 async function fillToutiaoScheduleAcrossFrames(tabId, value, platform) {
   if (!tabId) throw new Error('跨 frame 设置定时发布缺少 tabId')
   await ensureContentScript(tabId)
-  await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true },
-    files: ['fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js'],
-  }).catch(() => {})
+  await injectContentScripts(tabId, { allFrames: true }).catch(() => {})
   await delay(200)
 
   const frames = await chrome.scripting.executeScript({
@@ -2491,6 +2778,21 @@ async function fillToutiaoScheduleAcrossFrames(tabId, value, platform) {
         text: text.slice(0, 160),
       }
     },
+  }).catch((error) => {
+    if (!isCannotAccessContentsError(error?.message || error)) throw error
+    return chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      func: () => {
+        const text = String(document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, '')
+        return {
+          href: location.href,
+          title: document.title,
+          hasScheduleDialog: text.includes('定时发布'),
+          hasScheduleControls: /月\d{1,2}日/.test(text) && text.includes('时') && text.includes('分'),
+          text: text.slice(0, 160),
+        }
+      },
+    })
   })
   const frame = frames
     .filter((item) => item?.result?.hasScheduleDialog || item?.result?.hasScheduleControls)
@@ -3444,7 +3746,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (frameId !== 0 || !isAutoPollReadyUrl(readyUrl)) {
         return { ok: true, skipped: true, reason: 'not_publish_editor_ready' }
       }
-      return autoPollOnce(message.href || 'editor_ready', sender.tab?.id || null)
+      return autoPollOnce('editor_ready', sender.tab?.id || null, { source: 'editor_ready', href: message.href || readyUrl })
     }
     if (message?.type === 'GEO_ENV_TRUSTED_CLICK') {
       return dispatchTrustedClick(sender.tab?.id || null, message.click || {})
@@ -3486,11 +3788,66 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
   if (changeInfo.status !== 'complete') return
   const readyUrl = tab?.url || url
-  if (!isAutoPollReadyUrl(readyUrl)) return
-  triggerAutoPollFromTabComplete(tabId, readyUrl)
+  if (isAutoPollReadyUrl(readyUrl)) {
+    triggerAutoPollFromTabComplete(tabId, readyUrl)
+    return
+  }
+  if (isAutoLoginReportReadyUrl(readyUrl)) {
+    triggerAutoLoginReportFromTabComplete(tabId, readyUrl)
+  }
 })
 
 scheduleRuntimeStatusHeartbeat()
+
+function isAutoLoginReportReadyUrl(urlValue) {
+  const platform = inferPlatformFromUrl(urlValue)
+  return Boolean(platform && isAllowedLoginReportUrl(platform, urlValue))
+}
+
+function loginReportContextFromUrl(urlValue) {
+  try {
+    const url = new URL(urlValue || '')
+    const enabled = url.searchParams.get('geoEnvLoginReport') === '1'
+    if (!enabled) return {}
+    return {
+      platform: url.searchParams.get('geoEnvPlatform') || inferPlatformFromUrl(urlValue),
+      environmentKey: url.searchParams.get('geoEnvEnvironmentKey') || '',
+      environmentAccountId: url.searchParams.get('geoEnvEnvironmentAccountId') || '',
+      selfMediaAccountId: url.searchParams.get('geoEnvSelfMediaAccountId') || '',
+    }
+  } catch {
+    return {}
+  }
+}
+
+function triggerAutoLoginReportFromTabComplete(tabId, urlValue) {
+  const context = loginReportContextFromUrl(urlValue)
+  const platform = context.platform || inferPlatformFromUrl(urlValue)
+  if (!platform) return
+  const key = `${tabId}:${platform}:${context.environmentAccountId || 'auto'}:login`
+  const now = Date.now()
+  if (now - (autoLoginReportAtByKey.get(key) || 0) < 12_000) return
+  autoLoginReportAtByKey.set(key, now)
+  setTimeout(async () => {
+    try {
+      const { config, session } = await getConfig()
+      await autoReportLoginStatusFromTab(config, session, tabId, {
+        platform,
+        environmentKey: context.environmentKey || undefined,
+        environmentAccountId: context.environmentAccountId || undefined,
+        selfMediaAccountId: context.selfMediaAccountId || undefined,
+      })
+    } catch (error) {
+      await appendEventLog({
+        type: 'login_report',
+        ok: false,
+        platform,
+        environmentKey: context.environmentKey || undefined,
+        error: error?.message || String(error || ''),
+      })
+    }
+  }, 1200)
+}
 
 function triggerAutoPollFromTabComplete(tabId, urlValue) {
   const platform = inferPlatformFromUrl(urlValue)

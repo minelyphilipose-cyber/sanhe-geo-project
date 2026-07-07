@@ -1,6 +1,6 @@
 ;(function installXiaohongshuPlatform(global) {
   const WORKS_LIST_URL = 'https://creator.xiaohongshu.com/new/note-manager'
-  const PUBLISH_URL = 'https://creator.xiaohongshu.com/publish/publish'
+  const PUBLISH_URL = 'https://creator.xiaohongshu.com/publish/publish?from=tab_switch&target=article'
 
   const RETRYABLE_FAILURE_CODES = new Set([
     'XIAOHONGSHU_FORMAT_NOT_READY',
@@ -74,6 +74,9 @@
     if (next.filled) actions.push(next.message)
     if (options.locationName) {
       actions.push(`小红书地点未处理=${options.locationName}`)
+    }
+    if (payload.scheduleRequired && !options.scheduledAt) {
+      throw new Error(`XIAOHONGSHU_SCHEDULE_TIME_MISSING：小红书排期任务缺少定时时间，禁止降级为立即发布；${describeXiaohongshuPublishState()}`)
     }
     if (options.scheduledAt) {
       const schedule = await requireDependency(deps.fillScheduledPublish, 'fillScheduledPublish')(options.scheduledAt, fillProfile.platform, {
@@ -173,19 +176,61 @@
       await waitForXiaohongshuPublishSettingsReady()
       return { filled: false, message: '已在小红书发布设置页' }
     }
-    const next = await waitForCondition(
-      () => findXiaohongshuActionButton(['下一步']),
-      15000,
-      `小红书下一步按钮未找到；${describeXiaohongshuPublishState()}`,
-    )
-    await clickTrustedActionOnce(next, { platform })
-    await waitForCondition(
-      () => isXiaohongshuPublishSettingsVisible(),
-      20000,
-      `小红书点击下一步后未进入发布设置页；${describeXiaohongshuPublishState()}`,
-    )
-    await waitForXiaohongshuPublishSettingsReady()
-    return { filled: true, message: '已进入小红书发布设置页' }
+    const attempts = []
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const next = await waitForCondition(
+        () => findXiaohongshuActionButton(['下一步']) || findXiaohongshuBottomTextButton('下一步'),
+        15000,
+        `小红书下一步按钮未找到；attempt=${attempt}；${describeXiaohongshuPublishState()}`,
+      )
+      attempts.push(describeXiaohongshuButton(next, `attempt=${attempt}`))
+      await clickXiaohongshuNextButton(next, platform)
+      const entered = await waitForOptionalCondition(
+        () => isXiaohongshuPublishSettingsVisible(),
+        attempt === 1 ? 15000 : 12000,
+      )
+      if (entered) {
+        await waitForXiaohongshuPublishSettingsReady()
+        return { filled: true, message: attempt > 1 ? `已进入小红书发布设置页，下一步重试=${attempt}` : '已进入小红书发布设置页' }
+      }
+      await delay(700)
+    }
+    throw new Error(`小红书点击下一步后未进入发布设置页；nextAttempts=${attempts.join('|') || '-'}；${describeXiaohongshuPublishState()}`)
+  }
+
+  async function clickXiaohongshuNextButton(button, platform) {
+    if (!button?.getBoundingClientRect) {
+      throw new Error(`小红书下一步按钮无效；${describeXiaohongshuPublishState()}`)
+    }
+    button.scrollIntoView?.({ block: 'center', inline: 'center' })
+    await delay(180)
+    if (typeof firePointerClick === 'function') {
+      firePointerClick(button, { platform })
+      button.click?.()
+    }
+    await delay(120)
+    if (typeof requestTrustedClick === 'function') {
+      await requestTrustedClick(button, { platform, label: '下一步' })
+      return
+    }
+    await clickTrustedActionOnce(button, { platform, label: '下一步' })
+  }
+
+  async function waitForOptionalCondition(predicate, timeoutMs) {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (predicate()) return true
+      await delay(400)
+    }
+    return Boolean(predicate())
+  }
+
+  function describeXiaohongshuButton(button, prefix = '') {
+    if (!button?.getBoundingClientRect) return `${prefix}:missing`
+    const rect = button.getBoundingClientRect()
+    const text = normalizeText(button.textContent || button.getAttribute?.('aria-label') || button.getAttribute?.('title') || '')
+    const className = String(button.className || '').slice(0, 80)
+    return `${prefix}:${text || '-'}@${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)}x${Math.round(rect.height)},class=${className || '-'}`
   }
   
   async function waitForXiaohongshuPublishSettingsReady() {
@@ -242,11 +287,11 @@
   
   async function publishXiaohongshuNow(platform, context = {}) {
     const button = await waitForCondition(
-      () => findXiaohongshuBottomPublishButton('发布'),
+      () => findXiaohongshuBottomPublishButton('发布') || findXiaohongshuBottomPublishClickPoint('发布'),
       10000,
       `小红书发布按钮未找到；${describeXiaohongshuPublishState()}`,
     )
-    await clickTrustedActionOnce(button, { platform })
+    await clickXiaohongshuPublishTarget(button, platform)
     const verification = await waitForXiaohongshuPublishSuccess({
       ...context,
       platformStatus: 'published',
@@ -273,15 +318,45 @@
     if (!toggle) {
       throw new Error(`小红书定时发布开关未找到；${describeXiaohongshuPublishState()}`)
     }
-    toggle.scrollIntoView?.({ block: 'center', inline: 'center' })
-    await delay(300)
-    await clickTrustedActionOnce(toggle, { platform })
+    await clickXiaohongshuScheduleToggle(toggle, platform)
     await waitForCondition(
       () => findXiaohongshuScheduleInput(),
-      8000,
+      10000,
       `小红书定时发布开关打开后未出现时间输入框；${describeXiaohongshuPublishState()}`,
     )
     return true
+  }
+
+  async function clickXiaohongshuScheduleToggle(toggle, platform) {
+    toggle.scrollIntoView?.({ block: 'center', inline: 'center' })
+    await delay(300)
+    await clickTrustedActionOnce(toggle, { platform, label: '小红书定时发布开关' })
+    if (await waitForOptionalCondition(() => findXiaohongshuScheduleInput(), 2500)) return true
+
+    const rect = toggle.getBoundingClientRect?.()
+    if (rect && rect.width > 0 && rect.height > 0) {
+      const points = [
+        { clientX: Math.round(rect.left + rect.width * 0.5), clientY: Math.round(rect.top + rect.height / 2) },
+        { clientX: Math.round(rect.left + rect.width * 0.78), clientY: Math.round(rect.top + rect.height / 2) },
+      ]
+      for (const point of points) {
+        await requestTrustedClickAt(point, platform, '小红书定时发布开关坐标', rect)
+        if (await waitForOptionalCondition(() => findXiaohongshuScheduleInput(), 2000)) return true
+      }
+    }
+
+    const row = findXiaohongshuScheduleRow()
+    const rowRect = row?.getBoundingClientRect?.()
+    if (rowRect && rowRect.width > 0 && rowRect.height > 0) {
+      const point = {
+        clientX: Math.round(rowRect.right - Math.min(42, Math.max(24, rowRect.width * 0.08))),
+        clientY: Math.round(rowRect.top + rowRect.height / 2),
+      }
+      await requestTrustedClickAt(point, platform, '小红书定时发布行右侧开关', rowRect)
+      if (await waitForOptionalCondition(() => findXiaohongshuScheduleInput(), 2500)) return true
+    }
+
+    return false
   }
   
   async function fillXiaohongshuScheduleDateTime(value, platform) {
@@ -474,9 +549,11 @@
   
   function findXiaohongshuBottomPublishClickPoint(label) {
     if (!isXiaohongshuPublishSettingsVisible()) return null
-    const scheduleInput = findXiaohongshuScheduleInput()
-    if (!scheduleInput || !normalizeText(scheduleInput.value || scheduleInput.textContent || '').includes('-')) return null
     const target = normalizeText(label)
+    if (target !== '发布') {
+      const scheduleInput = findXiaohongshuScheduleInput()
+      if (!scheduleInput || !normalizeText(scheduleInput.value || scheduleInput.textContent || '').includes('-')) return null
+    }
     const redPoint = findXiaohongshuBottomRedButtonPoint()
     if (redPoint) return { ...redPoint, label: target }
   
@@ -561,7 +638,7 @@
       }))
       .filter((item) => item.text === target)
       .map((item) => {
-        const targetEl = findXiaohongshuBottomButtonClickTarget(item.el) || item.el
+        const targetEl = findXiaohongshuBottomButtonClickTarget(item.el, target) || item.el
         return {
           ...item,
           el: targetEl,
@@ -599,14 +676,15 @@
       && rect.left <= window.innerWidth * 0.72
   }
   
-  function findXiaohongshuBottomButtonClickTarget(el) {
+  function findXiaohongshuBottomButtonClickTarget(el, targetText = '定时发布') {
+    const target = normalizeText(targetText)
     let current = el
     let best = null
     for (let depth = 0; current && depth < 6; depth += 1) {
       const rect = current.getBoundingClientRect()
       const text = normalizeText(current.textContent || current.getAttribute?.('aria-label') || '')
-      if (text.includes('暂存离开') && text.includes('定时发布')) break
-      if (text === normalizeText('定时发布')
+      if (text.includes('暂存离开') && (text.includes('定时发布') || text.includes('发布'))) break
+      if (text === target
         && rect.width >= 44
         && rect.width <= 280
         && rect.height >= 20
@@ -672,6 +750,18 @@
       '定时发布',
     ]
     return markers.filter((marker) => text.includes(marker)).length >= 3
+  }
+
+  function currentXiaohongshuStage() {
+    const href = String(location.href || '')
+    const text = normalizeText(document.body?.innerText || document.body?.textContent || '')
+    if (href.includes('/publish/success') || text.includes('发布成功') || text.includes('秒后将返回发布页')) return 'publish_success'
+    if (isXiaohongshuPublishSettingsVisible()) return 'publish_settings'
+    if (isXiaohongshuLayoutCanvasVisible()) return 'layout_canvas'
+    if (text.includes('返回') && text.includes('一键排版') && text.includes('字数')) return 'article_editor'
+    if (href.includes('/publish/publish') && (text.includes('写长文') || text.includes('新的创作') || text.includes('导入链接'))) return 'creator_home'
+    if (href.includes('/new/note-manager') || text.includes('笔记管理')) return 'note_manager'
+    return 'unknown'
   }
   
   function isXiaohongshuImageGenerating() {
@@ -903,7 +993,7 @@
         aria: input.getAttribute('aria-label') || '',
       }))
       .slice(-12)
-    return `xhsSettingsVisible=${isXiaohongshuPublishSettingsVisible()}; xhsSettingsMarkers=${settingsMarkers || '-'}; ${scheduleControls}; xhsBottomButtons=${bottomButtons || '-'}; xhsText=${text || '-'}; actions=${actions || '-'}; inputs=${JSON.stringify(inputs).slice(0, 520)}; lastTrustedClick=${describeLastTrustedClick()}`
+    return `xhsStage=${currentXiaohongshuStage()}; xhsSettingsVisible=${isXiaohongshuPublishSettingsVisible()}; xhsSettingsMarkers=${settingsMarkers || '-'}; ${scheduleControls}; xhsBottomButtons=${bottomButtons || '-'}; xhsText=${text || '-'}; actions=${actions || '-'}; inputs=${JSON.stringify(inputs).slice(0, 520)}; lastTrustedClick=${describeLastTrustedClick()}`
   }
   
   function describeXiaohongshuBottomButtons() {
@@ -968,22 +1058,55 @@
   }
 
   function readIdentity(deps) {
+    const accountIds = new Set()
     const accountNames = new Set()
     const normalizeText = requireDependency(deps.normalizeText, 'normalizeText')
-    const visibleText = normalizeText(document.body?.innerText || document.body?.textContent || '')
+    const rawVisibleText = document.body?.innerText || document.body?.textContent || ''
+    const visibleText = normalizeText(rawVisibleText)
+    collectCreatorHomeIdentity(accountIds, accountNames, deps)
+    collectAccountIdsFromText(rawVisibleText, accountIds)
     collectAccountNamesFromAccountDom(accountNames, deps)
     collectAccountNamesFromScripts(accountNames, deps)
     collectAccountNamesFromStorage(accountNames, deps)
     return {
       implemented: true,
-      accountIds: [],
+      accountIds: Array.from(accountIds),
       accountNames: Array.from(accountNames),
-      diagnostics: `href=${location.href}; visibleTextLength=${visibleText.length}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
+      diagnostics: `href=${location.href}; visibleTextLength=${visibleText.length}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
+    }
+  }
+
+  function collectCreatorHomeIdentity(accountIds, accountNames, deps) {
+    if (location.hostname !== 'creator.xiaohongshu.com') return
+    const root = document.querySelector('.personal, [class*="personal"], [class*="home-card"]')
+    if (!root) return
+    for (const el of Array.from(root.querySelectorAll('.account-name, [class*="account-name"], [class*="accountName"]'))) {
+      const text = requireDependency(deps.normalizeAccountName, 'normalizeAccountName')(el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || '')
+      if (isLikelyAccountName(text, deps)) accountNames.add(text)
+    }
+    collectAccountIdsFromText(root.innerText || root.textContent || '', accountIds)
+  }
+
+  function collectAccountIdsFromText(text, accountIds) {
+    const patterns = [
+      /小红书账号\s*[:：]?\s*(\d{5,})/g,
+      /小红书号\s*[:：]?\s*(\d{5,})/g,
+      /redId["']?\s*[:=]\s*["']?(\d{5,})/g,
+      /userId["']?\s*[:=]\s*["']?(\d{5,})/g,
+    ]
+    for (const pattern of patterns) {
+      for (const match of text.matchAll(pattern)) {
+        const value = String(match[1] || '').trim()
+        if (value) accountIds.add(value)
+      }
     }
   }
 
   function collectAccountNamesFromAccountDom(accountNames, deps) {
     const preciseSelectors = [
+      '.account-name',
+      '[class*="account-name"]',
+      '[class*="accountName"]',
       '.name-box',
       'span.name-box',
       '.d-topbar-default .user-info .name-box',
@@ -1133,7 +1256,12 @@
 
   async function maybeSelectEditorMode(fillProfile, deps) {
     if (!location.hostname.endsWith('xiaohongshu.com')) return
+    if (await navigateToArticleEditorIfNeeded(fillProfile, deps)) return
     await ensureEntryPageReady(deps)
+    if (isDirectArticlePublishUrl()) {
+      await maybeStartLongFormCreation(fillProfile, deps)
+      if (hasEditor(fillProfile, deps)) return
+    }
     await maybeLeaveVideoUploadTab(fillProfile, deps)
     const modes = ['写长文', '上传图文']
     for (const mode of modes) {
@@ -1153,6 +1281,18 @@
     if (hasEditor(fillProfile, deps)) return
     const diagnostics = requireDependency(deps.collectDiagnostics, 'collectDiagnostics')()
     requireDependency(deps.showStatus, 'showStatus')(`小红书发布页未找到图文/长文编辑器；${describeEntryState(deps)}；${diagnostics}`, 'info')
+  }
+
+  async function navigateToArticleEditorIfNeeded(fillProfile, deps) {
+    if (hasEditor(fillProfile, deps)) return true
+    if (location.hostname !== 'creator.xiaohongshu.com') return false
+    const directArticleUrl = PUBLISH_URL
+    const currentTarget = new URLSearchParams(location.search).get('target')
+    if (location.pathname.includes('/publish/publish') && currentTarget === 'article') return false
+    requireDependency(deps.showStatus, 'showStatus')('小红书切换到长文编辑直达页', 'info')
+    location.href = directArticleUrl
+    await requireDependency(deps.delay, 'delay')(2600)
+    return hasEditor(fillProfile, deps)
   }
 
   async function maybeLeaveVideoUploadTab(fillProfile, deps) {
@@ -1178,11 +1318,18 @@
       if (hasEditor(fillProfile, deps)) return
       await requireDependency(deps.delay, 'delay')(300)
     }
+    if (isDirectArticlePublishUrl()) return
     if (location.pathname.includes('/publish/publish') && !findEntryElement(deps)) {
       requireDependency(deps.showStatus, 'showStatus')('小红书发布入口未渲染，切换到创作首页重试', 'info')
       location.href = 'https://creator.xiaohongshu.com/new/home'
       await requireDependency(deps.delay, 'delay')(2200)
     }
+  }
+
+  function isDirectArticlePublishUrl() {
+    return location.hostname === 'creator.xiaohongshu.com'
+      && location.pathname.includes('/publish/publish')
+      && new URLSearchParams(location.search).get('target') === 'article'
   }
 
   function findEntryElement(deps) {
@@ -1195,7 +1342,7 @@
     if (hasEditor(fillProfile, deps)) return true
     const tab = findModeTab(mode, deps)
     if (!tab) return false
-    await requireDependency(deps.clickClosestAction, 'clickClosestAction')(tab, { platform: fillProfile.platform })
+    await requireDependency(deps.clickClosestAction, 'clickClosestAction')(resolveModeTabClickTarget(tab, deps), { platform: fillProfile.platform })
     requireDependency(deps.showStatus, 'showStatus')(`已切换小红书发布模式：${mode}`, 'info')
     await requireDependency(deps.delay, 'delay')(1800)
     await maybeStartLongFormCreation(fillProfile, deps)
@@ -1204,7 +1351,7 @@
 
   function findModeTab(mode, deps) {
     const normalizeText = requireDependency(deps.normalizeText, 'normalizeText')
-    const candidates = Array.from(document.querySelectorAll('button, a, [role="tab"], [role="button"], div, span'))
+    const candidates = Array.from(document.querySelectorAll('button, a, [role="tab"], [role="button"], [class*="tab"], [class*="Tab"], li, div, span, p'))
       .map((el) => ({
         el,
         text: normalizeText(el.textContent || el.getAttribute('aria-label') || ''),
@@ -1225,6 +1372,27 @@
     if (candidates[0]?.el) return candidates[0].el
     return requireDependency(deps.findClickableByExactText, 'findClickableByExactText')([mode])
       || requireDependency(deps.findClickableByShortText, 'findClickableByShortText')([mode])
+  }
+
+  function resolveModeTabClickTarget(el, deps) {
+    if (!el) return el
+    const normalizeText = requireDependency(deps.normalizeText, 'normalizeText')
+    const currentText = normalizeText(el.textContent || el.getAttribute?.('aria-label') || '')
+    let current = el
+    let best = el
+    for (let depth = 0; current && current !== document.body && depth < 5; depth += 1) {
+      const rect = current.getBoundingClientRect?.()
+      const text = normalizeText(current.textContent || current.getAttribute?.('aria-label') || '')
+      if (rect && rect.width > 0 && rect.height > 0 && rect.width <= 320 && rect.height <= 110 && text.includes(currentText)) {
+        best = current
+      }
+      if (current.matches?.('button, a, [role="tab"], [role="button"], [role="menuitem"], li, [class*="tab"], [class*="Tab"]')) {
+        best = current
+        break
+      }
+      current = current.parentElement
+    }
+    return best
   }
 
   function isVideoUploadTabVisible(deps) {
@@ -1251,7 +1419,7 @@
     if (createButton) {
       await requireDependency(deps.clickClosestAction, 'clickClosestAction')(createButton.element, { ...createButton.options, platform: fillProfile.platform })
       requireDependency(deps.showStatus, 'showStatus')(`已点击小红书入口：${createButton.label}`, 'info')
-      await waitForEditorCandidate(fillProfile, 8000, deps)
+      await waitForEditorCandidate(fillProfile, 15000, deps)
     }
     if (hasEditor(fillProfile, deps)) return
     await maybeConfirmLongFormCreation(fillProfile, deps)
