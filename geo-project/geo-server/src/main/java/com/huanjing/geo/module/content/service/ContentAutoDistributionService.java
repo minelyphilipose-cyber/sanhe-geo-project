@@ -281,9 +281,13 @@ public class ContentAutoDistributionService {
 
     @Transactional
     public void createProjectPlan(Project project, LocalDate planDate, Long operatorId) {
-        if (batchMapper.selectCount(new LambdaQueryWrapper<ContentAutoDistributionBatch>()
+        ContentAutoDistributionBatch existingBatch = batchMapper.selectOne(new LambdaQueryWrapper<ContentAutoDistributionBatch>()
                 .eq(ContentAutoDistributionBatch::getProjectId, project.getId())
-                .eq(ContentAutoDistributionBatch::getPlanDate, planDate)) > 0) {
+                .eq(ContentAutoDistributionBatch::getPlanDate, planDate)
+                .last("LIMIT 1"));
+        if (existingBatch != null) {
+            createGenerationBatches(existingBatch.getId(), operatorId);
+            refreshBatchCounters(existingBatch.getId());
             return;
         }
         List<ProjectChannelAllocation> allocations = allocationMapper.selectList(
@@ -367,6 +371,9 @@ public class ContentAutoDistributionService {
                         .eq(ContentAutoDistributionItem::getStatus, "pending_generation")
                         .orderByAsc(ContentAutoDistributionItem::getId)
         );
+        if (items.isEmpty()) {
+            return;
+        }
         for (int start = 0; start < items.size(); start += GENERATION_BATCH_LIMIT) {
             List<ContentAutoDistributionItem> chunk = items.subList(start, Math.min(items.size(), start + GENERATION_BATCH_LIMIT));
             BatchArticleGenerateRequest request = buildGenerationRequest(chunk);

@@ -2,7 +2,9 @@ package com.huanjing.geo.module.content.service;
 
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.ContentAutoDistributionBatch;
 import com.huanjing.geo.module.content.entity.ContentAutoDistributionItem;
@@ -56,8 +58,10 @@ class ContentAutoDistributionServiceTest {
     private KeywordGroupResultMapper keywordGroupResultMapper;
     private ContentAutoDistributionBatchMapper batchMapper;
     private ContentAutoDistributionItemMapper itemMapper;
+    private BatchArticleGenerationTaskMapper generationTaskMapper;
     private ArticleDraftMapper articleDraftMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
+    private BatchArticleGenerationService generationService;
     private BatchArticlePublishService publishService;
     private SelfMediaScheduleCapabilityService scheduleCapabilityService;
     private BrowserEnvironmentService browserEnvironmentService;
@@ -72,8 +76,10 @@ class ContentAutoDistributionServiceTest {
         keywordGroupResultMapper = mock(KeywordGroupResultMapper.class);
         batchMapper = mock(ContentAutoDistributionBatchMapper.class);
         itemMapper = mock(ContentAutoDistributionItemMapper.class);
+        generationTaskMapper = mock(BatchArticleGenerationTaskMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
+        generationService = mock(BatchArticleGenerationService.class);
         publishService = mock(BatchArticlePublishService.class);
         scheduleCapabilityService = mock(SelfMediaScheduleCapabilityService.class);
         browserEnvironmentService = mock(BrowserEnvironmentService.class);
@@ -88,12 +94,12 @@ class ContentAutoDistributionServiceTest {
                 batchMapper,
                 itemMapper,
                 mock(ContentAutoDistributionPlanMapper.class),
-                mock(BatchArticleGenerationTaskMapper.class),
+                generationTaskMapper,
                 mock(BatchArticlePublishItemMapper.class),
                 articleDraftMapper,
                 selfMediaAccountMapper,
                 mock(SelfMediaPublishScheduleMapper.class),
-                mock(BatchArticleGenerationService.class),
+                generationService,
                 publishService,
                 mock(SelfMediaPublishScheduleService.class),
                 scheduleCapabilityService,
@@ -121,7 +127,6 @@ class ContentAutoDistributionServiceTest {
         BrowserEnvironmentAccount binding = new BrowserEnvironmentAccount();
         binding.setId(301L);
 
-        when(batchMapper.selectCount(any())).thenReturn(0L);
         when(allocationMapper.selectList(any())).thenReturn(List.of(allocation));
         when(keywordGroupResultMapper.selectProjectQuestionsByTiers(11L, "'A'")).thenReturn(List.of(question));
         when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of(toutiao, zhihu));
@@ -158,7 +163,6 @@ class ContentAutoDistributionServiceTest {
         allocation.setChannelCode("self_media:zhihu");
         allocation.setAllocatedCount(2);
 
-        when(batchMapper.selectCount(any())).thenReturn(0L);
         when(allocationMapper.selectList(any())).thenReturn(List.of(allocation));
         when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of(account(202L, "toutiao")));
 
@@ -170,6 +174,52 @@ class ContentAutoDistributionServiceTest {
         assertEquals("skipped", batch.getStatus());
         assertEquals("自媒体平台 / 知乎 无可用账号，请先在品牌下配置并启用账号", batch.getErrorMessage());
         verify(itemMapper, never()).insert(any(ContentAutoDistributionItem.class));
+    }
+
+    @Test
+    void createProjectPlanResumesPendingGenerationWhenDailyBatchAlreadyExists() {
+        Project project = new Project();
+        project.setId(12L);
+        project.setCompanyId(8L);
+        project.setBrandId(8L);
+
+        ContentAutoDistributionBatch existingBatch = new ContentAutoDistributionBatch();
+        existingBatch.setId(282L);
+        existingBatch.setProjectId(12L);
+        existingBatch.setPlanDate(LocalDate.of(2026, 7, 7));
+
+        ContentAutoDistributionItem item = new ContentAutoDistributionItem();
+        item.setId(4299L);
+        item.setBatchId(282L);
+        item.setProjectId(12L);
+        item.setCompanyId(8L);
+        item.setBrandId(8L);
+        item.setQuestionText("在阜阳，配套售后维护服务好的门诊有哪些");
+        item.setChannelGroupCode(ArticlePromptChannels.FORUM);
+        item.setContentStyle("forum");
+        item.setStatus("pending_generation");
+
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(9001L);
+        task.setBatchId(7001L);
+        task.setArticleIndexInBatch(1);
+
+        when(batchMapper.selectOne(any())).thenReturn(existingBatch);
+        when(itemMapper.selectList(any())).thenReturn(List.of(item), List.of(), List.of(), List.of(), List.of());
+        when(generationService.createSystemBatch(any(), eq(900L)))
+                .thenReturn(new BatchArticleGenerateResponse(7001L, 1, "pending"));
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
+
+        service.createProjectPlan(project, LocalDate.of(2026, 7, 7), 900L);
+
+        verify(generationService).createSystemBatch(any(), eq(900L));
+        ArgumentCaptor<LambdaUpdateWrapper<ContentAutoDistributionItem>> updateCaptor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(itemMapper).update(eq(null), updateCaptor.capture());
+        String params = updateCaptor.getValue().getParamNameValuePairs().values().toString();
+        assertTrue(params.contains("7001"));
+        assertTrue(params.contains("9001"));
+        assertTrue(params.contains("generating"));
     }
 
     @Test
