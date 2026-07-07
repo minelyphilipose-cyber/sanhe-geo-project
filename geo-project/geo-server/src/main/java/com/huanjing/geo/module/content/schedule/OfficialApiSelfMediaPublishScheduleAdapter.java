@@ -97,7 +97,7 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         TargetContext.SelfMediaTarget target = buildTarget(row, article, project, account, originalContent);
         String content = articleImagePublicUrlRewriter.rewriteForBrand(materialBrandId(project, article), originalContent);
 
-        DistributionTask task = createTask(row, article, account);
+        DistributionTask task = prepareTaskForSubmit(row, article, account, existing);
         SubmitResult result;
         try {
             result = adapter.submitToTarget(article, content, target);
@@ -308,6 +308,33 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         return project == null ? null : project.getBrandId();
     }
 
+    private DistributionTask prepareTaskForSubmit(SelfMediaPublishSchedule row,
+                                                  ArticleDraft article,
+                                                  SelfMediaAccount account,
+                                                  DistributionTask existing) {
+        if (existing != null) {
+            existing.setArticleId(article.getId());
+            existing.setProjectId(article.getProjectId());
+            existing.setTargetKind(DistributionTargetKind.MP_ACCOUNT);
+            existing.setSelfMediaAccountId(account.getId());
+            existing.setStatus("submitting");
+            existing.setIntegrationMethod(row.getPlatform());
+            existing.setDispatchMode("AUTO");
+            existing.setRetryCount(existing.getRetryCount() == null ? 1 : existing.getRetryCount() + 1);
+            existing.setOperatorId(row.getUpdatedBy() == null ? row.getCreatedBy() : row.getUpdatedBy());
+            existing.setRequestId(requestId(row));
+            existing.setLockedUntil(LocalDateTime.now().plusMinutes(5));
+            existing.setFinishedAt(null);
+            existing.setSubmittedAt(null);
+            existing.setNextRetryAt(null);
+            existing.setFailureKind(null);
+            existing.setErrorMessage(null);
+            distributionTaskMapper.updateById(existing);
+            return existing;
+        }
+        return createTask(row, article, account);
+    }
+
     private DistributionTask createTask(SelfMediaPublishSchedule row, ArticleDraft article, SelfMediaAccount account) {
         DistributionTask task = new DistributionTask();
         task.setArticleId(article.getId());
@@ -503,6 +530,7 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
             root.put("externalStatus", task.getExternalStatus());
             root.put("platformArticleId", firstText(task.getPlatformArticleId(), ""));
             root.put("platformPublishId", firstText(task.getPlatformPublishId(), ""));
+            root.put("platformPublishedUrl", firstText(task.getPublishedUrl(), ""));
         }
         if (submitResult != null) {
             root.put("submitSuccess", submitResult.isSuccess());
@@ -518,6 +546,8 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
             root.put("reviewOutcome", reviewStatus.status().name().toLowerCase(Locale.ROOT));
             root.put("reviewRetryable", reviewStatus.retryable());
             root.put("reviewFeedback", firstText(reviewStatus.reviewFeedback(), ""));
+            root.put("reviewPlatformArticleId", firstText(reviewStatus.platformArticleId(), ""));
+            root.put("reviewPublishedUrl", firstText(reviewStatus.publishedUrl(), ""));
         }
         try {
             return objectMapper.writeValueAsString(root);

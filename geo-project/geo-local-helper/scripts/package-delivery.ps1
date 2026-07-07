@@ -85,6 +85,10 @@ $config = [ordered]@{
   enableLegacyBackendTokenRoutes = $false
   enableStaticHelperToken = $false
   helperToken = ""
+  selfMediaSchedulePollStepTimeoutMs = 180000
+  selfMediaPublishCheckPageTimeoutMs = 180000
+  puppeteerProtocolTimeoutMs = 120000
+  puppeteerPageGotoTimeoutMs = 75000
   adspower = [ordered]@{
     apiBase = "http://localhost:50325"
   }

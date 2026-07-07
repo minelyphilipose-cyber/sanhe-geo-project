@@ -30,11 +30,13 @@ const DEFAULT_FETCH_TIMEOUT_MS = 15_000
 const ADSPOWER_FETCH_TIMEOUT_MS = 20_000
 const BACKEND_FETCH_TIMEOUT_MS = 20_000
 const RESPONSE_JSON_TIMEOUT_MS = 10_000
-const SCHEDULE_POLL_STEP_TIMEOUT_MS = 60_000
+const SCHEDULE_POLL_STEP_TIMEOUT_MS = 180_000
 const BAIJIAHAO_PUBLISH_CHECK_STEP_TIMEOUT_MS = 120_000
 const SCHEDULE_HEARTBEAT_INTERVAL_MS = 20_000
 const PUBLISH_CHECK_TASK_ID_OFFSET = 900_000_000_000
 const PUPPETEER_DISCONNECT_TIMEOUT_MS = 2_000
+const PUPPETEER_PROTOCOL_TIMEOUT_MS = 120_000
+const PUPPETEER_PAGE_GOTO_TIMEOUT_MS = 75_000
 const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
 const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
 const LOCAL_AGENT_RUNTIME_STATUS_HEARTBEAT_MS = 60_000
@@ -330,6 +332,23 @@ function publicAdspowerSettings(config) {
     apiKeyConfigured: Boolean(adspower.apiKey),
     apiKeyPreview: previewSecret(adspower.apiKey),
   }
+}
+
+function puppeteerProtocolTimeoutMs(config = {}) {
+  const value = Number(config.puppeteerProtocolTimeoutMs)
+  return Number.isFinite(value) && value >= 30_000 ? value : PUPPETEER_PROTOCOL_TIMEOUT_MS
+}
+
+function puppeteerPageGotoTimeoutMs(config = {}) {
+  const value = Number(config.puppeteerPageGotoTimeoutMs)
+  return Number.isFinite(value) && value >= 30_000 ? value : PUPPETEER_PAGE_GOTO_TIMEOUT_MS
+}
+
+async function connectPuppeteer(puppeteer, wsEndpoint, config = {}) {
+  return puppeteer.connect({
+    browserWSEndpoint: wsEndpoint,
+    protocolTimeout: puppeteerProtocolTimeoutMs(config),
+  })
 }
 
 function previewSecret(value) {
@@ -1338,14 +1357,14 @@ async function signedTrustedBackendRequest(config, path, init = {}) {
   })
 }
 
-async function openUrlWithPuppeteer(wsEndpoint, targetUrl) {
+async function openUrlWithPuppeteer(config, wsEndpoint, targetUrl) {
   if (!wsEndpoint || !targetUrl) return { opened: false, reason: 'missing_ws_or_url' }
 
   const { default: puppeteer } = await import('puppeteer-core')
-  const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint, protocolTimeout: 30_000 })
+  const browser = await connectPuppeteer(puppeteer, wsEndpoint, config)
   try {
     const page = await browser.newPage()
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) })
     await page.bringToFront().catch(() => null)
     const target = page.target()
     return { opened: true, url: targetUrl, pageUrl: page.url(), targetId: target?._targetId || null }
@@ -1404,7 +1423,7 @@ async function inspectGeoEnvExtension(wsEndpoint) {
     }
   }
   const { default: puppeteer } = await import('puppeteer-core')
-  const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint, protocolTimeout: 30_000 })
+  const browser = await connectPuppeteer(puppeteer, wsEndpoint)
   try {
     const targets = browser.targets()
     const inspected = []
@@ -1492,7 +1511,7 @@ async function handleLaunch(req, res, config) {
   const task = normalizeLaunchTask(body, environment, data)
   upsertTask(task)
   await saveRuntimeTasks()
-  task.openResult = await openUrlWithPuppeteer(data?.ws?.puppeteer, body.url)
+  task.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url)
   upsertTask(task)
   await saveRuntimeTasks()
   sendJson(req, res, config, 200, { ok: true, task })
@@ -1537,7 +1556,7 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
     task.platformScheduledAt = claim.schedule?.platformScheduledAt || null
     upsertTask(task)
     await saveRuntimeTasks()
-    task.openResult = await openUrlWithPuppeteer(data?.ws?.puppeteer, task.url)
+    task.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, task.url)
     upsertTask(task)
     await saveRuntimeTasks()
     return { ok: true, claimed: true, task, schedule: claim.schedule }
@@ -1611,8 +1630,8 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
       },
     )
     result = await withTimeout(
-      checkPublishResultInAdspowerPage(data?.ws?.puppeteer, checkUrl, checkSchedule),
-      publishCheckPageTimeoutMs(checkSchedule.platform || claim.launch.platform),
+      checkPublishResultInAdspowerPage(config, data?.ws?.puppeteer, checkUrl, checkSchedule),
+      publishCheckPageTimeoutMs(config, checkSchedule.platform || claim.launch.platform),
       `publish check page ${claim.launch.platform || claim.schedule.platform}`,
     )
     markPublishCheckRuntimeTaskStage(runtimeTask, 'reporting_result')
@@ -1783,11 +1802,14 @@ function publishCheckRuntimeTaskId(scheduleId) {
   return PUBLISH_CHECK_TASK_ID_OFFSET + Number(scheduleId || 0)
 }
 
-function publishCheckPageTimeoutMs(platform) {
+function publishCheckPageTimeoutMs(config, platform) {
+  const configured = Number(config.selfMediaPublishCheckPageTimeoutMs)
+  if (Number.isFinite(configured) && configured >= 60_000) return configured
+  const minimum = puppeteerProtocolTimeoutMs(config) + 30_000
   const normalized = String(platform || '').trim().toLowerCase()
-  if (normalized === 'baijiahao') return 100_000
-  if (normalized === 'douyin') return 55_000
-  return 45_000
+  if (normalized === 'baijiahao') return Math.max(150_000, minimum)
+  if (normalized === 'douyin') return Math.max(150_000, minimum)
+  return Math.max(120_000, minimum)
 }
 
 function markPublishCheckRuntimeTaskStage(task, stage) {
@@ -1833,12 +1855,12 @@ function markPublishCheckRuntimeTaskFinished(task, status, result) {
   task.lastResult = compactPublishCheckRuntimeResult(result)
 }
 
-async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule) {
+async function checkPublishResultInAdspowerPage(config, wsEndpoint, targetUrl, schedule) {
   if (!wsEndpoint || !targetUrl) {
     throw new Error('publish result check requires active AdsPower browser and works list url')
   }
   const { default: puppeteer } = await import('puppeteer-core')
-  const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint, protocolTimeout: 30_000 })
+  const browser = await connectPuppeteer(puppeteer, wsEndpoint, config)
   try {
     let effectiveTargetUrl = targetUrl
     const platform = String(schedule?.platform || '').trim().toLowerCase()
@@ -1852,7 +1874,7 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
       }
     }
     const { page } = await reuseOrCreatePublishCheckPage(browser, platform, effectiveTargetUrl)
-    await page.goto(effectiveTargetUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+    await page.goto(effectiveTargetUrl, { waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) })
     await waitForPublishCheckPageReady(page, platform)
     await delay(1_000)
     const deadline = Date.now() + publishCheckEvaluateTimeoutMs(platform)
@@ -1863,7 +1885,7 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
       if (latest.found) return latest
       if (shouldReloadPublishCheckPage(platform, latest, reloadCount)) {
         reloadCount += 1
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => null)
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) }).catch(() => null)
         await waitForPublishCheckPageReady(page, platform)
         await delay(1_000)
         latest = {
@@ -3135,7 +3157,7 @@ async function handleOpenEnvironment(req, res, config) {
     body.environmentName,
   )
   const data = await startAdspowerBrowser(config, environment.providerProfileId)
-  const openResult = await openUrlWithPuppeteer(data?.ws?.puppeteer, body.url)
+  const openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url)
   const extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer).catch((error) => ({
     installed: false,
     detected: false,
@@ -3297,7 +3319,7 @@ async function handleCreateAndLaunch(req, res, config) {
   task.selfMediaAccount = selfMediaAccount
   upsertTask(task)
   await saveRuntimeTasks()
-  task.openResult = await openUrlWithPuppeteer(data?.ws?.puppeteer, body.url)
+  task.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url)
   upsertTask(task)
   await saveRuntimeTasks()
   sendJson(req, res, config, 200, { ok: true, createdTask, task })
@@ -3329,15 +3351,17 @@ async function handleNextTask(req, res, config, url) {
   await requireHelperAccess(req, config)
   const environmentKey = String(url.searchParams.get('environmentKey') || '').trim()
   const platform = String(url.searchParams.get('platform') || '').trim()
-  if (environmentKey) {
-    await requeueTimedOutClaims(environmentKey)
-  } else {
-    await requeueTimedOutClaimsByPlatform(platform)
+  if (!environmentKey) {
+    const error = new Error('environmentKey is required for extension task claims')
+    error.statusCode = 400
+    error.code = 'ENVIRONMENT_KEY_REQUIRED'
+    throw error
   }
+  await requeueTimedOutClaims(environmentKey)
   const task = findNextClaimableTask(environmentKey, platform)
   if (!task) {
     const active = listTasks().find((item) => (
-      (!environmentKey || item.environmentKey === environmentKey)
+      item.environmentKey === environmentKey
       && (!platform || item.platform === platform)
       && !isTerminalStatus(item.status)
     ))
@@ -3380,8 +3404,9 @@ async function requeueTimedOutClaimsByPlatform(platform) {
 }
 
 function findNextClaimableTask(environmentKey, platform = '') {
+  if (!environmentKey) return null
   const claimable = listTasks().filter((task) => (
-    (!environmentKey || task.environmentKey === environmentKey)
+    task.environmentKey === environmentKey
     && (!platform || task.platform === platform)
     && CLAIMABLE_STATUSES.has(task.status)
   ))
@@ -3409,16 +3434,23 @@ function isReusableActiveTask(task) {
 async function handleTaskComplete(req, res, config, taskId, status) {
   const body = await readJson(req)
   await requireHelperAccess(req, config)
-  const environmentKey = body.environmentKey
+  const environmentKey = String(body.environmentKey || '').trim()
+  if (!environmentKey) {
+    const error = new Error('environmentKey is required for task completion')
+    error.statusCode = 400
+    error.code = 'ENVIRONMENT_KEY_REQUIRED'
+    throw error
+  }
   const task = tasksById.get(Number(taskId))
   if (!task) {
     const error = new Error('task not found')
     error.statusCode = 404
     throw error
   }
-  if (environmentKey && task.environmentKey !== environmentKey) {
+  if (task.environmentKey !== environmentKey) {
     const error = new Error('task environment mismatch')
     error.statusCode = 409
+    error.code = 'TASK_ENVIRONMENT_MISMATCH'
     throw error
   }
   if (task.status !== 'claimed') {
@@ -3569,18 +3601,18 @@ async function handleUploadImageToPage(req, res, config) {
   const body = await readJson(req)
   await requireHelperAccess(req, config)
   const image = await downloadImageToTempFile(config, body.url, 0, body.backendBase)
-  const upload = await uploadImageFileToAdsPowerPage(body, image.filePath)
+  const upload = await uploadImageFileToAdsPowerPage(config, body, image.filePath)
   sendJson(req, res, config, 200, { ok: true, image, upload })
 }
 
-async function uploadImageFileToAdsPowerPage(body, filePath) {
+async function uploadImageFileToAdsPowerPage(config, body, filePath) {
   const task = resolveTaskWithPuppeteerWs(body)
   if (!task?.adspower?.puppeteerWs) {
     throw new Error(`no active AdsPower puppeteer session for environmentKey=${body.environmentKey || '-'}`)
   }
   const platform = String(body.platform || task.platform || 'toutiao').trim().toLowerCase()
   const { default: puppeteer } = await import('puppeteer-core')
-  const browser = await puppeteer.connect({ browserWSEndpoint: task.adspower.puppeteerWs, protocolTimeout: 30_000 })
+  const browser = await connectPuppeteer(puppeteer, task.adspower.puppeteerWs, config)
   try {
     const pages = await browser.pages()
     const page = findUploadTargetPage(pages, platform, body.targetPageUrl || body.pageUrl || '')
