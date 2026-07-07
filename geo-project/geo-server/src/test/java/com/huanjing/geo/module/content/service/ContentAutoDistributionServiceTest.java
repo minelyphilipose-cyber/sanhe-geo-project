@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.service;
 
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
@@ -199,26 +200,52 @@ class ContentAutoDistributionServiceTest {
         item.setContentStyle("forum");
         item.setStatus("pending_generation");
 
+        ContentAutoDistributionItem selfMediaItem = new ContentAutoDistributionItem();
+        selfMediaItem.setId(4304L);
+        selfMediaItem.setBatchId(282L);
+        selfMediaItem.setProjectId(12L);
+        selfMediaItem.setCompanyId(8L);
+        selfMediaItem.setBrandId(8L);
+        selfMediaItem.setQuestionText("阜阳本地牙齿修复怎么选");
+        selfMediaItem.setChannelCode("self_media:baijiahao");
+        selfMediaItem.setChannelGroupCode(ArticlePromptChannels.SELF_MEDIA);
+        selfMediaItem.setContentStyle("baijiahao");
+        selfMediaItem.setStatus("pending_generation");
+
         BatchArticleGenerationTask task = new BatchArticleGenerationTask();
         task.setId(9001L);
         task.setBatchId(7001L);
         task.setArticleIndexInBatch(1);
+        BatchArticleGenerationTask selfMediaTask = new BatchArticleGenerationTask();
+        selfMediaTask.setId(9002L);
+        selfMediaTask.setBatchId(7001L);
+        selfMediaTask.setArticleIndexInBatch(2);
 
         when(batchMapper.selectOne(any())).thenReturn(existingBatch);
-        when(itemMapper.selectList(any())).thenReturn(List.of(item), List.of(), List.of(), List.of(), List.of());
+        when(itemMapper.selectList(any())).thenReturn(List.of(item, selfMediaItem), List.of(), List.of(), List.of(), List.of());
         when(generationService.createSystemBatch(any(), eq(900L)))
-                .thenReturn(new BatchArticleGenerateResponse(7001L, 1, "pending"));
-        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
+                .thenReturn(new BatchArticleGenerateResponse(7001L, 2, "pending"));
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(task, selfMediaTask));
 
         service.createProjectPlan(project, LocalDate.of(2026, 7, 7), 900L);
 
-        verify(generationService).createSystemBatch(any(), eq(900L));
+        ArgumentCaptor<BatchArticleGenerateRequest> requestCaptor = ArgumentCaptor.forClass(BatchArticleGenerateRequest.class);
+        verify(generationService).createSystemBatch(requestCaptor.capture(), eq(900L));
+        BatchArticleGenerateRequest request = requestCaptor.getValue();
+        assertEquals(ArticlePromptChannels.FORUM, request.getTopics().get(0).getPlatforms().get(0).getChannelGroupCode());
+        assertEquals(null, request.getTopics().get(0).getPlatforms().get(0).getChannelSubCode());
+        assertEquals("baijiahao", request.getTopics().get(1).getPlatforms().get(0).getChannelSubCode());
         ArgumentCaptor<LambdaUpdateWrapper<ContentAutoDistributionItem>> updateCaptor =
                 ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
-        verify(itemMapper).update(eq(null), updateCaptor.capture());
-        String params = updateCaptor.getValue().getParamNameValuePairs().values().toString();
+        verify(itemMapper, org.mockito.Mockito.atLeastOnce()).update(eq(null), updateCaptor.capture());
+        String params = updateCaptor.getAllValues().stream()
+                .flatMap(wrapper -> wrapper.getParamNameValuePairs().values().stream())
+                .map(String::valueOf)
+                .toList()
+                .toString();
         assertTrue(params.contains("7001"));
         assertTrue(params.contains("9001"));
+        assertTrue(params.contains("9002"));
         assertTrue(params.contains("generating"));
     }
 

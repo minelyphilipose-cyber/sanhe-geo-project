@@ -409,6 +409,7 @@ public class ContentAutoDistributionService {
             topic.setTopicAsQuestion(item.getQuestionText());
             BatchArticleGenerateRequest.PlatformCount platform = new BatchArticleGenerateRequest.PlatformCount();
             platform.setChannelGroupCode(item.getChannelGroupCode());
+            platform.setChannelSubCode(resolveGenerationChannelSubCode(item));
             platform.setContentStyle(item.getContentStyle());
             platform.setAllocationMode("auto");
             platform.setCount(1);
@@ -417,6 +418,17 @@ public class ContentAutoDistributionService {
         }
         request.setTopics(topics);
         return request;
+    }
+
+    private String resolveGenerationChannelSubCode(ContentAutoDistributionItem item) {
+        String selfMediaPlatform = selfMediaPlatform(item.getChannelCode());
+        if (selfMediaPlatform != null) {
+            return selfMediaPlatform;
+        }
+        if (ArticlePromptChannels.SELF_MEDIA.equals(item.getChannelGroupCode())) {
+            return ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(item.getContentStyle());
+        }
+        return null;
     }
 
     public void progressActivePlans() {
