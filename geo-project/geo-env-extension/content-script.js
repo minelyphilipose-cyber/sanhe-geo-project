@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION || '0.1.4'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.1.8'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -25,13 +25,13 @@ if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') reportEditorReady()
   })
-
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const run = async () => {
       if (message?.type === 'GEO_ENV_PING') {
         return {
           ok: true,
           href: location.href,
+          isTopFrame: window.top === window,
           contentScriptVersion: GEO_ENV_CONTENT_SCRIPT_VERSION,
           adapters: {
             douyin: Boolean(globalThis.__GEO_DOUYIN_PLATFORM__?.createPublishOptionsAdapter),
@@ -144,6 +144,8 @@ function collectFailureSnapshot(context = {}) {
     text: body,
     inputs,
     actions,
+    activeFillTask: globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null,
+    diagnostics: collectDiagnostics(),
     adapterState: collectAdapterState(platform),
   }
 }
@@ -213,10 +215,13 @@ async function fillPayload(payload) {
     taskId: payload.taskId || null,
     environmentKey: payload.environmentKey || null,
     platform: payload.platform || null,
+    stage: 'waiting_editor',
+    updatedAt: new Date().toISOString(),
   }
   showStatus(`v${GEO_ENV_CONTENT_SCRIPT_VERSION} 正在等待编辑器...`, 'info')
   const fillProfile = buildFillProfile(payload)
   await ensureEditorVisible(fillProfile)
+  updateActiveFillStage('editor_ready')
   normalizeEditorViewport(fillProfile)
   assertPlatformLoggedIn(fillProfile)
   const identityCheck = resolveFillIdentityCheck(payload)
@@ -230,23 +235,29 @@ async function fillPayload(payload) {
   const coverImageCleanup = removeCoverImageFromContent(rawHtml, resolvePayloadStandaloneImageUrls(payload))
   const imageCleanup = removeUnsupportedContentImages(coverImageCleanup.html, fillProfile)
   const normalizedContent = removeDuplicateLeadingTitle(imageCleanup.html, expectedTitle)
+  updateActiveFillStage('filling_title')
   const titleFilled = await fillTitle(filledTitle, titleElement, fillProfile)
   const contentElement = findContentElement(titleElement, fillProfile)
   if (titleElement && contentElement && titleElement === contentElement && normalizePlatform(fillProfile.platform) !== 'baijiahao') {
     throw new Error(`标题和正文命中同一元素：${describeElement(titleElement)}`)
   }
+  updateActiveFillStage('filling_content')
   const contentFilled = await fillContent(normalizedContent.html, contentElement, fillProfile, { titleElement })
+  updateActiveFillStage('filling_tags')
   const tagsFilled = fillTags(payload.tags || [], fillProfile)
   if (!titleFilled || !contentFilled) {
     const diagnostics = collectDiagnostics()
     throw new Error(`未找到${!titleFilled ? '标题' : ''}${!titleFilled && !contentFilled ? '和' : ''}${!contentFilled ? '正文' : ''}输入框；${diagnostics}`)
   }
   await delay(500)
+  updateActiveFillStage('verifying_content')
   verifyFilled(titleElement, contentElement, filledTitle, normalizedContent.html, fillProfile)
   const publishPayload = filledTitle && filledTitle !== expectedTitle
     ? { ...payload, title: filledTitle, articleTitle: filledTitle }
     : payload
+  updateActiveFillStage('filling_publish_options')
   const publishOptions = await fillPlatformPublishOptions(publishPayload, fillProfile)
+  updateActiveFillStage('completed')
   normalizeEditorViewport(fillProfile)
   const draftState = detectDraftState()
   const identityText = identityCheck.message ? `${identityCheck.message}，` : ''
@@ -276,6 +287,15 @@ async function fillPayload(payload) {
     titleElement: describeElement(titleElement),
     contentElement: describeElement(contentElement),
   }, payload)
+}
+
+function updateActiveFillStage(stage, extra = {}) {
+  globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = {
+    ...(globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || {}),
+    ...extra,
+    stage,
+    updatedAt: new Date().toISOString(),
+  }
 }
 
 function normalizeFillResult(fillResult, context = {}) {
@@ -3097,15 +3117,25 @@ function douyinEditorSelectors() {
 
 function verifyExpectedPlatformIdentity(payload, platform) {
   const expectedName = normalizeAccountName(payload.expectedAccountName)
-  if (!expectedName) return { method: 'skipped', message: '' }
+  const expectedId = normalizeAccountId(payload.expectedPlatformAccountId)
+  if (!expectedName && !expectedId) return { method: 'skipped', message: '' }
 
   const identity = readPlatformIdentity(platform)
   if (!identity.implemented) {
-    return {
-      method: 'notImplemented',
-      message: `账号校验未启用(${platform || 'unknown'})`,
-      currentAccountIds: [],
-      currentAccountNames: [],
+    throw new Error(`账号校验未启用(${platform || 'unknown'})，已阻止填充`)
+  }
+
+  if (expectedId) {
+    if (identity.accountIds.includes(expectedId)) {
+      return {
+        method: 'platformAccountId',
+        message: `账号校验通过(ID=${payload.expectedPlatformAccountId})`,
+        currentAccountIds: identity.accountIds,
+        currentAccountNames: identity.accountNames,
+      }
+    }
+    if (identity.accountIds.length) {
+      throw new Error(`账号ID未确认：当前ID=${identity.accountIds.join(',')}，期望ID=${payload.expectedPlatformAccountId}，已阻止填充`)
     }
   }
 
@@ -3118,14 +3148,11 @@ function verifyExpectedPlatformIdentity(payload, platform) {
     }
   }
 
-  const currentName = identity.accountNames.join(',') || '未读取到'
-  return {
-    method: 'accountNameWarning',
-    warning: true,
-    message: `账号名称未确认：当前名称=${currentName}，期望名称=${payload.expectedAccountName}`,
-    currentAccountIds: identity.accountIds,
-    currentAccountNames: identity.accountNames,
+  if (expectedId) {
+    throw new Error(`账号ID未确认：当前ID=未读取到，期望ID=${payload.expectedPlatformAccountId}，已阻止填充`)
   }
+  const currentName = identity.accountNames.join(',') || '未读取到'
+  throw new Error(`账号名称未确认：当前名称=${currentName}，期望名称=${payload.expectedAccountName}，已阻止填充`)
 }
 
 function inferPlatformFromLocation() {
@@ -3152,15 +3179,62 @@ function readPlatformIdentity(platform) {
 }
 
 function readDouyinIdentity() {
+  const accountIds = new Set()
   const accountNames = new Set()
+  const rawVisibleText = document.body?.innerText || document.body?.textContent || ''
+  const identityText = collectStorageAndScriptIdentityText()
+  collectDouyinHomeIdentity(accountIds, accountNames)
+  collectDouyinAccountIdsFromText(rawVisibleText, accountIds)
   collectDouyinAccountNamesFromDom(accountNames)
-  collectDouyinAccountNamesFromText(collectStorageAndScriptIdentityText(), accountNames)
+  collectDouyinAccountNamesFromText(identityText, accountNames)
   return {
     implemented: true,
-    accountIds: [],
+    accountIds: Array.from(accountIds),
     accountNames: Array.from(accountNames),
-    diagnostics: `href=${location.href}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
+    diagnostics: `href=${location.href}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
   }
+}
+
+function collectDouyinHomeIdentity(accountIds, accountNames) {
+  collectDouyinHomeHeaderIdentity(accountIds, accountNames)
+  const marker = Array.from(document.querySelectorAll('div, span'))
+    .find((el) => isVisibleElement(el) && /抖音号\s*[:：]/.test(el.textContent || ''))
+  if (!marker) return
+  const root = closestDouyinIdentityRoot(marker)
+  const text = root?.innerText || root?.textContent || marker.textContent || ''
+  collectDouyinAccountIdsFromText(text, accountIds)
+  collectDouyinAccountNamesFromText(text, accountNames)
+  const nameEl = root?.querySelector?.('[class*="name-"], [class*="Name-"]')
+  const name = normalizeAccountName(nameEl?.textContent || '')
+  if (isLikelyDouyinAccountName(name)) accountNames.add(name)
+}
+
+function collectDouyinHomeHeaderIdentity(accountIds, accountNames) {
+  const candidates = Array.from(document.querySelectorAll('[class*="content-"], [class*="header-"], [class*="left-"], [class*="container-"]'))
+    .filter((el) => isVisibleElement(el) || hasVisibleAncestor(el))
+  for (const el of candidates) {
+    const text = el.innerText || el.textContent || ''
+    if (!/抖音号\s*[:：]/.test(text)) continue
+    if (!/关注|粉丝|获赞/.test(text)) continue
+    collectDouyinAccountIdsFromText(text, accountIds)
+    for (const nameEl of Array.from(el.querySelectorAll('[class*="name-"], [class*="Name-"]'))) {
+      const name = normalizeAccountName(nameEl.textContent || nameEl.getAttribute('title') || nameEl.getAttribute('aria-label') || '')
+      if (isLikelyDouyinAccountName(name)) accountNames.add(name)
+    }
+    const textNameMatch = text.match(/^([^\s|｜]{2,40})\s*(?:[|｜]|\s+)\s*抖音号\s*[:：]/)
+    const textName = normalizeAccountName(textNameMatch?.[1] || '')
+    if (isLikelyDouyinAccountName(textName)) accountNames.add(textName)
+  }
+}
+
+function closestDouyinIdentityRoot(el) {
+  let current = el
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    const text = current.innerText || current.textContent || ''
+    if (/抖音号\s*[:：]/.test(text) && /关注|粉丝|获赞/.test(text)) return current
+    current = current.parentElement
+  }
+  return el
 }
 
 function collectDouyinAccountNamesFromDom(accountNames) {
@@ -3181,8 +3255,23 @@ function collectDouyinAccountNamesFromDom(accountNames) {
   }
 }
 
+function collectDouyinAccountIdsFromText(text, accountIds) {
+  const patterns = [
+    /抖音号\s*[:：]?\s*(\d{5,})/g,
+    /unique_id["']?\s*[:=]\s*["']?(\d{5,})/g,
+    /uniqueId["']?\s*[:=]\s*["']?(\d{5,})/g,
+  ]
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const value = normalizeAccountId(match[1])
+      if (value) accountIds.add(value)
+    }
+  }
+}
+
 function collectDouyinAccountNamesFromText(text, accountNames) {
   const patterns = [
+    /([^\s|｜]{2,40})\s*[|｜]\s*抖音号\s*[:：]/g,
     /"nickname"\s*:\s*"([^"]{2,80})"/g,
     /"nickName"\s*:\s*"([^"]{2,80})"/g,
     /"userName"\s*:\s*"([^"]{2,80})"/g,
@@ -3206,16 +3295,133 @@ function isLikelyDouyinAccountName(value) {
 }
 
 function readBaijiahaoIdentity() {
+  const accountIds = new Set()
   const accountNames = new Set()
   const rawVisibleText = document.body?.innerText || document.body?.textContent || ''
   const visibleText = normalizeText(rawVisibleText)
+  const identityText = collectStorageAndScriptIdentityText()
+  collectBaijiahaoPersonalCenterIdentity(accountIds, accountNames)
+  collectBaijiahaoAccountIdsFromLocation(accountIds)
+  collectBaijiahaoAccountIdsFromText(rawVisibleText, accountIds)
+  collectBaijiahaoAccountIdsFromText(identityText, accountIds)
   collectBaijiahaoAccountNamesFromDom(accountNames)
-  collectBaijiahaoAccountNamesFromText(collectStorageAndScriptIdentityText(), accountNames)
+  collectBaijiahaoAccountNamesFromText(identityText, accountNames)
   return {
     implemented: true,
-    accountIds: [],
+    accountIds: Array.from(accountIds),
     accountNames: Array.from(accountNames),
-    diagnostics: `href=${location.href}; visibleTextLength=${visibleText.length}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
+    diagnostics: `href=${location.href}; visibleTextLength=${visibleText.length}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
+  }
+}
+
+function collectBaijiahaoPersonalCenterIdentity(accountIds, accountNames) {
+  const root = document.querySelector('#personCenterBaseInfo') || findBaijiahaoAccountInfoRoot()
+  if (!root) return
+  const hasExactName = collectBaijiahaoExactAccountName(root, accountNames)
+  if (!hasExactName) {
+    collectBaijiahaoPrimaryAccountName(root, accountNames)
+    for (const el of Array.from(root.querySelectorAll('[class*="userName"], [class*="UserName"], [class*="accountName"], [class*="AccountName"]'))) {
+      const text = normalizeBaijiahaoAccountName(el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || '')
+      if (isLikelyBaijiahaoAccountName(text)) accountNames.add(text)
+    }
+  }
+  collectBaijiahaoAccountIdsFromText(root.innerText || root.textContent || '', accountIds)
+}
+
+function findBaijiahaoAccountInfoRoot() {
+  const marker = Array.from(document.querySelectorAll('main,section,div'))
+    .filter((el) => isVisibleElement(el) || hasVisibleAncestor(el))
+    .find((el) => {
+      const text = normalizeText(el.innerText || el.textContent || '')
+      return text.includes('账号信息') && text.includes('百家号ID') && text.length < 800
+    })
+  if (!marker) return null
+  let current = marker
+  for (let depth = 0; current?.parentElement && depth < 4; depth += 1) {
+    const parentText = normalizeText(current.parentElement.innerText || current.parentElement.textContent || '')
+    if (!parentText.includes('账号信息') || !parentText.includes('百家号ID') || parentText.length > 1200) break
+    current = current.parentElement
+  }
+  return current
+}
+
+function collectBaijiahaoExactAccountName(root, accountNames) {
+  const selectors = [
+    '[class*="userInfoBox"] [class*="userName"]',
+    '[class*="UserInfoBox"] [class*="UserName"]',
+    '[class*="user-info"] [class*="user-name"]',
+    '[class*="account-info"] [class*="account-name"]',
+  ]
+  for (const selector of selectors) {
+    for (const el of Array.from(root.querySelectorAll(selector))) {
+      if (!isVisibleElement(el) && !hasVisibleAncestor(el)) continue
+      const text = normalizeBaijiahaoAccountName(readOwnText(el) || el.getAttribute('title') || el.getAttribute('aria-label') || el.textContent || '')
+      if (isLikelyBaijiahaoAccountName(text)) {
+        accountNames.add(text)
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function readOwnText(el) {
+  return Array.from(el?.childNodes || [])
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent || '')
+    .join('')
+}
+
+function collectBaijiahaoPrimaryAccountName(root, accountNames) {
+  const candidates = Array.from(root.querySelectorAll('h1,h2,h3,strong,[class*="title"],[class*="Title"],[class*="name"],[class*="Name"]'))
+    .filter((el) => isVisibleElement(el) || hasVisibleAncestor(el))
+    .map((el) => ({
+      text: normalizeBaijiahaoAccountName(el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || ''),
+      score: scoreBaijiahaoAccountNameElement(el),
+    }))
+    .filter((item) => item.score > 0 && isLikelyBaijiahaoAccountName(item.text))
+    .sort((left, right) => right.score - left.score)
+  if (candidates[0]?.text) accountNames.add(candidates[0].text)
+}
+
+function scoreBaijiahaoAccountNameElement(el) {
+  const text = normalizeBaijiahaoAccountName(el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || '')
+  if (!text) return -100
+  let score = 0
+  const className = String(el.className || '')
+  const rect = el.getBoundingClientRect?.()
+  if (/userName|accountName|name|title/i.test(className)) score += 80
+  if (/^H[1-3]$/.test(el.tagName) || el.tagName === 'STRONG') score += 40
+  if (rect && rect.top < 340 && rect.left < window.innerWidth * 0.65) score += 40
+  if (/百家号ID|账号信息|账号管理|我的认证|内容设置|收益设置|当前账号|账号无|去设置|去认证|去关联/.test(text)) score -= 180
+  if (/[：:]/.test(text)) score -= 120
+  if (/\d{6,}/.test(text)) score -= 120
+  if (text.length > 24) score -= 50
+  return score
+}
+
+function collectBaijiahaoAccountIdsFromLocation(accountIds) {
+  try {
+    const url = new URL(location.href)
+    const appId = normalizeAccountId(url.searchParams.get('app_id'))
+    if (appId) accountIds.add(appId)
+  } catch {
+    // ignore malformed or inaccessible URLs
+  }
+}
+
+function collectBaijiahaoAccountIdsFromText(text, accountIds) {
+  const patterns = [
+    /百家号\s*ID\s*[:：]?\s*(\d{6,})/g,
+    /百家号ID\s*[:：]?\s*(\d{6,})/g,
+    /app_id["']?\s*[:=]\s*["']?(\d{6,})/g,
+    /appId["']?\s*[:=]\s*["']?(\d{6,})/g,
+  ]
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const value = normalizeAccountId(match[1])
+      if (value) accountIds.add(value)
+    }
   }
 }
 
@@ -3232,7 +3438,7 @@ function collectBaijiahaoAccountNamesFromDom(accountNames) {
     for (const el of Array.from(document.querySelectorAll(selector))) {
       if (!isVisibleElement(el) && !hasVisibleAncestor(el)) continue
       if (!isTopRightAccountElement(el)) continue
-      const text = normalizeAccountName(el.textContent || el.getAttribute('aria-label') || '')
+      const text = normalizeBaijiahaoAccountName(el.textContent || el.getAttribute('aria-label') || '')
       if (isLikelyBaijiahaoAccountName(text)) accountNames.add(text)
     }
   }
@@ -3244,11 +3450,10 @@ function collectBaijiahaoAccountNamesFromText(text, accountNames) {
     /"nickName"\s*:\s*"([^"]{2,80})"/g,
     /"userName"\s*:\s*"([^"]{2,80})"/g,
     /"accountName"\s*:\s*"([^"]{2,80})"/g,
-    /"name"\s*:\s*"([^"]{2,80})"/g,
   ]
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
-      const value = normalizeAccountName(match[1])
+      const value = normalizeBaijiahaoAccountName(match[1])
       if (isLikelyBaijiahaoAccountName(value)) accountNames.add(value)
     }
   }
@@ -3292,11 +3497,20 @@ function safeBrowserStorages() {
 }
 
 function isLikelyBaijiahaoAccountName(value) {
-  const text = normalizeAccountName(value)
+  const text = normalizeBaijiahaoAccountName(value)
   if (text.length < 2 || text.length > 40) return false
-  if (/^(首页|图文|视频|动态|直播|合集|图集|AI成片|基础信息|活动投稿|智能创作|创作声明|发布|预览|存草稿|定时发布|取消|确定|登录)$/.test(text)) return false
+  if (/^(首页|图文|视频|动态|直播|合集|图集|AI成片|基础信息|活动投稿|智能创作|创作声明|发布|预览|存草稿|定时发布|取消|确定|登录|账号信息|账号管理|我的认证|内容设置|收益设置|百家号ID|当前账号|账号无|规则中心|问题咨询)$/.test(text)) return false
+  if (/百家号ID|账号无|当前账号|去设置|去认证|去关联|去查看|适合各行业|内容分类|账号基础信息|百\+总览/.test(text)) return false
+  if (/[：:]/.test(text)) return false
+  if (/\d{6,}/.test(text)) return false
   if (/^[\w.-]{2,40}$/.test(text)) return true
   return /[\u4e00-\u9fa5]/.test(text) && !/[，。！？、]/.test(text)
+}
+
+function normalizeBaijiahaoAccountName(value) {
+  return normalizeAccountName(value)
+    .replace(/^(百家号|账号名称|用户名|昵称)[:：]?/, '')
+    .replace(/编辑$/, '')
 }
 
 function readZhihuIdentity() {
@@ -3366,6 +3580,7 @@ function readToutiaoIdentity() {
   const accountNames = new Set()
   const rawVisibleText = document.body?.innerText || document.body?.textContent || ''
   const visibleText = normalizeText(rawVisibleText)
+  collectToutiaoPersonalInfoIdentity(accountIds, accountNames)
   collectToutiaoMediaIdsFromText(visibleText, accountIds)
   collectToutiaoAccountNamesFromText(rawVisibleText, accountNames)
   collectAccountIdsFromText(visibleText, accountIds)
@@ -3393,6 +3608,30 @@ function collectToutiaoMediaIdsFromText(text, candidates) {
   }
 }
 
+function collectToutiaoPersonalInfoIdentity(accountIds, accountNames) {
+  if (location.hostname !== 'mp.toutiao.com') return
+  const rows = Array.from(document.querySelectorAll('.block-item-wrapper, [class*="block-item"]')).slice(0, 80)
+  for (const row of rows) {
+    const label = normalizeText(row.querySelector?.('.label, [class*="label"]')?.textContent || '')
+    const content = normalizeText(row.querySelector?.('.content, [class*="content"]')?.textContent || '')
+    if (!label || !content) continue
+    if (label.includes('用户名')) {
+      const value = normalizeToutiaoAccountName(content)
+      if (isLikelyToutiaoAccountName(value)) accountNames.add(value)
+    }
+    if (label.includes('头条号ID')) {
+      const value = normalizeAccountId(content)
+      if (value) accountIds.add(value)
+    }
+  }
+
+  const text = document.body?.innerText || document.body?.textContent || ''
+  const nameMatch = text.match(/用户名\s+([^\s，。！？、]{2,60})/)
+  const name = normalizeToutiaoAccountName(nameMatch?.[1] || '')
+  if (isLikelyToutiaoAccountName(name)) accountNames.add(name)
+  collectAccountIdsFromText(text, accountIds)
+}
+
 function collectToutiaoAccountNamesFromText(text, accountNames) {
   const patterns = [
     /"media"\s*:\s*\{[\s\S]{0,20000}?"display_name"\s*:\s*"([^"]{2,80})"/g,
@@ -3409,11 +3648,12 @@ function collectToutiaoAccountNamesFromText(text, accountNames) {
     /"account_name"\s*:\s*"([^"]{2,80})"/g,
     /头条号名称[:：]?([^\s，。！？、]{2,60})/g,
     /账号名称[:：]?([^\s，。！？、]{2,60})/g,
+    /用户名[:：]?([^\s，。！？、]{2,60})/g,
     /昵称[:：]?([^\s，。！？、]{2,60})/g,
   ]
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
-      const value = normalizeAccountName(match[1])
+      const value = normalizeToutiaoAccountName(match[1])
       if (isLikelyToutiaoAccountName(value)) accountNames.add(value)
     }
   }
@@ -3492,11 +3732,11 @@ function collectAccountIdentityFromScripts(accountIds, accountNames) {
 }
 
 function isLikelyToutiaoAccountName(value) {
-  const text = normalizeAccountName(value)
+  const text = normalizeToutiaoAccountName(value)
   if (text.length < 2 || text.length > 60) return false
   if (/^\d+$/.test(text)) return false
   if (/^https?:\/\//i.test(text)) return false
-  if (/^(首页|发布|发文|发视频|文章管理|作品管理|数据|数据助手|创作中心|头条号|今日头条|西瓜视频|抖音|登录|退出|设置|消息|通知|保存|取消|发布文章|图文|视频|问答)$/.test(text)) return false
+  if (/^(首页|发布|发文|发视频|文章管理|作品管理|数据|数据助手|创作中心|头条号|今日头条|西瓜视频|抖音|登录|退出|设置|消息|通知|保存|取消|编辑|复制ID|更改类型|更换头像|发布文章|图文|视频|问答)$/.test(text)) return false
   if (/[，。！？、；;<>]/.test(text)) return false
   return true
 }
@@ -3511,6 +3751,23 @@ function normalizeAccountName(value) {
     .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
     .replace(/\s+/g, '')
     .trim()
+}
+
+function normalizeToutiaoAccountName(value) {
+  let text = normalizeAccountName(value)
+  text = text.replace(/^(用户名|头条号名称|账号名称|昵称)[:：]?/, '')
+  const actionSuffixes = ['更换头像', '更改类型', '复制ID', '编辑']
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const suffix of actionSuffixes) {
+      if (text.length > suffix.length && text.endsWith(suffix)) {
+        text = text.slice(0, -suffix.length)
+        changed = true
+      }
+    }
+  }
+  return text
 }
 
 function normalizeTitleForPlatform(title, fillProfile = null) {
@@ -4072,7 +4329,7 @@ async function maybeOpenPlatformEditor(fillProfile) {
   if (fillProfile.platform === 'xiaohongshu') {
     if (location.hostname === 'www.xiaohongshu.com') {
       showStatus('小红书当前处于用户端页面，切换到创作服务平台', 'info')
-      location.href = 'https://creator.xiaohongshu.com/publish/publish'
+      location.href = 'https://creator.xiaohongshu.com/publish/publish?from=tab_switch&target=article'
       await delay(2200)
       return
     }
@@ -4304,7 +4561,66 @@ function findContentElement(titleElement, fillProfile) {
   if (normalizePlatform(fillProfile?.platform) === 'toutiao') {
     return findToutiaoContentElement(titleElement, fillProfile)
   }
+  if (normalizePlatform(fillProfile?.platform) === 'douyin') {
+    return findDouyinContentElement(titleElement, fillProfile)
+  }
   return findFirst(fillProfile.contentSelectors, { excludeElement: titleElement, rejectTitleLike: true })
+}
+
+function findDouyinContentElement(titleElement, fillProfile) {
+  const selectorCandidates = fillProfile.contentSelectors.flatMap((selector) => {
+    try {
+      return Array.from(document.querySelectorAll(selector))
+    } catch (_) {
+      return []
+    }
+  })
+  const fallbackCandidates = Array.from(document.querySelectorAll('[contenteditable="true"], div[role="textbox"], textarea[placeholder*="正文"]'))
+  const titleRect = titleElement?.getBoundingClientRect?.() || null
+  const seen = new Set()
+  const candidates = selectorCandidates.concat(fallbackCandidates)
+    .filter((candidate) => {
+      if (!candidate || seen.has(candidate)) return false
+      seen.add(candidate)
+      if (titleElement && candidate === titleElement) return false
+      if (titleElement && candidate.contains(titleElement)) return false
+      if (titleElement && titleElement.contains(candidate)) return false
+      return isVisibleElement(candidate)
+    })
+    .map((candidate) => ({
+      candidate,
+      score: scoreDouyinContentCandidate(candidate, titleRect),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+  return candidates[0]?.candidate || null
+}
+
+function scoreDouyinContentCandidate(candidate, titleRect) {
+  const rect = candidate.getBoundingClientRect()
+  const attrs = [
+    candidate.getAttribute?.('placeholder') || '',
+    candidate.getAttribute?.('aria-label') || '',
+    candidate.getAttribute?.('data-placeholder') || '',
+    candidate.getAttribute?.('role') || '',
+    String(candidate.className || ''),
+  ].join(' ')
+  const text = normalizeText(candidate.textContent || '')
+  const descriptor = `${attrs} ${text.slice(0, 120)}`
+  let score = 0
+  if (/ProseMirror|DraftEditor|public-DraftEditor|notranslate|slate|textbox|editor/i.test(attrs)) score += 150
+  if (/正文|内容|请输入正文/.test(attrs)) score += 140
+  if (/请输入正文/.test(text)) score += 120
+  if (candidate.isContentEditable || candidate.getAttribute?.('contenteditable') === 'true') score += 50
+  if (candidate instanceof HTMLTextAreaElement) score += 35
+  if (rect.width >= 360 && rect.height >= 120) score += 45
+  if (titleRect && rect.top > titleRect.bottom - 12) score += 90
+  if (titleRect && rect.bottom <= titleRect.bottom) score -= 180
+  if (/标题|请输入文章标题|请输入标题/.test(descriptor)) score -= 260
+  if (/上传封面|上传图片|预览首页|预览页|添加文章头图|基础信息|发布设置|封面设置|定时发布|同步到/.test(text)) score -= 220
+  if (rect.height < 40 || rect.width < 220) score -= 100
+  if (rect.left > window.innerWidth * 0.55 && /预览|手机|封面/.test(text)) score -= 240
+  return score
 }
 
 function findToutiaoContentElement(titleElement, fillProfile) {
