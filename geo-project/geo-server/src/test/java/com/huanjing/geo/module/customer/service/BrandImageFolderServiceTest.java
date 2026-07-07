@@ -2,6 +2,7 @@ package com.huanjing.geo.module.customer.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandImageFolder;
@@ -40,6 +41,7 @@ class BrandImageFolderServiceTest {
     private BrandImageFolderProjectMapper folderProjectMapper;
     private BrandImageFolderTagMapper folderTagMapper;
     private CurrentUserService currentUserService;
+    private InternalScopeService internalScopeService;
     private BrandImageFolderService service;
 
     @BeforeEach
@@ -52,6 +54,7 @@ class BrandImageFolderServiceTest {
         folderProjectMapper = mock(BrandImageFolderProjectMapper.class);
         folderTagMapper = mock(BrandImageFolderTagMapper.class);
         currentUserService = mock(CurrentUserService.class);
+        internalScopeService = mock(InternalScopeService.class);
         BrandMaterialPublicUrlService publicUrlService = mock(BrandMaterialPublicUrlService.class);
         service = new BrandImageFolderService(
                 brandMapper,
@@ -62,7 +65,8 @@ class BrandImageFolderServiceTest {
                 folderProjectMapper,
                 folderTagMapper,
                 currentUserService,
-                publicUrlService
+                publicUrlService,
+                internalScopeService
         );
 
         SysUser user = new SysUser();
@@ -123,7 +127,7 @@ class BrandImageFolderServiceTest {
 
         assertThatThrownBy(() -> service.updateFolder(10L, 100L, req))
                 .isInstanceOf(BizException.class)
-                .hasMessageContaining("文章自动生成需要");
+                .hasMessageContaining("图片资产中需至少一个名称以“插图”开头的文件夹");
 
         verify(folderMapper, never()).updateById(any(BrandImageFolder.class));
     }
@@ -139,7 +143,7 @@ class BrandImageFolderServiceTest {
 
         assertThatThrownBy(() -> service.updateFolder(10L, 102L, req))
                 .isInstanceOf(BizException.class)
-                .hasMessageContaining("文章自动生成需要");
+                .hasMessageContaining("图片资产中需至少一个名称以“插图”开头的文件夹");
 
         verify(folderMapper, never()).updateById(any(BrandImageFolder.class));
     }

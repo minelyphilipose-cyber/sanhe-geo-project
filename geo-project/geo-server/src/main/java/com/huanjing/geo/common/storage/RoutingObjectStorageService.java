@@ -83,10 +83,10 @@ public class RoutingObjectStorageService implements ObjectStorageService {
     }
 
     private ObjectStorageService currentBackend() {
-        return switch (storageProperties.getProvider()) {
-            case MINIO -> minioBackend;
-            case COS -> cosBackend;
-        };
+        if (storageProperties.getProvider() == StorageProperties.Provider.COS) {
+            return cosBackend;
+        }
+        return minioBackend;
     }
 
     @FunctionalInterface
