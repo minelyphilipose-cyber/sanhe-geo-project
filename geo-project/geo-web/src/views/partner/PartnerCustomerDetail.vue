@@ -786,6 +786,10 @@ function goCreateBrand() {
 }
 
 function goBrandDetail(id: number) {
+  if (route.name === 'PartnerSubmittedCustomerDetail') {
+    router.push(`/admin/partner-start-requests/brands/${id}`)
+    return
+  }
   router.push(`/partner/brands/${id}`)
 }
 

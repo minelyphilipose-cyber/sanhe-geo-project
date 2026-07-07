@@ -106,7 +106,7 @@
               <div class="table-subtext">{{ projectStatusLabel(row.projectStatus) }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="340" fixed="right">
+          <el-table-column label="操作" width="300" fixed="right">
             <template #default="{ row }">
               <div class="admin-row-actions">
                 <el-button link type="primary" @click="openDetail(row)">工单详情</el-button>

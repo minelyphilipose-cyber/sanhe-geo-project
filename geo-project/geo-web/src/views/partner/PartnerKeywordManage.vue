@@ -233,15 +233,6 @@
               >
                 退回修改
               </el-button>
-              <el-button
-                v-if="isPartnerOwner && canShowOwnerReviewActions"
-                type="primary"
-                :loading="submittingHq"
-                :disabled="!canSubmitHqReview"
-                @click="submitOwnerReviewToHq"
-              >
-                确认信息并提交总部
-              </el-button>
             </div>
           </div>
           <div class="review-note" :class="{ warning: !canCommitCoreQuestions }">
@@ -496,7 +487,6 @@ import {
   startPartnerCoreQuestionBatch,
   submitGeoPartnerReview,
   returnGeoPartnerReview,
-  submitGeoPartnerReviewToHq,
   updateGeoQuestion,
   type BatchVO,
   type ManualQuestionInput,
@@ -571,7 +561,6 @@ const savingQuestion = ref(false)
 const committing = ref(false)
 const submittingReview = ref(false)
 const returningReview = ref(false)
-const submittingHq = ref(false)
 const duplicateSaving = ref(false)
 const generating = ref(false)
 const batchDeleting = ref(false)
@@ -680,14 +669,6 @@ const canCommitCoreQuestions = computed(() => Boolean(
 ))
 const canSubmitOwnerReview = computed(() => Boolean(isPartnerStaff.value && canCommitCoreQuestions.value))
 const canShowOwnerReviewActions = computed(() => Boolean(workorder.value && partnerReviewStatus.value === 'pending_owner_review'))
-const canSubmitHqReview = computed(() => Boolean(
-  isPartnerOwner.value
-    && canShowOwnerReviewActions.value
-    && workorder.value?.status === 'committed'
-    && maintainedCount.value === coreQuotaLimit.value
-    && duplicateQuestionTexts.value.length === 0
-    && !hasRunningBatch.value,
-))
 const manualEntryTip = computed(() => {
   if (!selectedProject.value) return '请先选择项目'
   if (!workorder.value) return '当前项目任务尚未创建'
@@ -719,9 +700,9 @@ const generationStatusTip = computed(() => {
 const commitStatusTip = computed(() => {
   if (!workorder.value) return '当前项目任务尚未创建'
   if (isSubmittedToHq.value) return '当前项目已提交总部，拓词组已锁定，不能继续修改。'
-  if (isPartnerStaff.value && isPendingOwnerReview.value) return '已提交负责人复核，请等待负责人确认提交总部或退回修改。'
-  if (isPartnerOwner.value && isPendingOwnerReview.value) return '请核对客户资料与核心问题，确认无误后提交总部；如需员工调整，可退回修改。'
-  if (workorder.value.status === 'committed') return '当前核心问题已入项目拓词组，提交总部前仍可修改并再次确认更新。'
+  if (isPartnerStaff.value && isPendingOwnerReview.value) return '已提交负责人复核，请等待负责人确认，启动工单将由负责人在项目管理中提交。'
+  if (isPartnerOwner.value && isPendingOwnerReview.value) return '请核对客户资料与核心问题；如需员工调整，可退回修改。启动工单请在项目管理中提交。'
+  if (workorder.value.status === 'committed') return '当前核心问题已入项目拓词组，启动工单提交前仍可修改并再次确认更新。'
   if (hasRunningBatch.value) return '生成任务运行中，请等待完成后再确认入库'
   if (duplicateQuestionTexts.value.length) return `存在重复问题，请先处理：${duplicateQuestionTexts.value.slice(0, 3).join('；')}`
   if (maintainedCount.value !== coreQuotaLimit.value) return `核心问题需补齐到项目分配额度：${maintainedCount.value} / ${coreQuotaLimit.value}`
@@ -1200,33 +1181,6 @@ async function returnOwnerReview() {
     }
   } finally {
     returningReview.value = false
-  }
-}
-
-async function submitOwnerReviewToHq() {
-  if (!workorder.value) return
-  if (!canSubmitHqReview.value) {
-    ElMessage.warning(commitStatusTip.value)
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      '确认提交总部后，当前客户资料和项目拓词组将锁定，合伙人侧不能继续修改。',
-      '提交总部确认',
-      { type: 'warning', confirmButtonText: '确认提交总部', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  submittingHq.value = true
-  try {
-    await submitGeoPartnerReviewToHq(workorder.value.id)
-    ElMessage.success('已提交总部')
-    await Promise.all([refreshReview(), loadWorkorderList()])
-  } catch (err) {
-    ElMessage.error(errorMessage(err, '提交总部失败'))
-  } finally {
-    submittingHq.value = false
   }
 }
 

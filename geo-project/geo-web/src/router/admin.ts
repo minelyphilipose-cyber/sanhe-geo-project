@@ -115,6 +115,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '合伙人项目详情', hidden: true, permissions: ['delivery.assignment.manage', 'project.read'] },
     },
     {
+      path: 'partner-start-requests/brands/:id',
+      name: 'PartnerSubmittedBrandDetail',
+      component: () => import('@/views/partner/PartnerBrandDetail.vue'),
+      meta: { title: '合伙人品牌详情', hidden: true, permissions: ['delivery.assignment.manage', 'company.read'] },
+    },
+    {
       path: 'projects/:id',
       name: 'ProjectDetail',
       component: () => import('@/views/admin/project/ProjectDetail.vue'),
@@ -285,13 +291,23 @@ const adminRoutes: RouteRecordRaw = {
       path: 'keyword-groups',
       name: 'KeywordGroupManage',
       redirect: '/admin/layered-keyword-groups',
-      meta: { title: '拓词管理', hidden: true, permissions: ['keyword_group.read'] },
+      meta: {
+        title: '拓词管理',
+        hidden: true,
+        roles: ['operator', 'delivery_manager', 'manager', 'super_admin'],
+        permissions: ['keyword_group.read'],
+      },
     },
     {
       path: 'layered-keyword-groups',
       name: 'LayeredKeywordGroupManage',
       component: () => import('@/views/admin/project/LayeredKeywordGroupManage.vue'),
-      meta: { title: '拓词管理', icon: 'Collection', permissions: ['keyword_group.read'] },
+      meta: {
+        title: '拓词管理',
+        icon: 'Collection',
+        roles: ['operator', 'delivery_manager', 'manager', 'super_admin'],
+        permissions: ['keyword_group.read'],
+      },
     },
     {
       path: 'monitoring/platforms',

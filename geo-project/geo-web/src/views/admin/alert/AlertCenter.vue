@@ -2,11 +2,11 @@
   <div class="alert-center-page admin-page">
     <div class="admin-page-header alert-header">
       <div>
-        <div class="admin-page-kicker">监控中心</div>
-        <h1 class="admin-page-title">告警中心</h1>
-        <div class="admin-page-subtitle">聚合调度异常、平台风险与人工处置状态，帮助运营优先处理高风险告警。</div>
+        <div class="admin-page-kicker">{{ pageKicker }}</div>
+        <h1 class="admin-page-title">{{ pageTitle }}</h1>
+        <div class="admin-page-subtitle">{{ pageSubtitle }}</div>
       </div>
-      <div class="admin-page-actions alert-header-actions">
+      <div v-if="showRefreshControls" class="admin-page-actions alert-header-actions">
         <span class="refresh-state">
           <span class="refresh-dot" />
           自动刷新中
@@ -184,17 +184,18 @@
     <el-card v-if="activeTab === 'system' && canViewSystemAlerts" shadow="never" class="admin-table-card alert-table-card">
       <div class="table-header">
         <div>
-          <div class="table-title">系统待办</div>
-          <div class="table-subtitle">自动分发产生的配置类待办，处理后可在此标记闭环。</div>
+          <div class="table-title">{{ systemTableTitle }}</div>
+          <div class="table-subtitle">{{ systemTodoSubtitle }}</div>
         </div>
         <div class="chips">
           <span class="chip chip-muted">总计 {{ systemPage.total }}</span>
-          <span class="chip chip-danger">待处理 {{ systemRows.length }}</span>
+          <span v-if="userStore.isPartner" class="chip chip-danger">未读 {{ systemUnreadTotal }}</span>
+          <span v-else class="chip chip-danger">待处理 {{ systemRows.length }}</span>
         </div>
       </div>
 
-      <DataState :loading="loading" :empty="!loading && systemRows.length === 0" empty-text="暂无系统待办">
-        <el-table :data="systemRows" border table-layout="fixed">
+      <DataState :loading="loading" :empty="!loading && systemRows.length === 0" :empty-text="userStore.isPartner ? '暂无站内信' : '暂无系统待办'">
+        <el-table :data="systemRows" border table-layout="fixed" :row-class-name="systemTodoRowClassName">
           <el-table-column label="待办事项" min-width="260" show-overflow-tooltip>
             <template #default="scope">
               <div class="admin-entity-cell">
@@ -202,9 +203,16 @@
                   {{ alertInitial(scope.row.message) }}
                 </div>
                 <div class="min-w-0">
-                  <div class="admin-entity-main">{{ scope.row.message }}</div>
+                  <div class="admin-entity-main todo-title-line">
+                    <span v-if="!scope.row.readAt" class="todo-unread-dot" />
+                    <span>{{ systemTodoMessage(scope.row) }}</span>
+                  </div>
                   <div class="admin-entity-sub">
-                    <span>{{ scope.row.source || scope.row.alertType }}</span>
+                    <span>{{ systemTodoSourceLabel(scope.row) }}</span>
+                    <span>{{ systemTodoSenderText(scope.row) }}</span>
+                    <el-tag v-if="userStore.isPartner" size="small" :type="scope.row.readAt ? 'info' : 'danger'" effect="plain">
+                      {{ scope.row.readAt ? '已读' : '未读' }}
+                    </el-tag>
                     <el-tag v-if="isSpecialIndustryTodo(scope.row)" size="small" type="warning" effect="plain">特殊行业</el-tag>
                   </div>
                 </div>
@@ -223,46 +231,38 @@
           </el-table-column>
           <el-table-column label="详情" min-width="260">
             <template #default="scope">
-              <el-popover trigger="click" width="520" placement="top">
+              <span v-if="isPartnerStartRequestRejectedTodo(scope.row)" class="todo-reject-reason">
+                {{ systemTodoDetailPreview(scope.row) }}
+              </span>
+              <el-popover v-else trigger="click" width="520" placement="top">
                 <template #reference>
                   <el-button link type="primary">{{ systemTodoDetailPreview(scope.row) }}</el-button>
                 </template>
                 <div class="detail-wrap">
-                  <div v-if="isSpecialIndustryTodo(scope.row)" class="special-alert-detail">
-                    <div>
-                      <strong>处理类型</strong>
-                      <span>{{ specialIndustryActionLabel(systemTodoContext(scope.row).action) }}</span>
-                    </div>
-                    <div>
-                      <strong>项目</strong>
-                      <span>{{ contextValue(systemTodoContext(scope.row), 'projectName') || contextValue(systemTodoContext(scope.row), 'projectId') || '-' }}</span>
-                    </div>
-                    <div>
-                      <strong>品牌</strong>
-                      <span>{{ contextValue(systemTodoContext(scope.row), 'brandName') || contextValue(systemTodoContext(scope.row), 'brandId') || '-' }}</span>
-                    </div>
-                    <div>
-                      <strong>文章</strong>
-                      <span>{{ formatObjectId('文章', systemTodoContext(scope.row).articleId) }}</span>
-                    </div>
-                    <div>
-                      <strong>批次/任务</strong>
-                      <span>{{ formatTraceIds(systemTodoContext(scope.row)) }}</span>
-                    </div>
-                    <div v-if="formatHitRules(systemTodoContext(scope.row).hitRuleTypes)">
-                      <strong>命中规则</strong>
-                      <span>{{ formatHitRules(systemTodoContext(scope.row).hitRuleTypes) }}</span>
+                  <div class="special-alert-detail">
+                    <div v-for="item in systemTodoDetailItems(scope.row)" :key="item.label">
+                      <strong>{{ item.label }}</strong>
+                      <span>{{ item.value }}</span>
                     </div>
                   </div>
-                  <pre v-else>{{ scope.row.contextJson || '-' }}</pre>
                 </div>
               </el-popover>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="190" fixed="right">
+          <el-table-column label="操作" :width="userStore.isPartner ? 160 : 190" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openSystemTodo(scope.row)">去处理</el-button>
-              <el-button link type="success" :disabled="!canResolveSystemAlert" @click="resolveSystemTodo(scope.row)">标记已处理</el-button>
+              <el-button link type="primary" @click="openSystemTodoDetail(scope.row)">详情</el-button>
+              <el-button v-if="canProcessSystemTodo(scope.row)" link type="primary" @click="openSystemTodo(scope.row)">去处理</el-button>
+              <span v-else class="todo-action-hint">{{ systemTodoActionHint(scope.row) }}</span>
+              <el-button
+                v-if="!userStore.isPartner"
+                link
+                type="success"
+                :disabled="!canResolveSystemAlert"
+                @click="resolveSystemTodo(scope.row)"
+              >
+                标记已处理
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -279,6 +279,48 @@
         />
       </div>
     </el-card>
+
+    <el-dialog
+      v-model="systemDetailVisible"
+      :title="userStore.isPartner ? '站内信详情' : '系统待办详情'"
+      width="680px"
+      class="system-todo-detail-dialog"
+      append-to-body
+      destroy-on-close
+    >
+      <div v-if="systemDetailRow" class="system-todo-detail">
+        <div class="system-detail-head">
+          <div>
+            <div class="system-detail-title">{{ systemTodoMessage(systemDetailRow) }}</div>
+            <div class="system-detail-meta">
+              <span>{{ systemTodoSourceLabel(systemDetailRow) }}</span>
+              <span>{{ systemTodoSenderText(systemDetailRow) }}</span>
+              <span>{{ formatDateTime(systemDetailRow.createdAt) }}</span>
+              <span>{{ severityLabel(systemDetailRow.severity) }}</span>
+              <span>{{ systemDetailRow.readAt ? '已读' : '未读' }}</span>
+            </div>
+          </div>
+        </div>
+        <section class="system-detail-section">
+          <div class="system-detail-section-title">{{ systemTodoDetailTitle(systemDetailRow) }}</div>
+          <p>{{ systemTodoDetailPreview(systemDetailRow) }}</p>
+        </section>
+        <section v-if="!userStore.isPartner" class="system-detail-section">
+          <div class="system-detail-section-title">原始信息</div>
+          <p>{{ systemDetailRow.message || '-' }}</p>
+        </section>
+        <section v-if="!userStore.isPartner && systemDetailContextText(systemDetailRow)" class="system-detail-section">
+          <div class="system-detail-section-title">关联上下文</div>
+          <pre>{{ systemDetailContextText(systemDetailRow) }}</pre>
+        </section>
+      </div>
+      <template #footer>
+        <div class="partner-dialog-footer">
+          <el-button @click="systemDetailVisible = false">关闭</el-button>
+          <el-button v-if="systemDetailRow && canProcessSystemTodo(systemDetailRow)" type="primary" @click="openSystemTodoFromDetail">去处理</el-button>
+        </div>
+      </template>
+    </el-dialog>
 
     <el-dialog
       v-model="detailVisible"
@@ -418,16 +460,16 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { getDispatchAlert, getDispatchAlerts, resolveDispatchAlert, type DispatchAlertQuery } from '@/api/dispatch'
-import { getMySystemAlertTodos, resolveSystemAlert } from '@/api/systemAlert'
+import { getMySystemAlertTodos, getMySystemAlertUnreadCount, markSystemAlertRead, resolveSystemAlert } from '@/api/systemAlert'
 import type { DispatchAlertItem, SystemAlertTodoItem } from '@/types'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
 const router = useRouter()
 const canViewDispatchAlerts = userStore.hasPermission(['content.distribution.retry', 'dispatch.alert.resolve'])
-const canViewSystemAlerts = userStore.hasPermission(['system.alert.resolve', 'content.read'])
+const canViewSystemAlerts = userStore.isPartner || userStore.hasPermission(['system.alert.resolve', 'content.read'])
 const canResolveDispatchAlert = userStore.hasPermission('dispatch.alert.resolve')
-const canResolveSystemAlert = userStore.hasPermission('system.alert.resolve')
+const canResolveSystemAlert = userStore.isPartner || userStore.hasPermission('system.alert.resolve')
 
 const activeTab = ref<'dispatch' | 'system'>(canViewDispatchAlerts ? 'dispatch' : 'system')
 const loading = ref(false)
@@ -435,11 +477,29 @@ const rows = ref<DispatchAlertItem[]>([])
 const page = reactive({ current: 1, size: 20, total: 0 })
 const systemRows = ref<SystemAlertTodoItem[]>([])
 const systemPage = reactive({ current: 1, size: 20, total: 0 })
+const systemUnreadTotal = ref(0)
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detailRow = ref<DispatchAlertItem | null>(null)
+const systemDetailVisible = ref(false)
+const systemDetailRow = ref<SystemAlertTodoItem | null>(null)
 const detailAlertPage = ref(1)
 const detailAlertPageSize = 3
+
+const pageKicker = computed(() => (userStore.isPartner ? '协作通知' : '监控中心'))
+const pageTitle = computed(() => (userStore.isPartner ? '站内信' : '告警中心'))
+const pageSubtitle = computed(() =>
+  userStore.isPartner
+    ? '查看总部或负责人发起的协作待办，按提示回到对应客户、项目或品牌资料处理。'
+    : '聚合调度异常、平台风险与人工处置状态，帮助运营优先处理高风险告警。',
+)
+const systemTodoSubtitle = computed(() =>
+  userStore.isPartner
+    ? '总部或负责人发起的协作消息，进入详情后标记已读，需要处理时再进入对应业务页面。'
+    : '自动分发产生的配置类待办，处理后可在此标记闭环。',
+)
+const showRefreshControls = computed(() => !userStore.isPartner)
+const systemTableTitle = computed(() => (userStore.isPartner ? '站内信' : '系统待办'))
 
 const filters = reactive({
   rangeType: 'today' as 'today' | 'last7' | 'last30' | 'custom',
@@ -646,12 +706,18 @@ async function loadSystemTodos() {
   if (!canViewSystemAlerts) return
   loading.value = true
   try {
-    const { data } = await getMySystemAlertTodos({
-      current: systemPage.current,
-      size: systemPage.size,
-    })
+    const [todoRes, unreadRes] = await Promise.all([
+      getMySystemAlertTodos({
+        current: systemPage.current,
+        size: systemPage.size,
+        includeResolved: userStore.isPartner,
+      }),
+      userStore.isPartner ? getMySystemAlertUnreadCount() : Promise.resolve(null),
+    ])
+    const { data } = todoRes
     systemRows.value = data.data.records || []
     systemPage.total = data.data.total || 0
+    systemUnreadTotal.value = Number(unreadRes?.data.data || 0)
   } finally {
     loading.value = false
   }
@@ -714,6 +780,99 @@ function isSpecialIndustryTodo(row: SystemAlertTodoItem) {
   return row.source === 'special_industry_compliance' || String(row.alertType || '').startsWith('special_industry_')
 }
 
+function isPartnerStartRequestRejectedTodo(row: SystemAlertTodoItem) {
+  return row.alertType === 'partner_project_start_request_rejected'
+}
+
+function isPartnerCompanyEntryReturnedTodo(row: SystemAlertTodoItem) {
+  return row.alertType === 'partner_company_entry_returned'
+}
+
+function partnerStartRequestProjectName(row: SystemAlertTodoItem) {
+  const context = systemTodoContext(row)
+  const contextProjectName = contextValue(context, 'projectName')
+  if (contextProjectName) return contextProjectName
+  const message = row.message || ''
+  const separatorIndex = Math.max(message.lastIndexOf('：'), message.lastIndexOf(':'))
+  return separatorIndex >= 0 ? message.slice(separatorIndex + 1).trim() : ''
+}
+
+function systemTodoMessage(row: SystemAlertTodoItem) {
+  if (isPartnerStartRequestRejectedTodo(row)) {
+    const projectName = partnerStartRequestProjectName(row)
+    return `项目启动工单已驳回：${projectName || '未命名项目'}`
+  }
+  return row.message || '-'
+}
+
+function systemTodoSourceLabel(row: SystemAlertTodoItem) {
+  const map: Record<string, string> = {
+    project_start_request: '项目启动工单',
+    partner_workflow: '合伙人协作',
+    special_industry_compliance: '特殊行业合规',
+  }
+  const source = row.source || row.alertType || ''
+  return map[source] || source || '-'
+}
+
+function roleLabel(role?: string | null) {
+  const map: Record<string, string> = {
+    super_admin: '超级管理员',
+    manager: '总部负责人',
+    delivery_manager: '总部交付负责人',
+    operator: '运营负责人',
+    sales: '销售',
+    partner: '合伙人负责人',
+    partner_staff: '合伙人交付员工',
+  }
+  const key = String(role || '').trim()
+  return map[key] || key || '系统'
+}
+
+function systemTodoSenderText(row: SystemAlertTodoItem) {
+  const context = systemTodoContext(row)
+  const senderName = contextValue(context, 'senderName')
+  const senderRole = roleLabel(contextValue(context, 'senderRole'))
+  if (senderName) return `来源：${senderName} / ${senderRole}`
+  if (isPartnerStartRequestRejectedTodo(row)) return '来源：总部 / 总部交付负责人'
+  if (isPartnerCompanyEntryReturnedTodo(row)) return '来源：合伙人负责人'
+  return '来源：系统'
+}
+
+function contextStringArray(context: Record<string, unknown>, key: string) {
+  const value = context[key]
+  if (Array.isArray(value)) {
+    return value.filter(Boolean).map(String)
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value.split(',').map((item) => item.trim()).filter(Boolean)
+  }
+  return []
+}
+
+function systemTodoActionRoles(row: SystemAlertTodoItem) {
+  if (isPartnerStartRequestRejectedTodo(row)) return ['partner']
+  const context = systemTodoContext(row)
+  const roles = contextStringArray(context, 'actionRoles')
+  if (roles.length > 0) return roles
+  return []
+}
+
+function canProcessSystemTodo(row: SystemAlertTodoItem) {
+  const roles = systemTodoActionRoles(row)
+  if (roles.length === 0) return true
+  const currentRole = userStore.role
+  return !!currentRole && roles.includes(currentRole)
+}
+
+function systemTodoActionHint(row: SystemAlertTodoItem) {
+  if (isPartnerStartRequestRejectedTodo(row)) return '待合伙人负责人处理'
+  const context = systemTodoContext(row)
+  const actionRoleText = contextValue(context, 'actionRoleText')
+  if (actionRoleText) return `待${actionRoleText}处理`
+  return '无需处理'
+}
+
 function specialIndustryActionLabel(action: unknown) {
   const map: Record<string, string> = {
     discarded_compliance_failed: '合规失败已废弃',
@@ -745,7 +904,18 @@ function formatHitRules(value: unknown) {
 }
 
 function systemTodoDetailPreview(row: SystemAlertTodoItem) {
-  if (!isSpecialIndustryTodo(row)) return shortText(row.contextJson || '-')
+  if (isPartnerStartRequestRejectedTodo(row)) {
+    const context = systemTodoContext(row)
+    return contextValue(context, 'rejectReasonText')
+      || contextValue(context, 'rejectReasonCode')
+      || '暂无驳回原因，请联系总部交付负责人补充说明'
+  }
+  if (isPartnerCompanyEntryReturnedTodo(row)) {
+    const context = systemTodoContext(row)
+    return contextValue(context, 'returnReason')
+      || '负责人已退回资料修改，请按项目和品牌资料逐项补充'
+  }
+  if (!isSpecialIndustryTodo(row)) return shortText(row.message || systemTodoSourceLabel(row) || '-')
   const context = systemTodoContext(row)
   const actionLabel = specialIndustryActionLabel(context.action)
   const project = contextValue(context, 'projectName') || contextValue(context, 'projectId')
@@ -753,9 +923,72 @@ function systemTodoDetailPreview(row: SystemAlertTodoItem) {
   return shortText([actionLabel, project ? `项目 ${project}` : '', article ? `文章 #${article}` : ''].filter(Boolean).join(' · ') || '-')
 }
 
+function systemTodoDetailItems(row: SystemAlertTodoItem) {
+  const context = systemTodoContext(row)
+  if (isSpecialIndustryTodo(row)) {
+    const items = [
+      { label: '处理类型', value: specialIndustryActionLabel(context.action) },
+      { label: '项目', value: contextValue(context, 'projectName') || contextValue(context, 'projectId') || '-' },
+      { label: '品牌', value: contextValue(context, 'brandName') || contextValue(context, 'brandId') || '-' },
+      { label: '文章', value: formatObjectId('文章', context.articleId) },
+      { label: '批次/任务', value: formatTraceIds(context) },
+    ]
+    const hitRules = formatHitRules(context.hitRuleTypes)
+    return hitRules ? [...items, { label: '命中规则', value: hitRules }] : items
+  }
+  if (isPartnerCompanyEntryReturnedTodo(row)) {
+    return [
+      { label: '退回原因', value: systemTodoDetailPreview(row) },
+      { label: '客户', value: contextValue(context, 'companyName') || contextValue(context, 'companyId') || '-' },
+      { label: '处理角色', value: contextValue(context, 'actionRoleText') || '合伙人交付员工' },
+      { label: '来源', value: systemTodoSenderText(row).replace(/^来源：/, '') },
+    ]
+  }
+  return [
+    { label: '类型', value: systemTodoSourceLabel(row) },
+    { label: '内容', value: row.message || '-' },
+    { label: '来源', value: systemTodoSenderText(row).replace(/^来源：/, '') },
+    { label: '处理角色', value: contextValue(context, 'actionRoleText') || systemTodoActionHint(row) },
+  ]
+}
+
+function systemTodoDetailTitle(row: SystemAlertTodoItem) {
+  if (isPartnerStartRequestRejectedTodo(row)) return '驳回原因'
+  if (isPartnerCompanyEntryReturnedTodo(row)) return '退回原因'
+  return '详情'
+}
+
+function systemTodoRowClassName({ row }: { row: SystemAlertTodoItem }) {
+  return row.readAt ? '' : 'is-unread-system-todo'
+}
+
+function systemDetailContextText(row: SystemAlertTodoItem) {
+  if (!row.contextJson) return ''
+  try {
+    return JSON.stringify(JSON.parse(row.contextJson), null, 2)
+  } catch {
+    return row.contextJson
+  }
+}
+
 function normalizedSystemTodoRoute(row: SystemAlertTodoItem) {
   const context = systemTodoContext(row)
   const path = typeof context.route === 'string' ? context.route : ''
+  if (isPartnerStartRequestRejectedTodo(row)) {
+    const companyId = contextValue(context, 'companyId')
+    if (userStore.role === 'partner' && companyId) {
+      return { path: '/partner/my-projects', query: { companyId } }
+    }
+    const projectId = contextValue(context, 'projectId')
+    if (projectId) {
+      return { path: '/partner/my-projects', query: { editProjectId: projectId } }
+    }
+    if (companyId) return { path: '/partner/my-projects', query: { companyId } }
+  }
+  if (isPartnerCompanyEntryReturnedTodo(row)) {
+    const companyId = contextValue(context, 'companyId')
+    if (companyId) return { path: '/partner/my-projects', query: { companyId } }
+  }
   if (!path) return null
   if (!isSpecialIndustryTodo(row) || path !== '/admin/content/special-industry-compliance') {
     return { path }
@@ -770,13 +1003,40 @@ function normalizedSystemTodoRoute(row: SystemAlertTodoItem) {
   return { path, query }
 }
 
-function openSystemTodo(row: SystemAlertTodoItem) {
+async function openSystemTodoDetail(row: SystemAlertTodoItem) {
+  systemDetailRow.value = row
+  systemDetailVisible.value = true
+  if (row.readAt) return
+  try {
+    await markSystemAlertRead(row.id)
+    row.readAt = new Date().toISOString()
+    if (userStore.isPartner) {
+      const { data } = await getMySystemAlertUnreadCount()
+      systemUnreadTotal.value = Number(data.data || 0)
+      window.dispatchEvent(new CustomEvent('system-alert-count-changed'))
+    }
+  } catch {
+    // 详情展示优先，已读状态同步失败时不阻断查看。
+  }
+}
+
+async function openSystemTodo(row: SystemAlertTodoItem) {
+  if (!canProcessSystemTodo(row)) {
+    ElMessage.warning(systemTodoActionHint(row))
+    return
+  }
   const route = normalizedSystemTodoRoute(row)
   if (!route) {
     ElMessage.warning('该待办未配置跳转地址')
     return
   }
   router.push(route)
+}
+
+async function openSystemTodoFromDetail() {
+  if (!systemDetailRow.value) return
+  systemDetailVisible.value = false
+  await openSystemTodo(systemDetailRow.value)
 }
 
 async function resolveSystemTodo(row: SystemAlertTodoItem) {
@@ -787,9 +1047,11 @@ async function resolveSystemTodo(row: SystemAlertTodoItem) {
   await resolveSystemAlert(row.id)
   ElMessage.success('已标记处理')
   await loadSystemTodos()
+  window.dispatchEvent(new CustomEvent('system-alert-count-changed'))
 }
 
 function startAutoRefresh() {
+  if (userStore.isPartner) return
   stopAutoRefresh()
   timer = window.setInterval(() => {
     if (document.hidden) return
@@ -993,6 +1255,102 @@ onBeforeUnmount(() => {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.todo-reject-reason {
+  display: inline-block;
+  max-width: 100%;
+  color: #b45309;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.todo-action-hint {
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.todo-title-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.todo-unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ef4444;
+  flex: 0 0 auto;
+}
+
+:deep(.is-unread-system-todo) {
+  background: #fff7ed;
+}
+
+.system-todo-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.system-detail-head {
+  padding: 18px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f8fbff 0%, #f0fdfa 100%);
+}
+
+.system-detail-title {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.system-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.system-detail-section {
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.system-detail-section-title {
+  margin-bottom: 8px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.system-detail-section p {
+  margin: 0;
+  color: #0f172a;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.system-detail-section pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
   font-size: 12px;
   line-height: 1.6;
 }

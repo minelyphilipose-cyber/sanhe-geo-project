@@ -68,8 +68,6 @@ const publicPathPrefixes = [
   '/403',
   '/session-expired',
 ]
-const internalReadablePartnerRouteNames = new Set(['PartnerBrandDetail'])
-
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -207,7 +205,17 @@ router.beforeEach(async (to, _from, next) => {
     }
   }
 
-  if (!userStore.isPartner && to.path.startsWith('/partner') && !internalReadablePartnerRouteNames.has(String(to.name || ''))) {
+  if (!userStore.isPartner && to.name === 'PartnerBrandDetail') {
+    return next({
+      name: 'PartnerSubmittedBrandDetail',
+      params: to.params,
+      query: to.query,
+      hash: to.hash,
+      replace: true,
+    })
+  }
+
+  if (!userStore.isPartner && to.path.startsWith('/partner')) {
     return next('/admin/overview')
   }
 
@@ -226,6 +234,9 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   const requiredPerms = (to.meta?.permissions as string[] | undefined) || []
+  if (userStore.isSales && (to.path.startsWith('/admin/customers') || to.path.startsWith('/admin/projects'))) {
+    return next()
+  }
   if (requiredPerms.length > 0 && !userStore.hasPermission(requiredPerms)) {
     return next('/403')
   }
