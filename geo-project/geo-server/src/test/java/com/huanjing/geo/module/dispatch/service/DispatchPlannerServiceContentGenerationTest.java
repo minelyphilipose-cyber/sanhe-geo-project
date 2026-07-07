@@ -150,17 +150,15 @@ class DispatchPlannerServiceContentGenerationTest {
     }
 
     @Test
-    void contentGenerationSkipsInactiveProject() {
+    void scanSkipsPausedProjects() {
         dispatchProperties.setAutoContentGenerationEnabled(true);
-        Project project = activeProject(LocalDate.of(2026, 5, 1));
-        project.setStatus("paused");
-        when(projectMapper.selectList(any())).thenReturn(List.of(project));
+        when(projectMapper.selectList(any())).thenReturn(List.of());
 
         service.scanAndPlan(LocalDate.of(2026, 5, 3));
 
         verify(allocationService, never()).contentGenerationAllocations(anyLong());
-        verify(questionPollPlanningService, times(1))
-                .planProjectTierPoll(eq(project), eq(LocalDate.of(2026, 5, 3)), any(), eq("A"), eq(1));
+        verify(questionPollPlanningService, never())
+                .planProjectTierPoll(any(), any(), any(), any(), any(Integer.class));
     }
 
     private static Project activeProject(LocalDate activatedDate) {

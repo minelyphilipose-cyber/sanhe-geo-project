@@ -43,7 +43,7 @@ public class DispatchPlannerService {
 
         List<Project> projects = projectMapper.selectList(
                 new LambdaQueryWrapper<Project>()
-                        .in(Project::getStatus, List.of("active", "paused"))
+                        .eq(Project::getStatus, "active")
                         .isNotNull(Project::getActivatedAt)
         );
 
