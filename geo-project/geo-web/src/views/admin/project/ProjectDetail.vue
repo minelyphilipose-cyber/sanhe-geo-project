@@ -156,7 +156,7 @@
       </el-collapse>
     </el-card>
 
-    <el-card v-if="project" v-loading="selfMediaScheduleLoading" class="admin-rich-card">
+    <el-card v-if="project && canViewSelfMediaSchedulePanel" v-loading="selfMediaScheduleLoading" class="admin-rich-card">
       <template #header>
         <div class="section-header">
           <div class="auto-schedule-title">
@@ -773,7 +773,7 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openKeywordQuestions(row)">查看编辑</el-button>
+            <el-button link type="primary" @click="openKeywordQuestions(row)">{{ canEditKeywordQuestion ? '查看编辑' : '查看' }}</el-button>
             <el-button v-if="canDeleteKeywordGroup" link type="danger" @click="removeKeywordGroup(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -783,14 +783,14 @@
     <el-card v-if="project" class="admin-rich-card">
       <template #header><span>内容策略配置</span></template>
       <el-descriptions :column="2" border>
-        <el-descriptions-item label="核心关键词">{{ project.coreKeywords || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="目标区域词">{{ joinArray(project.targetRegions) }}</el-descriptions-item>
-        <el-descriptions-item label="目标受众">{{ project.targetAudience || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="内容调性">{{ project.contentTone || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="优先写作角度">{{ joinArray(project.preferredAngles) }}</el-descriptions-item>
-        <el-descriptions-item label="项目定制表述" :span="2">{{ project.customStatement || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="补充禁用词" :span="2">{{ joinArray(project.extraForbiddenPhrases) }}</el-descriptions-item>
-        <el-descriptions-item label="内容备注" :span="2">{{ project.contentNote || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="核心关键词">{{ contentStrategyDisplay.coreKeywords }}</el-descriptions-item>
+        <el-descriptions-item label="目标区域词">{{ contentStrategyDisplay.targetRegions }}</el-descriptions-item>
+        <el-descriptions-item label="目标受众">{{ contentStrategyDisplay.targetAudience }}</el-descriptions-item>
+        <el-descriptions-item label="内容调性">{{ contentStrategyDisplay.contentTone }}</el-descriptions-item>
+        <el-descriptions-item label="优先写作角度">{{ contentStrategyDisplay.preferredAngles }}</el-descriptions-item>
+        <el-descriptions-item label="项目定制表述" :span="2">{{ contentStrategyDisplay.customStatement }}</el-descriptions-item>
+        <el-descriptions-item label="补充禁用词" :span="2">{{ contentStrategyDisplay.extraForbiddenPhrases }}</el-descriptions-item>
+        <el-descriptions-item label="内容备注" :span="2">{{ contentStrategyDisplay.contentNote }}</el-descriptions-item>
       </el-descriptions>
     </el-card>
 
@@ -806,7 +806,15 @@
       </el-form>
     </el-card>
 
-    <el-drawer v-model="questionDrawerVisible" size="88%" title="拓词组问题明细">
+    <el-drawer v-model="questionDrawerVisible" size="88%">
+      <template #header>
+        <div class="drawer-header">
+          <span>拓词组问题明细</span>
+          <el-button type="primary" plain :icon="Download" :loading="questionExporting" @click="exportKeywordQuestions">
+              问题词导出
+          </el-button>
+        </div>
+      </template>
       <div class="space-y-3">
         <div class="flex items-center justify-between">
           <el-radio-group v-model="questionTier" @change="loadKeywordQuestions(1)">
@@ -835,7 +843,7 @@
           <el-table-column prop="totalScore" label="总分" width="80" />
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" :disabled="!canPrepareProject" @click="openQuestionEdit(row)">编辑</el-button>
+              <el-button link type="primary" :disabled="!canEditKeywordQuestion" @click="openQuestionEdit(row)">编辑</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -985,6 +993,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import MarkdownIt from 'markdown-it'
@@ -1063,12 +1072,21 @@ const KEYWORD_GROUP_TYPE_LABELS: Record<string, string> = {
   industry: '行业词(历史)',
   competitor: '竞品词(历史)',
 }
-const canActivateProject = computed(() => userStore.hasPermission('project.start'))
-const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
-const canManageMobileCompetitors = computed(() => userStore.hasPermission('project.competitor.manage'))
+const CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
+  let value = index
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1
+  }
+  return value >>> 0
+})
+const canActivateProject = computed(() => !userStore.isSales && userStore.hasPermission('project.start'))
+const canUpdateProject = computed(() => !userStore.isSales && userStore.hasPermission('project.update'))
+const canManageMobileCompetitors = computed(() => !userStore.isSales && userStore.hasPermission('project.competitor.manage'))
+const canViewSelfMediaSchedulePanel = computed(() => !userStore.isSales)
 const canPrepareProject = computed(() => project.value?.status === 'pending_start' || project.value?.status === 'paused')
-const canCreateKeywordGroup = computed(() => !!project.value && userStore.hasPermission('keyword_group.write'))
-const canDeleteKeywordGroup = computed(() => !!project.value && canPrepareProject.value && userStore.hasPermission('keyword_group.write'))
+const canCreateKeywordGroup = computed(() => !!project.value && !userStore.isSales && userStore.hasPermission('keyword_group.write'))
+const canDeleteKeywordGroup = computed(() => !!project.value && !userStore.isSales && canPrepareProject.value && userStore.hasPermission('keyword_group.write'))
+const canEditKeywordQuestion = computed(() => !!project.value && !userStore.isSales && canPrepareProject.value && userStore.hasPermission('keyword_group.write'))
 const projectId = Number(route.params.id)
 const hasValidId = Number.isFinite(projectId) && projectId > 0
 
@@ -1082,6 +1100,7 @@ const channelEditVisible = ref(false)
 const requirementEditVisible = ref(false)
 const questionLoading = ref(false)
 const questionSaving = ref(false)
+const questionExporting = ref(false)
 const channelQuotaLoading = ref(false)
 const channelSaving = ref(false)
 const requirementSaving = ref(false)
@@ -1140,10 +1159,10 @@ const requirementForm = reactive({
 const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 const activationConfirmed = ref(false)
-const showActivationGuide = computed(() => route.query.activate === '1' && canPrepareProject.value)
+const showActivationGuide = computed(() => route.query.activate === '1' && canPrepareProject.value && canActivateProject.value)
 const canImportKeywordGroup = computed(() => {
   const current = project.value
-  return !!current && canPrepareProject.value && (current.selectedKeywordGroupCount || 0) === 0
+  return !!current && canEditKeywordQuestion.value && (current.selectedKeywordGroupCount || 0) === 0
 })
 const keywordSummary = computed(() => {
   const current = project.value
@@ -1450,6 +1469,24 @@ const projectBasicInfoItems = computed(() => {
   ]
 })
 
+const contentStrategyDisplay = computed(() => {
+  const current = project.value
+  const keywordGroupWords = collectKeywordGroupWords(current?.selectedKeywordGroups || [])
+  const projectRegions = joinArray(current?.targetRegions)
+  const fallbackRegions = keywordGroupWords.area.length ? keywordGroupWords.area.join('、') : regionText(current)
+  const fallbackCoreKeywords = keywordGroupWords.core.length ? keywordGroupWords.core.join('、') : ''
+  return {
+    coreKeywords: displayText(current?.coreKeywords, fallbackCoreKeywords),
+    targetRegions: projectRegions !== '-' ? projectRegions : fallbackRegions,
+    targetAudience: displayText(current?.targetAudience),
+    contentTone: displayText(current?.contentTone),
+    preferredAngles: displayArray(current?.preferredAngles, keywordGroupWords.angles),
+    customStatement: displayText(current?.customStatement),
+    extraForbiddenPhrases: displayArray(current?.extraForbiddenPhrases),
+    contentNote: displayText(current?.contentNote),
+  }
+})
+
 function regionText(p?: Project | null) {
   if (!p) return '-'
   return regionDisplayFromPayload(p) || '-'
@@ -1522,6 +1559,54 @@ function joinArray(value?: string | string[] | null) {
   } catch {
     return value
   }
+}
+
+function displayText(value?: string | null, fallback = '') {
+  const text = String(value || '').trim()
+  if (text) return text
+  const fallbackText = fallback.trim()
+  return fallbackText || '-'
+}
+
+function displayArray(value?: string | string[] | null, fallback: string[] = []) {
+  const text = joinArray(value)
+  if (text !== '-') return text
+  return fallback.length ? fallback.join('、') : '-'
+}
+
+function collectKeywordGroupWords(groups: KeywordGroup[]) {
+  const area: string[] = []
+  const core: string[] = []
+  const angles: string[] = []
+  for (const group of groups) {
+    const columns = group.columns
+    if (!columns) continue
+    appendWordTexts(area, columns.areaWords)
+    appendWordTexts(area, columns.regionWords)
+    appendWordTexts(core, columns.coreWords)
+    appendWordTexts(core, columns.coreWordsA)
+    appendWordTexts(core, columns.coreWordsB)
+    appendWordTexts(angles, columns.prefixWords)
+    appendWordTexts(angles, columns.industryWords)
+    appendWordTexts(angles, columns.suffixWords)
+    appendWordTexts(angles, columns.compareWords)
+  }
+  return {
+    area: uniqueWords(area),
+    core: uniqueWords(core),
+    angles: uniqueWords(angles),
+  }
+}
+
+function appendWordTexts(target: string[], words?: Array<{ wordText?: string | null }> | null) {
+  for (const word of words || []) {
+    const text = String(word?.wordText || '').trim()
+    if (text) target.push(text)
+  }
+}
+
+function uniqueWords(words: string[]) {
+  return words.filter((word, index, arr) => arr.indexOf(word) === index)
 }
 
 function isArticleGenerationChannel(channelCode?: string | null) {
@@ -1976,7 +2061,10 @@ async function loadSelfMediaAutomationOverview() {
 
 async function loadSelfMediaSchedulePanel() {
   const current = project.value
-  if (!current) return
+  if (!current || !canViewSelfMediaSchedulePanel.value) {
+    resetSelfMediaSchedulePanel()
+    return
+  }
   selfMediaScheduleLoading.value = true
   try {
     const [configRes, accountsRes] = await Promise.all([
@@ -1990,6 +2078,16 @@ async function loadSelfMediaSchedulePanel() {
   } finally {
     selfMediaScheduleLoading.value = false
   }
+}
+
+function resetSelfMediaSchedulePanel() {
+  applySelfMediaScheduleConfig(null)
+  selfMediaAccounts.value = []
+  selfMediaScheduleBatch.value = null
+  selfMediaBatchDetail.value = null
+  selfMediaPreview.value = null
+  selfMediaCalendarStatus.value = null
+  selfMediaAutomationOverview.value = null
 }
 
 async function saveSelfMediaScheduleConfig() {
@@ -2421,7 +2519,273 @@ async function loadKeywordQuestions(page = questionPage.current) {
   }
 }
 
+async function exportKeywordQuestions() {
+  if (!currentKeywordGroup.value) return
+  questionExporting.value = true
+  try {
+    const records = await fetchAllKeywordQuestionsForExport()
+    if (!records.length) {
+      ElMessage.warning('暂无可导出的问题词')
+      return
+    }
+    const blob = toQuestionXlsx(records)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = questionExportFileName()
+    link.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success(`已导出 ${records.length} 条问题词`)
+  } finally {
+    questionExporting.value = false
+  }
+}
+
+async function fetchAllKeywordQuestionsForExport() {
+  if (!currentKeywordGroup.value) return []
+  const pageSize = 1000
+  const params = {
+    current: 1,
+    size: pageSize,
+    tier: questionTier.value,
+  }
+  const firstResponse = await getKeywordGroupQuestions(currentKeywordGroup.value.id, params)
+  const firstPage = firstResponse.data.data
+  const records = [...(firstPage.records || [])]
+  const total = Number(firstPage.total || records.length)
+  const effectiveSize = Number(firstPage.size || pageSize)
+  const pageCount = Math.ceil(total / Math.max(effectiveSize, 1))
+
+  for (let current = 2; current <= pageCount; current += 1) {
+    const { data } = await getKeywordGroupQuestions(currentKeywordGroup.value.id, {
+      ...params,
+      current,
+      size: effectiveSize,
+    })
+    const pageRecords = data.data.records || []
+    records.push(...pageRecords)
+    if (!pageRecords.length) break
+  }
+  return records
+}
+
+function toQuestionXlsx(records: KeywordGroupQuestion[]) {
+  const worksheetRows = questionExportRows(records)
+  const sheetXml = buildWorksheetXml(worksheetRows)
+  const files = [
+    {
+      name: '[Content_Types].xml',
+      content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        + '<Default Extension="xml" ContentType="application/xml"/>'
+        + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        + '</Types>',
+    },
+    {
+      name: '_rels/.rels',
+      content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        + '</Relationships>',
+    },
+    {
+      name: 'xl/workbook.xml',
+      content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        + '<sheets><sheet name="问题词" sheetId="1" r:id="rId1"/></sheets>'
+        + '</workbook>',
+    },
+    {
+      name: 'xl/_rels/workbook.xml.rels',
+      content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        + '</Relationships>',
+    },
+    {
+      name: 'xl/styles.xml',
+      content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        + '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+        + '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
+        + '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        + '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
+        + '</styleSheet>',
+    },
+    {
+      name: 'xl/worksheets/sheet1.xml',
+      content: sheetXml,
+    },
+  ]
+  const zipBytes = createZip(files)
+  return new Blob([zipBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+}
+
+function questionExportRows(records: KeywordGroupQuestion[]) {
+  const headers = ['ID', '问题文本', '场景', '分级', '优先级', '商业价值', '成交距离', '品牌绑定', '地域行业', '一期可达', '总分', '生成文章备注']
+  const rows = records.map((row) => [
+    row.questionCode,
+    row.questionText,
+    sceneLabel(row.sceneCode),
+    row.questionTier,
+    priorityLabel(row.priority),
+    row.scoreRelevance,
+    row.scoreIntent,
+    row.scoreCompetition,
+    row.scoreConversion,
+    row.scoreCoverage,
+    row.totalScore,
+    row.articleGenerationNote,
+  ])
+  return [headers, ...rows]
+}
+
+function buildWorksheetXml(rows: unknown[][]) {
+  const columnWidths = [14, 56, 14, 10, 10, 12, 12, 12, 12, 12, 10, 44]
+  const colsXml = columnWidths
+    .map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`)
+    .join('')
+  const rowsXml = rows
+    .map((row, rowIndex) => {
+      const rowNumber = rowIndex + 1
+      const cells = row
+        .map((value, colIndex) => {
+          const ref = `${columnName(colIndex + 1)}${rowNumber}`
+          const style = rowIndex === 0 ? ' s="1"' : ''
+          return `<c r="${ref}" t="inlineStr"${style}><is><t xml:space="preserve">${escapeXml(cellText(value))}</t></is></c>`
+        })
+        .join('')
+      return `<row r="${rowNumber}">${cells}</row>`
+    })
+    .join('')
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    + `<cols>${colsXml}</cols>`
+    + `<sheetData>${rowsXml}</sheetData>`
+    + '</worksheet>'
+}
+
+function cellText(value: unknown) {
+  return value === null || value === undefined ? '' : String(value)
+}
+
+function escapeXml(value: string) {
+  return value
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function columnName(index: number) {
+  let value = index
+  let name = ''
+  while (value > 0) {
+    value -= 1
+    name = String.fromCharCode(65 + (value % 26)) + name
+    value = Math.floor(value / 26)
+  }
+  return name
+}
+
+function createZip(files: Array<{ name: string; content: string }>) {
+  const encoder = new TextEncoder()
+  const chunks: Uint8Array[] = []
+  const centralChunks: Uint8Array[] = []
+  let offset = 0
+
+  for (const file of files) {
+    const nameBytes = encoder.encode(file.name)
+    const contentBytes = encoder.encode(file.content)
+    const crc = crc32(contentBytes)
+    const localHeader = new Uint8Array(30 + nameBytes.length)
+    writeUint32(localHeader, 0, 0x04034b50)
+    writeUint16(localHeader, 4, 20)
+    writeUint16(localHeader, 6, 0x0800)
+    writeUint16(localHeader, 8, 0)
+    writeUint32(localHeader, 14, crc)
+    writeUint32(localHeader, 18, contentBytes.length)
+    writeUint32(localHeader, 22, contentBytes.length)
+    writeUint16(localHeader, 26, nameBytes.length)
+    localHeader.set(nameBytes, 30)
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length)
+    writeUint32(centralHeader, 0, 0x02014b50)
+    writeUint16(centralHeader, 4, 20)
+    writeUint16(centralHeader, 6, 20)
+    writeUint16(centralHeader, 8, 0x0800)
+    writeUint16(centralHeader, 10, 0)
+    writeUint32(centralHeader, 16, crc)
+    writeUint32(centralHeader, 20, contentBytes.length)
+    writeUint32(centralHeader, 24, contentBytes.length)
+    writeUint16(centralHeader, 28, nameBytes.length)
+    writeUint32(centralHeader, 42, offset)
+    centralHeader.set(nameBytes, 46)
+
+    chunks.push(localHeader, contentBytes)
+    centralChunks.push(centralHeader)
+    offset += localHeader.length + contentBytes.length
+  }
+
+  const centralSize = centralChunks.reduce((sum, chunk) => sum + chunk.length, 0)
+  const endHeader = new Uint8Array(22)
+  writeUint32(endHeader, 0, 0x06054b50)
+  writeUint16(endHeader, 8, files.length)
+  writeUint16(endHeader, 10, files.length)
+  writeUint32(endHeader, 12, centralSize)
+  writeUint32(endHeader, 16, offset)
+  return concatBytes([...chunks, ...centralChunks, endHeader])
+}
+
+function writeUint16(target: Uint8Array, offset: number, value: number) {
+  target[offset] = value & 0xff
+  target[offset + 1] = (value >>> 8) & 0xff
+}
+
+function writeUint32(target: Uint8Array, offset: number, value: number) {
+  target[offset] = value & 0xff
+  target[offset + 1] = (value >>> 8) & 0xff
+  target[offset + 2] = (value >>> 16) & 0xff
+  target[offset + 3] = (value >>> 24) & 0xff
+}
+
+function concatBytes(chunks: Uint8Array[]) {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+  const result = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    result.set(chunk, offset)
+    offset += chunk.length
+  }
+  return result
+}
+
+function crc32(bytes: Uint8Array) {
+  let crc = 0xffffffff
+  for (const byte of bytes) {
+    crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ byte) & 0xff]
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+function questionExportFileName() {
+  const groupName = sanitizeFileName(currentKeywordGroup.value?.name || '拓词组')
+  const tier = questionTier.value === 'all' ? '全部' : `${questionTier.value}类`
+  return `${groupName}-问题词-${tier}.xlsx`
+}
+
+function sanitizeFileName(value: string) {
+  return value.trim().replace(/[\\/:*?"<>|]/g, '_') || '拓词组'
+}
+
 function openQuestionEdit(row: KeywordGroupQuestion) {
+  if (!canEditKeywordQuestion.value) return
   currentQuestionId.value = row.id
   questionForm.questionText = row.questionText
   questionForm.sceneCode = row.sceneCode || 'brand'
@@ -2492,6 +2856,14 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-right: 32px;
+}
+
 .project-hero-kpis {
   gap: 12px;
 }
