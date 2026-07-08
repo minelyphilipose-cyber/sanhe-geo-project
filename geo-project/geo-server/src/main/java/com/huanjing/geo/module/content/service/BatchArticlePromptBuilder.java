@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import cn.hutool.json.JSONUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
@@ -132,6 +133,41 @@ public class BatchArticlePromptBuilder {
             "从一个具体场景或痛点切入",
             "从一个时间节点切入，例如决策前、签约前、开业前、首年"
     );
+    private static final List<String> SELF_MEDIA_TITLE_STRATEGIES = List.of(
+            "直接回答型：承接用户问题词，标题给出一个克制判断或结论，不套用固定疑问句",
+            "条件判断型：把强推荐意图改写为“在什么条件下更适合/需要谨慎”，突出适配边界",
+            "场景代入型：从人群、预算、阶段、地域或使用场景切入，让标题和正文角度同步变化",
+            "误区澄清型：围绕一个常见误解或错误选择习惯展开，但不制造焦虑",
+            "核验线索型：突出公开信息、资质、流程、合同、材料或服务边界等可验证线索",
+            "对比维度型：比较路线、类型或方案的差异，不写品牌排名或优劣榜",
+            "流程阶段型：从决策前、了解中、确认前、使用后等阶段切入",
+            "成本变量型：解释投入、时间、维护、沟通成本等变量，不写报价或优惠",
+            "风险边界型：说明不适合、需要谨慎、需要进一步核验的情况",
+            "问题整合型：用一个自然问题覆盖用户搜索意图，但避免复用“怎么选/哪家好”的固定句式"
+    );
+    private static final List<String> SELF_MEDIA_STRUCTURE_STRATEGIES = List.of(
+            "判断清单型：围绕3-5个判断维度展开，不做品牌排名",
+            "误区澄清型：每节先说明误区，再给正确核验方式",
+            "流程解释型：按决策前、了解中、确认前的顺序解释",
+            "公开信息核验型：围绕主体信息、服务范围、资质/材料、案例边界等公开信息说明",
+            "FAQ整合型：用多个可独立摘取的问答段落覆盖搜索问题",
+            "对比维度型：比较类型、路线或方案，不点名贬低竞品",
+            "场景建议型：按不同人群/需求/预算说明适配与不适配"
+    );
+    private static final String SELF_MEDIA_PLATFORM_POLICY = """
+            # 自媒体平台监管与 GEO 平衡规则
+
+            以下规则只用于自媒体平台文章，优先级高于模板里的推荐、评测、种草、避坑等表达：
+            1. 标题必须回应用户问题或问题词，但遇到“哪家好、推荐、排名、最好、靠谱机构”等强推荐意图时，只做意图降级：改为条件判断、场景适配、公开信息核验、误区澄清、路线对比或风险边界，不能写成榜单、硬推荐或导购标题，也不要把所有标题都写成“怎么选/怎么判断/注意什么”。
+            2. 正文以解释型、科普型、判断型内容为主，不写营销文、招商文、转化页、口播稿、促销文案或品牌软广。
+            3. 品牌只作为可选例子或公开信息说明出现，不作为唯一结论、首要推荐、背书对象或案例主角；除品牌专门场景外，品牌名全文不超过 1 次。
+            4. 推荐型模板可以写“适合哪类需求 / 不适合哪类需求”，但不能写“首选、最推荐、闭眼选、强烈安利、必看、宝藏、天花板、性价比之王”等平台高风险表达。
+            5. 不输出联系方式、私信、加微信、预约、咨询、报价、优惠、套餐、名额、限时、到店、领取资料等转化表达；{{contactBlock}} 为空时不出现任何导流信息。
+            6. 为适配大模型抓取，每篇至少包含 2-3 个可独立摘取的段落：段落内同时具备问题、判断和依据；但不要每篇固定同一套小标题。
+            7. 模板原有的标题示例、标题括号说明和“XX类问句”只作为语义方向参考，不得作为固定标题句式套用；若与本规则冲突，以本规则为准。
+            8. 标题策略：{{titleStrategy}}。该策略只限定标题意图，不限定标题句式；必须结合 {{recentTitles}} 避免复用历史标题结构。
+            9. 结构策略：{{structureStrategy}}。这是本篇优先采用的结构方向，不是固定模板；可以按平台调性自然调整。
+            """;
     private static final List<String> MARKETING_WORDS = List.of(
             "领先", "专业", "优质", "卓越", "知名", "一流", "高端", "值得信赖",
             "深受认可", "行业标杆", "首选", "强大", "全面", "高效"
@@ -149,6 +185,8 @@ public class BatchArticlePromptBuilder {
     public PromptBuildResult build(PromptBuildInput input, String contactBlock) {
         String contentAngle = resolveContentAngle(input);
         String audiencePerspective = resolveAudiencePerspective(input.articleIndexInBatch());
+        String titleStrategy = resolveSelfMediaTitleStrategy(input);
+        String structureStrategy = resolveSelfMediaStructureStrategy(input);
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
         List<String> recentTitles = resolveHistoryTitles(input.sourceBrandId(), input.project().getId(), 10);
         String userPrompt = buildUserPrompt(input, contentAngle, audiencePerspective, businessFocus, recentTitles);
@@ -159,6 +197,8 @@ public class BatchArticlePromptBuilder {
                 withGlobalRules(SYSTEM_PROMPT, input.forbiddenPhrases(), input),
                 input,
                 contentAngle,
+                titleStrategy,
+                structureStrategy,
                 recentTitles,
                 resolvedContactBlock
         );
@@ -169,6 +209,8 @@ public class BatchArticlePromptBuilder {
         promptSnapshot.put("userPrompt", userPrompt);
         promptSnapshot.put("contentAngle", contentAngle);
         promptSnapshot.put("audiencePerspective", audiencePerspective);
+        promptSnapshot.put("titleStrategy", titleStrategy);
+        promptSnapshot.put("structureStrategy", structureStrategy);
         promptSnapshot.put("recentTitles", recentTitles);
         promptSnapshot.put("contactBlock", resolvedContactBlock);
         promptSnapshot.put("titleGuide", input.titleGuide());
@@ -196,6 +238,8 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("length", input.length());
         inputSnapshot.put("extraPrompt", input.extraPrompt());
         inputSnapshot.put("businessFocus", businessFocus);
+        inputSnapshot.put("titleStrategy", titleStrategy);
+        inputSnapshot.put("structureStrategy", structureStrategy);
         inputSnapshot.put("contactBlock", resolvedContactBlock);
         inputSnapshot.put("titleGuide", input.titleGuide());
         inputSnapshot.put("perspectiveCode", input.perspectiveCode());
@@ -218,6 +262,8 @@ public class BatchArticlePromptBuilder {
                                                ArticlePromptTemplateVersion version) {
         String contentAngle = resolveContentAngle(input);
         String audiencePerspective = resolveAudiencePerspective(input.articleIndexInBatch());
+        String titleStrategy = resolveSelfMediaTitleStrategy(input);
+        String structureStrategy = resolveSelfMediaStructureStrategy(input);
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
         List<String> recentTitles = resolveHistoryTitles(input.sourceBrandId(), input.project().getId(), 10);
         String contactBlock = buildContactBlock(template, input.brand());
@@ -227,11 +273,13 @@ public class BatchArticlePromptBuilder {
                 withGlobalRules(templateSystemPrompt, input.forbiddenPhrases(), input),
                 input,
                 contentAngle,
+                titleStrategy,
+                structureStrategy,
                 recentTitles,
                 contactBlock
         );
         String userPrompt = renderTemplate(version.getUserPromptTemplate(), input, template, contentAngle,
-                audiencePerspective, businessFocus, recentTitles, contactBlock, brandFacts);
+                audiencePerspective, titleStrategy, structureStrategy, businessFocus, recentTitles, contactBlock, brandFacts);
         userPrompt = withTitleGuideInstruction(userPrompt, input.titleGuide());
 
         Map<String, Object> promptSnapshot = new LinkedHashMap<>();
@@ -243,6 +291,8 @@ public class BatchArticlePromptBuilder {
         promptSnapshot.put("userPrompt", userPrompt);
         promptSnapshot.put("contentAngle", contentAngle);
         promptSnapshot.put("audiencePerspective", audiencePerspective);
+        promptSnapshot.put("titleStrategy", titleStrategy);
+        promptSnapshot.put("structureStrategy", structureStrategy);
         promptSnapshot.put("recentTitles", recentTitles);
         promptSnapshot.put("contactDisclosureMode", template.getContactDisclosureMode());
         promptSnapshot.put("contactBlock", contactBlock);
@@ -281,6 +331,8 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("length", input.length());
         inputSnapshot.put("extraPrompt", input.extraPrompt());
         inputSnapshot.put("businessFocus", businessFocus);
+        inputSnapshot.put("titleStrategy", titleStrategy);
+        inputSnapshot.put("structureStrategy", structureStrategy);
         inputSnapshot.put("contactDisclosureMode", template.getContactDisclosureMode());
         inputSnapshot.put("contactBlock", contactBlock);
         inputSnapshot.put("brandFacts", brandFacts);
@@ -351,6 +403,8 @@ public class BatchArticlePromptBuilder {
         appendLine(sb, "文章类型", label(ArticlePromptChannels.ARTICLE_TYPE_LABELS, input.articleType(), input.articleType()));
         appendLine(sb, "内容角度", contentAngle);
         appendLine(sb, "读者视角", audiencePerspective);
+        appendLine(sb, "标题策略", resolveSelfMediaTitleStrategy(input));
+        appendLine(sb, "结构策略", resolveSelfMediaStructureStrategy(input));
         appendLine(sb, "平台风格", label(STYLE_LABELS, input.contentStyle(), input.contentStyle()));
         appendLine(sb, "篇幅参考", label(LENGTH_LABELS, input.length(), "中等篇幅，约 1500 字"));
         appendLine(sb, "补充要求", input.extraPrompt());
@@ -430,6 +484,8 @@ public class BatchArticlePromptBuilder {
                                   ArticlePromptTemplate template,
                                   String contentAngle,
                                   String audiencePerspective,
+                                  String titleStrategy,
+                                  String structureStrategy,
                                   String businessFocus,
                                   List<String> recentTitles,
                                   String contactBlock,
@@ -451,6 +507,9 @@ public class BatchArticlePromptBuilder {
         values.put("targetAudience", trimToDash(input.project().getTargetAudience()));
         values.put("contentAngle", contentAngle);
         values.put("audiencePerspective", audiencePerspective);
+        values.put("titleStrategy", titleStrategy == null ? "" : titleStrategy);
+        values.put("structureStrategy", structureStrategy == null ? "" : structureStrategy);
+        values.put("perspectivePolicy", resolvePerspectivePolicy(input, template));
         values.put("businessFocus", businessFocus == null ? "-" : businessFocus);
         values.put("recentTitles", recentTitles.isEmpty() ? "-" : String.join("；", recentTitles));
         values.put("contactBlock", contactBlock == null ? "" : contactBlock);
@@ -497,10 +556,13 @@ public class BatchArticlePromptBuilder {
     }
 
     private String withGlobalRules(String systemPrompt, List<String> forbiddenPhrases, PromptBuildInput input) {
-        String globalRules = isSelfMediaContentStyle(input.contentStyle())
+        boolean selfMedia = isSelfMediaContentStyle(input.contentStyle());
+        String globalRules = selfMedia
                 ? GLOBAL_TRUTHFULNESS_RULES.replace(
                 "生成标题时必须结合 {{topic}}、{{contentAngle}}、{{recentTitles}} 做差异化表达。",
-                "生成标题时必须结合 {{topic}}、{{recentTitles}} 做差异化表达。")
+                "生成标题时必须结合 {{topic}}、{{recentTitles}}、{{titleStrategy}} 做差异化表达。")
+                + "\n\n"
+                + SELF_MEDIA_PLATFORM_POLICY
                 : GLOBAL_TRUTHFULNESS_RULES;
         return globalRules
                 + "\n\n# 禁用表达\n\n"
@@ -512,12 +574,16 @@ public class BatchArticlePromptBuilder {
     private String resolveGlobalRuleVariables(String prompt,
                                               PromptBuildInput input,
                                               String contentAngle,
+                                              String titleStrategy,
+                                              String structureStrategy,
                                               List<String> recentTitles,
                                               String contactBlock) {
         return prompt
                 .replace("{{contactBlock}}", contactBlock == null ? "" : contactBlock)
                 .replace("{{topic}}", trimToDash(input.topic()))
                 .replace("{{contentAngle}}", contentAngle == null ? "" : contentAngle)
+                .replace("{{titleStrategy}}", titleStrategy == null ? "" : titleStrategy)
+                .replace("{{structureStrategy}}", structureStrategy == null ? "" : structureStrategy)
                 .replace("{{recentTitles}}", recentTitles == null || recentTitles.isEmpty()
                         ? ""
                         : String.join("；", recentTitles));
@@ -688,6 +754,38 @@ public class BatchArticlePromptBuilder {
 
     private String resolveContentAngle(PromptBuildInput input) {
         return isSelfMediaContentStyle(input.contentStyle()) ? null : resolveContentAngle(input.articleIndexInBatch());
+    }
+
+    private String resolveSelfMediaTitleStrategy(PromptBuildInput input) {
+        if (!isSelfMediaContentStyle(input.contentStyle())) {
+            return null;
+        }
+        return SELF_MEDIA_TITLE_STRATEGIES.get(Math.floorMod(input.articleIndexInBatch() - 1, SELF_MEDIA_TITLE_STRATEGIES.size()));
+    }
+
+    private String resolveSelfMediaStructureStrategy(PromptBuildInput input) {
+        if (!isSelfMediaContentStyle(input.contentStyle())) {
+            return null;
+        }
+        int index = Math.floorDiv(Math.max(input.articleIndexInBatch() - 1, 0), SELF_MEDIA_TITLE_STRATEGIES.size());
+        return SELF_MEDIA_STRUCTURE_STRATEGIES.get(Math.floorMod(index, SELF_MEDIA_STRUCTURE_STRATEGIES.size()));
+    }
+
+    private String resolvePerspectivePolicy(PromptBuildInput input, ArticlePromptTemplate template) {
+        String perspective = TemplatePerspectiveCodes.normalize(input.perspectiveCode());
+        String templateName = template == null ? "" : trimToDash(template.getName());
+        String base = switch (perspective) {
+            case TemplatePerspectiveCodes.INDUSTRY_NEUTRAL ->
+                    "当前为第三方中立视角：不以品牌方、消费者或亲历者身份发声；品牌只能作为可选项或公开信息示例，不做倾向性推荐。";
+            case TemplatePerspectiveCodes.REVIEW_RECOMMEND ->
+                    "当前为第三方评测/推荐视角：可以给出适配判断，但必须同时写清不适合情形；推荐必须降级为维度判断，不能写榜单、背书或强转化。";
+            default ->
+                    "当前为第一/客户视角：可以更接近日常经验表达，但不得伪造亲测、成交、治疗、到店、使用前后对比或个人收益；品牌出现必须服务于信息核验。";
+        };
+        if (templateName.contains("特殊行业")) {
+            return base + " 特殊行业模板还必须遵守医疗/医美/口腔等强监管边界：不提供诊疗建议，不承诺效果，不写治疗对比、案例疗效、优惠套餐、预约导流。";
+        }
+        return base;
     }
 
     private boolean isSelfMediaContentStyle(String contentStyle) {
