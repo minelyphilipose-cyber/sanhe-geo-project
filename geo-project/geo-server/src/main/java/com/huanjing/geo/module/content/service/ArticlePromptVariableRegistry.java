@@ -125,6 +125,9 @@ public class ArticlePromptVariableRegistry {
         add(map, "contactBlock", "联系方式块", "后端根据联系方式披露模式拼接的文章结尾联系方式", VariableSource.RUNTIME, EmptyStrategy.KEEP_EMPTY, null, "如需了解更多信息,可访问官网。");
         add(map, "titleGuide", "标题参考", "标题生成参考", VariableSource.RUNTIME, EmptyStrategy.KEEP_EMPTY, null, "标题尽量包含地域和服务");
         add(map, "titleElements", "标题要素", "与标题参考同源的标题要素", VariableSource.RUNTIME, EmptyStrategy.KEEP_EMPTY, null, "地域、服务、疑问词");
+        add(map, "titleStrategy", "标题策略", "系统为自媒体文章生成的标题意图策略", VariableSource.RUNTIME, EmptyStrategy.KEEP_EMPTY, null, "条件判断型：突出适配边界");
+        add(map, "structureStrategy", "结构策略", "系统为自媒体文章生成的结构方向", VariableSource.RUNTIME, EmptyStrategy.KEEP_EMPTY, null, "公开信息核验型：围绕主体信息和资质材料展开");
+        add(map, "perspectivePolicy", "视角约束", "根据模板视角生成的写作边界说明", VariableSource.RUNTIME, EmptyStrategy.KEEP_EMPTY, null, "第三方中立视角：不以品牌方身份发声");
         add(map, "companyFullName", "公司全称", "项目公司名称或品牌名", VariableSource.PROJECT_BRAND, EmptyStrategy.SAFE_TEXT, "暂未提供公司全称", "示例科技有限公司");
         add(map, "brandShortName", "品牌简称", "品牌简称或品牌名", VariableSource.BRAND, EmptyStrategy.SAFE_TEXT, "该品牌", "示例品牌");
         add(map, "mainBusiness", "主营业务", "品牌主营业务", VariableSource.BRAND, EmptyStrategy.SAFE_TEXT, "暂未提供明确主营业务资料", "芳疗身体SPA、面部抗衰");
