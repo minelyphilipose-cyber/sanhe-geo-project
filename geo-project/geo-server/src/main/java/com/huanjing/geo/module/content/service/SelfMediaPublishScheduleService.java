@@ -66,6 +66,7 @@ import org.springframework.util.StringUtils;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
@@ -1524,6 +1525,9 @@ public class SelfMediaPublishScheduleService {
             if (operatorId != null && postponeLocalAgentClaimOutsideBusinessWindow(candidate, now)) {
                 continue;
             }
+            if (operatorId != null && rescheduleExpiredPlatformScheduleExecution(candidate, now)) {
+                continue;
+            }
             if (isExpiredPlatformScheduleExecution(candidate, now)) {
                 markExpiredPlatformScheduleExecution(candidate, now);
                 continue;
@@ -1695,7 +1699,36 @@ public class SelfMediaPublishScheduleService {
         if (nextWindow == null || !nextWindow.isAfter(now.withSecond(0).withNano(0))) {
             return false;
         }
-        row.setNextAttemptAt(nextBrandSafeAttemptAt(row.getBrandId(), nextWindow, row.getId()));
+        LocalDateTime nextAttemptAt = nextBrandSafeAttemptAt(row.getBrandId(), nextWindow, row.getId());
+        row.setNextAttemptAt(nextAttemptAt);
+        realignPlatformScheduledAtIfNeeded(row, nextAttemptAt, now);
+        row.setLockedUntil(null);
+        row.setUpdatedAt(now);
+        scheduleMapper.updateById(row);
+        return true;
+    }
+
+    private boolean rescheduleExpiredPlatformScheduleExecution(SelfMediaPublishSchedule row, LocalDateTime now) {
+        if (row == null || isManualQuickDispatchSchedule(row)) {
+            return false;
+        }
+        if (!isPlatformScheduleExecution(row)) {
+            return false;
+        }
+        LocalDateTime scheduledAt = effectivePlatformScheduledAt(row);
+        LocalDateTime currentAttemptAt = row.getNextAttemptAt();
+        if (scheduledAt == null || currentAttemptAt == null) {
+            return false;
+        }
+        if (!isPlatformScheduleTooClose(row.getScheduleStrategy(), currentAttemptAt, scheduledAt, row.getPlatform())) {
+            return false;
+        }
+
+        LocalDateTime nextAttemptAt = currentAttemptAt.isAfter(now)
+                ? currentAttemptAt
+                : nextBrandSafeAttemptAt(row.getBrandId(), now.plusSeconds(10).withNano(0), row.getId());
+        row.setNextAttemptAt(nextAttemptAt);
+        realignPlatformScheduledAtIfNeeded(row, nextAttemptAt, now);
         row.setLockedUntil(null);
         row.setUpdatedAt(now);
         scheduleMapper.updateById(row);
@@ -3319,17 +3352,58 @@ public class SelfMediaPublishScheduleService {
     }
 
     private boolean isExpiredPlatformScheduleExecution(SelfMediaPublishSchedule row, LocalDateTime now) {
+        if (!isPlatformScheduleExecution(row)) {
+            return false;
+        }
+        LocalDateTime platformScheduledAt = effectivePlatformScheduledAt(row);
+        int minRemainingMinutes = scheduleAdapterRouter.rules(row.getPlatform(), row.getScheduleStrategy()).minRemainingMinutes();
+        return platformScheduledAt != null
+                && minRemainingMinutes > 0
+                && !platformScheduledAt.isAfter(now.plusMinutes(minRemainingMinutes));
+    }
+
+    private boolean isPlatformScheduleExecution(SelfMediaPublishSchedule row) {
         if (row == null || !SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION.equals(row.getQueueKind())) {
             return false;
         }
         if (!SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalize(row.getScheduleStrategy()))) {
             return false;
         }
-        LocalDateTime platformScheduledAt = row.getPlatformScheduledAt();
-        int minRemainingMinutes = scheduleAdapterRouter.rules(row.getPlatform(), row.getScheduleStrategy()).minRemainingMinutes();
-        return platformScheduledAt != null
-                && minRemainingMinutes > 0
-                && !platformScheduledAt.isAfter(now.plusMinutes(minRemainingMinutes));
+        return !StringUtils.hasText(row.getPlatformScheduleId());
+    }
+
+    private LocalDateTime effectivePlatformScheduledAt(SelfMediaPublishSchedule row) {
+        if (row == null) {
+            return null;
+        }
+        return row.getPlatformScheduledAt() != null ? row.getPlatformScheduledAt() : row.getPlannedPublishAt();
+    }
+
+    private void realignPlatformScheduledAtIfNeeded(SelfMediaPublishSchedule row,
+                                                    LocalDateTime nextAttemptAt,
+                                                    LocalDateTime now) {
+        if (!isPlatformScheduleExecution(row) || nextAttemptAt == null) {
+            return;
+        }
+        LocalDateTime previousScheduledAt = effectivePlatformScheduledAt(row);
+        if (!isPlatformScheduleTooClose(row.getScheduleStrategy(), nextAttemptAt, previousScheduledAt, row.getPlatform())) {
+            return;
+        }
+        LocalDateTime plannedPublishAt = plannedPublishAtForQuickSchedule(
+                row.getPlatform(),
+                row.getScheduleStrategy(),
+                nextAttemptAt,
+                now
+        );
+        row.setPlannedPublishAt(plannedPublishAt);
+        row.setPlatformScheduledAt(plannedPublishAt);
+        if (previousScheduledAt != null) {
+            long driftSeconds = Duration.between(previousScheduledAt, plannedPublishAt).getSeconds();
+            if (driftSeconds <= Integer.MAX_VALUE && driftSeconds >= Integer.MIN_VALUE) {
+                row.setScheduleDriftSeconds((int) driftSeconds);
+            }
+        }
+        row.setScheduleDriftReason("AUTO_REALIGNED_AFTER_ATTEMPT_DELAY");
     }
 
     private boolean isPlatformScheduleTooClose(String strategy,

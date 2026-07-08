@@ -1529,6 +1529,99 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void claimNextTaskForLocalAgentRealignsPlatformScheduleWhenPostponedOutsideBusinessWindow() {
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(114L);
+        candidate.setBrandId(8L);
+        candidate.setPlatform("toutiao");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        candidate.setScheduleStrategy(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE);
+        candidate.setPlannedPublishAt(LocalDateTime.now().minusMinutes(30));
+        candidate.setPlatformScheduledAt(LocalDateTime.now().minusMinutes(30));
+        LocalDate nextBusinessDay = LocalDate.now().plusDays(1);
+        LocalDateTime nextWindowStart = nextBusinessDay.atTime(9, 15);
+        doReturn(List.of(new BusinessCalendarService.BusinessDay(
+                nextBusinessDay,
+                0,
+                "工作日",
+                1,
+                false,
+                List.of(new BusinessCalendarService.PublishWindow(
+                        "morning",
+                        LocalTime.of(9, 15),
+                        LocalTime.of(11, 30),
+                        LocalTime.of(9, 15)
+                ))
+        ))).when(businessCalendarService).publishDays(any(), eq(false));
+        when(scheduleMapper.selectDueQueueCandidatesForOperator(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(99L),
+                eq("toutiao"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
+        )).thenReturn(List.of(candidate));
+
+        var response = service.claimNextTaskForLocalAgent(99L, "toutiao", 10);
+
+        assertNull(response);
+        assertEquals(nextWindowStart, candidate.getNextAttemptAt());
+        assertEquals(nextWindowStart.plusMinutes(130), candidate.getPlannedPublishAt());
+        assertEquals(nextWindowStart.plusMinutes(130), candidate.getPlatformScheduledAt());
+        assertEquals("AUTO_REALIGNED_AFTER_ATTEMPT_DELAY", candidate.getScheduleDriftReason());
+        verify(scheduleMapper).updateById(candidate);
+        verify(scheduleMapper, never()).claimQueueSchedule(anyLong(), anyString(), anyList(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
+    void claimNextTaskForLocalAgentRealignsExpiredPlatformScheduleBeforeMarkingFailed() {
+        LocalDateTime now = LocalDateTime.now();
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(115L);
+        candidate.setBrandId(8L);
+        candidate.setPlatform("toutiao");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        candidate.setScheduleStrategy(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE);
+        candidate.setNextAttemptAt(now.minusMinutes(1));
+        candidate.setPlannedPublishAt(now.minusMinutes(10));
+        candidate.setPlatformScheduledAt(now.minusMinutes(10));
+        doReturn(List.of(new BusinessCalendarService.BusinessDay(
+                now.toLocalDate(),
+                0,
+                "工作日",
+                1,
+                false,
+                List.of(new BusinessCalendarService.PublishWindow(
+                        "current",
+                        LocalTime.of(0, 0),
+                        LocalTime.of(23, 59),
+                        now.toLocalTime()
+                ))
+        ))).when(businessCalendarService).publishDays(any(), eq(false));
+        when(scheduleMapper.selectDueQueueCandidatesForOperator(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(99L),
+                eq("toutiao"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
+        )).thenReturn(List.of(candidate));
+
+        var response = service.claimNextTaskForLocalAgent(99L, "toutiao", 10);
+
+        assertNull(response);
+        assertNotNull(candidate.getNextAttemptAt());
+        assertTrue(!candidate.getPlannedPublishAt().isBefore(candidate.getNextAttemptAt().plusMinutes(130)));
+        assertEquals(candidate.getPlannedPublishAt(), candidate.getPlatformScheduledAt());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PENDING, candidate.getStatus());
+        assertNull(candidate.getFailureCode());
+        verify(scheduleMapper).updateById(candidate);
+        verify(scheduleMapper, never()).claimQueueSchedule(anyLong(), anyString(), anyList(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
     void claimNextTaskForLocalAgentDoesNotPostponeManualQuickDispatchOutsideBusinessWindow() {
         SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         candidate.setId(110L);
