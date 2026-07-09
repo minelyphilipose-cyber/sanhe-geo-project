@@ -20,6 +20,7 @@ import type {
   DouyinAuthUrl,
   DouyinCapability,
   DouyinPlatformOptions,
+  WechatMenuConfig,
   WechatMpAuthUrl,
   WechatMpCapability,
 } from '@/types'
@@ -858,6 +859,10 @@ export function updateArticlePromptTemplateWeight(id: number, data: { weight: nu
   return request.patch<R<ArticlePromptTemplate>>(`/content/article-prompt-templates/${id}/weight`, data)
 }
 
+export function deleteArticlePromptTemplate(id: number) {
+  return request.delete<R<void>>(`/content/article-prompt-templates/${id}`)
+}
+
 export function createArticlePromptTemplateVersion(id: number, data: {
   systemPrompt: string
   userPromptTemplate: string
@@ -1434,6 +1439,14 @@ export function updateSelfMediaAccount(id: number, data: {
 
 export function checkSelfMediaAccountAuth(id: number) {
   return request.post<R<SelfMediaAccount>>(`/content/self-media-accounts/${id}/check-auth`)
+}
+
+export function getWechatMenuConfig(selfMediaAccountId: number) {
+  return request.get<R<WechatMenuConfig | null>>(`/admin/wechat/menu/accounts/${selfMediaAccountId}`)
+}
+
+export function initializeWechatMenu(selfMediaAccountId: number) {
+  return request.post<R<WechatMenuConfig>>(`/admin/wechat/menu/accounts/${selfMediaAccountId}/initialize`)
 }
 
 export function deleteSelfMediaAccount(id: number) {

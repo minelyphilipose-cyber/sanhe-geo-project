@@ -62,6 +62,7 @@ const publicPathPrefixes = [
   '/realtime-dashboard/',
   '/dashboard/',
   '/m/',
+  '/wechat/mp/',
   '/presale-print/',
   '/baseline-print/',
   ...(enablePresalePrintPoc ? ['/presale-print-poc/'] : []),
@@ -106,6 +107,12 @@ const router = createRouter({
       name: 'ProjectDashboard',
       component: () => import('@/views/share/ProjectDashboard.vue'),
       meta: { title: '项目统计看板' },
+    },
+    {
+      path: '/wechat/mp/:publicSlug/articles',
+      name: 'WechatMpArticles',
+      component: () => import('@/views/share/WechatMpArticles.vue'),
+      meta: { title: '往期文章' },
     },
     ...mobileDashboardRoutes,
     {

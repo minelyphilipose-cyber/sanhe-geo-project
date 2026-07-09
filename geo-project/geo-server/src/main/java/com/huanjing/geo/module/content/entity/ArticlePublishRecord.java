@@ -15,6 +15,8 @@ public class ArticlePublishRecord {
     private Long articleId;
     private Long distributionTaskId;
     private Long projectId;
+    private Long selfMediaAccountId;
+    private Long brandId;
     private String sourceType;
     private Long sourceId;
     private String targetKind;
@@ -25,6 +27,10 @@ public class ArticlePublishRecord {
     private String platformArticleId;
     private String platformPublishId;
     private String publishStatus;
+    private String title;
+    private String coverUrl;
+    private String digest;
+    private String rawResponse;
     private LocalDateTime publishedAt;
     private LocalDateTime verifiedAt;
     private LocalDateTime createdAt;

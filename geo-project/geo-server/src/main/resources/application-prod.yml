@@ -117,11 +117,16 @@ geo:
       live-verification-reason: ${WECHAT_LIVE_VERIFICATION_REASON:domain_icp_filing_pending}
       func-scope-strict-mode: ${WECHAT_FUNC_SCOPE_STRICT_MODE:true}
       required-draft-func-scopes: [1, 7, 11]
+      required-menu-func-scopes: [15]
       auth-type: ${WECHAT_AUTH_TYPE:1}
       backend-auth-callback-url: ${WECHAT_BACKEND_AUTH_CALLBACK_URL}
       frontend-callback-url: ${WECHAT_FRONTEND_CALLBACK_URL}
       component-event-url: ${WECHAT_COMPONENT_EVENT_URL}
       authorizer-message-url: ${WECHAT_AUTHORIZER_MESSAGE_URL}
+    menu:
+      web-base-url: ${WECHAT_MENU_WEB_BASE_URL:https://www.huanjingaigeo.com}
+      poc-allowed-brand-ids: ${WECHAT_MENU_POC_ALLOWED_BRAND_IDS:5}
+      poc-whitelist-enabled: ${WECHAT_MENU_POC_WHITELIST_ENABLED:true}
 
 presale:
   security:

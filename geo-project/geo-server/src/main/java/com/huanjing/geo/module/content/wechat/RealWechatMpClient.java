@@ -152,6 +152,25 @@ public class RealWechatMpClient implements WechatMpClient {
     }
 
     @Override
+    public MenuResult getMenu(String authorizerAccessToken) {
+        JsonNode root = get("/cgi-bin/menu/get", authorizerAccessToken);
+        return new MenuResult(root.toString());
+    }
+
+    @Override
+    public void createMenu(String authorizerAccessToken, String menuJson) {
+        try {
+            JsonNode body = objectMapper.readTree(menuJson == null ? "{}" : menuJson);
+            post("/cgi-bin/menu/create", authorizerAccessToken, body);
+        } catch (BizException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            log.error("WeChat MP create menu payload error", ex);
+            throw new BizException(500, "wechat mp menu payload invalid");
+        }
+    }
+
+    @Override
     public void sendCustomTextMessage(String authorizerAccessToken, String openid, String content) {
         ObjectNode text = objectMapper.createObjectNode();
         text.put("content", content);

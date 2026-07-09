@@ -5,10 +5,12 @@ import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.constant.SelfMediaAccountIdentity;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
+import com.huanjing.geo.module.content.service.WechatMenuConfigService;
 import com.huanjing.geo.module.content.vo.WechatMpAuthUrlVO;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -38,6 +40,9 @@ public class WechatMpAuthorizationService {
     private final StringRedisTemplate redisTemplate;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
+    @Autowired(required = false)
+    private WechatMenuConfigService wechatMenuConfigService;
+
     public WechatMpAuthUrlVO buildAuthUrl(Long brandId, Long redirectArticleId) {
         String componentAppid = require(properties.getComponentAppid(), "wechat component appid missing");
         String componentToken = componentAccessTokenService.getAccessToken();
@@ -65,6 +70,7 @@ public class WechatMpAuthorizationService {
         State decoded = consumeState(state);
         String componentAppid = require(properties.getComponentAppid(), "wechat component appid missing");
         SelfMediaAccount account = saveOrUpdateAuthorization(decoded.brandId(), componentAppid, authCode);
+        initializeMenuBestEffort(account);
         String status = "active".equals(account.getStatus()) ? "success" : "permission_missing";
         return redirectUrl(decoded.brandId(), decoded.redirectArticleId(), account.getPlatformAccountId(), account.getStatus(), status);
     }
@@ -127,6 +133,19 @@ public class WechatMpAuthorizationService {
         }
         authorizerTokenService.evictAccessToken(account);
         return account;
+    }
+
+    private void initializeMenuBestEffort(SelfMediaAccount account) {
+        try {
+            if (wechatMenuConfigService != null && account != null && account.getId() != null) {
+                wechatMenuConfigService.initializeMenuAfterAuthorization(account.getId());
+            }
+        } catch (Exception ex) {
+            log.warn("WeChat menu init after authorization failed accountId={} appid={}",
+                    account == null ? null : account.getId(),
+                    account == null ? null : account.getPlatformAccountId(),
+                    ex);
+        }
     }
 
     public String errorRedirect(String status) {

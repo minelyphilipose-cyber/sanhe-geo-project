@@ -30,11 +30,16 @@ geo:
       live-verification-reason: ${WECHAT_LIVE_VERIFICATION_REASON:domain_icp_filing_pending}
       func-scope-strict-mode: false
       required-draft-func-scopes: [1, 7, 11]
+      required-menu-func-scopes: [15]
       auth-type: 1
       backend-auth-callback-url: http://localhost:8080/api/wechat/open-platform/auth/callback
       frontend-callback-url: http://localhost:5173/admin/content/execution
       component-event-url: http://localhost:8080/api/wechat/open-platform/events
       authorizer-message-url: http://localhost:8080/api/wechat/open-platform/messages/$APPID
+    menu:
+      web-base-url: ${WECHAT_MENU_WEB_BASE_URL:http://localhost:5173}
+      poc-allowed-brand-ids: [5]
+      poc-whitelist-enabled: true
 
   douyin:
     client:

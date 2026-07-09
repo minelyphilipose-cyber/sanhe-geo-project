@@ -1507,6 +1507,23 @@ export interface SelfMediaAccount {
   cookieCredentialIdentityMessage?: string | null
 }
 
+export interface WechatMenuConfig {
+  id: number
+  selfMediaAccountId: number
+  brandId: number
+  authorizerAppid?: string | null
+  publicSlug?: string | null
+  menuName?: string | null
+  menuStatus?: string | null
+  listPageUrl?: string | null
+  backupMenuJson?: string | null
+  backupMenuAt?: string | null
+  lastSyncAt?: string | null
+  lastSyncError?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
 export interface SelfMediaPublishSchedule {
   id: number
   requestId?: number | null

@@ -51,6 +51,8 @@ public class ArticlePublishRecordCompensationService {
                                t.id AS distribution_task_id,
                                t.article_id,
                                t.project_id,
+                               t.self_media_account_id,
+                               COALESCE(sma.brand_id, ad.source_brand_id) AS brand_id,
                                t.target_kind,
                                CASE
                                  WHEN t.target_kind = 'brand_geo_site' THEN 'official_site'
@@ -76,10 +78,14 @@ public class ArticlePublishRecordCompensationService {
                                  WHEN t.target_kind IN ('brand_geo_site', 'industry_site', 'forum_site') THEN 'distributed'
                                  ELSE t.status
                                END AS publish_status,
+                               ad.title,
+                               ad.cover_image_url AS cover_url,
+                               t.response_payload AS raw_response,
                                COALESCE(t.published_at, t.finished_at, t.created_at) AS published_at,
                                COALESCE(t.published_at, t.finished_at, t.created_at) AS verified_at
                           FROM distribution_tasks t
                           LEFT JOIN self_media_account sma ON sma.id = t.self_media_account_id
+                          LEFT JOIN article_draft ad ON ad.id = t.article_id
                          LEFT JOIN article_publish_record r
                                  ON r.source_type = 'distribution_task'
                                 AND r.source_id = t.id
@@ -103,6 +109,8 @@ public class ArticlePublishRecordCompensationService {
                                s.distribution_task_id,
                                s.article_id,
                                d.project_id,
+                               s.self_media_account_id,
+                               s.brand_id,
                                'self_media' AS target_kind,
                                s.platform AS target_channel,
                                NULLIF(TRIM(s.platform_published_url), '') AS published_url,
@@ -116,18 +124,22 @@ public class ArticlePublishRecordCompensationService {
                                  WHEN NULLIF(TRIM(s.platform_publish_id), '') IS NOT NULL THEN 'self_media_publish_schedule.platform_publish_id'
                                  ELSE 'self_media_publish_schedule.status'
                                END AS url_source,
-                               NULL AS platform_article_id,
+                               d.platform_article_id,
                                s.platform_publish_id,
                                s.status AS publish_status,
+                               ad.title,
+                               ad.cover_image_url AS cover_url,
+                               d.response_payload AS raw_response,
                                COALESCE(s.published_confirmed_at, s.updated_at, s.created_at) AS published_at,
                                COALESCE(s.published_confirmed_at, s.updated_at, s.created_at) AS verified_at
                           FROM self_media_publish_schedule s
                           LEFT JOIN distribution_tasks d ON d.id = s.distribution_task_id
+                          LEFT JOIN article_draft ad ON ad.id = s.article_id
                           LEFT JOIN article_publish_record r
                                  ON r.source_type = 'self_media_publish_schedule'
                                 AND r.source_id = s.id
                          WHERE r.id IS NULL
-                           AND s.status = 'published_confirmed'
+                           AND s.status IN ('published_confirmed', 'published_url_pending')
                            AND (
                                  NULLIF(TRIM(s.platform_published_url), '') IS NOT NULL
                               OR NULLIF(TRIM(s.platform_publish_id), '') IS NOT NULL
@@ -142,6 +154,8 @@ public class ArticlePublishRecordCompensationService {
                 nullableLong(rs, "distribution_task_id"),
                 nullableLong(rs, "article_id"),
                 nullableLong(rs, "project_id"),
+                nullableLong(rs, "self_media_account_id"),
+                nullableLong(rs, "brand_id"),
                 rs.getString("target_kind"),
                 rs.getString("target_channel"),
                 rs.getString("published_url"),
@@ -150,6 +164,9 @@ public class ArticlePublishRecordCompensationService {
                 rs.getString("platform_article_id"),
                 rs.getString("platform_publish_id"),
                 rs.getString("publish_status"),
+                rs.getString("title"),
+                rs.getString("cover_url"),
+                rs.getString("raw_response"),
                 rs.getTimestamp("published_at") == null ? null : rs.getTimestamp("published_at").toLocalDateTime(),
                 rs.getTimestamp("verified_at") == null ? null : rs.getTimestamp("verified_at").toLocalDateTime()
         ), limit);
@@ -166,6 +183,8 @@ public class ArticlePublishRecordCompensationService {
                     article_id,
                     distribution_task_id,
                     project_id,
+                    self_media_account_id,
+                    brand_id,
                     source_type,
                     source_id,
                     target_kind,
@@ -176,13 +195,18 @@ public class ArticlePublishRecordCompensationService {
                     platform_article_id,
                     platform_publish_id,
                     publish_status,
+                    title,
+                    cover_url,
+                    raw_response,
                     published_at,
                     verified_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row.articleId(),
                 row.distributionTaskId(),
                 row.projectId(),
+                row.selfMediaAccountId(),
+                row.brandId(),
                 row.sourceType(),
                 row.sourceId(),
                 row.targetKind(),
@@ -193,6 +217,9 @@ public class ArticlePublishRecordCompensationService {
                 row.platformArticleId(),
                 row.platformPublishId(),
                 row.publishStatus(),
+                row.title(),
+                row.coverUrl(),
+                row.rawResponse(),
                 row.publishedAt(),
                 row.verifiedAt()
         );
@@ -203,6 +230,8 @@ public class ArticlePublishRecordCompensationService {
                                   Long distributionTaskId,
                                   Long articleId,
                                   Long projectId,
+                                  Long selfMediaAccountId,
+                                  Long brandId,
                                   String targetKind,
                                   String targetChannel,
                                   String publishedUrl,
@@ -211,6 +240,9 @@ public class ArticlePublishRecordCompensationService {
                                   String platformArticleId,
                                   String platformPublishId,
                                   String publishStatus,
+                                  String title,
+                                  String coverUrl,
+                                  String rawResponse,
                                   LocalDateTime publishedAt,
                                   LocalDateTime verifiedAt) {
     }

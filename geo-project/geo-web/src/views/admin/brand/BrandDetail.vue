@@ -98,7 +98,7 @@
       </div>
     </el-card>
 
-    <el-card class="admin-table-card">
+    <el-card v-if="canUpdateBrand" class="admin-table-card">
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -344,7 +344,7 @@
         type="info"
         show-icon
         :closable="false"
-        title="官方 API 账号通过平台授权保存凭证，不需要绑定指纹浏览器环境；授权有效时文章可直接发送到客户对应平台账号。"
+        title="官方 API 账号通过平台授权保存凭证；授权有效时文章可直接发送到客户对应平台账号。"
       />
       <el-table v-loading="selfMediaAccountsLoading" :data="officialApiSelfMediaAccounts" border empty-text="当前客户尚未授权官方 API 自媒体账号">
         <el-table-column prop="platform" label="平台" width="120">
@@ -367,6 +367,25 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="菜单承接" min-width="260">
+          <template #default="{ row }">
+            <div v-if="isWechatMpAccount(row)" class="wechat-menu-status">
+              <el-tag size="small" :type="wechatMenuStatusTag(row)">
+                {{ wechatMenuStatusLabel(row) }}
+              </el-tag>
+              <span v-if="wechatMenuConfigOf(row)?.listPageUrl" class="wechat-menu-url">
+                {{ wechatMenuConfigOf(row)?.listPageUrl }}
+              </span>
+              <span v-else class="wechat-menu-url is-muted">
+                初始化后生成 H5 链接
+              </span>
+              <small v-if="wechatMenuConfigOf(row)?.lastSyncError" class="table-error-text">
+                {{ wechatMenuConfigOf(row)?.lastSyncError }}
+              </small>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="lastAuthCheckedAt" label="最近检测" min-width="180">
           <template #default="{ row }">{{ row.lastAuthCheckedAt || '-' }}</template>
         </el-table-column>
@@ -375,16 +394,48 @@
             <span :class="{ 'table-error-text': row.lastAuthError }">{{ row.lastAuthError || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="canUpdateBrand" label="操作" width="190" fixed="right">
+        <el-table-column v-if="canUpdateBrand" label="操作" width="390" fixed="right">
           <template #default="{ row }">
             <el-button
-              v-if="row.platform === 'wechat_mp' || row.platform === 'wechat'"
+              v-if="isWechatMpAccount(row)"
               link
               type="primary"
               :loading="wechatAuthorizing"
               @click="authorizeWechatMp"
             >
               重新授权
+            </el-button>
+            <el-button
+              v-if="isWechatMpAccount(row)"
+              link
+              :loading="checkingSelfMediaAccountId === row.id"
+              @click="checkSelfMediaAuth(row)"
+            >
+              检测授权
+            </el-button>
+            <el-button
+              v-if="isWechatMpAccount(row)"
+              link
+              type="primary"
+              :loading="wechatMenuInitializingId === row.id"
+              @click="initializeWechatMenuForAccount(row)"
+            >
+              初始化菜单
+            </el-button>
+            <el-button
+              v-if="isWechatMpAccount(row) && wechatMenuConfigOf(row)?.listPageUrl"
+              link
+              type="success"
+              @click="openWechatMenuH5(row)"
+            >
+              打开 H5
+            </el-button>
+            <el-button
+              v-if="isWechatMpAccount(row) && wechatMenuConfigOf(row)?.listPageUrl"
+              link
+              @click="copyWechatMenuH5(row)"
+            >
+              复制链接
             </el-button>
             <el-button link type="danger" @click="deleteSelfMediaAccountRecord(row)">
               删除记录
@@ -394,7 +445,7 @@
       </el-table>
     </el-card>
 
-    <el-card class="admin-table-card">
+    <el-card v-if="canUpdateBrand" class="admin-table-card">
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -1310,6 +1361,8 @@ import {
   getBrandTemplatePerspectiveConfigs,
   createSelfMediaAccount,
   getSelfMediaAccountPlatformOptions,
+  getWechatMenuConfig,
+  initializeWechatMenu,
   saveBrandTemplatePerspectiveConfig,
   getSelfMediaAccountsByBrand,
   getWechatMpAuthUrl,
@@ -1368,7 +1421,7 @@ import {
   type LocalHelperExtensionStatus,
 } from '@/api/localHelper'
 import { getPublishSites } from '@/api/publishSite'
-import type { Brand, BrandOffering, PublishSite, SelfMediaAccount, SelfMediaAccountPlatformOption } from '@/types'
+import type { Brand, BrandOffering, PublishSite, SelfMediaAccount, SelfMediaAccountPlatformOption, WechatMenuConfig } from '@/types'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import CityNameSelect from '@/components/ui/CityNameSelect.vue'
@@ -1385,9 +1438,9 @@ const dictStore = useDictStore()
 const brandId = Number(route.params.id)
 const hasValidId = Number.isFinite(brandId) && brandId > 0
 
-const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
-const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
-const canCreateProject = computed(() => userStore.hasPermission('project.create'))
+const canUpdateBrand = computed(() => !userStore.isSales && userStore.hasPermission('brand.update'))
+const canDeleteBrand = computed(() => !userStore.isSales && userStore.hasPermission('brand.delete'))
+const canCreateProject = computed(() => !userStore.isSales && userStore.hasPermission('project.create'))
 
 type SemiAutoPlatform = string
 type SemiAutoSelfMediaAccount = SelfMediaAccount & {
@@ -1431,6 +1484,8 @@ const subjectPoolDraftItems = ref<ThirdPartySubjectPoolItem[]>([])
 const subjectPoolManualAddIds = ref<number[]>([])
 const coverableIndustriesFieldRef = ref<any>(null)
 const selfMediaAccounts = ref<SemiAutoSelfMediaAccount[]>([])
+const wechatMenuConfigs = ref<Record<number, WechatMenuConfig | null>>({})
+const wechatMenuInitializingId = ref<number | null>(null)
 const browserEnvironments = ref<BrowserEnvironment[]>([])
 const browserEnvironmentsLoading = ref(false)
 const browserEnvironmentVisible = ref(false)
@@ -1974,6 +2029,10 @@ function isOfficialApiSelfMediaPlatform(value?: string | null) {
   return value === 'wechat_mp' || value === 'wechat'
 }
 
+function isWechatMpAccount(account?: SelfMediaAccount | null) {
+  return account?.platform === 'wechat_mp' || account?.platform === 'wechat'
+}
+
 function officialAccountStatusLabel(account: SelfMediaAccount) {
   const map: Record<string, string> = {
     active: '授权有效',
@@ -2003,6 +2062,32 @@ function selfMediaAccountStatusTag(account: SelfMediaAccount): 'success' | 'warn
     return officialAccountStatusTag(account)
   }
   return account.status === 'active' ? 'success' : 'info'
+}
+
+function wechatMenuConfigOf(account: SelfMediaAccount) {
+  return wechatMenuConfigs.value[account.id] || null
+}
+
+function wechatMenuStatusLabel(account: SelfMediaAccount) {
+  const status = wechatMenuConfigOf(account)?.menuStatus
+  const map: Record<string, string> = {
+    pending: '待初始化',
+    configured: '已配置',
+    permission_missing: '缺菜单权限',
+    menu_full: '菜单已满',
+    config_failed: '配置失败',
+    manual_required: '需人工处理',
+    disabled: '已停用',
+  }
+  return status ? map[status] || status : '未初始化'
+}
+
+function wechatMenuStatusTag(account: SelfMediaAccount): 'success' | 'warning' | 'danger' | 'info' {
+  const status = wechatMenuConfigOf(account)?.menuStatus
+  if (status === 'configured') return 'success'
+  if (status === 'permission_missing' || status === 'menu_full' || status === 'manual_required') return 'warning'
+  if (status === 'config_failed') return 'danger'
+  return 'info'
 }
 
 function optionLabel(option: SelfMediaAccountPlatformOption) {
@@ -2532,6 +2617,10 @@ function fillForm(data: Brand) {
 }
 
 async function loadPublishSiteOptions() {
+  if (!canUpdateBrand.value) {
+    publishSites.value = []
+    return
+  }
   try {
     const { data } = await getPublishSites({ status: 'active' })
     publishSites.value = data.data || []
@@ -2560,12 +2649,12 @@ async function load() {
     }
     await Promise.all([
       loadOfferings(),
-      loadBrowserEnvironments(),
       loadSelfMediaAccountContext(),
       loadPerspectiveConfigs(),
-      loadExtensionSessions(),
-      loadAutomationReadiness(),
       loadSubjectPool(),
+      canUpdateBrand.value ? loadBrowserEnvironments() : Promise.resolve(),
+      canUpdateBrand.value ? loadExtensionSessions() : Promise.resolve(),
+      canUpdateBrand.value ? loadAutomationReadiness() : Promise.resolve(),
     ])
   } catch {
     brand.value = null
@@ -2719,6 +2808,10 @@ async function loadOfferings() {
 }
 
 async function loadBrowserEnvironments() {
+  if (!canUpdateBrand.value) {
+    browserEnvironments.value = []
+    return
+  }
   browserEnvironmentsLoading.value = true
   try {
     const { data } = await listBrowserEnvironments(brandId)
@@ -2730,6 +2823,10 @@ async function loadBrowserEnvironments() {
 
 async function loadAutomationReadiness(options: { silent?: boolean } = {}) {
   if (!hasValidId) return
+  if (!canUpdateBrand.value) {
+    automationReadiness.value = null
+    return
+  }
   if (!options.silent) automationReadinessLoading.value = true
   try {
     const { data } = await getSelfMediaAutomationReadiness(brandId)
@@ -3116,10 +3213,30 @@ async function loadSelfMediaAccounts() {
     const { data } = await getSelfMediaAccountsByBrand(brandId)
     const accounts = data.data as SemiAutoSelfMediaAccount[]
     selfMediaAccounts.value = accounts
-    await loadBrowserEnvironmentAccounts(accounts)
+    if (canUpdateBrand.value) {
+      await loadBrowserEnvironmentAccounts(accounts)
+      await loadWechatMenuConfigs(accounts)
+    } else {
+      browserEnvironmentAccounts.value = {}
+      wechatMenuConfigs.value = {}
+    }
   } finally {
     selfMediaAccountsLoading.value = false
   }
+}
+
+async function loadWechatMenuConfigs(accounts: SemiAutoSelfMediaAccount[]) {
+  const wechatAccounts = accounts.filter((account) => isWechatMpAccount(account))
+  const next: Record<number, WechatMenuConfig | null> = {}
+  await Promise.all(wechatAccounts.map(async (account) => {
+    try {
+      const { data } = await getWechatMenuConfig(account.id)
+      next[account.id] = data.data || null
+    } catch {
+      next[account.id] = null
+    }
+  }))
+  wechatMenuConfigs.value = next
 }
 
 async function loadSelfMediaAccountContext() {
@@ -3159,6 +3276,57 @@ async function authorizeWechatMp() {
   } finally {
     wechatAuthorizing.value = false
   }
+}
+
+async function initializeWechatMenuForAccount(account: SelfMediaAccount) {
+  if (!isWechatMpAccount(account)) return
+  try {
+    await ElMessageBox.confirm(
+      `确认为公众号「${account.accountName}」写入「往期文章」菜单？系统会先备份当前菜单；若菜单已满或存在冲突，会转为人工处理，不会覆盖客户现有关键菜单。`,
+      '初始化公众号菜单',
+      {
+        type: 'warning',
+        confirmButtonText: '确认初始化',
+        cancelButtonText: '取消',
+      },
+    )
+    wechatMenuInitializingId.value = account.id
+    const { data } = await initializeWechatMenu(account.id)
+    wechatMenuConfigs.value = {
+      ...wechatMenuConfigs.value,
+      [account.id]: data.data || null,
+    }
+    const config = data.data
+    if (config?.menuStatus === 'configured') {
+      ElMessage.success('菜单承接已配置，可打开 H5 页面并在微信客户端验收')
+    } else {
+      ElMessage.warning(`菜单初始化未完成：${wechatMenuStatusLabel(account)}`)
+    }
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '初始化公众号菜单失败')
+  } finally {
+    wechatMenuInitializingId.value = null
+  }
+}
+
+function openWechatMenuH5(account: SelfMediaAccount) {
+  const url = wechatMenuConfigOf(account)?.listPageUrl
+  if (!url) {
+    ElMessage.warning('请先初始化菜单生成 H5 链接')
+    return
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+async function copyWechatMenuH5(account: SelfMediaAccount) {
+  const url = wechatMenuConfigOf(account)?.listPageUrl
+  if (!url) {
+    ElMessage.warning('请先初始化菜单生成 H5 链接')
+    return
+  }
+  await copyText(url)
+  ElMessage.success('H5 链接已复制')
 }
 
 async function loadBrowserEnvironmentAccounts(accounts: SemiAutoSelfMediaAccount[]) {
@@ -4089,6 +4257,28 @@ onMounted(async () => {
 
 .environment-binding-select {
   width: 100%;
+}
+
+.wechat-menu-status {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.wechat-menu-url {
+  max-width: 100%;
+  overflow: hidden;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wechat-menu-url.is-muted {
+  color: #94a3b8;
 }
 
 @media (max-width: 960px) {

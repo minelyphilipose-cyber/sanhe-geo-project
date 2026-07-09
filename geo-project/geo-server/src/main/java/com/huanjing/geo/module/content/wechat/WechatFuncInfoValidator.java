@@ -31,8 +31,24 @@ public class WechatFuncInfoValidator {
     }
 
     public Set<Integer> missingRequired(String funcInfoJson) {
+        return missingRequired(funcInfoJson, properties.getRequiredDraftFuncScopes());
+    }
+
+    public boolean hasMenuPermission(String funcInfoJson) {
+        return missingMenuRequired(funcInfoJson).isEmpty();
+    }
+
+    public Set<Integer> missingMenuRequired(String funcInfoJson) {
+        return missingRequired(funcInfoJson, properties.getRequiredMenuFuncScopes());
+    }
+
+    private Set<Integer> missingRequired(String funcInfoJson, Set<Integer> requiredScopes) {
+        return missingRequired(funcInfoJson, new java.util.ArrayList<>(requiredScopes));
+    }
+
+    private Set<Integer> missingRequired(String funcInfoJson, java.util.List<Integer> requiredScopes) {
         Set<Integer> actual = new HashSet<>();
-        Set<Integer> required = new HashSet<>(properties.getRequiredDraftFuncScopes());
+        Set<Integer> required = new HashSet<>(requiredScopes);
         if (!StringUtils.hasText(funcInfoJson)) {
             return required;
         }

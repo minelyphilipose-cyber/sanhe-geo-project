@@ -22,6 +22,10 @@ public interface WechatMpClient {
 
     MaterialCountResult getMaterialCount(String authorizerAccessToken);
 
+    MenuResult getMenu(String authorizerAccessToken);
+
+    void createMenu(String authorizerAccessToken, String menuJson);
+
     void sendCustomTextMessage(String authorizerAccessToken, String openid, String content);
 
     record QueryAuthResult(
@@ -64,6 +68,9 @@ public interface WechatMpClient {
     }
 
     record MaterialCountResult(int voiceCount, int videoCount, int imageCount, int newsCount) {
+    }
+
+    record MenuResult(String rawResponse) {
     }
 
     record DraftArticle(

@@ -21,6 +21,7 @@ public class WechatOpenPlatformProperties {
     private String liveVerificationReason = "domain_icp_filing_pending";
     private boolean funcScopeStrictMode = false;
     private List<Integer> requiredDraftFuncScopes = new ArrayList<>(List.of(1, 13));
+    private List<Integer> requiredMenuFuncScopes = new ArrayList<>(List.of(15));
     private int authType = 1;
     private String backendAuthCallbackUrl;
     private String frontendCallbackUrl;

@@ -88,6 +88,20 @@ public class MockWechatMpClient implements WechatMpClient {
     }
 
     @Override
+    public MenuResult getMenu(String authorizerAccessToken) {
+        failIf("invalid_credential", 40001, "invalid credential");
+        failIf("permission_missing", 48001, "api unauthorized");
+        return new MenuResult("{\"menu\":{\"button\":[]}}");
+    }
+
+    @Override
+    public void createMenu(String authorizerAccessToken, String menuJson) {
+        failIf("invalid_credential", 40001, "invalid credential");
+        failIf("permission_missing", 48001, "api unauthorized");
+        failIf("rate_limit", 45009, "reach max api daily quota limit");
+    }
+
+    @Override
     public void sendCustomTextMessage(String authorizerAccessToken, String openid, String content) {
         failIf("permission_missing", 48001, "api unauthorized");
         failIf("customer_window_timeout", 45015, "response out of time limit");
