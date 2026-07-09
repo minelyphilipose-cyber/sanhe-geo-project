@@ -12,22 +12,26 @@
     </div>
 
     <el-card shadow="never" class="admin-surface user-toolbar-card">
+      <el-tabs v-model="accountScope" class="account-scope-tabs" @tab-change="onScopeChange">
+        <el-tab-pane label="总部账号" name="internal" />
+        <el-tab-pane label="合伙人账号" name="partner" />
+      </el-tabs>
       <div class="user-toolbar">
-        <el-input v-model="query.keyword" class="filter-keyword" placeholder="搜索用户名/姓名/手机号" clearable @keyup.enter="load" />
-        <el-select v-model="query.roleKey" class="filter-role" placeholder="角色" clearable @change="load">
-          <el-option v-for="r in roles" :key="r.roleKey" :label="dictStore.label('role', r.roleKey)" :value="r.roleKey" />
+        <el-input v-model="query.keyword" class="filter-keyword" placeholder="搜索用户名/姓名/手机号" clearable @keyup.enter="search" />
+        <el-select v-model="query.roleKey" class="filter-role" placeholder="角色" clearable @change="search">
+          <el-option v-for="r in scopedRoles" :key="r.roleKey" :label="dictStore.label('role', r.roleKey)" :value="r.roleKey" />
         </el-select>
-        <el-select v-model="query.isActive" class="filter-status" placeholder="状态" clearable @change="load">
+        <el-select v-model="query.isActive" class="filter-status" placeholder="状态" clearable @change="search">
           <el-option label="启用" :value="true" />
           <el-option label="停用" :value="false" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="search">查询</el-button>
       </div>
     </el-card>
 
     <div class="admin-metric-grid user-metric-grid">
       <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
-        <span class="admin-metric-label">账号总数</span>
+        <span class="admin-metric-label">{{ currentScopeLabel }}总数</span>
         <strong class="admin-metric-value">{{ page.total }}</strong>
         <span class="admin-metric-hint">当前筛选结果</span>
       </div>
@@ -52,7 +56,7 @@
       <div class="table-header">
         <div>
           <div class="table-title">账号列表</div>
-          <div class="table-subtitle">按角色、状态和合伙人归属核对后台账号权限。</div>
+          <div class="table-subtitle">{{ currentScopeSubtitle }}</div>
         </div>
         <div class="chips">
           <span class="chip chip-muted">当前页 {{ rows.length }}</span>
@@ -84,7 +88,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="所属合伙人" min-width="160" show-overflow-tooltip>
+          <el-table-column v-if="accountScope === 'partner'" label="所属合伙人" min-width="160" show-overflow-tooltip>
             <template #default="scope">{{ partnerName(scope.row.partnerId) }}</template>
           </el-table-column>
           <el-table-column prop="phone" label="手机" width="140" />
@@ -142,7 +146,7 @@
             </el-form-item>
             <el-form-item v-if="formMode === 'create'" label="角色" prop="roleKey" required>
               <el-select v-model="form.roleKey">
-                <el-option v-for="r in roles" :key="r.roleKey" :label="dictStore.label('role', r.roleKey)" :value="r.roleKey" />
+                <el-option v-for="r in scopedRoles" :key="r.roleKey" :label="dictStore.label('role', r.roleKey)" :value="r.roleKey" />
               </el-select>
             </el-form-item>
           </div>
@@ -156,8 +160,8 @@
             </div>
           </div>
           <div class="form-grid is-two">
-            <el-form-item label="所属合伙人">
-              <el-select v-model="form.partnerId" clearable filterable placeholder="可不选">
+            <el-form-item v-if="accountScope === 'partner'" label="所属合伙人" required>
+              <el-select v-model="form.partnerId" clearable filterable placeholder="请选择合伙人">
                 <el-option v-for="p in partnerOptions" :key="p.id" :label="p.partnerName" :value="p.id" />
               </el-select>
             </el-form-item>
@@ -188,7 +192,7 @@
           <div class="form-grid is-one">
             <el-form-item label="角色" required>
               <el-select v-model="roleForm.roleKey">
-                <el-option v-for="r in roles" :key="r.roleKey" :label="dictStore.label('role', r.roleKey)" :value="r.roleKey" />
+                <el-option v-for="r in scopedRoles" :key="r.roleKey" :label="dictStore.label('role', r.roleKey)" :value="r.roleKey" />
               </el-select>
             </el-form-item>
           </div>
@@ -249,6 +253,9 @@ const rows = ref<AdminUserItem[]>([])
 const roles = ref<RoleOption[]>([])
 const partnerOptions = ref<PartnerItem[]>([])
 const page = reactive({ current: 1, size: 10, total: 0 })
+type AccountScope = 'internal' | 'partner'
+const PARTNER_ROLE_KEYS = new Set(['partner', 'partner_staff'])
+const accountScope = ref<AccountScope>('internal')
 const query = reactive<{ keyword: string; roleKey: string; isActive: boolean | undefined }>({
   keyword: '',
   roleKey: '',
@@ -256,6 +263,17 @@ const query = reactive<{ keyword: string; roleKey: string; isActive: boolean | u
 })
 const activeCount = computed(() => rows.value.filter((item) => item.isActive).length)
 const inactiveCount = computed(() => rows.value.filter((item) => !item.isActive).length)
+const currentScopeLabel = computed(() => accountScope.value === 'partner' ? '合伙人账号' : '总部账号')
+const currentScopeSubtitle = computed(() => (
+  accountScope.value === 'partner'
+    ? '查看绑定到合伙人的主账号与员工账号，核对角色、状态和合伙人归属。'
+    : '查看总部侧内部账号，核对角色、联系方式和启停状态。'
+))
+const scopedRoles = computed(() => roles.value.filter((role) => (
+  accountScope.value === 'partner'
+    ? PARTNER_ROLE_KEYS.has(role.roleKey)
+    : !PARTNER_ROLE_KEYS.has(role.roleKey)
+)))
 
 const formVisible = ref(false)
 const formRef = ref<FormInstance>()
@@ -325,6 +343,7 @@ async function load() {
     const { data } = await getAdminUsers({
       current: page.current,
       size: page.size,
+      accountScope: accountScope.value,
       keyword: query.keyword || undefined,
       roleKey: query.roleKey || undefined,
       isActive: query.isActive,
@@ -339,6 +358,17 @@ async function load() {
   }
 }
 
+function search() {
+  page.current = 1
+  load()
+}
+
+function onScopeChange() {
+  query.roleKey = ''
+  page.current = 1
+  load()
+}
+
 function onPageChange(v: number) {
   page.current = v
   load()
@@ -348,6 +378,7 @@ function openCreate() {
   formMode.value = 'create'
   currentUserId.value = null
   resetForm()
+  form.roleKey = scopedRoles.value[0]?.roleKey || ''
   formVisible.value = true
 }
 
@@ -367,6 +398,10 @@ function openEdit(row: AdminUserItem) {
 async function submitForm() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  if (accountScope.value === 'partner' && !form.partnerId) {
+    ElMessage.warning('请选择所属合伙人')
+    return
+  }
 
   saving.value = true
   try {
@@ -467,7 +502,30 @@ onMounted(async () => {
 }
 
 .user-toolbar-card :deep(.el-card__body) {
-  padding: 12px;
+  padding: 0;
+}
+
+.account-scope-tabs {
+  padding: 0 14px;
+  border-bottom: 1px solid var(--admin-panel-border-soft);
+}
+
+.account-scope-tabs :deep(.el-tabs__header) {
+  margin: 0;
+}
+
+.account-scope-tabs :deep(.el-tabs__nav-wrap::after) {
+  display: none;
+}
+
+.account-scope-tabs :deep(.el-tabs__item) {
+  height: 44px;
+  color: var(--admin-text-muted);
+  font-weight: 800;
+}
+
+.account-scope-tabs :deep(.el-tabs__item.is-active) {
+  color: #2563eb;
 }
 
 .user-toolbar {
@@ -475,6 +533,7 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  padding: 12px;
 }
 
 .filter-keyword {

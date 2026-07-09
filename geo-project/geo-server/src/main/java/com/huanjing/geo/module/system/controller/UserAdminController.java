@@ -25,10 +25,11 @@ public class UserAdminController {
             @RequestParam(defaultValue = "20") long size,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String roleKey,
+            @RequestParam(required = false) String accountScope,
             @RequestParam(required = false) Long partnerId,
             @RequestParam(required = false) Boolean isActive
     ) {
-        return R.ok(userAdminService.page(current, size, keyword, roleKey, partnerId, isActive));
+        return R.ok(userAdminService.page(current, size, keyword, roleKey, accountScope, partnerId, isActive));
     }
 
     @GetMapping("/users/{id}")

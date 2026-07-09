@@ -28,6 +28,8 @@ public class UserAdminService {
 
     private static final String REMOVED_PARTNER_VIEWER_ROLE = "partner_viewer";
     private static final Set<String> PARTNER_ROLE_KEYS = Set.of("partner", "partner_staff");
+    private static final String ACCOUNT_SCOPE_INTERNAL = "internal";
+    private static final String ACCOUNT_SCOPE_PARTNER = "partner";
     private static final String REFRESH_KEY_PREFIX = "refresh:";
 
     private final CurrentUserService currentUserService;
@@ -37,7 +39,7 @@ public class UserAdminService {
     private final PasswordEncoder passwordEncoder;
     private final RedisTemplate<String, Object> redisTemplate;
 
-    public Page<UserAdminVO> page(long current, long size, String keyword, String roleKey, Long partnerId, Boolean isActive) {
+    public Page<UserAdminVO> page(long current, long size, String keyword, String roleKey, String accountScope, Long partnerId, Boolean isActive) {
         currentUserService.ensurePermission("user.manage");
 
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
@@ -48,6 +50,11 @@ public class UserAdminService {
                     .or().like(SysUser::getDisplayName, keyword)
                     .or().like(SysUser::getPhone, keyword)
                     .or().like(SysUser::getEmail, keyword));
+        }
+        if (ACCOUNT_SCOPE_INTERNAL.equals(accountScope)) {
+            wrapper.isNull(SysUser::getPartnerId);
+        } else if (ACCOUNT_SCOPE_PARTNER.equals(accountScope)) {
+            wrapper.isNotNull(SysUser::getPartnerId);
         }
         if (partnerId != null) {
             wrapper.eq(SysUser::getPartnerId, partnerId);

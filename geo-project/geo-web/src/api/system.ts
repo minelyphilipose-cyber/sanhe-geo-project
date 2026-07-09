@@ -30,6 +30,7 @@ export interface UserQuery {
   size?: number
   keyword?: string
   roleKey?: string
+  accountScope?: 'internal' | 'partner'
   partnerId?: number
   isActive?: boolean
 }
