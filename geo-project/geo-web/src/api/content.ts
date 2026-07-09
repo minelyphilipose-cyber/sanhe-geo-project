@@ -471,6 +471,7 @@ export function createBatchContentArticles(data: BatchArticleGenerateRequest) {
 export interface BatchArticleGenerationTask {
   taskId: number
   articleId?: number | null
+  topic?: string | null
   sourceBrandId?: number | null
   sourceBrandName?: string | null
   subjectBrandId?: number | null
@@ -489,6 +490,8 @@ export interface BatchArticleGenerationTask {
   audiencePerspective?: string | null
   promptTemplateId?: number | null
   promptTemplateVersionId?: number | null
+  promptTemplateName?: string | null
+  promptTemplateVersionNo?: number | null
   perspectiveCode?: string | null
   perspectiveMatchedScope?: string | null
   perspectiveMatchedConfigId?: number | null
@@ -518,6 +521,7 @@ export interface BatchArticleGenerationTask {
 export interface BatchArticleGenerationDetailResponse {
   batchId: number
   projectId: number
+  projectName?: string | null
   topic?: string | null
   topicAsQuestion?: string | null
   status: string
@@ -529,6 +533,27 @@ export interface BatchArticleGenerationDetailResponse {
   startedAt?: string | null
   finishedAt?: string | null
   tasks: BatchArticleGenerationTask[]
+}
+
+export interface BatchArticleGenerationBatchSummary {
+  batchId: number
+  projectId: number
+  projectName?: string | null
+  topic?: string | null
+  topicSource?: 'manual' | 'keyword_group' | string
+  status: string
+  totalCount: number
+  successCount: number
+  failedCount: number
+  warningCount: number
+  createdBy?: number | null
+  createdAt?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+}
+
+export function getBatchArticleGenerationJobs(params?: { current?: number; size?: number; status?: string; projectName?: string }) {
+  return request.get<R<PageResult<BatchArticleGenerationBatchSummary>>>('/content/articles/batch-generate', { params })
 }
 
 export function getBatchArticleGeneration(batchId: number) {

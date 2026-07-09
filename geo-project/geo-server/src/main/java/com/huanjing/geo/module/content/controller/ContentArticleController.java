@@ -16,6 +16,7 @@ import com.huanjing.geo.module.content.dto.ArticleGenerationReadinessDtos.Readin
 import com.huanjing.geo.module.content.dto.ArticleGenerationReadinessDtos.ReadinessRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerationBatchSummary;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerationDetailResponse;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.dto.MedicalPublishReviewRequest;
@@ -105,6 +106,14 @@ public class ContentArticleController {
     @PostMapping("/batch-generate")
     public R<BatchArticleGenerateResponse> batchGenerate(@Valid @RequestBody BatchArticleGenerateRequest req) {
         return R.ok(batchArticleGenerationService.create(req));
+    }
+
+    @GetMapping("/batch-generate")
+    public R<Page<BatchArticleGenerationBatchSummary>> batchGeneratePage(@RequestParam(defaultValue = "1") Long current,
+                                                                         @RequestParam(defaultValue = "10") Long size,
+                                                                         @RequestParam(required = false) String status,
+                                                                         @RequestParam(required = false) String projectName) {
+        return R.ok(batchArticleGenerationService.page(current, size, status, projectName));
     }
 
     @PostMapping("/batch-generate/readiness")

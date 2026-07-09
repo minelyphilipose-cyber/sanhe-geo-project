@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.service;
 
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
@@ -17,6 +18,7 @@ import com.huanjing.geo.module.content.constant.SelfMediaAccountIdentity;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerationBatchSummary;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerationDetailResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
@@ -267,6 +269,44 @@ public class BatchArticleGenerationService {
         return createInternal(req, operator, false);
     }
 
+    public Page<BatchArticleGenerationBatchSummary> page(long current,
+                                                         long size,
+                                                         String status,
+                                                         String projectName) {
+        currentUserService.ensurePermission("content.read");
+        long safeCurrent = Math.max(1L, current);
+        long safeSize = Math.min(Math.max(1L, size), 100L);
+        LambdaQueryWrapper<BatchArticleGenerationBatch> wrapper = new LambdaQueryWrapper<BatchArticleGenerationBatch>()
+                .eq(StringUtils.hasText(status), BatchArticleGenerationBatch::getStatus, trim(status))
+                .orderByDesc(BatchArticleGenerationBatch::getCreatedAt, BatchArticleGenerationBatch::getId);
+        if (StringUtils.hasText(projectName)) {
+            List<Long> projectIds = projectMapper.selectList(new LambdaQueryWrapper<Project>()
+                            .like(Project::getProjectName, trim(projectName)))
+                    .stream()
+                    .map(Project::getId)
+                    .filter(Objects::nonNull)
+                    .toList();
+            if (projectIds.isEmpty()) {
+                return emptyBatchSummaryPage(safeCurrent, safeSize);
+            }
+            wrapper.in(BatchArticleGenerationBatch::getProjectId, projectIds);
+        }
+        Page<BatchArticleGenerationBatch> page = batchMapper.selectPage(new Page<>(safeCurrent, safeSize), wrapper);
+        List<BatchArticleGenerationBatch> records = page.getRecords();
+        Map<Long, String> projectNameMap = records.isEmpty()
+                ? Map.of()
+                : projectMapper.selectBatchIds(records.stream()
+                                .map(BatchArticleGenerationBatch::getProjectId)
+                                .filter(Objects::nonNull)
+                                .distinct()
+                                .toList())
+                        .stream()
+                        .collect(Collectors.toMap(Project::getId, Project::getProjectName, (first, ignored) -> first));
+        Page<BatchArticleGenerationBatchSummary> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        result.setRecords(records.stream().map(batch -> toSummary(batch, projectNameMap)).toList());
+        return result;
+    }
+
     private BatchArticleGenerateResponse createInternal(BatchArticleGenerateRequest req,
                                                         SysUser operator,
                                                         boolean checkAccess) {
@@ -408,6 +448,7 @@ public class BatchArticleGenerationService {
         if (batch == null) {
             throw new BizException(404, "Batch not found");
         }
+        Project project = batch.getProjectId() == null ? null : projectMapper.selectById(batch.getProjectId());
         List<BatchArticleGenerationTask> tasks = taskMapper.selectList(
                 new LambdaQueryWrapper<BatchArticleGenerationTask>()
                         .eq(BatchArticleGenerationTask::getBatchId, batchId)
@@ -421,10 +462,27 @@ public class BatchArticleGenerationService {
                 ? Map.of()
                 : brandMapper.selectBatchIds(brandIds).stream()
                 .collect(Collectors.toMap(Brand::getId, Brand::getBrandName, (first, ignored) -> first));
+        Set<Long> promptTemplateIds = tasks.stream()
+                .map(BatchArticleGenerationTask::getPromptTemplateId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> promptTemplateNameMap = promptTemplateIds.isEmpty()
+                ? Map.of()
+                : promptTemplateMapper.selectBatchIds(promptTemplateIds).stream()
+                .collect(Collectors.toMap(ArticlePromptTemplate::getId, ArticlePromptTemplate::getName, (first, ignored) -> first));
+        Set<Long> promptTemplateVersionIds = tasks.stream()
+                .map(BatchArticleGenerationTask::getPromptTemplateVersionId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, Integer> promptTemplateVersionNoMap = promptTemplateVersionIds.isEmpty()
+                ? Map.of()
+                : promptTemplateVersionMapper.selectBatchIds(promptTemplateVersionIds).stream()
+                .collect(Collectors.toMap(ArticlePromptTemplateVersion::getId, ArticlePromptTemplateVersion::getVersionNo, (first, ignored) -> first));
         List<BatchArticleGenerationDetailResponse.Task> taskItems = tasks.stream()
                 .map(task -> new BatchArticleGenerationDetailResponse.Task(
                         task.getId(),
                         task.getArticleId(),
+                        task.getTopic(),
                         task.getSourceBrandId(),
                         brandNameMap.get(task.getSourceBrandId()),
                         task.getSubjectBrandId(),
@@ -443,6 +501,8 @@ public class BatchArticleGenerationService {
                         task.getAudiencePerspective(),
                         task.getPromptTemplateId(),
                         task.getPromptTemplateVersionId(),
+                        promptTemplateNameMap.get(task.getPromptTemplateId()),
+                        promptTemplateVersionNoMap.get(task.getPromptTemplateVersionId()),
                         task.getPerspectiveCode(),
                         task.getPerspectiveMatchedScope(),
                         task.getPerspectiveMatchedConfigId(),
@@ -472,6 +532,7 @@ public class BatchArticleGenerationService {
         return new BatchArticleGenerationDetailResponse(
                 batch.getId(),
                 batch.getProjectId(),
+                project == null ? null : project.getProjectName(),
                 batch.getTopic(),
                 batch.getTopicAsQuestion(),
                 batch.getStatus(),
@@ -1344,6 +1405,32 @@ public class BatchArticleGenerationService {
                 new LambdaQueryWrapper<BatchArticleGenerationTask>().eq(BatchArticleGenerationTask::getBatchId, batchId)
         );
         return tasks == null ? List.of() : tasks;
+    }
+
+    private Page<BatchArticleGenerationBatchSummary> emptyBatchSummaryPage(long current, long size) {
+        Page<BatchArticleGenerationBatchSummary> page = new Page<>(current, size, 0);
+        page.setRecords(List.of());
+        return page;
+    }
+
+    private BatchArticleGenerationBatchSummary toSummary(BatchArticleGenerationBatch batch,
+                                                         Map<Long, String> projectNameMap) {
+        BatchArticleGenerationBatchSummary summary = new BatchArticleGenerationBatchSummary();
+        summary.setBatchId(batch.getId());
+        summary.setProjectId(batch.getProjectId());
+        summary.setProjectName(projectNameMap.get(batch.getProjectId()));
+        summary.setTopic(batch.getTopic());
+        summary.setTopicSource(batch.getTopicSource());
+        summary.setStatus(batch.getStatus());
+        summary.setTotalCount(batch.getTotalCount());
+        summary.setSuccessCount(batch.getSuccessCount());
+        summary.setFailedCount(batch.getFailedCount());
+        summary.setWarningCount(batch.getWarningCount());
+        summary.setCreatedBy(batch.getCreatedBy());
+        summary.setCreatedAt(batch.getCreatedAt());
+        summary.setStartedAt(batch.getStartedAt());
+        summary.setFinishedAt(batch.getFinishedAt());
+        return summary;
     }
 
     private void markTaskRunning(BatchArticleGenerationTask task) {

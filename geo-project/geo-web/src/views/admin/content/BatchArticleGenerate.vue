@@ -1509,7 +1509,10 @@ async function submitBatchGeneration() {
     } else {
       ElMessage.success(`已提交批量生成任务，预计生成 ${data.data.totalCount} 篇文章`)
     }
-    router.push('/admin/content/execution')
+    router.push({
+      path: '/admin/content/articles/batch-publish-jobs',
+      query: { tab: 'generation', batchId: String(data.data.batchId) },
+    })
   } catch (err) {
     console.error(err)
     ElMessage.error('批量生成任务提交失败')

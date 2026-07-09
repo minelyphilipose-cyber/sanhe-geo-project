@@ -267,7 +267,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'content/articles/batch-publish-jobs',
       name: 'BatchArticlePublishJobs',
       component: () => import('@/views/admin/content/BatchArticlePublishJobs.vue'),
-      meta: { title: '批量发布任务', hidden: true, permissions: ['content.read'] },
+      meta: { title: '批量任务中心', hidden: true, permissions: ['content.read'] },
     },
     {
       path: 'content/publish-platforms',

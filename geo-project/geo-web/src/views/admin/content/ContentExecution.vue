@@ -85,7 +85,7 @@
               <el-button class="toolbar-more-action">更多</el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="jobs">批量任务列表</el-dropdown-item>
+                  <el-dropdown-item command="jobs">批量任务中心</el-dropdown-item>
                   <el-dropdown-item v-if="canViewSelfMediaSchedules" command="schedules">发布排期</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePromptTemplates" command="templates">文章提示词模板</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePromptTemplates" command="special-compliance">行业专项</el-dropdown-item>
@@ -227,6 +227,7 @@
       @revision="openRevisionFromDetail"
       @style-render="handleDetailStyleRenderCommand"
       @medical-publish-review="handleDetailMedicalPublishReview"
+      @batch-generation-open="openBatchGenerationJob"
     />
 
     <ArticleRevisionDialog
@@ -1284,6 +1285,13 @@ function openSpecialIndustryComplianceWorkbench() {
 function openBatchPublishJobs() {
   router.push({
     path: '/admin/content/articles/batch-publish-jobs',
+  })
+}
+
+function openBatchGenerationJob(batchId: number) {
+  router.push({
+    path: '/admin/content/articles/batch-publish-jobs',
+    query: { tab: 'generation', batchId: String(batchId) },
   })
 }
 

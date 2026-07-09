@@ -107,9 +107,14 @@
       <div v-if="detailData.batchGenerationTask" class="detail-section-panel">
         <div class="detail-header trace-header">
           <h4 class="detail-title">批量生成追溯</h4>
-          <el-tag size="small" :type="batchTaskStatusTag(detailData.batchGenerationTask.status)">
-            {{ batchTaskStatusLabel(detailData.batchGenerationTask.status) }}
-          </el-tag>
+          <div class="trace-actions">
+            <el-button link type="primary" @click="emit('batchGenerationOpen', detailData.batchGenerationTask.batchId)">
+              查看批次
+            </el-button>
+            <el-tag size="small" :type="batchTaskStatusTag(detailData.batchGenerationTask.status)">
+              {{ batchTaskStatusLabel(detailData.batchGenerationTask.status) }}
+            </el-tag>
+          </div>
         </div>
         <div class="trace-body">
           <el-descriptions :column="3" border>
@@ -262,6 +267,7 @@ const emit = defineEmits<{
   revision: []
   styleRender: [command: string]
   medicalPublishReview: [action: 'approve' | 'reject']
+  batchGenerationOpen: [batchId: number]
 }>()
 
 const visible = computed({
@@ -478,6 +484,12 @@ function batchComplianceIssues(task?: BatchArticleGenerationTaskDetail | null): 
 .trace-header {
   padding-right: 16px;
   border-bottom: 1px solid #e2e8f0;
+}
+
+.trace-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .trace-body {
