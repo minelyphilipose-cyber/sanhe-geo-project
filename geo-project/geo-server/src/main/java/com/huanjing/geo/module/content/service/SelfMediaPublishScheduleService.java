@@ -60,7 +60,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
@@ -189,6 +193,7 @@ public class SelfMediaPublishScheduleService {
     private final CompanyChannelQuotaService companyChannelQuotaService;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
+    private final PlatformTransactionManager transactionManager;
     private final SysUserMapper sysUserMapper;
     private final LocalAgentSessionMapper localAgentSessionMapper;
     private final BusinessCalendarService businessCalendarService;
@@ -272,7 +277,6 @@ public class SelfMediaPublishScheduleService {
         return response;
     }
 
-    @Transactional
     public SelfMediaPlatformQuickScheduleResponse dispatchPlatformQuickSchedule(SelfMediaPlatformQuickScheduleRequest request,
                                                                                String idempotencyKeyHeader) {
         SysUser operator = currentUserService.requireCurrentUser();
@@ -284,6 +288,7 @@ public class SelfMediaPublishScheduleService {
         SelfMediaPublishSchedule replaced = null;
         LocalDateTime now = LocalDateTime.now();
         PeriodWindow replacementMonth = currentMonth(now);
+        Long replaceScheduleId = null;
         if ("replace_required".equals(plan.response().getAction())) {
             SelfMediaPublishSchedule replaceable = scheduleMapper.selectSafeReplaceablePendingByBrandPlatformAndPeriod(
                     plan.response().getBrandId(),
@@ -293,13 +298,10 @@ public class SelfMediaPublishScheduleService {
                     now,
                     now.plusMinutes(QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES)
             );
-            replaced = cancelSafeReplaceableSchedule(
-                    replaceable == null ? null : replaceable.getId(),
-                    plan.response().getBrandId(),
-                    plan.response().getPlatform(),
-                    replacementMonth,
-                    now
-            );
+            replaceScheduleId = replaceable == null ? null : replaceable.getId();
+            if (replaceScheduleId == null) {
+                fail("REPLACE_TARGET_NOT_AVAILABLE", "没有可安全替换的排期；即将开始或已进入处理的排期不会被替换");
+            }
             plan = buildQuickSchedulePlan(request, operator.getId(), true);
             if (!"ready".equals(plan.response().getAction())) {
                 return plan.response();
@@ -314,22 +316,37 @@ public class SelfMediaPublishScheduleService {
                     now.plusMinutes(QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES)
             );
             if (replaceable != null) {
-                replaced = cancelSafeReplaceableSchedule(
-                        replaceable.getId(),
-                        plan.response().getBrandId(),
-                        plan.response().getPlatform(),
-                        replacementMonth,
-                        now
-                );
-                plan = buildQuickSchedulePlan(request, operator.getId(), true);
-                if (!"ready".equals(plan.response().getAction())) {
-                    return plan.response();
-                }
+                replaceScheduleId = replaceable.getId();
             }
         }
 
         plan = withQuickDispatchTiming(plan, now);
-        SelfMediaPublishScheduleCreateResponse created = createQuickSchedule(plan, operator.getId(), idempotencyKeyHeader, true);
+        QuickSchedulePlan dispatchPlan = plan;
+        Long finalReplaceScheduleId = replaceScheduleId;
+        QuickDispatchCreateResult createResult = executeInShortTransaction(status -> {
+            SelfMediaPublishSchedule replacedInTransaction = null;
+            if (finalReplaceScheduleId != null) {
+                replacedInTransaction = cancelSafeReplaceableSchedule(
+                        finalReplaceScheduleId,
+                        dispatchPlan.response().getBrandId(),
+                        dispatchPlan.response().getPlatform(),
+                        replacementMonth,
+                        now,
+                        false
+                );
+            }
+            SelfMediaPublishScheduleCreateResponse createResponse = createQuickSchedule(
+                    dispatchPlan,
+                    operator.getId(),
+                    idempotencyKeyHeader,
+                    true,
+                    false
+            );
+            return new QuickDispatchCreateResult(createResponse, replacedInTransaction);
+        });
+        SelfMediaPublishScheduleCreateResponse created = createResult.createResponse();
+        replaced = createResult.replacedSchedule();
+        reserveQuickDispatchQuotaAfterCommit(dispatchPlan, created, replaced);
         SelfMediaPlatformQuickScheduleResponse response = plan.response();
         response.setAction(created.getCreatedSchedules().isEmpty() ? "rejected" : "created");
         response.setCode(created.getCreatedSchedules().isEmpty() ? "QUICK_DISPATCH_NOT_CREATED" : "QUICK_DISPATCH_CREATED");
@@ -533,6 +550,14 @@ public class SelfMediaPublishScheduleService {
                                                                       Long operatorId,
                                                                       String idempotencyKeyHeader,
                                                                       boolean enforceQuickDispatchQueueLimit) {
+        return createQuickSchedule(plan, operatorId, idempotencyKeyHeader, enforceQuickDispatchQueueLimit, true);
+    }
+
+    private SelfMediaPublishScheduleCreateResponse createQuickSchedule(QuickSchedulePlan plan,
+                                                                      Long operatorId,
+                                                                      String idempotencyKeyHeader,
+                                                                      boolean enforceQuickDispatchQueueLimit,
+                                                                      boolean reserveQuotaImmediately) {
         QuickScheduleData data = plan.data();
         ValidatedRequest validated = new ValidatedRequest(
                 plan.response().getBrandId(),
@@ -578,7 +603,9 @@ public class SelfMediaPublishScheduleService {
             response.getRejectedItems().add(rejected(plan.response().getArticleId(), plan.response().getSelfMediaAccountId(),
                     plan.response().getPlatform(), "ACTIVE_SCHEDULE_EXISTS", "同一文章、账号和计划时间已存在活跃排期", null));
         } else {
-            reserveScheduleQuota(inserted, data.candidate().article().getProjectId(), quotaPrecheck(plan.response().getBrandId()).companyId);
+            if (reserveQuotaImmediately) {
+                reserveScheduleQuota(inserted, data.candidate().article().getProjectId(), quotaPrecheck(plan.response().getBrandId()).companyId);
+            }
             response.getCreatedSchedules().add(SelfMediaPublishScheduleVO.from(inserted));
         }
         requestRow.setScheduleCount(response.getCreatedSchedules().size());
@@ -592,6 +619,15 @@ public class SelfMediaPublishScheduleService {
                                                                    String platform,
                                                                    PeriodWindow replacementMonth,
                                                                    LocalDateTime now) {
+        return cancelSafeReplaceableSchedule(scheduleId, brandId, platform, replacementMonth, now, true);
+    }
+
+    private SelfMediaPublishSchedule cancelSafeReplaceableSchedule(Long scheduleId,
+                                                                   Long brandId,
+                                                                   String platform,
+                                                                   PeriodWindow replacementMonth,
+                                                                   LocalDateTime now,
+                                                                   boolean refundQuotaImmediately) {
         if (scheduleId == null) {
             fail("REPLACE_TARGET_NOT_AVAILABLE", "没有可安全替换的排期；即将开始或已进入处理的排期不会被替换");
         }
@@ -611,8 +647,64 @@ public class SelfMediaPublishScheduleService {
         if (replaced <= 0) {
             fail("REPLACE_TARGET_NOT_AVAILABLE", "可替换排期已进入保护窗口或开始处理，请稍后再试");
         }
-        refundScheduleQuotaIfPresent(replaceTarget);
+        if (refundQuotaImmediately) {
+            refundScheduleQuotaIfPresent(replaceTarget);
+        }
         return replaceTarget;
+    }
+
+    private void reserveQuickDispatchQuotaAfterCommit(QuickSchedulePlan plan,
+                                                      SelfMediaPublishScheduleCreateResponse created,
+                                                      SelfMediaPublishSchedule replaced) {
+        if (created == null || created.getCreatedSchedules().isEmpty()) {
+            if (replaced != null) {
+                refundScheduleQuotaIfPresent(replaced);
+            }
+            return;
+        }
+        Long scheduleId = created.getCreatedSchedules().get(0).getId();
+        try {
+            if (replaced != null) {
+                refundScheduleQuotaIfPresent(replaced);
+            }
+            SelfMediaPublishSchedule inserted = scheduleMapper.selectById(scheduleId);
+            reserveScheduleQuota(inserted, plan.data().candidate().article().getProjectId(),
+                    quotaPrecheck(plan.response().getBrandId()).companyId);
+        } catch (RuntimeException ex) {
+            cancelCreatedQuickDispatchAfterQuotaFailure(scheduleId, ex);
+            throw ex;
+        }
+    }
+
+    private void cancelCreatedQuickDispatchAfterQuotaFailure(Long scheduleId, RuntimeException cause) {
+        if (scheduleId == null) {
+            return;
+        }
+        executeInShortTransaction(status -> {
+            SelfMediaPublishSchedule row = scheduleMapper.selectById(scheduleId);
+            if (row == null) {
+                return null;
+            }
+            String currentStatus = normalize(row.getStatus());
+            if (!SelfMediaPublishScheduleConstants.STATUS_PENDING.equals(currentStatus)) {
+                return null;
+            }
+            row.setStatus(SelfMediaPublishScheduleConstants.STATUS_CANCELLED);
+            row.setCancelledAt(LocalDateTime.now());
+            row.setLockedUntil(null);
+            row.setNextAttemptAt(null);
+            row.setFailureCode("SELF_MEDIA_SCHEDULE_QUOTA_RESERVATION_FAILED");
+            row.setFailureMessage(truncate(
+                    cause == null || !StringUtils.hasText(cause.getMessage())
+                            ? "渠道额度预占失败，已取消快速分发排期"
+                            : cause.getMessage(),
+                    FAILURE_MESSAGE_MAX_LENGTH
+            ));
+            touch(row);
+            scheduleMapper.updateById(row);
+            releaseArticleIfNoActiveSchedule(row);
+            return null;
+        });
     }
 
     private QuickSchedulePlan withQuickDispatchTiming(QuickSchedulePlan plan, LocalDateTime now) {
@@ -3932,6 +4024,12 @@ public class SelfMediaPublishScheduleService {
         }
     }
 
+    private <T> T executeInShortTransaction(TransactionCallback<T> callback) {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return tx.execute(callback);
+    }
+
     private void fail(String code, String message) {
         throw new BizException(ERROR_CODE, message, 200, Map.of("code", code));
     }
@@ -4036,6 +4134,10 @@ public class SelfMediaPublishScheduleService {
         QuickSchedulePlan withPlan(QuickScheduleData data) {
             return new QuickSchedulePlan(response, data);
         }
+    }
+
+    private record QuickDispatchCreateResult(SelfMediaPublishScheduleCreateResponse createResponse,
+                                             SelfMediaPublishSchedule replacedSchedule) {
     }
 
     private record Candidate(ArticleDraft article,

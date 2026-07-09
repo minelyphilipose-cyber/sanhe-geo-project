@@ -38,6 +38,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -113,6 +114,7 @@ class ContentAutoDistributionServiceTest {
 
     @Test
     void createProjectPlanPlansOnlyMatchingSelfMediaPlatformQuotaChannel() {
+        ReflectionTestUtils.setField(service, "includeSelfMediaChannels", true);
         Project project = new Project();
         project.setId(11L);
         project.setCompanyId(7L);
@@ -155,7 +157,24 @@ class ContentAutoDistributionServiceTest {
     }
 
     @Test
+    void createProjectPlanDoesNotPlanSelfMediaByDefault() {
+        Project project = new Project();
+        project.setId(12L);
+        project.setCompanyId(7L);
+        project.setBrandId(3L);
+        when(allocationMapper.selectList(any())).thenReturn(List.of());
+
+        service.createProjectPlan(project, LocalDate.of(2026, 6, 8), 900L);
+
+        verify(allocationMapper).selectList(any());
+        verify(batchMapper, never()).insert(any(ContentAutoDistributionBatch.class));
+        verify(itemMapper, never()).insert(any(ContentAutoDistributionItem.class));
+        verify(generationService, never()).createSystemBatch(any(), any());
+    }
+
+    @Test
     void createProjectPlanSkipsWithPlatformHintWhenSelfMediaAccountMissing() {
+        ReflectionTestUtils.setField(service, "includeSelfMediaChannels", true);
         Project project = new Project();
         project.setId(12L);
         project.setCompanyId(7L);
@@ -179,6 +198,7 @@ class ContentAutoDistributionServiceTest {
 
     @Test
     void createProjectPlanResumesPendingGenerationWhenDailyBatchAlreadyExists() {
+        ReflectionTestUtils.setField(service, "includeSelfMediaChannels", true);
         Project project = new Project();
         project.setId(12L);
         project.setCompanyId(8L);

@@ -86,7 +86,6 @@ public class ContentAutoDistributionService {
             "industry_site", ArticlePromptChannels.INDUSTRY_SITE,
             "forum", ArticlePromptChannels.FORUM
     );
-    private static final Set<String> PLANNABLE_CHANNEL_CODES = plannableChannelCodes();
 
     private final ProjectMapper projectMapper;
     private final ProjectChannelAllocationMapper allocationMapper;
@@ -140,6 +139,8 @@ public class ContentAutoDistributionService {
     private int planWorkerBatchSize;
     @Value("${geo.content.auto-distribution.plan-retry-max-count:3}")
     private int planRetryMaxCount;
+    @Value("${geo.content.auto-distribution.include-self-media:false}")
+    private boolean includeSelfMediaChannels;
 
     @Scheduled(cron = "${geo.content.auto-distribution.cron:0 0 1 * * ?}", zone = "Asia/Shanghai")
     public void runDailyPlan() {
@@ -293,7 +294,7 @@ public class ContentAutoDistributionService {
         List<ProjectChannelAllocation> allocations = allocationMapper.selectList(
                 new LambdaQueryWrapper<ProjectChannelAllocation>()
                         .eq(ProjectChannelAllocation::getProjectId, project.getId())
-                        .in(ProjectChannelAllocation::getChannelCode, PLANNABLE_CHANNEL_CODES)
+                        .in(ProjectChannelAllocation::getChannelCode, plannableChannelCodes())
                         .gt(ProjectChannelAllocation::getAllocatedCount, 0)
         );
         if (allocations.isEmpty()) {
@@ -979,10 +980,12 @@ public class ContentAutoDistributionService {
         return QUOTA_TO_GENERATION_GROUP.get(channelCode);
     }
 
-    private static Set<String> plannableChannelCodes() {
+    private Set<String> plannableChannelCodes() {
         Set<String> codes = new HashSet<>(QUOTA_TO_GENERATION_GROUP.keySet());
-        for (String platform : ArticlePromptChannels.SELF_MEDIA_SUB_CODES) {
-            codes.add(ArticlePromptChannels.SELF_MEDIA + ":" + platform);
+        if (includeSelfMediaChannels) {
+            for (String platform : ArticlePromptChannels.SELF_MEDIA_SUB_CODES) {
+                codes.add(ArticlePromptChannels.SELF_MEDIA + ":" + platform);
+            }
         }
         return Set.copyOf(codes);
     }
