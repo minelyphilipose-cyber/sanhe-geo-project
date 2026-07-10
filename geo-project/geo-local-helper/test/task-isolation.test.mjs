@@ -71,6 +71,21 @@ test('local helper requires environmentKey for extension task claims and complet
   )
 })
 
+test('AdsPower extension status refreshes a stale dynamic DevTools endpoint once', () => {
+  const server = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.match(
+    server,
+    /function isStaleAdspowerBrowserSessionError[\s\S]+ECONNREFUSED[\s\S]+ECONNRESET/,
+    'helper must recognize connection failures caused by an expired AdsPower DevTools port',
+  )
+  assert.match(
+    server,
+    /handleAdspowerExtensionStatus[\s\S]+isStaleAdspowerBrowserSessionError\(error\)[\s\S]+startAdspowerBrowser\(config, environment\.providerProfileId, \{ forceRefresh: true \}\)[\s\S]+inspectGeoEnvExtension/,
+    'extension status must discard the cached session, obtain the current dynamic port, and retry once',
+  )
+})
+
 test('official api schedule retries reuse the existing distribution task request id', () => {
   const adapter = readProjectFile('geo-server/src/main/java/com/huanjing/geo/module/content/schedule/OfficialApiSelfMediaPublishScheduleAdapter.java')
 

@@ -1051,13 +1051,14 @@ function cachedAdspowerBrowserSession(providerProfileId) {
   return cached.data
 }
 
-async function startAdspowerBrowser(config, providerProfileId) {
+async function startAdspowerBrowser(config, providerProfileId, options = {}) {
   const key = adspowerSessionCacheKey(providerProfileId)
   if (!key) {
     const error = new Error('providerProfileId is required')
     error.statusCode = 400
     throw error
   }
+  if (options.forceRefresh) adspowerBrowserSessions.delete(key)
   const cached = cachedAdspowerBrowserSession(key)
   if (cached) return cached
 
@@ -1076,6 +1077,16 @@ async function startAdspowerBrowser(config, providerProfileId) {
   })
   adspowerBrowserStartInFlight.set(key, promise)
   return promise
+}
+
+function isStaleAdspowerBrowserSessionError(error) {
+  const text = [
+    error?.code,
+    error?.message,
+    error?.cause?.code,
+    error?.cause?.message,
+  ].filter(Boolean).join(' ')
+  return /ECONNREFUSED|ECONNRESET|socket hang up|websocket.*(?:closed|failed)|browser has disconnected/i.test(text)
 }
 
 function normalizeAdspowerProfile(row) {
@@ -3187,8 +3198,24 @@ async function handleAdspowerExtensionStatus(req, res, config) {
     body.providerProfileId,
     body.environmentName,
   )
-  const data = await startAdspowerBrowser(config, environment.providerProfileId)
-  const extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer)
+  let data = await startAdspowerBrowser(config, environment.providerProfileId)
+  let extensionStatus
+  try {
+    extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer)
+  } catch (error) {
+    if (!isStaleAdspowerBrowserSessionError(error)) throw error
+
+    // AdsPower assigns a dynamic DevTools port whenever a browser session starts.
+    // Refresh its start response once instead of reconnecting to a cached, closed port.
+    data = await startAdspowerBrowser(config, environment.providerProfileId, { forceRefresh: true })
+    try {
+      extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer)
+    } catch (retryError) {
+      retryError.statusCode ||= 502
+      retryError.details ||= { reason: 'adspower_browser_session_unavailable' }
+      throw retryError
+    }
+  }
   sendJson(req, res, config, 200, {
     ok: true,
     environmentKey: environment.environmentKey,
