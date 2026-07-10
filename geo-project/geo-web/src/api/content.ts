@@ -1539,6 +1539,7 @@ export function createSelfMediaPlatformQuickSchedule(data: {
 export function dispatchSelfMediaPlatformQuickSchedule(data: {
   articleId: number
   platform: string
+  replaceNextScheduled?: boolean
 }) {
   return request.post<R<SelfMediaPlatformQuickScheduleResponse>>('/content/self-media-schedules/platform-quick-dispatch', data, {
     headers: {

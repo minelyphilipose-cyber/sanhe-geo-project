@@ -43,10 +43,13 @@ import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -56,6 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -89,6 +93,7 @@ class SelfMediaPublishScheduleServiceTest {
     private ContentDistributionService contentDistributionService;
     private CompanyChannelQuotaService companyChannelQuotaService;
     private BrandAccessService brandAccessService;
+    private PlatformTransactionManager transactionManager;
     private SysUserMapper sysUserMapper;
     private LocalAgentSessionMapper localAgentSessionMapper;
     private BusinessCalendarService businessCalendarService;
@@ -123,6 +128,7 @@ class SelfMediaPublishScheduleServiceTest {
         when(companyChannelQuotaService.selfMediaDistributionQuota(anyLong(), anyString()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 0, 100));
         brandAccessService = mock(BrandAccessService.class);
+        transactionManager = mock(PlatformTransactionManager.class);
         sysUserMapper = mock(SysUserMapper.class);
         localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
         when(localAgentSessionMapper.countOnlineSessionsByOperator(anyLong(), any(), any())).thenReturn(1L);
@@ -151,6 +157,7 @@ class SelfMediaPublishScheduleServiceTest {
                 companyChannelQuotaService,
                 brandAccessService,
                 currentUserService,
+                transactionManager,
                 sysUserMapper,
                 localAgentSessionMapper,
                 businessCalendarService,
@@ -687,6 +694,12 @@ class SelfMediaPublishScheduleServiceTest {
             row.setId(71L);
             return 1;
         });
+        when(scheduleMapper.selectById(71L)).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule inserted = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+            inserted.setId(71L);
+            inserted.setPlatform("toutiao");
+            return inserted;
+        });
 
         SelfMediaPlatformQuickScheduleResponse response = service.createPlatformQuickSchedule(quickRequest("toutiao", true), "quick-key");
 
@@ -719,7 +732,7 @@ class SelfMediaPublishScheduleServiceTest {
         protectedSlot.setNextAttemptAt(occupied);
         protectedSlot.setPlannedPublishAt(occupied.plusHours(2));
         when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any()))
-                .thenReturn(List.of(), List.of(), List.of(protectedSlot), List.of());
+                .thenReturn(List.of(), List.of(protectedSlot), List.of());
         stubRequestInsert();
         when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
             SelfMediaPublishSchedule row = invocation.getArgument(0);
@@ -727,8 +740,14 @@ class SelfMediaPublishScheduleServiceTest {
             assertTrue(!row.getNextAttemptAt().isBefore(occupied.plusMinutes(3)));
             return 1;
         });
+        when(scheduleMapper.selectById(73L)).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule inserted = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+            inserted.setId(73L);
+            inserted.setPlatform("toutiao");
+            return inserted;
+        });
 
-        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("toutiao", false), "dispatch-key");
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("toutiao", true), "dispatch-key");
 
         assertEquals("created", response.getAction());
         assertEquals("QUICK_DISPATCH_CREATED", response.getCode());
@@ -753,6 +772,12 @@ class SelfMediaPublishScheduleServiceTest {
             assertTrue(!row.getNextAttemptAt().isBefore(earliestBufferedAttempt));
             assertTrue(row.getNextAttemptAt().isBefore(clickedAt.plusMinutes(3)));
             return 1;
+        });
+        when(scheduleMapper.selectById(73L)).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule inserted = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+            inserted.setId(73L);
+            inserted.setPlatform("toutiao");
+            return inserted;
         });
 
         SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("toutiao", false), "dispatch-key");
@@ -802,6 +827,12 @@ class SelfMediaPublishScheduleServiceTest {
             assertNull(row.getBrowserEnvironmentAccountId());
             return 1;
         });
+        when(scheduleMapper.selectById(74L)).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule inserted = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+            inserted.setId(74L);
+            inserted.setPlatform("douyin");
+            return inserted;
+        });
 
         SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("douyin", false), "dispatch-douyin-key");
 
@@ -848,6 +879,12 @@ class SelfMediaPublishScheduleServiceTest {
             assertNull(row.getBrowserEnvironmentAccountId());
             return 1;
         });
+        when(scheduleMapper.selectById(75L)).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule inserted = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+            inserted.setId(75L);
+            inserted.setPlatform("wechat_mp");
+            return inserted;
+        });
 
         SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("wechat_mp", false), "dispatch-wechat-key");
 
@@ -890,7 +927,7 @@ class SelfMediaPublishScheduleServiceTest {
             return 1;
         });
 
-        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("toutiao", false), "dispatch-key");
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("toutiao", true), "dispatch-key");
 
         assertEquals("created", response.getAction());
         assertEquals(72L, response.getReplaceScheduleId());
@@ -938,6 +975,37 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("ready", response.getAction());
         assertTrue(!response.getNextAttemptAt().isBefore(occupied.plusMinutes(3)));
         assertEquals(3, response.getBrandSafetyIntervalMinutes());
+    }
+
+    @Test
+    void previewPlatformQuickScheduleAdvancesAcrossAllSecondOffsetSlotsWithoutLooping() {
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        LocalDateTime initialMinute = LocalDateTime.now().plusSeconds(10).withSecond(0).withNano(0);
+        List<SelfMediaPublishSchedule> slots = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            SelfMediaPublishSchedule slot = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+            slot.setId(81L + i);
+            slot.setNextAttemptAt(i == 0
+                    ? initialMinute.minusMinutes(3).plusSeconds(10)
+                    : initialMinute.plusMinutes(i * 6L - 3L).plusSeconds(10));
+            slots.add(slot);
+        }
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any()))
+                .thenReturn(slots);
+
+        SelfMediaPlatformQuickScheduleResponse response = assertTimeoutPreemptively(
+                Duration.ofSeconds(2),
+                () -> service.previewPlatformQuickSchedule(quickRequest("toutiao", false))
+        );
+
+        assertEquals("ready", response.getAction());
+        assertTrue(!response.getNextAttemptAt().isBefore(initialMinute.plusMinutes(55)));
+        for (SelfMediaPublishSchedule slot : slots) {
+            assertTrue(Duration.between(slot.getNextAttemptAt(), response.getNextAttemptAt()).abs()
+                    .compareTo(Duration.ofMinutes(3)) >= 0);
+        }
     }
 
     @Test

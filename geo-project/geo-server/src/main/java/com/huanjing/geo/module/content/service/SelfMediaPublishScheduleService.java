@@ -285,6 +285,10 @@ public class SelfMediaPublishScheduleService {
         if (!List.of("ready", "replace_required").contains(plan.response().getAction())) {
             return plan.response();
         }
+        if ("replace_required".equals(plan.response().getAction())
+                && !Boolean.TRUE.equals(request.getReplaceNextScheduled())) {
+            return plan.response();
+        }
 
         SelfMediaPublishSchedule replaced = null;
         LocalDateTime now = LocalDateTime.now();
@@ -3756,20 +3760,21 @@ public class SelfMediaPublishScheduleService {
                 protectionEnd.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES),
                 new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
         );
-        boolean moved;
-        do {
-            moved = false;
-            for (SelfMediaPublishSchedule slot : protectedSlots == null ? List.<SelfMediaPublishSchedule>of() : protectedSlots) {
-                LocalDateTime occupied = slot.getNextAttemptAt() != null ? slot.getNextAttemptAt() : slot.getPlannedPublishAt();
-                if (occupied == null || occupied.isBefore(protectionStart) || occupied.isAfter(protectionEnd)) {
-                    continue;
-                }
-                if (!cursor.isAfter(occupied.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES))) {
-                    cursor = occupied.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES).plusSeconds(10).withNano(0);
-                    moved = true;
-                }
+        List<LocalDateTime> occupiedTimes = (protectedSlots == null
+                ? List.<SelfMediaPublishSchedule>of()
+                : protectedSlots).stream()
+                .map(slot -> slot.getNextAttemptAt() != null ? slot.getNextAttemptAt() : slot.getPlannedPublishAt())
+                .filter(occupied -> occupied != null
+                        && !occupied.isBefore(protectionStart)
+                        && !occupied.isAfter(protectionEnd))
+                .sorted()
+                .toList();
+        for (LocalDateTime occupied : occupiedTimes) {
+            LocalDateTime safeAfter = occupied.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES);
+            if (!cursor.isAfter(safeAfter)) {
+                cursor = safeAfter.plusSeconds(10).withNano(0);
             }
-        } while (moved);
+        }
         return cursor;
     }
 
@@ -3784,24 +3789,30 @@ public class SelfMediaPublishScheduleService {
                 cursor.plusHours(QUICK_SCHEDULE_SLOT_LOOKAHEAD_HOURS),
                 new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
         );
-        boolean moved;
-        do {
-            moved = false;
-            for (SelfMediaPublishSchedule slot : slots == null ? List.<SelfMediaPublishSchedule>of() : slots) {
-                if (excludedScheduleId != null && excludedScheduleId.equals(slot.getId())) {
-                    continue;
-                }
-                LocalDateTime occupied = slot.getNextAttemptAt() != null ? slot.getNextAttemptAt() : slot.getPlannedPublishAt();
-                if (occupied == null) continue;
-                long distance = Math.abs(java.time.Duration.between(occupied, cursor).toMinutes());
-                if (distance < QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES) {
-                    cursor = clampToBusinessAttemptWindow(
-                            occupied.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES).withSecond(0).withNano(0));
-                    moved = true;
-                }
+        List<LocalDateTime> occupiedTimes = (slots == null ? List.<SelfMediaPublishSchedule>of() : slots).stream()
+                .filter(slot -> excludedScheduleId == null || !excludedScheduleId.equals(slot.getId()))
+                .map(slot -> slot.getNextAttemptAt() != null ? slot.getNextAttemptAt() : slot.getPlannedPublishAt())
+                .filter(java.util.Objects::nonNull)
+                .sorted()
+                .toList();
+        Duration safetyInterval = Duration.ofMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES);
+        for (LocalDateTime occupied : occupiedTimes) {
+            Duration distance = Duration.between(occupied, cursor).abs();
+            if (distance.compareTo(safetyInterval) >= 0) {
+                continue;
             }
-        } while (moved);
+            LocalDateTime nextCursor = clampToBusinessAttemptWindow(
+                    ceilToMinute(occupied.plus(safetyInterval)));
+            if (nextCursor != null && nextCursor.isAfter(cursor)) {
+                cursor = nextCursor;
+            }
+        }
         return cursor;
+    }
+
+    private LocalDateTime ceilToMinute(LocalDateTime value) {
+        LocalDateTime minute = value.withSecond(0).withNano(0);
+        return value.equals(minute) ? minute : minute.plusMinutes(1);
     }
 
     private LocalDateTime plannedPublishAtForQuickSchedule(String platform,

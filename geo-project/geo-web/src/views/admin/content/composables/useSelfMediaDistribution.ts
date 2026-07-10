@@ -686,7 +686,8 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   async function submitPlatformQuickSchedule(platform: PlatformQuickSchedulePlatform) {
-    if (!mediaDistributeArticleId.value) {
+    const articleId = mediaDistributeArticleId.value
+    if (!articleId) {
       ElMessage.warning('请选择要分发的文章')
       return
     }
@@ -706,10 +707,24 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     }
     selfMediaSubmitting.value = true
     try {
-      const created = (await dispatchSelfMediaPlatformQuickSchedule({
-        articleId: mediaDistributeArticleId.value,
+      const dispatch = async (replaceNextScheduled = false) => (await dispatchSelfMediaPlatformQuickSchedule({
+        articleId,
         platform,
+        replaceNextScheduled,
       })).data.data
+      let created = await dispatch()
+      if (created.action === 'replace_required') {
+        await ElMessageBox.confirm(
+          created.message || `继续分发将替换已有${semiAutoPlatformLabel(platform)}排期，是否继续？`,
+          `${semiAutoPlatformLabel(platform)}排期替换确认`,
+          {
+            confirmButtonText: '确认替换并分发',
+            cancelButtonText: '取消',
+            type: 'warning',
+          },
+        )
+        created = await dispatch(true)
+      }
       if (created.action !== 'created') {
         ElMessage.warning(created.message || `${semiAutoPlatformLabel(platform)}排期未创建`)
         return
