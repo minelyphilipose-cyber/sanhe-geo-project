@@ -328,12 +328,14 @@
   }
 
   async function clickXiaohongshuScheduleToggle(toggle, platform) {
-    toggle.scrollIntoView?.({ block: 'center', inline: 'center' })
+    const target = normalizeXiaohongshuScheduleToggleTarget(toggle)
+    target.scrollIntoView?.({ block: 'center', inline: 'center' })
     await delay(300)
-    await clickTrustedActionOnce(toggle, { platform, label: '小红书定时发布开关' })
+    await clickTrustedActionOnce(target, { platform, label: '小红书定时发布开关' })
     if (await waitForOptionalCondition(() => findXiaohongshuScheduleInput(), 2500)) return true
 
-    const rect = toggle.getBoundingClientRect?.()
+    const clickBox = findXiaohongshuScheduleToggleBox(target) || target
+    const rect = clickBox.getBoundingClientRect?.()
     if (rect && rect.width > 0 && rect.height > 0) {
       const points = [
         { clientX: Math.round(rect.left + rect.width * 0.5), clientY: Math.round(rect.top + rect.height / 2) },
@@ -800,8 +802,12 @@
     const label = findXiaohongshuScheduleLabel()
     if (label) label.scrollIntoView?.({ block: 'center', inline: 'nearest' })
     const labelRect = label?.getBoundingClientRect?.()
+    const card = findXiaohongshuScheduleCard(label)
+    const scope = card || document
     const minLeft = labelRect ? labelRect.left + Math.min(160, Math.max(80, labelRect.width * 0.45)) : 0
-    const candidates = Array.from(document.querySelectorAll('button, [role="switch"], [role="button"], input, div, span'))
+    const candidates = Array.from(scope.querySelectorAll(
+      '.custom-switch-switch .d-switch.d-clickable, .custom-switch-switch [role="switch"], .custom-switch-switch input[type="checkbox"], .custom-switch-switch .d-switch-box, [role="switch"], input[type="checkbox"]',
+    ))
       .filter(isVisibleElement)
       .map((el) => {
         const target = normalizeXiaohongshuScheduleToggleTarget(el)
@@ -818,10 +824,7 @@
       .filter((item) => !labelRect || Math.abs(verticalCenter(item.rect) - verticalCenter(labelRect)) <= 70)
       .filter((item) => !labelRect || item.rect.left >= minLeft)
       .filter((item) => item.distance <= 520)
-      .filter((item) => item.role === 'switch'
-        || item.el.getAttribute?.('type') === 'checkbox'
-        || /switch|toggle|checkbox/i.test(item.className)
-        || (item.rect.width >= 28 && item.rect.width <= 80 && item.rect.height >= 18 && item.rect.height <= 48 && item.text.length <= 8))
+      .filter((item) => isXiaohongshuScheduleToggleElement(item.el))
       .sort((left, right) => {
         const leftRole = left.role === 'switch' ? 0 : 1
         const rightRole = right.role === 'switch' ? 0 : 1
@@ -874,6 +877,8 @@
   }
   
   function findXiaohongshuScheduleRow(label = findXiaohongshuScheduleLabel()) {
+    const card = findXiaohongshuScheduleCard(label)
+    if (card) return card
     let current = label
     let best = null
     for (let depth = 0; current && depth < 10; depth += 1) {
@@ -884,7 +889,7 @@
         && rect.width <= Math.max(760, window.innerWidth * 0.75)
         && rect.height >= 32
         && rect.height <= 110) {
-        best = current
+        if (!best) best = current
       }
       current = current.parentElement
     }
@@ -892,19 +897,36 @@
   }
   
   function normalizeXiaohongshuScheduleToggleTarget(el) {
+    const switchArea = el?.closest?.('.custom-switch-switch')
+    const explicit = switchArea?.querySelector?.('.d-switch.d-clickable, [role="switch"]')
+    if (explicit && isVisibleElement(explicit)) return explicit
     let current = el
     for (let depth = 0; current && depth < 5; depth += 1) {
-      const rect = current.getBoundingClientRect()
-      const className = String(current.className || '')
       if (current.getAttribute?.('role') === 'switch'
         || current.getAttribute?.('type') === 'checkbox'
-        || /switch|toggle|checkbox/i.test(className)
-        || (rect.width >= 28 && rect.width <= 90 && rect.height >= 18 && rect.height <= 54)) {
+        || current.matches?.('.d-switch.d-clickable, .d-switch-box')) {
         return current
       }
       current = current.parentElement
     }
     return el
+  }
+
+  function findXiaohongshuScheduleCard(label = findXiaohongshuScheduleLabel()) {
+    const card = label?.closest?.('.custom-switch-card') || null
+    return card && isVisibleElement(card) ? card : null
+  }
+
+  function findXiaohongshuScheduleToggleBox(toggle) {
+    const switchArea = toggle?.closest?.('.custom-switch-switch') || toggle
+    const box = switchArea?.querySelector?.('.d-switch-box') || null
+    return box && isVisibleElement(box) ? box : null
+  }
+
+  function isXiaohongshuScheduleToggleElement(el) {
+    if (!el) return false
+    if (el.getAttribute?.('role') === 'switch' || el.getAttribute?.('type') === 'checkbox') return true
+    return Boolean(el.matches?.('.d-switch.d-clickable, .d-switch-box'))
   }
   
   function setXiaohongshuDateTimeValue(input, value) {
@@ -1019,11 +1041,14 @@
   
   function describeXiaohongshuScheduleControls() {
     const label = findXiaohongshuScheduleLabel()
+    const card = findXiaohongshuScheduleCard(label)
     const labelRect = label?.getBoundingClientRect?.()
     const labelInfo = labelRect
       ? `${Math.round(labelRect.left)},${Math.round(labelRect.top)},${Math.round(labelRect.width)}x${Math.round(labelRect.height)}`
       : '-'
-    const candidates = Array.from(document.querySelectorAll('button, [role="switch"], [role="button"], input, div, span'))
+    const candidates = Array.from((card || document).querySelectorAll(
+      '.custom-switch-switch .d-switch.d-clickable, .custom-switch-switch [role="switch"], .custom-switch-switch input[type="checkbox"], .custom-switch-switch .d-switch-box, [role="switch"], input[type="checkbox"]',
+    ))
       .filter(isVisibleElement)
       .map((el) => {
         const target = normalizeXiaohongshuScheduleToggleTarget(el)
@@ -1039,10 +1064,7 @@
         }
       })
       .filter((item, index, items) => items.findIndex((other) => other.el === item.el) === index)
-      .filter((item) => item.role === 'switch'
-        || item.type === 'checkbox'
-        || /switch|toggle|checkbox/i.test(item.className)
-        || (item.rect.width >= 28 && item.rect.width <= 90 && item.rect.height >= 18 && item.rect.height <= 54 && item.text.length <= 8))
+      .filter((item) => isXiaohongshuScheduleToggleElement(item.el))
       .sort((left, right) => left.distance - right.distance)
       .slice(0, 8)
       .map((item) => `${item.role || item.type || 'node'}:${item.text || '-'}@${Math.round(item.rect.left)},${Math.round(item.rect.top)},${Math.round(item.rect.width)}x${Math.round(item.rect.height)},d=${Math.round(item.distance)}`)

@@ -101,15 +101,17 @@ test('extension targets the current local helper session and serializes token re
   )
 })
 
-test('0.1.9 hotfix packages expose and enforce the same build revision', () => {
+test('0.1.10 packages expose and enforce the same build revision', () => {
   const manifest = JSON.parse(readProjectFile('geo-env-extension/manifest.json'))
   const helperPackage = JSON.parse(readProjectFile('geo-local-helper/package.json'))
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+  const contentScript = readProjectFile('geo-env-extension/content-script.js')
 
-  assert.equal(manifest.version, '0.1.9')
-  assert.equal(helperPackage.version, '0.1.9')
-  assert.match(manifest.version_name, /0\.1\.9-hotfix-/)
-  assert.equal(helperPackage.buildRevision, '20260710.3')
+  assert.equal(manifest.version, '0.1.10')
+  assert.equal(helperPackage.version, '0.1.10')
+  assert.match(manifest.version_name, /0\.1\.10-hotfix-20260710\.6/)
+  assert.equal(helperPackage.buildRevision, '20260710.6')
+  assert.match(contentScript, /GEO_ENV_CONTENT_SCRIPT_VERSION = '0\.1\.10'/)
   assert.match(serviceWorker, /EXTENSION_HELPER_BUILD_MISMATCH/)
 })
 
@@ -141,6 +143,32 @@ test('douyin channel-close recovery opens the works manager and recreates a vani
     'known Chrome message-port lifecycle errors must enter publish-result recovery',
   )
   assert.match(serviceWorker, /DOUYIN_PUBLISH_NOT_CONFIRMED/)
+})
+
+test('all browser platforms recover channel-close through result pages without resubmitting content', () => {
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+
+  assert.match(serviceWorker, /TOUTIAO_MANAGE_URL = 'https:\/\/mp\.toutiao\.com\/profile_v4\/manage\/content\/all'/)
+  assert.match(serviceWorker, /ZHIHU_MANAGE_URL = 'https:\/\/www\.zhihu\.com\/creator\/manage\/creation\/article'/)
+  assert.match(serviceWorker, /XIAOHONGSHU_MANAGE_URL = 'https:\/\/creator\.xiaohongshu\.com\/new\/note-manager'/)
+  assert.match(serviceWorker, /BAIJIAHAO_MANAGE_URL = 'https:\/\/baijiahao\.baidu\.com\/builder\/rc\/content'/)
+  assert.match(
+    serviceWorker,
+    /recoverXiaohongshuPublishAfterMessageChannelClosed[\s\S]+findVerifiedPlatformTab\('xiaohongshu'[\s\S]+openPlatformManageVerifyTab\(recoveryTabId, 'xiaohongshu'/,
+  )
+  assert.match(
+    serviceWorker,
+    /recoverZhihuPublishAfterMessageChannelClosed[\s\S]+findVerifiedPlatformTab\('zhihu'[\s\S]+openPlatformManageVerifyTab\(recoveryTabId, 'zhihu'/,
+  )
+  assert.match(
+    serviceWorker,
+    /recoverBaijiahaoAfterMessageChannelClosed[\s\S]+findVerifiedPlatformTab\('baijiahao'[\s\S]+openPlatformManageVerifyTab\(recoveryTabId, 'baijiahao'/,
+  )
+  assert.doesNotMatch(serviceWorker, /retryFillMessageAfterChannelRecovery|isRecoverableFillChannelError/)
+  assert.match(serviceWorker, /publishNotConfirmedError\('TOUTIAO'/)
+  assert.match(serviceWorker, /publishNotConfirmedError\('ZHIHU'/)
+  assert.match(serviceWorker, /publishNotConfirmedError\('XIAOHONGSHU'/)
+  assert.match(serviceWorker, /publishNotConfirmedError\('BAIJIAHAO'/)
 })
 
 test('AdsPower extension status refreshes a stale dynamic DevTools endpoint once', () => {
@@ -210,5 +238,52 @@ test('xiaohongshu scheduled publish retries the real switch click target', () =>
     platform,
     /小红书定时发布行右侧开关/,
     'xiaohongshu schedule flow should retry by the right side of the schedule row',
+  )
+  assert.match(
+    platform,
+    /findXiaohongshuScheduleCard[\s\S]+closest\?\.\('\.custom-switch-card'\)/,
+    'schedule recovery must scope the toggle to the card that owns the 定时发布 label',
+  )
+  assert.match(
+    platform,
+    /\.custom-switch-switch \.d-switch\.d-clickable/,
+    'the actual Xiaohongshu d-switch clickable root must be preferred over decorative switch-named nodes',
+  )
+  assert.doesNotMatch(
+    platform,
+    /function normalizeXiaohongshuScheduleToggleTarget[\s\S]{0,900}\/switch\|toggle\|checkbox\/i/,
+    'custom-switch-icon and custom-switch-text-content must not be accepted merely because their class contains switch',
+  )
+})
+
+test('douyin article head upload never falls back to every image input', () => {
+  const platform = readProjectFile('geo-env-extension/platform-douyin.js')
+  const contentScript = readProjectFile('geo-env-extension/content-script.js')
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+  const helper = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.match(platform, /uploadTarget: 'douyin_article_head_image'/)
+  assert.match(contentScript, /uploadTarget: options\.uploadTarget \|\| null/)
+  assert.match(
+    serviceWorker,
+    /uploadTarget: options\.uploadTarget \|\| null,[\s\S]+click: options\.click \|\| null/,
+    'the exact page target and click point must reach the local helper',
+  )
+  assert.match(helper, /douyin upload target is not allowed/)
+  assert.match(
+    helper,
+    /platform === 'douyin'[\s\S]+chooseDouyinArticleHeadImageInputs\(inputs\)/,
+    'douyin must use its strict article-head input chooser',
+  )
+  assert.match(
+    helper,
+    /function chooseDouyinArticleHeadImageInputs[\s\S]+contextKind !== 'article_head'[\s\S]+return candidates\.length \? \[candidates\[0\]\.input\] : \[\]/,
+    'the strict fallback must return at most one confirmed head-image input',
+  )
+  assert.match(helper, /文章正文\|prosemirror\|tiptap\|toolbar\|editor\|contenteditable\|插入图片/)
+  assert.match(
+    helper,
+    /extra\.uploadTarget === 'douyin_article_head_image'[\s\S]+readFileInputState\(input\)[\s\S]+readAndDispatchFileInputState\(input\)/,
+    'after accepting the head-image chooser, unrelated empty file inputs must not receive synthetic change events',
   )
 })

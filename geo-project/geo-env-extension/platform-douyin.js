@@ -99,6 +99,7 @@
     const headImage = await uploadImageInSection('文章头图', ['点击上传图片', '上传图片'], headImageUrl, fillProfile.platform, deps, {
       optional: false,
       helperClicksUploadEntry: true,
+      uploadTarget: 'douyin_article_head_image',
       success: () => hasSectionImage('文章头图', deps),
       afterUpload: () => confirmImageEditor(deps, fillProfile.platform),
     })
@@ -216,6 +217,7 @@
       deps.showStatus?.(`抖音${sectionLabel}通过扩展调试通道选择图片`, 'info')
     }
     await uploadCoverImageFromLocalHelper(imageUrl, platform, `抖音${sectionLabel}`, {
+      uploadTarget: options.uploadTarget || '',
       click: clickPoint
         ? {
           clientX: clickPoint.clientX,

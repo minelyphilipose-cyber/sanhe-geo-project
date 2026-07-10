@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SelfMediaPublishFailureCodesTest {
 
@@ -23,6 +24,10 @@ class SelfMediaPublishFailureCodesTest {
         assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("PLATFORM_TAB_GONE"));
         assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("PLATFORM_TAB_REDIRECTED"));
         assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("DOUYIN_PUBLISH_NOT_CONFIRMED"));
+        assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("TOUTIAO_PUBLISH_NOT_CONFIRMED"));
+        assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("XIAOHONGSHU_PUBLISH_NOT_CONFIRMED"));
+        assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("ZHIHU_PUBLISH_NOT_CONFIRMED"));
+        assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("BAIJIAHAO_PUBLISH_NOT_CONFIRMED"));
         assertEquals("立即重试", SelfMediaPublishFailureCodes.actionLabel("PLATFORM_TAB_GONE"));
         assertEquals("重新校验", SelfMediaPublishFailureCodes.actionLabel("DOUYIN_PUBLISH_NOT_CONFIRMED"));
     }

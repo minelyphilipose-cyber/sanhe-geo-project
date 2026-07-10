@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.1.9'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.1.10'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -2388,6 +2388,7 @@ async function setFileInputFromLocalHelper(imageUrl, platform, options = {}) {
     platform: normalizePlatform(platform),
     taskId: globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT?.taskId || null,
     environmentKey: globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT?.environmentKey || null,
+    uploadTarget: options.uploadTarget || null,
     click: options.click || null,
   })
   if (!response?.ok) {

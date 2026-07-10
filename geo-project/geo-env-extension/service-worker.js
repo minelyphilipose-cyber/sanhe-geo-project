@@ -1,8 +1,12 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.1.9'
-const EXTENSION_BUILD_REVISION = '20260710.3'
+const EXTENSION_VERSION = '0.1.10'
+const EXTENSION_BUILD_REVISION = '20260710.6'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
+const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/manage/content/all'
+const ZHIHU_MANAGE_URL = 'https://www.zhihu.com/creator/manage/creation/article'
+const XIAOHONGSHU_MANAGE_URL = 'https://creator.xiaohongshu.com/new/note-manager'
+const BAIJIAHAO_MANAGE_URL = 'https://baijiahao.baidu.com/builder/rc/content'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
 const ACTIVE_PROFILE_KEY = 'geoEnvActiveProfile'
@@ -895,6 +899,8 @@ async function captureFailureSnapshot(tabId, platform) {
 
 function classifyTaskFailureCode(text, platform = '') {
   const normalizedPlatform = normalizePlatform(platform)
+  const explicitCode = String(text || '').match(/^([A-Z0-9_]{3,80})[：:]/)?.[1]
+  if (explicitCode) return explicitCode
   if (text.includes('fill token used or expired')) return 'FILL_TOKEN_USED_OR_EXPIRED'
   if (text.includes('作品列表') || text.includes('作品管理页') || text.includes('WORKS_LIST_VERIFY_TIMEOUT')) return 'WORKS_LIST_VERIFY_TIMEOUT'
   if (text.includes('账号不一致') || text.includes('LOGIN_STATUS_MISMATCH') || text.includes('账号身份预检失败')) return 'ACCOUNT_MISMATCH'
@@ -1306,6 +1312,11 @@ function normalizeFillResult(fillResult, task = {}) {
 }
 
 async function recoverPublishAfterFillError(tabId, task, payload, error) {
+  const xiaohongshuResult = await recoverXiaohongshuPublishAfterMessageChannelClosed(tabId, task, payload, error).catch((xiaohongshuError) => {
+    if (xiaohongshuError !== error) throw xiaohongshuError
+    return null
+  })
+  if (xiaohongshuResult) return xiaohongshuResult
   const baijiahaoResult = await recoverBaijiahaoAfterMessageChannelClosed(tabId, task, payload, error).catch((baijiahaoError) => {
     if (baijiahaoError !== error) throw baijiahaoError
     return null
@@ -1329,10 +1340,18 @@ async function recoverBaijiahaoAfterMessageChannelClosed(tabId, task, payload, e
   if (normalizePlatform(task?.platform || payload?.platform) !== 'baijiahao' || !isMessageChannelClosedError(message)) {
     throw error
   }
-  await waitForTabComplete(tabId, 45_000).catch(() => null)
-  await delay(1500)
-  const state = await inspectBaijiahaoPostSubmitTab(tabId)
-  if (!state?.submittedLike) throw error
+  const context = { title: firstText(payload?.title, payload?.articleTitle) }
+  let state = await findVerifiedPlatformTab('baijiahao', context, inspectBaijiahaoPostSubmitTab, tabId)
+  let recoveryTabId = state?.tabId || tabId
+  if (!state?.submittedLike) {
+    recoveryTabId = await openPlatformManageVerifyTab(recoveryTabId, 'baijiahao', BAIJIAHAO_MANAGE_URL)
+    for (let attempt = 0; attempt < 4 && !state?.submittedLike; attempt += 1) {
+      await delay(1200 + attempt * 700)
+      state = await inspectBaijiahaoPostSubmitTab(recoveryTabId, context)
+      if (!state?.submittedLike && attempt > 0) await chrome.tabs.reload(recoveryTabId, { bypassCache: true }).catch(() => null)
+    }
+  }
+  if (!state?.submittedLike) throw publishNotConfirmedError('BAIJIAHAO', context.title, message, state)
   return {
     titleFilled: true,
     contentFilled: true,
@@ -1349,14 +1368,18 @@ async function recoverBaijiahaoAfterMessageChannelClosed(tabId, task, payload, e
   }
 }
 
-async function inspectBaijiahaoPostSubmitTab(tabId) {
+async function inspectBaijiahaoPostSubmitTab(tabId, context = {}) {
   const tab = await chrome.tabs.get(tabId).catch(() => null)
   await ensureContentScript(tabId).catch(() => null)
   const state = await executeScriptOnPlatformTab(tabId, {
     target: { tabId },
-    func: () => {
+    args: [context],
+    func: (context) => {
       const text = document.body?.innerText || document.body?.textContent || ''
       const url = location.href
+      const normalize = (value) => String(value || '').replace(/\s+/g, '').replace(/[《》「」『』"'“”‘’]/g, '')
+      const title = normalize(context?.title || '')
+      const titleNeedle = title.length > 18 ? title.slice(0, 18) : title
       const postSubmitPath = location.hostname === 'baijiahao.baidu.com'
         && (
           location.pathname.includes('/builder/rc/clue')
@@ -1365,14 +1388,18 @@ async function inspectBaijiahaoPostSubmitTab(tabId) {
         )
       const stillEditor = location.pathname.includes('/builder/rc/edit')
         || /发布|定时发布|存草稿|请输入标题|请输入正文/.test(text)
-      const successText = /发布成功|提交成功|已发布|审核中|定时发布|发文成功/.test(text)
+      const successText = /发布成功|提交成功|发文成功/.test(text)
+      const managerRecordMatched = Boolean(titleNeedle)
+        && normalize(text).includes(titleNeedle)
+        && /已发布|审核中|定时发布|发布成功/.test(text)
       return {
         pageUrl: url,
         title: document.title || '',
         textProbe: text.slice(0, 500),
-        submittedLike: postSubmitPath || successText || (location.hostname === 'baijiahao.baidu.com' && !stillEditor),
+        submittedLike: (successText && context?.allowCompletionWithoutTitle) || managerRecordMatched,
         postSubmitPath,
         successText,
+        managerRecordMatched,
         stillEditor,
       }
     },
@@ -1380,8 +1407,56 @@ async function inspectBaijiahaoPostSubmitTab(tabId) {
   return state?.[0]?.result || {
     pageUrl: tab?.url || '',
     title: tab?.title || '',
-    submittedLike: Boolean(tab?.url && /baijiahao\.baidu\.com\/builder\/rc\/(clue|content|home)/.test(tab.url)),
+    submittedLike: false,
   }
+}
+
+async function recoverXiaohongshuPublishAfterMessageChannelClosed(tabId, task, payload, error) {
+  const message = error?.message || String(error || '')
+  if (normalizePlatform(task?.platform || payload?.platform) !== 'xiaohongshu' || !isMessageChannelClosedError(message)) throw error
+  const context = { title: firstText(payload?.title, payload?.articleTitle) }
+  let verification = await findVerifiedPlatformTab('xiaohongshu', context, inspectXiaohongshuPublishedTab, tabId)
+  let recoveryTabId = verification?.tabId || tabId
+  if (!verification?.verified) {
+    recoveryTabId = await openPlatformManageVerifyTab(recoveryTabId, 'xiaohongshu', XIAOHONGSHU_MANAGE_URL)
+    for (let attempt = 0; attempt < 4 && !verification?.verified; attempt += 1) {
+      await delay(1200 + attempt * 700)
+      verification = await inspectXiaohongshuPublishedTab(recoveryTabId, context)
+      if (!verification?.verified && attempt > 0) await chrome.tabs.reload(recoveryTabId, { bypassCache: true }).catch(() => null)
+    }
+  }
+  if (!verification?.verified) throw publishNotConfirmedError('XIAOHONGSHU', context.title, message, verification)
+  return recoveredPublishResult(payload, verification, message, '小红书发布后页面跳转，已通过笔记管理页确认发布结果')
+}
+
+async function inspectXiaohongshuPublishedTab(tabId, context = {}) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null)
+  if (!tab?.url || !isAllowedPlatformUrl('xiaohongshu', tab.url)) return { verified: false, pageUrl: tab?.url || '', reason: 'not_xiaohongshu_tab' }
+  const [state] = await executeScriptOnPlatformTab(tabId, {
+    target: { tabId },
+    args: [context],
+    func: (context) => {
+      const text = document.body?.innerText || document.body?.textContent || ''
+      const normalize = (value) => String(value || '').replace(/\s+/g, '').replace(/[《》「」『』"'“”‘’]/g, '')
+      const title = normalize(context?.title || '')
+      const titleNeedle = title.length > 18 ? title.slice(0, 18) : title
+      const completionUrl = location.pathname.includes('/publish/success')
+        || (location.pathname.includes('/publish/publish') && new URLSearchParams(location.search).get('published') === 'true')
+      const explicitSuccess = /发布成功|发布完成|提交成功/.test(text)
+      const managerRecordMatched = Boolean(titleNeedle)
+        && normalize(text).includes(titleNeedle)
+        && /已发布|审核中|发布成功/.test(text)
+      return {
+        verified: ((completionUrl || explicitSuccess) && context?.allowCompletionWithoutTitle) || managerRecordMatched,
+        pageUrl: location.href,
+        completionUrl,
+        explicitSuccess,
+        managerRecordMatched,
+        diagnostics: text.replace(/\s+/g, ' ').slice(0, 500),
+      }
+    },
+  }).catch(() => [])
+  return state?.result || { verified: false, pageUrl: tab.url, reason: 'inspect_failed' }
 }
 
 async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payload, error) {
@@ -1445,6 +1520,60 @@ async function openDouyinManageVerifyTab(tabId) {
   return target.id
 }
 
+async function openPlatformManageVerifyTab(tabId, platform, manageUrl) {
+  const current = tabId ? await chrome.tabs.get(tabId).catch(() => null) : null
+  const updated = current
+    ? await chrome.tabs.update(current.id, { url: manageUrl, active: true }).catch(() => null)
+    : null
+  const target = updated || await chrome.tabs.create({ url: manageUrl, active: true })
+  if (!target?.id) throw codedError('PLATFORM_TAB_GONE', `无法打开${platform}作品管理页进行发布结果恢复校验`)
+  await waitForTabComplete(target.id, 45_000).catch(() => null)
+  await delay(1000)
+  return target.id
+}
+
+async function findVerifiedPlatformTab(platform, context, inspector, preferredTabId = null) {
+  const tabs = await chrome.tabs.query({}).catch(() => [])
+  tabs.sort((left, right) => Number(right?.id === preferredTabId) - Number(left?.id === preferredTabId))
+  let latest = null
+  for (const tab of tabs) {
+    if (!tab?.id || !tab?.url || !isAllowedPlatformUrl(platform, tab.url)) continue
+    const state = await inspector(tab.id, {
+      ...context,
+      allowCompletionWithoutTitle: tab.id === preferredTabId,
+    }).catch(() => null)
+    if (state) latest = { ...state, tabId: tab.id }
+    if (state?.verified || state?.submittedLike) return latest
+  }
+  return latest
+}
+
+function recoveredPublishResult(payload, verification, message, description) {
+  const scheduled = Boolean(payload?.platformScheduledAt || payload?.scheduledAt)
+  return {
+    titleFilled: true,
+    contentFilled: true,
+    tagsFilled: false,
+    publishOptions: {
+      filled: true,
+      scheduled,
+      published: !scheduled,
+      publishVerification: verification,
+      message: description,
+    },
+    recoveredAfterMessageChannelClosed: true,
+    messageChannelClosedError: message,
+  }
+}
+
+function publishNotConfirmedError(platform, title, originalMessage, verification) {
+  const code = `${platform}_PUBLISH_NOT_CONFIRMED`
+  const error = new Error(`${code}：页面跳转后已自动打开作品管理页，但暂未匹配到目标作品；targetTitle=${title || '-'}；diagnostics=${verification?.diagnostics || verification?.reason || originalMessage}`)
+  error.code = code
+  error.originalMessage = originalMessage
+  return error
+}
+
 function isRecoverableDouyinPublishVerifyError(error, message) {
   const text = String(message || '')
   return isMessageChannelClosedError(text)
@@ -1458,14 +1587,17 @@ async function recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload
   if (normalizePlatform(task?.platform || payload?.platform) !== 'zhihu' || !isMessageChannelClosedError(message)) {
     throw error
   }
-  const verification = await waitForZhihuPublishedTab(tabId, 15000, {
+  const context = {
     expectedTitle: payload?.title || payload?.articleTitle || '',
     expectedAccountName: payload?.expectedAccountName || '',
-    expectedPlatformAccountId: payload?.expectedPlatformAccountId || '',
-  })
-  if (!verification?.verified) {
-    throw error
   }
+  let verification = await findVerifiedPlatformTab('zhihu', context, inspectZhihuPublishedTab, tabId)
+  let recoveryTabId = verification?.tabId || tabId
+  if (!verification?.verified) {
+    recoveryTabId = await openPlatformManageVerifyTab(recoveryTabId, 'zhihu', ZHIHU_MANAGE_URL)
+    verification = await waitForZhihuPublishedTab(recoveryTabId, 15_000, context)
+  }
+  if (!verification?.verified) throw publishNotConfirmedError('ZHIHU', context.expectedTitle, message, verification)
   return {
     titleFilled: true,
     contentFilled: true,
@@ -1474,7 +1606,7 @@ async function recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload
       filled: true,
       published: true,
       publishVerification: verification,
-      message: '知乎发布后页面跳转，已通过标签页状态确认发布',
+      message: '知乎发布后页面跳转，已通过文章页或创作管理页确认发布',
     },
     recoveredAfterMessageChannelClosed: true,
     messageChannelClosedError: message,
@@ -1741,14 +1873,18 @@ async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload,
   if (platform !== 'toutiao' || (!isWorksListVerifyTimeout(error, message) && !isMessageChannelClosedError(message))) throw error
 
   const context = buildToutiaoWorksListVerifyContext(payload)
-  if (!context.scheduledAt) throw error
+  if (!context.title) throw error
   let latest = null
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await chrome.tabs.reload(tabId, { bypassCache: true })
-    await delay(300)
-    await waitForTabComplete(tabId, 30_000).catch(() => null)
+  let recoveryTabId = tabId
+  const current = await chrome.tabs.get(recoveryTabId).catch(() => null)
+  if (!current?.url || !current.url.includes('/manage/')) {
+    recoveryTabId = await openPlatformManageVerifyTab(recoveryTabId, 'toutiao', TOUTIAO_MANAGE_URL)
+  }
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (attempt > 0) await chrome.tabs.reload(recoveryTabId, { bypassCache: true }).catch(() => null)
+    await waitForTabComplete(recoveryTabId, 30_000).catch(() => null)
     await delay(1200 + attempt * 800)
-    latest = await inspectToutiaoWorksListTab(tabId, context, attempt + 1)
+    latest = await inspectToutiaoWorksListTab(recoveryTabId, context, attempt + 1)
     if (latest?.verified) {
       return {
         titleFilled: true,
@@ -1756,12 +1892,12 @@ async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload,
         tagsFilled: false,
         publishOptions: {
           filled: true,
-          scheduled: true,
-          published: false,
+          scheduled: Boolean(context.scheduledAt),
+          published: !context.scheduledAt,
           publishVerification: latest,
           message: isMessageChannelClosedError(message)
-            ? `头条发布后页面跳转导致消息通道关闭，刷新${attempt + 1}次后确认定时发布`
-            : `头条作品列表首次未命中，刷新${attempt + 1}次后确认定时发布`,
+            ? `头条发布后页面跳转导致消息通道关闭，已通过作品管理页确认${context.scheduledAt ? '定时发布' : '发布结果'}`
+            : `头条作品列表首次未命中，刷新${attempt + 1}次后确认发布结果`,
         },
         recoveredAfterWorksListRefresh: true,
         recoveredAfterMessageChannelClosed: isMessageChannelClosedError(message),
@@ -1769,7 +1905,7 @@ async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload,
       }
     }
   }
-  throw new Error(`WORKS_LIST_VERIFY_TIMEOUT：头条作品列表刷新后仍未匹配到定时文章；target=${context.scheduledAt}；${latest?.diagnostics || message}`)
+  throw publishNotConfirmedError('TOUTIAO', context.title, message, latest)
 }
 
 function isWorksListVerifyTimeout(error, message) {
@@ -1856,7 +1992,7 @@ async function inspectToutiaoWorksListTab(tabId, context, refreshAttempt) {
             const rect = el.getBoundingClientRect()
             if (rect.width < 300 || rect.height < 60 || rect.height > 360) return false
             const text = normalizeText(el.textContent || '')
-            return text.includes('定时发布中') || text.includes('将于')
+            return /定时发布中|将于|已发布|发布成功|审核中/.test(text)
           })
         return candidates.filter((candidate) => !candidates.some((other) => other !== candidate && other.contains(candidate)))
       }
@@ -1865,6 +2001,7 @@ async function inspectToutiaoWorksListTab(tabId, context, refreshAttempt) {
       const titleNeedle = expectedTitle.length > 18 ? expectedTitle.slice(0, 18) : expectedTitle
       const locationName = normalizeText(context.locationName || '')
       const scheduleMatched = (text) => {
+        if (!context.scheduledAt) return true
         const full = normalizeText(schedule.full)
         const compactFull = full.replace(/[-:]/g, '')
         const compactHourMinute = `${Number(schedule.hour)}时${Number(schedule.minute)}分`
@@ -1893,13 +2030,14 @@ async function inspectToutiaoWorksListTab(tabId, context, refreshAttempt) {
       const rows = collectRows()
       for (const row of rows) {
         const text = normalizeText(row.textContent || '')
-        if (!text.includes('定时发布中') && !text.includes('将于')) continue
+        if (context.scheduledAt && !text.includes('定时发布中') && !text.includes('将于') && !text.includes('审核中')) continue
+        if (!context.scheduledAt && !/已发布|发布成功|审核中/.test(text)) continue
         if (titleNeedle && !normalizeArticleText(row.textContent || '').includes(titleNeedle)) continue
         if (locationName && !text.includes(locationName)) continue
         if (!scheduleMatched(text)) continue
         return {
           verified: true,
-          platformStatus: 'scheduled',
+          platformStatus: context.scheduledAt ? 'scheduled' : (/审核中/.test(text) ? 'reviewing' : 'published'),
           matchedTitle: extractTitle(row),
           scheduledAtText: extractScheduleText(row),
           locationText: locationName && text.includes(locationName) ? context.locationName : '',
@@ -1942,14 +2080,15 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
   const publishedUrl = normalizeZhihuPublishedUrl(url)
   if (isZhihuPublishedArticleUrl(url)) {
     const pageTitle = normalizeZhihuTitleText(tab?.title || '')
+    const titleMatch = matchZhihuPublishedTitle(context.expectedTitle || '', pageTitle, '')
     return {
-      verified: true,
+      verified: Boolean(titleMatch?.matched),
       pageUrl: publishedUrl,
       platformPublishedUrl: publishedUrl,
       publishedUrl,
       pageTitle,
       expectedTitle: context.expectedTitle || '',
-      titleMatch: matchZhihuPublishedTitle(context.expectedTitle || '', pageTitle, ''),
+      titleMatch,
       account: {
         expectedAccountName: context.expectedAccountName || '',
         expectedPlatformAccountId: context.expectedPlatformAccountId || '',
@@ -2074,7 +2213,7 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
     },
   }).catch(() => [])
   const result = state?.result || {}
-  if (result.successText && !result.editorStillOpen) {
+  if (result.successText && !result.editorStillOpen && result.titleMatch?.matched) {
     return {
       verified: true,
       pageUrl: normalizeZhihuPublishedUrl(result.href || url),
@@ -2931,9 +3070,6 @@ async function sendFillMessageOnce(tabId, message, options = {}) {
       '页面填充执行超时，请检查定时发布弹窗或平台页面是否阻塞',
     )
   } catch (error) {
-    if (!options.channelRecovered && isRecoverableFillChannelError(error?.message || error, options.platform)) {
-      return retryFillMessageAfterChannelRecovery(tabId, message, options, error)
-    }
     if (!isNoReceivingEndError(error?.message || error)) {
       throw await enrichFillMessageError(tabId, options.platform, error)
     }
@@ -2961,23 +3097,6 @@ async function sendFillMessageOnce(tabId, message, options = {}) {
 function fillMessageTimeoutMs(platform) {
   if (normalizePlatform(platform) === 'xiaohongshu') return 150_000
   return 90_000
-}
-
-function isRecoverableFillChannelError(message, platform) {
-  return normalizePlatform(platform) === 'xiaohongshu'
-    && isMessageChannelClosedError(message)
-}
-
-async function retryFillMessageAfterChannelRecovery(tabId, message, options, originalError) {
-  await waitForTabComplete(tabId, 45_000).catch(() => null)
-  await delay(1200)
-  await waitForFillContentScriptReadyWithRecovery(tabId, options.platform, 20_000)
-  try {
-    return await sendFillMessageOnce(tabId, message, { ...options, channelRecovered: true })
-  } catch (retryError) {
-    retryError.originalMessage = originalError?.message || String(originalError || '')
-    throw retryError
-  }
 }
 
 async function enrichFillMessageError(tabId, platform, error) {
@@ -3122,6 +3241,8 @@ async function setFileInputFromUrl(tabId, urlValue, options = {}) {
       environmentKey: options.environmentKey || config.environmentKey,
       platform,
       targetPageUrl: tab.url,
+      uploadTarget: options.uploadTarget || null,
+      click: options.click || null,
     }),
   }, session)
   if (!uploaded?.ok) throw new Error(`本地助手未完成${platformDisplayName(platform)}文件上传`)
@@ -3996,6 +4117,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         platform: message.platform || null,
         taskId: message.taskId || null,
         environmentKey: message.environmentKey || null,
+        uploadTarget: message.uploadTarget || null,
         click: message.click || null,
       })
     }

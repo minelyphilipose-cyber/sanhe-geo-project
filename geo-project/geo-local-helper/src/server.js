@@ -3695,7 +3695,13 @@ async function uploadImageFileToAdsPowerPage(config, body, filePath) {
       throw new Error(`AdsPower browser has no active ${platform || 'target'} page`)
     }
     await page.bringToFront().catch(() => {})
-    const chooserState = await acceptPlatformFileChooser(page, filePath, platform)
+    if (platform === 'douyin' && body.uploadTarget !== 'douyin_article_head_image') {
+      throw new Error(`douyin upload target is not allowed: ${body.uploadTarget || '-'}`)
+    }
+    const chooserState = await acceptPlatformFileChooser(page, filePath, platform, {
+      uploadTarget: body.uploadTarget || '',
+      click: body.click || null,
+    })
     if (chooserState?.accepted) {
       return chooserState
     }
@@ -3706,7 +3712,9 @@ async function uploadImageFileToAdsPowerPage(config, body, filePath) {
         ? await chooseBaijiahaoCoverImageInputs(inputs)
         : platform === 'toutiao'
           ? await chooseToutiaoCoverImageInputs(inputs)
-          : await choosePuppeteerImageInputs(inputs)
+          : platform === 'douyin'
+            ? await chooseDouyinArticleHeadImageInputs(inputs)
+            : await choosePuppeteerImageInputs(inputs)
     if (!targets.length) {
       const diagnostic = chooserState?.tried
         ? `; chooserTried=${JSON.stringify(chooserState.tried).slice(0, 800)}`
@@ -3787,7 +3795,7 @@ function sameBrowserPagePath(left, right) {
   }
 }
 
-async function acceptPlatformFileChooser(page, filePath, platform) {
+async function acceptPlatformFileChooser(page, filePath, platform, options = {}) {
   const labels = uploadChooserLabels(platform)
   const normalized = String(platform || '').trim().toLowerCase()
   // Baijiahao reuses the same upload text for article, cover, and video controls.
@@ -3796,7 +3804,7 @@ async function acceptPlatformFileChooser(page, filePath, platform) {
     return null
   }
   if (normalized === 'douyin') {
-    return acceptFileChooserByClickCandidates(page, filePath, labels)
+    return acceptDouyinArticleHeadFileChooser(page, filePath, options)
   }
 
   const chooserPromise = page.waitForFileChooser({ timeout: 3_000 }).catch(() => null)
@@ -3805,6 +3813,93 @@ async function acceptPlatformFileChooser(page, filePath, platform) {
   const chooser = await chooserPromise
   if (!chooser) return null
   return acceptChooserAndReadState(page, chooser, filePath)
+}
+
+async function acceptDouyinArticleHeadFileChooser(page, filePath, options = {}) {
+  const candidates = await collectDouyinArticleHeadUploadCandidates(page, options.click)
+  const tried = []
+  for (const candidate of candidates.slice(0, 5)) {
+    tried.push({
+      source: candidate.source,
+      text: candidate.text,
+      x: Math.round(candidate.x),
+      y: Math.round(candidate.y),
+    })
+    const chooserPromise = page.waitForFileChooser({ timeout: 2_500 }).catch(() => null)
+    await page.mouse.click(candidate.x, candidate.y, { delay: 40 }).catch(() => {})
+    const chooser = await chooserPromise
+    if (chooser) return acceptChooserAndReadState(page, chooser, filePath, { tried, uploadTarget: options.uploadTarget })
+  }
+  return { accepted: false, noChooser: true, tried, uploadTarget: options.uploadTarget }
+}
+
+async function collectDouyinArticleHeadUploadCandidates(page, providedClick = null) {
+  return page.evaluate((click) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '')
+    const visible = (el) => {
+      if (!el?.getBoundingClientRect) return false
+      const rect = el.getBoundingClientRect()
+      const style = getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+    }
+    const isHeadImageContext = (el) => {
+      let current = el
+      for (let depth = 0; current && depth < 7; depth += 1) {
+        const text = normalize(current.textContent || '')
+        if (text.includes('封面设置') || text.includes('文章正文')) return false
+        if (text.includes('文章头图') && (text.includes('点击上传图片') || text.includes('上传图片'))) return true
+        current = current.parentElement
+      }
+      return false
+    }
+    const points = []
+    if (Number.isFinite(click?.clientX) && Number.isFinite(click?.clientY)) {
+      const pointTarget = document.elementFromPoint(click.clientX, click.clientY)
+      if (pointTarget && isHeadImageContext(pointTarget)) {
+        points.push({ source: 'provided_head_image_point', text: normalize(pointTarget.textContent || ''), x: click.clientX, y: click.clientY })
+      }
+    }
+    const labels = Array.from(document.querySelectorAll('label, div, span, p'))
+      .filter(visible)
+      .filter((el) => normalize(el.textContent || '') === '文章头图')
+    for (const label of labels) {
+      let row = label
+      const rows = []
+      for (let depth = 0; row && depth < 7; depth += 1) {
+        const text = normalize(row.textContent || '')
+        if (text.includes('文章头图') && (text.includes('点击上传图片') || text.includes('上传图片'))
+            && !text.includes('封面设置') && !text.includes('文章正文')) rows.push(row)
+        row = row.parentElement
+      }
+      rows.sort((left, right) => {
+        const a = left.getBoundingClientRect()
+        const b = right.getBoundingClientRect()
+        return a.width * a.height - b.width * b.height
+      })
+      const headRow = rows[0]
+      if (!headRow) continue
+      const entries = Array.from(headRow.querySelectorAll('button, [role="button"], div, span, label'))
+        .filter(visible)
+        .filter((el) => {
+          const text = normalize(el.textContent || '')
+          return text === '点击上传图片' || text === '上传图片'
+        })
+      for (const entry of entries) {
+        const target = entry.closest('[class*="content-upload"], button, label, [role="button"]') || entry
+        if (!visible(target) || !isHeadImageContext(target)) continue
+        const icon = target.querySelector('[class*="addIcon"], [class*="addInnerIcon"]')
+        const rect = visible(icon) ? icon.getBoundingClientRect() : target.getBoundingClientRect()
+        points.push({ source: 'scoped_article_head_dom', text: normalize(target.textContent || '').slice(0, 80), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+      }
+    }
+    const seen = new Set()
+    return points.filter((item) => {
+      const key = `${Math.round(item.x)},${Math.round(item.y)}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }, providedClick).catch(() => [])
 }
 
 async function acceptFileChooserByClickCandidates(page, filePath, labels) {
@@ -3838,7 +3933,9 @@ async function acceptChooserAndReadState(page, chooser, filePath, extra = {}) {
   try {
     inputs = await page.$$('input[type="file"]')
     for (const input of inputs) {
-      states.push(await readAndDispatchFileInputState(input))
+      states.push(extra.uploadTarget === 'douyin_article_head_image'
+        ? await readFileInputState(input)
+        : await readAndDispatchFileInputState(input))
     }
   } catch (error) {
     stateReadError = error?.message || String(error)
@@ -3976,6 +4073,59 @@ async function choosePuppeteerImageInputs(inputs) {
   const candidates = preferred.concat(fallback)
   candidates.sort((left, right) => right.score - left.score)
   return candidates.length ? candidates.map((item) => item.input) : inputs.slice().reverse()
+}
+
+async function chooseDouyinArticleHeadImageInputs(inputs) {
+  const candidates = []
+  for (const input of inputs) {
+    const meta = await input.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      const parts = []
+      let current = el
+      let contextKind = ''
+      for (let depth = 0; current && depth < 8; depth += 1) {
+        parts.push(current.id || '')
+        parts.push(String(current.className || ''))
+        const text = String(current.textContent || '').replace(/\s+/g, '')
+        if (text && text.length <= 220) parts.push(text)
+        if (text.includes('文章头图') && (text.includes('点击上传图片') || text.includes('上传图片'))) {
+          contextKind = 'article_head'
+          break
+        }
+        if (text.includes('封面设置') || text.includes('点击上传封面图')) {
+          contextKind = 'cover'
+          break
+        }
+        if (text.includes('文章正文') || /prosemirror|tiptap|toolbar|editor/i.test(String(current.className || ''))) {
+          contextKind = 'article_body'
+          break
+        }
+        current = current.parentElement
+      }
+      return {
+        accept: el.getAttribute('accept') || '',
+        id: el.id || '',
+        name: el.name || '',
+        className: String(el.className || ''),
+        visible: rect.width > 0 && rect.height > 0,
+        contextKind,
+        nearbyText: parts.join(' '),
+      }
+    }).catch(() => ({}))
+    const descriptor = `${meta.accept || ''} ${meta.id || ''} ${meta.name || ''} ${meta.className || ''} ${meta.contextKind || ''} ${meta.nearbyText || ''}`.toLowerCase()
+    if (!/(image|jpg|jpeg|png|webp|gif|jfif)/.test(descriptor)) continue
+    if (meta.contextKind === 'article_body' || /文章正文|prosemirror|tiptap|toolbar|editor|contenteditable|插入图片/.test(descriptor)) continue
+    if (meta.contextKind === 'cover' || /封面设置|点击上传封面图|选择封面|编辑封面|mycard/.test(descriptor)) continue
+    if (meta.contextKind !== 'article_head' || !/文章头图|点击上传图片|content-upload/.test(descriptor)) continue
+    let score = 100
+    if (/文章头图/.test(descriptor)) score += 300
+    if (/点击上传图片/.test(descriptor)) score += 180
+    if (/content-upload/.test(descriptor)) score += 100
+    if (meta.visible) score += 5
+    candidates.push({ input, score })
+  }
+  candidates.sort((left, right) => right.score - left.score)
+  return candidates.length ? [candidates[0].input] : []
 }
 
 async function chooseToutiaoCoverImageInputs(inputs) {
@@ -4163,6 +4313,17 @@ async function readAndDispatchFileInputState(input) {
     name: '',
     className: '',
     stateReadError: error.message,
+  }))
+}
+
+async function readFileInputState(input) {
+  return input.evaluate((el) => ({
+    filesLength: el.files?.length || 0,
+    fileName: el.files?.[0]?.name || '',
+    accept: el.getAttribute('accept') || '',
+    id: el.id || '',
+    name: el.name || '',
+    className: String(el.className || ''),
   }))
 }
 
