@@ -126,9 +126,6 @@ public class WechatMenuConfigService {
             return updateStatus(config, STATUS_PERMISSION_MISSING, "wechat menu permission missing: "
                     + funcInfoValidator.missingMenuRequired(account.getScopeJson()));
         }
-        if (!isPocAllowed(account.getBrandId())) {
-            return updateStatus(config, STATUS_MANUAL_REQUIRED, "brand not allowed by wechat menu poc whitelist");
-        }
 
         String lockKey = "wechat:menu:init:" + account.getPlatformAccountId();
         String lockValue = UUID.randomUUID().toString();
@@ -237,14 +234,6 @@ public class WechatMenuConfigService {
         config.setLastSyncError(trimError(error));
         menuConfigMapper.updateById(config);
         return config;
-    }
-
-    private boolean isPocAllowed(Long brandId) {
-        if (!menuProperties.isPocWhitelistEnabled()) {
-            return true;
-        }
-        List<Long> allowed = menuProperties.getPocAllowedBrandIds();
-        return brandId != null && allowed != null && allowed.contains(brandId);
     }
 
     private String generateUniqueSlug() {

@@ -78,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Loading, Location, Phone } from '@element-plus/icons-vue'
 import { getWechatPublicArticles, type WechatPublicArticleList } from '@/api/wechatPublic'
@@ -104,10 +104,19 @@ const brandInitial = computed(() => {
   return name.trim().slice(0, 1)
 })
 
+const pageTitle = computed(() => {
+  const name = (state.data?.brandName || state.data?.accountName || '').trim()
+  return name ? `往期文章 | ${name}` : '往期文章'
+})
+
 const hasMore = computed(() => {
   if (!state.data) return false
   return state.data.articles.length < state.data.total
 })
+
+watch(pageTitle, title => {
+  document.title = title
+}, { immediate: true })
 
 function formatDate(value: string) {
   const date = new Date(value)

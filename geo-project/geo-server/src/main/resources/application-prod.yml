@@ -125,8 +125,6 @@ geo:
       authorizer-message-url: ${WECHAT_AUTHORIZER_MESSAGE_URL}
     menu:
       web-base-url: ${WECHAT_MENU_WEB_BASE_URL:https://www.huanjingaigeo.com}
-      poc-allowed-brand-ids: ${WECHAT_MENU_POC_ALLOWED_BRAND_IDS:5}
-      poc-whitelist-enabled: ${WECHAT_MENU_POC_WHITELIST_ENABLED:true}
 
 presale:
   security:

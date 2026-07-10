@@ -38,8 +38,6 @@ geo:
       authorizer-message-url: http://localhost:8080/api/wechat/open-platform/messages/$APPID
     menu:
       web-base-url: ${WECHAT_MENU_WEB_BASE_URL:http://localhost:5173}
-      poc-allowed-brand-ids: [5]
-      poc-whitelist-enabled: true
 
   douyin:
     client:

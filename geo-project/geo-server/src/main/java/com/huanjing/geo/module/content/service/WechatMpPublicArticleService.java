@@ -55,7 +55,6 @@ public class WechatMpPublicArticleService {
                    AND r.self_media_account_id = ?
                    AND r.publish_status IN ('published', 'published_confirmed', 'distributed')
                    AND NULLIF(TRIM(r.published_url), '') IS NOT NULL
-                   AND NULLIF(TRIM(r.platform_article_id), '') IS NOT NULL
                 """, Long.class, config.getSelfMediaAccountId());
         List<WechatMpArticleListVO.ArticleItem> articles = jdbcTemplate.query("""
                 SELECT r.id,
@@ -63,7 +62,7 @@ public class WechatMpPublicArticleService {
                        NULLIF(TRIM(r.digest), '') AS digest,
                        COALESCE(NULLIF(TRIM(r.cover_url), ''), NULLIF(TRIM(ad.cover_image_url), '')) AS cover_url,
                        r.published_url,
-                       r.platform_article_id,
+                       COALESCE(NULLIF(TRIM(r.platform_article_id), ''), '') AS platform_article_id,
                        COALESCE(r.published_at, r.verified_at, r.created_at) AS published_at
                   FROM article_publish_record r
                   LEFT JOIN article_draft ad ON ad.id = r.article_id
@@ -71,7 +70,6 @@ public class WechatMpPublicArticleService {
                    AND r.self_media_account_id = ?
                    AND r.publish_status IN ('published', 'published_confirmed', 'distributed')
                    AND NULLIF(TRIM(r.published_url), '') IS NOT NULL
-                   AND NULLIF(TRIM(r.platform_article_id), '') IS NOT NULL
                  ORDER BY COALESCE(r.published_at, r.verified_at, r.created_at) DESC, r.id DESC
                  LIMIT ? OFFSET ?
                 """, (rs, rowNum) -> toItem(rs), config.getSelfMediaAccountId(), pageSize, offset);

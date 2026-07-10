@@ -394,7 +394,7 @@
             <span :class="{ 'table-error-text': row.lastAuthError }">{{ row.lastAuthError || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="canUpdateBrand" label="操作" width="390" fixed="right">
+        <el-table-column v-if="canUpdateBrand" label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="isWechatMpAccount(row)"
@@ -408,34 +408,11 @@
             <el-button
               v-if="isWechatMpAccount(row)"
               link
-              :loading="checkingSelfMediaAccountId === row.id"
-              @click="checkSelfMediaAuth(row)"
-            >
-              检测授权
-            </el-button>
-            <el-button
-              v-if="isWechatMpAccount(row)"
-              link
               type="primary"
               :loading="wechatMenuInitializingId === row.id"
               @click="initializeWechatMenuForAccount(row)"
             >
               初始化菜单
-            </el-button>
-            <el-button
-              v-if="isWechatMpAccount(row) && wechatMenuConfigOf(row)?.listPageUrl"
-              link
-              type="success"
-              @click="openWechatMenuH5(row)"
-            >
-              打开 H5
-            </el-button>
-            <el-button
-              v-if="isWechatMpAccount(row) && wechatMenuConfigOf(row)?.listPageUrl"
-              link
-              @click="copyWechatMenuH5(row)"
-            >
-              复制链接
             </el-button>
             <el-button link type="danger" @click="deleteSelfMediaAccountRecord(row)">
               删除记录
@@ -3308,25 +3285,6 @@ async function initializeWechatMenuForAccount(account: SelfMediaAccount) {
   } finally {
     wechatMenuInitializingId.value = null
   }
-}
-
-function openWechatMenuH5(account: SelfMediaAccount) {
-  const url = wechatMenuConfigOf(account)?.listPageUrl
-  if (!url) {
-    ElMessage.warning('请先初始化菜单生成 H5 链接')
-    return
-  }
-  window.open(url, '_blank', 'noopener,noreferrer')
-}
-
-async function copyWechatMenuH5(account: SelfMediaAccount) {
-  const url = wechatMenuConfigOf(account)?.listPageUrl
-  if (!url) {
-    ElMessage.warning('请先初始化菜单生成 H5 链接')
-    return
-  }
-  await copyText(url)
-  ElMessage.success('H5 链接已复制')
 }
 
 async function loadBrowserEnvironmentAccounts(accounts: SemiAutoSelfMediaAccount[]) {
