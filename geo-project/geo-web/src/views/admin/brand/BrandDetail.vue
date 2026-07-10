@@ -2940,14 +2940,17 @@ async function syncBrowserEnvironmentLoginStatus() {
   const accounts = syncableEnvironmentSelfMediaAccounts.value.map((account) => {
     const binding = browserEnvironmentAccountOf(account)
     const platform = normalizeSelfMediaPlatformForLogin(account.platform)
+    const accountIdentity = normalizeSelfMediaAccountIdentity(account.accountIdentity, platform)
     return {
       platform,
       loginUrl: selfMediaPlatformLoginReportUrl(platform, {
+        accountIdentity,
         environmentKey: environment.environmentKey,
         browserEnvironmentAccountId: binding?.id || null,
         selfMediaAccountId: account.id || null,
       }),
       browserEnvironmentAccountId: binding?.id || null,
+      accountIdentity,
     }
   }).filter((account) => account.platform && account.loginUrl && account.browserEnvironmentAccountId)
   if (!accounts.length) {
@@ -2956,11 +2959,14 @@ async function syncBrowserEnvironmentLoginStatus() {
   }
   loginStatusSyncing.value = true
   try {
-    const openedPlatforms = new Set<string>()
+    const openedLoginPages = new Set<string>()
     const openFailures: string[] = []
     for (const account of accounts) {
-      if (openedPlatforms.has(account.platform)) continue
-      openedPlatforms.add(account.platform)
+      const loginPageKey = account.platform === 'zhihu'
+        ? `${account.platform}:${account.accountIdentity}`
+        : account.platform
+      if (openedLoginPages.has(loginPageKey)) continue
+      openedLoginPages.add(loginPageKey)
       try {
         await openLocalHelperEnvironment(localHelperClientConfig(), {
           environmentKey: environment.environmentKey,
@@ -3001,6 +3007,7 @@ function normalizeSelfMediaPlatformForLogin(value?: string | null) {
 }
 
 function selfMediaPlatformLoginReportUrl(platform?: string | null, options: {
+  accountIdentity?: string | null
   environmentKey?: string | null
   browserEnvironmentAccountId?: number | string | null
   selfMediaAccountId?: number | string | null
@@ -3008,7 +3015,11 @@ function selfMediaPlatformLoginReportUrl(platform?: string | null, options: {
   const normalized = normalizeSelfMediaPlatformForLogin(platform)
   let url = ''
   if (normalized === 'toutiao') url = 'https://mp.toutiao.com/profile_v4/personal/info'
-  if (normalized === 'zhihu') url = 'https://www.zhihu.com/creator/manage/creation/article'
+  if (normalized === 'zhihu') {
+    url = options.accountIdentity === 'enterprise'
+      ? 'https://www.zhihu.com/organization/verify/levelup'
+      : 'https://www.zhihu.com/creator/manage/creation/article'
+  }
   if (normalized === 'xiaohongshu') url = 'https://creator.xiaohongshu.com/new/home?source=official'
   if (normalized === 'baijiahao') url = 'https://baijiahao.baidu.com/builder/rc/settings/accountSet'
   if (normalized === 'douyin') url = 'https://creator.douyin.com/creator-micro/home'
