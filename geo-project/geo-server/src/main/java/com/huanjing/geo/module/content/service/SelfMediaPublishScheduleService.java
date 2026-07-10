@@ -103,6 +103,7 @@ public class SelfMediaPublishScheduleService {
     private static final int PUBLISH_RESULT_RECHECK_DELAY_MINUTES = 2;
     private static final int[] PUBLISH_CHECK_RETRY_DELAYS_MINUTES = {5, 15};
     private static final int FAILURE_MESSAGE_MAX_LENGTH = 512;
+    private static final int FAILURE_CODE_MAX_LENGTH = 64;
     private static final int[] SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES = {3, 8};
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
     private static final Set<String> LOCKED_ARTICLE_STATUS = Set.of("published", "distributed");
@@ -1953,9 +1954,9 @@ public class SelfMediaPublishScheduleService {
                 || SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED.equals(status)
                 || SelfMediaPublishScheduleConstants.STATUS_SCHEDULING.equals(status)) {
             row.setLockedUntil(null);
-            row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "SCHEDULE_EXECUTION_FAILED");
+            row.setFailureCode(trimFailureCode(failureCode, "SCHEDULE_EXECUTION_FAILED"));
             row.setFailureMessage(trimFailureMessage(failureMessage));
-            row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+            row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
             if (canRetry(row, nextAttemptAt)) {
                 row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
                 row.setNextAttemptAt(nextAttemptAt);
@@ -2047,7 +2048,7 @@ public class SelfMediaPublishScheduleService {
         row.setLockedUntil(null);
         row.setFailureCode(null);
         row.setFailureMessage(null);
-        row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
         applyRuntimeStage(row, "publish_submitted", "平台发布或定时提交完成");
         scheduleMapper.updateById(row);
         syncArticleForActiveSchedule(row);
@@ -2168,7 +2169,7 @@ public class SelfMediaPublishScheduleService {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED);
         row.setFailureCode(null);
         row.setFailureMessage(null);
-        row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
         applyRuntimeStage(row, "content_filled", "内容填充完成");
         scheduleMapper.updateById(row);
         syncArticleForActiveSchedule(row);
@@ -2182,7 +2183,7 @@ public class SelfMediaPublishScheduleService {
             fail("SCHEDULE_STATUS_NOT_FILLED_VERIFIED", "当前排期未完成填充校验");
         }
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
-        row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
         applyRuntimeStage(row, "publish_submitting", "准备提交平台发布或定时");
         scheduleMapper.updateById(row);
         syncArticleForActiveSchedule(row);
@@ -2197,7 +2198,7 @@ public class SelfMediaPublishScheduleService {
         }
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setLockedUntil(null);
-        row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
         applyRuntimeStage(row, "publish_checking", "发布结果待继续复查");
         if (isPendingPlatformScheduledDiagnostics(diagnosticsJson)) {
             row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
@@ -2391,9 +2392,9 @@ public class SelfMediaPublishScheduleService {
         }
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED);
         row.setLockedUntil(null);
-        row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "PUBLISH_RESULT_CHECK_FAILED");
+        row.setFailureCode(trimFailureCode(failureCode, "PUBLISH_RESULT_CHECK_FAILED"));
         row.setFailureMessage(trimFailureMessage(failureMessage));
-        row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
         scheduleMapper.updateById(row);
         releaseArticleIfNoActiveSchedule(row);
         refundScheduleQuotaIfPresent(row);
@@ -2414,9 +2415,9 @@ public class SelfMediaPublishScheduleService {
             fail("SCHEDULE_STATUS_NOT_CLAIMED", "当前排期不处于预期执行状态");
         }
         row.setLockedUntil(null);
-        row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "SCHEDULE_EXECUTION_FAILED");
+        row.setFailureCode(trimFailureCode(failureCode, "SCHEDULE_EXECUTION_FAILED"));
         row.setFailureMessage(trimFailureMessage(failureMessage));
-        row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
         if (canRetry(row, nextAttemptAt)) {
             row.setStatus(statusBeforeClaim(expectedRunningStatus));
             row.setNextAttemptAt(nextAttemptAt);
@@ -2565,7 +2566,7 @@ public class SelfMediaPublishScheduleService {
             fail("SCHEDULE_STATUS_NOT_CONFIRMABLE", "当前排期状态不允许确认发布失败");
         }
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED);
-        row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "PUBLISH_RESULT_MANUAL_FAILED");
+        row.setFailureCode(trimFailureCode(failureCode, "PUBLISH_RESULT_MANUAL_FAILED"));
         row.setFailureMessage(trimFailureMessage(failureMessage));
         row.setDiagnosticsJson(manualPublishFailedDiagnostics(row, failureCode, failureMessage, note));
         touch(row);
@@ -2668,7 +2669,7 @@ public class SelfMediaPublishScheduleService {
         row.setPlannedPublishAt(plannedPublishAt);
         row.setPlatformScheduledAt(plannedPublishAt);
         row.setLockedUntil(null);
-        row.setFailureCode(StringUtils.hasText(failureCode) ? failureCode.trim() : "MANUAL_RETRY_REQUESTED");
+        row.setFailureCode(trimFailureCode(failureCode, "MANUAL_RETRY_REQUESTED"));
         row.setFailureMessage(StringUtils.hasText(failureMessage) ? failureMessage : "已人工触发立即重试");
         row.setMaxAttempts(Math.max(row.getMaxAttempts() == null ? 0 : row.getMaxAttempts(),
                 (row.getAttemptCount() == null ? 0 : row.getAttemptCount()) + 1));
@@ -3894,6 +3895,26 @@ public class SelfMediaPublishScheduleService {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
+    private String validDiagnosticsJson(String value) {
+        String text = trimToNull(value);
+        if (text == null) {
+            return null;
+        }
+        try {
+            objectMapper.readTree(text);
+            return text;
+        } catch (JsonProcessingException ignored) {
+            ObjectNode fallback = objectMapper.createObjectNode();
+            fallback.put("invalidDiagnostics", true);
+            fallback.put("rawDiagnostics", truncate(text, 12_000));
+            try {
+                return objectMapper.writeValueAsString(fallback);
+            } catch (JsonProcessingException impossible) {
+                return "{}";
+            }
+        }
+    }
+
     private String trimError(String value) {
         return trimFailureMessage(value);
     }
@@ -3904,6 +3925,11 @@ public class SelfMediaPublishScheduleService {
             return null;
         }
         return truncate(text, FAILURE_MESSAGE_MAX_LENGTH);
+    }
+
+    private String trimFailureCode(String value, String fallback) {
+        String text = StringUtils.hasText(value) ? value.trim() : fallback;
+        return truncate(text, FAILURE_CODE_MAX_LENGTH);
     }
 
     private String truncate(String value, int maxLength) {

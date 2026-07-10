@@ -2,8 +2,10 @@ package com.huanjing.geo.module.extension.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.extension.dto.LocalAgentExtensionSignRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignResponse;
+import com.huanjing.geo.module.extension.entity.ExtensionSession;
 import com.huanjing.geo.module.extension.entity.LocalAgentSession;
 import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -104,6 +106,36 @@ class LocalAgentSessionServiceTest {
 
         assertEquals(400, ex.getCode());
         assertEquals("invalid local helper path", ex.getMessage());
+    }
+
+    @Test
+    void extensionSigningTargetsTheHelperSessionRequestedByTheCallingBrowser() {
+        when(sessionMapper.selectById(12L)).thenReturn(activeSession(12L, 20L));
+        ExtensionSession extensionSession = new ExtensionSession();
+        extensionSession.setOperatorId(20L);
+
+        LocalAgentSignResponse response = service.signRequestForExtension(extensionSession, new LocalAgentExtensionSignRequest(
+                "GET",
+                "/v1/extension/tasks/next?environmentKey=env-1&platform=toutiao",
+                EMPTY_BODY_HASH,
+                12L
+        ));
+
+        assertEquals("helper.session.12", response.headers().get("X-Geo-Helper-Access"));
+    }
+
+    @Test
+    void extensionSigningRejectsAHelperSessionOwnedByAnotherOperator() {
+        when(sessionMapper.selectById(12L)).thenReturn(activeSession(12L, 99L));
+        ExtensionSession extensionSession = new ExtensionSession();
+        extensionSession.setOperatorId(20L);
+
+        BizException ex = assertThrows(BizException.class, () -> service.signRequestForExtension(
+                extensionSession,
+                new LocalAgentExtensionSignRequest("GET", "/v1/extension/tasks", EMPTY_BODY_HASH, 12L)
+        ));
+
+        assertEquals(403, ex.getCode());
     }
 
     private SysUser operator(Long id) {

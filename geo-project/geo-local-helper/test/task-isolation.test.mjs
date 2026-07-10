@@ -36,8 +36,18 @@ test('extension task polling never claims by platform without environmentKey', (
   )
   assert.match(
     serviceWorker,
-    /resolveFillTab\(options\.fillTabId \|\| null, task\.platform, payload\.publishUrl\)/,
-    'extension must fill the original publish tab instead of reusing the identity tab',
+    /prepareFillTab\(options\.fillTabId \|\| null, task\.platform, payload\.publishUrl\)[\s\S]+resolveFillTab\(candidateTabId, platform, publishUrl\)/,
+    'extension must prepare the original publish tab separately from the identity tab',
+  )
+  assert.match(
+    serviceWorker,
+    /function removedListener\(removedTabId\)[\s\S]+PLATFORM_TAB_GONE[\s\S]+chrome\.tabs\.onRemoved\.addListener/,
+    'extension must stop waiting immediately when a platform tab is closed',
+  )
+  assert.match(
+    serviceWorker,
+    /isPreFillTabLifecycleError[\s\S]+chrome\.tabs\.create\(\{ url: publishUrl, active: true \}\)/,
+    'extension may recreate a vanished publish tab once before filling',
   )
   assert.doesNotMatch(
     serviceWorker,
@@ -69,6 +79,68 @@ test('local helper requires environmentKey for extension task claims and complet
     /function findNextClaimableTask\(environmentKey, platform = ''\) \{\s+if \(!environmentKey\) return null/,
     'helper must not fall back to platform-only task matching',
   )
+})
+
+test('extension targets the current local helper session and serializes token refresh', () => {
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+
+  assert.match(
+    serviceWorker,
+    /const extensionSessionRefreshInFlight = new Map\(\)[\s\S]+extensionSessionRefreshInFlight\.get\(refreshKey\)[\s\S]+refreshExtensionSessionOnce/,
+    'concurrent heartbeat and task requests must share one token refresh',
+  )
+  assert.match(
+    serviceWorker,
+    /helperSigningContext\(config\)[\s\S]+localAgentSessionId: helperContext\.sessionId/,
+    'backend signing must target the helper session exposed by localhost health',
+  )
+  assert.match(
+    serviceWorker,
+    /LOCAL_HELPER_CLOCK_SKEW/,
+    'extension must report an actionable clock skew error before helper signature validation fails',
+  )
+})
+
+test('0.1.9 hotfix packages expose and enforce the same build revision', () => {
+  const manifest = JSON.parse(readProjectFile('geo-env-extension/manifest.json'))
+  const helperPackage = JSON.parse(readProjectFile('geo-local-helper/package.json'))
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+
+  assert.equal(manifest.version, '0.1.9')
+  assert.equal(helperPackage.version, '0.1.9')
+  assert.match(manifest.version_name, /0\.1\.9-hotfix-/)
+  assert.equal(helperPackage.buildRevision, '20260710.3')
+  assert.match(serviceWorker, /EXTENSION_HELPER_BUILD_MISMATCH/)
+})
+
+test('helper retries a failed schedule report with a bounded minimal payload after backend 5xx', () => {
+  const server = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.match(
+    server,
+    /async function reportScheduleExecutionFailed[\s\S]+Number\(error\?\.statusCode \|\| 0\) < 500[\s\S]+fallbackReport: true/,
+  )
+})
+
+test('douyin channel-close recovery opens the works manager and recreates a vanished tab', () => {
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+
+  assert.match(
+    serviceWorker,
+    /DOUYIN_MANAGE_URL = 'https:\/\/creator\.douyin\.com\/creator-micro\/content\/manage/,
+    'douyin recovery must use the works manager instead of the account home page',
+  )
+  assert.match(
+    serviceWorker,
+    /recoverDouyinPublishAfterMessageChannelClosed[\s\S]+openDouyinManageVerifyTab\(recoveryTabId\)[\s\S]+chrome\.tabs\.create\(\{ url: DOUYIN_MANAGE_URL/,
+    'douyin recovery must recreate the verification tab when the original publish tab vanished',
+  )
+  assert.match(
+    serviceWorker,
+    /message port closed[\s\S]+back\/forward cache[\s\S]+no tab with id/,
+    'known Chrome message-port lifecycle errors must enter publish-result recovery',
+  )
+  assert.match(serviceWorker, /DOUYIN_PUBLISH_NOT_CONFIRMED/)
 })
 
 test('AdsPower extension status refreshes a stale dynamic DevTools endpoint once', () => {

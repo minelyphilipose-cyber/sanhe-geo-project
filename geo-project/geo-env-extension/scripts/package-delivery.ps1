@@ -38,6 +38,7 @@ New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 $files = @(
   "content-script.js",
   "fill-result.js",
+  "identity-policy.js",
   "manifest.json",
   "platform-baijiahao.js",
   "platform-douyin.js",

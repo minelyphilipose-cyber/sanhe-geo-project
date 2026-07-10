@@ -160,10 +160,16 @@ public class LocalAgentSessionService {
         if (extensionSession == null || extensionSession.getOperatorId() == null) {
             throw new BizException(401, "extension session is required");
         }
-        LocalAgentSession session = sessionMapper.selectActiveByOperatorId(extensionSession.getOperatorId()).stream()
-                .filter(item -> item.getLastSeenAt() != null)
-                .findFirst()
-                .orElseThrow(() -> new BizException(404, "未找到当前账号已配对的本地助手会话"));
+        LocalAgentSession session;
+        if (request.localAgentSessionId() != null) {
+            session = requireActiveSessionById(request.localAgentSessionId());
+            requireSessionOwner(session, extensionSession.getOperatorId());
+        } else {
+            session = sessionMapper.selectActiveByOperatorId(extensionSession.getOperatorId()).stream()
+                    .filter(item -> item.getLastSeenAt() != null)
+                    .findFirst()
+                    .orElseThrow(() -> new BizException(404, "未找到当前账号已配对的本地助手会话"));
+        }
         return signRequestForSession(session, request.method(), request.path(), request.bodyHash());
     }
 

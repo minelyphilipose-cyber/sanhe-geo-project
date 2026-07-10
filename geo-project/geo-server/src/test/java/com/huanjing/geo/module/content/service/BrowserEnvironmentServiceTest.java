@@ -76,7 +76,7 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
-    void reportLoginStatus_firstSuccessfulSeenIdentityLocksExpectedFields() {
+    void reportLoginStatus_firstSuccessfulSeenIdentityLocksExpectedNameOnly() {
         when(environmentAccountMapper.selectById(30L)).thenReturn(binding(null, null, BrowserEnvironmentConstants.LOGIN_UNKNOWN));
         when(environmentAccountMapper.selectOne(any())).thenReturn(null);
         when(environmentMapper.selectById(20L)).thenReturn(environment());
@@ -184,6 +184,66 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
+    void reportLoginStatusByBrandAndPlatformResolvesTargetByBaijiahaoAccountName() {
+        BrowserEnvironmentAccount target = binding(null, "yqx2002528", BrowserEnvironmentConstants.LOGIN_UNKNOWN, "baijiahao");
+        target.setId(32L);
+        target.setSelfMediaAccountId(12L);
+        when(environmentAccountMapper.selectAllActiveByBrandIdAndPlatform(1L, "baijiahao"))
+                .thenReturn(List.of(target));
+        when(environmentAccountMapper.selectById(32L)).thenReturn(target);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(12L))
+                .thenReturn(account("yqx2002528", "baijiahao", "1869569183682287"));
+
+        service.reportLoginStatusForExtensionByBrandAndPlatform(1L, new com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest(
+                null,
+                "baijiahao",
+                "1869569183682287",
+                "yqx2002528",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ), 99L);
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        BrowserEnvironmentAccount updated = captor.getValue();
+        assertNull(updated.getExpectedPlatformAccountId());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, updated.getLoginStatus());
+    }
+
+    @Test
+    void reportLoginStatusByBrandAndPlatformResolvesLegacyDouyinImageTextBinding() {
+        BrowserEnvironmentAccount target = binding(null, "王恒", BrowserEnvironmentConstants.LOGIN_UNKNOWN, "douyin_image_text");
+        target.setId(32L);
+        target.setSelfMediaAccountId(12L);
+        when(environmentAccountMapper.selectAllActiveByBrandIdAndPlatform(1L, "douyin"))
+                .thenReturn(List.of());
+        when(environmentAccountMapper.selectAllActiveByBrandIdAndPlatform(1L, "douyin_image_text"))
+                .thenReturn(List.of(target));
+        when(environmentAccountMapper.selectById(32L)).thenReturn(target);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(12L))
+                .thenReturn(account("王恒", "douyin_image_text", "1529218551"));
+
+        service.reportLoginStatusForExtensionByBrandAndPlatform(1L, new com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest(
+                null,
+                "douyin",
+                "1529218551",
+                "王恒",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ), 99L);
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        BrowserEnvironmentAccount updated = captor.getValue();
+        assertNull(updated.getExpectedPlatformAccountId());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, updated.getLoginStatus());
+    }
+
+    @Test
     void reportLoginStatus_mismatchCanRecoverToLoggedInWhenIdentityMatchesExpected() {
         when(environmentAccountMapper.selectById(30L)).thenReturn(binding("expected", "name", BrowserEnvironmentConstants.LOGIN_MISMATCH));
         when(environmentMapper.selectById(20L)).thenReturn(environment());
@@ -217,6 +277,28 @@ class BrowserEnvironmentServiceTest {
                 "zhihu",
                 null,
                 "jnhbdxh",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ));
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, captor.getValue().getLoginStatus());
+    }
+
+    @Test
+    void reportLoginStatus_matchesDouyinPrefixedDisplayName() {
+        when(environmentAccountMapper.selectById(30L)).thenReturn(binding(null, "王恒", BrowserEnvironmentConstants.LOGIN_MISMATCH, "douyin"));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("王恒", "douyin"));
+
+        service.reportLoginStatus(30L, new BrowserEnvironmentLoginStatusRequest(
+                "geo_b",
+                10L,
+                "douyin",
+                null,
+                "抖音图文 / 王恒",
                 BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
                 null,
                 null
@@ -438,6 +520,38 @@ class BrowserEnvironmentServiceTest {
                 "toutiao",
                 "1865234056392716",
                 "阜阳全屋智能家居",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ), 99L);
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, captor.getValue().getLoginStatus());
+    }
+
+    @Test
+    void reportLoginStatusByEnvironmentAndPlatformResolvesLegacyDouyinImageTextBinding() {
+        BrowserEnvironmentAccount target = binding(null, "王恒", BrowserEnvironmentConstants.LOGIN_UNKNOWN, "douyin_image_text");
+        target.setSelfMediaAccountId(12L);
+        when(environmentAccountMapper.selectActiveByEnvironmentKeyAndPlatform("geo_huawei", "douyin"))
+                .thenReturn(List.of());
+        when(environmentAccountMapper.selectActiveByEnvironmentKeyAndPlatform("geo_huawei", "douyin_image_text"))
+                .thenReturn(List.of(target));
+        when(environmentAccountMapper.selectById(30L)).thenReturn(target);
+        BrowserEnvironment environment = environment();
+        environment.setEnvironmentKey("brand_990006013_adspower");
+        environment.setName("geo-huawei");
+        when(environmentMapper.selectById(20L)).thenReturn(environment);
+        when(selfMediaAccountMapper.selectById(12L))
+                .thenReturn(account("王恒", "douyin_image_text", "1529218551"));
+
+        service.reportLoginStatusForExtensionByEnvironmentAndPlatform(new BrowserEnvironmentLoginStatusRequest(
+                "geo_huawei",
+                null,
+                "douyin",
+                "1529218551",
+                "王恒",
                 BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
                 null,
                 null
@@ -681,10 +795,15 @@ class BrowserEnvironmentServiceTest {
     }
 
     private SelfMediaAccount account(String accountName, String platform) {
+        return account(accountName, platform, null);
+    }
+
+    private SelfMediaAccount account(String accountName, String platform, String platformAccountId) {
         SelfMediaAccount row = new SelfMediaAccount();
         row.setId(10L);
         row.setBrandId(1L);
         row.setPlatform(platform);
+        row.setPlatformAccountId(platformAccountId);
         row.setAccountName(accountName);
         return row;
     }

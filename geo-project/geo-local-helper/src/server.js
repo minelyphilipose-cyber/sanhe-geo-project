@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import crypto from 'node:crypto'
+import { stringifyBoundedDiagnostics } from './diagnostics-json.js'
 import { evaluateBaijiahaoPublishSignals, evaluateXiaohongshuPublishSignals } from './publish-check.js'
 
 const CONFIG_PATH = new URL('../config.local.json', import.meta.url)
@@ -106,11 +107,13 @@ async function readPackageInfo() {
     packageInfoCache = {
       name: String(pkg.name || 'geo-local-helper'),
       version: pkg.version ? String(pkg.version) : null,
+      buildRevision: pkg.buildRevision ? String(pkg.buildRevision) : null,
     }
   } catch {
     packageInfoCache = {
       name: 'geo-local-helper',
       version: null,
+      buildRevision: null,
     }
   }
   return packageInfoCache
@@ -475,6 +478,7 @@ async function reportLocalAgentRuntimeStatus(config, options = {}) {
         claim: true,
         publishCheck: true,
         extensionStatusProbe: true,
+        buildRevision: packageInfo.buildRevision || null,
       },
       lastErrorCode: options.lastErrorCode || null,
       lastErrorMessage: options.lastErrorMessage || lastAdspowerApiStatus.error || null,
@@ -802,15 +806,19 @@ async function requireSignedAccess(req) {
   const signature = String(req.headers['x-geo-helper-signature'] || '')
   const expectedHelperAccess = `helper.session.${runtimeSession.sessionId}`
   if (!constantTimeEqual(helperAccess, expectedHelperAccess)) {
-    const error = new Error('invalid helper access token')
+    const error = new Error(`本地助手会话不匹配：当前助手 sessionId=${runtimeSession.sessionId}，请重新配对并刷新扩展绑定`)
     error.statusCode = 401
+    error.code = 'LOCAL_HELPER_SESSION_MISMATCH'
     throw error
   }
   const timestampNumber = Number(timestamp)
-  if (!Number.isFinite(timestampNumber)
-      || Math.abs(Math.floor(Date.now() / 1000) - timestampNumber) > SIGNATURE_MAX_SKEW_SECONDS) {
-    const error = new Error('helper request timestamp expired')
+  const clockSkewSeconds = Number.isFinite(timestampNumber)
+    ? Math.abs(Math.floor(Date.now() / 1000) - timestampNumber)
+    : null
+  if (!Number.isFinite(timestampNumber) || clockSkewSeconds > SIGNATURE_MAX_SKEW_SECONDS) {
+    const error = new Error(`本地助手与后台时间偏差过大(${clockSkewSeconds ?? '未知'}秒)，请同步系统时间`)
     error.statusCode = 401
+    error.code = 'LOCAL_HELPER_CLOCK_SKEW'
     throw error
   }
   if (!nonce || nonce.length < 16) {
@@ -1295,6 +1303,7 @@ async function backendRequest(backendBase, accessToken, path, init = {}) {
   if (!response.ok || (body.code !== undefined && body.code !== 0)) {
     const error = new Error(body.message || `backend request failed: ${response.status}`)
     error.statusCode = response.status === 401 ? 401 : 502
+    error.backendCode = body?.data?.code || body?.code || null
     error.details = body
     throw error
   }
@@ -1326,6 +1335,7 @@ async function trustedBackendRequest(config, path, init = {}) {
     const details = body && Object.keys(body).length ? `; details=${JSON.stringify(body).slice(0, 600)}` : ''
     const error = new Error(body.message || `trusted backend request failed: ${response.status}${details}`)
     error.statusCode = response.status
+    error.backendCode = body?.data?.code || body?.code || null
     error.details = body
     throw error
   }
@@ -1407,6 +1417,7 @@ async function inspectGeoEnvExtensionTarget(target) {
     targetUrl: url,
     name: '',
     version: '',
+    buildRevision: '',
   }
   if (target.type() === 'service_worker') {
     const worker = await target.worker().catch(() => null)
@@ -1414,6 +1425,7 @@ async function inspectGeoEnvExtensionTarget(target) {
       const manifest = await worker.evaluate(() => chrome.runtime.getManifest()).catch(() => null)
       result.name = String(manifest?.name || '')
       result.version = String(manifest?.version || '')
+      result.buildRevision = String(manifest?.version_name || '')
     }
   }
   return result
@@ -1452,6 +1464,7 @@ async function inspectGeoEnvExtension(wsEndpoint) {
         extensionId: matched.extensionId,
         name: matched.name || GEO_ENV_EXTENSION_NAME,
         version: matched.version || null,
+        buildRevision: matched.buildRevision || null,
         targetType: matched.targetType,
         targetUrl: matched.targetUrl,
       }
@@ -2515,9 +2528,11 @@ async function reportPublishCheckFailed(config, scheduleId, result) {
 async function reportScheduleExecutionFailed(config, task, result) {
   const scheduleId = scheduleIdOfTask(task)
   if (!scheduleId) return null
+  const failureCode = result?.failureCode || task?.lastError?.code || task?.failureCode || 'FILL_FAILED'
+  const failureMessage = String(result?.failureMessage || task?.lastError?.message || 'schedule execution failed').slice(0, 480)
   const body = JSON.stringify({
-    failureCode: result?.failureCode || task?.lastError?.code || task?.failureCode || 'FILL_FAILED',
-    failureMessage: String(result?.failureMessage || task?.lastError?.message || 'schedule execution failed').slice(0, 480),
+    failureCode,
+    failureMessage,
     diagnosticsJson: shortDiagnosticsJson({
       ...result,
       taskId: task?.taskId,
@@ -2526,7 +2541,34 @@ async function reportScheduleExecutionFailed(config, task, result) {
     }),
   })
   const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/executions/failed`
-  return signedTrustedBackendRequest(config, path, { method: 'POST', body, signatureBodyText: '' })
+  try {
+    return await signedTrustedBackendRequest(config, path, { method: 'POST', body, signatureBodyText: '' })
+  } catch (error) {
+    if (Number(error?.statusCode || 0) < 500) throw error
+    const fallbackBody = JSON.stringify({
+      failureCode: String(failureCode).slice(0, 64),
+      failureMessage: failureMessage.slice(0, 240),
+      diagnosticsJson: JSON.stringify({
+        fallbackReport: true,
+        taskId: task?.taskId || null,
+        platform: task?.platform || null,
+      }),
+    })
+    try {
+      return await signedTrustedBackendRequest(config, path, {
+        method: 'POST',
+        body: fallbackBody,
+        signatureBodyText: '',
+      })
+    } catch (fallbackError) {
+      fallbackError.details = {
+        ...(fallbackError.details || {}),
+        initialReportError: formatBackendError(error),
+        fallbackReport: true,
+      }
+      throw fallbackError
+    }
+  }
 }
 
 async function reportScheduleExecutionSuccess(config, task, fillResult) {
@@ -2856,7 +2898,7 @@ async function flushPendingPublishCheckSuccessReports(config, platform = '') {
       task.backendSuccessReportLastError = null
     } catch (error) {
       task.backendSuccessReportLastError = formatBackendError(error)
-      if (error?.statusCode === 400) {
+      if (isNonRetryableBackendReportError(error)) {
         task.backendSuccessReportRejectedAt = nowIso()
       }
       console.error('Failed to report pending publish check success:', task.backendSuccessReportLastError)
@@ -2881,7 +2923,7 @@ async function flushPendingPublishCheckUnknownReports(config, platform = '') {
       task.backendUnknownReportLastError = null
     } catch (error) {
       task.backendUnknownReportLastError = formatBackendError(error)
-      if (error?.statusCode === 400) {
+      if (isNonRetryableBackendReportError(error)) {
         task.backendUnknownReportRejectedAt = nowIso()
       }
       console.error('Failed to report pending publish check unknown:', task.backendUnknownReportLastError)
@@ -2916,7 +2958,7 @@ async function flushPendingPublishCheckFailureReports(config, platform = '') {
       task.backendFailureReportLastError = null
     } catch (error) {
       task.backendFailureReportLastError = formatBackendError(error)
-      if (error?.statusCode === 400) {
+      if (isNonRetryableBackendReportError(error)) {
         task.backendFailureReportRejectedAt = nowIso()
       }
       console.error('Failed to report pending publish check failure:', task.backendFailureReportLastError)
@@ -2940,7 +2982,7 @@ async function flushPendingScheduleFailureReports(config, platform = '') {
       task.backendFailureReportLastError = null
     } catch (error) {
       task.backendFailureReportLastError = formatBackendError(error)
-      if (error?.statusCode === 400) {
+      if (isNonRetryableBackendReportError(error)) {
         task.backendFailureReportRejectedAt = nowIso()
       }
       console.error('Failed to report pending schedule execution failure:', task.backendFailureReportLastError)
@@ -2971,7 +3013,7 @@ async function flushPendingScheduleSuccessReports(config, platform = '') {
       task.backendSuccessReportLastError = null
     } catch (error) {
       task.backendSuccessReportLastError = formatBackendError(error)
-      if (error?.statusCode === 400) {
+      if (isNonRetryableBackendReportError(error)) {
         task.backendSuccessReportRejectedAt = nowIso()
       }
       console.error('Failed to report pending schedule execution success:', task.backendSuccessReportLastError)
@@ -2984,7 +3026,13 @@ async function flushPendingScheduleSuccessReports(config, platform = '') {
 function formatBackendError(error) {
   const details = error?.details ? `; details=${JSON.stringify(error.details).slice(0, 600)}` : ''
   const status = error?.statusCode ? `; status=${error.statusCode}` : ''
-  return `${error?.message || error}${status}${details}`
+  const backendCode = error?.backendCode ? `; backendCode=${error.backendCode}` : ''
+  return `${error?.message || error}${status}${backendCode}${details}`
+}
+
+function isNonRetryableBackendReportError(error) {
+  if (error?.statusCode === 400) return true
+  return error?.backendCode === 'SCHEDULE_STATUS_NOT_CHECKING_PUBLISH_RESULT'
 }
 
 function shortDiagnosticsJson(value) {
@@ -2993,7 +3041,7 @@ function shortDiagnosticsJson(value) {
     textSample: typeof value?.textSample === 'string' ? value.textSample.slice(0, 800) : value?.textSample,
     checkedAt: nowIso(),
   }
-  return JSON.stringify(normalized).slice(0, 6000)
+  return stringifyBoundedDiagnostics(normalized, 6000)
 }
 
 function publishedUrlFromPublishCheckResult(result) {
@@ -3031,7 +3079,7 @@ function publishCheckReportDiagnosticsJson(result) {
     url: result?.url || '',
     checkedAt: nowIso(),
   }
-  return JSON.stringify(diagnostics).slice(0, 2500)
+  return stringifyBoundedDiagnostics(diagnostics, 2500)
 }
 
 function trimPublishCheckEvidence(evidence = {}) {
@@ -3501,7 +3549,7 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     }).catch((error) => {
       task.backendSuccessReportAttempts += 1
       task.backendSuccessReportLastError = formatBackendError(error)
-      if (error?.statusCode === 400) {
+      if (isNonRetryableBackendReportError(error)) {
         task.backendSuccessReportRejectedAt = nowIso()
       }
       console.error('Failed to report schedule execution success:', task.backendSuccessReportLastError)
@@ -3525,7 +3573,7 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     }).catch((error) => {
       task.backendFailureReportAttempts += 1
       task.backendFailureReportLastError = formatBackendError(error)
-      if (error?.statusCode === 400) {
+      if (isNonRetryableBackendReportError(error)) {
         task.backendFailureReportRejectedAt = nowIso()
       }
       console.error('Failed to report schedule execution failure:', task.backendFailureReportLastError)
@@ -4265,6 +4313,7 @@ async function route(req, res, config) {
       ok: true,
       service: packageInfo.name,
       version: packageInfo.version,
+      buildRevision: packageInfo.buildRevision,
       time: nowIso(),
       paired: Boolean(runtimeSession?.sessionId && runtimeSession?.hmacSecret),
       session: publicSession(),
@@ -4363,6 +4412,7 @@ const server = http.createServer((req, res) => {
     const statusCode = error.statusCode || 500
     sendJson(req, res, config, statusCode, {
       ok: false,
+      code: error.code || null,
       error: error.message,
       details: error.details,
     })

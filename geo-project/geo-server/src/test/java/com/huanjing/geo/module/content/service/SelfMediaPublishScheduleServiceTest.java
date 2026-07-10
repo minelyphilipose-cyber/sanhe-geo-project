@@ -1848,6 +1848,29 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void markClaimFailedBoundsExternalFailureCodeToDatabaseColumnLength() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        row.setId(108L);
+        row.setAttemptCount(1);
+        row.setMaxAttempts(1);
+        when(scheduleMapper.selectById(108L)).thenReturn(row);
+        String oversizedCode = "EXTERNAL_" + "X".repeat(120);
+
+        SelfMediaPublishScheduleVO response = service.markClaimFailed(
+                108L,
+                SelfMediaPublishScheduleConstants.STATUS_FILLING,
+                oversizedCode,
+                "failure",
+                "{\"ok\":false}",
+                null
+        );
+
+        assertEquals(64, response.getFailureCode().length());
+        assertTrue(oversizedCode.startsWith(response.getFailureCode()));
+        verify(scheduleMapper).updateById(row);
+    }
+
+    @Test
     void heartbeatLocalAgentScheduleRenewsScheduleAndEnvironmentLock() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
         row.setId(110L);
@@ -2452,6 +2475,30 @@ class SelfMediaPublishScheduleServiceTest {
         assertTrue(longFailureMessage.startsWith(updated.getFailureMessage().substring(0, 12)));
         assertEquals(diagnosticsJson, updated.getDiagnosticsJson());
         verify(environmentLockService).release(101L);
+    }
+
+    @Test
+    void markClaimFailedWrapsInvalidDiagnosticsAsValidJson() throws Exception {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        row.setId(102L);
+        row.setAttemptCount(2);
+        row.setMaxAttempts(2);
+        when(scheduleMapper.selectById(102L)).thenReturn(row);
+
+        service.markClaimFailed(
+                102L,
+                SelfMediaPublishScheduleConstants.STATUS_FILLING,
+                "FILL_FAILED",
+                "failed",
+                "{\"truncated\":",
+                null
+        );
+
+        ArgumentCaptor<SelfMediaPublishSchedule> captor = ArgumentCaptor.forClass(SelfMediaPublishSchedule.class);
+        verify(scheduleMapper).updateById(captor.capture());
+        String diagnosticsJson = captor.getValue().getDiagnosticsJson();
+        assertTrue(new ObjectMapper().readTree(diagnosticsJson).path("invalidDiagnostics").asBoolean());
+        assertEquals("{\"truncated\":", new ObjectMapper().readTree(diagnosticsJson).path("rawDiagnostics").asText());
     }
 
     @Test

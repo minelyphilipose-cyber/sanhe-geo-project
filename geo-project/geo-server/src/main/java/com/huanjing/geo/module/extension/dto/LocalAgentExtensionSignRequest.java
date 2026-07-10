@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 public record LocalAgentExtensionSignRequest(
         @NotBlank String method,
         @NotBlank String path,
-        @NotBlank String bodyHash
+        @NotBlank String bodyHash,
+        Long localAgentSessionId
 ) {
 }

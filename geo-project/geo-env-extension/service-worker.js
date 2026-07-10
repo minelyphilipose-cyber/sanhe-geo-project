@@ -1,6 +1,8 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.1.8'
+const EXTENSION_VERSION = '0.1.9'
+const EXTENSION_BUILD_REVISION = '20260710.3'
+const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
 const ACTIVE_PROFILE_KEY = 'geoEnvActiveProfile'
@@ -30,6 +32,10 @@ const autoPollTabUpdatedAtByKey = new Map()
 const bindIntentInFlight = new Set()
 const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
 const RUNTIME_STATUS_HEARTBEAT_MS = 60 * 1000
+const HELPER_SIGNING_CONTEXT_CACHE_MS = 10 * 1000
+const HELPER_SIGNATURE_CLOCK_WARNING_SECONDS = 240
+const extensionSessionRefreshInFlight = new Map()
+const helperSigningContextCache = new Map()
 let runtimeStatusReportInFlight = false
 let lastRuntimeStatusReportAt = 0
 
@@ -226,6 +232,21 @@ async function refreshExtensionSession(config, session, options = {}) {
     return session
   }
 
+  const refreshKey = `${normalizeBaseUrl(config.apiBase)}:${session.extensionToken}`
+  const existing = extensionSessionRefreshInFlight.get(refreshKey)
+  if (existing) return existing
+  const refresh = refreshExtensionSessionOnce(config, session)
+  extensionSessionRefreshInFlight.set(refreshKey, refresh)
+  try {
+    return await refresh
+  } finally {
+    if (extensionSessionRefreshInFlight.get(refreshKey) === refresh) {
+      extensionSessionRefreshInFlight.delete(refreshKey)
+    }
+  }
+}
+
+async function refreshExtensionSessionOnce(config, session) {
   try {
     const refreshed = await apiRequest(config, '/api/v1/extension/token/refresh', {
       method: 'POST',
@@ -243,7 +264,10 @@ async function refreshExtensionSession(config, session, options = {}) {
   } catch (error) {
     if (isExtensionUnauthorized(error)) {
       await clearExtensionSession(session.extensionToken)
-      throw new Error('扩展后台绑定已失效，请在扩展弹窗重新绑定后台')
+      const unauthorized = new Error('扩展后台绑定已失效，请在扩展弹窗重新绑定后台')
+      unauthorized.status = error?.status || 401
+      unauthorized.code = error?.code || 70002
+      throw unauthorized
     }
     throw error
   }
@@ -294,6 +318,7 @@ async function reportRuntimeStatus(options = {}) {
         accountDetect: true,
         publishSubmit: true,
         publishCheck: false,
+        buildRevision: EXTENSION_BUILD_REVISION,
       },
       lastTaskId: options.lastTaskId || null,
       lastErrorCode: firstText(options.lastErrorCode),
@@ -341,15 +366,60 @@ function requestBodyText(init = {}) {
   throw new Error('本地助手签名暂只支持字符串请求体')
 }
 
+async function helperSigningContext(config, options = {}) {
+  const helperBase = normalizeBaseUrl(config.helperBase)
+  const cached = helperSigningContextCache.get(helperBase)
+  if (!options.force && cached && Date.now() - cached.checkedAt < HELPER_SIGNING_CONTEXT_CACHE_MS) {
+    return cached
+  }
+  const response = await fetch(`${helperBase}/health`)
+  const health = await response.json().catch(() => ({}))
+  if (!response.ok || health?.ok === false) {
+    throw new Error(`本地助手健康检查失败：${response.status}`)
+  }
+  const sessionId = Number(health?.session?.sessionId)
+  if (!health?.paired || !Number.isFinite(sessionId) || sessionId <= 0) {
+    throw new Error('本地助手尚未与后台配对，请先完成本地助手配对')
+  }
+  if (health?.version !== EXTENSION_VERSION || health?.buildRevision !== EXTENSION_BUILD_REVISION) {
+    const error = new Error(
+      `扩展与本地助手构建不一致：扩展=${EXTENSION_VERSION}/${EXTENSION_BUILD_REVISION}，`
+      + `助手=${health?.version || '-'}/${health?.buildRevision || '-'}，请同步更新后重试`,
+    )
+    error.code = 'EXTENSION_HELPER_BUILD_MISMATCH'
+    throw error
+  }
+  const context = {
+    checkedAt: Date.now(),
+    sessionId,
+    helperVersion: String(health?.version || ''),
+    helperBuildRevision: String(health?.buildRevision || ''),
+  }
+  helperSigningContextCache.set(helperBase, context)
+  return context
+}
+
+function assertBackendSignatureClock(headers) {
+  const timestamp = Number(headers?.['X-Geo-Helper-Timestamp'] || headers?.['x-geo-helper-timestamp'])
+  if (!Number.isFinite(timestamp)) return
+  const skewSeconds = Math.abs(Math.floor(Date.now() / 1000) - timestamp)
+  if (skewSeconds <= HELPER_SIGNATURE_CLOCK_WARNING_SECONDS) return
+  const error = new Error(`本机与后台时间偏差约 ${skewSeconds} 秒，请先同步系统时间后重试`)
+  error.code = 'LOCAL_HELPER_CLOCK_SKEW'
+  throw error
+}
+
 async function signedHelperHeaders(config, path, init = {}, session = null) {
   if (!session?.extensionToken) return null
   const activeSession = await refreshExtensionSession(config, session)
+  const helperContext = await helperSigningContext(config)
   const method = String(init.method || 'GET').toUpperCase()
   const bodyHash = await sha256Hex(requestBodyText(init))
   const body = JSON.stringify({
     method,
     path,
     bodyHash,
+    localAgentSessionId: helperContext.sessionId,
   })
 
   try {
@@ -357,7 +427,9 @@ async function signedHelperHeaders(config, path, init = {}, session = null) {
       method: 'POST',
       body,
     }, activeSession.extensionToken)
-    return signed?.headers || null
+    const headers = signed?.headers || null
+    assertBackendSignatureClock(headers)
+    return headers
   } catch (error) {
     if (!isExtensionUnauthorized(error)) throw error
     const refreshedSession = await refreshExtensionSession(config, activeSession, { force: true })
@@ -365,7 +437,9 @@ async function signedHelperHeaders(config, path, init = {}, session = null) {
       method: 'POST',
       body,
     }, refreshedSession.extensionToken)
-    return signed?.headers || null
+    const headers = signed?.headers || null
+    assertBackendSignatureClock(headers)
+    return headers
   }
 }
 
@@ -403,7 +477,11 @@ async function helperRequest(config, path, init = {}, session = null) {
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok || body.ok === false) {
-    throw new Error(body.error || `本地助手请求失败：${response.status}`)
+    const error = new Error(body.error || `本地助手请求失败：${response.status}`)
+    error.status = response.status
+    error.code = body.code || null
+    error.details = body.details || null
+    throw error
   }
   return body
 }
@@ -578,18 +656,29 @@ async function bindFromTabUrl(tabId, url) {
 }
 
 async function pollOnce(options = {}) {
-  await refreshRuntimeConfig({
-    reason: options.reason || 'poll',
-    platform: options.platform || '',
-  }).catch((error) => {
-    if (isExtensionUnauthorized(error)) return null
-    return appendEventLog({
+  try {
+    await refreshRuntimeConfig({
+      reason: options.reason || 'poll',
+      platform: options.platform || '',
+    })
+  } catch (error) {
+    if (isExtensionUnauthorized(error)) {
+      await setBadge('ERR')
+      await appendEventLog({
+        type: 'auto_fill',
+        ok: false,
+        reason: options.reason || 'poll',
+        error: '扩展后台绑定已失效，请重新绑定后台',
+      })
+      return { ok: false, skipped: true, reason: 'extension_binding_expired' }
+    }
+    await appendEventLog({
       type: 'runtime_config',
       ok: false,
       reason: options.reason || 'poll',
       error: error.message,
     })
-  })
+  }
   const { config, session } = await getConfig()
   if (!session?.extensionToken) throw new Error('请先绑定后台')
   const platform = options.platform || ''
@@ -873,6 +962,8 @@ function isRetryableTaskFailureCode(code) {
   if (globalThis.__GEO_BAIJIAHAO_PLATFORM__?.isRetryableFailureCode?.(code)) return true
   return [
     'PAGE_LOAD_TIMEOUT',
+    'PLATFORM_TAB_GONE',
+    'PLATFORM_TAB_REDIRECTED',
     'EDITOR_NOT_READY',
     'COVER_UPLOAD_TIMEOUT',
     'SCHEDULE_DIALOG_NOT_READY',
@@ -917,6 +1008,16 @@ async function autoPollOnce(reason, senderTabId, options = {}) {
     }
     return { ...result, auto: true, reason }
   } catch (error) {
+    if (isExtensionUnauthorized(error)) {
+      await setBadge('ERR')
+      await appendEventLog({
+        type: 'auto_fill',
+        ok: false,
+        reason,
+        error: '扩展后台绑定已失效，请重新绑定后台',
+      })
+      return { ok: false, skipped: true, reason: 'extension_binding_expired' }
+    }
     await setBadge('ERR')
     await appendEventLog({ type: 'auto_fill', ok: false, reason, error: error.message })
     throw error
@@ -1061,10 +1162,8 @@ async function handleTask(config, session, task, options = {}) {
   assertExpectedIdentityPresent(payload)
   payload.precheckedIdentity = precheckedIdentity || null
 
-  const tab = await resolveFillTab(options.fillTabId || null, task.platform, payload.publishUrl)
-  await waitForTabComplete(tab.id, 45_000).catch(() => null)
+  const tab = await prepareFillTab(options.fillTabId || null, task.platform, payload.publishUrl)
   if (normalizePlatform(task.platform) === 'baijiahao') await delay(1200)
-  await waitForFillContentScriptReadyWithRecovery(tab.id, task.platform, 30_000)
   await waitForPlatformShellReady(tab.id, task.platform)
   let fillResult
   try {
@@ -1110,7 +1209,7 @@ async function waitForPlatformShellReady(tabId, platform) {
 }
 
 async function inspectDouyinShellState(tabId) {
-  const [state] = await chrome.scripting.executeScript({
+  const [state] = await executeScriptOnPlatformTab(tabId, {
     target: { tabId, frameIds: [0] },
     func: () => {
       const text = String(document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, '')
@@ -1253,7 +1352,7 @@ async function recoverBaijiahaoAfterMessageChannelClosed(tabId, task, payload, e
 async function inspectBaijiahaoPostSubmitTab(tabId) {
   const tab = await chrome.tabs.get(tabId).catch(() => null)
   await ensureContentScript(tabId).catch(() => null)
-  const state = await chrome.scripting.executeScript({
+  const state = await executeScriptOnPlatformTab(tabId, {
     target: { tabId },
     func: () => {
       const text = document.body?.innerText || document.body?.textContent || ''
@@ -1294,10 +1393,11 @@ async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payloa
   if (!context.title) throw error
 
   let latest = null
+  let recoveryTabId = tabId
   for (let attempt = 0; attempt < 5; attempt += 1) {
     await delay(900 + attempt * 700)
-    await waitForTabComplete(tabId, 30_000).catch(() => null)
-    latest = await inspectDouyinManageTab(tabId, context, attempt)
+    await waitForTabComplete(recoveryTabId, 30_000).catch(() => null)
+    latest = await inspectDouyinManageTab(recoveryTabId, context, attempt)
     if (latest?.verified) {
       return {
         titleFilled: true,
@@ -1314,17 +1414,35 @@ async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payloa
         messageChannelClosedError: message,
       }
     }
-    if (latest && latest.isManagePage === false && attempt < 4) {
-      await chrome.tabs.update(tabId, { url: defaultLoginReportUrl('douyin'), active: true }).catch(() => null)
-      await waitForTabComplete(tabId, 45_000).catch(() => null)
+    if (latest?.isManagePage !== true && attempt < 4) {
+      recoveryTabId = await openDouyinManageVerifyTab(recoveryTabId)
       await delay(1600)
       continue
     }
     if (latest?.isManagePage && attempt >= 1 && attempt < 4) {
-      await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
+      await chrome.tabs.reload(recoveryTabId, { bypassCache: true }).catch(() => null)
     }
   }
-  throw error
+  const unresolved = new Error(
+    `DOUYIN_PUBLISH_NOT_CONFIRMED：抖音页面跳转后已自动打开作品管理页，但暂未匹配到目标作品；`
+    + `targetTitle=${context.title}；targetTime=${context.scheduledAt || '立即发布'}；`
+    + `diagnostics=${latest?.diagnostics || message}`,
+  )
+  unresolved.code = 'DOUYIN_PUBLISH_NOT_CONFIRMED'
+  unresolved.originalMessage = message
+  throw unresolved
+}
+
+async function openDouyinManageVerifyTab(tabId) {
+  const current = tabId ? await chrome.tabs.get(tabId).catch(() => null) : null
+  const tab = current
+    ? await chrome.tabs.update(current.id, { url: DOUYIN_MANAGE_URL, active: true }).catch(() => null)
+    : null
+  const target = tab || await chrome.tabs.create({ url: DOUYIN_MANAGE_URL, active: true })
+  if (!target?.id) throw codedError('PLATFORM_TAB_GONE', '无法打开抖音作品管理页进行发布结果恢复校验')
+  await waitForTabComplete(target.id, 45_000)
+  await delay(1200)
+  return target.id
 }
 
 function isRecoverableDouyinPublishVerifyError(error, message) {
@@ -1364,10 +1482,15 @@ async function recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload
 }
 
 function isMessageChannelClosedError(message) {
-  const text = String(message || '')
+  const text = String(message || '').toLowerCase()
   return text.includes('message channel closed')
+    || text.includes('message port closed')
     || text.includes('receiving end does not exist')
-    || text.includes('Extension context invalidated')
+    || text.includes('extension context invalidated')
+    || text.includes('asynchronous response') && text.includes('channel closed')
+    || text.includes('extension port') && text.includes('back/forward cache')
+    || text.includes('no tab with id')
+    || text.includes('tab was closed')
 }
 
 function isNoReceivingEndError(message) {
@@ -1401,11 +1524,12 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
   if (!tab?.url || !isAllowedPlatformUrl('douyin', tab.url)) {
     return {
       verified: false,
+      isManagePage: false,
       pageUrl: tab?.url || '',
       diagnostics: `attempt=${attempt}; not_douyin_tab`,
     }
   }
-  const [state] = await chrome.scripting.executeScript({
+  const [state] = await executeScriptOnPlatformTab(tabId, {
     target: { tabId },
     args: [context, attempt],
     func: (context, attempt) => {
@@ -1690,7 +1814,7 @@ async function inspectToutiaoWorksListTab(tabId, context, refreshAttempt) {
       diagnostics: `refreshAttempt=${refreshAttempt}; not_toutiao_tab`,
     }
   }
-  const [state] = await chrome.scripting.executeScript({
+  const [state] = await executeScriptOnPlatformTab(tabId, {
     target: { tabId },
     args: [context, refreshAttempt],
     func: (context, refreshAttempt) => {
@@ -1851,7 +1975,7 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
   if (!isAllowedPlatformUrl('zhihu', url)) {
     return { verified: false, pageUrl: url, reason: 'not_zhihu_tab' }
   }
-  const [state] = await chrome.scripting.executeScript({
+  const [state] = await executeScriptOnPlatformTab(tabId, {
     target: { tabId },
     args: [context],
     func: (context) => {
@@ -2127,6 +2251,7 @@ async function readIdentityFromTab(tabId, platform, options = {}) {
 }
 
 async function ensureContentScript(tabId) {
+  await requireInjectablePlatformTab(tabId)
   const ping = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' }, { frameId: 0 }).catch(() => null)
   const href = String(ping?.result?.href || '')
   const needsDouyinAdapter = href.includes('creator.douyin.com') && !ping?.result?.adapters?.douyin
@@ -2143,11 +2268,16 @@ async function ensureContentScript(tabId) {
 }
 
 async function injectContentScripts(tabId, options = {}) {
-  const files = ['fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js']
-  await chrome.scripting.executeScript({
-    target: { tabId, frameIds: [0] },
-    files,
-  })
+  const files = ['fill-result.js', 'identity-policy.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js']
+  await requireInjectablePlatformTab(tabId)
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      files,
+    })
+  } catch (error) {
+    throw await normalizeTabInjectionError(tabId, error)
+  }
   if (!options.allFrames) return
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
@@ -2161,6 +2291,58 @@ function isCannotAccessContentsError(message) {
   const text = String(message || '')
   return text.includes('Cannot access contents of the page')
     || text.includes('Extension manifest must request permission')
+}
+
+async function requireInjectablePlatformTab(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null)
+  if (!tab) throw codedError('PLATFORM_TAB_GONE', `平台标签页已关闭(tabId=${tabId})`)
+  const url = String(tab.url || '')
+  if (inferPlatformFromUrl(url)) return tab
+  if (/login|signin|passport|sso/i.test(url)) {
+    throw codedError('LOGIN_REQUIRED', `平台页面已跳转到登录页：${url || '-'}`)
+  }
+  throw codedError('PLATFORM_TAB_REDIRECTED', `平台标签页已跳转到不可注入页面：${url || '-'}`)
+}
+
+async function normalizeTabInjectionError(tabId, error) {
+  const message = error?.message || String(error || '页面脚本注入失败')
+  const tab = await chrome.tabs.get(tabId).catch(() => null)
+  if (!tab || isNoTabError(message)) {
+    return codedError('PLATFORM_TAB_GONE', `平台标签页在脚本注入前已关闭(tabId=${tabId})；原始错误：${message}`)
+  }
+  const url = String(tab.url || '')
+  if (!inferPlatformFromUrl(url)) {
+    const code = /login|signin|passport|sso/i.test(url) ? 'LOGIN_REQUIRED' : 'PLATFORM_TAB_REDIRECTED'
+    return codedError(code, `平台标签页已跳转，无法注入脚本：${url || '-'}；原始错误：${message}`)
+  }
+  if (isCannotAccessContentsError(message)) {
+    return codedError('EXTENSION_HOST_PERMISSION_DENIED', `扩展无法访问平台页面：${url}；请确认已加载最新扩展包。原始错误：${message}`)
+  }
+  return error instanceof Error ? error : new Error(message)
+}
+
+async function executeScriptOnPlatformTab(tabId, injection) {
+  await requireInjectablePlatformTab(tabId)
+  try {
+    return await chrome.scripting.executeScript(injection)
+  } catch (error) {
+    throw await normalizeTabInjectionError(tabId, error)
+  }
+}
+
+function codedError(code, message) {
+  const error = new Error(message)
+  error.code = code
+  return error
+}
+
+function isNoTabError(message) {
+  return /No tab with id|tab was closed|Invalid tab ID/i.test(String(message || ''))
+}
+
+function isPreFillTabLifecycleError(error) {
+  const code = String(error?.code || '')
+  return code === 'PLATFORM_TAB_GONE' || code === 'PLATFORM_TAB_REDIRECTED' || isNoTabError(error?.message || error)
 }
 
 async function reportLoginStatus(config, session, report) {
@@ -2249,6 +2431,22 @@ async function resolveFillTab(candidateTabId, platform, publishUrl) {
   return chrome.tabs.create({ url: publishUrl, active: true })
 }
 
+async function prepareFillTab(candidateTabId, platform, publishUrl) {
+  let tab = await resolveFillTab(candidateTabId, platform, publishUrl)
+  try {
+    await waitForTabComplete(tab.id, 45_000)
+    await waitForFillContentScriptReadyWithRecovery(tab.id, platform, 30_000)
+    return tab
+  } catch (error) {
+    if (!isPreFillTabLifecycleError(error)) throw error
+  }
+
+  tab = await chrome.tabs.create({ url: publishUrl, active: true })
+  await waitForTabComplete(tab.id, 45_000)
+  await waitForFillContentScriptReadyWithRecovery(tab.id, platform, 30_000)
+  return tab
+}
+
 function isReusablePublishTab(platform, currentUrlValue, publishUrlValue) {
   if (!isAllowedPlatformUrl(platform, currentUrlValue)) return false
   const currentUrl = new URL(currentUrlValue)
@@ -2299,7 +2497,7 @@ async function verifyTaskIdentityOnTab(tabId, task) {
         expectedAccountName: task.expectedAccountName || null,
         expectedPlatformAccountId: task.expectedPlatformAccountId || null,
       },
-    })
+    }, { frameId: 0 })
     if (!response?.ok) throw new Error(response?.error || '账号身份校验失败')
     if (response.result?.warning) {
       const error = new Error(response.result.message || '账号身份未确认，已阻止填充')
@@ -2325,6 +2523,14 @@ async function resolveIdentityPrecheckTabId(candidateTabId, platform, requiresPr
   const existing = tabs.find((tab) => tab.id && tab.url && isAllowedLoginReportUrl(platform, tab.url))
   if (existing?.id) return existing.id
 
+  const identityUrl = defaultLoginReportUrl(platform)
+  if (identityUrl) {
+    const tab = await chrome.tabs.create({ url: identityUrl, active: true })
+    await waitForTabComplete(tab.id, 30_000).catch(() => null)
+    await delay(1200)
+    return tab.id || null
+  }
+
   return null
 }
 
@@ -2336,8 +2542,8 @@ function requiresIdentityPrecheck(task) {
 function assertExpectedIdentityPresent(payload) {
   const platform = normalizePlatform(payload.platform)
   if (!IDENTITY_PRECHECK_PLATFORMS.has(platform)) return
-  if (!payload.expectedAccountName && !payload.expectedPlatformAccountId) {
-    const error = new Error('IDENTITY_EXPECTATION_MISSING：任务缺少 expectedAccountName/expectedPlatformAccountId，已阻止填充以避免账号串门')
+  if (!payload.expectedAccountName) {
+    const error = new Error('IDENTITY_EXPECTATION_MISSING：任务缺少 expectedAccountName，已阻止填充以避免账号串门')
     error.code = 'IDENTITY_EXPECTATION_MISSING'
     throw error
   }
@@ -2360,13 +2566,25 @@ async function runSelfTest() {
     checks.push({
       name: 'local_helper_health',
       ok: Boolean(health?.ok),
-      detail: `paired=${Boolean(health?.paired)}`,
+      detail: `paired=${Boolean(health?.paired)}, version=${health?.version || '-'}, build=${health?.buildRevision || '-'}`,
+    })
+    const compatibleBuild = health?.version === EXTENSION_VERSION
+      && health?.buildRevision === EXTENSION_BUILD_REVISION
+    checks.push({
+      name: 'extension_helper_build_match',
+      ok: compatibleBuild,
+      detail: `extension=${EXTENSION_VERSION}/${EXTENSION_BUILD_REVISION}, helper=${health?.version || '-'}/${health?.buildRevision || '-'}`,
     })
   } catch (error) {
     checks.push({
       name: 'local_helper_health',
       ok: false,
       error: `本地助手不可访问：${error.message}`,
+    })
+    checks.push({
+      name: 'extension_helper_build_match',
+      ok: false,
+      error: '无法读取本地助手版本与构建标识',
     })
   }
 
@@ -2479,7 +2697,7 @@ function isAllowedLoginReportUrl(platform, urlValue) {
         && !url.pathname.includes('/graphic/publish')
     }
     if (normalizedPlatform === 'zhihu') {
-      return isZhihuCreatorCenterUrl(url)
+      return isZhihuIdentityUrl(url)
     }
     if (normalizedPlatform === 'xiaohongshu') {
       return url.hostname === 'creator.xiaohongshu.com'
@@ -2490,7 +2708,7 @@ function isAllowedLoginReportUrl(platform, urlValue) {
     }
     if (normalizedPlatform === 'douyin') {
       return url.hostname === 'creator.douyin.com'
-        && !isDouyinPublishPath(url)
+        && isDouyinIdentityUrl(url)
     }
     return false
   } catch {
@@ -2503,6 +2721,11 @@ function isDouyinPublishPath(url) {
     || url.pathname.includes('/creator-micro/content/post/article')
 }
 
+function isDouyinIdentityUrl(url) {
+  return url.pathname === '/creator-micro/home'
+    || url.pathname === '/creator-micro/home/'
+}
+
 function isToutiaoArticlePreviewUrl(url) {
   return url.hostname === 'mp.toutiao.com' && url.pathname.includes('/mp-article-preview/')
 }
@@ -2510,6 +2733,12 @@ function isToutiaoArticlePreviewUrl(url) {
 function isZhihuCreatorCenterUrl(url) {
   return (url.hostname === 'www.zhihu.com' || url.hostname === 'zhihu.com')
     && url.pathname.startsWith('/creator/')
+}
+
+function isZhihuIdentityUrl(url) {
+  return isZhihuCreatorCenterUrl(url)
+    || ((url.hostname === 'www.zhihu.com' || url.hostname === 'zhihu.com')
+      && url.pathname.startsWith('/organization/verify/'))
 }
 
 function inferPlatformFromUrl(urlValue) {
@@ -2530,7 +2759,7 @@ function platformReportPageHint(platform) {
   const normalizedPlatform = normalizePlatform(platform)
   const hints = {
     toutiao: '头条设置页(mp.toutiao.com/profile_v4/personal/info)',
-    zhihu: '知乎创作中心(www.zhihu.com/creator/manage/creation/article)',
+    zhihu: '知乎创作中心或企业认证页(www.zhihu.com/organization/verify/levelup)',
     xiaohongshu: '小红书创作者主页(creator.xiaohongshu.com/new/home?source=official)',
     baijiahao: '百家号个人中心页(baijiahao.baidu.com/builder/rc/settings/accountSet)',
     douyin: '抖音创作者中心首页(creator.douyin.com/creator-micro/home)',
@@ -2615,11 +2844,16 @@ function waitForTabComplete(tabId, timeoutMs) {
       settled = true
       if (timeout) clearTimeout(timeout)
       chrome.tabs.onUpdated.removeListener(listener)
+      chrome.tabs.onRemoved.removeListener(removedListener)
       if (error) reject(error)
       else resolve()
     }
 
     chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError || !tab) {
+        finish(codedError('PLATFORM_TAB_GONE', `平台标签页不存在(tabId=${tabId})`))
+        return
+      }
       if (tab?.status === 'complete') finish()
     })
 
@@ -2632,7 +2866,13 @@ function waitForTabComplete(tabId, timeoutMs) {
       finish()
     }
 
+    function removedListener(removedTabId) {
+      if (removedTabId !== tabId) return
+      finish(codedError('PLATFORM_TAB_GONE', `平台标签页在等待加载时已关闭(tabId=${tabId})`))
+    }
+
     chrome.tabs.onUpdated.addListener(listener)
+    chrome.tabs.onRemoved.addListener(removedListener)
   })
 }
 
@@ -2763,7 +3003,7 @@ async function fillToutiaoScheduleAcrossFrames(tabId, value, platform) {
   await injectContentScripts(tabId, { allFrames: true }).catch(() => {})
   await delay(200)
 
-  const frames = await chrome.scripting.executeScript({
+  const frames = await executeScriptOnPlatformTab(tabId, {
     target: { tabId, allFrames: true },
     func: () => {
       const text = String(document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, '')
@@ -2780,7 +3020,7 @@ async function fillToutiaoScheduleAcrossFrames(tabId, value, platform) {
     },
   }).catch((error) => {
     if (!isCannotAccessContentsError(error?.message || error)) throw error
-    return chrome.scripting.executeScript({
+    return executeScriptOnPlatformTab(tabId, {
       target: { tabId, frameIds: [0] },
       func: () => {
         const text = String(document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, '')
@@ -2901,7 +3141,7 @@ async function setBaijiahaoUeditorContentInMainWorld(tabId, message = {}) {
   const frameId = String(message.frameId || 'ueditor_0')
   const instantId = String(message.instantId || '')
   const html = String(message.html || '')
-  const [result] = await chrome.scripting.executeScript({
+  const [result] = await executeScriptOnPlatformTab(tabId, {
     target: { tabId },
     world: 'MAIN',
     args: [frameId, instantId, html],
@@ -2965,7 +3205,7 @@ async function setBaijiahaoUeditorContentInMainWorld(tabId, message = {}) {
 }
 
 async function findDouyinUploadClickPoints(tabId) {
-  const result = await chrome.scripting.executeScript({
+  const result = await executeScriptOnPlatformTab(tabId, {
     target: { tabId },
     func: () => {
       function visible(el) {
@@ -3222,7 +3462,7 @@ async function describePlatformFileInputs(target, platform) {
 }
 
 async function findPlatformUploadClickPoints(tabId, platform) {
-  const result = await chrome.scripting.executeScript({
+  const result = await executeScriptOnPlatformTab(tabId, {
     target: { tabId },
     args: [normalizePlatform(platform)],
     func: (platform) => {

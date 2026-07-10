@@ -1002,10 +1002,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
           browserEnvironmentAccountId: taskBrowserEnvironmentAccountId,
           platform: account.platform,
           url: defaultSemiAutoPublishUrl(account.platform),
-          expectedPlatformAccountId: comparablePlatformAccountId(
-            account.platform,
-            binding.expectedPlatformAccountId || account.platformAccountId || null,
-          ),
+          expectedPlatformAccountId: null,
           expectedAccountName: binding.expectedAccountName || account.accountName || null,
           backendTask,
         },
@@ -1022,13 +1019,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     } finally {
       selfMediaSubmitting.value = false
     }
-  }
-
-  function comparablePlatformAccountId(platform?: string | null, platformAccountId?: string | null) {
-    const value = platformAccountId?.trim()
-    const normalizedPlatform = platform?.trim().toLowerCase()
-    if (!value || !normalizedPlatform) return value || null
-    return value.toLowerCase().startsWith(`geo-${normalizedPlatform}-`) ? null : value
   }
 
   async function refreshDistributionHistory() {

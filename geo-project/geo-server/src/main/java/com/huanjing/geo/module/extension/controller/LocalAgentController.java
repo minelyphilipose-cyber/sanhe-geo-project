@@ -3,6 +3,7 @@ package com.huanjing.geo.module.extension.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.entity.BrowserEnvironment;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
@@ -51,6 +52,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 @Tag(name = "LocalAgent")
@@ -197,6 +199,29 @@ public class LocalAgentController {
         BrowserEnvironmentAccount environmentAccount = schedule.getBrowserEnvironmentAccountId() == null
                 ? null
                 : browserEnvironmentAccountMapper.selectById(schedule.getBrowserEnvironmentAccountId());
+        String environmentKey = environment == null ? null : environment.getEnvironmentKey();
+        String providerProfileId = environment == null ? null : environment.getProviderProfileId();
+        if (!StringUtils.hasText(environmentKey) || !StringUtils.hasText(providerProfileId)) {
+            scheduleService.markClaimedPublishCheckUnknown(
+                    schedule.getId(),
+                    diagnosticsJson(
+                            "found", false,
+                            "reason", "BROWSER_ENVIRONMENT_BINDING_INVALID",
+                            "failureCode", "BROWSER_ENVIRONMENT_BINDING_INVALID",
+                            "failureMessage", "浏览器环境绑定缺少环境标识或 AdsPower 浏览器编号，已退回等待修复",
+                            "scheduleId", schedule.getId(),
+                            "browserEnvironmentId", schedule.getBrowserEnvironmentId(),
+                            "browserEnvironmentAccountId", schedule.getBrowserEnvironmentAccountId(),
+                            "platform", schedule.getPlatform()
+                    )
+            );
+            return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(
+                    null,
+                    null,
+                    "BROWSER_ENVIRONMENT_BINDING_INVALID",
+                    null
+            ));
+        }
         String taskPlatform = StringUtils.hasText(schedule.getPlatform())
                 ? schedule.getPlatform()
                 : account == null ? null : account.getPlatform();
@@ -212,9 +237,9 @@ public class LocalAgentController {
                                 environmentAccount == null ? null : environmentAccount.getExpectedAccountName(),
                                 account == null ? null : account.getAccountName()
                         ),
-                        environment == null ? null : environment.getEnvironmentKey(),
+                        environmentKey,
                         environment == null ? null : environment.getName(),
-                        environment == null ? null : environment.getProviderProfileId()
+                        providerProfileId
                 );
         return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(schedule, launch, null, null));
     }
@@ -266,86 +291,107 @@ public class LocalAgentController {
     }
 
     @PostMapping("/self-media-schedules/{scheduleId}/publish-checks/published")
-    public R<SelfMediaPublishScheduleVO> markSelfMediaPublishCheckPublished(
+    public R<Map<String, Object>> markSelfMediaPublishCheckPublished(
             @PathVariable Long scheduleId,
             @RequestParam(required = false) String platformPublishedUrl,
             @RequestParam(required = false) String diagnosticsJson,
+            @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
         verifySignedRequest(request);
-        return R.ok(scheduleService.markClaimedPublishedConfirmed(scheduleId, platformPublishedUrl, diagnosticsJson));
+        scheduleService.markClaimedPublishedConfirmed(
+                scheduleId,
+                firstText(jsonText(body, "platformPublishedUrl"), platformPublishedUrl),
+                firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson)
+        );
+        return R.ok(Map.of("ok", true, "scheduleId", scheduleId));
     }
 
     @PostMapping("/self-media-schedules/{scheduleId}/publish-checks/unknown")
-    public R<SelfMediaPublishScheduleVO> markSelfMediaPublishCheckUnknown(
+    public R<Map<String, Object>> markSelfMediaPublishCheckUnknown(
             @PathVariable Long scheduleId,
             @RequestParam(required = false) String diagnosticsJson,
+            @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
         verifySignedRequest(request);
-        return R.ok(scheduleService.markClaimedPublishCheckUnknown(scheduleId, diagnosticsJson));
+        scheduleService.markClaimedPublishCheckUnknown(
+                scheduleId,
+                firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson)
+        );
+        return R.ok(Map.of("ok", true, "scheduleId", scheduleId));
     }
 
     @PostMapping("/self-media-schedules/{scheduleId}/publish-checks/failed")
-    public R<SelfMediaPublishScheduleVO> markSelfMediaPublishCheckFailed(
+    public R<Map<String, Object>> markSelfMediaPublishCheckFailed(
             @PathVariable Long scheduleId,
             @RequestParam(required = false) String failureCode,
             @RequestParam(required = false) String failureMessage,
             @RequestParam(required = false) String diagnosticsJson,
+            @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
         verifySignedRequest(request);
-        return R.ok(scheduleService.markClaimedPublishFailed(
+        scheduleService.markClaimedPublishFailed(
                 scheduleId,
-                failureCode,
-                failureMessage,
-                diagnosticsJson
-        ));
+                firstText(jsonText(body, "failureCode"), failureCode),
+                firstText(jsonText(body, "failureMessage"), failureMessage),
+                firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson)
+        );
+        return R.ok(Map.of("ok", true, "scheduleId", scheduleId));
     }
 
     @PostMapping("/self-media-schedules/{scheduleId}/executions/failed")
-    public R<SelfMediaPublishScheduleVO> markSelfMediaScheduleExecutionFailed(
+    public R<Map<String, Object>> markSelfMediaScheduleExecutionFailed(
             @PathVariable Long scheduleId,
             @RequestParam(required = false) String failureCode,
             @RequestParam(required = false) String failureMessage,
             @RequestParam(required = false) String diagnosticsJson,
+            @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
         verifySignedRequest(request);
-        return R.ok(scheduleService.markLocalAgentExecutionFailed(
+        scheduleService.markLocalAgentExecutionFailed(
                 scheduleId,
-                failureCode,
-                failureMessage,
-                diagnosticsJson
-        ));
+                firstText(jsonText(body, "failureCode"), failureCode),
+                firstText(jsonText(body, "failureMessage"), failureMessage),
+                firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson)
+        );
+        return R.ok(Map.of("ok", true, "scheduleId", scheduleId));
     }
 
     @PostMapping("/self-media-schedules/{scheduleId}/executions/filled")
-    public R<SelfMediaPublishScheduleVO> markSelfMediaScheduleExecutionFilled(
+    public R<Map<String, Object>> markSelfMediaScheduleExecutionFilled(
             @PathVariable Long scheduleId,
             @RequestParam(required = false) String diagnosticsJson,
+            @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
         verifySignedRequest(request);
-        return R.ok(scheduleService.markLocalAgentExecutionFilled(scheduleId, diagnosticsJson));
+        scheduleService.markLocalAgentExecutionFilled(scheduleId, firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson));
+        return R.ok(Map.of("ok", true, "scheduleId", scheduleId));
     }
 
     @PostMapping("/self-media-schedules/{scheduleId}/executions/scheduled")
-    public R<SelfMediaPublishScheduleVO> markSelfMediaScheduleExecutionScheduled(
+    public R<Map<String, Object>> markSelfMediaScheduleExecutionScheduled(
             @PathVariable Long scheduleId,
             @RequestParam(required = false) String diagnosticsJson,
+            @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
         verifySignedRequest(request);
-        return R.ok(scheduleService.markLocalAgentExecutionScheduled(scheduleId, diagnosticsJson));
+        scheduleService.markLocalAgentExecutionScheduled(scheduleId, firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson));
+        return R.ok(Map.of("ok", true, "scheduleId", scheduleId));
     }
 
     @PostMapping("/self-media-schedules/{scheduleId}/executions/published")
-    public R<SelfMediaPublishScheduleVO> markSelfMediaScheduleExecutionPublished(
+    public R<Map<String, Object>> markSelfMediaScheduleExecutionPublished(
             @PathVariable Long scheduleId,
             @RequestParam(required = false) String platformPublishedUrl,
             @RequestParam(required = false) String diagnosticsJson,
+            @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
         verifySignedRequest(request);
-        return R.ok(scheduleService.markLocalAgentExecutionPublishedConfirmed(
+        scheduleService.markLocalAgentExecutionPublishedConfirmed(
                 scheduleId,
-                platformPublishedUrl,
-                diagnosticsJson
-        ));
+                firstText(jsonText(body, "platformPublishedUrl"), platformPublishedUrl),
+                firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson)
+        );
+        return R.ok(Map.of("ok", true, "scheduleId", scheduleId));
     }
 
     private LocalAgentSession verifySignedRequest(HttpServletRequest request) {
@@ -450,6 +496,27 @@ public class LocalAgentController {
         return StringUtils.hasText(value) && value.trim().matches("\\d{6,}");
     }
 
+    private String diagnosticsJson(Object... pairs) {
+        ObjectNode root = objectMapper.createObjectNode();
+        if (pairs == null) {
+            return "{}";
+        }
+        for (int index = 0; index + 1 < pairs.length; index += 2) {
+            String key = String.valueOf(pairs[index]);
+            Object value = pairs[index + 1];
+            if (value == null) {
+                root.putNull(key);
+            } else if (value instanceof Boolean bool) {
+                root.put(key, bool);
+            } else if (value instanceof Number number) {
+                root.putPOJO(key, number);
+            } else {
+                root.put(key, String.valueOf(value));
+            }
+        }
+        return root.toString();
+    }
+
     private String firstText(String... values) {
         if (values == null) {
             return null;
@@ -460,6 +527,14 @@ public class LocalAgentController {
             }
         }
         return null;
+    }
+
+    private String jsonText(JsonNode body, String fieldName) {
+        if (body == null || !body.has(fieldName) || body.get(fieldName).isNull()) {
+            return null;
+        }
+        String value = body.get(fieldName).asText(null);
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private String sha256Hex(String value) {

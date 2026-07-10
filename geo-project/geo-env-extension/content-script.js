@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.1.8'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.1.9'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -3124,35 +3124,28 @@ function verifyExpectedPlatformIdentity(payload, platform) {
   if (!identity.implemented) {
     throw new Error(`账号校验未启用(${platform || 'unknown'})，已阻止填充`)
   }
-
-  if (expectedId) {
-    if (identity.accountIds.includes(expectedId)) {
-      return {
-        method: 'platformAccountId',
-        message: `账号校验通过(ID=${payload.expectedPlatformAccountId})`,
-        currentAccountIds: identity.accountIds,
-        currentAccountNames: identity.accountNames,
-      }
-    }
-    if (identity.accountIds.length) {
-      throw new Error(`账号ID未确认：当前ID=${identity.accountIds.join(',')}，期望ID=${payload.expectedPlatformAccountId}，已阻止填充`)
-    }
+  const policy = globalThis.__GEO_IDENTITY_POLICY__?.evaluateExpectedIdentity
+  if (!policy) throw new Error('账号校验策略未加载，已阻止填充')
+  const decision = policy({
+    platform,
+    expectedName,
+    expectedId,
+    currentIds: identity.accountIds,
+    currentNames: identity.accountNames,
+  })
+  if (!decision.matched) {
+    const error = new Error(decision.message || '账号身份未确认，已阻止填充')
+    error.code = decision.code || 'TASK_ACCOUNT_IDENTITY_NOT_CONFIRMED'
+    throw error
   }
-
-  if (expectedName && identity.accountNames.includes(expectedName)) {
-    return {
-      method: 'accountName',
-      message: `账号校验通过(名称=${payload.expectedAccountName})`,
-      currentAccountIds: identity.accountIds,
-      currentAccountNames: identity.accountNames,
-    }
+  return {
+    method: decision.method,
+    message: decision.method === 'platformAccountId'
+      ? `账号校验通过(ID=${payload.expectedPlatformAccountId})`
+      : `账号校验通过(名称=${payload.expectedAccountName})`,
+    currentAccountIds: identity.accountIds,
+    currentAccountNames: identity.accountNames,
   }
-
-  if (expectedId) {
-    throw new Error(`账号ID未确认：当前ID=未读取到，期望ID=${payload.expectedPlatformAccountId}，已阻止填充`)
-  }
-  const currentName = identity.accountNames.join(',') || '未读取到'
-  throw new Error(`账号名称未确认：当前名称=${currentName}，期望名称=${payload.expectedAccountName}，已阻止填充`)
 }
 
 function inferPlatformFromLocation() {
@@ -3207,6 +3200,7 @@ function collectDouyinHomeIdentity(accountIds, accountNames) {
   const nameEl = root?.querySelector?.('[class*="name-"], [class*="Name-"]')
   const name = normalizeAccountName(nameEl?.textContent || '')
   if (isLikelyDouyinAccountName(name)) accountNames.add(name)
+  collectDouyinNameNearIdentityMarker(marker, accountNames)
 }
 
 function collectDouyinHomeHeaderIdentity(accountIds, accountNames) {
@@ -3215,7 +3209,6 @@ function collectDouyinHomeHeaderIdentity(accountIds, accountNames) {
   for (const el of candidates) {
     const text = el.innerText || el.textContent || ''
     if (!/抖音号\s*[:：]/.test(text)) continue
-    if (!/关注|粉丝|获赞/.test(text)) continue
     collectDouyinAccountIdsFromText(text, accountIds)
     for (const nameEl of Array.from(el.querySelectorAll('[class*="name-"], [class*="Name-"]'))) {
       const name = normalizeAccountName(nameEl.textContent || nameEl.getAttribute('title') || nameEl.getAttribute('aria-label') || '')
@@ -3224,6 +3217,19 @@ function collectDouyinHomeHeaderIdentity(accountIds, accountNames) {
     const textNameMatch = text.match(/^([^\s|｜]{2,40})\s*(?:[|｜]|\s+)\s*抖音号\s*[:：]/)
     const textName = normalizeAccountName(textNameMatch?.[1] || '')
     if (isLikelyDouyinAccountName(textName)) accountNames.add(textName)
+  }
+}
+
+function collectDouyinNameNearIdentityMarker(marker, accountNames) {
+  const candidates = [
+    marker.previousElementSibling,
+    marker.parentElement?.previousElementSibling,
+    marker.parentElement?.querySelector?.('[class*="name-"], [class*="Name-"]'),
+    marker.closest?.('[class*="header"], [class*="content"], [class*="left"], [class*="container"]')?.querySelector?.('[class*="name-"], [class*="Name-"]'),
+  ].filter(Boolean)
+  for (const el of candidates) {
+    const text = normalizeAccountName(el.textContent || el.getAttribute?.('title') || el.getAttribute?.('aria-label') || '')
+    if (isLikelyDouyinAccountName(text)) accountNames.add(text)
   }
 }
 
@@ -3272,6 +3278,7 @@ function collectDouyinAccountIdsFromText(text, accountIds) {
 function collectDouyinAccountNamesFromText(text, accountNames) {
   const patterns = [
     /([^\s|｜]{2,40})\s*[|｜]\s*抖音号\s*[:：]/g,
+    /([^\s|｜:：]{2,40})抖音号\s*[:：]/g,
     /"nickname"\s*:\s*"([^"]{2,80})"/g,
     /"nickName"\s*:\s*"([^"]{2,80})"/g,
     /"userName"\s*:\s*"([^"]{2,80})"/g,

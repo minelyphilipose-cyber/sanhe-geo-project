@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountCreateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountUpdateRequest;
@@ -513,8 +514,7 @@ public class BrowserEnvironmentService {
         if (!StringUtils.hasText(environmentKey) || !StringUtils.hasText(platform)) {
             fail("ENVIRONMENT_AND_PLATFORM_REQUIRED", "环境标识和平台不能为空");
         }
-        List<BrowserEnvironmentAccount> rows =
-                environmentAccountMapper.selectActiveByEnvironmentKeyAndPlatform(environmentKey, platform);
+        List<BrowserEnvironmentAccount> rows = selectActiveByEnvironmentKeyAndEquivalentPlatform(environmentKey, platform);
         if (rows == null || rows.isEmpty()) {
             fail("ENVIRONMENT_ACCOUNT_BINDING_NOT_FOUND", "未找到环境与平台对应的账号绑定");
         }
@@ -522,6 +522,24 @@ public class BrowserEnvironmentService {
             fail("ENVIRONMENT_PLATFORM_BINDING_AMBIGUOUS", "同一环境与平台存在多个账号绑定，请改用环境账号ID上报");
         }
         return reportLoginStatusForOperator(rows.get(0).getId(), request, operatorId);
+    }
+
+    private List<BrowserEnvironmentAccount> selectActiveByEnvironmentKeyAndEquivalentPlatform(String environmentKey,
+                                                                                              String platform) {
+        List<BrowserEnvironmentAccount> rows = new ArrayList<>();
+        for (String candidate : platformLookupValues(platform)) {
+            List<BrowserEnvironmentAccount> candidateRows =
+                    environmentAccountMapper.selectActiveByEnvironmentKeyAndPlatform(environmentKey, candidate);
+            if (candidateRows == null || candidateRows.isEmpty()) {
+                continue;
+            }
+            for (BrowserEnvironmentAccount row : candidateRows) {
+                if (rows.stream().noneMatch(existing -> Objects.equals(existing.getId(), row.getId()))) {
+                    rows.add(row);
+                }
+            }
+        }
+        return rows;
     }
 
     @Transactional
@@ -539,14 +557,14 @@ public class BrowserEnvironmentService {
         brandAccessService.requireBrandAccess(brandId, operatorId, BrandAccessAction.OPERATE);
         if (request.selfMediaAccountId() != null) {
             BrowserEnvironmentAccount row = environmentAccountMapper.selectActiveBySelfMediaAccountId(request.selfMediaAccountId());
-            if (row == null || !brandId.equals(row.getBrandId()) || !platform.equals(row.getPlatform())) {
+            if (row == null || !brandId.equals(row.getBrandId()) || !platformEquivalent(platform, row.getPlatform())) {
                 fail("ENVIRONMENT_ACCOUNT_BINDING_NOT_FOUND", "未找到指定自媒体账号对应的环境账号绑定");
             }
             BrowserEnvironment environment = requireEnvironment(row.getBrowserEnvironmentId());
             BrowserEnvironmentLoginStatusRequest normalizedRequest = new BrowserEnvironmentLoginStatusRequest(
                     environment.getEnvironmentKey(),
                     request.selfMediaAccountId(),
-                    platform,
+                    row.getPlatform(),
                     request.actualPlatformAccountId(),
                     request.actualAccountName(),
                     request.loginStatus(),
@@ -563,7 +581,7 @@ public class BrowserEnvironmentService {
         BrowserEnvironmentLoginStatusRequest normalizedRequest = new BrowserEnvironmentLoginStatusRequest(
                 environment.getEnvironmentKey(),
                 request.selfMediaAccountId(),
-                platform,
+                target.getPlatform(),
                 request.actualPlatformAccountId(),
                 request.actualAccountName(),
                 request.loginStatus(),
@@ -577,8 +595,7 @@ public class BrowserEnvironmentService {
                                                                        String platform,
                                                                        BrowserEnvironmentBrandLoginStatusRequest request) {
         String actualName = trimToNull(request.actualAccountName());
-        List<BrowserEnvironmentAccount> rows =
-                environmentAccountMapper.selectAllActiveByBrandIdAndPlatform(brandId, platform);
+        List<BrowserEnvironmentAccount> rows = selectAllActiveByBrandIdAndEquivalentPlatform(brandId, platform);
         if (rows == null || rows.isEmpty()) {
             return null;
         }
@@ -596,6 +613,42 @@ public class BrowserEnvironmentService {
         }
         fail("BRAND_PLATFORM_ACCOUNT_NOT_MATCHED", "当前登录的平台账号未匹配到品牌下的自媒体账号绑定");
         return null;
+    }
+
+    private List<BrowserEnvironmentAccount> selectAllActiveByBrandIdAndEquivalentPlatform(Long brandId, String platform) {
+        List<BrowserEnvironmentAccount> rows = new ArrayList<>();
+        for (String candidate : platformLookupValues(platform)) {
+            List<BrowserEnvironmentAccount> candidateRows =
+                    environmentAccountMapper.selectAllActiveByBrandIdAndPlatform(brandId, candidate);
+            if (candidateRows == null || candidateRows.isEmpty()) {
+                continue;
+            }
+            for (BrowserEnvironmentAccount row : candidateRows) {
+                if (rows.stream().noneMatch(existing -> Objects.equals(existing.getId(), row.getId()))) {
+                    rows.add(row);
+                }
+            }
+        }
+        return rows;
+    }
+
+    private List<String> platformLookupValues(String platform) {
+        String normalized = trimToNull(platform);
+        String canonical = canonicalSelfMediaPlatform(platform);
+        List<String> values = new ArrayList<>();
+        if (StringUtils.hasText(normalized)) {
+            values.add(normalized);
+        }
+        if (StringUtils.hasText(canonical) && values.stream().noneMatch(canonical::equals)) {
+            values.add(canonical);
+        }
+        if ("douyin".equals(canonical) && values.stream().noneMatch("douyin_image_text"::equals)) {
+            values.add("douyin_image_text");
+        }
+        if ("wechat".equals(canonical) && values.stream().noneMatch("wechat_mp"::equals)) {
+            values.add("wechat_mp");
+        }
+        return values;
     }
 
     private boolean reportIdentityMatches(BrowserEnvironmentAccount row, String actualName) {
@@ -713,8 +766,6 @@ public class BrowserEnvironmentService {
         }
         ensureExpectedIdentityNotClaimed(binding.getId(), binding.getBrandId(), binding.getPlatform(), expectedAccountName);
         binding.setExpectedAccountName(expectedAccountName);
-        binding.setUpdatedAt(LocalDateTime.now());
-        environmentAccountMapper.updateById(binding);
     }
 
     private String resolveReportedStatus(BrowserEnvironmentAccount row,
@@ -726,20 +777,18 @@ public class BrowserEnvironmentService {
         }
         String actualName = trimToNull(request.actualAccountName());
         if (!StringUtils.hasText(row.getExpectedAccountName())) {
-            if (!StringUtils.hasText(actualName)) {
-                fail(BrowserEnvironmentConstants.ERR_IDENTITY_EXPECTATION_MISSING, "首次登记缺少平台账号身份");
+            applyAccountNameExpectation(row, account);
+            if (!StringUtils.hasText(row.getExpectedAccountName()) && StringUtils.hasText(actualName)) {
+                ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(), actualName);
+                row.setExpectedAccountName(actualName);
             }
-            ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(), actualName);
-            row.setExpectedAccountName(actualName);
-            return BrowserEnvironmentConstants.LOGIN_LOGGED_IN;
+        }
+        if (!StringUtils.hasText(actualName)) {
+            fail(BrowserEnvironmentConstants.ERR_IDENTITY_EXPECTATION_MISSING, "登录状态上报缺少平台账号名称");
         }
         boolean nameMatches = accountNameMatches(row.getPlatform(), row.getExpectedAccountName(), actualName);
-        if (!nameMatches
-                && !StringUtils.hasText(row.getExpectedAccountName())
-                && accountNameMatches(row.getPlatform(), account.getAccountName(), actualName)) {
-            ensureExpectedIdentityNotClaimed(row.getId(), row.getBrandId(), row.getPlatform(), actualName);
-            row.setExpectedAccountName(actualName);
-            nameMatches = true;
+        if (!nameMatches) {
+            nameMatches = accountNameMatches(row.getPlatform(), account.getAccountName(), actualName);
         }
         if (nameMatches) {
             return BrowserEnvironmentConstants.LOGIN_LOGGED_IN;
@@ -759,24 +808,37 @@ public class BrowserEnvironmentService {
             return null;
         }
         String normalized = text.replaceAll("\\s+", "");
-        String platformName = platformDisplayName(platform);
-        if (StringUtils.hasText(platformName)) {
+        for (String platformName : platformDisplayNames(platform)) {
+            if (!StringUtils.hasText(platformName)) {
+                continue;
+            }
             String prefix = platformName + "/";
             if (normalized.startsWith(prefix) && normalized.length() > prefix.length()) {
                 normalized = normalized.substring(prefix.length());
+                break;
             }
         }
         return normalized;
     }
 
+    private List<String> platformDisplayNames(String platform) {
+        String normalized = canonicalSelfMediaPlatform(platform);
+        if (!StringUtils.hasText(normalized)) return List.of();
+        return switch (normalized) {
+            case "douyin" -> List.of("抖音图文", "抖音");
+            default -> List.of(platformDisplayName(normalized));
+        };
+    }
+
     private String platformDisplayName(String platform) {
-        String normalized = trimToNull(platform);
+        String normalized = canonicalSelfMediaPlatform(platform);
         if (!StringUtils.hasText(normalized)) return null;
         return switch (normalized) {
             case "toutiao" -> "头条";
             case "zhihu" -> "知乎";
             case "xiaohongshu" -> "小红书";
             case "baijiahao" -> "百家号";
+            case "douyin" -> "抖音图文";
             default -> normalized;
         };
     }
@@ -808,16 +870,47 @@ public class BrowserEnvironmentService {
                                                BrowserEnvironment environment,
                                                SelfMediaAccount account,
                                                BrowserEnvironmentLoginStatusRequest request) {
-        if (!environment.getEnvironmentKey().equals(request.environmentKey())) {
+        if (!environmentIdentityMatches(environment, request.environmentKey())) {
             throw new BizException(403, "environmentKey does not match environment account binding");
         }
         if (request.selfMediaAccountId() != null
                 && !Objects.equals(row.getSelfMediaAccountId(), request.selfMediaAccountId())) {
             throw new BizException(403, "selfMediaAccountId does not match environment account binding");
         }
-        if (!row.getPlatform().equals(request.platform()) || !account.getPlatform().equals(request.platform())) {
+        if (!platformEquivalent(row.getPlatform(), request.platform())
+                || !platformEquivalent(account.getPlatform(), request.platform())) {
             throw new BizException(403, "platform does not match environment account binding");
         }
+    }
+
+    private boolean environmentIdentityMatches(BrowserEnvironment environment, String reportedEnvironmentKey) {
+        String reported = normalizeEnvironmentIdentity(reportedEnvironmentKey);
+        return StringUtils.hasText(reported)
+                && (reported.equals(normalizeEnvironmentIdentity(environment.getEnvironmentKey()))
+                || reported.equals(normalizeEnvironmentIdentity(environment.getName())));
+    }
+
+    private String normalizeEnvironmentIdentity(String value) {
+        String normalized = trimToNull(value);
+        if (!StringUtils.hasText(normalized)) {
+            return null;
+        }
+        return normalized.replace('-', '_');
+    }
+
+    private boolean platformEquivalent(String left, String right) {
+        String normalizedLeft = canonicalSelfMediaPlatform(left);
+        String normalizedRight = canonicalSelfMediaPlatform(right);
+        return StringUtils.hasText(normalizedLeft) && normalizedLeft.equals(normalizedRight);
+    }
+
+    private String canonicalSelfMediaPlatform(String platform) {
+        String normalized = trimToNull(platform);
+        if (!StringUtils.hasText(normalized)) {
+            return null;
+        }
+        String canonical = ArticlePromptChannels.normalizeSelfMediaPublishPlatform(normalized);
+        return StringUtils.hasText(canonical) ? canonical : normalized;
     }
 
     private void assertTransitionAllowed(String from, String to) {

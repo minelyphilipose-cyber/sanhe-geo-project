@@ -2,7 +2,8 @@
   "manifest_version": 3,
   "name": "GEO 自媒体助手",
   "description": "GEO AdsPower environment task filling extension.",
-  "version": "0.1.8",
+  "version": "0.1.9",
+  "version_name": "0.1.9-hotfix-20260710.3",
   "action": {
     "default_popup": "popup.html"
   },
@@ -43,6 +44,7 @@
       ],
       "js": [
         "fill-result.js",
+        "identity-policy.js",
         "platform-baijiahao.js",
         "platform-douyin.js",
         "platform-xiaohongshu.js",

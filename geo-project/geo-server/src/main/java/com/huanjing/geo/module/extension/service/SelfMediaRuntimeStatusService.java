@@ -52,9 +52,14 @@ public class SelfMediaRuntimeStatusService {
         if (!StringUtils.hasText(extensionVersion)) {
             badRequest("EXTENSION_VERSION_REQUIRED", "extensionVersion is required");
         }
+        enforceSessionScope(session, providerProfileId, request.environmentKey());
 
         LocalDateTime now = LocalDateTime.now();
-        BrowserEnvironment environment = resolveEnvironment(providerProfileId, request.environmentKey());
+        BrowserEnvironment environment = resolveEnvironment(
+                providerProfileId,
+                request.environmentKey(),
+                session == null ? null : session.getBrandId()
+        );
         String platform = normalizePlatform(firstText(request.detectedPlatform(), request.platform()));
         BrowserEnvironmentAccount account = resolveEnvironmentAccount(environment, platform);
         enforceSessionBrand(session, environment, account);
@@ -160,21 +165,60 @@ public class SelfMediaRuntimeStatusService {
         }
     }
 
-    private BrowserEnvironment resolveEnvironment(String providerProfileId, String environmentKey) {
+    private BrowserEnvironment resolveEnvironment(String providerProfileId, String environmentKey, Long brandId) {
         BrowserEnvironment byProvider = browserEnvironmentMapper.selectOne(new LambdaQueryWrapper<BrowserEnvironment>()
                 .eq(BrowserEnvironment::getProviderProfileId, providerProfileId)
+                .eq(brandId != null, BrowserEnvironment::getBrandId, brandId)
                 .isNull(BrowserEnvironment::getDeletedAt)
                 .last("LIMIT 1"));
-        if (byProvider != null || !StringUtils.hasText(environmentKey)) {
+        if (!StringUtils.hasText(environmentKey)) {
             return byProvider;
         }
-        return browserEnvironmentMapper.selectOne(new LambdaQueryWrapper<BrowserEnvironment>()
+        BrowserEnvironment byEnvironmentKey = browserEnvironmentMapper.selectOne(new LambdaQueryWrapper<BrowserEnvironment>()
+                .eq(brandId != null, BrowserEnvironment::getBrandId, brandId)
                 .and(wrapper -> wrapper
                         .eq(BrowserEnvironment::getEnvironmentKey, environmentKey.trim())
                         .or()
                         .eq(BrowserEnvironment::getName, environmentKey.trim()))
                 .isNull(BrowserEnvironment::getDeletedAt)
                 .last("LIMIT 1"));
+        if (byProvider != null && byEnvironmentKey != null && !Objects.equals(byProvider.getId(), byEnvironmentKey.getId())) {
+            scopeMismatch("BROWSER_ENVIRONMENT_SCOPE_MISMATCH", "providerProfileId and environmentKey resolve to different browser environments");
+        }
+        if (byProvider != null && !environmentIdentityMatches(byProvider, environmentKey)) {
+            scopeMismatch("BROWSER_ENVIRONMENT_KEY_MISMATCH", "environmentKey does not match providerProfileId");
+        }
+        if (byProvider == null && byEnvironmentKey != null
+                && !Objects.equals(providerProfileId, byEnvironmentKey.getProviderProfileId())) {
+            scopeMismatch("BROWSER_PROVIDER_PROFILE_MISMATCH", "providerProfileId does not match environmentKey");
+        }
+        return byProvider != null ? byProvider : byEnvironmentKey;
+    }
+
+    private void enforceSessionScope(ExtensionSession session, String providerProfileId, String environmentKey) {
+        if (session == null) {
+            return;
+        }
+        if (StringUtils.hasText(session.getProviderProfileId())
+                && !Objects.equals(session.getProviderProfileId().trim(), providerProfileId)) {
+            scopeMismatch("EXTENSION_SESSION_PROVIDER_MISMATCH", "extension session is bound to another AdsPower profile");
+        }
+        if (StringUtils.hasText(session.getEnvironmentKey()) && StringUtils.hasText(environmentKey)
+                && !Objects.equals(session.getEnvironmentKey().trim(), environmentKey.trim())) {
+            scopeMismatch("EXTENSION_SESSION_ENVIRONMENT_MISMATCH", "extension session is bound to another environmentKey");
+        }
+    }
+
+    private boolean environmentIdentityMatches(BrowserEnvironment environment, String environmentKey) {
+        if (environment == null || !StringUtils.hasText(environmentKey)) {
+            return true;
+        }
+        String expected = environmentKey.trim();
+        return Objects.equals(expected, environment.getEnvironmentKey()) || Objects.equals(expected, environment.getName());
+    }
+
+    private void scopeMismatch(String code, String message) {
+        throw new BizException(ERROR_CODE, message, 409, Map.of("code", code));
     }
 
     private BrowserEnvironmentAccount resolveEnvironmentAccount(BrowserEnvironment environment, String platform) {

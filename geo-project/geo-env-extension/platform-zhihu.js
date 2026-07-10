@@ -1,6 +1,7 @@
 ;(function installZhihuPlatform(global) {
   const HOME_URL = 'https://www.zhihu.com/'
   const CREATOR_CENTER_URL = 'https://www.zhihu.com/creator/manage/creation/article'
+  const ORGANIZATION_VERIFY_URL = 'https://www.zhihu.com/organization/verify/levelup'
   const WRITE_URL = 'https://zhuanlan.zhihu.com/write'
 
   const RETRYABLE_FAILURE_CODES = new Set([
@@ -194,6 +195,9 @@
   }
 
   function readIdentity(deps = {}) {
+    const organizationIdentity = readOrganizationVerifyIdentity()
+    if (organizationIdentity) return organizationIdentity
+
     const creatorCenterIdentity = readCreatorCenterIdentity(deps)
     if (creatorCenterIdentity) return creatorCenterIdentity
 
@@ -212,6 +216,36 @@
       profileUrls: Array.from(profileUrls),
       diagnostics: `href=${location.href}; visibleTextLength=${visibleText.length}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}; profileUrls=${Array.from(profileUrls).join(',') || '-'}; cookieKeys=${document.cookie.split(';').map((item) => item.split('=')[0]?.trim()).filter(Boolean).slice(0, 20).join(',') || '-'}`,
     }
+  }
+
+  function readOrganizationVerifyIdentity() {
+    if (!isOrganizationVerifyLocation()) return null
+    const root = document.querySelector('.OrgVerifyDesc')
+    if (!root) return null
+
+    const accountIds = new Set()
+    const accountNames = new Set()
+    const profileUrls = new Set()
+    const profileLink = root.querySelector('a[href*="/org/"]')
+    collectProfileHref(profileLink?.getAttribute('href') || '', accountIds, profileUrls, location.href)
+
+    const nameElement = root.querySelector('.OrgVerifyDesc-name a, .OrgVerifyDesc-name, a.UserLink-link')
+    const name = normalizeAccountName(nameElement?.textContent || '')
+    if (isLikelyAccountName(name)) accountNames.add(name)
+    if (!accountIds.size && !accountNames.size) return null
+
+    return {
+      implemented: true,
+      accountIds: Array.from(accountIds),
+      accountNames: Array.from(accountNames),
+      profileUrls: Array.from(profileUrls),
+      diagnostics: `href=${location.href}; source=organization_verify; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}; profileUrls=${Array.from(profileUrls).join(',') || '-'}`,
+    }
+  }
+
+  function isOrganizationVerifyLocation() {
+    return (location.hostname === 'www.zhihu.com' || location.hostname === 'zhihu.com')
+      && location.pathname.startsWith('/organization/verify/')
   }
 
   function readCreatorCenterIdentity(deps = {}) {
@@ -1136,6 +1170,7 @@
   global.__GEO_ZHIHU_PLATFORM__ = {
     HOME_URL,
     CREATOR_CENTER_URL,
+    ORGANIZATION_VERIFY_URL,
     WRITE_URL,
     classifyFailureCode,
     isPublishedArticleUrl,

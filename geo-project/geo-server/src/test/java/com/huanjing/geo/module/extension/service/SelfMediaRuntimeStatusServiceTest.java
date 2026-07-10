@@ -105,6 +105,40 @@ class SelfMediaRuntimeStatusServiceTest {
     }
 
     @Test
+    void extensionReportRejectsAClonedSessionBoundToAnotherProviderProfile() {
+        ExtensionSession session = new ExtensionSession();
+        session.setExtensionVersion("0.1.9");
+        session.setProviderProfileId("adspower-original");
+        session.setEnvironmentKey("env-original");
+        ExtensionRuntimeStatusReportRequest request = new ExtensionRuntimeStatusReportRequest(
+                "install-cloned",
+                "env-cloned",
+                "adspower-cloned",
+                "toutiao",
+                "0.1.9",
+                "1",
+                null,
+                null,
+                null,
+                null,
+                "unknown",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
+
+        BizException ex = assertThrows(BizException.class, () -> service.reportExtension(session, request));
+
+        assertEquals(409, ex.getHttpStatus());
+        assertEquals("EXTENSION_SESSION_PROVIDER_MISMATCH", ((Map<?, ?>) ex.getData()).get("code"));
+        verify(extensionRuntimeStatusMapper, never()).insert(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void localAgentReportRequiresMachineIdAndActiveProfileBeforeInsert() {
         LocalAgentSession session = new LocalAgentSession();
         session.setId(1L);

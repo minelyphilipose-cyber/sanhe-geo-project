@@ -17,4 +17,13 @@ class SelfMediaPublishFailureCodesTest {
                 SelfMediaPublishFailureCodes.actionLabel("WECHAT_API_UNAUTHORIZED"));
         assertFalse(SelfMediaPublishFailureCodes.retryable("WECHAT_API_UNAUTHORIZED"));
     }
+
+    @Test
+    void platformTabLifecycleFailuresAreRetryable() {
+        assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("PLATFORM_TAB_GONE"));
+        assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("PLATFORM_TAB_REDIRECTED"));
+        assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("DOUYIN_PUBLISH_NOT_CONFIRMED"));
+        assertEquals("立即重试", SelfMediaPublishFailureCodes.actionLabel("PLATFORM_TAB_GONE"));
+        assertEquals("重新校验", SelfMediaPublishFailureCodes.actionLabel("DOUYIN_PUBLISH_NOT_CONFIRMED"));
+    }
 }
