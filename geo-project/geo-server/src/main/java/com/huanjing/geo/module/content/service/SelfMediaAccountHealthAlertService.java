@@ -2,12 +2,11 @@ package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.content.credential.entity.SelfMediaCookieCredential;
-import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
-import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
-import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
+import com.huanjing.geo.module.content.entity.AccountAuthRiskScanBatch;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaCookieCredentialMapper;
+import com.huanjing.geo.module.content.mapper.AccountAuthRiskScanBatchMapper;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
@@ -21,12 +20,12 @@ import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -53,17 +52,21 @@ public class SelfMediaAccountHealthAlertService {
             "OFFICIAL_ACCOUNT_INACTIVE",
             "COOKIE_CREDENTIAL_MISSING",
             "COOKIE_CREDENTIAL_EXPIRED",
-            "COOKIE_CREDENTIAL_EXPIRING"
+            "COOKIE_CREDENTIAL_EXPIRING",
+            "ACCOUNT_REVERIFY_OVERDUE",
+            "ACCOUNT_REVERIFY_DUE_SOON"
     );
 
     private final SelfMediaAccountMapper accountMapper;
     private final SelfMediaCookieCredentialMapper credentialMapper;
-    private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private final BrandMapper brandMapper;
     private final BrandOperatorAssignmentMapper brandOperatorAssignmentMapper;
     private final CompanyMapper companyMapper;
     private final SelfMediaPlatformScheduleAdapterRouter platformRouter;
     private final SystemAlertService systemAlertService;
+    private final SelfMediaAuthHealthPolicyService authHealthPolicyService;
+    private final SelfMediaAuthRiskEvaluator authRiskEvaluator;
+    private final AccountAuthRiskScanBatchMapper scanBatchMapper;
 
     @Value("${geo.self-media-account-health.scan-limit:500}")
     private int scanLimit;
@@ -77,10 +80,11 @@ public class SelfMediaAccountHealthAlertService {
     @Value("${geo.self-media-account-health.cookie-platform-valid-days:toutiao:30,baijiahao:30,zhihu:30,xiaohongshu:7}")
     private String cookiePlatformValidDays;
 
-    @Transactional
     public int scanOnce() {
+        AccountAuthRiskScanBatch batch = startBatch();
         List<SelfMediaAccount> accounts = loadMonitoredAccounts();
         if (accounts.isEmpty()) {
+            finishBatch(batch, 0, 0, 0, null);
             return 0;
         }
         Map<Long, SelfMediaCookieCredential> credentialsByAccountId = loadCookieCredentials(accounts);
@@ -88,11 +92,22 @@ public class SelfMediaAccountHealthAlertService {
         LocalDateTime now = LocalDateTime.now();
 
         int changed = 0;
+        int succeeded = 0;
+        int failed = 0;
+        List<String> errors = new ArrayList<>();
         for (SelfMediaAccount account : accounts) {
-            HealthIssue issue = detectIssue(account, credentialsByAccountId.get(account.getId()), now);
-            BrandContext brandContext = brandContextByBrandId.getOrDefault(account.getBrandId(), BrandContext.fallback());
-            changed += reconcile(account, issue, brandContext);
+            try {
+                HealthIssue issue = detectIssue(account, credentialsByAccountId.get(account.getId()), now);
+                BrandContext brandContext = brandContextByBrandId.getOrDefault(account.getBrandId(), BrandContext.fallback());
+                changed += reconcile(account, issue, brandContext);
+                succeeded++;
+            } catch (Exception ex) {
+                failed++;
+                if (errors.size() < 5) errors.add(account.getId() + ":" + ex.getMessage());
+            }
         }
+        batch.setLastScannedId(accounts.get(accounts.size() - 1).getId());
+        finishBatch(batch, accounts.size(), succeeded, failed, String.join("; ", errors));
         return changed;
     }
 
@@ -101,14 +116,22 @@ public class SelfMediaAccountHealthAlertService {
         if (platforms.isEmpty()) {
             return List.of();
         }
-        return accountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
-                        .isNull(SelfMediaAccount::getDeletedAt)
-                        .in(SelfMediaAccount::getPlatform, platforms)
-                        .orderByAsc(SelfMediaAccount::getId)
-                        .last("LIMIT " + Math.max(scanLimit, 1)))
-                .stream()
-                .filter(account -> account.getId() != null)
-                .toList();
+        List<SelfMediaAccount> result = new ArrayList<>();
+        long lastId = 0L;
+        int pageSize = Math.max(scanLimit, 1);
+        while (true) {
+            List<SelfMediaAccount> page = accountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
+                    .isNull(SelfMediaAccount::getDeletedAt)
+                    .in(SelfMediaAccount::getPlatform, platforms)
+                    .gt(SelfMediaAccount::getId, lastId)
+                    .orderByAsc(SelfMediaAccount::getId)
+                    .last("LIMIT " + pageSize));
+            if (page.isEmpty()) break;
+            result.addAll(page);
+            lastId = page.get(page.size() - 1).getId();
+            if (page.size() < pageSize) break;
+        }
+        return result;
     }
 
     private Set<String> monitoredPlatforms() {
@@ -224,23 +247,28 @@ public class SelfMediaAccountHealthAlertService {
         if (!STATUS_ACTIVE.equalsIgnoreCase(account.getStatus())) {
             return null;
         }
-        if (credential == null) {
-            return issue("COOKIE_CREDENTIAL_MISSING", "high", "平台 Cookie 登录凭据缺失或已失效");
+        var policy = authHealthPolicyService.findPolicy(account.getPlatform());
+        if (policy == null) return null;
+        LocalDateTime declaredExpiry = credential != null
+                && Set.of("cookie_expires", "manual").contains(String.valueOf(credential.getExpirySource()))
+                ? credential.getExpiresAt() : null;
+        var risk = authRiskEvaluator.evaluate(new SelfMediaAuthRiskEvaluator.Input(policy, now, true, credential != null,
+                account.getLastLoginVerifiedAt(), credential == null ? null : credential.getCapturedAt(),
+                declaredExpiry, account.getCreatedAt()));
+        account.setRecommendedReverifyAt(risk.recommendedReverifyAt());
+        account.setUpdatedAt(now);
+        accountMapper.updateById(account);
+        if ("credential_missing".equals(risk.riskStatus())) {
+            return issue("COOKIE_CREDENTIAL_MISSING", "warn", "尚无可信登录健康记录，请验证当前登录状态");
         }
-        LocalDateTime expiresAt = credential.getExpiresAt();
-        if (expiresAt == null && credential.getCapturedAt() != null) {
-            expiresAt = credential.getCapturedAt().plusDays(cookieValidDays(account.getPlatform()));
+        long daysUntil = risk.recommendedReverifyAt() == null ? 0 : daysUntil(now, risk.recommendedReverifyAt());
+        if ("reverify_overdue".equals(risk.riskStatus())) {
+            return issue("ACCOUNT_REVERIFY_OVERDUE", "warn", "已超过建议复验时间，请确认当前登录状态",
+                    risk.recommendedReverifyAt(), daysUntil);
         }
-        if (expiresAt == null) {
-            return issue("COOKIE_CREDENTIAL_MISSING", "high", "平台 Cookie 登录授权记录时间缺失");
-        }
-        long daysUntilExpiry = daysUntil(now, expiresAt);
-        if (!expiresAt.isAfter(now)) {
-            return issue("COOKIE_CREDENTIAL_EXPIRED", "high", expiredMessage("平台登录授权", daysUntilExpiry), expiresAt, daysUntilExpiry);
-        }
-        if (expiresAt.isBefore(now.plusDays(Math.max(credentialExpiringDays, 1)))) {
-            return issue("COOKIE_CREDENTIAL_EXPIRING", expiringSeverity(daysUntilExpiry),
-                    expiringMessage("平台登录授权", daysUntilExpiry), expiresAt, daysUntilExpiry);
+        if ("reverify_due_soon".equals(risk.riskStatus())) {
+            return issue("ACCOUNT_REVERIFY_DUE_SOON", "warn", "即将需要复验，请提前确认当前登录状态",
+                    risk.recommendedReverifyAt(), daysUntil);
         }
         return null;
     }
@@ -313,23 +341,33 @@ public class SelfMediaAccountHealthAlertService {
                 brandContext.recipientRole(),
                 prefix + issue.code()
         );
-        if ("COOKIE_CREDENTIAL_EXPIRED".equals(issue.code())) {
-            markBrowserLoginExpired(account);
-        }
         return 1;
     }
 
-    private void markBrowserLoginExpired(SelfMediaAccount account) {
-        BrowserEnvironmentAccount binding = browserEnvironmentAccountMapper.selectActiveBySelfMediaAccountId(account.getId());
-        if (binding == null || BrowserEnvironmentConstants.LOGIN_EXPIRED.equals(binding.getLoginStatus())) {
-            return;
-        }
-        binding.setLoginStatus(BrowserEnvironmentConstants.LOGIN_EXPIRED);
-        binding.setLastVerifiedAt(LocalDateTime.now());
-        binding.setLastErrorCode("COOKIE_CREDENTIAL_EXPIRED");
-        binding.setLastErrorMessage("cookie credential expired by health scan");
-        binding.setUpdatedAt(LocalDateTime.now());
-        browserEnvironmentAccountMapper.updateById(binding);
+    private AccountAuthRiskScanBatch startBatch() {
+        AccountAuthRiskScanBatch row = new AccountAuthRiskScanBatch();
+        row.setScanType("self_media");
+        row.setStatus("running");
+        row.setStartedAt(LocalDateTime.now());
+        row.setTotalCount(0);
+        row.setSuccessCount(0);
+        row.setFailureCount(0);
+        row.setSkippedCount(0);
+        row.setCreatedAt(LocalDateTime.now());
+        row.setUpdatedAt(LocalDateTime.now());
+        scanBatchMapper.insert(row);
+        return row;
+    }
+
+    private void finishBatch(AccountAuthRiskScanBatch row, int total, int success, int failed, String error) {
+        row.setStatus(failed == 0 ? "succeeded" : success > 0 ? "partial_success" : "failed");
+        row.setFinishedAt(LocalDateTime.now());
+        row.setTotalCount(total);
+        row.setSuccessCount(success);
+        row.setFailureCount(failed);
+        row.setErrorSummary(StringUtils.hasText(error) ? error.substring(0, Math.min(error.length(), 1000)) : null);
+        row.setUpdatedAt(LocalDateTime.now());
+        scanBatchMapper.updateById(row);
     }
 
     private String message(SelfMediaAccount account, HealthIssue issue, BrandContext brandContext) {

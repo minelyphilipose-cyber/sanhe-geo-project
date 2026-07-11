@@ -5,6 +5,12 @@ import { isPartnerRole } from '@/utils/constants'
 import type { UserInfo, RoleType, LoginRequest } from '@/types'
 
 const AUTH_STORAGE_KEY = 'geo_auth_v1'
+const SALES_READ_PERMISSION_FALLBACK = new Set([
+  'workbench.sales.read',
+  'company.read',
+  'project.read',
+])
+const SALES_ROLE_ALIASES = new Set(['sales', 'sale', '销售'])
 
 interface PersistedAuth {
   accessToken: string
@@ -42,6 +48,8 @@ export const useUserStore = defineStore('user', () => {
   const displayName = computed(() => userInfo.value?.displayName ?? '')
   const avatarUrl = computed(() => userInfo.value?.avatarUrl ?? '')
   const permissions = computed(() => userInfo.value?.permissions ?? [])
+  const normalizedRole = computed(() => normalizeRole(role.value))
+  const isSales = computed(() => SALES_ROLE_ALIASES.has(normalizedRole.value))
 
   function persistAuth() {
     const payload: PersistedAuth = {
@@ -129,17 +137,21 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function hasRole(allowed: RoleType[]): boolean {
-    if (!role.value) return false
-    if (role.value === 'super_admin') return true
-    return allowed.includes(role.value)
+    if (!normalizedRole.value) return false
+    if (normalizedRole.value === 'super_admin') return true
+    const allowedRoles = allowed.map((item) => normalizeRole(item))
+    return allowedRoles.includes(normalizedRole.value)
   }
 
   function hasPermission(required: string | string[]): boolean {
     const requiredList = Array.isArray(required) ? required : [required]
     if (requiredList.length === 0) return true
-    if (role.value === 'super_admin') return true
+    if (normalizedRole.value === 'super_admin') return true
     const userPerms = permissions.value
-    return requiredList.some((perm) => userPerms.includes(perm))
+    return requiredList.some((perm) =>
+      userPerms.includes(perm) ||
+      (isSales.value && SALES_READ_PERMISSION_FALLBACK.has(perm)),
+    )
   }
 
   return {
@@ -152,6 +164,8 @@ export const useUserStore = defineStore('user', () => {
     displayName,
     avatarUrl,
     permissions,
+    normalizedRole,
+    isSales,
     profileSynced,
     login,
     refreshAccessToken,
@@ -163,3 +177,7 @@ export const useUserStore = defineStore('user', () => {
     hasPermission,
   }
 })
+
+function normalizeRole(value?: string | null): string {
+  return String(value || '').trim().toLowerCase()
+}

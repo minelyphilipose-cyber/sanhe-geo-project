@@ -66,7 +66,9 @@ class SelfMediaAccountServiceTest {
                 browserEnvironmentAccountMapper,
                 brandAccessService,
                 currentUserService,
-                platformEligibilityService
+                platformEligibilityService,
+                mock(SelfMediaAuthHealthPolicyService.class),
+                new SelfMediaAuthRiskEvaluator()
         );
 
         SysUser operator = new SysUser();
@@ -174,7 +176,9 @@ class SelfMediaAccountServiceTest {
                 mock(BrowserEnvironmentAccountMapper.class),
                 brandAccessService,
                 currentUserService,
-                mock(SelfMediaAccountPlatformEligibilityService.class)
+                mock(SelfMediaAccountPlatformEligibilityService.class),
+                mock(SelfMediaAuthHealthPolicyService.class),
+                new SelfMediaAuthRiskEvaluator()
         );
 
         WechatMpCapabilityVO capability = capabilityService.capability();
@@ -290,6 +294,8 @@ class SelfMediaAccountServiceTest {
                 99L,
                 capturedAt,
                 capturedAt,
+                null,
+                null,
                 null,
                 null,
                 capturedAt

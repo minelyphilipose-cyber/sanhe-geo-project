@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.1.10'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.1.11'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -3175,18 +3175,43 @@ function readPlatformIdentity(platform) {
 function readDouyinIdentity() {
   const accountIds = new Set()
   const accountNames = new Set()
+  const preciseAccountNames = new Set()
   const rawVisibleText = document.body?.innerText || document.body?.textContent || ''
   const identityText = collectStorageAndScriptIdentityText()
-  collectDouyinHomeIdentity(accountIds, accountNames)
+  collectDouyinPreciseHomeIdentity(accountIds, preciseAccountNames)
   collectDouyinAccountIdsFromText(rawVisibleText, accountIds)
-  collectDouyinAccountNamesFromDom(accountNames)
-  collectDouyinAccountNamesFromText(identityText, accountNames)
+  if (preciseAccountNames.size) {
+    for (const name of preciseAccountNames) accountNames.add(name)
+  } else {
+    collectDouyinHomeIdentity(accountIds, accountNames)
+    collectDouyinAccountNamesFromDom(accountNames)
+    collectDouyinAccountNamesFromText(identityText, accountNames)
+  }
   return {
     implemented: true,
     accountIds: Array.from(accountIds),
     accountNames: Array.from(accountNames),
-    diagnostics: `href=${location.href}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
+    diagnostics: `href=${location.href}; nameSource=${preciseAccountNames.size ? 'creator_home_precise' : 'fallback'}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
   }
+}
+
+function collectDouyinPreciseHomeIdentity(accountIds, accountNames) {
+  if (location.hostname !== 'creator.douyin.com') return
+  const selectors = [
+    '[id^="garfish_app_for_douyin_creator_pc_home_"] [class*="header-"] [class*="left-"] [class*="name-"]',
+    '[id^="garfish_app_for_douyin_creator_pc_home_"] [class*="content-"] [class*="name-"]',
+  ]
+  for (const selector of selectors) {
+    for (const el of Array.from(document.querySelectorAll(selector))) {
+      if (!isVisibleElement(el) && !hasVisibleAncestor(el)) continue
+      const name = normalizeAccountName(el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || '')
+      if (isLikelyDouyinAccountName(name)) accountNames.add(name)
+    }
+    if (accountNames.size) break
+  }
+
+  const homeRoot = document.querySelector('[id^="garfish_app_for_douyin_creator_pc_home_"]')
+  if (homeRoot) collectDouyinAccountIdsFromText(homeRoot.innerText || homeRoot.textContent || '', accountIds)
 }
 
 function collectDouyinHomeIdentity(accountIds, accountNames) {
@@ -3297,7 +3322,7 @@ function collectDouyinAccountNamesFromText(text, accountNames) {
 function isLikelyDouyinAccountName(value) {
   const text = normalizeAccountName(value)
   if (text.length < 2 || text.length > 40) return false
-  if (/^(首页|发布|发布视频|发布图文|发布文章|作品管理|合集管理|共创中心|原创保护中心|互动管理|变现中心|创作中心|通知|网址|抖音|登录|更新|设置|删除作品|作品置顶|公开|定时发布|立即发布|暂存离开)$/.test(text)) return false
+  if (/^(首页|发布|发布视频|发布图文|发布文章|作品管理|合集管理|共创中心|原创保护中心|互动管理|变现中心|创作中心|通知|网址|抖音|抖音官网|巨量星图|企业号|直播开放平台|登录|更新|设置|删除作品|作品置顶|公开|定时发布|立即发布|暂存离开)$/.test(text)) return false
   if (/^https?:\/\//i.test(text)) return false
   return /[\u4e00-\u9fa5A-Za-z0-9_-]/.test(text) && !/[，。！？、]/.test(text)
 }
@@ -3323,9 +3348,10 @@ function readBaijiahaoIdentity() {
 }
 
 function collectBaijiahaoPersonalCenterIdentity(accountIds, accountNames) {
+  const hasDocumentExactName = collectBaijiahaoExactAccountName(document, accountNames)
   const root = document.querySelector('#personCenterBaseInfo') || findBaijiahaoAccountInfoRoot()
   if (!root) return
-  const hasExactName = collectBaijiahaoExactAccountName(root, accountNames)
+  const hasExactName = hasDocumentExactName || collectBaijiahaoExactAccountName(root, accountNames)
   if (!hasExactName) {
     collectBaijiahaoPrimaryAccountName(root, accountNames)
     for (const el of Array.from(root.querySelectorAll('[class*="userName"], [class*="UserName"], [class*="accountName"], [class*="AccountName"]'))) {
@@ -3510,7 +3536,8 @@ function isLikelyBaijiahaoAccountName(value) {
   if (/^(首页|图文|视频|动态|直播|合集|图集|AI成片|基础信息|活动投稿|智能创作|创作声明|发布|预览|存草稿|定时发布|取消|确定|登录|账号信息|账号管理|我的认证|内容设置|收益设置|百家号ID|当前账号|账号无|规则中心|问题咨询)$/.test(text)) return false
   if (/百家号ID|账号无|当前账号|去设置|去认证|去关联|去查看|适合各行业|内容分类|账号基础信息|百\+总览/.test(text)) return false
   if (/[：:]/.test(text)) return false
-  if (/\d{6,}/.test(text)) return false
+  // 百家号昵称允许包含较长数字串（例如 yqx2002528）；只有纯数字值才按账号 ID 排除。
+  if (/^\d{6,}$/.test(text)) return false
   if (/^[\w.-]{2,40}$/.test(text)) return true
   return /[\u4e00-\u9fa5]/.test(text) && !/[，。！？、]/.test(text)
 }
@@ -3586,20 +3613,26 @@ function xiaohongshuEntryNavigator() {
 function readToutiaoIdentity() {
   const accountIds = new Set()
   const accountNames = new Set()
+  const preciseAccountNames = new Set()
   const rawVisibleText = document.body?.innerText || document.body?.textContent || ''
   const visibleText = normalizeText(rawVisibleText)
-  collectToutiaoPersonalInfoIdentity(accountIds, accountNames)
+  collectToutiaoPersonalInfoIdentity(accountIds, preciseAccountNames, false)
   collectToutiaoMediaIdsFromText(visibleText, accountIds)
-  collectToutiaoAccountNamesFromText(rawVisibleText, accountNames)
   collectAccountIdsFromText(visibleText, accountIds)
-  collectAccountIdentityFromDom(accountIds, accountNames)
-  collectAccountIdentityFromStorage(accountIds, accountNames)
-  collectAccountIdentityFromScripts(accountIds, accountNames)
+  if (preciseAccountNames.size) {
+    for (const name of preciseAccountNames) accountNames.add(name)
+  } else {
+    collectToutiaoPersonalInfoIdentity(accountIds, accountNames, true)
+    collectToutiaoAccountNamesFromText(rawVisibleText, accountNames)
+    collectAccountIdentityFromDom(accountIds, accountNames)
+    collectAccountIdentityFromStorage(accountIds, accountNames)
+    collectAccountIdentityFromScripts(accountIds, accountNames)
+  }
   return {
     implemented: true,
     accountIds: Array.from(accountIds),
     accountNames: Array.from(accountNames),
-    diagnostics: `href=${location.href}; visibleTextLength=${visibleText.length}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
+    diagnostics: `href=${location.href}; nameSource=${preciseAccountNames.size ? 'profile_detail_precise' : 'fallback'}; visibleTextLength=${visibleText.length}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
   }
 }
 
@@ -3616,8 +3649,20 @@ function collectToutiaoMediaIdsFromText(text, candidates) {
   }
 }
 
-function collectToutiaoPersonalInfoIdentity(accountIds, accountNames) {
+function collectToutiaoPersonalInfoIdentity(accountIds, accountNames, allowTextFallback = true) {
   if (location.hostname !== 'mp.toutiao.com') return
+  const preciseNameSelectors = [
+    '#root .user-detail-block .block-container > .block-item:first-child .content > div:first-child',
+    '#root .user-detail-block .block-container > div:first-child .content > div:first-child',
+  ]
+  for (const selector of preciseNameSelectors) {
+    const el = document.querySelector(selector)
+    const value = normalizeToutiaoAccountName(el?.textContent || el?.getAttribute?.('title') || '')
+    if (isLikelyToutiaoAccountName(value)) {
+      accountNames.add(value)
+      break
+    }
+  }
   const rows = Array.from(document.querySelectorAll('.block-item-wrapper, [class*="block-item"]')).slice(0, 80)
   for (const row of rows) {
     const label = normalizeText(row.querySelector?.('.label, [class*="label"]')?.textContent || '')
@@ -3634,6 +3679,10 @@ function collectToutiaoPersonalInfoIdentity(accountIds, accountNames) {
   }
 
   const text = document.body?.innerText || document.body?.textContent || ''
+  if (!allowTextFallback) {
+    collectAccountIdsFromText(text, accountIds)
+    return
+  }
   const nameMatch = text.match(/用户名\s+([^\s，。！？、]{2,60})/)
   const name = normalizeToutiaoAccountName(nameMatch?.[1] || '')
   if (isLikelyToutiaoAccountName(name)) accountNames.add(name)

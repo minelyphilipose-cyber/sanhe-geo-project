@@ -33,6 +33,11 @@ public class SelfMediaAccount {
     private String qrcodeUrl;
     private LocalDateTime lastAuthCheckedAt;
     private String lastAuthError;
+    private LocalDateTime lastLoginVerifiedAt;
+    private String lastLoginVerificationResult;
+    private String lastLoginVerificationMethod;
+    private String lastLoginVerificationWarning;
+    private LocalDateTime recommendedReverifyAt;
     private String extraJson;
     private Long createdBy;
     private LocalDateTime createdAt;

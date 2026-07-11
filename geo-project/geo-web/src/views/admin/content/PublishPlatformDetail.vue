@@ -71,6 +71,76 @@
           <el-empty v-else description="暂无接入自检信息" :image-size="72" />
         </section>
 
+        <section v-if="authHealthPolicyVisible" class="detail-card wide-card auth-health-card">
+          <div class="card-title auth-health-title">
+            <span>授权健康策略</span>
+            <el-tag size="small" :type="authHealthPolicy?.enabled ? 'success' : 'info'">
+              {{ authHealthPolicy?.enabled ? '监控中' : '未启用' }}
+            </el-tag>
+          </div>
+          <el-alert
+            type="info"
+            show-icon
+            :closable="false"
+            title="以下时间只用于安排账号复验和运营提醒，不会直接判定登录失效，也不会自动停止发布。"
+          />
+          <div v-if="authHealthPolicyLoading" class="self-media-check-loading">正在加载授权健康策略...</div>
+          <el-form v-else-if="authHealthPolicy" class="auth-health-form" label-position="top">
+            <div class="auth-health-group">
+              <div class="auth-health-group-title">风险监控</div>
+              <el-form-item>
+                <template #label><span class="field-label">启用授权风险监控 <el-tooltip content="关闭后不再计算或提醒该平台的时间风险，但仍可人工验证登录状态。"><el-icon><QuestionFilled /></el-icon></el-tooltip></span></template>
+                <el-switch v-model="authHealthPolicy.enabled" />
+              </el-form-item>
+              <el-form-item>
+                <template #label><span class="field-label">建议复验周期 <el-tooltip content="例如设置14天，最近验证成功后第14天建议再次确认登录状态。"><el-icon><QuestionFilled /></el-icon></el-tooltip></span></template>
+                <el-input-number v-model="authHealthPolicy.reverifyIntervalDays" :min="1" :max="365" />
+                <span class="field-unit">天</span>
+                <div class="field-help">最近一次可信验证后，经过该周期建议再次验证。</div>
+              </el-form-item>
+              <el-form-item>
+                <template #label><span class="field-label">临期提醒提前量 <el-tooltip content="在建议复验时间到达前多少天开始显示提醒。"><el-icon><QuestionFilled /></el-icon></el-tooltip></span></template>
+                <el-input-number v-model="authHealthPolicy.warningDays" :min="0" :max="90" />
+                <span class="field-unit">天</span>
+              </el-form-item>
+            </div>
+            <div class="auth-health-group">
+              <div class="auth-health-group-title">时间参考</div>
+              <el-form-item>
+                <template #label><span class="field-label">到期参考方式 <el-tooltip content="决定使用Cookie声明时间、平台参考周期，或只按固定周期复验。"><el-icon><QuestionFilled /></el-icon></el-tooltip></span></template>
+                <el-select v-model="authHealthPolicy.credentialExpiryMode">
+                  <el-option label="声明时间优先，缺失时使用参考周期" value="declared_then_reference" />
+                  <el-option label="仅使用 Cookie 声明时间" value="declared_only" />
+                  <el-option label="仅使用平台参考周期" value="reference_only" />
+                  <el-option label="仅进行周期复验" value="periodic_only" />
+                </el-select>
+              </el-form-item>
+              <el-form-item>
+                <template #label><span class="field-label">登录凭据参考周期 <el-tooltip content="Cookie没有可靠声明时间时，从采集时间开始计算；留空表示不参与计算。"><el-icon><QuestionFilled /></el-icon></el-tooltip></span></template>
+                <el-input-number v-model="authHealthPolicy.credentialReferenceDays" :min="1" :max="730" clearable />
+                <span class="field-unit">天</span>
+                <div class="field-help">空值表示平台固定参考周期不参与计算。</div>
+              </el-form-item>
+            </div>
+            <div class="auth-health-group">
+              <div class="auth-health-group-title">提醒处理</div>
+              <el-form-item label="启用复验提醒">
+                <el-switch v-model="authHealthPolicy.alertEnabled" />
+              </el-form-item>
+              <el-form-item>
+                <template #label><span class="field-label">默认处理角色 <el-tooltip content="账号没有明确负责人时，由该角色接收复验提醒。"><el-icon><QuestionFilled /></el-icon></el-tooltip></span></template>
+                <el-select v-model="authHealthPolicy.defaultRecipientRole" clearable>
+                  <el-option label="交付经理" value="delivery_manager" />
+                  <el-option label="经理" value="manager" />
+                </el-select>
+              </el-form-item>
+            </div>
+            <div class="auth-health-actions">
+              <el-button type="primary" :loading="authHealthPolicySaving" @click="saveAuthHealthPolicy">保存设置</el-button>
+            </div>
+          </el-form>
+        </section>
+
         <section class="detail-card">
           <div class="card-title">站点配置</div>
           <div class="info-list">
@@ -127,12 +197,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, QuestionFilled } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
 import { getDouyinCapability, getWechatMpCapability } from '@/api/content'
 import { getPublishSites, testPublishSite } from '@/api/publishSite'
-import type { DouyinCapability, DouyinReadinessCheck, PublishSite, WechatMpCapability, WechatReadinessCheck } from '@/types'
+import { getSelfMediaAuthHealthPolicy, updateSelfMediaAuthHealthPolicy } from '@/api/selfMediaAuthHealth'
+import type { DouyinCapability, DouyinReadinessCheck, PublishSite, SelfMediaAuthHealthPolicy, WechatMpCapability, WechatReadinessCheck } from '@/types'
 
 interface BoardInfo {
   fid: number
@@ -169,6 +240,9 @@ const selfMediaCapabilityLoading = ref(false)
 const publishSites = ref<PublishSite[]>([])
 const wechatCapability = ref<WechatMpCapability | null>(null)
 const douyinCapability = ref<DouyinCapability | null>(null)
+const authHealthPolicy = ref<SelfMediaAuthHealthPolicy | null>(null)
+const authHealthPolicyLoading = ref(false)
+const authHealthPolicySaving = ref(false)
 const routeCode = computed(() => String(route.params.code || ''))
 
 const staticPlatforms: PlatformDetail[] = [
@@ -209,6 +283,7 @@ const selfMediaReadinessChecks = computed<Array<WechatReadinessCheck | DouyinRea
   return []
 })
 const selfMediaReadinessSummary = computed(() => readinessSummary(selfMediaReadinessChecks.value))
+const authHealthPolicyVisible = computed(() => ['toutiao', 'xiaohongshu', 'zhihu', 'baijiahao', 'douyin'].includes(routeCode.value))
 
 function staticPlatform(code: string, name: string, logoText: string, logoClass: string, categoryName: string): PlatformDetail {
   return {
@@ -306,6 +381,57 @@ async function loadDetail() {
     loading.value = false
   }
   await loadSelfMediaCapability()
+  await loadAuthHealthPolicy()
+}
+
+async function loadAuthHealthPolicy() {
+  if (!authHealthPolicyVisible.value) return
+  authHealthPolicyLoading.value = true
+  try {
+    const { data } = await getSelfMediaAuthHealthPolicy(routeCode.value)
+    authHealthPolicy.value = data.data
+  } catch {
+    authHealthPolicy.value = null
+    ElMessage.error('加载授权健康策略失败')
+  } finally {
+    authHealthPolicyLoading.value = false
+  }
+}
+
+async function saveAuthHealthPolicy() {
+  const policy = authHealthPolicy.value
+  if (!policy) return
+  if (policy.warningDays > policy.reverifyIntervalDays) {
+    ElMessage.warning('临期提醒提前量不能大于建议复验周期')
+    return
+  }
+  try {
+    const { value } = await ElMessageBox.prompt('请简要说明本次策略调整原因', '保存授权健康策略', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputPlaceholder: '例如：根据近期平台登录稳定性调整复验周期',
+      inputValidator: (text) => Boolean(String(text || '').trim()) || '请填写调整原因',
+    })
+    authHealthPolicySaving.value = true
+    const { data } = await updateSelfMediaAuthHealthPolicy(routeCode.value, {
+      enabled: policy.enabled,
+      reverifyIntervalDays: policy.reverifyIntervalDays,
+      warningDays: policy.warningDays,
+      credentialReferenceDays: policy.credentialReferenceDays || null,
+      credentialExpiryMode: policy.credentialExpiryMode,
+      alertEnabled: policy.alertEnabled,
+      defaultRecipientRole: policy.defaultRecipientRole || null,
+      version: policy.version,
+      changeReason: String(value).trim(),
+    })
+    authHealthPolicy.value = data.data
+    ElMessage.success('授权健康策略已保存')
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error instanceof Error ? error.message : '保存授权健康策略失败')
+  } finally {
+    authHealthPolicySaving.value = false
+  }
 }
 
 async function loadSelfMediaCapability() {
@@ -432,6 +558,76 @@ onMounted(loadDetail)
   color: #64748b;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
+}
+
+.auth-health-card {
+  display: grid;
+  gap: 18px;
+}
+
+.auth-health-title,
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auth-health-title {
+  justify-content: space-between;
+}
+
+.field-label .el-icon {
+  color: #94a3b8;
+  cursor: help;
+}
+
+.auth-health-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.auth-health-group {
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.auth-health-group-title {
+  margin-bottom: 14px;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.auth-health-group :deep(.el-select) {
+  width: 100%;
+}
+
+.field-unit {
+  margin-left: 8px;
+  color: #64748b;
+}
+
+.field-help {
+  width: 100%;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.auth-health-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1080px) {
+  .auth-health-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 .platform-logo {

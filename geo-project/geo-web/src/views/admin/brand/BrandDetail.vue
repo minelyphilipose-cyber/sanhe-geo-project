@@ -151,7 +151,7 @@
         </el-table-column>
         <el-table-column prop="priority" label="优先级" width="90" />
         <el-table-column label="更新时间" min-width="170">
-          <template #default="{ row }">{{ row.updatedAt || '-' }}</template>
+          <template #default="{ row }">{{ formatDateTimeSeconds(row.updatedAt) }}</template>
         </el-table-column>
         <el-table-column v-if="canUpdateBrand" label="操作" width="130" fixed="right">
           <template #default="{ row }">
@@ -280,7 +280,8 @@
               </el-tag>
               <span>Session #{{ row.extensionSession.id }}</span>
               <small>
-                v{{ row.extensionSession.extensionVersion || '-' }} · 最近活跃 {{ row.extensionSession.lastSeenAt || row.extensionSession.boundAt || '-' }}
+                v{{ row.extensionSession.extensionVersion || '-' }} · 最近活跃
+                {{ formatDateTimeSeconds(row.extensionSession.lastSeenAt || row.extensionSession.boundAt) }}
               </small>
             </div>
             <div v-else class="extension-session-inline is-empty">
@@ -387,7 +388,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="lastAuthCheckedAt" label="最近检测" min-width="180">
-          <template #default="{ row }">{{ row.lastAuthCheckedAt || '-' }}</template>
+          <template #default="{ row }">{{ formatDateTimeSeconds(row.lastAuthCheckedAt) }}</template>
         </el-table-column>
         <el-table-column label="异常原因" min-width="240">
           <template #default="{ row }">
@@ -509,19 +510,38 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="登录授权" min-width="170">
+        <el-table-column label="时间风险" min-width="250">
           <template #default="{ row }">
-            <el-tag size="small" :type="cookieCredentialRiskTag(row)">
-              {{ cookieCredentialRiskLabel(row) }}
+            <el-tag size="small" :type="authRiskTag(row.authRiskStatus)">
+              {{ authRiskLabel(row.authRiskStatus) }}
             </el-tag>
-            <div v-if="row.cookieCredentialExpiresAt" class="table-subtext">
-              到期：{{ row.cookieCredentialExpiresAt }}
+            <div v-if="row.recommendedReverifyAt" class="table-subtext">
+              建议复验：{{ formatDateTimeSeconds(row.recommendedReverifyAt) }}
+            </div>
+            <div v-if="row.credentialCandidateSuperseded" class="table-subtext">
+              旧凭据时间已由最近验证覆盖
+            </div>
+            <div
+              v-if="authHealthBlocker(row)"
+              class="table-subtext table-warning-text auth-health-blocker"
+              :title="authHealthBlocker(row)"
+            >
+              阻塞：{{ authHealthBlocker(row) }}
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="最近上报" min-width="210">
+        <el-table-column label="最近健康验证" min-width="220">
           <template #default="{ row }">
-            <div>{{ browserEnvironmentLastReportTime(row) }}</div>
+            <div>{{ formatDateTimeSeconds(row.lastLoginVerifiedAt || browserEnvironmentLastReportTime(row)) }}</div>
+            <div v-if="row.lastLoginVerifiedAt" class="table-subtext">
+              {{ loginVerificationMethodLabel(row.lastLoginVerificationMethod) }}
+            </div>
+            <div
+              v-if="row.lastLoginVerificationWarning && row.authRiskStatus !== 'credential_missing'"
+              class="table-subtext table-warning-text"
+            >
+              {{ row.lastLoginVerificationWarning }}
+            </div>
             <div
               v-if="browserEnvironmentLoginStatusReason(row)"
               class="table-subtext"
@@ -540,10 +560,10 @@
             <el-button
               link
               type="primary"
-              :loading="checkingSelfMediaAccountId === row.id"
-              @click="checkSelfMediaAuth(row)"
+              :loading="loginVerificationAccountId === row.id"
+              @click="verifySelfMediaLogin(row)"
             >
-              重新检测
+              验证登录状态
             </el-button>
             <el-button
               v-if="!browserEnvironmentAccountOf(row)"
@@ -673,7 +693,7 @@
               确认主体池
             </el-button>
             <span v-if="subjectPool?.lastConfirmedAt" class="subject-pool-limit-note">
-              最近确认：{{ subjectPool.lastConfirmedAt }}
+              最近确认：{{ formatDateTimeSeconds(subjectPool.lastConfirmedAt) }}
             </span>
           </div>
         </el-form>
@@ -749,7 +769,9 @@
             <template #default="{ row }">{{ subjectPoolMatchSourceLabel(row.matchSource) }}</template>
           </el-table-column>
           <el-table-column label="最近选中" width="180">
-            <template #default="{ row }">{{ row.lastSelectedAt || '从未选中' }}</template>
+            <template #default="{ row }">
+              {{ row.lastSelectedAt ? formatDateTimeSeconds(row.lastSelectedAt) : '从未选中' }}
+            </template>
           </el-table-column>
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
@@ -1398,6 +1420,7 @@ import {
   type LocalHelperExtensionStatus,
 } from '@/api/localHelper'
 import { getPublishSites } from '@/api/publishSite'
+import { createSelfMediaLoginVerification, getSelfMediaLoginVerification } from '@/api/selfMediaAuthHealth'
 import type { Brand, BrandOffering, PublishSite, SelfMediaAccount, SelfMediaAccountPlatformOption, WechatMenuConfig } from '@/types'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
@@ -1405,6 +1428,7 @@ import CityNameSelect from '@/components/ui/CityNameSelect.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { isValidMobile, nullableText } from '@/utils/form'
+import { formatDateTimeSeconds } from '@/utils/format'
 import { specialIndustryCodesFromOptions } from '@/utils/specialIndustry'
 
 const route = useRoute()
@@ -1486,6 +1510,7 @@ const extensionBindCodeLoading = ref(false)
 const extensionEnvironmentOpening = ref(false)
 const loginStatusSyncing = ref(false)
 const checkingSelfMediaAccountId = ref<number | null>(null)
+const loginVerificationAccountId = ref<number | null>(null)
 const environmentBindingVisible = ref(false)
 const environmentBindingSaving = ref(false)
 const environmentBindingTargetAccount = ref<SemiAutoSelfMediaAccount | null>(null)
@@ -2141,7 +2166,7 @@ function browserEnvironmentLoginStatusTagType(account: SelfMediaAccount) {
 
 function browserEnvironmentLastReportTime(account: SelfMediaAccount) {
   const binding = browserEnvironmentAccountOf(account)
-  return binding?.lastVerifiedAt || binding?.lastLoginSeenAt || '-'
+  return binding?.lastVerifiedAt || binding?.lastLoginSeenAt || null
 }
 
 function browserEnvironmentLoginStatusReason(account: SelfMediaAccount) {
@@ -2180,6 +2205,47 @@ function cookieCredentialRiskTag(account: SelfMediaAccount): 'success' | 'warnin
   if (days < 0) return 'danger'
   if (days <= 7) return 'warning'
   return 'success'
+}
+
+function authRiskLabel(status?: string | null) {
+  if (status === 'normal') return '正常'
+  if (status === 'reverify_due_soon') return '即将需要复验'
+  if (status === 'reverify_overdue') return '复验超期'
+  if (status === 'credential_missing') return '待验证登录'
+  if (status === 'monitoring_disabled') return '未启用监控'
+  return '暂无足够信息'
+}
+
+function authRiskTag(status?: string | null): 'success' | 'warning' | 'danger' | 'info' {
+  if (status === 'normal') return 'success'
+  if (status === 'reverify_due_soon' || status === 'reverify_overdue') return 'warning'
+  if (status === 'credential_missing') return 'warning'
+  return 'info'
+}
+
+function authHealthBlocker(account: SelfMediaAccount) {
+  if (account.authRiskStatus !== 'credential_missing') return ''
+  if (account.lastLoginVerificationWarning) return account.lastLoginVerificationWarning
+  const binding = browserEnvironmentAccountOf(account)
+  if (!binding) return '尚未绑定指纹浏览器环境'
+  if (binding.lastErrorCode === 'MULTIPLE_IDENTITIES') {
+    return '读取到多个账号身份，请确认该环境的当前平台只登录一个账号'
+  }
+  if (binding.lastErrorCode === 'IDENTITY_UNREADABLE') {
+    return '未读取到唯一账号名称，请确认平台身份页加载完成后重新同步'
+  }
+  if (binding.loginStatus === 'login_required') return '平台身份页未确认登录，请完成登录后重新同步'
+  if (binding.loginStatus === 'mismatch') return '扩展读取账号与系统账号名称不一致'
+  if (binding.lastErrorMessage) return binding.lastErrorMessage
+  if (binding.lastErrorCode) return binding.lastErrorCode
+  if (binding.loginStatus === 'logged_in') return '已有环境登录记录，但尚未收到符合严格名称校验的健康上报，请重新同步'
+  return '尚未收到可信登录健康上报，请点击“同步登录状态”'
+}
+
+function loginVerificationMethodLabel(method?: string | null) {
+  if (method === 'system_triggered_identity_check') return '来源：主动验证'
+  if (method === 'extension_passive_identity_report') return '来源：扩展可信上报'
+  return '来源：登录健康记录'
 }
 
 function daysUntil(value?: string | null) {
@@ -3011,6 +3077,7 @@ function selfMediaPlatformLoginReportUrl(platform?: string | null, options: {
   environmentKey?: string | null
   browserEnvironmentAccountId?: number | string | null
   selfMediaAccountId?: number | string | null
+  loginVerificationId?: number | string | null
 } = {}) {
   const normalized = normalizeSelfMediaPlatformForLogin(platform)
   let url = ''
@@ -3029,6 +3096,7 @@ function selfMediaPlatformLoginReportUrl(platform?: string | null, options: {
     environmentKey: options.environmentKey,
     browserEnvironmentAccountId: options.browserEnvironmentAccountId,
     selfMediaAccountId: options.selfMediaAccountId,
+    loginVerificationId: options.loginVerificationId,
   })
 }
 
@@ -3037,6 +3105,7 @@ function withLoginReportContext(urlValue: string, options: {
   environmentKey?: string | null
   browserEnvironmentAccountId?: number | string | null
   selfMediaAccountId?: number | string | null
+  loginVerificationId?: number | string | null
 }) {
   const url = new URL(urlValue)
   url.searchParams.set('geoEnvLoginReport', '1')
@@ -3047,6 +3116,9 @@ function withLoginReportContext(urlValue: string, options: {
   }
   if (options.selfMediaAccountId) {
     url.searchParams.set('geoEnvSelfMediaAccountId', String(options.selfMediaAccountId))
+  }
+  if (options.loginVerificationId) {
+    url.searchParams.set('geoEnvLoginVerificationId', String(options.loginVerificationId))
   }
   return url.toString()
 }
@@ -3236,11 +3308,83 @@ async function checkSelfMediaAuth(account: SelfMediaAccount) {
   checkingSelfMediaAccountId.value = account.id
   try {
     await checkSelfMediaAccountAuth(account.id)
-    ElMessage.success('账号授权状态已重新检测')
+    ElMessage.success('账号授权风险已重新计算')
     await loadSelfMediaAccounts()
   } finally {
     checkingSelfMediaAccountId.value = null
   }
+}
+
+async function verifySelfMediaLogin(account: SemiAutoSelfMediaAccount) {
+  const binding = browserEnvironmentAccountOf(account)
+  if (!binding) {
+    ElMessage.warning('请先绑定指纹浏览器环境')
+    return
+  }
+  const environment = browserEnvironments.value.find((item) => item.id === binding.browserEnvironmentId)
+  if (!environment?.environmentKey || !environment.providerProfileId) {
+    ElMessage.warning('绑定的指纹浏览器环境信息不完整，请先维护环境配置')
+    return
+  }
+  loginVerificationAccountId.value = account.id
+  try {
+    const { data } = await createSelfMediaLoginVerification(brandId, account.id)
+    const verification = data.data
+    const url = selfMediaPlatformLoginReportUrl(account.platform, {
+      accountIdentity: account.accountIdentity,
+      environmentKey: environment.environmentKey,
+      browserEnvironmentAccountId: binding.id,
+      selfMediaAccountId: account.id,
+      loginVerificationId: verification.id,
+    })
+    if (!url) {
+      ElMessage.warning('当前平台暂不支持系统登录状态验证')
+      return
+    }
+    await openLocalHelperEnvironment(localHelperClientConfig(), {
+      environmentKey: environment.environmentKey,
+      providerProfileId: environment.providerProfileId,
+      environmentName: environment.name || environment.environmentKey,
+      url,
+    })
+    ElMessage.info('已打开平台身份页，正在验证当前登录账号…')
+    let current = verification
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (!['pending', 'running'].includes(current.status)) break
+      await delay(2000)
+      const response = await getSelfMediaLoginVerification(brandId, account.id, verification.id)
+      current = response.data.data
+    }
+    if (current.status === 'succeeded') {
+      if (current.resultCode === 'SUCCESS_WITH_ID_WARNING') {
+        ElMessage.warning(current.resultMessage || '登录状态正常，但平台账号 ID 与系统记录不同')
+      } else {
+        ElMessage.success('登录状态验证成功')
+      }
+      await Promise.all([loadSelfMediaAccounts(), loadAutomationReadiness({ silent: true })])
+      return
+    }
+    ElMessage.warning(current.resultMessage || loginVerificationFailureMessage(current.resultCode))
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '登录状态验证失败')
+  } finally {
+    loginVerificationAccountId.value = null
+  }
+}
+
+function loginVerificationFailureMessage(code?: string | null) {
+  const messages: Record<string, string> = {
+    ENVIRONMENT_OFFLINE: '请先打开绑定的指纹浏览器环境',
+    ENVIRONMENT_BUSY: '当前环境正在执行发布任务，请稍后重试',
+    LOGIN_REQUIRED: '当前平台尚未完成登录，请登录后重新验证',
+    ACCOUNT_NAME_MISMATCH: '当前登录账号名称与系统记录不一致',
+    IDENTITY_UNREADABLE: '请进入平台账号主页或创作者中心后重新验证',
+    MULTIPLE_IDENTITIES: '读取到多个账号身份，请确认当前环境只登录一个账号',
+    PLATFORM_MISMATCH: '当前页面平台与目标平台不一致',
+    ENVIRONMENT_MISMATCH: '验证结果不是来自账号绑定的指纹浏览器环境',
+    TIMEOUT: '本次验证超时，账号状态未发生变化',
+  }
+  return code ? (messages[code] || '登录状态验证未通过') : '登录状态验证未通过'
 }
 
 async function loadSelfMediaAccountPlatformOptions() {
@@ -3919,6 +4063,17 @@ onMounted(async () => {
 
 .table-error-text {
   color: #ef4444;
+}
+
+.table-warning-text {
+  color: #b45309;
+}
+
+.auth-health-blocker {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .subject-pool-wrap {

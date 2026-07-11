@@ -54,6 +54,8 @@ public class SelfMediaAccountService {
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
     private final SelfMediaAccountPlatformEligibilityService platformEligibilityService;
+    private final SelfMediaAuthHealthPolicyService authHealthPolicyService;
+    private final SelfMediaAuthRiskEvaluator authRiskEvaluator;
 
     public WechatMpCapabilityVO capability() {
         String reason = openPlatformProperties.isDraftDistributionEnabled()
@@ -338,18 +340,46 @@ public class SelfMediaAccountService {
 
     private SelfMediaAccountVO toVoWithCredentialStatus(SelfMediaAccount account) {
         SelfMediaAccountVO vo = SelfMediaAccountVO.from(account);
+        CookieCredentialMeta credential = null;
         if ("COOKIE".equalsIgnoreCase(account.getAuthMode())) {
-            CookieCredentialMeta credential = credentialVaultService.getActiveCredentialMeta(account.getId());
+            credential = credentialVaultService.getActiveCredentialMeta(account.getId());
             if (credential == null) {
                 vo.setCookieCredentialStatus("missing");
             } else {
                 vo.setCookieCredentialStatus("active");
                 vo.setCookieCredentialVersion(credential.version());
                 vo.setCookieCredentialCapturedAt(credential.capturedAt());
+                vo.setCookieCredentialExpiresAt(credential.expiresAt());
+                vo.setCookieCredentialExpirySource(credential.expirySource());
                 applyCookieCredentialIdentity(vo, credential);
             }
         }
+        applyAuthRisk(vo, account, credential);
         return vo;
+    }
+
+    private void applyAuthRisk(SelfMediaAccountVO vo, SelfMediaAccount account, CookieCredentialMeta credential) {
+        var policy = authHealthPolicyService.findPolicy(account.getPlatform());
+        if (policy == null) return;
+        LocalDateTime declaredExpiry = credential != null && Set.of("cookie_expires", "manual")
+                .contains(String.valueOf(credential.expirySource())) ? credential.expiresAt() : null;
+        SelfMediaAuthRiskEvaluator.Evaluation risk = authRiskEvaluator.evaluate(new SelfMediaAuthRiskEvaluator.Input(
+                policy,
+                LocalDateTime.now(),
+                "COOKIE".equalsIgnoreCase(account.getAuthMode()),
+                credential != null,
+                account.getLastLoginVerifiedAt(),
+                credential == null ? null : credential.capturedAt(),
+                declaredExpiry,
+                account.getCreatedAt()
+        ));
+        vo.setAuthRiskStatus(risk.riskStatus());
+        vo.setRecommendedReverifyAt(risk.recommendedReverifyAt());
+        vo.setRecommendedReverifySource(risk.recommendedReverifySource());
+        vo.setAuthRiskWarningStartAt(risk.warningStartAt());
+        vo.setCredentialCandidateSuperseded(risk.credentialCandidateSuperseded());
+        vo.setCookieDeclaredExpiryPassed(risk.cookieDeclaredExpiryPassed());
+        vo.setAuthRiskReasonCodes(risk.riskReasonCodes());
     }
 
     private void applyCookieCredentialIdentity(SelfMediaAccountVO vo, CookieCredentialMeta credential) {

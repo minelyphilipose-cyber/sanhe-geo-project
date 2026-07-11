@@ -1,7 +1,7 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.1.10'
-const EXTENSION_BUILD_REVISION = '20260710.6'
+const EXTENSION_VERSION = '0.1.11'
+const EXTENSION_BUILD_REVISION = '20260711.1'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
 const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/manage/content/all'
 const ZHIHU_MANAGE_URL = 'https://www.zhihu.com/creator/manage/creation/article'
@@ -212,9 +212,9 @@ async function apiRequest(config, path, init = {}, extensionToken) {
 
 function isExtensionUnauthorized(error) {
   const message = String(error?.message || '')
-  return error?.status === 401
-    || error?.code === 70002
-    || message.toLowerCase() === 'unauthorized'
+  return error?.code === 70002
+    || message.includes('extension token invalid')
+    || message.includes('extension token expired')
     || message.includes('扩展后台绑定已失效')
 }
 
@@ -1057,10 +1057,15 @@ async function autoReportLoginStatusFromTab(config, session, tabId, options = {}
     await appendEventLog({ type: 'login_report', ok: false, platform: options.platform || '-', error: '跳过登录上报：缺少 tab 或后台绑定' })
     return null
   }
-  const tab = await chrome.tabs.get(tabId).catch(() => null)
-  const platform = options.platform || inferPlatformFromUrl(tab?.url)
+  const requestedPlatform = normalizePlatform(options.platform)
+  const originalTab = await chrome.tabs.get(tabId).catch(() => null)
+  const platform = requestedPlatform || inferPlatformFromUrl(originalTab?.url)
+  const tab = await resolveLoginReportTab(originalTab, platform)
   if (!platform || !isAllowedLoginReportUrl(platform, tab?.url)) {
-    await appendEventLog({ type: 'login_report', ok: false, platform: platform || '-', error: `跳过登录上报：当前页不允许或无法识别平台，url=${tab?.url || '-'}` })
+    const reason = originalTab
+      ? `当前页不允许登录上报，url=${originalTab.url || '-'}`
+      : `原标签页已关闭，且未找到可用的${platformDisplayName(platform)}身份页`
+    await appendEventLog({ type: 'login_report', ok: false, platform: platform || '-', error: `跳过登录上报：${reason}` })
     return null
   }
 
@@ -1072,21 +1077,25 @@ async function autoReportLoginStatusFromTab(config, session, tabId, options = {}
     return null
   }
   const reportConfig = { ...config, environmentKey }
-  const throttleKey = `${environmentKey}:${platform}:${tabId}`
+  const reportBindingKey = options.environmentAccountId || options.selfMediaAccountId || 'auto'
+  const throttleKey = `${environmentKey}:${platform}:${tab.id}:${reportBindingKey}`
   const now = Date.now()
   if (now - (autoLoginReportAtByKey.get(throttleKey) || 0) < 10_000) return null
   autoLoginReportAtByKey.set(throttleKey, now)
 
-  await ensureContentScript(tabId)
-  await waitForContentScript(tabId, 8, 500)
-  const identity = await readIdentityFromTab(tabId, platform, { requireIdentity: false })
-  if (!identity) {
-    await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: '跳过登录上报：content-script 未返回身份诊断' })
-    return null
+  await ensureContentScript(tab.id)
+  await waitForContentScript(tab.id, 8, 500)
+  const detectedIdentity = await readIdentityFromTab(tab.id, platform, { requireIdentity: false })
+  const identity = detectedIdentity || {
+    accountIds: [],
+    accountNames: [],
+    diagnostics: 'content-script 未返回身份诊断',
+  }
+  if (!detectedIdentity) {
+    await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: 'content-script 未返回身份诊断，正在上报阻塞信息' })
   }
   if (!identityHasCandidates(identity)) {
-    await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: `跳过登录上报：未读取到平台账号身份，${identity.diagnostics || '-'}` })
-    return null
+    await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: `身份读取未通过，正在上报诊断：${identity.diagnostics || '-'}` })
   }
   const status = await reportLoginStatus(reportConfig, session, {
     environmentAccountId: options.environmentAccountId || null,
@@ -1094,9 +1103,19 @@ async function autoReportLoginStatusFromTab(config, session, tabId, options = {}
     selfMediaAccountId: options.selfMediaAccountId || null,
     platform,
     identity,
+    loginVerificationId: options.loginVerificationId || null,
   })
   await appendEventLog({ type: 'login_report', ok: true, platform, environmentKey, status: status?.loginStatus || '-' })
   return status
+}
+
+async function resolveLoginReportTab(originalTab, platform) {
+  if (originalTab?.id && originalTab.url && isAllowedLoginReportUrl(platform, originalTab.url)) {
+    return originalTab
+  }
+  if (!platform) return originalTab || null
+  const tabs = await chrome.tabs.query({}).catch(() => [])
+  return tabs.find((tab) => tab.id && tab.url && isAllowedLoginReportUrl(platform, tab.url)) || null
 }
 
 async function resolveCandidateEnvironmentKeys(config, session, platform) {
@@ -1671,6 +1690,25 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
       const normalizeCompact = (value) => normalizeText(value).replace(/\s+/g, '')
       const isManagePage = location.hostname === 'creator.douyin.com' && location.href.includes('/creator-micro/content/manage')
       const pageText = normalizeText(document.body?.innerText || document.body?.textContent || '')
+      const explicitSuccess = /发布成功|定时发布成功|提交成功/.test(pageText)
+      if (isManagePage && explicitSuccess) {
+        return {
+          verified: true,
+          platformStatus: scheduledAt ? 'scheduled' : 'published',
+          pageStatusCode: scheduledAt ? 'scheduled' : 'submitted',
+          pageStatus: '发布成功',
+          platformScheduledAt: scheduledAt || null,
+          scheduledAtText: scheduledAt || null,
+          platformPublishId: null,
+          platformPublishedUrl: null,
+          coverImageUrl: null,
+          recordLinks: [],
+          title,
+          manageUrl: location.href,
+          matchedText: pageText.slice(0, 180),
+          diagnostics: `attempt=${attempt}; explicit_success`,
+        }
+      }
       if (!isManagePage || !title) {
         return {
           verified: false,
@@ -2488,10 +2526,17 @@ async function reportLoginStatus(config, session, report) {
   const identity = report.identity || {}
   const accountIds = firstArray(identity.accountIds, identity.currentAccountIds)
   const accountNames = firstArray(identity.accountNames, identity.currentAccountNames)
-  assertSingleIdentityCandidate(accountIds, accountNames, identity)
-  const hasIdentity = accountIds.length > 0 || accountNames.length > 0
-  const brandId = session?.brandId || report.brandId || null
-  const environmentAccountId = report.environmentAccountId || config.environmentAccountId || null
+  let identityErrorCode = null
+  let identityErrorMessage = null
+  if (accountIds.length > 1 || accountNames.length > 1) {
+    identityErrorCode = 'MULTIPLE_IDENTITIES'
+    identityErrorMessage = `读取到多个候选平台账号身份；${identity.diagnostics || ''}`
+  }
+  const hasIdentity = !identityErrorCode && (accountIds.length > 0 || accountNames.length > 0)
+  const brandId = session?.brandId || report.brandId || config.brandId || null
+  // 自动登录上报没有任务级绑定上下文时交由品牌+平台+账号名称路由，
+  // 不得回退到扩展配置中的历史绑定 ID，否则环境重绑后会命中旧环境记录。
+  const environmentAccountId = report.environmentAccountId || null
   const selfMediaAccountId = report.selfMediaAccountId || config.selfMediaAccountId || null
   const path = environmentAccountId
     ? `/api/v1/extension/browser-environment-accounts/${environmentAccountId}/login-status`
@@ -2503,9 +2548,10 @@ async function reportLoginStatus(config, session, report) {
     platform: report.platform,
     actualPlatformAccountId: accountIds[0] || null,
     actualAccountName: accountNames[0] || null,
-    loginStatus: hasIdentity ? 'logged_in' : 'login_required',
-    errorCode: hasIdentity ? null : 'IDENTITY_NOT_READ',
-    errorMessage: hasIdentity ? null : (identity.diagnostics || '未读取到平台账号身份'),
+    loginStatus: hasIdentity ? 'logged_in' : identityErrorCode ? 'error' : 'login_required',
+    errorCode: hasIdentity ? null : (identityErrorCode || 'IDENTITY_UNREADABLE'),
+    errorMessage: hasIdentity ? null : (identityErrorMessage || identity.diagnostics || '未读取到平台账号身份'),
+    loginVerificationId: report.loginVerificationId || null,
   }
   if (report.environmentKey) {
     body.environmentKey = report.environmentKey
@@ -2524,15 +2570,6 @@ async function reportLoginStatus(config, session, report) {
     runtimeStage: 'account_detected',
   }).catch(() => null)
   return backendStatus
-}
-
-function assertSingleIdentityCandidate(accountIds, accountNames, identity) {
-  if (accountIds.length > 1) {
-    throw new Error(`读取到多个候选平台账号ID：${accountIds.join(',')}；${identity.diagnostics || ''}`)
-  }
-  if (accountIds.length === 0 && accountNames.length > 1) {
-    throw new Error(`读取到多个候选账号名称：${accountNames.join(',')}；${identity.diagnostics || ''}`)
-  }
 }
 
 function firstArray(...values) {
@@ -4176,6 +4213,7 @@ function loginReportContextFromUrl(urlValue) {
       environmentKey: url.searchParams.get('geoEnvEnvironmentKey') || '',
       environmentAccountId: url.searchParams.get('geoEnvEnvironmentAccountId') || '',
       selfMediaAccountId: url.searchParams.get('geoEnvSelfMediaAccountId') || '',
+      loginVerificationId: url.searchParams.get('geoEnvLoginVerificationId') || '',
     }
   } catch {
     return {}
@@ -4198,6 +4236,7 @@ function triggerAutoLoginReportFromTabComplete(tabId, urlValue) {
         environmentKey: context.environmentKey || undefined,
         environmentAccountId: context.environmentAccountId || undefined,
         selfMediaAccountId: context.selfMediaAccountId || undefined,
+        loginVerificationId: context.loginVerificationId || undefined,
       })
     } catch (error) {
       await appendEventLog({

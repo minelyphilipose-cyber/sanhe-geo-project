@@ -252,7 +252,7 @@
       throw new Error(`小红书关闭定时时间选择器后离开发布设置页；target=${value.full}；${describeXiaohongshuPublishState()}`)
     }
     const button = await waitForCondition(
-      () => findXiaohongshuBottomPublishButton('定时发布') || findXiaohongshuBottomPublishClickPoint('定时发布'),
+      () => findXiaohongshuBottomPublishClickPoint('定时发布') || findXiaohongshuBottomPublishButton('定时发布'),
       15000,
       `小红书定时发布按钮未找到；target=${value.full}；${describeXiaohongshuPublishState()}`,
     )
@@ -282,12 +282,32 @@
       if (requiresTrustedClick(platform)) {
         await requestTrustedClickAt(target, platform, target.label || '小红书定时发布按钮')
       }
+      if (target.source === 'xhs-publish-btn') {
+        const accepted = await waitForXiaohongshuPublishHostAccepted(target.label)
+        if (!accepted) {
+          const retryPoint = findXiaohongshuPublishHostClickPoint(target.label)
+          if (retryPoint) {
+            await requestTrustedClickAt(retryPoint, platform, `${target.label || '发布'}按钮补点`)
+          }
+        }
+      }
     }
+  }
+
+  async function waitForXiaohongshuPublishHostAccepted(label) {
+    const deadline = Date.now() + 2500
+    while (Date.now() < deadline) {
+      const host = findXiaohongshuPublishHost(label)
+      if (!host || currentXiaohongshuStage() === 'publish_success' || !isXiaohongshuPublishSettingsVisible()) return true
+      if (host.getAttribute('submit-loading') === 'true' || host.getAttribute('submit-disabled') === 'true') return true
+      await delay(200)
+    }
+    return false
   }
   
   async function publishXiaohongshuNow(platform, context = {}) {
     const button = await waitForCondition(
-      () => findXiaohongshuBottomPublishButton('发布') || findXiaohongshuBottomPublishClickPoint('发布'),
+      () => findXiaohongshuBottomPublishClickPoint('发布') || findXiaohongshuBottomPublishButton('发布'),
       10000,
       `小红书发布按钮未找到；${describeXiaohongshuPublishState()}`,
     )
@@ -556,6 +576,8 @@
       const scheduleInput = findXiaohongshuScheduleInput()
       if (!scheduleInput || !normalizeText(scheduleInput.value || scheduleInput.textContent || '').includes('-')) return null
     }
+    const hostPoint = findXiaohongshuPublishHostClickPoint(target)
+    if (hostPoint) return hostPoint
     const redPoint = findXiaohongshuBottomRedButtonPoint()
     if (redPoint) return { ...redPoint, label: target }
   
@@ -576,6 +598,29 @@
       clientX: Math.round(window.innerWidth * 0.49),
       clientY: Math.round(window.innerHeight - 46),
       label: target,
+    }
+  }
+
+  function findXiaohongshuPublishHost(label) {
+    const target = normalizeText(label)
+    return Array.from(document.querySelectorAll('xhs-publish-btn'))
+      .filter(isVisibleElement)
+      .filter((host) => normalizeText(host.getAttribute('submit-text') || '') === target)
+      .filter((host) => host.getAttribute('submit-disabled') !== 'true')
+      .filter((host) => host.getAttribute('submit-loading') !== 'true')
+      .sort((left, right) => right.getBoundingClientRect().top - left.getBoundingClientRect().top)[0] || null
+  }
+
+  function findXiaohongshuPublishHostClickPoint(label) {
+    const host = findXiaohongshuPublishHost(label)
+    if (!host) return null
+    const rect = host.getBoundingClientRect()
+    if (rect.width < 80 || rect.height < 24) return null
+    return {
+      clientX: Math.round(rect.right - Math.min(60, rect.width * 0.23)),
+      clientY: Math.round(rect.top + rect.height / 2),
+      label: normalizeText(label),
+      source: 'xhs-publish-btn',
     }
   }
   
@@ -1015,7 +1060,14 @@
         aria: input.getAttribute('aria-label') || '',
       }))
       .slice(-12)
-    return `xhsStage=${currentXiaohongshuStage()}; xhsSettingsVisible=${isXiaohongshuPublishSettingsVisible()}; xhsSettingsMarkers=${settingsMarkers || '-'}; ${scheduleControls}; xhsBottomButtons=${bottomButtons || '-'}; xhsText=${text || '-'}; actions=${actions || '-'}; inputs=${JSON.stringify(inputs).slice(0, 520)}; lastTrustedClick=${describeLastTrustedClick()}`
+    return `xhsStage=${currentXiaohongshuStage()}; xhsSettingsVisible=${isXiaohongshuPublishSettingsVisible()}; xhsSettingsMarkers=${settingsMarkers || '-'}; ${scheduleControls}; xhsPublishHosts=${describeXiaohongshuPublishHosts()}; xhsBottomButtons=${bottomButtons || '-'}; xhsText=${text || '-'}; actions=${actions || '-'}; inputs=${JSON.stringify(inputs).slice(0, 520)}; lastTrustedClick=${describeLastTrustedClick()}`
+  }
+
+  function describeXiaohongshuPublishHosts() {
+    return Array.from(document.querySelectorAll('xhs-publish-btn')).map((host) => {
+      const rect = host.getBoundingClientRect()
+      return `${host.getAttribute('submit-text') || '-'}@${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)}x${Math.round(rect.height)},disabled=${host.getAttribute('submit-disabled') || '-'},loading=${host.getAttribute('submit-loading') || '-'}`
+    }).join('|') || '-'
   }
   
   function describeXiaohongshuBottomButtons() {
@@ -1082,19 +1134,24 @@
   function readIdentity(deps) {
     const accountIds = new Set()
     const accountNames = new Set()
+    const preciseAccountNames = new Set()
     const normalizeText = requireDependency(deps.normalizeText, 'normalizeText')
     const rawVisibleText = document.body?.innerText || document.body?.textContent || ''
     const visibleText = normalizeText(rawVisibleText)
-    collectCreatorHomeIdentity(accountIds, accountNames, deps)
+    collectCreatorHomeIdentity(accountIds, preciseAccountNames, deps)
     collectAccountIdsFromText(rawVisibleText, accountIds)
-    collectAccountNamesFromAccountDom(accountNames, deps)
-    collectAccountNamesFromScripts(accountNames, deps)
-    collectAccountNamesFromStorage(accountNames, deps)
+    if (preciseAccountNames.size) {
+      for (const name of preciseAccountNames) accountNames.add(name)
+    } else {
+      collectAccountNamesFromAccountDom(accountNames, deps)
+      collectAccountNamesFromScripts(accountNames, deps)
+      collectAccountNamesFromStorage(accountNames, deps)
+    }
     return {
       implemented: true,
       accountIds: Array.from(accountIds),
       accountNames: Array.from(accountNames),
-      diagnostics: `href=${location.href}; visibleTextLength=${visibleText.length}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
+      diagnostics: `href=${location.href}; nameSource=${preciseAccountNames.size ? 'creator_home_precise' : 'fallback'}; visibleTextLength=${visibleText.length}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
     }
   }
 

@@ -5,11 +5,36 @@ import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
 @Mapper
 public interface BrowserEnvironmentAccountMapper extends BaseMapper<BrowserEnvironmentAccount> {
+
+    @Select("""
+            SELECT *
+            FROM browser_environment_account
+            WHERE self_media_account_id = #{selfMediaAccountId}
+            ORDER BY (deleted_at IS NULL) DESC, id ASC
+            LIMIT 1
+            """)
+    BrowserEnvironmentAccount selectOldestBySelfMediaAccountIdIncludingDeleted(
+            @Param("selfMediaAccountId") Long selfMediaAccountId);
+
+    @Update("UPDATE browser_environment_account SET deleted_at = NULL WHERE id = #{id}")
+    int restoreDeletedById(@Param("id") Long id);
+
+    @Update("""
+            UPDATE browser_environment_account
+            SET last_error_code = #{errorCode},
+                last_error_message = #{errorMessage}
+            WHERE id = #{id}
+              AND deleted_at IS NULL
+            """)
+    int updateNullableLoginErrors(@Param("id") Long id,
+                                  @Param("errorCode") String errorCode,
+                                  @Param("errorMessage") String errorMessage);
 
     @Select("""
             SELECT bea.*

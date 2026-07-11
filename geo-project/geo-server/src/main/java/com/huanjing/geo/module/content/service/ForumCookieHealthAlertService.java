@@ -4,7 +4,8 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.huanjing.geo.module.content.entity.AccountAuthRiskScanBatch;
+import com.huanjing.geo.module.content.mapper.AccountAuthRiskScanBatchMapper;
 import com.huanjing.geo.module.system.entity.PublishSite;
 import com.huanjing.geo.module.system.mapper.PublishSiteMapper;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
@@ -12,7 +13,6 @@ import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -37,6 +37,7 @@ public class ForumCookieHealthAlertService {
     private final PublishSiteMapper publishSiteMapper;
     private final PlatformCredentialService platformCredentialService;
     private final SystemAlertService systemAlertService;
+    private final AccountAuthRiskScanBatchMapper scanBatchMapper;
 
     @Value("${geo.forum-cookie-health.scan-limit:500}")
     private int scanLimit;
@@ -47,16 +48,16 @@ public class ForumCookieHealthAlertService {
     @Value("${geo.forum-cookie-health.default-cookie-valid-days:30}")
     private int defaultCookieValidDays;
 
-    @Transactional
     public int scanOnce() {
-        List<PublishSite> sites = publishSiteMapper.selectList(new LambdaQueryWrapper<PublishSite>()
-                .eq(PublishSite::getStatus, "active")
-                .in(PublishSite::getIntegrationMethod, FORUM_METHODS)
-                .orderByAsc(PublishSite::getId)
-                .last("LIMIT " + Math.max(scanLimit, 1)));
+        AccountAuthRiskScanBatch batch = startBatch();
+        List<PublishSite> sites = loadSites();
         LocalDateTime now = LocalDateTime.now();
         int changed = 0;
+        int succeeded = 0;
+        int failed = 0;
+        List<String> errors = new ArrayList<>();
         for (PublishSite site : sites) {
+            try {
             List<ForumAccountHealth> accounts = parseAccounts(site);
             List<PendingForumIssue> pendingIssues = new ArrayList<>();
             int checkedForSite = 0;
@@ -82,8 +83,34 @@ public class ForumCookieHealthAlertService {
                 createIssueAlert(site, pendingIssue.accountKey(), pendingIssue.issue());
             }
             changed += checkedForSite;
+            succeeded++;
+            } catch (Exception ex) {
+                failed++;
+                if (errors.size() < 5) errors.add(site.getId() + ":" + ex.getMessage());
+            }
         }
+        if (!sites.isEmpty()) batch.setLastScannedId(sites.get(sites.size() - 1).getId());
+        finishBatch(batch, sites.size(), succeeded, failed, String.join("; ", errors));
         return changed;
+    }
+
+    private List<PublishSite> loadSites() {
+        List<PublishSite> result = new ArrayList<>();
+        long lastId = 0L;
+        int pageSize = Math.max(scanLimit, 1);
+        while (true) {
+            List<PublishSite> page = publishSiteMapper.selectList(new LambdaQueryWrapper<PublishSite>()
+                    .eq(PublishSite::getStatus, "active")
+                    .in(PublishSite::getIntegrationMethod, FORUM_METHODS)
+                    .gt(PublishSite::getId, lastId)
+                    .orderByAsc(PublishSite::getId)
+                    .last("LIMIT " + pageSize));
+            if (page.isEmpty()) break;
+            result.addAll(page);
+            lastId = page.get(page.size() - 1).getId();
+            if (page.size() < pageSize) break;
+        }
+        return result;
     }
 
     private List<ForumAccountHealth> parseAccounts(PublishSite site) {
@@ -158,12 +185,32 @@ public class ForumCookieHealthAlertService {
                 RECIPIENT_ROLE,
                 prefix + issue.code()
         );
-        if ("FORUM_COOKIE_EXPIRED".equals(issue.code())) {
-            publishSiteMapper.update(null, new LambdaUpdateWrapper<PublishSite>()
-                    .eq(PublishSite::getId, site.getId())
-                    .set(PublishSite::getCurrentHealthStatus, "degraded")
-                    .set(PublishSite::getLastFailureAt, LocalDateTime.now()));
-        }
+    }
+
+    private AccountAuthRiskScanBatch startBatch() {
+        AccountAuthRiskScanBatch row = new AccountAuthRiskScanBatch();
+        row.setScanType("forum");
+        row.setStatus("running");
+        row.setStartedAt(LocalDateTime.now());
+        row.setTotalCount(0);
+        row.setSuccessCount(0);
+        row.setFailureCount(0);
+        row.setSkippedCount(0);
+        row.setCreatedAt(LocalDateTime.now());
+        row.setUpdatedAt(LocalDateTime.now());
+        scanBatchMapper.insert(row);
+        return row;
+    }
+
+    private void finishBatch(AccountAuthRiskScanBatch row, int total, int success, int failed, String error) {
+        row.setStatus(failed == 0 ? "succeeded" : success > 0 ? "partial_success" : "failed");
+        row.setFinishedAt(LocalDateTime.now());
+        row.setTotalCount(total);
+        row.setSuccessCount(success);
+        row.setFailureCount(failed);
+        row.setErrorSummary(StringUtils.hasText(error) ? error.substring(0, Math.min(error.length(), 1000)) : null);
+        row.setUpdatedAt(LocalDateTime.now());
+        scanBatchMapper.updateById(row);
     }
 
     private String message(PublishSite site, HealthIssue issue) {

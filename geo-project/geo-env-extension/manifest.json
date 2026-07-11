@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "GEO 自媒体助手",
   "description": "GEO AdsPower environment task filling extension.",
-  "version": "0.1.10",
-  "version_name": "0.1.10-hotfix-20260710.6",
+  "version": "0.1.11",
+  "version_name": "0.1.11-identity-precision-20260711.1",
   "action": {
     "default_popup": "popup.html"
   },

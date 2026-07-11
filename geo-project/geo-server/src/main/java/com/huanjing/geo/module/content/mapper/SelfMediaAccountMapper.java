@@ -38,6 +38,17 @@ public interface SelfMediaAccountMapper extends BaseMapper<SelfMediaAccount> {
     List<SelfMediaAccount> selectExtensionAccountsByBrandIds(@Param("brandIds") List<Long> brandIds,
                                                              @Param("limit") int limit);
 
+    @Update("""
+            UPDATE self_media_account
+            SET last_login_verification_warning = #{warning},
+                recommended_reverify_at = #{recommendedReverifyAt}
+            WHERE id = #{id}
+              AND deleted_at IS NULL
+            """)
+    int updateNullableLoginHealthFields(@Param("id") Long id,
+                                        @Param("warning") String warning,
+                                        @Param("recommendedReverifyAt") LocalDateTime recommendedReverifyAt);
+
     @Select("""
             SELECT id, brand_id, platform, platform_account_id, account_name, account_identity, status, auth_mode,
                    scope_json, refresh_token_cipher, credential_key_version, avatar_url, qrcode_url,

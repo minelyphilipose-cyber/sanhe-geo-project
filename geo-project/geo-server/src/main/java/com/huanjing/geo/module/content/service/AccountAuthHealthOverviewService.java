@@ -62,6 +62,8 @@ public class AccountAuthHealthOverviewService {
     private final PublishSiteMapper publishSiteMapper;
     private final PlatformCredentialService platformCredentialService;
     private final SystemAlertMapper systemAlertMapper;
+    private final SelfMediaAuthHealthPolicyService authHealthPolicyService;
+    private final SelfMediaAuthRiskEvaluator authRiskEvaluator;
 
     @Value("${geo.self-media-account-health.credential-expiring-days:7}")
     private int selfMediaExpiringDays;
@@ -131,7 +133,25 @@ public class AccountAuthHealthOverviewService {
         for (SelfMediaAccount account : accounts) {
             BrandContext brandContext = brandContexts.get(account.getBrandId());
             Expiry expiry = selfMediaExpiry(account, credentialByAccountId.get(account.getId()), contractByPlatform.get(account.getPlatform()));
-            Risk risk = risk(expiry.expiresAt(), expiry.missing(), expiry.unknown(), Math.max(selfMediaExpiringDays, 1), now);
+            Risk risk;
+            if ("COOKIE".equalsIgnoreCase(account.getAuthMode())) {
+                SelfMediaCookieCredential credential = credentialByAccountId.get(account.getId());
+                var policy = authHealthPolicyService.findPolicy(account.getPlatform());
+                LocalDateTime declaredExpiry = credential != null && Set.of("cookie_expires", "manual")
+                        .contains(String.valueOf(credential.getExpirySource())) ? credential.getExpiresAt() : null;
+                var evaluated = authRiskEvaluator.evaluate(new SelfMediaAuthRiskEvaluator.Input(policy, now, true,
+                        credential != null, account.getLastLoginVerifiedAt(), credential == null ? null : credential.getCapturedAt(),
+                        declaredExpiry, account.getCreatedAt()));
+                expiry = new Expiry(evaluated.recommendedReverifyAt(), evaluated.recommendedReverifySource(),
+                        "credential_missing".equals(evaluated.riskStatus()), "unknown".equals(evaluated.riskStatus()));
+                risk = new Risk(evaluated.riskStatus(),
+                        "reverify_overdue".equals(evaluated.riskStatus()) ? "warn"
+                                : "credential_missing".equals(evaluated.riskStatus()) ? "warn" : "info",
+                        evaluated.recommendedReverifyAt() == null ? null
+                                : ChronoUnit.DAYS.between(now.toLocalDate(), evaluated.recommendedReverifyAt().toLocalDate()));
+            } else {
+                risk = risk(expiry.expiresAt(), expiry.missing(), expiry.unknown(), Math.max(selfMediaExpiringDays, 1), now);
+            }
             result.add(new AccountAuthHealthOverviewVO.RiskItem(
                     "self_media",
                     account.getId(),
@@ -295,9 +315,9 @@ public class AccountAuthHealthOverviewService {
         for (AccountAuthHealthOverviewVO.RiskItem item : items) {
             switch (String.valueOf(item.riskStatus())) {
                 case "normal" -> normal++;
-                case "expiring" -> expiring++;
-                case "expired" -> expired++;
-                case "missing" -> missing++;
+                case "expiring", "reverify_due_soon" -> expiring++;
+                case "expired", "reverify_overdue" -> expired++;
+                case "missing", "credential_missing" -> missing++;
                 default -> unknown++;
             }
             if ("high".equals(item.severity()) || "critical".equals(item.severity())) {
@@ -512,6 +532,11 @@ public class AccountAuthHealthOverviewService {
             case "platform_policy" -> "平台策略估算";
             case "manual" -> "手工维护";
             case "default" -> "系统默认";
+            case "last_verification" -> "最近登录验证";
+            case "credential_capture" -> "凭据采集时间";
+            case "credential_reference" -> "平台参考周期";
+            case "cookie_declared_expiry" -> "Cookie 声明时间";
+            case "account_binding" -> "账号绑定时间";
             default -> "未记录来源";
         };
     }
@@ -520,14 +545,26 @@ public class AccountAuthHealthOverviewService {
         if ("missing".equals(status)) {
             return "账号缺少有效 Cookie 凭据，请打开对应浏览器环境完成登录采集。";
         }
+        if ("credential_missing".equals(status)) {
+            return "尚无可信登录健康记录；可同步已登录环境，或在品牌详情中验证登录状态。";
+        }
+        if ("reverify_overdue".equals(status)) {
+            return "已超过建议复验时间，请在品牌详情中验证当前登录状态。";
+        }
+        if ("reverify_due_soon".equals(status)) {
+            return "即将需要复验，可提前在品牌详情中确认当前登录状态。";
+        }
+        if ("monitoring_disabled".equals(status)) {
+            return "该平台未启用授权时间风险监控。";
+        }
         if ("expired".equals(status)) {
-            return "登录授权已过期，请重新登录并等待扩展上报登录态。";
+            return "已超过旧版建议复验时间，请在品牌详情中验证当前登录状态。";
         }
         if ("expiring".equals(status)) {
-            return "建议提前重新登录，避免后续自动发布任务失败。";
+            return "旧版估算显示即将需要复验，可提前确认当前登录状态。";
         }
         if ("unknown".equals(status)) {
-            return "到期时间缺失，请重新采集 Cookie 或补充到期信息。";
+            return "暂时无法计算建议复验时间，请检查平台策略及最近验证记录。";
         }
         return "当前授权可用，来源：" + expirySourceLabel(source) + "。";
     }
@@ -551,8 +588,9 @@ public class AccountAuthHealthOverviewService {
     private int riskRank(String riskStatus) {
         return switch (String.valueOf(riskStatus)) {
             case "expired" -> 0;
-            case "missing" -> 1;
-            case "expiring" -> 2;
+            case "reverify_overdue" -> 0;
+            case "missing", "credential_missing" -> 1;
+            case "expiring", "reverify_due_soon" -> 2;
             case "unknown" -> 3;
             default -> 4;
         };
@@ -580,8 +618,10 @@ public class AccountAuthHealthOverviewService {
         private String actionLabel(String verb) {
             return switch (status) {
                 case "expired" -> "立即" + verb;
+                case "reverify_overdue" -> "立即复验";
                 case "missing" -> "补充凭据";
-                case "expiring" -> "提前" + verb;
+                case "credential_missing" -> "验证登录";
+                case "expiring", "reverify_due_soon" -> "提前复验";
                 case "unknown" -> "补齐到期";
                 default -> "查看详情";
             };
@@ -642,6 +682,8 @@ public class AccountAuthHealthOverviewService {
             case "COOKIE_CREDENTIAL_MISSING" -> "自媒体 Cookie 缺失";
             case "OFFICIAL_CREDENTIAL_EXPIRED" -> "官方授权已过期";
             case "OFFICIAL_CREDENTIAL_EXPIRING" -> "官方授权临近到期";
+            case "ACCOUNT_REVERIFY_OVERDUE" -> "自媒体账号复验超期";
+            case "ACCOUNT_REVERIFY_DUE_SOON" -> "自媒体账号即将需要复验";
             case "FORUM_COOKIE_EXPIRED" -> "论坛 Cookie 已过期";
             case "FORUM_COOKIE_EXPIRING" -> "论坛 Cookie 临近到期";
             case "FORUM_COOKIE_MISSING" -> "论坛 Cookie 缺失";

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentCreateRequest;
+import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountCreateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentLoginStatusRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentUpdateRequest;
 import com.huanjing.geo.module.content.entity.BrowserEnvironment;
@@ -39,6 +40,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 class BrowserEnvironmentServiceTest {
     private BrowserEnvironmentAccountMapper environmentAccountMapper;
@@ -47,6 +49,7 @@ class BrowserEnvironmentServiceTest {
     private LocalAgentSessionMapper localAgentSessionMapper;
     private ExtensionSessionMapper extensionSessionMapper;
     private ExtensionProperties extensionProperties;
+    private SelfMediaLoginVerificationService loginVerificationService;
     private BrowserEnvironmentService service;
 
     @BeforeEach
@@ -59,6 +62,7 @@ class BrowserEnvironmentServiceTest {
         localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
         extensionSessionMapper = mock(ExtensionSessionMapper.class);
         extensionProperties = new ExtensionProperties();
+        loginVerificationService = mock(SelfMediaLoginVerificationService.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
         SysUser operator = new SysUser();
         operator.setId(99L);
@@ -71,7 +75,8 @@ class BrowserEnvironmentServiceTest {
                 extensionSessionMapper,
                 mock(BrandAccessService.class),
                 currentUserService,
-                extensionProperties
+                extensionProperties,
+                loginVerificationService
         );
     }
 
@@ -125,6 +130,27 @@ class BrowserEnvironmentServiceTest {
         assertNull(updated.getExpectedPlatformAccountId());
         assertEquals("jnhbdxh", updated.getExpectedAccountName());
         assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, updated.getLoginStatus());
+    }
+
+    @Test
+    void passiveLoggedInReportIsOfferedToHealthFactRecorder() {
+        BrowserEnvironmentAccount row = binding(null, "三和口腔", BrowserEnvironmentConstants.LOGIN_UNKNOWN);
+        row.setLastErrorCode("MULTIPLE_IDENTITIES");
+        row.setLastErrorMessage("读取到多个账号身份");
+        SelfMediaAccount account = account("三和口腔");
+        when(environmentAccountMapper.selectById(30L)).thenReturn(row);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account);
+
+        BrowserEnvironmentLoginStatusRequest request = new BrowserEnvironmentLoginStatusRequest(
+                "geo_b", 10L, "toutiao", null, "三和口腔",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN, null, null);
+        service.reportLoginStatusForExtension(30L, request, 99L);
+
+        assertNull(row.getLastErrorCode());
+        assertNull(row.getLastErrorMessage());
+        verify(environmentAccountMapper).updateNullableLoginErrors(30L, null, null);
+        verify(loginVerificationService).recordTrustedPassiveHealthReport(row, account, request);
     }
 
     @Test
@@ -637,6 +663,49 @@ class BrowserEnvironmentServiceTest {
         )));
 
         assertTrue(ex.getMessage().contains("AdsPower 浏览器编号或环境代号已被其他启用环境使用"));
+    }
+
+    @Test
+    void createEnvironmentReusesExistingIdentityInsteadOfChangingDatabaseId() {
+        BrowserEnvironment existing = environment();
+        existing.setDeletedAt(LocalDateTime.now().minusMinutes(1));
+        when(environmentMapper.selectOldestByIdentityIncludingDeleted(1L,
+                BrowserEnvironmentConstants.PROVIDER_ADSPOWER, "geo_b", "profile-1"))
+                .thenReturn(existing);
+
+        var response = service.createEnvironment(new BrowserEnvironmentCreateRequest(
+                1L,
+                BrowserEnvironmentConstants.PROVIDER_ADSPOWER,
+                "geo_b",
+                "profile-1",
+                "环境"
+        ));
+
+        assertEquals(20L, response.id());
+        assertNull(existing.getDeletedAt());
+        assertEquals(BrowserEnvironmentConstants.ENV_STATUS_ACTIVE, existing.getStatus());
+        verify(environmentMapper).restoreDeletedById(20L);
+        verify(environmentMapper).updateById(existing);
+        verify(environmentMapper, times(0)).insert(any(BrowserEnvironment.class));
+    }
+
+    @Test
+    void createEnvironmentAccountReusesDeletedBindingInsteadOfChangingDatabaseId() {
+        BrowserEnvironmentAccount existing = binding(null, "旧名称", BrowserEnvironmentConstants.LOGIN_UNKNOWN);
+        existing.setDeletedAt(LocalDateTime.now().minusMinutes(1));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account());
+        when(environmentAccountMapper.selectOldestBySelfMediaAccountIdIncludingDeleted(10L)).thenReturn(existing);
+
+        var response = service.createEnvironmentAccount(new BrowserEnvironmentAccountCreateRequest(
+                20L, 10L, null, "阜阳全屋智能家居"));
+
+        assertEquals(30L, response.id());
+        assertNull(existing.getDeletedAt());
+        assertEquals("阜阳全屋智能家居", existing.getExpectedAccountName());
+        verify(environmentAccountMapper).restoreDeletedById(30L);
+        verify(environmentAccountMapper).updateById(existing);
+        verify(environmentAccountMapper, times(0)).insert(any(BrowserEnvironmentAccount.class));
     }
 
     @Test

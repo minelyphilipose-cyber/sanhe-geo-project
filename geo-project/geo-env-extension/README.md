@@ -25,7 +25,7 @@ powershell -ExecutionPolicy Bypass -File scripts/package-delivery.ps1 -Environme
 在 AdsPower 对应环境里打开扩展管理页，选择“加载已解压的扩展”，目录选择解压后的包目录，例如：
 
 ```text
-D:\code\sanhe-geo-project\geo-project\geo-env-extension\dist\geo-env-extension-prod-v0.1.10
+D:\code\sanhe-geo-project\geo-project\geo-env-extension\dist\geo-env-extension-prod-v0.1.11
 ```
 
 每个用于 PoC 的 AdsPower 环境都需要装一次。生产化时再做批量安装/更新。

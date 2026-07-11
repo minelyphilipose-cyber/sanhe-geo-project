@@ -9,6 +9,17 @@ public record BrowserEnvironmentBrandLoginStatusRequest(
         String actualAccountName,
         @NotBlank String loginStatus,
         String errorCode,
-        String errorMessage
+        String errorMessage,
+        Long loginVerificationId
 ) {
+    public BrowserEnvironmentBrandLoginStatusRequest(Long selfMediaAccountId,
+                                                     String platform,
+                                                     String actualPlatformAccountId,
+                                                     String actualAccountName,
+                                                     String loginStatus,
+                                                     String errorCode,
+                                                     String errorMessage) {
+        this(selfMediaAccountId, platform, actualPlatformAccountId, actualAccountName,
+                loginStatus, errorCode, errorMessage, null);
+    }
 }

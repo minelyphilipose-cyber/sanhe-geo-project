@@ -1505,6 +1505,50 @@ export interface SelfMediaAccount {
   cookieCredentialIdentityStatus?: 'matched' | 'mismatch' | 'unknown' | string | null
   cookieCredentialIdentityName?: string | null
   cookieCredentialIdentityMessage?: string | null
+  lastLoginVerifiedAt?: string | null
+  lastLoginVerificationResult?: string | null
+  lastLoginVerificationMethod?: string | null
+  lastLoginVerificationWarning?: string | null
+  recommendedReverifyAt?: string | null
+  authRiskStatus?: 'normal' | 'reverify_due_soon' | 'reverify_overdue' | 'credential_missing' | 'unknown' | 'monitoring_disabled' | string | null
+  recommendedReverifySource?: string | null
+  authRiskWarningStartAt?: string | null
+  credentialCandidateSuperseded?: boolean | null
+  cookieDeclaredExpiryPassed?: boolean | null
+  authRiskReasonCodes?: string[] | null
+}
+
+export interface SelfMediaAuthHealthPolicy {
+  id: number
+  platformCode: string
+  enabled: boolean
+  reverifyIntervalDays: number
+  warningDays: number
+  credentialReferenceDays?: number | null
+  credentialExpiryMode: 'declared_then_reference' | 'declared_only' | 'reference_only' | 'periodic_only' | string
+  alertEnabled: boolean
+  defaultRecipientRole?: string | null
+  version: number
+  updatedAt?: string | null
+}
+
+export interface SelfMediaLoginVerification {
+  id: number
+  brandId: number
+  selfMediaAccountId: number
+  browserEnvironmentId: number
+  browserEnvironmentAccountId: number
+  platform: string
+  expectedAccountName: string
+  expectedPlatformAccountId?: string | null
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'timeout' | 'cancelled' | string
+  resultCode?: string | null
+  resultMessage?: string | null
+  actualAccountName?: string | null
+  actualPlatformAccountId?: string | null
+  requestedAt: string
+  reportedAt?: string | null
+  expiresAt: string
 }
 
 export interface WechatMenuConfig {

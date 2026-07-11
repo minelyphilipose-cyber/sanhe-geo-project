@@ -38,6 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.text.Normalizer;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +59,7 @@ public class BrowserEnvironmentService {
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
     private final ExtensionProperties extensionProperties;
+    private final SelfMediaLoginVerificationService loginVerificationService;
     private static final Set<String> SEMI_AUTO_PLATFORMS = Set.of("toutiao", "baijiahao", "zhihu", "xiaohongshu");
 
     public List<BrowserEnvironmentVO> listEnvironments(Long brandId) {
@@ -295,11 +298,30 @@ public class BrowserEnvironmentService {
         SysUser operator = currentUserService.requireCurrentUser();
         brandAccessService.requireBrandAccess(request.brandId(), operator.getId(), BrandAccessAction.MANAGE);
         LocalDateTime now = LocalDateTime.now();
+        String provider = normalizeProvider(request.provider());
+        String environmentKey = requireTrimmed(request.environmentKey(), "environmentKey is required");
+        String providerProfileId = requireTrimmed(request.providerProfileId(), "providerProfileId is required");
+        BrowserEnvironment existing = environmentMapper.selectOldestByIdentityIncludingDeleted(
+                request.brandId(), provider, environmentKey, providerProfileId);
+        if (existing != null) {
+            if (existing.getDeletedAt() != null) {
+                environmentMapper.restoreDeletedById(existing.getId());
+            }
+            existing.setEnvironmentKey(environmentKey);
+            existing.setProviderProfileId(providerProfileId);
+            existing.setName(trimToNull(request.name()));
+            existing.setStatus(BrowserEnvironmentConstants.ENV_STATUS_ACTIVE);
+            existing.setDeletedAt(null);
+            existing.setUpdatedBy(operator.getId());
+            existing.setUpdatedAt(now);
+            environmentMapper.updateById(existing);
+            return BrowserEnvironmentVO.from(existing);
+        }
         BrowserEnvironment row = new BrowserEnvironment();
         row.setBrandId(request.brandId());
-        row.setProvider(normalizeProvider(request.provider()));
-        row.setEnvironmentKey(requireTrimmed(request.environmentKey(), "environmentKey is required"));
-        row.setProviderProfileId(requireTrimmed(request.providerProfileId(), "providerProfileId is required"));
+        row.setProvider(provider);
+        row.setEnvironmentKey(environmentKey);
+        row.setProviderProfileId(providerProfileId);
         row.setName(trimToNull(request.name()));
         row.setStatus(BrowserEnvironmentConstants.ENV_STATUS_ACTIVE);
         row.setCreatedBy(operator.getId());
@@ -384,8 +406,16 @@ public class BrowserEnvironmentService {
         }
         brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
         LocalDateTime now = LocalDateTime.now();
-        softDeleteActiveBindingsForAccount(account.getId(), operator.getId(), now);
-        BrowserEnvironmentAccount row = new BrowserEnvironmentAccount();
+        BrowserEnvironmentAccount row = environmentAccountMapper
+                .selectOldestBySelfMediaAccountIdIncludingDeleted(account.getId());
+        if (row == null) {
+            row = new BrowserEnvironmentAccount();
+            row.setCreatedBy(operator.getId());
+            row.setCreatedAt(now);
+        } else if (row.getDeletedAt() != null) {
+            environmentAccountMapper.restoreDeletedById(row.getId());
+        }
+        softDeleteActiveBindingsForAccountExcept(account.getId(), row.getId(), operator.getId(), now);
         row.setBrandId(account.getBrandId());
         row.setBrowserEnvironmentId(environment.getId());
         row.setSelfMediaAccountId(account.getId());
@@ -393,18 +423,32 @@ public class BrowserEnvironmentService {
         row.setExpectedAccountName(trimToNull(request.expectedAccountName()));
         ensureExpectedIdentityNotClaimed(null, account.getBrandId(), account.getPlatform(), row.getExpectedAccountName());
         row.setLoginStatus(BrowserEnvironmentConstants.LOGIN_UNKNOWN);
-        row.setCreatedBy(operator.getId());
         row.setUpdatedBy(operator.getId());
-        row.setCreatedAt(now);
         row.setUpdatedAt(now);
-        environmentAccountMapper.insert(row);
+        row.setDeletedAt(null);
+        if (row.getId() == null) {
+            environmentAccountMapper.insert(row);
+        } else {
+            environmentAccountMapper.updateById(row);
+        }
         return BrowserEnvironmentAccountVO.from(row, environment);
     }
 
     private void softDeleteActiveBindingsForAccount(Long selfMediaAccountId, Long operatorId, LocalDateTime now) {
-        environmentAccountMapper.update(null, new LambdaUpdateWrapper<BrowserEnvironmentAccount>()
+        softDeleteActiveBindingsForAccountExcept(selfMediaAccountId, null, operatorId, now);
+    }
+
+    private void softDeleteActiveBindingsForAccountExcept(Long selfMediaAccountId,
+                                                           Long preservedId,
+                                                           Long operatorId,
+                                                           LocalDateTime now) {
+        LambdaUpdateWrapper<BrowserEnvironmentAccount> update = new LambdaUpdateWrapper<BrowserEnvironmentAccount>()
                 .eq(BrowserEnvironmentAccount::getSelfMediaAccountId, selfMediaAccountId)
-                .isNull(BrowserEnvironmentAccount::getDeletedAt)
+                .isNull(BrowserEnvironmentAccount::getDeletedAt);
+        if (preservedId != null) {
+            update.ne(BrowserEnvironmentAccount::getId, preservedId);
+        }
+        environmentAccountMapper.update(null, update
                 .set(BrowserEnvironmentAccount::getUpdatedBy, operatorId)
                 .set(BrowserEnvironmentAccount::getUpdatedAt, now)
                 .set(BrowserEnvironmentAccount::getDeletedAt, now));
@@ -495,14 +539,14 @@ public class BrowserEnvironmentService {
     @Transactional
     public BrowserEnvironmentAccountVO reportLoginStatus(Long id, BrowserEnvironmentLoginStatusRequest request) {
         SysUser operator = currentUserService.requireCurrentUser();
-        return reportLoginStatusForOperator(id, request, operator.getId());
+        return reportLoginStatusForOperator(id, request, operator.getId(), false);
     }
 
     @Transactional
     public BrowserEnvironmentAccountVO reportLoginStatusForExtension(Long id,
                                                                      BrowserEnvironmentLoginStatusRequest request,
                                                                      Long operatorId) {
-        return reportLoginStatusForOperator(id, request, operatorId);
+        return reportLoginStatusForOperator(id, request, operatorId, true);
     }
 
     @Transactional
@@ -521,7 +565,7 @@ public class BrowserEnvironmentService {
         if (rows.size() > 1) {
             fail("ENVIRONMENT_PLATFORM_BINDING_AMBIGUOUS", "同一环境与平台存在多个账号绑定，请改用环境账号ID上报");
         }
-        return reportLoginStatusForOperator(rows.get(0).getId(), request, operatorId);
+        return reportLoginStatusForOperator(rows.get(0).getId(), request, operatorId, true);
     }
 
     private List<BrowserEnvironmentAccount> selectActiveByEnvironmentKeyAndEquivalentPlatform(String environmentKey,
@@ -569,9 +613,10 @@ public class BrowserEnvironmentService {
                     request.actualAccountName(),
                     request.loginStatus(),
                     request.errorCode(),
-                    request.errorMessage()
+                    request.errorMessage(),
+                    request.loginVerificationId()
             );
-            return reportLoginStatusForOperator(row.getId(), normalizedRequest, operatorId);
+            return reportLoginStatusForOperator(row.getId(), normalizedRequest, operatorId, true);
         }
         BrowserEnvironmentAccount target = resolveBrandPlatformReportTarget(brandId, platform, request);
         if (target == null) {
@@ -586,9 +631,10 @@ public class BrowserEnvironmentService {
                 request.actualAccountName(),
                 request.loginStatus(),
                 request.errorCode(),
-                request.errorMessage()
+                request.errorMessage(),
+                request.loginVerificationId()
         );
-        return reportLoginStatusForOperator(target.getId(), normalizedRequest, operatorId);
+        return reportLoginStatusForOperator(target.getId(), normalizedRequest, operatorId, true);
     }
 
     private BrowserEnvironmentAccount resolveBrandPlatformReportTarget(Long brandId,
@@ -661,7 +707,8 @@ public class BrowserEnvironmentService {
 
     private BrowserEnvironmentAccountVO reportLoginStatusForOperator(Long id,
                                                                      BrowserEnvironmentLoginStatusRequest request,
-                                                                     Long operatorId) {
+                                                                     Long operatorId,
+                                                                     boolean trustedExtensionReport) {
         BrowserEnvironmentAccount row = requireEnvironmentAccount(id);
         brandAccessService.requireBrandAccess(row.getBrandId(), operatorId, BrandAccessAction.OPERATE);
         BrowserEnvironment environment = requireEnvironment(row.getBrowserEnvironmentId());
@@ -681,6 +728,14 @@ public class BrowserEnvironmentService {
         row.setUpdatedBy(operatorId);
         row.setUpdatedAt(now);
         environmentAccountMapper.updateById(row);
+        // updateById 不会持久化 null，需显式清除上一次 MULTIPLE_IDENTITIES 等历史错误。
+        environmentAccountMapper.updateNullableLoginErrors(
+                row.getId(), row.getLastErrorCode(), row.getLastErrorMessage());
+        if (request.loginVerificationId() != null) {
+            loginVerificationService.completeFromLoginReport(request.loginVerificationId(), row, account, request, target);
+        } else if (trustedExtensionReport) {
+            loginVerificationService.recordTrustedPassiveHealthReport(row, account, request);
+        }
         return BrowserEnvironmentAccountVO.from(row, environment);
     }
 
@@ -786,9 +841,13 @@ public class BrowserEnvironmentService {
         if (!StringUtils.hasText(actualName)) {
             fail(BrowserEnvironmentConstants.ERR_IDENTITY_EXPECTATION_MISSING, "登录状态上报缺少平台账号名称");
         }
-        boolean nameMatches = accountNameMatches(row.getPlatform(), row.getExpectedAccountName(), actualName);
+        boolean nameMatches = request.loginVerificationId() != null
+                ? verificationAccountNameMatches(row.getExpectedAccountName(), actualName)
+                : accountNameMatches(row.getPlatform(), row.getExpectedAccountName(), actualName);
         if (!nameMatches) {
-            nameMatches = accountNameMatches(row.getPlatform(), account.getAccountName(), actualName);
+            nameMatches = request.loginVerificationId() != null
+                    ? verificationAccountNameMatches(account.getAccountName(), actualName)
+                    : accountNameMatches(row.getPlatform(), account.getAccountName(), actualName);
         }
         if (nameMatches) {
             return BrowserEnvironmentConstants.LOGIN_LOGGED_IN;
@@ -800,6 +859,20 @@ public class BrowserEnvironmentService {
         String expected = normalizeAccountNameForMatch(platform, expectedAccountName);
         String actual = normalizeAccountNameForMatch(platform, actualAccountName);
         return StringUtils.hasText(expected) && expected.equals(actual);
+    }
+
+    private boolean verificationAccountNameMatches(String expectedAccountName, String actualAccountName) {
+        String expected = normalizeVerificationAccountName(expectedAccountName);
+        String actual = normalizeVerificationAccountName(actualAccountName);
+        return StringUtils.hasText(expected) && expected.equals(actual);
+    }
+
+    private String normalizeVerificationAccountName(String value) {
+        if (!StringUtils.hasText(value)) return null;
+        return Normalizer.normalize(value, Normalizer.Form.NFKC)
+                .trim()
+                .replaceAll("\\s+", " ")
+                .toLowerCase(Locale.ROOT);
     }
 
     private String normalizeAccountNameForMatch(String platform, String value) {

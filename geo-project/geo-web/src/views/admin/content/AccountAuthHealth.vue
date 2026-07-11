@@ -3,13 +3,13 @@
     <div class="admin-page-header">
       <div>
         <div class="admin-page-kicker">账号授权健康</div>
-        <h1 class="admin-page-title">登录到期与凭据风险</h1>
-        <div class="admin-page-subtitle">集中查看自媒体账号授权、论坛 Cookie 风险、聚合告警和未来到期压力。</div>
+        <h1 class="admin-page-title">登录复验与凭据风险</h1>
+        <div class="admin-page-subtitle">时间风险来自凭据采集和最近验证时间，仅用于安排复验，不代表平台授权一定失效。</div>
       </div>
       <div class="page-actions">
         <span v-if="overview?.generatedAt" class="generated-at">更新于 {{ formatDateTime(overview.generatedAt) }}</span>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :icon="RefreshRight" :loading="refreshing" @click="refreshScan">重新检测</el-button>
+        <el-button type="primary" :icon="RefreshRight" :loading="refreshing" @click="refreshScan">重新计算风险</el-button>
       </div>
     </div>
 
@@ -17,14 +17,14 @@
       <template v-if="overview">
         <section class="metric-grid">
           <div class="metric-panel is-danger">
-            <span>已过期</span>
+            <span>复验超期</span>
             <strong>{{ overview.summary.expiredCount }}</strong>
-            <small>需立即处理，避免发布失败</small>
+            <small>建议确认当前登录状态</small>
           </div>
           <div class="metric-panel is-warning">
-            <span>7 天内到期</span>
+            <span>即将需要复验</span>
             <strong>{{ overview.summary.dueInSevenDays }}</strong>
-            <small>建议提前安排重新登录</small>
+            <small>可提前确认登录状态</small>
           </div>
           <div class="metric-panel">
             <span>开放待办</span>
@@ -42,8 +42,8 @@
           <div class="panel trend-panel">
             <div class="panel-head">
               <div>
-                <strong>到期趋势预测</strong>
-                <span>未来 14 天账号与论坛 Cookie 到期分布</span>
+                <strong>建议复验时间分布</strong>
+                <span>未来 14 天账号与论坛凭据复验安排</span>
               </div>
               <el-tag size="small" type="warning">30 天内 {{ overview.summary.dueInThirtyDays }}</el-tag>
             </div>
@@ -103,7 +103,7 @@
           <div class="panel-head">
             <div>
               <strong>待处理清单</strong>
-              <span>按过期、缺失、临期和到期时间排序，优先处理高风险账号。</span>
+              <span>按复验超期、凭据缺失和建议复验时间排序。</span>
             </div>
             <div class="filter-tabs">
               <el-segmented v-model="riskFilter" :options="riskFilterOptions" />
@@ -131,7 +131,7 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="到期时间" min-width="180">
+            <el-table-column label="建议复验时间" min-width="180">
               <template #default="{ row }">
                 <div>{{ row.expiresAt ? formatDateTime(row.expiresAt) : '-' }}</div>
                 <div class="table-subtext">{{ daysText(row.daysUntilExpiry) }}</div>
@@ -178,8 +178,8 @@ const riskFilter = ref('attention')
 
 const riskFilterOptions = [
   { label: '需关注', value: 'attention' },
-  { label: '已过期', value: 'expired' },
-  { label: '临期', value: 'expiring' },
+  { label: '复验超期', value: 'overdue' },
+  { label: '即将复验', value: 'due_soon' },
   { label: '全部', value: 'all' },
 ]
 
@@ -188,6 +188,12 @@ const filteredRiskItems = computed(() => {
   if (riskFilter.value === 'all') return rows
   if (riskFilter.value === 'attention') {
     return rows.filter((item) => item.riskStatus !== 'normal')
+  }
+  if (riskFilter.value === 'overdue') {
+    return rows.filter((item) => item.riskStatus === 'reverify_overdue' || item.riskStatus === 'expired')
+  }
+  if (riskFilter.value === 'due_soon') {
+    return rows.filter((item) => item.riskStatus === 'reverify_due_soon' || item.riskStatus === 'expiring')
   }
   return rows.filter((item) => item.riskStatus === riskFilter.value)
 })
@@ -209,7 +215,7 @@ async function refreshScan() {
   try {
     const { data } = await refreshAccountAuthHealthOverview()
     overview.value = data.data
-    ElMessage.success('账号授权健康已重新检测')
+    ElMessage.success('账号授权时间风险已重新计算')
   } finally {
     refreshing.value = false
   }
@@ -226,17 +232,21 @@ function objectSubtitle(row: AccountAuthHealthRiskItem) {
 }
 
 function riskLabel(status?: string | null) {
-  if (status === 'expired') return '已过期'
+  if (status === 'expired') return '复验超期'
+  if (status === 'reverify_overdue') return '复验超期'
   if (status === 'missing') return '缺少凭据'
-  if (status === 'expiring') return '临近到期'
+  if (status === 'expiring') return '即将复验'
+  if (status === 'reverify_due_soon') return '即将复验'
+  if (status === 'credential_missing') return '待验证登录'
+  if (status === 'monitoring_disabled') return '未启用监控'
   if (status === 'unknown') return '到期未知'
   if (status === 'normal') return '正常'
   return status || '-'
 }
 
 function riskTag(status?: string | null): 'success' | 'warning' | 'danger' | 'info' {
-  if (status === 'expired' || status === 'missing') return 'danger'
-  if (status === 'expiring') return 'warning'
+  if (status === 'expired' || status === 'missing' || status === 'credential_missing') return 'danger'
+  if (status === 'expiring' || status === 'reverify_due_soon' || status === 'reverify_overdue') return 'warning'
   if (status === 'normal') return 'success'
   return 'info'
 }
@@ -255,7 +265,7 @@ function severityClass(severity?: string | null) {
 
 function daysText(days?: number | null) {
   if (days === null || days === undefined) return '未记录到期'
-  if (days < 0) return `已过期 ${Math.abs(days)} 天`
+  if (days < 0) return `复验超期 ${Math.abs(days)} 天`
   if (days === 0) return '今天到期'
   return `还剩 ${days} 天`
 }

@@ -6,6 +6,7 @@ import com.huanjing.geo.module.content.service.SelfMediaAccountService;
 import com.huanjing.geo.module.content.vo.DouyinCapabilityVO;
 import com.huanjing.geo.module.content.wechat.WechatMpAuthorizationService;
 import com.huanjing.geo.module.customer.service.BrandService;
+import com.huanjing.geo.module.partner.service.PartnerFeatureAccessGuard;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -32,7 +33,9 @@ class SelfMediaAccountControllerTest {
                 brandService,
                 platformEligibilityService,
                 wechatAuthorizationService,
-                douyinAuthorizationService
+                douyinAuthorizationService,
+                mock(PartnerFeatureAccessGuard.class),
+                mock(com.huanjing.geo.module.content.service.SelfMediaLoginVerificationService.class)
         );
 
         var response = controller.douyinCapability();
