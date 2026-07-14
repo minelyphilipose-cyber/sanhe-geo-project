@@ -92,7 +92,7 @@ public class BusinessCalendarService {
                 .sorted(Comparator.comparing(PublishSlot::plannedAt))
                 .toList();
         if (count > allSlots.size()) {
-            throw new BizException(ERROR_CODE, "目标月份工作日上午/下午排期容量不足，请扩大允许日期或减少任务数量");
+            throw new BizException(ERROR_CODE, "目标月份每天最多两个排期时段，容量不足，请选择其他月份或减少任务数量");
         }
         return selectEvenlyFromSlots(allSlots, count);
     }

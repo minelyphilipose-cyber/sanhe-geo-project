@@ -16,6 +16,34 @@ import java.util.Set;
 public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPublishSchedule> {
 
     @Select("""
+            SELECT id
+            FROM self_media_account
+            WHERE id = #{selfMediaAccountId}
+            FOR UPDATE
+            """)
+    Long lockSelfMediaAccountForScheduling(@Param("selfMediaAccountId") Long selfMediaAccountId);
+
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE brand_id = #{brandId}
+              AND self_media_account_id = #{selfMediaAccountId}
+              AND planned_publish_at &gt;= #{dayStart}
+              AND planned_publish_at &lt; #{dayEnd}
+              AND status NOT IN
+              <foreach collection="excludedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    long countOccupiedByBrandAccountAndPublishDay(@Param("brandId") Long brandId,
+                                                   @Param("selfMediaAccountId") Long selfMediaAccountId,
+                                                   @Param("dayStart") LocalDateTime dayStart,
+                                                   @Param("dayEnd") LocalDateTime dayEnd,
+                                                   @Param("excludedStatuses") List<String> excludedStatuses);
+
+    @Select("""
             <script>
             SELECT *
             FROM self_media_publish_schedule

@@ -858,6 +858,32 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     @Test
+    void previewForProjectAllowsTwoScheduleSlotsOnSameDayWhenNeeded() {
+        ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
+        request.setTargetMonth("2026-06");
+        request.setSelfMediaAccountIds(List.of(20L));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 2));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
+                .thenReturn(0L);
+        when(businessCalendarService.allPublishSlots(eq(java.time.YearMonth.of(2026, 6)), eq(false)))
+                .thenReturn(List.of(slot(11, 9), slot(11, 15)));
+        when(scheduleAdapterRouter.rules("toutiao", "platform_schedule"))
+                .thenReturn(SelfMediaPlatformScheduleRules.defaults());
+
+        var response = service.previewForProject(7L, request);
+
+        assertEquals(2, response.getAvailableSlotCount());
+        assertEquals(1, response.getSlotGroups().get(0).getRemainingWorkdayCount());
+        assertEquals(true, response.getEnough());
+        assertEquals(0, response.getDeficitCount());
+    }
+
+    @Test
     void previewForProjectUsesQuotaPlatformForQuotaAndPublishPlatformForScheduleOccupation() {
         ProjectSelfMediaAutoScheduleRequest request = new ProjectSelfMediaAutoScheduleRequest();
         request.setTargetMonth("2026-06");

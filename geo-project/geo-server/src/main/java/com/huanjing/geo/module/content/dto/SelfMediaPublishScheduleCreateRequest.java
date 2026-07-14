@@ -35,4 +35,10 @@ public class SelfMediaPublishScheduleCreateRequest {
     private String scheduleStrategy;
 
     private Integer minIntervalMinutes;
+
+    /**
+     * Automatic monthly planning may use a second daily slot when the task count
+     * exceeds the available publish-day count. The daily hard limit remains two.
+     */
+    private Boolean allowSecondDailySchedule;
 }

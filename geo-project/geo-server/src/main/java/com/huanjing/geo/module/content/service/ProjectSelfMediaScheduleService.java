@@ -1403,6 +1403,7 @@ public class ProjectSelfMediaScheduleService {
                 payload.scheduleStrategy(),
                 generated.size()
         );
+        Set<AccountPublishDay> occupiedDays = new LinkedHashSet<>();
         for (int i = 0; i < generated.size(); i++) {
             GeneratedSchedulePlan plan = generated.get(i);
             BusinessCalendarService.PublishSlot slot = slots.get(i);
@@ -1418,6 +1419,9 @@ public class ProjectSelfMediaScheduleService {
             request.setExecutionWindowEnd(slot.plannedAt());
             request.setScheduleStrategy(scheduleStrategy);
             request.setMinIntervalMinutes(3);
+            request.setAllowSecondDailySchedule(!occupiedDays.add(new AccountPublishDay(
+                    plan.plan().selfMediaAccountId(), plannedPublishAt.toLocalDate()
+            )));
             ensureArticleCoverIfRequired(batch.getBrandId(), plan.plan().platform(), plan.articleId());
             try {
                 SelfMediaPublishScheduleCreateResponse created = scheduleService.createSystemSchedules(
@@ -3071,6 +3075,9 @@ public class ProjectSelfMediaScheduleService {
         private AccountPublishPlan(Long accountId, String platform) {
             this(accountId, platform, null);
         }
+    }
+
+    private record AccountPublishDay(Long accountId, LocalDate publishDay) {
     }
 
     private record AccountPublishPlanResult(List<AccountPublishPlan> plans,

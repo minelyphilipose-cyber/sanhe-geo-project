@@ -38,4 +38,21 @@ class BusinessCalendarServiceTest {
                         || slot.plannedAt().toLocalTime().equals(LocalTime.of(15, 0))));
         assertTrue(slots.stream().noneMatch(slot -> "端午节".equals(slot.dayName())));
     }
+
+    @Test
+    void selectEvenlyUsesSecondDailySlotWhenTasksExceedPublishDays() {
+        YearMonth month = YearMonth.of(2026, 6);
+        int publishDayCount = service.publishDays(month, false).size();
+
+        List<BusinessCalendarService.PublishSlot> slots =
+                service.selectEvenly(month, publishDayCount + 1, false);
+
+        assertEquals(publishDayCount + 1, slots.size());
+        assertTrue(slots.stream().collect(java.util.stream.Collectors.groupingBy(
+                        BusinessCalendarService.PublishSlot::date,
+                        java.util.stream.Collectors.counting()
+                )).values().stream().allMatch(count -> count <= 2));
+        assertTrue(slots.stream().map(BusinessCalendarService.PublishSlot::date).distinct().count()
+                < slots.size());
+    }
 }

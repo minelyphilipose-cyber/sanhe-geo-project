@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -68,6 +69,7 @@ public class SelfMediaPublishAutoScheduleService {
     private SelfMediaPublishAutoScheduleResponse createInternal(SelfMediaPublishAutoScheduleRequest request, Long operatorId) {
         SelfMediaPublishAutoScheduleResponse response = operatorId == null ? plan(request, false) : planSystem(request, false);
         response.setCreated(true);
+        LinkedHashSet<AccountPublishDay> occupiedDays = new LinkedHashSet<>();
         for (SelfMediaPublishAutoScheduleItemVO item : response.getPlannedItems()) {
             if (!"planned".equals(item.getStatus())) {
                 continue;
@@ -80,6 +82,9 @@ public class SelfMediaPublishAutoScheduleService {
             createRequest.setWindowEnd(item.getPlannedPublishAt());
             createRequest.setScheduleStrategy(resolveItemStrategy(request.getScheduleStrategy(), item.getPlatform()));
             createRequest.setMinIntervalMinutes(1);
+            createRequest.setAllowSecondDailySchedule(!occupiedDays.add(new AccountPublishDay(
+                    item.getSelfMediaAccountId(), item.getPlannedPublishAt().toLocalDate()
+            )));
             String idempotencyKey = autoIdempotencyKey(request.getBrandId(), item, createRequest.getScheduleStrategy());
             SelfMediaPublishScheduleCreateResponse created = operatorId == null
                     ? scheduleService.createSchedules(createRequest, idempotencyKey)
@@ -366,5 +371,8 @@ public class SelfMediaPublishAutoScheduleService {
     }
 
     private record PairCandidate(Long articleId, Long accountId, String platform) {
+    }
+
+    private record AccountPublishDay(Long accountId, LocalDate publishDay) {
     }
 }

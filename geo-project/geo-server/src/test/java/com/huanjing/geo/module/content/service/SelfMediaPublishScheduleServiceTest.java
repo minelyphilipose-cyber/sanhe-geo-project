@@ -208,6 +208,62 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void createSchedules_rejectsSecondArticleForSameAccountOnSameDay() {
+        prepareValidArticleAndAccount();
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(scheduleMapper.countOccupiedByBrandAccountAndPublishDay(
+                eq(8L), eq(20L), any(LocalDateTime.class), any(LocalDateTime.class), anyList()
+        )).thenReturn(1L);
+        stubRequestInsert();
+
+        SelfMediaPublishScheduleCreateRequest request = validRequest();
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(request, "daily-limit-key");
+
+        assertTrue(response.getCreatedSchedules().isEmpty());
+        assertEquals(1, response.getRejectedItems().size());
+        assertEquals("ACCOUNT_DAILY_SCHEDULE_LIMIT", response.getRejectedItems().get(0).getCode());
+        assertEquals("同一自媒体账号每天只能排期一篇文章，请选择其他日期",
+                response.getRejectedItems().get(0).getMessage());
+        verify(scheduleMapper).lockSelfMediaAccountForScheduling(20L);
+        ArgumentCaptor<LocalDateTime> dayStartCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
+        ArgumentCaptor<LocalDateTime> dayEndCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(scheduleMapper).countOccupiedByBrandAccountAndPublishDay(
+                eq(8L), eq(20L), dayStartCaptor.capture(), dayEndCaptor.capture(),
+                eq(List.of(
+                        SelfMediaPublishScheduleConstants.STATUS_CANCELLED,
+                        SelfMediaPublishScheduleConstants.STATUS_ROUTED_TO_SEMI_AUTO
+                ))
+        );
+        assertEquals(request.getWindowStart().toLocalDate().atStartOfDay(), dayStartCaptor.getValue());
+        assertEquals(dayStartCaptor.getValue().plusDays(1), dayEndCaptor.getValue());
+        verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void createSchedules_allowsSecondDailyArticleForOverflowAutoPlan() {
+        prepareValidArticleAndAccount();
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(scheduleMapper.countOccupiedByBrandAccountAndPublishDay(
+                eq(8L), eq(20L), any(LocalDateTime.class), any(LocalDateTime.class), anyList()
+        )).thenReturn(1L);
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(52L);
+            return 1;
+        });
+        stubRequestInsert();
+        SelfMediaPublishScheduleCreateRequest request = validRequest();
+        request.setAllowSecondDailySchedule(true);
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSystemSchedules(
+                request, "overflow-auto-key", 99L);
+
+        assertEquals(1, response.getCreatedSchedules().size(), response.getRejectedItems().toString());
+        assertTrue(response.getRejectedItems().isEmpty());
+        verify(scheduleMapper).insert(any(SelfMediaPublishSchedule.class));
+    }
+
+    @Test
     void createSchedules_rejectsWhenActiveScheduleAlreadyExists() {
         prepareValidArticleAndAccount();
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
@@ -672,6 +728,32 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    @Test
+    void dispatchPlatformQuickScheduleIgnoresDailyScheduleLimitForManualDistribution() {
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(scheduleMapper.countOccupiedByBrandAccountAndPublishDay(
+                eq(8L), eq(20L), any(LocalDateTime.class), any(LocalDateTime.class), anyList()
+        )).thenReturn(1L);
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of());
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(74L);
+            return 1;
+        });
+
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(
+                quickRequest("toutiao", false), "manual-dispatch-key");
+
+        assertEquals("created", response.getAction());
+        assertEquals("QUICK_DISPATCH_CREATED", response.getCode());
+        verify(scheduleMapper, never()).countOccupiedByBrandAccountAndPublishDay(
+                anyLong(), anyLong(), any(), any(), anyList());
+        verify(scheduleMapper).insert(any(SelfMediaPublishSchedule.class));
+    }
+
     void createPlatformQuickScheduleReplacesPendingScheduleAndCreatesNewOne() {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());

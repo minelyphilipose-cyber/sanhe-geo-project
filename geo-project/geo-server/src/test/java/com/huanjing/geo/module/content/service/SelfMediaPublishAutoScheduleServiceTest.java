@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.DayOfWeek;
+import java.util.stream.LongStream;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -148,6 +149,24 @@ class SelfMediaPublishAutoScheduleServiceTest {
                 .toList();
         assertTrue(strategies.contains(SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE));
         assertTrue(strategies.contains(SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH));
+    }
+
+    @Test
+    void createMarksSecondDailySlotOnlyWhenTasksExceedWorkdays() {
+        when(quotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 0, 40));
+        List<Long> articleIds = LongStream.rangeClosed(1L, 23L).boxed().toList();
+
+        service.create(request(articleIds, List.of(20L)));
+
+        org.mockito.ArgumentCaptor<SelfMediaPublishScheduleCreateRequest> captor =
+                forClass(SelfMediaPublishScheduleCreateRequest.class);
+        verify(scheduleService, atLeastOnce()).createSchedules(captor.capture(), anyString());
+        assertTrue(captor.getAllValues().stream()
+                .anyMatch(item -> Boolean.TRUE.equals(item.getAllowSecondDailySchedule())));
+        assertTrue(captor.getAllValues().stream()
+                .anyMatch(item -> !Boolean.TRUE.equals(item.getAllowSecondDailySchedule())));
     }
 
     @Test
