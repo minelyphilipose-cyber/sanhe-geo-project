@@ -79,6 +79,12 @@ public class ArticlePromptTemplateController {
         return R.ok(templateService.updateWeight(id, req));
     }
 
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        templateService.delete(id);
+        return R.ok();
+    }
+
     @PostMapping("/{id}/versions")
     public R<TemplateDetailVO> createVersion(@PathVariable Long id, @Valid @RequestBody VersionCreateRequest req) {
         return R.ok(templateService.createVersion(id, req));

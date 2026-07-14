@@ -56,6 +56,7 @@ let pendingQueue: Array<{
 }> = []
 const AUTH_STORAGE_KEY = 'geo_auth_v1'
 const SESSION_EXPIRED_MESSAGE = '登录信息已超时，请重新登录'
+const SERVER_ERROR_MESSAGE = '服务器接口异常，请稍后重试'
 
 export interface ApiError<T = unknown> extends Error {
   code?: number
@@ -112,6 +113,12 @@ request.interceptors.response.use(
     const silentError = Boolean(config.silentError)
 
     if (res.code !== 0) {
+      if (res.code >= 500) {
+        if (!silentError) {
+          ElMessage.error(SERVER_ERROR_MESSAGE)
+        }
+        return Promise.reject(buildApiError(SERVER_ERROR_MESSAGE, res.code, res.data, response.status))
+      }
       if (isLocalAgentRequest(reqUrl)) {
         const msg = normalizeLocalAgentErrorMessage(res.message, '本地助手请求失败')
         return Promise.reject(buildApiError(msg, res.code, res.data, response.status))
@@ -225,6 +232,19 @@ request.interceptors.response.use(
     }
 
     const responseData = error.response?.data
+    const responseStatus = error.response?.status
+    if (responseStatus >= 500 && responseStatus < 600) {
+      if (!silentError) {
+        ElMessage.error(SERVER_ERROR_MESSAGE)
+      }
+      const responseCode = responseData && typeof responseData === 'object' && 'code' in responseData
+        ? responseData.code
+        : responseStatus
+      const responsePayload = responseData && typeof responseData === 'object' && 'data' in responseData
+        ? responseData.data
+        : responseData
+      return Promise.reject(buildApiError(SERVER_ERROR_MESSAGE, responseCode, responsePayload, responseStatus))
+    }
     if (responseData && typeof responseData === 'object' && 'code' in responseData) {
       const msg = isLocalAgentRequest(originalRequest?.url)
         ? normalizeLocalAgentErrorMessage(responseData.message || error.message, '本地助手请求失败')

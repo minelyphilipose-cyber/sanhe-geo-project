@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.util.List;
 
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +39,7 @@ class ArticlePromptTemplateServiceTest {
         AuditService auditService = mock(AuditService.class);
         SysUser user = new SysUser();
         user.setId(7L);
+        user.setRole("delivery_manager");
         when(currentUserService.requireCurrentUser()).thenReturn(user);
         TemplatePerspectiveService perspectiveService = mock(TemplatePerspectiveService.class);
         service = new ArticlePromptTemplateService(templateMapper, versionMapper, currentUserService, auditService,
@@ -63,6 +66,20 @@ class ArticlePromptTemplateServiceTest {
         assertEquals("new user", saved.getUserPromptTemplate());
         assertEquals(ArticlePromptTemplateService.VERSION_PUBLISHED, saved.getStatus());
         assertNotNull(saved.getPublishedAt());
+    }
+
+    @Test
+    void deleteClearsCurrentVersionReferenceBeforeDeletingVersions() {
+        ArticlePromptTemplate template = template();
+        template.setStatus(ArticlePromptTemplateService.STATUS_DISABLED);
+        when(templateMapper.selectById(10L)).thenReturn(template);
+
+        service.delete(10L);
+
+        InOrder deletionOrder = inOrder(templateMapper, versionMapper);
+        deletionOrder.verify(templateMapper).clearCurrentVersionId(10L);
+        deletionOrder.verify(versionMapper).delete(any());
+        deletionOrder.verify(templateMapper).deleteById(10L);
     }
 
     private ArticlePromptTemplate template() {

@@ -87,7 +87,7 @@
                 <el-dropdown-menu>
                   <el-dropdown-item command="jobs">批量任务中心</el-dropdown-item>
                   <el-dropdown-item v-if="canViewSelfMediaSchedules" command="schedules">发布排期</el-dropdown-item>
-                  <el-dropdown-item v-if="canManagePromptTemplates" command="templates">文章提示词模板</el-dropdown-item>
+                  <el-dropdown-item v-if="canAccessPromptTemplates" command="templates">文章提示词模板</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePromptTemplates" command="special-compliance">行业专项</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="platforms">发布平台管理</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="schedule-capabilities">排期能力管理</el-dropdown-item>
@@ -629,11 +629,12 @@ const canAiGenerate = computed(() => userStore.hasPermission('content.ai.generat
 const canDistributeOperate = computed(() => userStore.hasPermission('content.distribution.operate'))
 const canPublish = computed(() => userStore.hasPermission('content.publish.operate'))
 const canManagePromptTemplates = computed(() => userStore.hasPermission('content.prompt_template.manage'))
+const canAccessPromptTemplates = computed(() => canManagePromptTemplates.value || userStore.hasRole(['delivery_manager']))
 const canManagePublishPlatforms = computed(() => userStore.hasPermission('user.manage'))
 const canViewBatchPublishJobs = computed(() => userStore.hasPermission('content.read'))
 const canViewSelfMediaSchedules = computed(() => userStore.hasPermission('content.read'))
 const hasToolbarMoreActions = computed(() =>
-  canViewBatchPublishJobs.value || canViewSelfMediaSchedules.value || canManagePromptTemplates.value || canManagePublishPlatforms.value,
+  canViewBatchPublishJobs.value || canViewSelfMediaSchedules.value || canAccessPromptTemplates.value || canManagePublishPlatforms.value,
 )
 const hasToolbarActions = computed(() =>
   canArticleWrite.value

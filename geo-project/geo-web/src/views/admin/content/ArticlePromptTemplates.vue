@@ -11,7 +11,7 @@
           <strong>{{ pagination.total }}</strong>
           <span>模板总数</span>
         </div>
-        <el-button type="primary" :icon="Plus" @click="openCreate">新增模板</el-button>
+        <el-button v-if="canManageTemplates" type="primary" :icon="Plus" @click="openCreate">新增模板</el-button>
       </div>
     </header>
 
@@ -125,7 +125,7 @@
                 <span>{{ contactModeLabel(item.contactDisclosureMode) }}</span>
                 <span>{{ formatDateTime(item.updatedAt) }}</span>
               </div>
-              <div class="weight-row" @click.stop>
+              <div v-if="canManageTemplates" class="weight-row" @click.stop>
                 <div>
                   <span>权重</span>
                   <small>范围 0-100。数字越大，自动生成时分配到的文章数越多；0 表示不参与自动分配</small>
@@ -143,7 +143,8 @@
               </div>
               <div class="card-actions">
                 <el-button v-if="item.sampleOutputUrl" text type="success" @click.stop="openSample(item.sampleOutputUrl)">样文</el-button>
-                <el-button text type="primary" @click.stop="openEdit(item)">编辑</el-button>
+                <el-button v-if="canManageTemplates" text type="primary" @click.stop="openEdit(item)">编辑</el-button>
+                <el-button v-if="canDeleteTemplate(item)" text type="danger" :icon="Delete" @click.stop="confirmDeleteTemplate(item)">删除</el-button>
               </div>
             </article>
           </div>
@@ -365,7 +366,8 @@
       <template #footer>
         <el-button @click="detailVisible = false">关闭</el-button>
         <el-button v-if="templateDetail?.sampleOutputUrl" type="success" plain @click="openSample(templateDetail.sampleOutputUrl)">查看样文</el-button>
-        <el-button v-if="templateDetail" type="primary" @click="openEditFromDetail">编辑</el-button>
+        <el-button v-if="templateDetail && canDeleteTemplate(templateDetail)" type="danger" plain :icon="Delete" @click="confirmDeleteTemplate(templateDetail)">删除</el-button>
+        <el-button v-if="templateDetail && canManageTemplates" type="primary" @click="openEditFromDetail">编辑</el-button>
       </template>
     </el-dialog>
   </div>
@@ -375,10 +377,12 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { Delete, Plus, Search } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
+import { useUserStore } from '@/stores/user'
 import {
   createArticlePromptTemplate,
+  deleteArticlePromptTemplate,
   getArticlePromptTemplate,
   getArticlePromptTemplates,
   getArticlePromptTemplateVariables,
@@ -472,6 +476,7 @@ const templateDetail = ref<ArticlePromptTemplateDetail | null>(null)
 const editingDetail = ref<ArticlePromptTemplateDetail | null>(null)
 const editingId = ref<number | null>(null)
 const route = useRoute()
+const userStore = useUserStore()
 const pagination = reactive({ current: 1, size: 12, total: 0 })
 const filters = reactive({ channelGroupCode: '', channelSubCode: '', questionSceneCode: '', perspectiveCode: '', status: '', keyword: '' })
 const form = reactive<ArticlePromptTemplateSaveRequest>({
@@ -559,6 +564,7 @@ const enabledPerspectiveOptions = computed(() => {
   const enabled = perspectiveOptions.value.filter((item) => item.enabled)
   return enabled.length ? enabled : perspectiveOptions.value
 })
+const canManageTemplates = computed(() => userStore.hasPermission('content.prompt_template.manage'))
 
 function channelGroupLabel(value: string) {
   return channelGroups.find((item) => item.value === value)?.label || value
@@ -910,6 +916,36 @@ function openEditFromDetail() {
   fillFormFromDetail(templateDetail.value)
   detailVisible.value = false
   editorVisible.value = true
+}
+
+function canDeleteTemplate(item: ArticlePromptTemplate) {
+  return item.status === 'disabled' && userStore.hasRole(['delivery_manager'])
+}
+
+async function confirmDeleteTemplate(item: ArticlePromptTemplate) {
+  if (!canDeleteTemplate(item)) {
+    ElMessage.warning('只有停用状态的模板可由交付负责人删除')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确认删除「${item.name}」？删除后该模板及历史版本将不可恢复，已生成文章不会被删除。`, '删除文章模板', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      confirmButtonClass: 'el-button--danger',
+    })
+    await deleteArticlePromptTemplate(item.id)
+    ElMessage.success('模板已删除')
+    if (templateDetail.value?.id === item.id) {
+      templateDetail.value = null
+      detailVisible.value = false
+    }
+    await loadTemplates()
+  } catch (err) {
+    if (err !== 'cancel' && err !== 'close') {
+      console.error(err)
+    }
+  }
 }
 
 async function saveTemplate() {

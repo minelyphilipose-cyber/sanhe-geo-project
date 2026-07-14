@@ -219,7 +219,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'content/article-prompt-templates',
       name: 'ArticlePromptTemplates',
       component: () => import('@/views/admin/content/ArticlePromptTemplates.vue'),
-      meta: { title: '文章提示词模板', hidden: true, permissions: ['content.prompt_template.manage'] },
+      meta: { title: '文章提示词模板', hidden: true, permissions: ['content.prompt_template.manage', 'delivery.assignment.manage'] },
     },
     {
       path: 'content/special-industry-config',

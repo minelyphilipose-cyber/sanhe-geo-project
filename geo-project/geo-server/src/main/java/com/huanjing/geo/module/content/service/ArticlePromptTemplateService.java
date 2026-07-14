@@ -29,7 +29,9 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -45,6 +47,7 @@ public class ArticlePromptTemplateService {
     public static final String CONTACT_SOFT_HINT = "soft_hint";
     public static final String CONTACT_BRAND_ONLY = "brand_only";
     public static final String CONTACT_NONE = "none";
+    private static final Set<String> DELETE_ALLOWED_ROLES = Set.of("delivery_manager", "super_admin");
     public static final Map<String, String> QUESTION_SCENE_LABELS = Map.of(
             "brand", "品牌",
             "decision", "决策",
@@ -205,6 +208,22 @@ public class ArticlePromptTemplateService {
         audit(operator, "article_prompt_template.weight.update", id,
                 Map.of("before", Map.of("weight", before), "after", Map.of("weight", req.weight())));
         return toVO(template);
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        ensureDeleteRole(operator);
+        ArticlePromptTemplate template = requireTemplate(id);
+        if (!STATUS_DISABLED.equals(template.getStatus())) {
+            throw new BizException(400, "请先停用文章模板后再删除");
+        }
+        Map<String, Object> before = snapshot(template);
+        templateMapper.clearCurrentVersionId(id);
+        versionMapper.delete(new LambdaQueryWrapper<ArticlePromptTemplateVersion>()
+                .eq(ArticlePromptTemplateVersion::getTemplateId, id));
+        templateMapper.deleteById(id);
+        audit(operator, "article_prompt_template.delete", id, Map.of("before", before));
     }
 
     public ArticlePromptTemplate requireTemplate(Long id) {
@@ -406,6 +425,15 @@ public class ArticlePromptTemplateService {
         map.put("sampleOutputUrl", template.getSampleOutputUrl());
         map.put("contactDisclosureMode", normalizeContactMode(template.getContactDisclosureMode()));
         return map;
+    }
+
+    private void ensureDeleteRole(SysUser operator) {
+        String role = operator == null || operator.getRole() == null
+                ? ""
+                : operator.getRole().trim().toLowerCase(Locale.ROOT);
+        if (!DELETE_ALLOWED_ROLES.contains(role)) {
+            throw new BizException(403, "No permission: delivery_manager");
+        }
     }
 
     private void audit(SysUser operator, String eventType, Long templateId, Map<String, Object> detail) {
