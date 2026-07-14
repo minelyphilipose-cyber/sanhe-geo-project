@@ -89,6 +89,12 @@ public class SelfMediaPublishScheduleService {
     private static final int DEFAULT_INTERVAL_MINUTES = 30;
     private static final int MAX_ACTIVE_SCHEDULES_PER_BRAND = 10;
     private static final String QUICK_DISPATCH_REQUEST_KEY_PREFIX = "platform-quick-dispatch-";
+    private static final Set<String> QUICK_DISPATCH_CAPACITY_STATUSES = Set.of(
+            SelfMediaPublishScheduleConstants.STATUS_PENDING,
+            SelfMediaPublishScheduleConstants.STATUS_FILLING,
+            SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULING
+    );
     private static final int QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES = 3;
     private static final int QUICK_SCHEDULE_SLOT_LOOKAHEAD_HOURS = 12;
     private static final int QUICK_DISPATCH_MANUAL_START_DELAY_MINUTES = 2;
@@ -2290,7 +2296,7 @@ public class SelfMediaPublishScheduleService {
         } else {
             candidate = now.plusMinutes(resolvePublishCheckDelayMinutes(row));
         }
-        return nextBrandSafeAttemptAt(row.getBrandId(), candidate, row.getId());
+        return nextBrandAttemptAt(row, candidate);
     }
 
     @Transactional
@@ -2407,11 +2413,7 @@ public class SelfMediaPublishScheduleService {
     }
 
     private LocalDateTime nextPublishedUrlCheckAt(SelfMediaPublishSchedule row) {
-        return nextBrandSafeAttemptAt(
-                row.getBrandId(),
-                LocalDateTime.now().plusMinutes(resolvePublishCheckDelayMinutes(row)),
-                row.getId()
-        );
+        return nextBrandAttemptAt(row, LocalDateTime.now().plusMinutes(resolvePublishCheckDelayMinutes(row)));
     }
 
     @Transactional
@@ -3105,7 +3107,7 @@ public class SelfMediaPublishScheduleService {
         if (candidate.isBefore(now)) {
             candidate = now;
         }
-        return nextBrandSafeAttemptAt(row.getBrandId(), candidate, row.getId());
+        return nextBrandAttemptAt(row, candidate);
     }
 
     private int resolvePublishCheckDelayMinutes(SelfMediaPublishSchedule row) {
@@ -3139,7 +3141,7 @@ public class SelfMediaPublishScheduleService {
         int delayMinutes = PUBLISH_CHECK_RETRY_DELAYS_MINUTES[
                 Math.min(retryIndex, PUBLISH_CHECK_RETRY_DELAYS_MINUTES.length - 1)
         ];
-        return nextBrandSafeAttemptAt(row.getBrandId(), LocalDateTime.now().plusMinutes(delayMinutes), row.getId());
+        return nextBrandAttemptAt(row, LocalDateTime.now().plusMinutes(delayMinutes));
     }
 
     private void reconcileAlerts(SelfMediaPublishSchedule row) {
@@ -3157,7 +3159,7 @@ public class SelfMediaPublishScheduleService {
         int delayMinutes = SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES[
                 Math.min(retryIndex, SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES.length - 1)
         ];
-        return nextBrandSafeAttemptAt(row.getBrandId(), LocalDateTime.now().plusMinutes(delayMinutes), row.getId());
+        return nextBrandAttemptAt(row, LocalDateTime.now().plusMinutes(delayMinutes));
     }
 
     private LocalDateTime clampToBusinessAttemptWindow(LocalDateTime candidate) {
@@ -3389,7 +3391,7 @@ public class SelfMediaPublishScheduleService {
         long count = scheduleMapper.countActiveByBrandIdAndRequestKeyPrefix(
                 brandId,
                 QUICK_DISPATCH_REQUEST_KEY_PREFIX,
-                new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
+                new ArrayList<>(QUICK_DISPATCH_CAPACITY_STATUSES)
         );
         return count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count;
     }
@@ -3411,7 +3413,7 @@ public class SelfMediaPublishScheduleService {
                                                                           int activeCount) {
         return rejected(articleId, accountId, platform,
                 "BRAND_SELF_MEDIA_QUEUE_FULL",
-                "当前品牌已有 " + activeCount + " 个自媒体任务正在排队或处理中，最多允许 "
+                "当前品牌已有 " + activeCount + " 个自媒体任务等待打开平台或正在提交，最多允许 "
                         + MAX_ACTIVE_SCHEDULES_PER_BRAND + " 个。请等待部分任务完成后再继续分发。",
                 "内容分发 > 自媒体排期");
     }
@@ -3836,7 +3838,21 @@ public class SelfMediaPublishScheduleService {
     }
 
     private LocalDateTime nextBrandSafeAttemptAt(Long brandId, LocalDateTime candidate, Long excludedScheduleId) {
-        LocalDateTime cursor = clampToBusinessAttemptWindow(candidate);
+        return nextBrandSafeAttemptAt(brandId, candidate, excludedScheduleId, true);
+    }
+
+    private LocalDateTime nextBrandAttemptAt(SelfMediaPublishSchedule row, LocalDateTime candidate) {
+        boolean continuous = isManualQuickDispatchSchedule(row);
+        return nextBrandSafeAttemptAt(row.getBrandId(), candidate, row.getId(), !continuous);
+    }
+
+    private LocalDateTime nextBrandSafeAttemptAt(Long brandId,
+                                                 LocalDateTime candidate,
+                                                 Long excludedScheduleId,
+                                                 boolean respectBusinessWindow) {
+        LocalDateTime cursor = respectBusinessWindow
+                ? clampToBusinessAttemptWindow(candidate)
+                : ceilToMinute(candidate);
         if (brandId == null || cursor == null) {
             return cursor;
         }
@@ -3858,8 +3874,10 @@ public class SelfMediaPublishScheduleService {
             if (distance.compareTo(safetyInterval) >= 0) {
                 continue;
             }
-            LocalDateTime nextCursor = clampToBusinessAttemptWindow(
-                    ceilToMinute(occupied.plus(safetyInterval)));
+            LocalDateTime candidateCursor = ceilToMinute(occupied.plus(safetyInterval));
+            LocalDateTime nextCursor = respectBusinessWindow
+                    ? clampToBusinessAttemptWindow(candidateCursor)
+                    : candidateCursor;
             if (nextCursor != null && nextCursor.isAfter(cursor)) {
                 cursor = nextCursor;
             }

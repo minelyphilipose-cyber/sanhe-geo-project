@@ -724,10 +724,21 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("rejected", response.getAction());
         assertEquals("QUICK_DISPATCH_NOT_CREATED", response.getCode());
         assertEquals("BRAND_SELF_MEDIA_QUEUE_FULL", response.getCreateResponse().getRejectedItems().get(0).getCode());
+        ArgumentCaptor<List> statusesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(scheduleMapper).countActiveByBrandIdAndRequestKeyPrefix(
+                eq(8L),
+                eq("platform-quick-dispatch-"),
+                statusesCaptor.capture()
+        );
+        assertEquals(Set.of(
+                SelfMediaPublishScheduleConstants.STATUS_PENDING,
+                SelfMediaPublishScheduleConstants.STATUS_FILLING,
+                SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
+                SelfMediaPublishScheduleConstants.STATUS_SCHEDULING
+        ), Set.copyOf(statusesCaptor.getValue()));
         verify(scheduleMapper, never()).insert(any());
     }
 
-    @Test
     @Test
     void dispatchPlatformQuickScheduleIgnoresDailyScheduleLimitForManualDistribution() {
         prepareValidArticleAndAccount();
@@ -2386,6 +2397,24 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void markClaimedScheduledQuickDispatchDoesNotDeferPublishCheckToNextBusinessDay() {
+        SelfMediaPublishSchedule scheduling = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
+        scheduling.setId(119L);
+        scheduling.setRequestIdempotencyKey("platform-quick-dispatch-119-toutiao");
+        scheduling.setPlatformScheduledAt(LocalDateTime.now().minusHours(2));
+        when(scheduleMapper.selectById(119L)).thenReturn(scheduling);
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of());
+        LocalDateTime before = LocalDateTime.now();
+
+        SelfMediaPublishScheduleVO response = service.markClaimedScheduled(119L, "platform-schedule-119", "{\"ok\":true}");
+
+        assertEquals(before.toLocalDate(), response.getNextAttemptAt().toLocalDate());
+        assertTrue(!response.getNextAttemptAt().isBefore(before.withSecond(0).withNano(0)));
+        assertTrue(response.getNextAttemptAt().isBefore(before.plusMinutes(2)));
+        verify(businessCalendarService, never()).publishDays(any(), anyBoolean());
+    }
+
+    @Test
     void markClaimedScheduledKeepsArticleDistributingWhenPlatformScheduled() {
         SelfMediaPublishSchedule scheduling = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
         scheduling.setId(102L);
@@ -2574,6 +2603,31 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(nextAttemptAt, response.getNextAttemptAt());
         assertEquals("EDITOR_NOT_FOUND", response.getFailureCode());
         verify(environmentLockService).release(98L);
+    }
+
+    @Test
+    void quickDispatchExecutionRetryDoesNotWaitForNextBusinessDay() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        row.setId(120L);
+        row.setRequestIdempotencyKey("platform-quick-dispatch-120-xiaohongshu");
+        row.setAttemptCount(1);
+        row.setMaxAttempts(3);
+        when(scheduleMapper.selectById(120L)).thenReturn(row);
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of());
+        LocalDateTime before = LocalDateTime.now();
+
+        SelfMediaPublishScheduleVO response = service.markLocalAgentExecutionFailed(
+                120L,
+                "LOCAL_AGENT_HEARTBEAT_TIMEOUT",
+                "temporary timeout",
+                null
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PENDING, response.getStatus());
+        assertEquals(before.toLocalDate(), response.getNextAttemptAt().toLocalDate());
+        assertTrue(response.getNextAttemptAt().isAfter(before.plusMinutes(2)));
+        assertTrue(response.getNextAttemptAt().isBefore(before.plusMinutes(5)));
+        verify(businessCalendarService, never()).publishDays(any(), anyBoolean());
     }
 
     @Test
