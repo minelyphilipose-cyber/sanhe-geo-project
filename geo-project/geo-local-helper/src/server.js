@@ -6,7 +6,12 @@ import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import crypto from 'node:crypto'
 import { stringifyBoundedDiagnostics } from './diagnostics-json.js'
-import { evaluateBaijiahaoPublishSignals, evaluateXiaohongshuPublishSignals } from './publish-check.js'
+import { describeUploadPageCandidates, selectUploadTargetPage } from './browser-target.js'
+import {
+  evaluateBaijiahaoPublishSignals,
+  evaluateDouyinPublishSignals,
+  evaluateXiaohongshuPublishSignals,
+} from './publish-check.js'
 
 const CONFIG_PATH = new URL('../config.local.json', import.meta.url)
 const EXAMPLE_CONFIG_PATH = new URL('../config.example.json', import.meta.url)
@@ -23,6 +28,7 @@ const TEMP_FILES_DIR = new URL('temp-files/', RUNTIME_DIR)
 const tasksById = new Map()
 const extensionBindIntentsByHash = new Map()
 const CLAIM_TIMEOUT_MS = 30_000
+const EXTENSION_CLAIM_TIMEOUT_MS = 90_000
 const CLAIM_BACKEND_HEARTBEAT_MAX_MS = 3 * 60_000
 const CLAIMABLE_STATUSES = new Set(['pending', 'requeued'])
 const SIGNATURE_MAX_SKEW_SECONDS = 300
@@ -75,6 +81,7 @@ let lastScheduleHeartbeatStatus = null
 let cachedSelfMediaSchedulePlatforms = null
 let cachedSelfMediaSchedulePlatformsAt = 0
 let lastSelfMediaSchedulePlatformsError = null
+let schedulePlatformCursor = 0
 let machineIdCache = null
 let localAgentRuntimeStatusInFlight = false
 let lastLocalAgentRuntimeStatus = null
@@ -432,7 +439,19 @@ async function getMachineId() {
 }
 
 function activeRuntimeTaskCount() {
-  return listTasks().filter((task) => !isTerminalStatus(task.status)).length
+  return listTasks().filter((task) => task.status === 'claimed').length
+}
+
+function occupiedScheduleClaimSlotCount() {
+  return listTasks().filter((task) => (
+    scheduleIdOfTask(task)
+    && (task.status === 'pending' || task.status === 'claimed')
+  )).length
+}
+
+function hasAvailableScheduleClaimSlot(config) {
+  const capacity = Math.max(1, Number(config.localAgentCapacity || 1) || 1)
+  return occupiedScheduleClaimSlotCount() < capacity
 }
 
 async function probeAdspowerApi(config) {
@@ -2074,8 +2093,8 @@ async function evaluateToutiaoPublishResult(page, schedule) {
       })
       matchedUrl = anchor?.href || ''
     }
-    const pendingScheduled = hasTitle && hasLocation && (isBeforeScheduledAt || (hasScheduledSignal && !hasPublishedSignal))
-    const found = hasTitle && hasLocation && !isBeforeScheduledAt && hasPublishedSignal
+    const pendingScheduled = hasTitle && hasLocation && !hasPublishedSignal && (isBeforeScheduledAt || hasScheduledSignal)
+    const found = hasTitle && hasLocation && hasPublishedSignal
     return {
       found,
       pendingScheduled,
@@ -2172,10 +2191,25 @@ async function evaluateXiaohongshuPublishResult(page, schedule) {
   }
   const pageState = await page.evaluate(() => {
     const text = document.body?.innerText || ''
+    const xiaohongshuCards = Array.from(document.querySelectorAll('.note-card')).map((card) => {
+      let impression = null
+      try {
+        impression = JSON.parse(card.getAttribute('data-impression') || 'null')
+      } catch (_) {
+        impression = null
+      }
+      return {
+        title: card.querySelector('.note-card__title')?.textContent || '',
+        publishedAt: card.querySelector('.note-card__time')?.textContent || '',
+        noteId: impression?.noteTarget?.value?.noteId || '',
+        text: card.innerText || card.textContent || '',
+      }
+    })
     return {
       text,
       url: location.href,
       pageTitle: document.title,
+      xiaohongshuCards,
       anchors: Array.from(document.querySelectorAll('a[href]'))
         .map((item) => ({ text: item.textContent || '', href: item.href || '' }))
         .slice(0, 80),
@@ -2183,9 +2217,11 @@ async function evaluateXiaohongshuPublishResult(page, schedule) {
   })
   const result = evaluateXiaohongshuPublishSignals(target, pageState)
   if (result.found && !result.platformPublishedUrl) {
-    const detailUrl = await openXiaohongshuPublishedNoteDetail(page, schedule).catch((error) => {
+    const detailUrl = await openXiaohongshuPublishedNoteDetail(page, schedule, result.platformPublishId).catch((error) => {
       result.detailOpenError = error instanceof Error ? error.message : String(error)
-      return ''
+      return result.platformPublishId
+        ? `https://www.xiaohongshu.com/explore/${encodeURIComponent(result.platformPublishId)}`
+        : ''
     })
     if (detailUrl) {
       result.platformPublishedUrl = detailUrl
@@ -2195,7 +2231,7 @@ async function evaluateXiaohongshuPublishResult(page, schedule) {
   return result
 }
 
-async function openXiaohongshuPublishedNoteDetail(page, schedule) {
+async function openXiaohongshuPublishedNoteDetail(page, schedule, expectedNoteId = '') {
   const title = schedule?.publishCheckTitle || ''
   const browser = page.browser()
   const beforeTargets = new Set(browser.targets().map((target) => target._targetId || target.url()))
@@ -2205,24 +2241,29 @@ async function openXiaohongshuPublishedNoteDetail(page, schedule) {
     const title = normalizeTitle(input.title)
     const titleProbe = title.length > 18 ? title.slice(0, 18) : title
     if (!titleProbe) return { clickReady: false, reason: 'missing title' }
-    const cards = Array.from(document.querySelectorAll('.note-card, [class*="note-card"], section, article, li, div'))
+    const cards = Array.from(document.querySelectorAll('.note-card'))
       .map((el) => {
         const rect = el.getBoundingClientRect()
         const text = normalizeTitle(el.innerText || el.textContent || '')
-        const hasMedia = Boolean(el.querySelector('a[href*="/explore/"], img, [style*="background-image"], .media, [class*="media"]'))
-        const noteClass = String(el.className || '').includes('note-card') ? 1 : 0
-        return { el, rect, text, hasMedia, noteClass }
+        let noteId = ''
+        try {
+          noteId = JSON.parse(el.getAttribute('data-impression') || 'null')?.noteTarget?.value?.noteId || ''
+        } catch (_) {
+          noteId = ''
+        }
+        const titleText = normalizeTitle(el.querySelector('.note-card__title')?.textContent || '')
+        return { el, rect, text, titleText, noteId }
       })
-      .filter((item) => item.text.includes(titleProbe)
-        && item.rect.width >= 180
-        && item.rect.height >= 120
+      .filter((item) => (input.expectedNoteId && item.noteId === input.expectedNoteId)
+        || item.titleText.includes(titleProbe)
+        || titleProbe.includes(item.titleText)
+        || item.text.includes(titleProbe))
+      .filter((item) => item.titleText || item.noteId)
+      .filter((item) => item.rect.width > 0 && item.rect.height > 0)
+      .filter((item) => item.rect.width >= 180
         && item.rect.width <= 1200
         && item.rect.height <= 800)
-      .sort((left, right) => {
-        return right.noteClass - left.noteClass
-          || Number(right.hasMedia) - Number(left.hasMedia)
-          || left.rect.top - right.rect.top
-      })
+      .sort((left, right) => Number(right.noteId === input.expectedNoteId) - Number(left.noteId === input.expectedNoteId))
     const card = cards[0]?.el
     if (!card) {
       return {
@@ -2239,7 +2280,7 @@ async function openXiaohongshuPublishedNoteDetail(page, schedule) {
         reason: 'direct link found',
       }
     }
-    const target = card.querySelector('a[href*="/explore/"], img, [style*="background-image"], .media, [class*="media"]') || card
+    const target = card.querySelector('.note-card__cover, .note-card__title') || card
     target.scrollIntoView({ block: 'center', inline: 'center' })
     const rect = target.getBoundingClientRect()
     return {
@@ -2248,8 +2289,9 @@ async function openXiaohongshuPublishedNoteDetail(page, schedule) {
       clientX: Math.round(rect.left + Math.min(Math.max(rect.width / 2, 12), Math.max(rect.width - 12, 12))),
       clientY: Math.round(rect.top + Math.min(Math.max(rect.height / 2, 12), Math.max(rect.height - 12, 12))),
       targetText: normalize(target.innerText || target.textContent || '').slice(0, 120),
+      noteId: cards[0]?.noteId || '',
     }
-  }, { title })
+  }, { title, expectedNoteId })
   if (!clickTarget?.clickReady) {
     throw new Error(`xiaohongshu note card click failed: ${clickTarget?.reason || 'unknown'}`)
   }
@@ -2259,15 +2301,17 @@ async function openXiaohongshuPublishedNoteDetail(page, schedule) {
   if (!Number.isFinite(clickTarget.clientX) || !Number.isFinite(clickTarget.clientY)) {
     throw new Error(`xiaohongshu note card click point invalid: ${JSON.stringify(clickTarget).slice(0, 500)}`)
   }
+  const noteId = clickTarget.noteId || expectedNoteId
   await page.mouse.click(clickTarget.clientX, clickTarget.clientY, { delay: 30 })
-  const target = await browser.waitForTarget((item) => {
-    const url = item.url()
-    if (!/xiaohongshu\.com\/(explore|discovery\/item)\//.test(url)) return false
-    const key = item._targetId || url
-    return !beforeTargets.has(key)
-  }, { timeout: 12_000 }).catch(() => null)
-  const detailPage = target ? await target.page().catch(() => null) : await newestXiaohongshuExplorePage(browser, beforeTargets)
+  const deadline = Date.now() + 12_000
+  let detailPage = null
+  while (Date.now() < deadline && !detailPage) {
+    detailPage = await newestXiaohongshuExplorePage(browser, beforeTargets, noteId)
+    if (!detailPage && /xiaohongshu\.com\/(explore|discovery\/item)\//.test(page.url())) detailPage = page
+    if (!detailPage) await delay(250)
+  }
   if (!detailPage) {
+    if (noteId) return `https://www.xiaohongshu.com/explore/${encodeURIComponent(noteId)}`
     throw new Error('xiaohongshu note detail tab not found')
   }
   await detailPage.bringToFront().catch(() => {})
@@ -2301,12 +2345,13 @@ async function openXiaohongshuPublishedNoteDetail(page, schedule) {
   return verification.url
 }
 
-async function newestXiaohongshuExplorePage(browser, beforeTargets) {
+async function newestXiaohongshuExplorePage(browser, beforeTargets, expectedNoteId = '') {
   const pages = await browser.pages()
   const candidates = []
   for (const item of pages) {
     const url = item.url()
     if (!/xiaohongshu\.com\/(explore|discovery\/item)\//.test(url)) continue
+    if (expectedNoteId && !url.includes(expectedNoteId)) continue
     const target = item.target()
     const key = target?._targetId || url
     candidates.push({ page: item, isNew: !beforeTargets.has(key) })
@@ -2364,6 +2409,41 @@ async function evaluateDouyinPublishResult(page, schedule) {
     title: schedule?.publishCheckTitle || '',
     platformScheduledAt: schedule?.platformScheduledAt || schedule?.plannedPublishAt || '',
   }
+  const structuredPageState = await page.evaluate(() => {
+    const contentNodes = Array.from(document.querySelectorAll('[class*="video-card-content-"]'))
+    const cardNodes = Array.from(new Set(contentNodes.map((content) => {
+      return content.closest('[class*="video-card-new-"]') || content.parentElement || content
+    })))
+    const backgroundImageUrl = (element) => {
+      const value = element ? getComputedStyle(element).backgroundImage : ''
+      return String(value || '').match(/^url\(["']?(.*?)["']?\)$/)?.[1] || ''
+    }
+    return {
+      text: document.body?.innerText || '',
+      url: location.href,
+      pageTitle: document.title,
+      douyinCards: cardNodes.map((card) => {
+        const rect = card.getBoundingClientRect()
+        const cover = card.querySelector('[class*="video-card-cover-"]')
+        return {
+          title: card.querySelector('[class*="info-title-text-"]')?.textContent || '',
+          publishedAt: card.querySelector('[class*="info-time-"]')?.textContent || '',
+          status: card.querySelector('[class*="info-status-"]')?.textContent || '',
+          text: card.innerText || card.textContent || '',
+          width: Math.round(rect.width * 10) / 10,
+          height: Math.round(rect.height * 10) / 10,
+          coverImageUrl: backgroundImageUrl(cover),
+          links: Array.from(card.querySelectorAll('a[href]')).map((link) => ({
+            text: link.textContent || '',
+            href: link.href || '',
+          })),
+        }
+      }),
+    }
+  })
+  if (structuredPageState.douyinCards.length) {
+    return evaluateDouyinPublishSignals(target, structuredPageState)
+  }
   return page.evaluate((input) => {
     const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
     const normalizeTitle = (value) => normalize(value).replace(/[「」『』【】\[\]（）()《》<>“”"‘’'`,，。！？!?、:：；;·.\-—_]/g, '')
@@ -2404,7 +2484,6 @@ async function evaluateDouyinPublishResult(page, schedule) {
       .filter((item) => item.text
         && item.rect.width >= 260
         && item.rect.height >= 60
-        && item.rect.width <= 1600
         && item.rect.height <= 460)
       .filter((item) => titleProbe && item.titleText.includes(titleProbe))
       .filter((item) => {
@@ -2644,6 +2723,40 @@ function expireClaimedTask(task) {
   task.claimOwner = null
 }
 
+async function expireTimedOutPendingScheduleTasks(config) {
+  let changed = false
+  for (const task of tasksById.values()) {
+    if (task.status !== 'pending' || !scheduleIdOfTask(task)) continue
+    const pendingSince = Date.parse(task.createdAt || '')
+    if (!Number.isFinite(pendingSince) || Date.now() - pendingSince <= EXTENSION_CLAIM_TIMEOUT_MS) continue
+    task.status = 'failed'
+    task.failedAt = nowIso()
+    task.failureCode = 'EXTENSION_CLAIM_TIMEOUT'
+    task.lastError = {
+      code: 'EXTENSION_CLAIM_TIMEOUT',
+      message: '浏览器扩展未在 90 秒内领取任务，已释放后端排期锁并重新排队',
+    }
+    task.claimedAt = null
+    task.claimOwner = null
+    task.backendFailureReportedAt = null
+    task.backendFailureReportAttempts = Number(task.backendFailureReportAttempts || 0)
+    try {
+      await reportScheduleExecutionFailed(config, task, {
+        failureCode: task.failureCode,
+        failureMessage: task.lastError.message,
+      })
+      task.backendFailureReportedAt = nowIso()
+      task.backendFailureReportLastError = null
+    } catch (error) {
+      task.backendFailureReportAttempts += 1
+      task.backendFailureReportLastError = formatBackendError(error)
+    }
+    changed = true
+  }
+  if (changed) await saveRuntimeTasks()
+  return changed
+}
+
 function shouldHeartbeatScheduleTask(task) {
   if (!task || isTerminalStatus(task.status)) return false
   if (!scheduleIdOfTask(task)) return false
@@ -2651,7 +2764,10 @@ function shouldHeartbeatScheduleTask(task) {
   if (task.status !== 'pending' && task.status !== 'claimed') return false
   const activeSince = Date.parse(task.claimedAt || task.createdAt || '')
   if (!Number.isFinite(activeSince)) return false
-  return Date.now() - activeSince <= CLAIM_BACKEND_HEARTBEAT_MAX_MS
+  const maxAgeMs = task.status === 'pending'
+    ? EXTENSION_CLAIM_TIMEOUT_MS
+    : CLAIM_BACKEND_HEARTBEAT_MAX_MS
+  return Date.now() - activeSince <= maxAgeMs
 }
 
 function activeScheduleHeartbeatTasks() {
@@ -2747,8 +2863,11 @@ async function flushPendingBackendReports(config, platform = '') {
 
 function runtimeTaskStorageSummary() {
   let active = 0
+  let awaitingExtension = 0
+  let running = 0
   let terminal = 0
   let pendingBackendReport = 0
+  let oldestAwaitingExtensionAt = null
   let oldestTerminalAt = null
   let newestTaskAt = null
   for (const task of tasksById.values()) {
@@ -2761,6 +2880,15 @@ function runtimeTaskStorageSummary() {
       }
     } else {
       active += 1
+      if (task.status === 'pending') {
+        awaitingExtension += 1
+        const pendingAt = Date.parse(task.createdAt || '')
+        if (Number.isFinite(pendingAt)
+          && (oldestAwaitingExtensionAt === null || pendingAt < oldestAwaitingExtensionAt)) {
+          oldestAwaitingExtensionAt = pendingAt
+        }
+      }
+      if (task.status === 'claimed') running += 1
     }
     const createdAt = Date.parse(task.createdAt || '')
     if (Number.isFinite(createdAt) && (newestTaskAt === null || createdAt > newestTaskAt)) {
@@ -2770,6 +2898,8 @@ function runtimeTaskStorageSummary() {
   return {
     total: tasksById.size,
     active,
+    awaitingExtension,
+    running,
     terminal,
     pendingBackendReport,
     maxRecords: RUNTIME_TASK_MAX_RECORDS,
@@ -2777,6 +2907,12 @@ function runtimeTaskStorageSummary() {
     remainingCapacity: Math.max(0, RUNTIME_TASK_MAX_RECORDS - tasksById.size),
     nearLimit: tasksById.size >= Math.floor(RUNTIME_TASK_MAX_RECORDS * 0.9),
     oldestTerminalAt: oldestTerminalAt ? new Date(oldestTerminalAt).toISOString() : null,
+    oldestAwaitingExtensionAt: oldestAwaitingExtensionAt
+      ? new Date(oldestAwaitingExtensionAt).toISOString()
+      : null,
+    oldestAwaitingExtensionAgeSeconds: oldestAwaitingExtensionAt
+      ? Math.max(0, Math.floor((Date.now() - oldestAwaitingExtensionAt) / 1000))
+      : 0,
     newestTaskAt: newestTaskAt ? new Date(newestTaskAt).toISOString() : null,
   }
 }
@@ -2805,6 +2941,7 @@ function appendPendingBackendReportTask(summary, task, scheduleId, reportKind) {
 }
 
 async function heartbeatActiveScheduleTasks(config) {
+  await expireTimedOutPendingScheduleTasks(config)
   let sent = 0
   let failed = 0
   let changed = false
@@ -3580,6 +3717,11 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     })
   }
   await saveRuntimeTasks()
+  await reportLocalAgentRuntimeStatus(config, {
+    reason: `task_${status}`,
+    probeAdspower: false,
+    force: true,
+  }).catch(() => null)
   sendJson(req, res, config, 200, { ok: true, task })
 }
 
@@ -3690,9 +3832,14 @@ async function uploadImageFileToAdsPowerPage(config, body, filePath) {
   const browser = await connectPuppeteer(puppeteer, task.adspower.puppeteerWs, config)
   try {
     const pages = await browser.pages()
-    const page = findUploadTargetPage(pages, platform, body.targetPageUrl || body.pageUrl || '')
+    const page = selectUploadTargetPage(pages, {
+      platform,
+      targetPageUrl: body.targetPageUrl || body.pageUrl || '',
+      browserTargetId: body.browserTargetId || '',
+    })
     if (!page) {
-      throw new Error(`AdsPower browser has no active ${platform || 'target'} page`)
+      const candidates = describeUploadPageCandidates(pages)
+      throw new Error(`AdsPower browser has no unambiguous active ${platform || 'target'} page; browserTargetId=${body.browserTargetId || '-'}; candidates=${JSON.stringify(candidates).slice(0, 1200)}`)
     }
     await page.bringToFront().catch(() => {})
     if (platform === 'douyin' && body.uploadTarget !== 'douyin_article_head_image') {
@@ -3734,64 +3881,6 @@ async function uploadImageFileToAdsPowerPage(config, body, filePath) {
     }
   } finally {
     await browser.disconnect()
-  }
-}
-
-function findUploadTargetPage(pages, platform, targetPageUrl = '') {
-  const normalized = String(platform || '').trim().toLowerCase()
-  const targetUrl = String(targetPageUrl || '').trim()
-  if (targetUrl) {
-    const matched = pages.find((item) => sameBrowserPageUrl(item.url(), targetUrl))
-      || pages.find((item) => sameBrowserPagePath(item.url(), targetUrl))
-    if (matched) return matched
-  }
-  if (normalized === 'zhihu') {
-    return pages.find((item) => {
-      const pageUrl = item.url()
-      return pageUrl.includes('zhihu.com') && (pageUrl.includes('/write') || pageUrl.includes('/edit'))
-    }) || pages.find((item) => item.url().includes('zhihu.com'))
-  }
-  if (normalized === 'toutiao') {
-    return pages.find((item) => {
-      const pageUrl = item.url()
-      return pageUrl.includes('mp.toutiao.com') && pageUrl.includes('/graphic/publish')
-    }) || pages.find((item) => item.url().includes('mp.toutiao.com'))
-  }
-  if (normalized === 'douyin') {
-    return pages.find((item) => {
-      const pageUrl = item.url()
-      return pageUrl.includes('creator.douyin.com')
-        && (pageUrl.includes('/creator-micro/content/upload') || pageUrl.includes('/creator-micro/content/post/article'))
-    }) || pages.find((item) => item.url().includes('creator.douyin.com'))
-  }
-  if (normalized === 'baijiahao') {
-    return pages.find((item) => {
-      const pageUrl = item.url()
-      return pageUrl.includes('baijiahao.baidu.com') && pageUrl.includes('/builder/rc/edit')
-    }) || pages.find((item) => item.url().includes('baijiahao.baidu.com'))
-  }
-  return pages.find((item) => item.url().includes(normalized))
-}
-
-function sameBrowserPageUrl(left, right) {
-  try {
-    const leftUrl = new URL(String(left || ''))
-    const rightUrl = new URL(String(right || ''))
-    leftUrl.hash = ''
-    rightUrl.hash = ''
-    return leftUrl.href === rightUrl.href
-  } catch {
-    return String(left || '') === String(right || '')
-  }
-}
-
-function sameBrowserPagePath(left, right) {
-  try {
-    const leftUrl = new URL(String(left || ''))
-    const rightUrl = new URL(String(right || ''))
-    return leftUrl.origin === rightUrl.origin && leftUrl.pathname === rightUrl.pathname
-  } catch {
-    return false
   }
 }
 
@@ -4700,8 +4789,12 @@ function startLocalAgentRuntimeStatusReporter(config) {
 }
 
 async function pollSelfMediaSchedules(config) {
+  await expireTimedOutPendingScheduleTasks(config)
+  if (!hasAvailableScheduleClaimSlot(config)) {
+    return { ok: true, claimed: false, claimBlockedReason: 'LOCAL_HELPER_CAPACITY_FULL' }
+  }
   const timeoutMs = Number(config.selfMediaSchedulePollStepTimeoutMs || SCHEDULE_POLL_STEP_TIMEOUT_MS)
-  const platforms = await selfMediaSchedulePlatforms(config)
+  const platforms = rotateSchedulePlatforms(await selfMediaSchedulePlatforms(config))
   let lastNoClaimReason = ''
   for (const platform of platforms) {
     const publishCheck = await withTimeout(
@@ -4720,6 +4813,13 @@ async function pollSelfMediaSchedules(config) {
     lastNoClaimReason = launch.claimBlockedReason || lastNoClaimReason
   }
   return { ok: true, claimed: false, claimBlockedReason: lastNoClaimReason || 'NO_DUE_TASK' }
+}
+
+function rotateSchedulePlatforms(platforms) {
+  if (!Array.isArray(platforms) || platforms.length < 2) return platforms || []
+  const offset = schedulePlatformCursor % platforms.length
+  schedulePlatformCursor = (offset + 1) % platforms.length
+  return platforms.slice(offset).concat(platforms.slice(0, offset))
 }
 
 function publishCheckPollStepTimeoutMs(config, platform, defaultTimeoutMs) {

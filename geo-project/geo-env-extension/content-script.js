@@ -1588,7 +1588,10 @@ function isToutiaoPreviewPublishCompleted() {
 
 function isToutiaoWorksManagePage() {
   if (location.hostname !== 'mp.toutiao.com') return false
-  if (/\/profile_v\d+\/manage/.test(location.pathname) || location.pathname.includes('/profile_v4/content-manage')) return true
+  if (globalThis.__GEO_TOUTIAO_PLATFORM__?.isWorksManageUrl?.(location.href)) return true
+  if (/\/profile_v\d+\/graphic\/articles(?:\/|$)/.test(location.pathname)
+    || /\/profile_v\d+\/manage/.test(location.pathname)
+    || location.pathname.includes('/profile_v4/content-manage')) return true
   const text = normalizeText(document.body?.innerText || document.body?.textContent || '')
   return text.includes('作品管理')
     || (text.includes('草稿箱') && (text.includes('已发布') || text.includes('审核中') || text.includes('定时发布中')))

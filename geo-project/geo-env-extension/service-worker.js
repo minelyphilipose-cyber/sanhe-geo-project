@@ -1,9 +1,9 @@
-importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
+importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
 const EXTENSION_VERSION = '0.1.11'
-const EXTENSION_BUILD_REVISION = '20260711.1'
+const EXTENSION_BUILD_REVISION = '20260714.1'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
-const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/manage/content/all'
+const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/graphic/articles'
 const ZHIHU_MANAGE_URL = 'https://www.zhihu.com/creator/manage/creation/article'
 const XIAOHONGSHU_MANAGE_URL = 'https://creator.xiaohongshu.com/new/note-manager'
 const BAIJIAHAO_MANAGE_URL = 'https://baijiahao.baidu.com/builder/rc/content'
@@ -1915,14 +1915,16 @@ async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload,
   let latest = null
   let recoveryTabId = tabId
   const current = await chrome.tabs.get(recoveryTabId).catch(() => null)
-  if (!current?.url || !current.url.includes('/manage/')) {
+  if (!current?.url || !isToutiaoWorksManageUrl(current.url)) {
     recoveryTabId = await openPlatformManageVerifyTab(recoveryTabId, 'toutiao', TOUTIAO_MANAGE_URL)
   }
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (attempt > 0) await chrome.tabs.reload(recoveryTabId, { bypassCache: true }).catch(() => null)
-    await waitForTabComplete(recoveryTabId, 30_000).catch(() => null)
-    await delay(1200 + attempt * 800)
-    latest = await inspectToutiaoWorksListTab(recoveryTabId, context, attempt + 1)
+    await reloadPlatformWorksList(recoveryTabId, 30_000)
+    for (let poll = 0; poll < 3; poll += 1) {
+      await delay(900 + poll * 600)
+      latest = await inspectToutiaoWorksListTab(recoveryTabId, context, attempt + 1)
+      if (latest?.verified) break
+    }
     if (latest?.verified) {
       return {
         titleFilled: true,
@@ -1944,6 +1946,17 @@ async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload,
     }
   }
   throw publishNotConfirmedError('TOUTIAO', context.title, message, latest)
+}
+
+function isToutiaoWorksManageUrl(value) {
+  return globalThis.__GEO_TOUTIAO_PLATFORM__?.isWorksManageUrl?.(value) === true
+}
+
+async function reloadPlatformWorksList(tabId, timeoutMs) {
+  await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
+  // Give Chrome time to transition the tab from the previous complete state to loading.
+  await delay(350)
+  await waitForTabComplete(tabId, timeoutMs).catch(() => null)
 }
 
 function isWorksListVerifyTimeout(error, message) {
@@ -2018,7 +2031,9 @@ async function inspectToutiaoWorksListTab(tabId, context, refreshAttempt) {
       }
       const isWorksManagePage = () => {
         if (location.hostname !== 'mp.toutiao.com') return false
-        if (/\/profile_v\d+\/manage/.test(location.pathname) || location.pathname.includes('/profile_v4/content-manage')) return true
+        if (/\/profile_v\d+\/graphic\/articles(?:\/|$)/.test(location.pathname)
+          || /\/profile_v\d+\/manage/.test(location.pathname)
+          || location.pathname.includes('/profile_v4/content-manage')) return true
         const text = normalizeText(document.body?.innerText || document.body?.textContent || '')
         return text.includes('作品管理')
           || (text.includes('草稿箱') && (text.includes('已发布') || text.includes('审核中') || text.includes('定时发布中')))
@@ -2445,7 +2460,7 @@ async function ensureContentScript(tabId) {
 }
 
 async function injectContentScripts(tabId, options = {}) {
-  const files = ['fill-result.js', 'identity-policy.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js']
+  const files = ['fill-result.js', 'identity-policy.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js']
   await requireInjectablePlatformTab(tabId)
   try {
     await chrome.scripting.executeScript({
@@ -3229,8 +3244,9 @@ async function dispatchTrustedClick(tabId, click) {
       || (!isAllowedPlatformUrl('xiaohongshu', tab.url)
         && !isAllowedPlatformUrl('toutiao', tab.url)
         && !isAllowedPlatformUrl('zhihu', tab.url)
-        && !isAllowedPlatformUrl('baijiahao', tab.url))) {
-    throw new Error('真实点击仅允许用于小红书、头条、知乎或百家号页面')
+        && !isAllowedPlatformUrl('baijiahao', tab.url)
+        && !isAllowedPlatformUrl('douyin', tab.url))) {
+    throw new Error('真实点击仅允许用于小红书、头条、知乎、百家号或抖音页面')
   }
   const target = { tabId }
   await chrome.debugger.attach(target, '1.3')
@@ -3269,6 +3285,7 @@ async function setFileInputFromUrl(tabId, urlValue, options = {}) {
     throw new Error(`本地文件上传仅允许用于${platformDisplayName(platform)}页面`)
   }
   const { config, session } = await getConfig()
+  const browserTargetId = await browserTargetIdForTab(tabId)
   const uploaded = await helperRequest(config, '/v1/extension/files/upload-image-to-page', {
     method: 'POST',
     body: JSON.stringify({
@@ -3278,6 +3295,7 @@ async function setFileInputFromUrl(tabId, urlValue, options = {}) {
       environmentKey: options.environmentKey || config.environmentKey,
       platform,
       targetPageUrl: tab.url,
+      browserTargetId: browserTargetId || null,
       uploadTarget: options.uploadTarget || null,
       click: options.click || null,
     }),
@@ -3291,7 +3309,15 @@ async function setFileInputFromUrl(tabId, urlValue, options = {}) {
     inputState: uploaded?.upload?.inputState || null,
     fileInputCount: uploaded?.upload?.fileInputCount || null,
     pageUrl: uploaded?.upload?.pageUrl || '',
+    browserTargetId: browserTargetId || null,
   }
+}
+
+async function browserTargetIdForTab(tabId) {
+  const targets = await chrome.debugger.getTargets().catch(() => [])
+  const target = targets.find((item) => item.tabId === tabId && item.type === 'page')
+    || targets.find((item) => item.tabId === tabId)
+  return String(target?.id || '')
 }
 
 async function setBaijiahaoUeditorContentInMainWorld(tabId, message = {}) {

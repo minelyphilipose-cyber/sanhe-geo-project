@@ -42,6 +42,7 @@ $files = @(
   "manifest.json",
   "platform-baijiahao.js",
   "platform-douyin.js",
+  "platform-toutiao.js",
   "platform-xiaohongshu.js",
   "platform-zhihu.js",
   "popup.html",

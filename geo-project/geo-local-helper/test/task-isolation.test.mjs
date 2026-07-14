@@ -81,6 +81,66 @@ test('local helper requires environmentKey for extension task claims and complet
   )
 })
 
+test('local helper releases unclaimed schedules and reports only claimed work as running', () => {
+  const server = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.match(
+    server,
+    /const EXTENSION_CLAIM_TIMEOUT_MS = 90_000/,
+    'a browser extension must claim a launched schedule within a bounded handoff window',
+  )
+  assert.match(
+    server,
+    /function activeRuntimeTaskCount\(\) \{\s+return listTasks\(\)\.filter\(\(task\) => task\.status === 'claimed'\)\.length/,
+    'pending handoffs must not be reported as actively running tasks',
+  )
+  assert.match(
+    server,
+    /async function expireTimedOutPendingScheduleTasks\(config\)[\s\S]+EXTENSION_CLAIM_TIMEOUT[\s\S]+reportScheduleExecutionFailed/,
+    'an unclaimed schedule must be failed back to the backend so its lock is released and retry policy can run',
+  )
+  assert.match(
+    server,
+    /async function handleTaskComplete\(req, res, config, taskId, status\)[\s\S]+await saveRuntimeTasks\(\)[\s\S]+reportLocalAgentRuntimeStatus\(config, \{[\s\S]+reason: `task_\$\{status\}`/,
+    'task completion must immediately publish the released helper capacity',
+  )
+  assert.doesNotMatch(
+    server,
+    /async function handleNextTask\([\s\S]+?reason: `task_\$\{status\}`[\s\S]+?async function requeueTimedOutClaims/,
+    'task claiming must not reference the completion-only status variable',
+  )
+  assert.match(
+    server,
+    /task\.status === 'pending'[\s\S]+\? EXTENSION_CLAIM_TIMEOUT_MS\s+: CLAIM_BACKEND_HEARTBEAT_MAX_MS/,
+    'pending handoffs must stop extending the backend lock at the extension claim timeout',
+  )
+  assert.match(
+    server,
+    /awaitingExtension[\s\S]+running[\s\S]+oldestAwaitingExtensionAgeSeconds/,
+    'health output must distinguish helper process health from extension handoff health',
+  )
+})
+
+test('local helper applies capacity locally and rotates platform polling fairly', () => {
+  const server = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.match(
+    server,
+    /function occupiedScheduleClaimSlotCount\(\)[\s\S]+task\.status === 'pending' \|\| task\.status === 'claimed'/,
+    'pending and claimed schedules must occupy the local admission slot',
+  )
+  assert.match(
+    server,
+    /if \(!hasAvailableScheduleClaimSlot\(config\)\)[\s\S]+LOCAL_HELPER_CAPACITY_FULL/,
+    'the helper must not claim more backend schedules than it can hand to the extension',
+  )
+  assert.match(
+    server,
+    /function rotateSchedulePlatforms\(platforms\)[\s\S]+schedulePlatformCursor[\s\S]+platforms\.slice\(offset\)\.concat\(platforms\.slice\(0, offset\)\)/,
+    'each polling cycle must start from the next platform instead of starving later platforms',
+  )
+})
+
 test('extension targets the current local helper session and serializes token refresh', () => {
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
 
@@ -101,17 +161,81 @@ test('extension targets the current local helper session and serializes token re
   )
 })
 
-test('0.1.10 packages expose and enforce the same build revision', () => {
+test('extension distinguishes backend security failures and recovers login report tabs', () => {
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+
+  assert.match(
+    serviceWorker,
+    /function isExtensionUnauthorized\(error\)[\s\S]+error\?\.code === 70002/,
+    'only the extension-token error code should invalidate a successful binding',
+  )
+  assert.doesNotMatch(
+    serviceWorker,
+    /function isExtensionUnauthorized\(error\) \{[\s\S]{0,300}error\?\.status === 401/,
+    'a generic Spring Security 401 must not clear the extension binding',
+  )
+  assert.match(
+    serviceWorker,
+    /async function resolveLoginReportTab\(originalTab, platform\)[\s\S]+chrome\.tabs\.query\(\{\}\)[\s\S]+isAllowedLoginReportUrl\(platform, tab\.url\)/,
+    'login reporting should recover another valid platform tab after the original tab closes or redirects',
+  )
+  assert.match(
+    serviceWorker,
+    /const environmentAccountId = report\.environmentAccountId \|\| null/,
+    'automatic login reporting must not reuse a stale environment-account id from extension config',
+  )
+  assert.doesNotMatch(
+    serviceWorker,
+    /report\.environmentAccountId \|\| config\.environmentAccountId/,
+    'a rebound environment must route login reports by the current task binding or brand account name',
+  )
+  assert.match(
+    serviceWorker,
+    /const brandId = session\?\.brandId \|\| report\.brandId \|\| config\.brandId \|\| null/,
+    'automatic tab login reports must retain the configured brand route',
+  )
+  assert.match(
+    serviceWorker,
+    /const reportBindingKey = options\.environmentAccountId \|\| options\.selfMediaAccountId \|\| 'auto'[\s\S]+const throttleKey = `\$\{environmentKey\}:\$\{platform\}:\$\{tab\.id\}:\$\{reportBindingKey\}`/,
+    'a generic tab report must not throttle the task-scoped binding report that follows it',
+  )
+})
+
+test('baijiahao login reporting reads the current account page structure', () => {
+  const contentScript = readProjectFile('geo-env-extension/content-script.js')
+
+  assert.match(
+    contentScript,
+    /\[class\*="userInfoBox"\] \[class\*="userName"\]/,
+    'the identity reader must target the current Baijiahao account-name container',
+  )
+  assert.match(
+    contentScript,
+    /collectBaijiahaoExactAccountName\(document, accountNames\)/,
+    'the account name selector must run against the whole page before relying on a heuristic account root',
+  )
+  assert.match(
+    contentScript,
+    /百家号ID\\s\*\[:：\]\?\\s\*\(\\d\{6,\}\)/,
+    'the identity reader must recognize the Baijiahao ID label shown on the account page',
+  )
+  assert.ok(
+    contentScript.includes('if (/^\\d{6,}$/.test(text)) return false'),
+    'numeric-only Baijiahao IDs must be rejected without rejecting names such as yqx2002528',
+  )
+})
+
+test('extension and helper packages expose and enforce the same build revision', () => {
   const manifest = JSON.parse(readProjectFile('geo-env-extension/manifest.json'))
   const helperPackage = JSON.parse(readProjectFile('geo-local-helper/package.json'))
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
   const contentScript = readProjectFile('geo-env-extension/content-script.js')
 
-  assert.equal(manifest.version, '0.1.10')
-  assert.equal(helperPackage.version, '0.1.10')
-  assert.match(manifest.version_name, /0\.1\.10-hotfix-20260710\.6/)
-  assert.equal(helperPackage.buildRevision, '20260710.6')
-  assert.match(contentScript, /GEO_ENV_CONTENT_SCRIPT_VERSION = '0\.1\.10'/)
+  assert.equal(manifest.version, helperPackage.version)
+  assert.equal(manifest.version, '0.1.11')
+  assert.match(manifest.version_name, new RegExp(`${helperPackage.version}-.+-${helperPackage.buildRevision.replaceAll('.', '\\.')}`))
+  assert.equal(helperPackage.buildRevision, '20260714.1')
+  assert.match(contentScript, new RegExp(`GEO_ENV_CONTENT_SCRIPT_VERSION = '${helperPackage.version.replaceAll('.', '\\.')}'`))
   assert.match(serviceWorker, /EXTENSION_HELPER_BUILD_MISMATCH/)
 })
 
@@ -148,7 +272,12 @@ test('douyin channel-close recovery opens the works manager and recreates a vani
 test('all browser platforms recover channel-close through result pages without resubmitting content', () => {
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
 
-  assert.match(serviceWorker, /TOUTIAO_MANAGE_URL = 'https:\/\/mp\.toutiao\.com\/profile_v4\/manage\/content\/all'/)
+  assert.match(serviceWorker, /TOUTIAO_MANAGE_URL = 'https:\/\/mp\.toutiao\.com\/profile_v4\/graphic\/articles'/)
+  assert.match(
+    serviceWorker,
+    /recoverToutiaoScheduleAfterWorksListTimeout[\s\S]+isToutiaoWorksManageUrl\(current\.url\)[\s\S]+reloadPlatformWorksList/,
+    'toutiao recovery must preserve the actual redirected works page and refresh it before matching',
+  )
   assert.match(serviceWorker, /ZHIHU_MANAGE_URL = 'https:\/\/www\.zhihu\.com\/creator\/manage\/creation\/article'/)
   assert.match(serviceWorker, /XIAOHONGSHU_MANAGE_URL = 'https:\/\/creator\.xiaohongshu\.com\/new\/note-manager'/)
   assert.match(serviceWorker, /BAIJIAHAO_MANAGE_URL = 'https:\/\/baijiahao\.baidu\.com\/builder\/rc\/content'/)
@@ -254,6 +383,31 @@ test('xiaohongshu scheduled publish retries the real switch click target', () =>
     /function normalizeXiaohongshuScheduleToggleTarget[\s\S]{0,900}\/switch\|toggle\|checkbox\/i/,
     'custom-switch-icon and custom-switch-text-content must not be accepted merely because their class contains switch',
   )
+  assert.match(
+    platform,
+    /function findXiaohongshuPublishHost[\s\S]+querySelectorAll\('xhs-publish-btn'\)[\s\S]+getAttribute\('submit-text'\)[\s\S]+getAttribute\('submit-disabled'\)[\s\S]+getAttribute\('submit-loading'\)/,
+    'the closed-shadow publish component must be located through its public host attributes',
+  )
+  assert.match(
+    platform,
+    /function findXiaohongshuPublishHostClickPoint[\s\S]+xiaohongshuPublishHostPrimaryButtonPoint\(rect\)/,
+    'the trusted click must derive the real primary button position from the xhs-publish-btn host layout',
+  )
+  assert.match(
+    platform,
+    /function xiaohongshuPublishHostPrimaryButtonPoint[\s\S]+width \/ 2 \+ \(actionWidth \+ actionGap\) \/ 2/,
+    'the closed-shadow fallback must target the centered primary action instead of the host right edge',
+  )
+  assert.match(
+    platform,
+    /function waitForXiaohongshuPublishHostAccepted[\s\S]+submit-loading/,
+    'the host loading state must confirm whether the trusted click was accepted',
+  )
+  assert.match(
+    platform,
+    /const accepted = await waitForXiaohongshuPublishHostAccepted[\s\S]+if \(!accepted\)[\s\S]+按钮补点/,
+    'a missed trusted click may be retried once only after the host confirms it stayed idle',
+  )
 })
 
 test('douyin article head upload never falls back to every image input', () => {
@@ -286,4 +440,39 @@ test('douyin article head upload never falls back to every image input', () => {
     /extra\.uploadTarget === 'douyin_article_head_image'[\s\S]+readFileInputState\(input\)[\s\S]+readAndDispatchFileInputState\(input\)/,
     'after accepting the head-image chooser, unrelated empty file inputs must not receive synthetic change events',
   )
+  assert.match(
+    platform,
+    /function findDouyinSubmitButton[\s\S]+querySelectorAll\('button'\)[\s\S]+=== '发布'/,
+    'douyin must click the exact final publish button instead of a publish-labelled container',
+  )
+  assert.match(
+    serviceWorker,
+    /isManagePage && explicitSuccess[\s\S]+pageStatus: '发布成功'/,
+    'douyin navigation recovery must accept the explicit success notice while the manage list is still loading',
+  )
+  assert.match(
+    serviceWorker,
+    /dispatchTrustedClick[\s\S]+isAllowedPlatformUrl\('douyin', tab\.url\)/,
+    'douyin final submission must be allowed to use a trusted browser-level click',
+  )
+  assert.match(
+    serviceWorker,
+    /browserTargetIdForTab\(tabId\)[\s\S]+browserTargetId: browserTargetId \|\| null/,
+    'the extension must pass the exact browser target id to the local helper',
+  )
+  assert.match(
+    helper,
+    /selectUploadTargetPage\(pages,[\s\S]+browserTargetId: body\.browserTargetId \|\| ''/,
+    'the local helper must select the upload page by browser target id',
+  )
+})
+
+test('publish checks let an explicit published status override the expected schedule time', () => {
+  const publishCheck = readProjectFile('geo-local-helper/src/publish-check.js')
+  const server = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.match(publishCheck, /const found = hasTitle && hasConfirmedPublishedEvidence/)
+  assert.match(publishCheck, /const found = hasTitle && hasPublishedNearTitle/)
+  assert.match(server, /const found = hasTitle && hasLocation && hasPublishedSignal/)
+  assert.doesNotMatch(server, /const found = hasTitle && hasLocation && !isBeforeScheduledAt && hasPublishedSignal/)
 })

@@ -614,13 +614,39 @@
   function findXiaohongshuPublishHostClickPoint(label) {
     const host = findXiaohongshuPublishHost(label)
     if (!host) return null
+    const shadowButton = Array.from(host.shadowRoot?.querySelectorAll?.('button') || [])
+      .find((button) => normalizeText(button.textContent || '') === normalizeText(label)
+        && !button.disabled
+        && button.getAttribute('aria-disabled') !== 'true')
+    if (shadowButton && isVisibleElement(shadowButton)) {
+      const buttonRect = shadowButton.getBoundingClientRect()
+      return {
+        clientX: Math.round(buttonRect.left + buttonRect.width / 2),
+        clientY: Math.round(buttonRect.top + buttonRect.height / 2),
+        label: normalizeText(label),
+        source: 'xhs-publish-btn-shadow',
+      }
+    }
     const rect = host.getBoundingClientRect()
     if (rect.width < 80 || rect.height < 24) return null
+    const point = xiaohongshuPublishHostPrimaryButtonPoint(rect)
     return {
-      clientX: Math.round(rect.right - Math.min(60, rect.width * 0.23)),
-      clientY: Math.round(rect.top + rect.height / 2),
+      ...point,
       label: normalizeText(label),
       source: 'xhs-publish-btn',
+    }
+  }
+
+  function xiaohongshuPublishHostPrimaryButtonPoint(rect) {
+    const width = Math.max(0, Number(rect?.width) || 0)
+    const height = Math.max(0, Number(rect?.height) || 0)
+    const left = Number(rect?.left) || 0
+    const top = Number(rect?.top) || 0
+    const actionWidth = Math.min(120, Math.max(88, width * 0.18))
+    const actionGap = Math.min(24, Math.max(12, width * 0.035))
+    return {
+      clientX: Math.round(left + width / 2 + (actionWidth + actionGap) / 2),
+      clientY: Math.round(top + height / 2),
     }
   }
   
@@ -1588,5 +1614,8 @@
     createEntryNavigator,
     editorSelectors,
     resolvePublishOptions,
+    testing: {
+      xiaohongshuPublishHostPrimaryButtonPoint,
+    },
   }
 })(globalThis)

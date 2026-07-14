@@ -1,6 +1,6 @@
 globalThis.GEO_ENV_BUILD_CONFIG = {
-  profileKey: 'prod',
-  profileLabel: '生产环境',
-  apiBase: 'https://www.huanjingaigeo.com',
+  profileKey: 'dev',
+  profileLabel: '本地开发',
+  apiBase: 'http://127.0.0.1:8080',
   helperBase: 'http://127.0.0.1:17891',
 }

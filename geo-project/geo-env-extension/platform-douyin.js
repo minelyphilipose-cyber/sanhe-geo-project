@@ -406,13 +406,59 @@
   async function submitPublish(platform, payload, deps, scheduledAt, platformStatus) {
     const waitForCondition = requireDependency(deps.waitForCondition, 'waitForCondition')
     const publishAttemptKey = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    await clickIfVisible(['发布'], deps, { timeoutMs: 12000, required: true, platform })
+    const publishButton = await waitForCondition(
+      () => findDouyinSubmitButton(deps),
+      12000,
+      `抖音最终发布按钮未找到；${describeState(deps)}`,
+    )
+    await click(publishButton, platform, deps)
     const verification = await waitForCondition(
-      () => verifyManagePageAfterPublish(payload, scheduledAt, platformStatus, deps, publishAttemptKey),
+      () => verifyPublishSubmission(payload, scheduledAt, platformStatus, deps, publishAttemptKey),
       45000,
       `抖音发布后未检测到成功状态；${describeState(deps)}`,
     )
     return verification
+  }
+
+  function findDouyinSubmitButton(deps = {}) {
+    const normalizeText = deps.normalizeText || defaultNormalizeText
+    return Array.from(document.querySelectorAll('button'))
+      .filter(isVisible)
+      .filter((button) => normalizeText(button.textContent || '') === '发布')
+      .filter((button) => !button.disabled && button.getAttribute('aria-disabled') !== 'true')
+      .sort((left, right) => right.getBoundingClientRect().top - left.getBoundingClientRect().top)[0] || null
+  }
+
+  function verifyPublishSubmission(payload, scheduledAt, platformStatus, deps, publishAttemptKey) {
+    return verifyManagePageAfterPublish(payload, scheduledAt, platformStatus, deps, publishAttemptKey)
+      || verifyManagePageSuccessNotice(payload, scheduledAt, platformStatus, deps)
+  }
+
+  function verifyManagePageSuccessNotice(payload, scheduledAt, platformStatus, deps = {}) {
+    if (!location.href.includes('/creator-micro/content/manage')) return null
+    const normalizeText = deps.normalizeText || defaultNormalizeText
+    const notice = Array.from(document.querySelectorAll('[role="alert"], [class*="toast"], [class*="Toast"], [class*="message"], [class*="Message"], [class*="notification"], [class*="Notification"]'))
+      .filter(isVisible)
+      .map((el) => normalizeText(el.textContent || ''))
+      .find((text) => /(发布成功|定时发布成功|提交成功|已提交审核)/.test(text))
+    if (!notice) return null
+    return {
+      verified: true,
+      platformStatus,
+      pageStatusCode: platformStatus === 'scheduled' ? 'scheduled' : 'submitted',
+      pageStatus: notice,
+      platformScheduledAt: scheduledAt || null,
+      scheduledAtText: scheduledAt || null,
+      platformPublishId: null,
+      platformPublishedUrl: null,
+      coverImageUrl: null,
+      recordLinks: [],
+      title: firstText(payload.title, payload.articleTitle).slice(0, 30),
+      manageUrl: location.href,
+      matchedText: notice.slice(0, 180),
+      refreshed: false,
+      reloadCount: 0,
+    }
   }
 
   function verifyManagePageAfterPublish(payload, scheduledAt, platformStatus, deps, publishAttemptKey = '') {
@@ -926,6 +972,8 @@
       value: input.value ? String(input.value).slice(0, 40) : '',
     }))
     const douyin = {
+      submitButtons: collectSubmitButtonDiagnostics(deps),
+      lastTrustedClick: global.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT?.lastTrustedClick || null,
       uploadSections: collectUploadSectionDiagnostics(deps),
       manageRecords: location.href.includes('/creator-micro/content/manage')
         ? extractManageRecordCandidates(deps).slice(0, 5).map((item) => ({
@@ -936,6 +984,20 @@
         : [],
     }
     return `url=${location.href}; text=${text || '-'}; inputs=${JSON.stringify(inputs).slice(0, 500)}; douyin=${JSON.stringify(douyin).slice(0, 1200)}`
+  }
+
+  function collectSubmitButtonDiagnostics(deps = {}) {
+    const normalizeText = deps.normalizeText || defaultNormalizeText
+    return Array.from(document.querySelectorAll('button'))
+      .filter(isVisible)
+      .map((button) => ({
+        text: normalizeText(button.textContent || ''),
+        disabled: Boolean(button.disabled),
+        ariaDisabled: button.getAttribute('aria-disabled') || '',
+        ariaBusy: button.getAttribute('aria-busy') || '',
+        rect: compactRect(button.getBoundingClientRect()),
+      }))
+      .filter((item) => item.text === '发布' || item.text === '暂存离开')
   }
 
   function collectUploadSectionDiagnostics(deps = {}) {

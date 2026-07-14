@@ -3,7 +3,7 @@
   "name": "GEO 自媒体助手",
   "description": "GEO AdsPower environment task filling extension.",
   "version": "0.1.11",
-  "version_name": "0.1.11-identity-precision-20260711.1",
+  "version_name": "0.1.11-publish-hotfix-20260714.1",
   "action": {
     "default_popup": "popup.html"
   },
@@ -47,6 +47,7 @@
         "identity-policy.js",
         "platform-baijiahao.js",
         "platform-douyin.js",
+        "platform-toutiao.js",
         "platform-xiaohongshu.js",
         "platform-zhihu.js",
         "content-script.js"
