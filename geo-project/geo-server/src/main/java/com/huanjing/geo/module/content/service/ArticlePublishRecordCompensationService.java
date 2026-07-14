@@ -34,7 +34,7 @@ public class ArticlePublishRecordCompensationService {
         List<String> failedSources = new ArrayList<>();
         for (PublishTaskRow row : candidates) {
             try {
-                inserted += insertRecord(row);
+                inserted += upsertRecord(row);
             } catch (RuntimeException ex) {
                 failedSources.add(row.sourceType() + ":" + row.sourceId());
             }
@@ -86,11 +86,10 @@ public class ArticlePublishRecordCompensationService {
                           FROM distribution_tasks t
                           LEFT JOIN self_media_account sma ON sma.id = t.self_media_account_id
                           LEFT JOIN article_draft ad ON ad.id = t.article_id
-                         LEFT JOIN article_publish_record r
+                          LEFT JOIN article_publish_record r
                                  ON r.source_type = 'distribution_task'
                                 AND r.source_id = t.id
-                         WHERE r.id IS NULL
-                           AND t.target_kind <> 'brand_official_site'
+                         WHERE t.target_kind <> 'brand_official_site'
                            AND (
                                  t.status = 'published'
                               OR (t.status = 'submitted' AND t.finished_at IS NOT NULL)
@@ -103,14 +102,35 @@ public class ArticlePublishRecordCompensationService {
                               OR t.status = 'published'
                               OR t.review_status IN ('published', 'offline')
                            )
+                           AND (
+                                 r.id IS NULL
+                              OR COALESCE(r.article_id, -1) <> COALESCE(t.article_id, -1)
+                              OR COALESCE(r.distribution_task_id, -1) <> t.id
+                              OR COALESCE(r.project_id, -1) <> COALESCE(t.project_id, -1)
+                              OR COALESCE(r.self_media_account_id, -1) <> COALESCE(t.self_media_account_id, -1)
+                              OR COALESCE(r.brand_id, -1) <> COALESCE(sma.brand_id, ad.source_brand_id, -1)
+                              OR COALESCE(r.target_channel, '') <> CASE
+                                     WHEN t.target_kind = 'brand_geo_site' THEN 'official_site'
+                                     WHEN t.target_kind = 'industry_site' THEN 'industry_site'
+                                     WHEN t.target_kind = 'forum_site' THEN 'forum_site'
+                                     ELSE COALESCE(sma.platform, t.integration_method, t.target_kind, '')
+                                 END
+                              OR COALESCE(r.published_url, '') <> COALESCE(NULLIF(TRIM(t.published_url), ''), '')
+                              OR COALESCE(r.platform_article_id, '') <> COALESCE(NULLIF(TRIM(t.platform_article_id), ''), '')
+                              OR COALESCE(r.platform_publish_id, '') <> COALESCE(NULLIF(TRIM(t.platform_publish_id), ''), '')
+                              OR COALESCE(r.publish_status, '') <> CASE
+                                     WHEN t.target_kind IN ('brand_geo_site', 'industry_site', 'forum_site') THEN 'distributed'
+                                     ELSE COALESCE(t.status, '')
+                                 END
+                           )
                         UNION ALL
                         SELECT 'self_media_publish_schedule' AS source_type,
                                s.id AS source_id,
                                s.distribution_task_id,
                                s.article_id,
-                               d.project_id,
+                               COALESCE(ad.project_id, d.project_id) AS project_id,
                                s.self_media_account_id,
-                               s.brand_id,
+                               COALESCE(s.brand_id, sma.brand_id, ad.source_brand_id) AS brand_id,
                                'self_media' AS target_kind,
                                s.platform AS target_channel,
                                NULLIF(TRIM(s.platform_published_url), '') AS published_url,
@@ -121,6 +141,7 @@ public class ArticlePublishRecordCompensationService {
                                END AS url_quality,
                                CASE
                                  WHEN NULLIF(TRIM(s.platform_published_url), '') IS NOT NULL THEN 'self_media_publish_schedule.platform_published_url'
+                                 WHEN NULLIF(TRIM(d.platform_article_id), '') IS NOT NULL THEN 'distribution_tasks.platform_article_id'
                                  WHEN NULLIF(TRIM(s.platform_publish_id), '') IS NOT NULL THEN 'self_media_publish_schedule.platform_publish_id'
                                  ELSE 'self_media_publish_schedule.status'
                                END AS url_source,
@@ -135,15 +156,29 @@ public class ArticlePublishRecordCompensationService {
                           FROM self_media_publish_schedule s
                           LEFT JOIN distribution_tasks d ON d.id = s.distribution_task_id
                           LEFT JOIN article_draft ad ON ad.id = s.article_id
+                          LEFT JOIN self_media_account sma ON sma.id = s.self_media_account_id
                           LEFT JOIN article_publish_record r
                                  ON r.source_type = 'self_media_publish_schedule'
                                 AND r.source_id = s.id
-                         WHERE r.id IS NULL
-                           AND s.status IN ('published_confirmed', 'published_url_pending')
+                         WHERE s.status IN ('published_confirmed', 'published_url_pending')
                            AND (
                                  NULLIF(TRIM(s.platform_published_url), '') IS NOT NULL
+                              OR NULLIF(TRIM(d.platform_article_id), '') IS NOT NULL
                               OR NULLIF(TRIM(s.platform_publish_id), '') IS NOT NULL
                               OR s.published_confirmed_at IS NOT NULL
+                           )
+                           AND (
+                                 r.id IS NULL
+                              OR COALESCE(r.article_id, -1) <> COALESCE(s.article_id, -1)
+                              OR COALESCE(r.distribution_task_id, -1) <> COALESCE(s.distribution_task_id, -1)
+                              OR COALESCE(r.project_id, -1) <> COALESCE(ad.project_id, d.project_id, -1)
+                              OR COALESCE(r.self_media_account_id, -1) <> COALESCE(s.self_media_account_id, -1)
+                              OR COALESCE(r.brand_id, -1) <> COALESCE(s.brand_id, sma.brand_id, ad.source_brand_id, -1)
+                              OR COALESCE(r.target_channel, '') <> COALESCE(s.platform, '')
+                              OR COALESCE(r.published_url, '') <> COALESCE(NULLIF(TRIM(s.platform_published_url), ''), '')
+                              OR COALESCE(r.platform_article_id, '') <> COALESCE(NULLIF(TRIM(d.platform_article_id), ''), '')
+                              OR COALESCE(r.platform_publish_id, '') <> COALESCE(NULLIF(TRIM(s.platform_publish_id), ''), '')
+                              OR COALESCE(r.publish_status, '') <> COALESCE(s.status, '')
                            )
                        ) candidate
                  ORDER BY COALESCE(verified_at, published_at), source_type, source_id
@@ -177,9 +212,9 @@ public class ArticlePublishRecordCompensationService {
         return rs.wasNull() ? null : value;
     }
 
-    private int insertRecord(PublishTaskRow row) {
+    private int upsertRecord(PublishTaskRow row) {
         return jdbcTemplate.update("""
-                INSERT IGNORE INTO article_publish_record (
+                INSERT INTO article_publish_record (
                     article_id,
                     distribution_task_id,
                     project_id,
@@ -201,6 +236,25 @@ public class ArticlePublishRecordCompensationService {
                     published_at,
                     verified_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    article_id = VALUES(article_id),
+                    distribution_task_id = VALUES(distribution_task_id),
+                    project_id = VALUES(project_id),
+                    self_media_account_id = VALUES(self_media_account_id),
+                    brand_id = VALUES(brand_id),
+                    target_kind = VALUES(target_kind),
+                    target_channel = VALUES(target_channel),
+                    published_url = VALUES(published_url),
+                    url_quality = VALUES(url_quality),
+                    url_source = VALUES(url_source),
+                    platform_article_id = VALUES(platform_article_id),
+                    platform_publish_id = VALUES(platform_publish_id),
+                    publish_status = VALUES(publish_status),
+                    title = VALUES(title),
+                    cover_url = VALUES(cover_url),
+                    raw_response = VALUES(raw_response),
+                    published_at = VALUES(published_at),
+                    verified_at = VALUES(verified_at)
                 """,
                 row.articleId(),
                 row.distributionTaskId(),
