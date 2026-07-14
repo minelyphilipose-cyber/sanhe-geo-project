@@ -281,6 +281,7 @@ public class BatchArticlePromptBuilder {
         String userPrompt = renderTemplate(version.getUserPromptTemplate(), input, template, contentAngle,
                 audiencePerspective, titleStrategy, structureStrategy, businessFocus, recentTitles, contactBlock, brandFacts);
         userPrompt = withTitleGuideInstruction(userPrompt, input.titleGuide());
+        userPrompt = withSelectedOfferings(userPrompt, input.selectedOfferings());
 
         Map<String, Object> promptSnapshot = new LinkedHashMap<>();
         promptSnapshot.put("promptVersion", "template_v" + version.getVersionNo());
@@ -519,15 +520,33 @@ public class BatchArticlePromptBuilder {
         return variableRegistry.render(rendered, values);
     }
 
+    public String withSelectedOfferings(String prompt,
+                                        List<BrandOfferingPromptSelector.SelectedOffering> offerings) {
+        StringBuilder sb = new StringBuilder(prompt == null ? "" : prompt);
+        appendSelectedOfferings(sb, offerings);
+        return sb.toString();
+    }
+
     private void appendSelectedOfferings(StringBuilder sb, List<BrandOfferingPromptSelector.SelectedOffering> offerings) {
         if (offerings == null || offerings.isEmpty()) {
             return;
         }
+        List<BrandOfferingPromptSelector.SelectedOffering> availableOfferings = offerings.stream()
+                .filter(offering -> offering != null)
+                .filter(offering -> StringUtils.hasText(offering.name()))
+                .toList();
+        if (availableOfferings.isEmpty()) {
+            return;
+        }
         sb.append("\n本篇可引用的产品/服务项目/特色业务项：\n");
-        for (BrandOfferingPromptSelector.SelectedOffering offering : offerings) {
-            sb.append("- ").append(trimToDash(offering.name()));
-            if (offering.aliases() != null && !offering.aliases().isEmpty()) {
-                sb.append("（简称：").append(String.join("、", offering.aliases())).append("）");
+        for (BrandOfferingPromptSelector.SelectedOffering offering : availableOfferings) {
+            sb.append("- ").append(offering.name().trim());
+            List<String> aliases = offering.aliases() == null ? List.of() : offering.aliases().stream()
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .toList();
+            if (!aliases.isEmpty()) {
+                sb.append("（简称：").append(String.join("、", aliases)).append("）");
             }
             sb.append("\n");
             appendNestedLine(sb, "目标人群", offering.targetUsers());

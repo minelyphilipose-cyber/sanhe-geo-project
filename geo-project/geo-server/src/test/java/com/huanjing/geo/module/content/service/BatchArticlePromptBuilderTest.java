@@ -62,6 +62,35 @@ class BatchArticlePromptBuilderTest {
     }
 
     @Test
+    void buildFromTemplateIncludesOnlyNonBlankOfferingFields() {
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+        when(sysDictItemMapper.selectOne(any())).thenReturn(null);
+        BrandOfferingPromptSelector.SelectedOffering offering = new BrandOfferingPromptSelector.SelectedOffering(
+                101L,
+                " 舒缓芳疗 ",
+                List.of("芳疗 SPA", " "),
+                null,
+                " 久坐放松 ",
+                " ",
+                null
+        );
+
+        BatchArticlePromptBuilder.PromptBuildResult result = builder.buildFromTemplate(
+                promptInput(List.of(offering)),
+                template(),
+                version()
+        );
+
+        assertThat(result.userPrompt())
+                .contains("本篇可引用的产品/服务项目/特色业务项")
+                .contains("- 舒缓芳疗（简称：芳疗 SPA）")
+                .contains("适用场景：久坐放松")
+                .doesNotContain("目标人群：")
+                .doesNotContain("介绍：")
+                .doesNotContain("资质描述：");
+    }
+
+    @Test
     void contactBlockUsesRequestedDisclosureMode() {
         Brand brand = new Brand();
         brand.setWebsite("https://example.com");
@@ -77,6 +106,11 @@ class BatchArticlePromptBuilderTest {
     }
 
     private BatchArticlePromptBuilder.PromptBuildInput promptInput() {
+        return promptInput(List.of());
+    }
+
+    private BatchArticlePromptBuilder.PromptBuildInput promptInput(
+            List<BrandOfferingPromptSelector.SelectedOffering> selectedOfferings) {
         Project project = new Project();
         project.setId(9L);
         project.setBrandId(8L);
@@ -110,7 +144,7 @@ class BatchArticlePromptBuilderTest {
                 "customer",
                 TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
                 null,
-                List.<BrandOfferingPromptSelector.SelectedOffering>of()
+                selectedOfferings
         );
     }
 

@@ -161,6 +161,35 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
+    void generateAddsOnlyNonBlankOfferingFieldsToPrompt() throws Exception {
+        mockInsertId();
+        when(offeringPromptSelector.select(any(), any(), any(), any(), any()))
+                .thenReturn(new BrandOfferingPromptSelector.SelectionResult(List.of(
+                        new BrandOfferingPromptSelector.SelectedOffering(
+                                101L,
+                                "舒缓芳疗",
+                                List.of(),
+                                null,
+                                "久坐放松",
+                                " ",
+                                null
+                        )
+                )));
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        service.generate(request()).get();
+
+        verify(llmInvoker).invoke(promptCaptor.capture(), any(LlmModelConfig.class));
+        String prompt = promptCaptor.getValue();
+        assertTrue(prompt.contains("- 舒缓芳疗"));
+        assertTrue(prompt.contains("适用场景：久坐放松"));
+        assertFalse(prompt.contains("目标人群："));
+        assertFalse(prompt.contains("介绍："));
+        assertFalse(prompt.contains("资质描述："));
+    }
+
+    @Test
     void previewReturnsMarkdownAndDoesNotPersistDraft() throws Exception {
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
 

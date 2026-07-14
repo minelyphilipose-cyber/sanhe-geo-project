@@ -136,9 +136,17 @@ public class ArticleAiDraftService {
         String articleType = normalizeArticleType(req.getArticleType());
         String originalPrompt = req.getPrompt().trim();
         Brand brand = resolveBrand(project.getBrandId());
+        BrandOfferingPromptSelector.SelectionResult selectedOfferings = offeringPromptSelector.select(
+                project.getBrandId(),
+                originalPrompt,
+                originalPrompt,
+                articleType,
+                "manual"
+        );
+        String generationPrompt = promptBuilder.withSelectedOfferings(originalPrompt, selectedOfferings.offerings());
 
         return CompletableFuture.supplyAsync(
-                () -> generateInWorker(project, brand, operator, articleType, originalPrompt,
+                () -> generateInWorker(project, brand, operator, articleType, generationPrompt,
                         req.getModelPlatformCode(), req.getModelId()),
                 articleAiDraftExecutor
         );
