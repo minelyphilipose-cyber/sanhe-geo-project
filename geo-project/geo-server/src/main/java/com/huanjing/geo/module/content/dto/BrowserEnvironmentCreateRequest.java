@@ -8,6 +8,7 @@ public record BrowserEnvironmentCreateRequest(
         String provider,
         @NotBlank String environmentKey,
         @NotBlank String providerProfileId,
-        String name
+        String name,
+        Long localAgentSessionId
 ) {
 }

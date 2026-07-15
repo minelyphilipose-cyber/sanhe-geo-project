@@ -1502,6 +1502,7 @@ const adspowerProfileImportSaving = ref(false)
 const adspowerProfileSearch = ref('')
 const adspowerProfiles = ref<LocalHelperAdspowerProfile[]>([])
 const selectedAdspowerProfileId = ref('')
+const adspowerImportLocalAgentSessionId = ref<number | null>(null)
 const extensionSessions = ref<ExtensionSession[]>([])
 const extensionSessionsLoading = ref(false)
 const adspowerExtensionStatus = ref<LocalHelperExtensionStatus | null>(null)
@@ -2297,10 +2298,15 @@ async function openAdspowerProfileImport() {
 async function loadAdspowerProfiles() {
   adspowerProfilesLoading.value = true
   try {
+    const helperHealth = await getLocalHelperHealth(LOCAL_HELPER_BASE)
+    const helperSessionId = Number(helperHealth.session?.sessionId)
+    adspowerImportLocalAgentSessionId.value = Number.isFinite(helperSessionId) && helperSessionId > 0
+      ? helperSessionId
+      : automationReadiness.value?.localAgent.sessionId || null
     const response = await listLocalHelperAdspowerProfiles(
       {
         helperBase: LOCAL_HELPER_BASE,
-        localAgentSessionId: automationReadiness.value?.localAgent.sessionId || null,
+        localAgentSessionId: adspowerImportLocalAgentSessionId.value,
       },
       {
         page: 1,
@@ -2314,6 +2320,7 @@ async function loadAdspowerProfiles() {
     }
   } catch (error) {
     adspowerProfiles.value = []
+    adspowerImportLocalAgentSessionId.value = null
     ElMessage.error(error instanceof Error ? error.message : '读取本机 AdsPower 环境失败')
   } finally {
     adspowerProfilesLoading.value = false
@@ -2334,6 +2341,10 @@ async function importSelectedAdspowerProfile() {
     ElMessage.warning('请选择要导入的 AdsPower 环境')
     return
   }
+  if (!adspowerImportLocalAgentSessionId.value) {
+    ElMessage.warning('未识别到当前电脑已配对的本地助手，请启动并配对助手后重试')
+    return
+  }
   const target = defaultBrowserEnvironment.value || browserEnvironments.value[0] || null
   const name = profile.name || profile.providerProfileId
   adspowerProfileImportSaving.value = true
@@ -2343,6 +2354,7 @@ async function importSelectedAdspowerProfile() {
         providerProfileId: profile.providerProfileId,
         name,
         status: 'active',
+        localAgentSessionId: adspowerImportLocalAgentSessionId.value,
       })
     } else {
       await createBrowserEnvironment({
@@ -2351,6 +2363,7 @@ async function importSelectedAdspowerProfile() {
         environmentKey: generatedBrowserEnvironmentKey(),
         providerProfileId: profile.providerProfileId,
         name,
+        localAgentSessionId: adspowerImportLocalAgentSessionId.value,
       })
     }
     ElMessage.success('AdsPower 浏览器环境已导入并启用')

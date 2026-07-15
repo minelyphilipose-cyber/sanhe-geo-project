@@ -17,8 +17,10 @@ import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.config.ExtensionProperties;
 import com.huanjing.geo.module.extension.entity.ExtensionSession;
+import com.huanjing.geo.module.extension.entity.LocalAgentRuntimeStatus;
 import com.huanjing.geo.module.extension.entity.LocalAgentSession;
 import com.huanjing.geo.module.extension.mapper.ExtensionSessionMapper;
+import com.huanjing.geo.module.extension.mapper.LocalAgentRuntimeStatusMapper;
 import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -36,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -47,6 +50,7 @@ class BrowserEnvironmentServiceTest {
     private BrowserEnvironmentMapper environmentMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
     private LocalAgentSessionMapper localAgentSessionMapper;
+    private LocalAgentRuntimeStatusMapper localAgentRuntimeStatusMapper;
     private ExtensionSessionMapper extensionSessionMapper;
     private ExtensionProperties extensionProperties;
     private SelfMediaLoginVerificationService loginVerificationService;
@@ -60,6 +64,7 @@ class BrowserEnvironmentServiceTest {
         environmentAccountMapper = mock(BrowserEnvironmentAccountMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
         localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
+        localAgentRuntimeStatusMapper = mock(LocalAgentRuntimeStatusMapper.class);
         extensionSessionMapper = mock(ExtensionSessionMapper.class);
         extensionProperties = new ExtensionProperties();
         loginVerificationService = mock(SelfMediaLoginVerificationService.class);
@@ -72,6 +77,7 @@ class BrowserEnvironmentServiceTest {
                 environmentAccountMapper,
                 selfMediaAccountMapper,
                 localAgentSessionMapper,
+                localAgentRuntimeStatusMapper,
                 extensionSessionMapper,
                 mock(BrandAccessService.class),
                 currentUserService,
@@ -648,6 +654,7 @@ class BrowserEnvironmentServiceTest {
         service.deleteEnvironment(20L);
 
         verify(environmentMapper).update(any(), any());
+        verify(environmentMapper).disableLocalAgentBinding(eq(20L), any(LocalDateTime.class));
     }
 
     @Test
@@ -659,7 +666,8 @@ class BrowserEnvironmentServiceTest {
                 BrowserEnvironmentConstants.PROVIDER_ADSPOWER,
                 "geo_b",
                 "profile-1",
-                "环境"
+                "环境",
+                null
         )));
 
         assertTrue(ex.getMessage().contains("AdsPower 浏览器编号或环境代号已被其他启用环境使用"));
@@ -678,7 +686,8 @@ class BrowserEnvironmentServiceTest {
                 BrowserEnvironmentConstants.PROVIDER_ADSPOWER,
                 "geo_b",
                 "profile-1",
-                "环境"
+                "环境",
+                null
         ));
 
         assertEquals(20L, response.id());
@@ -687,6 +696,36 @@ class BrowserEnvironmentServiceTest {
         verify(environmentMapper).restoreDeletedById(20L);
         verify(environmentMapper).updateById(existing);
         verify(environmentMapper, times(0)).insert(any(BrowserEnvironment.class));
+    }
+
+    @Test
+    void createEnvironmentImportedFromLocalHelperBindsStableMachineOwnership() {
+        BrowserEnvironment existing = environment();
+        LocalAgentSession session = localAgentSession();
+        session.setStatus("active");
+        LocalAgentRuntimeStatus runtime = new LocalAgentRuntimeStatus();
+        runtime.setSessionId(40L);
+        runtime.setMachineId("machine-a");
+        runtime.setActiveProfile("prod");
+        runtime.setLastSeenAt(LocalDateTime.now().minusSeconds(5));
+        when(environmentMapper.selectOldestByIdentityIncludingDeleted(1L,
+                BrowserEnvironmentConstants.PROVIDER_ADSPOWER, "geo_b", "profile-1"))
+                .thenReturn(existing);
+        when(localAgentSessionMapper.selectById(40L)).thenReturn(session);
+        when(localAgentRuntimeStatusMapper.selectLatestBySessionId(40L)).thenReturn(runtime);
+
+        service.createEnvironment(new BrowserEnvironmentCreateRequest(
+                1L,
+                BrowserEnvironmentConstants.PROVIDER_ADSPOWER,
+                "geo_b",
+                "profile-1",
+                "环境",
+                40L
+        ));
+
+        verify(environmentMapper).upsertLocalAgentBinding(
+                eq(20L), eq("machine-a"), eq("prod"), eq(40L), eq(99L),
+                eq(runtime.getLastSeenAt()), any(LocalDateTime.class));
     }
 
     @Test
@@ -717,6 +756,7 @@ class BrowserEnvironmentServiceTest {
                 "profile-2",
                 "环境",
                 BrowserEnvironmentConstants.ENV_STATUS_ACTIVE,
+                null,
                 null,
                 null
         )));

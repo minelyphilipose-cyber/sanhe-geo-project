@@ -352,6 +352,73 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                                                                        @Param("platforms") Set<String> platforms);
 
     @Select("""
+            <script>
+            SELECT schedule.*
+            FROM self_media_publish_schedule schedule
+            JOIN browser_environment_agent_binding agent_binding
+              ON agent_binding.browser_environment_id = schedule.browser_environment_id
+             AND agent_binding.status = 'active'
+            JOIN local_agent_runtime_status helper_runtime
+              ON helper_runtime.machine_id = agent_binding.machine_id
+             AND helper_runtime.active_profile = agent_binding.active_profile
+             AND helper_runtime.session_id = #{localAgentSessionId}
+            WHERE schedule.queue_kind = #{queueKind}
+              <if test="platform != null and platform != ''">
+                AND schedule.platform = #{platform}
+              </if>
+              <if test="platforms != null and platforms.size() > 0">
+                AND schedule.platform IN
+                <foreach collection="platforms" item="allowedPlatform" open="(" separator="," close=")">
+                  #{allowedPlatform}
+                </foreach>
+              </if>
+              AND schedule.status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND (
+                (#{queueKind} != 'publish_result_check'
+                  AND (schedule.next_attempt_at IS NULL OR schedule.next_attempt_at &lt;= #{now}))
+                OR (#{queueKind} = 'publish_result_check' AND (
+                  schedule.next_attempt_at &lt;= #{now}
+                  OR (schedule.next_attempt_at IS NULL
+                    AND schedule.status IN ('publish_due', 'published_url_pending', 'publish_unknown'))
+                  OR (schedule.next_attempt_at IS NULL
+                    AND schedule.status = 'scheduled'
+                    AND COALESCE(schedule.platform_scheduled_at, schedule.planned_publish_at) &lt;= #{now})
+                ))
+              )
+              AND (schedule.locked_until IS NULL OR schedule.locked_until &lt; #{now})
+            ORDER BY schedule.queue_priority ASC,
+                     COALESCE(schedule.next_attempt_at, schedule.platform_scheduled_at, schedule.planned_publish_at),
+                     schedule.id ASC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<SelfMediaPublishSchedule> selectDueQueueCandidatesForLocalAgent(
+            @Param("queueKind") String queueKind,
+            @Param("statuses") List<String> statuses,
+            @Param("now") LocalDateTime now,
+            @Param("limit") int limit,
+            @Param("localAgentSessionId") Long localAgentSessionId,
+            @Param("platform") String platform,
+            @Param("platforms") Set<String> platforms);
+
+    @Select("""
+            SELECT COUNT(1) > 0
+            FROM browser_environment_agent_binding agent_binding
+            JOIN local_agent_runtime_status helper_runtime
+              ON helper_runtime.machine_id = agent_binding.machine_id
+             AND helper_runtime.active_profile = agent_binding.active_profile
+             AND helper_runtime.session_id = #{localAgentSessionId}
+            WHERE agent_binding.browser_environment_id = #{browserEnvironmentId}
+              AND agent_binding.status = 'active'
+            """)
+    boolean isBrowserEnvironmentOwnedByLocalAgent(
+            @Param("browserEnvironmentId") Long browserEnvironmentId,
+            @Param("localAgentSessionId") Long localAgentSessionId);
+
+    @Select("""
             SELECT *
             FROM self_media_publish_schedule
             WHERE distribution_task_id = #{distributionTaskId}

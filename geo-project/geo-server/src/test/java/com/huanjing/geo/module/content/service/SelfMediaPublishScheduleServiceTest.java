@@ -44,6 +44,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -129,6 +131,7 @@ class SelfMediaPublishScheduleServiceTest {
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 0, 100));
         brandAccessService = mock(BrandAccessService.class);
         transactionManager = mock(PlatformTransactionManager.class);
+        when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
         sysUserMapper = mock(SysUserMapper.class);
         localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
         when(localAgentSessionMapper.countOnlineSessionsByOperator(anyLong(), any(), any())).thenReturn(1L);
@@ -1464,6 +1467,88 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("DISTRIBUTION_QUOTA_EXHAUSTED", claimed.getFailureCode());
         verify(scheduleMapper).updateById(claimed);
         verify(environmentLockService).release(104L);
+    }
+
+    @Test
+    void claimNextTaskForSignedLocalAgentUsesEnvironmentOwnershipInsteadOfCreatedBy() {
+        stubCurrentTimeInsideBusinessWindow();
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(140L);
+        candidate.setCreatedBy(3L);
+        candidate.setPlatform("toutiao");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        SelfMediaPublishSchedule claimed = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        claimed.setId(140L);
+        claimed.setCreatedBy(3L);
+        claimed.setPlatform("toutiao");
+        claimed.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        when(scheduleMapper.selectDueQueueCandidatesForLocalAgent(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(50L),
+                eq("toutiao"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
+        )).thenReturn(List.of(candidate));
+        when(scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(15L, 50L)).thenReturn(true);
+        when(environmentLockService.tryAcquire(eq(15L), eq(140L), any(), any())).thenReturn(true);
+        when(scheduleMapper.claimQueueSchedule(
+                eq(140L),
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                eq(SelfMediaPublishScheduleConstants.STATUS_FILLING),
+                any(),
+                any(),
+                eq(13L),
+                any()
+        )).thenReturn(1);
+        when(scheduleMapper.selectById(140L)).thenReturn(claimed);
+        when(accountMapper.selectById(20L)).thenReturn(account());
+        DistributionTask task = new DistributionTask();
+        task.setId(240L);
+        when(contentDistributionService.distributeToAsOperator(eq(10L), any(), eq(13L))).thenReturn(task);
+
+        var response = service.claimNextTaskForLocalAgent(13L, 50L, "toutiao", 3);
+
+        assertNotNull(response);
+        assertEquals(140L, response.schedule().getId());
+        verify(scheduleMapper, never()).selectDueQueueCandidatesForOperator(
+                anyString(), anyList(), any(), anyInt(), anyLong(), any(), any());
+        ArgumentCaptor<TransactionDefinition> definitionCaptor = ArgumentCaptor.forClass(TransactionDefinition.class);
+        verify(transactionManager).getTransaction(definitionCaptor.capture());
+        assertEquals(TransactionDefinition.PROPAGATION_REQUIRES_NEW,
+                definitionCaptor.getValue().getPropagationBehavior());
+        assertEquals(TransactionDefinition.ISOLATION_READ_COMMITTED,
+                definitionCaptor.getValue().getIsolationLevel());
+        assertEquals(3, definitionCaptor.getValue().getTimeout());
+    }
+
+    @Test
+    void claimNextTaskForSignedLocalAgentRejectsEnvironmentOwnedByAnotherHelper() {
+        stubCurrentTimeInsideBusinessWindow();
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(141L);
+        candidate.setCreatedBy(3L);
+        candidate.setPlatform("toutiao");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        when(scheduleMapper.selectDueQueueCandidatesForLocalAgent(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(51L),
+                eq("toutiao"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
+        )).thenReturn(List.of(candidate));
+        when(scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(15L, 51L)).thenReturn(false);
+
+        var response = service.claimNextTaskForLocalAgent(13L, 51L, "toutiao", 3);
+
+        assertNull(response);
+        verify(environmentLockService, never()).tryAcquire(anyLong(), anyLong(), any(), any());
+        verify(scheduleMapper, never()).claimQueueSchedule(
+                anyLong(), anyString(), anyList(), anyString(), any(), any(), any(), any());
     }
 
     @Test

@@ -25,8 +25,10 @@ import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.dto.ExtensionRuntimeConfigResponse;
 import com.huanjing.geo.module.extension.config.ExtensionProperties;
 import com.huanjing.geo.module.extension.entity.ExtensionSession;
+import com.huanjing.geo.module.extension.entity.LocalAgentRuntimeStatus;
 import com.huanjing.geo.module.extension.entity.LocalAgentSession;
 import com.huanjing.geo.module.extension.mapper.ExtensionSessionMapper;
+import com.huanjing.geo.module.extension.mapper.LocalAgentRuntimeStatusMapper;
 import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.extension.service.SemverComparator;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -55,6 +57,7 @@ public class BrowserEnvironmentService {
     private final BrowserEnvironmentAccountMapper environmentAccountMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final LocalAgentSessionMapper localAgentSessionMapper;
+    private final LocalAgentRuntimeStatusMapper localAgentRuntimeStatusMapper;
     private final ExtensionSessionMapper extensionSessionMapper;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
@@ -315,6 +318,7 @@ public class BrowserEnvironmentService {
             existing.setUpdatedBy(operator.getId());
             existing.setUpdatedAt(now);
             environmentMapper.updateById(existing);
+            bindEnvironmentToLocalAgent(existing.getId(), request.localAgentSessionId(), operator, now);
             return BrowserEnvironmentVO.from(existing);
         }
         BrowserEnvironment row = new BrowserEnvironment();
@@ -333,6 +337,7 @@ public class BrowserEnvironmentService {
         } catch (DuplicateKeyException ex) {
             throw duplicateEnvironmentException();
         }
+        bindEnvironmentToLocalAgent(row.getId(), request.localAgentSessionId(), operator, now);
         return BrowserEnvironmentVO.from(row);
     }
 
@@ -363,7 +368,40 @@ public class BrowserEnvironmentService {
         } catch (DuplicateKeyException ex) {
             throw duplicateEnvironmentException();
         }
+        bindEnvironmentToLocalAgent(row.getId(), request.localAgentSessionId(), operator, row.getUpdatedAt());
         return BrowserEnvironmentVO.from(row);
+    }
+
+    private void bindEnvironmentToLocalAgent(Long browserEnvironmentId,
+                                             Long localAgentSessionId,
+                                             SysUser operator,
+                                             LocalDateTime now) {
+        if (browserEnvironmentId == null || localAgentSessionId == null) {
+            return;
+        }
+        LocalAgentSession session = localAgentSessionMapper.selectById(localAgentSessionId);
+        if (session == null
+                || !"active".equalsIgnoreCase(session.getStatus())
+                || !Objects.equals(session.getOperatorId(), operator.getId())
+                || session.getExpiresAt() == null
+                || !session.getExpiresAt().isAfter(now)) {
+            throw new BizException(400, "本地助手会话无效或不属于当前操作员");
+        }
+        LocalAgentRuntimeStatus runtime = localAgentRuntimeStatusMapper.selectLatestBySessionId(localAgentSessionId);
+        if (runtime == null
+                || !StringUtils.hasText(runtime.getMachineId())
+                || !StringUtils.hasText(runtime.getActiveProfile())) {
+            throw new BizException(400, "本地助手尚未上报稳定的机器运行标识，请启动助手后重试");
+        }
+        environmentMapper.upsertLocalAgentBinding(
+                browserEnvironmentId,
+                runtime.getMachineId().trim(),
+                runtime.getActiveProfile().trim(),
+                session.getId(),
+                operator.getId(),
+                runtime.getLastSeenAt(),
+                now
+        );
     }
 
     @Transactional
@@ -379,6 +417,7 @@ public class BrowserEnvironmentService {
                 .set(BrowserEnvironment::getUpdatedBy, operator.getId())
                 .set(BrowserEnvironment::getUpdatedAt, now)
                 .set(BrowserEnvironment::getDeletedAt, now));
+        environmentMapper.disableLocalAgentBinding(id, now);
     }
 
     public List<BrowserEnvironmentAccountVO> listEnvironmentAccounts(Long brandId, String platform) {

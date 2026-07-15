@@ -5,6 +5,7 @@ public record BrowserEnvironmentUpdateRequest(
         String name,
         String status,
         String lastErrorCode,
-        String lastErrorMessage
+        String lastErrorMessage,
+        Long localAgentSessionId
 ) {
 }

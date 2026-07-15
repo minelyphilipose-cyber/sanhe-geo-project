@@ -108,6 +108,7 @@ export interface BrowserEnvironmentCreatePayload {
   environmentKey: string
   providerProfileId: string
   name?: string | null
+  localAgentSessionId?: number | null
 }
 
 export interface BrowserEnvironmentUpdatePayload {
@@ -116,6 +117,7 @@ export interface BrowserEnvironmentUpdatePayload {
   status?: string | null
   lastErrorCode?: string | null
   lastErrorMessage?: string | null
+  localAgentSessionId?: number | null
 }
 
 export interface BrowserEnvironmentAccountCreatePayload {

@@ -1328,7 +1328,6 @@ public class SelfMediaPublishScheduleService {
         return claimNextTaskForLocalAgent(operatorId, null, platform, lockMinutes);
     }
 
-    @Transactional(noRollbackFor = BizException.class)
     public ClaimedScheduleTask claimNextTaskForLocalAgent(Long operatorId, Long localAgentSessionId, String platform, int lockMinutes) {
         lastLocalAgentClaimBlock.remove();
         if (operatorId == null || operatorId <= 0) {
@@ -1393,7 +1392,6 @@ public class SelfMediaPublishScheduleService {
         return claimNextPublishCheckForLocalAgent(operatorId, null, platform, lockMinutes);
     }
 
-    @Transactional
     public SelfMediaPublishScheduleVO claimNextPublishCheckForLocalAgent(Long operatorId, Long localAgentSessionId, String platform, int lockMinutes) {
         lastLocalAgentClaimBlock.remove();
         if (operatorId == null || operatorId <= 0) {
@@ -1652,6 +1650,7 @@ public class SelfMediaPublishScheduleService {
                 expectedStatuses,
                 now,
                 operatorId,
+                localAgentSessionId,
                 platform,
                 normalizedAllowedPlatforms
         );
@@ -1674,30 +1673,85 @@ public class SelfMediaPublishScheduleService {
             if (applyLocalAgentClaimGate(queueKind, expectedStatuses, targetStatus, operatorId, localAgentSessionId, candidate, now)) {
                 continue;
             }
-            boolean environmentLockAcquired = false;
-            if (requiresEnvironmentLock(candidate)) {
-                if (!environmentLockService.tryAcquire(candidate.getBrowserEnvironmentId(),
-                        candidate.getId(), lockedUntil, now)) {
-                    continue;
-                }
-                environmentLockAcquired = true;
-            }
-            int updated = scheduleMapper.claimQueueSchedule(
-                    candidate.getId(),
+            SelfMediaPublishSchedule claimed = claimCandidate(
+                    candidate,
                     queueKind,
                     expectedStatuses,
                     targetStatus,
                     now,
                     lockedUntil,
                     operatorId,
-                    claimRuntimeStage(targetStatus)
+                    localAgentSessionId
             );
-            if (updated > 0) {
-                return scheduleMapper.selectById(candidate.getId());
+            if (claimed != null) {
+                return claimed;
             }
-            if (environmentLockAcquired) {
-                environmentLockService.release(candidate.getId());
+        }
+        return null;
+    }
+
+    private SelfMediaPublishSchedule claimCandidate(SelfMediaPublishSchedule candidate,
+                                                    String queueKind,
+                                                    List<String> expectedStatuses,
+                                                    String targetStatus,
+                                                    LocalDateTime now,
+                                                    LocalDateTime lockedUntil,
+                                                    Long operatorId,
+                                                    Long localAgentSessionId) {
+        if (localAgentSessionId == null) {
+            return claimCandidateAtomically(candidate, queueKind, expectedStatuses, targetStatus,
+                    now, lockedUntil, operatorId, null);
+        }
+        return executeInLocalAgentClaimTransaction(status -> claimCandidateAtomically(
+                candidate,
+                queueKind,
+                expectedStatuses,
+                targetStatus,
+                now,
+                lockedUntil,
+                operatorId,
+                localAgentSessionId
+        ));
+    }
+
+    private SelfMediaPublishSchedule claimCandidateAtomically(SelfMediaPublishSchedule candidate,
+                                                               String queueKind,
+                                                               List<String> expectedStatuses,
+                                                               String targetStatus,
+                                                               LocalDateTime now,
+                                                               LocalDateTime lockedUntil,
+                                                               Long operatorId,
+                                                               Long localAgentSessionId) {
+        if (localAgentSessionId != null) {
+            if (candidate.getBrowserEnvironmentId() == null
+                    || !scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(
+                    candidate.getBrowserEnvironmentId(), localAgentSessionId)) {
+                return null;
             }
+        }
+        boolean environmentLockAcquired = false;
+        if (requiresEnvironmentLock(candidate)) {
+            if (!environmentLockService.tryAcquire(candidate.getBrowserEnvironmentId(),
+                    candidate.getId(), lockedUntil, now)) {
+                return null;
+            }
+            environmentLockAcquired = true;
+        }
+        int updated = scheduleMapper.claimQueueSchedule(
+                candidate.getId(),
+                queueKind,
+                expectedStatuses,
+                targetStatus,
+                now,
+                lockedUntil,
+                operatorId,
+                claimRuntimeStage(targetStatus)
+        );
+        if (updated > 0) {
+            return scheduleMapper.selectById(candidate.getId());
+        }
+        if (environmentLockAcquired) {
+            environmentLockService.release(candidate.getId());
         }
         return null;
     }
@@ -1968,6 +2022,7 @@ public class SelfMediaPublishScheduleService {
                                                                     List<String> expectedStatuses,
                                                                     LocalDateTime now,
                                                                     Long operatorId,
+                                                                    Long localAgentSessionId,
                                                                     String platform,
                                                                     Set<String> allowedPlatforms) {
         if (operatorId == null) {
@@ -1979,6 +2034,17 @@ public class SelfMediaPublishScheduleService {
                     expectedStatuses,
                     now,
                     DEFAULT_CLAIM_LIMIT,
+                    allowedPlatforms
+            );
+        }
+        if (localAgentSessionId != null) {
+            return scheduleMapper.selectDueQueueCandidatesForLocalAgent(
+                    queueKind,
+                    expectedStatuses,
+                    now,
+                    DEFAULT_CLAIM_LIMIT,
+                    localAgentSessionId,
+                    platform,
                     allowedPlatforms
             );
         }
@@ -4210,6 +4276,14 @@ public class SelfMediaPublishScheduleService {
     private <T> T executeInShortTransaction(TransactionCallback<T> callback) {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return tx.execute(callback);
+    }
+
+    private <T> T executeInLocalAgentClaimTransaction(TransactionCallback<T> callback) {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        tx.setTimeout(3);
         return tx.execute(callback);
     }
 
