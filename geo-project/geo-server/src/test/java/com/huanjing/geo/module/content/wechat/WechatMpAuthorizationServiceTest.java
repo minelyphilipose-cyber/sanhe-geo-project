@@ -111,6 +111,42 @@ class WechatMpAuthorizationServiceTest {
     }
 
     @Test
+    void reauthorizationUsesLatestQueryScopesAndClearsPreviousPermissionError() {
+        String latestScopes = """
+                [{"funcscope_category":{"id":1}},{"funcscope_category":{"id":7}},{"funcscope_category":{"id":11}}]
+                """;
+        String staleScopes = """
+                [{"funcscope_category":{"id":7}},{"funcscope_category":{"id":11}}]
+                """;
+        SelfMediaAccount existing = new SelfMediaAccount();
+        existing.setId(99L);
+        existing.setBrandId(7L);
+        existing.setPlatform("wechat_mp");
+        existing.setPlatformAccountId("wx-authorizer");
+        existing.setStatus("disabled");
+        existing.setLastAuthError("wechat permission missing: [1]");
+        when(accountMapper.selectByPlatformAccountIncludingDeleted("wechat_mp", "wx-authorizer"))
+                .thenReturn(existing);
+        when(openPlatformClient.queryAuth("component-token", "component-appid", "new-auth-code"))
+                .thenReturn(new WechatOpenPlatformClient.QueryAuthResult(
+                        "wx-authorizer",
+                        "access-token",
+                        "refresh-token-2",
+                        7200,
+                        latestScopes
+                ));
+        authorizerInfo(staleScopes);
+        when(funcInfoValidator.hasDraftPermissions(latestScopes)).thenReturn(true);
+
+        SelfMediaAccount account = service.saveOrUpdateAuthorization("component-appid", "new-auth-code");
+
+        assertThat(account.getScopeJson()).isEqualTo(latestScopes);
+        assertThat(account.getStatus()).isEqualTo("active");
+        assertThat(account.getLastAuthError()).isNull();
+        verify(accountMapper).updateById(account);
+    }
+
+    @Test
     void saveOrUpdateAuthorizationRestoresDeletedAuthorizerForBrand() {
         SelfMediaAccount existing = new SelfMediaAccount();
         existing.setId(99L);

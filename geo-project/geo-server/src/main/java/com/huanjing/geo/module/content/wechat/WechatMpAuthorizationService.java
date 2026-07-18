@@ -109,9 +109,9 @@ public class WechatMpAuthorizationService {
         account.setPlatformAccountId(queryAuth.authorizerAppid());
         account.setRefreshTokenCipher(cipherService.encryptForStorage(queryAuth.authorizerRefreshToken()));
         account.setCredentialKeyVersion("v1");
-        String funcInfo = StringUtils.hasText(info.funcInfoJson()) && !"null".equals(info.funcInfoJson())
-                ? info.funcInfoJson()
-                : queryAuth.funcInfoJson();
+        String funcInfo = StringUtils.hasText(queryAuth.funcInfoJson()) && !"null".equals(queryAuth.funcInfoJson())
+                ? queryAuth.funcInfoJson()
+                : info.funcInfoJson();
         account.setScopeJson(funcInfo);
         account.setAvatarUrl(info.headImg());
         account.setQrcodeUrl(info.qrcodeUrl());

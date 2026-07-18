@@ -10,7 +10,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
@@ -45,6 +47,36 @@ class SelfMediaAccountMapperIT {
             assertNotNull(loaded.getExtraJson());
             assertTrue(loaded.getScopeJson().contains("draft"));
             assertTrue(loaded.getExtraJson().contains("999"));
+        } finally {
+            mapper.delete(new LambdaQueryWrapper<SelfMediaAccount>()
+                    .eq(SelfMediaAccount::getPlatform, "wechat_mp")
+                    .eq(SelfMediaAccount::getPlatformAccountId, platformAccountId));
+        }
+    }
+
+    @Test
+    void updateByIdClearsPreviousAuthorizationError() {
+        Long brandId = resolveBrandId();
+        String platformAccountId = "test-reauth-" + System.currentTimeMillis();
+
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setBrandId(brandId);
+        account.setPlatform("wechat_mp");
+        account.setPlatformAccountId(platformAccountId);
+        account.setAccountName("Reauthorization IT");
+        account.setStatus("disabled");
+        account.setLastAuthError("wechat permission missing: [1]");
+
+        try {
+            mapper.insert(account);
+            account.setStatus("active");
+            account.setLastAuthError(null);
+            mapper.updateById(account);
+
+            SelfMediaAccount loaded = mapper.selectById(account.getId());
+            assertNotNull(loaded);
+            assertEquals("active", loaded.getStatus());
+            assertNull(loaded.getLastAuthError());
         } finally {
             mapper.delete(new LambdaQueryWrapper<SelfMediaAccount>()
                     .eq(SelfMediaAccount::getPlatform, "wechat_mp")

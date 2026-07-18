@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Slf4j
@@ -31,7 +32,7 @@ public class WechatFuncInfoValidator {
     }
 
     public Set<Integer> missingRequired(String funcInfoJson) {
-        return missingRequired(funcInfoJson, properties.getRequiredDraftFuncScopes());
+        return missingRequired(funcInfoJson, properties.getRequiredDraftFuncScopes(), false);
     }
 
     public boolean hasMenuPermission(String funcInfoJson) {
@@ -39,14 +40,12 @@ public class WechatFuncInfoValidator {
     }
 
     public Set<Integer> missingMenuRequired(String funcInfoJson) {
-        return missingRequired(funcInfoJson, properties.getRequiredMenuFuncScopes());
+        return missingRequired(funcInfoJson, properties.getRequiredMenuFuncScopes(), true);
     }
 
-    private Set<Integer> missingRequired(String funcInfoJson, Set<Integer> requiredScopes) {
-        return missingRequired(funcInfoJson, new java.util.ArrayList<>(requiredScopes));
-    }
-
-    private Set<Integer> missingRequired(String funcInfoJson, java.util.List<Integer> requiredScopes) {
+    private Set<Integer> missingRequired(String funcInfoJson,
+                                         List<Integer> requiredScopes,
+                                         boolean confirmationRequired) {
         Set<Integer> actual = new HashSet<>();
         Set<Integer> required = new HashSet<>(requiredScopes);
         if (!StringUtils.hasText(funcInfoJson)) {
@@ -57,7 +56,7 @@ public class WechatFuncInfoValidator {
             if (root.isArray()) {
                 for (JsonNode item : root) {
                     int id = item.path("funcscope_category").path("id").asInt(-1);
-                    if (id > 0 && isConfirmed(item.path("confirm_info"))) {
+                    if (id > 0 && (!confirmationRequired || isConfirmed(item.path("confirm_info")))) {
                         actual.add(id);
                     }
                 }

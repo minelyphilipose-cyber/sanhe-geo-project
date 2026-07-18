@@ -49,6 +49,23 @@ class WechatFuncInfoValidatorTest {
     }
 
     @Test
+    void draftPermissionAcceptsReturnedScopeThatHasSeparateConfirmationState() {
+        WechatFuncInfoValidator validator = validator(true, List.of(1, 7, 11));
+        String funcInfo = """
+                [
+                  {"confirm_info":{"can_confirm":1,"need_confirm":1,"already_confirm":0},"funcscope_category":{"id":1}},
+                  {"confirm_info":{"can_confirm":1,"need_confirm":1,"already_confirm":0},"funcscope_category":{"id":2}},
+                  {"funcscope_category":{"id":7}},
+                  {"confirm_info":{"can_confirm":0,"need_confirm":0,"already_confirm":0},"funcscope_category":{"id":11}},
+                  {"funcscope_category":{"id":15}}
+                ]
+                """;
+
+        assertThat(validator.hasDraftPermissions(funcInfo)).isTrue();
+        assertThat(validator.missingRequired(funcInfo)).isEmpty();
+    }
+
+    @Test
     void menuPermissionRejectsScopeThatStillNeedsConfirmation() {
         WechatFuncInfoValidator validator = menuValidator();
         String funcInfo = """
