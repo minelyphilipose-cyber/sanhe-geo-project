@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
+import com.huanjing.geo.module.content.dto.LocalAgentClaimDiagnosticRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -359,122 +360,47 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                                                                        @Param("platform") String platform,
                                                                        @Param("platforms") Set<String> platforms);
 
-    @Select("""
-            <script>
-            SELECT schedule.*
-            FROM self_media_publish_schedule schedule
-            JOIN browser_environment environment
-              ON environment.id = schedule.browser_environment_id
-             AND environment.brand_id = schedule.brand_id
-            JOIN browser_environment_agent_binding agent_binding
-              ON agent_binding.browser_environment_id = schedule.browser_environment_id
-             AND agent_binding.status = 'active'
-            JOIN local_agent_runtime_status helper_runtime
-              ON helper_runtime.machine_id = agent_binding.machine_id
-             AND helper_runtime.active_profile = agent_binding.active_profile
-             AND helper_runtime.session_id = #{localAgentSessionId}
-            JOIN local_agent_session helper_session
-              ON helper_session.id = helper_runtime.session_id
-             AND helper_session.brand_id = schedule.brand_id
-             AND helper_session.operator_id = helper_runtime.operator_id
-             AND helper_session.status = 'active'
-            WHERE schedule.queue_kind = #{queueKind}
-              <if test="platform != null and platform != ''">
-                AND schedule.platform = #{platform}
-              </if>
-              <if test="platforms != null and platforms.size() > 0">
-                AND schedule.platform IN
-                <foreach collection="platforms" item="allowedPlatform" open="(" separator="," close=")">
-                  #{allowedPlatform}
-                </foreach>
-              </if>
-              AND schedule.status IN
-              <foreach collection="statuses" item="status" open="(" separator="," close=")">
-                #{status}
-              </foreach>
-              AND (
-                (#{queueKind} != 'publish_result_check'
-                  AND (schedule.next_attempt_at IS NULL OR schedule.next_attempt_at &lt;= #{now}))
-                OR (#{queueKind} = 'publish_result_check' AND (
-                  schedule.next_attempt_at &lt;= #{now}
-                  OR (schedule.next_attempt_at IS NULL
-                    AND schedule.status IN ('publish_due', 'published_url_pending', 'publish_unknown'))
-                  OR (schedule.next_attempt_at IS NULL
-                    AND schedule.status = 'scheduled'
-                    AND COALESCE(schedule.platform_scheduled_at, schedule.planned_publish_at) &lt;= #{now})
-                ))
-              )
-              AND (schedule.locked_until IS NULL OR schedule.locked_until &lt; #{now})
-            ORDER BY schedule.queue_priority ASC,
-                     COALESCE(schedule.next_attempt_at, schedule.platform_scheduled_at, schedule.planned_publish_at),
-                     schedule.id ASC
-            LIMIT #{limit}
-            </script>
-            """)
     List<SelfMediaPublishSchedule> selectDueQueueCandidatesForLocalAgent(
             @Param("queueKind") String queueKind,
             @Param("statuses") List<String> statuses,
             @Param("now") LocalDateTime now,
             @Param("limit") int limit,
             @Param("localAgentSessionId") Long localAgentSessionId,
+            @Param("operatorId") Long operatorId,
+            @Param("accessibleBrandIds") List<Long> accessibleBrandIds,
             @Param("platform") String platform,
             @Param("platforms") Set<String> platforms);
 
-    @Select("""
-            SELECT COUNT(1) > 0
-            FROM browser_environment_agent_binding agent_binding
-            JOIN browser_environment environment
-              ON environment.id = agent_binding.browser_environment_id
-            JOIN local_agent_runtime_status helper_runtime
-              ON helper_runtime.machine_id = agent_binding.machine_id
-             AND helper_runtime.active_profile = agent_binding.active_profile
-             AND helper_runtime.session_id = #{localAgentSessionId}
-            JOIN local_agent_session helper_session
-              ON helper_session.id = helper_runtime.session_id
-             AND helper_session.brand_id = environment.brand_id
-             AND helper_session.operator_id = #{operatorId}
-             AND helper_session.status = 'active'
-            WHERE agent_binding.browser_environment_id = #{browserEnvironmentId}
-              AND environment.brand_id = #{brandId}
-              AND agent_binding.status = 'active'
-            """)
     boolean isBrowserEnvironmentOwnedByLocalAgent(
             @Param("browserEnvironmentId") Long browserEnvironmentId,
             @Param("localAgentSessionId") Long localAgentSessionId,
             @Param("brandId") Long brandId,
-            @Param("operatorId") Long operatorId);
+            @Param("operatorId") Long operatorId,
+            @Param("now") LocalDateTime now);
 
-    @Select("""
-            <script>
-            SELECT COUNT(DISTINCT schedule.id)
-            FROM self_media_publish_schedule schedule
-            JOIN browser_environment environment
-              ON environment.id = schedule.browser_environment_id
-             AND environment.brand_id = schedule.brand_id
-            JOIN browser_environment_agent_binding agent_binding
-              ON agent_binding.browser_environment_id = environment.id
-             AND agent_binding.status = 'active'
-            JOIN local_agent_runtime_status helper_runtime
-              ON helper_runtime.machine_id = agent_binding.machine_id
-             AND helper_runtime.active_profile = agent_binding.active_profile
-             AND helper_runtime.session_id = #{localAgentSessionId}
-            JOIN local_agent_session helper_session
-              ON helper_session.id = helper_runtime.session_id
-             AND helper_session.brand_id = schedule.brand_id
-             AND helper_session.operator_id = helper_runtime.operator_id
-             AND helper_session.status = 'active'
-            WHERE schedule.status IN
-              <foreach collection="statuses" item="status" open="(" separator="," close=")">
-                #{status}
-              </foreach>
-              AND schedule.locked_until IS NOT NULL
-              AND schedule.locked_until &gt; #{now}
-            </script>
-            """)
     long countLockedByLocalAgentSessionAndStatuses(
             @Param("localAgentSessionId") Long localAgentSessionId,
+            @Param("operatorId") Long operatorId,
             @Param("statuses") List<String> statuses,
             @Param("now") LocalDateTime now);
+
+    long countDueByLocalAgentSessionAndQueue(
+            @Param("localAgentSessionId") Long localAgentSessionId,
+            @Param("operatorId") Long operatorId,
+            @Param("accessibleBrandIds") List<Long> accessibleBrandIds,
+            @Param("queueKind") String queueKind,
+            @Param("statuses") List<String> statuses,
+            @Param("now") LocalDateTime now);
+
+    LocalAgentClaimDiagnosticRow diagnoseLocalAgentClaim(
+            @Param("queueKind") String queueKind,
+            @Param("statuses") List<String> statuses,
+            @Param("now") LocalDateTime now,
+            @Param("localAgentSessionId") Long localAgentSessionId,
+            @Param("operatorId") Long operatorId,
+            @Param("accessibleBrandIds") List<Long> accessibleBrandIds,
+            @Param("platform") String platform,
+            @Param("platforms") Set<String> platforms);
 
     @Select("""
             <script>
@@ -493,22 +419,13 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                                        @Param("statuses") List<String> statuses,
                                        @Param("now") LocalDateTime now);
 
-    @Select("""
-            SELECT COALESCE(SUM(GREATEST(helper_runtime.capacity, 0)), 0)
-            FROM local_agent_runtime_status helper_runtime
-            JOIN local_agent_session helper_session
-              ON helper_session.id = helper_runtime.session_id
-             AND helper_session.brand_id = #{brandId}
-             AND helper_session.status = 'active'
-             AND helper_session.expires_at > #{now}
-             AND helper_session.last_seen_at IS NOT NULL
-             AND helper_session.last_seen_at >= #{onlineSince}
-            WHERE helper_runtime.last_seen_at IS NOT NULL
-              AND helper_runtime.last_seen_at >= #{onlineSince}
-            """)
     long sumOnlineLocalAgentCapacityByBrand(@Param("brandId") Long brandId,
-                                            @Param("now") LocalDateTime now,
-                                            @Param("onlineSince") LocalDateTime onlineSince);
+                                             @Param("now") LocalDateTime now,
+                                             @Param("onlineSince") LocalDateTime onlineSince);
+
+    long countOnlineLocalAgentsServingBrand(@Param("brandId") Long brandId,
+                                             @Param("now") LocalDateTime now,
+                                             @Param("onlineSince") LocalDateTime onlineSince);
 
     @Select("""
             <script>
@@ -952,37 +869,6 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                                     @Param("diagnosticsJson") String diagnosticsJson,
                                     @Param("now") LocalDateTime now);
 
-    @Update("""
-            <script>
-            UPDATE self_media_publish_schedule
-            SET locked_until = #{lockedUntil},
-                updated_at = #{now}
-            WHERE id = #{scheduleId}
-              AND runtime_worker_id = #{runtimeWorkerId}
-              AND status IN
-              <foreach collection="runningStatuses" item="status" open="(" separator="," close=")">
-                #{status}
-              </foreach>
-              AND EXISTS (
-                SELECT 1
-                FROM browser_environment_agent_binding agent_binding
-                JOIN browser_environment environment
-                  ON environment.id = agent_binding.browser_environment_id
-                JOIN local_agent_runtime_status helper_runtime
-                  ON helper_runtime.machine_id = agent_binding.machine_id
-                 AND helper_runtime.active_profile = agent_binding.active_profile
-                 AND helper_runtime.session_id = #{localAgentSessionId}
-                JOIN local_agent_session helper_session
-                  ON helper_session.id = helper_runtime.session_id
-                 AND helper_session.brand_id = environment.brand_id
-                 AND helper_session.operator_id = #{operatorId}
-                 AND helper_session.status = 'active'
-                WHERE agent_binding.browser_environment_id = self_media_publish_schedule.browser_environment_id
-                  AND environment.brand_id = self_media_publish_schedule.brand_id
-                  AND agent_binding.status = 'active'
-              )
-            </script>
-            """)
     int renewLocalAgentLock(@Param("scheduleId") Long scheduleId,
                             @Param("runtimeWorkerId") String runtimeWorkerId,
                             @Param("localAgentSessionId") Long localAgentSessionId,

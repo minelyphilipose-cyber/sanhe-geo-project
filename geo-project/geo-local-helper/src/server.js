@@ -12,6 +12,10 @@ import {
   evaluateDouyinPublishSignals,
   evaluateXiaohongshuPublishSignals,
 } from './publish-check.js'
+import {
+  preferScheduleClaimBlock,
+  schedulePollBlockLogDecision,
+} from './schedule-poll-observability.js'
 
 const CONFIG_PATH = new URL('../config.local.json', import.meta.url)
 const EXAMPLE_CONFIG_PATH = new URL('../config.example.json', import.meta.url)
@@ -59,6 +63,7 @@ const TERMINAL_SCHEDULE_CLAIM_ERROR_CODES = new Set([
 const RUNTIME_TASK_MAX_RECORDS = 200
 const RUNTIME_TASK_TERMINAL_TTL_MS = 7 * 24 * 60 * 60 * 1000
 const SELF_MEDIA_SCHEDULE_PLATFORMS_CACHE_MS = 60_000
+const SCHEDULE_POLL_BLOCK_LOG_INTERVAL_MS = 5 * 60 * 1000
 const EXTENSION_BIND_INTENT_TTL_MS = 2 * 60 * 1000
 const ADSPOWER_BROWSER_SESSION_CACHE_MS = 2 * 60 * 1000
 const ADSPOWER_RATE_LIMIT_RETRY_DELAYS_MS = [800, 1600, 2400]
@@ -85,6 +90,7 @@ let pendingPairing = null
 let schedulePollInFlight = false
 let scheduleHeartbeatInFlight = false
 let lastSchedulePollStatus = null
+let lastSchedulePollBlockLog = { reason: null, at: 0 }
 let lastScheduleHeartbeatStatus = null
 let cachedSelfMediaSchedulePlatforms = null
 let cachedSelfMediaSchedulePlatformsAt = 0
@@ -1574,7 +1580,12 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
   const path = `/api/v1/local-agent/self-media-schedules/claim-next?platform=${encodeURIComponent(platform)}`
   const claim = await signedTrustedBackendRequest(config, path, { method: 'GET' })
   if (!claim?.task || !claim?.launch) {
-    return { ok: true, claimed: false, claimBlockedReason: claim?.claimBlockedReason || 'NO_DUE_TASK' }
+    return {
+      ok: true,
+      claimed: false,
+      claimBlockedReason: claim?.claimBlockedReason || 'NO_DUE_TASK',
+      retryAfterSeconds: Number(claim?.retryAfterSeconds) || null,
+    }
   }
   const taskId = Number(claim.launch.taskId || claim.task.id)
   const existing = tasksById.get(taskId)
@@ -1640,7 +1651,12 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
   const path = `/api/v1/local-agent/self-media-schedules/publish-checks/claim-next?platform=${encodeURIComponent(platform)}`
   const claim = await signedTrustedBackendRequest(config, path, { method: 'GET' })
   if (!claim?.schedule || !claim?.launch) {
-    return { ok: true, claimed: false, claimBlockedReason: claim?.claimBlockedReason || 'NO_DUE_TASK' }
+    return {
+      ok: true,
+      claimed: false,
+      claimBlockedReason: claim?.claimBlockedReason || 'NO_DUE_TASK',
+      retryAfterSeconds: Number(claim?.retryAfterSeconds) || null,
+    }
   }
   const scheduleId = Number(claim.launch.scheduleId || claim.schedule.id)
   const claimAttempt = Number(claim.schedule.attemptCount || 0) || null
@@ -4838,10 +4854,13 @@ function startSchedulePoller(config) {
           at: nowIso(),
           ok: true,
           claimed: Boolean(result?.claimed),
+          claimBlockedReason: result?.claimBlockedReason || null,
+          retryAfterSeconds: Number(result?.retryAfterSeconds) || null,
           platform: result?.platform || null,
           kind: result?.kind || null,
           outcome: result?.outcome || null,
         }
+        maybeLogSchedulePollBlock(result)
         reportLocalAgentRuntimeStatus(config, {
           reason: 'schedule_poll_after',
           probeAdspower: false,
@@ -4921,11 +4940,12 @@ function startLocalAgentRuntimeStatusReporter(config) {
 async function pollSelfMediaSchedules(config) {
   await expireTimedOutPendingScheduleTasks(config)
   if (!hasAvailableScheduleClaimSlot(config)) {
-    return { ok: true, claimed: false, claimBlockedReason: 'LOCAL_HELPER_CAPACITY_FULL' }
+    return { ok: true, claimed: false, claimBlockedReason: 'HELPER_CAPACITY_FULL' }
   }
   const timeoutMs = Number(config.selfMediaSchedulePollStepTimeoutMs || SCHEDULE_POLL_STEP_TIMEOUT_MS)
   const platforms = rotateSchedulePlatforms(await selfMediaSchedulePlatforms(config))
   let lastNoClaimReason = ''
+  let lastRetryAfterSeconds = null
   for (const platform of platforms) {
     const publishCheck = await withTimeout(
       claimAndCheckPublishResult(config, platform),
@@ -4933,16 +4953,49 @@ async function pollSelfMediaSchedules(config) {
       `self-media publish check poll ${platform}`,
     )
     if (publishCheck.claimed) return { ...publishCheck, platform, kind: 'publish_result_check' }
-    lastNoClaimReason = publishCheck.claimBlockedReason || lastNoClaimReason
+    ;({ reason: lastNoClaimReason, retryAfterSeconds: lastRetryAfterSeconds } = preferScheduleClaimBlock(
+      lastNoClaimReason,
+      lastRetryAfterSeconds,
+      publishCheck.claimBlockedReason,
+      publishCheck.retryAfterSeconds,
+    ))
     const launch = await withTimeout(
       claimAndLaunchScheduledTask(config, platform),
       timeoutMs,
       `self-media schedule execution poll ${platform}`,
     )
     if (launch.claimed) return { ...launch, platform, kind: 'schedule_execution' }
-    lastNoClaimReason = launch.claimBlockedReason || lastNoClaimReason
+    ;({ reason: lastNoClaimReason, retryAfterSeconds: lastRetryAfterSeconds } = preferScheduleClaimBlock(
+      lastNoClaimReason,
+      lastRetryAfterSeconds,
+      launch.claimBlockedReason,
+      launch.retryAfterSeconds,
+    ))
   }
-  return { ok: true, claimed: false, claimBlockedReason: lastNoClaimReason || 'NO_DUE_TASK' }
+  return {
+    ok: true,
+    claimed: false,
+    claimBlockedReason: lastNoClaimReason || 'NO_DUE_TASK',
+    retryAfterSeconds: lastRetryAfterSeconds,
+  }
+}
+
+function maybeLogSchedulePollBlock(result) {
+  const now = Date.now()
+  const decision = schedulePollBlockLogDecision(
+    lastSchedulePollBlockLog,
+    result,
+    now,
+    SCHEDULE_POLL_BLOCK_LOG_INTERVAL_MS,
+  )
+  lastSchedulePollBlockLog = decision.state
+  if (!decision.shouldLog) return
+  const reason = decision.state.reason
+  const retryAfterSeconds = Number(result?.retryAfterSeconds) || null
+  console.warn(
+    `GEO self-media schedule claim blocked: ${reason}`
+      + (retryAfterSeconds ? `; retryAfterSeconds=${retryAfterSeconds}` : ''),
+  )
 }
 
 function rotateSchedulePlatforms(platforms) {

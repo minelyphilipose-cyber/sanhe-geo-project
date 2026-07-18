@@ -12,6 +12,10 @@ import java.time.LocalDateTime;
 public class LocalAgentSession {
     @TableId(type = IdType.AUTO)
     private Long id;
+    /**
+     * Optional legacy brand scope. A null value is the normal account-wide helper session and
+     * must still be constrained by the operator's current brand access and environment binding.
+     */
     private Long brandId;
     private Long operatorId;
     private String accessTokenLookupHash;

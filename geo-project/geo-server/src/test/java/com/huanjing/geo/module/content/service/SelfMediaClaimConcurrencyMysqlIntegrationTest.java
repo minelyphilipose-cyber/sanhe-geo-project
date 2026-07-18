@@ -44,15 +44,18 @@ class SelfMediaClaimConcurrencyMysqlIntegrationTest {
             statement.execute("""
                     CREATE TABLE browser_environment (
                       id BIGINT PRIMARY KEY,
-                      brand_id BIGINT NOT NULL
+                      brand_id BIGINT NOT NULL,
+                      status VARCHAR(32) NOT NULL DEFAULT 'active',
+                      deleted_at DATETIME(6) NULL
                     ) ENGINE=InnoDB
                     """);
             statement.execute("""
                     CREATE TABLE local_agent_session (
                       id BIGINT PRIMARY KEY,
-                      brand_id BIGINT NOT NULL,
+                      brand_id BIGINT NULL,
                       operator_id BIGINT NOT NULL,
-                      status VARCHAR(32) NOT NULL
+                      status VARCHAR(32) NOT NULL,
+                      expires_at DATETIME(6) NOT NULL
                     ) ENGINE=InnoDB
                     """);
             statement.execute("""
@@ -74,7 +77,9 @@ class SelfMediaClaimConcurrencyMysqlIntegrationTest {
                       browser_environment_id BIGINT NOT NULL,
                       machine_id VARCHAR(128) NOT NULL,
                       active_profile VARCHAR(128) NOT NULL,
+                      bound_session_id BIGINT NULL,
                       status VARCHAR(32) NOT NULL,
+                      bound_by BIGINT NULL,
                       PRIMARY KEY (browser_environment_id, machine_id, active_profile)
                     ) ENGINE=InnoDB
                     """);
@@ -206,10 +211,14 @@ class SelfMediaClaimConcurrencyMysqlIntegrationTest {
                  AND runtime.session_id = ?
                 JOIN local_agent_session session
                   ON session.id = runtime.session_id
-                 AND session.brand_id = schedule.brand_id
                  AND session.operator_id = runtime.operator_id
                  AND session.status = 'active'
+                 AND session.expires_at > CURRENT_TIMESTAMP(6)
                 WHERE schedule.status IN ('filling', 'filled_verified', 'scheduling', 'checking_publish_result')
+                  AND (session.brand_id IS NULL OR session.brand_id = schedule.brand_id)
+                  AND binding.bound_by = runtime.operator_id
+                  AND environment.status = 'active'
+                  AND environment.deleted_at IS NULL
                   AND schedule.locked_until IS NOT NULL
                   AND schedule.locked_until > CURRENT_TIMESTAMP(6)
                 """)) {
@@ -268,17 +277,22 @@ class SelfMediaClaimConcurrencyMysqlIntegrationTest {
                  AND runtime.session_id = ?
                 JOIN local_agent_session session
                   ON session.id = runtime.session_id
-                 AND session.brand_id = environment.brand_id
                  AND session.operator_id = ?
                  AND session.status = 'active'
+                 AND session.expires_at > CURRENT_TIMESTAMP(6)
                 WHERE binding.browser_environment_id = ?
                   AND environment.brand_id = ?
                   AND binding.status = 'active'
+                  AND binding.bound_by = ?
+                  AND environment.status = 'active'
+                  AND environment.deleted_at IS NULL
+                  AND (session.brand_id IS NULL OR session.brand_id = environment.brand_id)
                 """)) {
             query.setLong(1, sessionId);
             query.setLong(2, operatorId);
             query.setLong(3, environmentId);
             query.setLong(4, brandId);
+            query.setLong(5, operatorId);
             try (ResultSet result = query.executeQuery()) {
                 result.next();
                 return result.getLong(1) > 0;
@@ -295,14 +309,18 @@ class SelfMediaClaimConcurrencyMysqlIntegrationTest {
                                    int capacity) throws Exception {
         try (Connection connection = MYSQL.createConnection("");
              Statement statement = connection.createStatement()) {
-            statement.executeUpdate("INSERT INTO browser_environment VALUES (" + environmentId + ", " + brandId + ")");
-            statement.executeUpdate("INSERT INTO local_agent_session VALUES (" + sessionId + ", " + brandId
-                    + ", " + operatorId + ", 'active')");
+            statement.executeUpdate("INSERT INTO browser_environment (id, brand_id, status) VALUES ("
+                    + environmentId + ", " + brandId + ", 'active')");
+            statement.executeUpdate("INSERT INTO local_agent_session "
+                    + "(id, brand_id, operator_id, status, expires_at) VALUES (" + sessionId + ", NULL, "
+                    + operatorId + ", 'active', DATE_ADD(NOW(6), INTERVAL 1 DAY))");
             statement.executeUpdate("INSERT INTO local_agent_runtime_status VALUES (" + sessionId + ", '"
                     + machineId + "', '" + profile + "', " + sessionId + ", " + operatorId
                     + ", 0, " + capacity + ", NOW(6), NOW(6))");
-            statement.executeUpdate("INSERT INTO browser_environment_agent_binding VALUES (" + environmentId
-                    + ", '" + machineId + "', '" + profile + "', 'active')");
+            statement.executeUpdate("INSERT INTO browser_environment_agent_binding "
+                    + "(browser_environment_id, machine_id, active_profile, bound_session_id, status, bound_by) VALUES ("
+                    + environmentId + ", '" + machineId + "', '" + profile + "', " + sessionId
+                    + ", 'active', " + operatorId + ")");
         }
     }
 

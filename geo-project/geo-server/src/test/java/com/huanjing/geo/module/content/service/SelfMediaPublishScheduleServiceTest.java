@@ -6,6 +6,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
+import com.huanjing.geo.module.content.dto.LocalAgentClaimDiagnosticRow;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
@@ -40,6 +41,7 @@ import com.huanjing.geo.module.extension.mapper.LocalAgentRuntimeStatusMapper;
 import com.huanjing.geo.module.extension.dto.ClaimGateEvaluation;
 import com.huanjing.geo.module.extension.service.SelfMediaClaimGateService;
 import com.huanjing.geo.module.extension.service.SelfMediaGateDiagnosticsWriter;
+import com.huanjing.geo.module.extension.service.LocalAgentExecutionAuthorizationService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -82,6 +84,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 
 class SelfMediaPublishScheduleServiceTest {
     private SelfMediaPublishScheduleMapper scheduleMapper;
@@ -104,6 +107,7 @@ class SelfMediaPublishScheduleServiceTest {
     private SysUserMapper sysUserMapper;
     private LocalAgentSessionMapper localAgentSessionMapper;
     private LocalAgentRuntimeStatusMapper localAgentRuntimeStatusMapper;
+    private LocalAgentExecutionAuthorizationService localAgentExecutionAuthorizationService;
     private BusinessCalendarService businessCalendarService;
     private ThirdPartySubjectRotationService thirdPartySubjectRotationService;
     private SelfMediaPublishScheduleService service;
@@ -141,6 +145,11 @@ class SelfMediaPublishScheduleServiceTest {
         sysUserMapper = mock(SysUserMapper.class);
         localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
         localAgentRuntimeStatusMapper = mock(LocalAgentRuntimeStatusMapper.class);
+        localAgentExecutionAuthorizationService = mock(LocalAgentExecutionAuthorizationService.class);
+        when(localAgentExecutionAuthorizationService.evaluate(anyLong(), anyLong(), anyLong(), anyLong(), any()))
+                .thenReturn(LocalAgentExecutionAuthorizationService.AuthorizationResult.allowed());
+        when(brandAccessService.listAccessibleBrandIds(anyLong(), eq(BrandAccessAction.OPERATE)))
+                .thenReturn(List.of(8L));
         when(localAgentSessionMapper.countOnlineSessionsByOperator(anyLong(), any(), any())).thenReturn(1L);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
         SysUser user = new SysUser();
@@ -171,6 +180,7 @@ class SelfMediaPublishScheduleServiceTest {
                 sysUserMapper,
                 localAgentSessionMapper,
                 localAgentRuntimeStatusMapper,
+                localAgentExecutionAuthorizationService,
                 businessCalendarService,
                 thirdPartySubjectRotationService,
                 mock(ArticleTemplateAllocationService.class),
@@ -1521,11 +1531,12 @@ class SelfMediaPublishScheduleServiceTest {
                 any(),
                 eq(10),
                 eq(50L),
+                eq(13L),
+                eq(List.of(8L)),
                 eq("toutiao"),
                 eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
         )).thenReturn(List.of(candidate));
         stubLocalAgentCapacity(13L, 50L, 1, 0, 0L);
-        when(scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(15L, 50L, 8L, 13L)).thenReturn(true);
         when(environmentLockService.tryAcquire(eq(15L), eq(140L), any(), any())).thenReturn(true);
         when(scheduleMapper.claimQueueSchedule(
                 eq(140L),
@@ -1572,11 +1583,15 @@ class SelfMediaPublishScheduleServiceTest {
                 any(),
                 eq(10),
                 eq(51L),
+                eq(13L),
+                eq(List.of(8L)),
                 eq("toutiao"),
                 eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
         )).thenReturn(List.of(candidate));
         stubLocalAgentCapacity(13L, 51L, 1, 0, 0L);
-        when(scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(15L, 51L, 8L, 13L)).thenReturn(false);
+        when(localAgentExecutionAuthorizationService.evaluate(eq(13L), eq(51L), eq(8L), eq(15L), any()))
+                .thenReturn(LocalAgentExecutionAuthorizationService.AuthorizationResult.denied(
+                        "ENVIRONMENT_NOT_BOUND_TO_THIS_HELPER"));
 
         var response = service.claimNextTaskForLocalAgent(13L, 51L, "toutiao", 3);
 
@@ -1677,7 +1692,7 @@ class SelfMediaPublishScheduleServiceTest {
         candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
         when(scheduleMapper.selectDueQueueCandidatesForLocalAgent(
                 eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
-                anyList(), any(), eq(10), eq(52L), eq("toutiao"), any()
+                anyList(), any(), eq(10), eq(52L), eq(99L), eq(List.of(8L)), eq("toutiao"), any()
         )).thenReturn(List.of(candidate));
         stubLocalAgentCapacity(99L, 52L, 1, 0, 1L);
 
@@ -1687,6 +1702,30 @@ class SelfMediaPublishScheduleServiceTest {
         verify(environmentLockService, never()).tryAcquire(anyLong(), anyLong(), any(), any());
         verify(scheduleMapper, never()).claimQueueSchedule(
                 anyLong(), anyString(), anyList(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
+    void emptyClaimReportsTheExactScopeStageThatFilteredTheTask() {
+        when(scheduleMapper.selectDueQueueCandidatesForLocalAgent(
+                anyString(), anyList(), any(), anyInt(), eq(5L), eq(13L), eq(List.of(8L)), any(), any()))
+                .thenReturn(List.of());
+        when(scheduleMapper.diagnoseLocalAgentClaim(
+                anyString(), anyList(), any(), eq(5L), eq(13L), eq(List.of(8L)), any(), any()))
+                .thenReturn(
+                        diagnostic(0, 0, 0, 0, 0, 0),
+                        diagnostic(1, 0, 0, 0, 0, 0),
+                        diagnostic(1, 1, 0, 0, 0, 0),
+                        diagnostic(1, 1, 1, 0, 0, 0),
+                        diagnostic(1, 1, 1, 1, 0, 0),
+                        diagnostic(1, 1, 1, 1, 1, 0)
+                );
+
+        assertClaimBlockReason("NO_DUE_TASK");
+        assertClaimBlockReason("NO_ACTIVE_ENVIRONMENT");
+        assertClaimBlockReason("ENVIRONMENT_NOT_BOUND_TO_THIS_HELPER");
+        assertClaimBlockReason("ENVIRONMENT_BOUND_TO_ANOTHER_OPERATOR");
+        assertClaimBlockReason("HELPER_OFFLINE");
+        assertClaimBlockReason("ENVIRONMENT_NOT_BOUND_TO_THIS_HELPER");
     }
 
     @Test
@@ -2200,7 +2239,6 @@ class SelfMediaPublishScheduleServiceTest {
         renewed.setLockedUntil(LocalDateTime.now().plusMinutes(3));
         when(scheduleMapper.selectByIdForUpdate(110L)).thenReturn(row);
         when(scheduleMapper.selectById(110L)).thenReturn(renewed);
-        when(scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(15L, 50L, 8L, 99L)).thenReturn(true);
         when(scheduleMapper.renewLocalAgentLock(
                 eq(110L),
                 eq("99"),
@@ -2266,7 +2304,6 @@ class SelfMediaPublishScheduleServiceTest {
         row.setAttemptCount(5);
         row.setLockedUntil(LocalDateTime.now().plusMinutes(1));
         when(scheduleMapper.selectByIdForUpdate(115L)).thenReturn(row);
-        when(scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(15L, 50L, 8L, 99L)).thenReturn(true);
         when(scheduleMapper.renewLocalAgentLock(
                 eq(115L), eq("99"), eq(50L), eq(99L), anyList(), any(), any())).thenReturn(1);
         when(environmentLockService.renew(eq(15L), eq(115L), any(), any())).thenReturn(false);
@@ -2288,7 +2325,9 @@ class SelfMediaPublishScheduleServiceTest {
         row.setAttemptCount(3);
         row.setLockedUntil(LocalDateTime.now().plusMinutes(1));
         when(scheduleMapper.selectByIdForUpdate(112L)).thenReturn(row);
-        when(scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(15L, 51L, 8L, 99L)).thenReturn(false);
+        doThrow(new BizException(70040, "forbidden"))
+                .when(localAgentExecutionAuthorizationService)
+                .requireAuthorized(eq(99L), eq(51L), eq(8L), eq(15L), any());
 
         assertThrows(BizException.class, () -> service.heartbeatLocalAgentSchedule(99L, 51L, 3, 112L, 3));
 
@@ -3336,8 +3375,30 @@ class SelfMediaPublishScheduleServiceTest {
         runtime.setCapacity(capacity);
         runtime.setRunningTaskCount(helperRunning);
         when(localAgentRuntimeStatusMapper.selectLatestBySessionIdForUpdate(sessionId)).thenReturn(runtime);
-        when(scheduleMapper.countLockedByLocalAgentSessionAndStatuses(eq(sessionId), anyList(), any()))
+        when(scheduleMapper.countLockedByLocalAgentSessionAndStatuses(
+                eq(sessionId), eq(operatorId), anyList(), any()))
                 .thenReturn(databaseRunning);
+    }
+
+    private void assertClaimBlockReason(String expected) {
+        assertNull(service.claimNextTaskForLocalAgent(13L, 5L, "toutiao", 3));
+        assertEquals(expected, service.consumeLastLocalAgentClaimBlock().reason());
+    }
+
+    private LocalAgentClaimDiagnosticRow diagnostic(long due,
+                                                    long activeEnvironment,
+                                                    long anyBinding,
+                                                    long operatorBinding,
+                                                    long helperRuntime,
+                                                    long localAgentBinding) {
+        LocalAgentClaimDiagnosticRow row = new LocalAgentClaimDiagnosticRow();
+        row.setDueCount(due);
+        row.setActiveEnvironmentCount(activeEnvironment);
+        row.setAnyBindingCount(anyBinding);
+        row.setOperatorBindingCount(operatorBinding);
+        row.setHelperRuntimeCount(helperRuntime);
+        row.setLocalAgentBindingCount(localAgentBinding);
+        return row;
     }
 
     private LocalDateTime stubFutureBusinessPublishTime() {

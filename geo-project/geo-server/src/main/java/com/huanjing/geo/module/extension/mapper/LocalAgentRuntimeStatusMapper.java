@@ -64,12 +64,24 @@ public interface LocalAgentRuntimeStatusMapper extends BaseMapper<LocalAgentRunt
                                                            @Param("limit") int limit);
 
     @Select("""
-            SELECT lar.*, las.brand_id AS brandId
+            SELECT DISTINCT lar.*, environment.brand_id AS brandId
             FROM local_agent_runtime_status lar
             JOIN local_agent_session las
               ON las.id = lar.session_id
+             AND las.operator_id = lar.operator_id
              AND las.status = 'active'
-            WHERE las.brand_id = #{brandId}
+             AND las.expires_at > CURRENT_TIMESTAMP
+            JOIN browser_environment_agent_binding agent_binding
+              ON agent_binding.machine_id = lar.machine_id
+             AND agent_binding.active_profile = lar.active_profile
+             AND agent_binding.status = 'active'
+             AND agent_binding.bound_by = las.operator_id
+            JOIN browser_environment environment
+              ON environment.id = agent_binding.browser_environment_id
+             AND environment.status = 'active'
+             AND environment.deleted_at IS NULL
+            WHERE environment.brand_id = #{brandId}
+              AND (las.brand_id IS NULL OR las.brand_id = environment.brand_id)
             ORDER BY lar.last_seen_at DESC, lar.updated_at DESC
             LIMIT 1
             """)
@@ -77,16 +89,28 @@ public interface LocalAgentRuntimeStatusMapper extends BaseMapper<LocalAgentRunt
 
     @Select("""
             <script>
-            SELECT lar.*, las.brand_id AS brandId
+            SELECT DISTINCT lar.*, environment.brand_id AS brandId
             FROM local_agent_runtime_status lar
             JOIN local_agent_session las
               ON las.id = lar.session_id
+             AND las.operator_id = lar.operator_id
              AND las.status = 'active'
-            WHERE las.brand_id IN
+             AND las.expires_at > CURRENT_TIMESTAMP
+            JOIN browser_environment_agent_binding agent_binding
+              ON agent_binding.machine_id = lar.machine_id
+             AND agent_binding.active_profile = lar.active_profile
+             AND agent_binding.status = 'active'
+             AND agent_binding.bound_by = las.operator_id
+            JOIN browser_environment environment
+              ON environment.id = agent_binding.browser_environment_id
+             AND environment.status = 'active'
+             AND environment.deleted_at IS NULL
+            WHERE environment.brand_id IN
             <foreach collection="brandIds" item="id" open="(" separator="," close=")">
               #{id}
             </foreach>
-            ORDER BY las.brand_id ASC, lar.last_seen_at DESC, lar.updated_at DESC
+              AND (las.brand_id IS NULL OR las.brand_id = environment.brand_id)
+            ORDER BY environment.brand_id ASC, lar.last_seen_at DESC, lar.updated_at DESC
             </script>
             """)
     List<LocalAgentRuntimeStatus> selectLatestByBrandIds(@Param("brandIds") List<Long> brandIds);

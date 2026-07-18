@@ -14,6 +14,7 @@ import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
+import com.huanjing.geo.module.content.dto.LocalAgentClaimDiagnosticRow;
 import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleManualResultRequest;
@@ -53,6 +54,7 @@ import com.huanjing.geo.module.extension.mapper.LocalAgentRuntimeStatusMapper;
 import com.huanjing.geo.module.extension.mapper.LocalAgentSessionMapper;
 import com.huanjing.geo.module.extension.service.SelfMediaClaimGateService;
 import com.huanjing.geo.module.extension.service.SelfMediaGateDiagnosticsWriter;
+import com.huanjing.geo.module.extension.service.LocalAgentExecutionAuthorizationService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -210,6 +212,7 @@ public class SelfMediaPublishScheduleService {
     private final SysUserMapper sysUserMapper;
     private final LocalAgentSessionMapper localAgentSessionMapper;
     private final LocalAgentRuntimeStatusMapper localAgentRuntimeStatusMapper;
+    private final LocalAgentExecutionAuthorizationService localAgentExecutionAuthorizationService;
     private final BusinessCalendarService businessCalendarService;
     private final ThirdPartySubjectRotationService thirdPartySubjectRotationService;
     private final ArticleTemplateAllocationService templateAllocationService;
@@ -1018,18 +1021,24 @@ public class SelfMediaPublishScheduleService {
         return localAgentSessionMapper.selectRecentActiveSessions(now, 8).stream()
                 .map(session -> {
                     Long operatorId = session.getOperatorId();
-                    Long brandId = session.getBrandId();
                     long runningLoad = scheduleMapper.countLockedByLocalAgentSessionAndStatuses(
                             session.getId(),
+                            operatorId,
                             LOCAL_AGENT_RUNNING_STATUSES,
                             now
                     );
-                    long waitingTasks = brandId == null ? 0 : scheduleMapper.countDueByBrandAndQueue(
-                            brandId,
-                            SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION,
-                            List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING),
-                            now
-                    );
+                    List<Long> accessibleBrandIds = operatorId == null
+                            ? List.of()
+                            : brandAccessService.listAccessibleBrandIds(operatorId, BrandAccessAction.OPERATE);
+                    long waitingTasks = accessibleBrandIds.isEmpty() ? 0
+                            : scheduleMapper.countDueByLocalAgentSessionAndQueue(
+                                    session.getId(),
+                                    operatorId,
+                                    accessibleBrandIds,
+                                    SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION,
+                                    List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING),
+                                    now
+                            );
                     SysUser operator = operatorId == null ? null : sysUserMapper.selectById(operatorId);
                     boolean online = session.getLastSeenAt() != null && !session.getLastSeenAt().isBefore(onlineSince);
                     return SelfMediaAutomationOverviewVO.LocalAgentSessionOverview.builder()
@@ -1345,10 +1354,12 @@ public class SelfMediaPublishScheduleService {
         }
         Set<String> allowedPlatforms = platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION);
         if (allowedPlatforms.isEmpty()) {
+            rememberClaimBlock("PLATFORM_CAPABILITY_DISABLED", null);
             return null;
         }
         String normalizedPlatform = normalizePublishPlatform(platform);
         if (normalizedPlatform != null && !allowedPlatforms.contains(normalizedPlatform)) {
+            rememberClaimBlock("PLATFORM_CAPABILITY_DISABLED", null);
             return null;
         }
         recoverTimedOutLocalAgentSchedules(DEFAULT_CLAIM_LIMIT);
@@ -1406,10 +1417,12 @@ public class SelfMediaPublishScheduleService {
         }
         Set<String> allowedPlatforms = platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION);
         if (allowedPlatforms.isEmpty()) {
+            rememberClaimBlock("PLATFORM_CAPABILITY_DISABLED", null);
             return null;
         }
         String normalizedPlatform = normalizePublishPlatform(platform);
         if (normalizedPlatform != null && !allowedPlatforms.contains(normalizedPlatform)) {
+            rememberClaimBlock("PLATFORM_CAPABILITY_DISABLED", null);
             return null;
         }
         recoverTimedOutLocalAgentSchedules(DEFAULT_CLAIM_LIMIT);
@@ -1784,12 +1797,19 @@ public class SelfMediaPublishScheduleService {
         }
         if (localAgentSessionId != null) {
             if (!hasAvailableLocalAgentCapacity(operatorId, localAgentSessionId, now)) {
+                rememberClaimBlock("HELPER_CAPACITY_FULL", 10);
                 return null;
             }
-            if (candidate.getBrowserEnvironmentId() == null
-                    || !scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(
-                    candidate.getBrowserEnvironmentId(), localAgentSessionId,
-                    candidate.getBrandId(), operatorId)) {
+            LocalAgentExecutionAuthorizationService.AuthorizationResult authorization =
+                    localAgentExecutionAuthorizationService.evaluate(
+                            operatorId,
+                            localAgentSessionId,
+                            candidate.getBrandId(),
+                            candidate.getBrowserEnvironmentId(),
+                            now
+                    );
+            if (!authorization.authorized()) {
+                rememberClaimBlock(authorization.reason(), 30);
                 return null;
             }
         }
@@ -1856,7 +1876,7 @@ public class SelfMediaPublishScheduleService {
         }
         int capacity = Math.max(1, runtime.getCapacity() == null ? 1 : runtime.getCapacity());
         long databaseRunning = scheduleMapper.countLockedByLocalAgentSessionAndStatuses(
-                localAgentSessionId, LOCAL_AGENT_RUNNING_STATUSES, now);
+                localAgentSessionId, operatorId, LOCAL_AGENT_RUNNING_STATUSES, now);
         long helperRunning = Math.max(0,
                 runtime.getRunningTaskCount() == null ? 0 : runtime.getRunningTaskCount());
         return Math.max(databaseRunning, helperRunning) < capacity;
@@ -1927,9 +1947,26 @@ public class SelfMediaPublishScheduleService {
         ));
     }
 
+    private void rememberClaimBlock(String reason, Integer retryAfterSeconds) {
+        if (!StringUtils.hasText(reason)) {
+            return;
+        }
+        lastLocalAgentClaimBlock.set(new LocalAgentClaimBlock(
+                reason,
+                List.of(reason),
+                retryAfterSeconds,
+                null
+        ));
+    }
+
     private String primaryGateReason(ClaimGateEvaluation evaluation) {
-        if (evaluation == null || evaluation.blockedReasons() == null || evaluation.blockedReasons().isEmpty()) {
+        if (evaluation == null) {
             return null;
+        }
+        if (evaluation.blockedReasons() == null || evaluation.blockedReasons().isEmpty()) {
+            return evaluation.blockClaim() || evaluation.markManualRequired()
+                    ? "CLAIM_GATE_BLOCKED"
+                    : null;
         }
         return evaluation.blockedReasons().get(0);
     }
@@ -2157,15 +2194,37 @@ public class SelfMediaPublishScheduleService {
             );
         }
         if (localAgentSessionId != null) {
-            return scheduleMapper.selectDueQueueCandidatesForLocalAgent(
+            List<Long> accessibleBrandIds = brandAccessService.listAccessibleBrandIds(
+                    operatorId, BrandAccessAction.OPERATE);
+            if (accessibleBrandIds == null || accessibleBrandIds.isEmpty()) {
+                rememberClaimBlock("NO_AUTHORIZED_BRAND", null);
+                return List.of();
+            }
+            List<SelfMediaPublishSchedule> candidates = scheduleMapper.selectDueQueueCandidatesForLocalAgent(
                     queueKind,
                     expectedStatuses,
                     now,
                     DEFAULT_CLAIM_LIMIT,
                     localAgentSessionId,
+                    operatorId,
+                    accessibleBrandIds,
                     platform,
                     allowedPlatforms
             );
+            if (candidates == null || candidates.isEmpty()) {
+                rememberClaimBlock(diagnoseEmptyLocalAgentClaim(
+                        queueKind,
+                        expectedStatuses,
+                        now,
+                        localAgentSessionId,
+                        operatorId,
+                        accessibleBrandIds,
+                        platform,
+                        allowedPlatforms
+                ), null);
+                return List.of();
+            }
+            return candidates;
         }
         return scheduleMapper.selectDueQueueCandidatesForOperator(
                 queueKind,
@@ -2176,6 +2235,45 @@ public class SelfMediaPublishScheduleService {
                 platform,
                 allowedPlatforms
         );
+    }
+
+    private String diagnoseEmptyLocalAgentClaim(String queueKind,
+                                                List<String> expectedStatuses,
+                                                LocalDateTime now,
+                                                Long localAgentSessionId,
+                                                Long operatorId,
+                                                List<Long> accessibleBrandIds,
+                                                String platform,
+                                                Set<String> allowedPlatforms) {
+        LocalAgentClaimDiagnosticRow diagnostic = scheduleMapper.diagnoseLocalAgentClaim(
+                queueKind,
+                expectedStatuses,
+                now,
+                localAgentSessionId,
+                operatorId,
+                accessibleBrandIds,
+                platform,
+                allowedPlatforms
+        );
+        if (diagnostic == null || diagnostic.getDueCount() <= 0) {
+            return "NO_DUE_TASK";
+        }
+        if (diagnostic.getActiveEnvironmentCount() <= 0) {
+            return "NO_ACTIVE_ENVIRONMENT";
+        }
+        if (diagnostic.getAnyBindingCount() <= 0) {
+            return "ENVIRONMENT_NOT_BOUND_TO_THIS_HELPER";
+        }
+        if (diagnostic.getOperatorBindingCount() <= 0) {
+            return "ENVIRONMENT_BOUND_TO_ANOTHER_OPERATOR";
+        }
+        if (diagnostic.getHelperRuntimeCount() <= 0) {
+            return "HELPER_OFFLINE";
+        }
+        if (diagnostic.getLocalAgentBindingCount() <= 0) {
+            return "ENVIRONMENT_NOT_BOUND_TO_THIS_HELPER";
+        }
+        return "NO_DUE_TASK";
     }
 
     @Transactional
@@ -3341,12 +3439,13 @@ public class SelfMediaPublishScheduleService {
         if (!claimAttempt.equals(row.getAttemptCount())) {
             fail("SCHEDULE_CLAIM_GENERATION_MISMATCH", "当前回调不属于排期的最新领取代次");
         }
-        if (row.getBrowserEnvironmentId() == null
-                || row.getBrandId() == null
-                || !scheduleMapper.isBrowserEnvironmentOwnedByLocalAgent(
-                row.getBrowserEnvironmentId(), localAgentSessionId, row.getBrandId(), operatorId)) {
-            fail("SCHEDULE_ENVIRONMENT_MISMATCH", "当前本地助手未绑定该排期品牌的浏览器环境");
-        }
+        localAgentExecutionAuthorizationService.requireAuthorized(
+                operatorId,
+                localAgentSessionId,
+                row.getBrandId(),
+                row.getBrowserEnvironmentId(),
+                LocalDateTime.now()
+        );
         String status = normalize(row.getStatus());
         if (acceptedStatuses != null && !acceptedStatuses.isEmpty() && !acceptedStatuses.contains(status)) {
             fail("SCHEDULE_STATUS_NOT_RUNNING", "当前排期状态不接受本地助手回调");

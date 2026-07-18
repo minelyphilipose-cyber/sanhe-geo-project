@@ -2732,7 +2732,7 @@ public class ProjectSelfMediaScheduleService {
             return new ClaimDiagnostic("BRAND_MISSING", "发布任务缺少品牌归属，请重新生成排期");
         }
         LocalDateTime onlineSince = now.minusMinutes(LOCAL_AGENT_ONLINE_WINDOW_MINUTES);
-        long onlineSessions = localAgentSessionMapper.countOnlineSessionsByBrand(
+        long onlineSessions = selfMediaPublishScheduleMapper.countOnlineLocalAgentsServingBrand(
                 brandId,
                 now,
                 onlineSince

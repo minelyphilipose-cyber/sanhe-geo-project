@@ -90,6 +90,7 @@ public class LocalAgentSessionService {
         sessionMapper.revokeActiveByOperatorId(operator.getId(), now, operator.getId());
 
         LocalAgentSession row = new LocalAgentSession();
+        // New pairings are account-wide. Brand access and environment ownership are checked per execution.
         row.setBrandId(null);
         row.setOperatorId(operator.getId());
         row.setAccessTokenLookupHash(sha256Hex(token.plaintext()));

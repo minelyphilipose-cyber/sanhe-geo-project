@@ -3,6 +3,8 @@ package com.huanjing.geo.module.extension.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.extension.dto.LocalAgentExtensionSignRequest;
+import com.huanjing.geo.module.extension.dto.LocalAgentPairingApproveRequest;
+import com.huanjing.geo.module.extension.dto.LocalAgentPairingIntentRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignResponse;
 import com.huanjing.geo.module.extension.entity.ExtensionSession;
@@ -12,14 +14,24 @@ import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class LocalAgentSessionServiceTest {
@@ -29,18 +41,48 @@ class LocalAgentSessionServiceTest {
 
     private LocalAgentSessionMapper sessionMapper;
     private CurrentUserService currentUserService;
+    private ExtensionRedisStore redisStore;
     private LocalAgentSessionService service;
 
     @BeforeEach
     void setUp() {
         sessionMapper = mock(LocalAgentSessionMapper.class);
         currentUserService = mock(CurrentUserService.class);
+        redisStore = mock(ExtensionRedisStore.class);
         service = new LocalAgentSessionService(
                 sessionMapper,
-                mock(ExtensionRedisStore.class),
+                redisStore,
                 currentUserService,
-                new ObjectMapper()
+                new ObjectMapper().findAndRegisterModules()
         );
+    }
+
+    @Test
+    void pairingCreatesAccountWideSessionAndReturnsNullBrand() throws Exception {
+        String pairingCode = "ABCD-1234";
+        String codeHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(pairingCode.getBytes(StandardCharsets.UTF_8)));
+        String deviceSecretHash = "a".repeat(64);
+        service.registerPairingIntent(new LocalAgentPairingIntentRequest(
+                codeHash, deviceSecretHash, "production-helper"));
+        ArgumentCaptor<String> intentJson = ArgumentCaptor.forClass(String.class);
+        verify(redisStore).set(anyString(), intentJson.capture(), any());
+        when(redisStore.getAndDelete(anyString())).thenReturn(intentJson.getValue());
+        when(currentUserService.requireCurrentUser()).thenReturn(operator(20L));
+        doAnswer(invocation -> {
+            LocalAgentSession row = invocation.getArgument(0);
+            row.setId(5L);
+            return 1;
+        }).when(sessionMapper).insert(any(LocalAgentSession.class));
+
+        var response = service.approvePairing(new LocalAgentPairingApproveRequest(pairingCode));
+
+        ArgumentCaptor<LocalAgentSession> session = ArgumentCaptor.forClass(LocalAgentSession.class);
+        verify(sessionMapper).insert(session.capture());
+        assertNull(session.getValue().getBrandId());
+        assertNull(response.brandId());
+        assertEquals(5L, response.sessionId());
+        verify(sessionMapper).revokeActiveByOperatorId(eq(20L), any(), eq(20L));
     }
 
     @Test

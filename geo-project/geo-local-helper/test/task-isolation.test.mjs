@@ -145,7 +145,7 @@ test('local helper applies capacity locally and rotates platform polling fairly'
   )
   assert.match(
     server,
-    /if \(!hasAvailableScheduleClaimSlot\(config\)\)[\s\S]+LOCAL_HELPER_CAPACITY_FULL/,
+    /if \(!hasAvailableScheduleClaimSlot\(config\)\)[\s\S]+HELPER_CAPACITY_FULL/,
     'the helper must not claim more backend schedules than it can hand to the extension',
   )
   assert.match(
