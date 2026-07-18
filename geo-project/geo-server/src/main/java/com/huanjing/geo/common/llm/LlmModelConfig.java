@@ -131,7 +131,7 @@ public record LlmModelConfig(String platformCode,
         if (requestTimeoutMs > requestTimeoutMaxMs) {
             throw new IllegalArgumentException("requestTimeoutMs must be <= " + requestTimeoutMaxMs);
         }
-        maxRetry = Math.max(0, positiveOrDefault(maxRetry, 2));
+        maxRetry = maxRetry == null ? 2 : Math.max(0, maxRetry);
         rateLimitQps = Math.max(1, positiveOrDefault(rateLimitQps, 1));
         temperature = normalizeTemperature(platformCode, temperature);
         maxTokens = maxTokens == null || maxTokens <= 0 ? null : maxTokens;

@@ -27,6 +27,11 @@ class LlmModelConfigTest {
         assertEquals(0.6D, config(" wenxin ", 0.6D).temperature());
     }
 
+    @Test
+    void explicitZeroMaxRetryDisablesRetries() {
+        assertEquals(0, config("doubao", 0.7D).maxRetry());
+    }
+
     private LlmModelConfig config(String platformCode, Double temperature) {
         return new LlmModelConfig(
                 platformCode,

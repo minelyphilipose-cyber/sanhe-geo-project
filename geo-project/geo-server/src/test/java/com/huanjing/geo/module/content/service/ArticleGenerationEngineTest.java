@@ -96,6 +96,8 @@ class ArticleGenerationEngineTest {
         verify(llmCallFacade).execute(requestCaptor.capture());
         LlmRouteRequest routeRequest = requestCaptor.getValue().routeRequest();
         assertEquals(LlmFeature.ARTICLE, routeRequest.feature());
+        assertEquals(180_000, routeRequest.requestTimeoutMs());
+        assertEquals(180_000, routeRequest.requestTimeoutMaxMs());
         assertEquals(0, routeRequest.maxRetry());
     }
 }

@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class ArticleGenerationEngine {
 
-    private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
+    private static final int ARTICLE_REQUEST_TIMEOUT_MS = LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS;
     private static final double ARTICLE_TEMPERATURE = 0.4D;
     private static final Pattern MARKDOWN_TITLE_PREFIX = Pattern.compile("^(#+)\\s*");
 

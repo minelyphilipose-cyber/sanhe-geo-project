@@ -19,7 +19,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ArticleModelResolver {
 
-    private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
+    private static final int ARTICLE_REQUEST_TIMEOUT_MS = LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS;
     private static final String ARTICLE_FEATURE = "article";
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
@@ -77,7 +77,7 @@ public class ArticleModelResolver {
                 0.4D,
                 LlmModelConfig.DEFAULT_CONNECT_TIMEOUT_MS,
                 timeout,
-                normalize(config.getMaxRetry(), 2),
+                longForm ? 0 : normalize(config.getMaxRetry(), 2),
                 Math.max(1, normalize(config.getRateLimitQps(), 1)),
                 null,
                 false,

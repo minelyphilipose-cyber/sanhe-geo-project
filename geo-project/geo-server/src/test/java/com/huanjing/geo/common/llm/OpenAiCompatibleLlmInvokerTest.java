@@ -44,6 +44,19 @@ class OpenAiCompatibleLlmInvokerTest {
     }
 
     @Test
+    void invoke_doesNotRetryWhenMaxRetryIsZero() {
+        FakeHttpClient httpClient = new FakeHttpClient(
+                new RuntimeException("temporary timeout"),
+                new LlmHttpClient.HttpResponse(200, "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}")
+        );
+        OpenAiCompatibleLlmInvoker invoker = new OpenAiCompatibleLlmInvoker(httpClient, new ObjectMapper());
+
+        assertThrows(LlmInvokeException.class, () -> invoker.invoke("hello", config(0, 10_000, 30_000, 0)));
+
+        assertEquals(1, httpClient.callCount);
+    }
+
+    @Test
     void modelConfig_rejectsRequestTimeoutOverMaxLimit() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> config(0, 10_000, 60_001, 0));

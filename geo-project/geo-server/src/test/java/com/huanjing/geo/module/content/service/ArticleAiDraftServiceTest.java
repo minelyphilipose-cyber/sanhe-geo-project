@@ -285,14 +285,14 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
-    void previewUsesAtLeastOneHundredTwentySecondModelTimeout() throws Exception {
+    void previewUsesThreeMinuteModelTimeout() throws Exception {
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
         ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
 
         service.preview(previewRequest()).get();
 
         verify(llmInvoker).invoke(any(), configCaptor.capture());
-        assertTrue(configCaptor.getValue().requestTimeoutMs() >= 120_000);
+        assertEquals(180_000, configCaptor.getValue().requestTimeoutMs());
     }
 
     @Test
@@ -333,7 +333,7 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
-    void previewHonorsConfiguredTimeoutAboveMinimum() throws Exception {
+    void previewRaisesConfiguredTimeoutBelowArticleMinimum() throws Exception {
         AiPlatformConfig config = aiConfig();
         config.setTimeoutMs(150_000);
         when(configMapper.selectOne(any())).thenReturn(config);
@@ -343,7 +343,7 @@ class ArticleAiDraftServiceTest {
         service.preview(previewRequest()).get();
 
         verify(llmInvoker).invoke(any(), configCaptor.capture());
-        assertEquals(150_000, configCaptor.getValue().requestTimeoutMs());
+        assertEquals(180_000, configCaptor.getValue().requestTimeoutMs());
     }
 
     @Test

@@ -44,6 +44,20 @@ class ArticleModelResolverTest {
     }
 
     @Test
+    void resolveUsesThreeMinuteTimeoutForLongFormArticles() {
+        AiPlatformConfig qwen = platform("qwen");
+        qwen.setTimeoutMs(60_000);
+        when(configMapper.selectOne(any())).thenReturn(qwen);
+        when(credentialService.resolveApiKey(eq("qwen"), any(), any())).thenReturn("sk-qwen");
+
+        ArticleModelResolver.ModelSelection selection = resolver.resolve("qwen", null, "system", true);
+
+        assertThat(selection.config().requestTimeoutMs()).isEqualTo(180_000);
+        assertThat(selection.config().requestTimeoutMaxMs()).isEqualTo(180_000);
+        assertThat(selection.config().maxRetry()).isZero();
+    }
+
+    @Test
     void resolveFailsWhenExcludedPlatformWouldBeTheOnlyCandidate() {
         when(configMapper.selectOne(any())).thenReturn(null);
 
