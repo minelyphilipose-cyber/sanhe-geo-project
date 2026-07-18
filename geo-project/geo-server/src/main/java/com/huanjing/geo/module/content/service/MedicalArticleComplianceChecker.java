@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.entity.MedicalComplianceHitLog;
 import com.huanjing.geo.module.content.entity.MedicalComplianceRule;
 import com.huanjing.geo.module.content.mapper.MedicalComplianceHitLogMapper;
@@ -29,14 +30,14 @@ public class MedicalArticleComplianceChecker {
             "理性", "不要盲目", "不建议盲目", "需结合", "结合自身", "结合具体", "先评估", "权衡",
             "医生评估", "专业评估", "综合判断", "个体情况", "个体差异", "适应条件", "完整检查", "口腔检查", "影像评估"
     );
-    private static final List<String> PERSONAL_ACCOUNT_OFFICIAL_TONE_HINTS = List.of(
+    private static final List<String> THIRD_PARTY_OFFICIAL_TONE_HINTS = List.of(
             "我们机构", "本院", "我院", "本机构", "官方推荐", "官方指定", "官方建议"
     );
-    private static final List<String> PERSONAL_ACCOUNT_CONVERSION_HINTS = List.of(
-            "预约咨询", "私信了解", "私信咨询", "点击咨询", "到店", "来院", "联系电话", "加微信", "扫码",
-            "优惠", "套餐", "名额", "限时", "活动价"
+    private static final List<String> SELF_MEDIA_CONVERSION_HINTS = List.of(
+            "预约咨询", "私信了解", "私信咨询", "点击咨询", "来院咨询", "联系电话", "加微信", "扫码咨询",
+            "限时优惠", "优惠套餐", "限时名额", "到店优惠", "到店体验", "活动价", "免费体验"
     );
-    private static final List<String> PERSONAL_ACCOUNT_EXPERIENCE_HINTS = List.of(
+    private static final List<String> SELF_MEDIA_EXPERIENCE_HINTS = List.of(
             "亲测", "我做过", "朋友做过", "真实案例", "前后对比", "术前术后"
     );
 
@@ -111,7 +112,7 @@ public class MedicalArticleComplianceChecker {
             if (!StringUtils.hasText(matchedText)) {
                 continue;
             }
-            if (isForumContextualReference(input, content, matchedText)) {
+            if (isContextualReference(content, matchedText)) {
                 continue;
             }
             issues.add(new ComplianceIssue(
@@ -140,33 +141,21 @@ public class MedicalArticleComplianceChecker {
                         "正文品牌露出次数超过医疗渠道档位限制：" + count + "/" + limit));
             }
         }
-        collectPersonalSelfMediaIssues(input, content, issues);
+        collectSelfMediaIssues(input, content, issues);
     }
 
-    private void collectPersonalSelfMediaIssues(CheckInput input, String content, List<ComplianceIssue> issues) {
-        if (!ArticlePromptChannels.SELF_MEDIA.equals(input.channelGroupCode())
-                || "baijiahao".equals(input.channelSubCode())) {
+    private void collectSelfMediaIssues(CheckInput input, String content, List<ComplianceIssue> issues) {
+        if (!ArticlePromptChannels.SELF_MEDIA.equals(input.channelGroupCode())) {
             return;
         }
-        addFirstHitIssue(content, PERSONAL_ACCOUNT_OFFICIAL_TONE_HINTS, issues,
-                "personal_account_official_tone", "特殊行业个人号内容出现官方/机构身份口吻");
-        addFirstHitIssue(content, PERSONAL_ACCOUNT_CONVERSION_HINTS, issues,
-                "personal_account_conversion_hint", "特殊行业个人号内容出现咨询、到店、优惠或其他转化引导");
-        addFirstHitIssue(content, PERSONAL_ACCOUNT_EXPERIENCE_HINTS, issues,
-                "personal_account_experience_seeding", "特殊行业个人号内容出现亲测、案例或前后对比表达");
-
-        if (input.brand() == null || !StringUtils.hasText(input.brand().getBrandName())) {
-            return;
+        if (TemplatePerspectiveCodes.isThirdParty(input.perspectiveCode())) {
+            addFirstHitIssue(content, THIRD_PARTY_OFFICIAL_TONE_HINTS, issues,
+                    "third_party_official_tone", "特殊行业第三方账号内容出现客户官方/机构身份口吻");
         }
-        String brandName = input.brand().getBrandName().trim();
-        int count = countOccurrences(content, brandName);
-        if (count < 1) {
-            issues.add(new ComplianceIssue(null, "personal_account_brand_exposure_missing", "block", brandName,
-                    "特殊行业个人号内容缺少品牌/机构名露出：0/1"));
-        } else if (count > 2) {
-            issues.add(new ComplianceIssue(null, "personal_account_brand_exposure_exceeded", "block", brandName,
-                    "特殊行业个人号内容品牌/机构名露出超过限制：" + count + "/2"));
-        }
+        addFirstHitIssue(content, SELF_MEDIA_CONVERSION_HINTS, issues,
+                "self_media_conversion_hint", "特殊行业自媒体内容出现咨询、促销或其他直接转化引导");
+        addFirstHitIssue(content, SELF_MEDIA_EXPERIENCE_HINTS, issues,
+                "self_media_experience_seeding", "特殊行业自媒体内容出现亲测、案例或前后对比表达");
     }
 
     private void addFirstHitIssue(String content,
@@ -176,7 +165,7 @@ public class MedicalArticleComplianceChecker {
                                   String message) {
         String normalizedContent = normalizeForMatch(content);
         for (String hint : hints) {
-            if (normalizedContent.contains(normalizeForMatch(hint))) {
+            if (normalizedContent.contains(normalizeForMatch(hint)) && !isContextualReference(content, hint)) {
                 issues.add(new ComplianceIssue(null, ruleType, "block", hint, message));
                 return;
             }
@@ -213,8 +202,8 @@ public class MedicalArticleComplianceChecker {
         return issue != null && !"warn".equalsIgnoreCase(normalize(issue.severity()));
     }
 
-    private boolean isForumContextualReference(CheckInput input, String content, String matchedText) {
-        if (!ArticlePromptChannels.FORUM.equals(input.channelGroupCode()) || !StringUtils.hasText(matchedText)) {
+    private boolean isContextualReference(String content, String matchedText) {
+        if (!StringUtils.hasText(matchedText)) {
             return false;
         }
         String normalizedContent = normalizeForMatch(content);
@@ -223,19 +212,44 @@ public class MedicalArticleComplianceChecker {
             return false;
         }
         int index = normalizedContent.indexOf(normalizedHit);
+        boolean found = false;
         while (index >= 0) {
-            int start = Math.max(0, index - 24);
-            int end = Math.min(normalizedContent.length(), index + normalizedHit.length() + 12);
-            String window = normalizedContent.substring(start, end);
-            if (containsAny(window, List.of(
+            found = true;
+            String window = contextualClauseWindow(normalizedContent, index, normalizedHit.length());
+            if (!containsAny(window, List.of(
                     "不得", "不要", "不能", "禁止", "避免", "不写", "不应", "不可", "别写", "避开",
-                    "慎用", "违规", "不建议使用", "不要使用", "不能写成", "不要写成", "营销话术"
+                    "慎用", "违规", "并非", "并不", "不是", "不代表", "不可能", "不等于", "无法保证",
+                    "不建议使用", "不要使用", "不能写成", "不要写成", "不能作为", "不能等同",
+                    "不要只看", "营销话术"
             ))) {
-                return true;
+                return false;
             }
             index = normalizedContent.indexOf(normalizedHit, index + normalizedHit.length());
         }
-        return false;
+        return found;
+    }
+
+    private String contextualClauseWindow(String content, int hitIndex, int hitLength) {
+        int start = Math.max(0, hitIndex - 24);
+        for (int i = hitIndex - 1; i >= start; i--) {
+            if (isClauseBoundary(content.charAt(i))) {
+                start = i + 1;
+                break;
+            }
+        }
+        int end = Math.min(content.length(), hitIndex + hitLength + 12);
+        for (int i = hitIndex + hitLength; i < end; i++) {
+            if (isClauseBoundary(content.charAt(i))) {
+                end = i;
+                break;
+            }
+        }
+        return content.substring(start, end);
+    }
+
+    private boolean isClauseBoundary(char ch) {
+        return ch == '，' || ch == ',' || ch == '。' || ch == '.' || ch == '！' || ch == '!'
+                || ch == '？' || ch == '?' || ch == '；' || ch == ';' || ch == '\n' || ch == '\r';
     }
 
     private boolean containsAny(String value, List<String> needles) {
@@ -296,6 +310,7 @@ public class MedicalArticleComplianceChecker {
                              Long brandId,
                              String channelGroupCode,
                              String channelSubCode,
+                             String perspectiveCode,
                              String title,
                              String content,
                              Brand brand,

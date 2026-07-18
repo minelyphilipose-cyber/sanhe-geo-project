@@ -34,4 +34,19 @@ class BatchArticleQualityCheckerV2Test {
         assertTrue(result.issues().stream().anyMatch(issue -> "unresolved_variable".equals(issue.type())));
         assertTrue(result.issues().stream().anyMatch(issue -> "forbidden_phrase".equals(issue.type())));
     }
+
+    @Test
+    void ignoresOverbroadStandaloneTermsButKeepsCompletePhrasesEnforceable() {
+        BatchArticleQualityChecker.QualityResult normalProse = checker.check(
+                "# 标题\n第一，最好先参考权威资料，由专业人员判断；价格不是唯一标准，最后再核对安全边界。",
+                null,
+                List.of("第一", "最", "最好", "权威", "专业", "唯一", "安全", "推荐"));
+        BatchArticleQualityChecker.QualityResult exaggeratedClaim = checker.check(
+                "# 标题\n该品牌被称为行业第一。", null, List.of("行业第一"));
+
+        assertFalse(normalProse.rewriteRequired());
+        assertTrue(normalProse.issues().isEmpty());
+        assertTrue(exaggeratedClaim.rewriteRequired());
+        assertTrue(exaggeratedClaim.issues().stream().anyMatch(issue -> "forbidden_phrase".equals(issue.type())));
+    }
 }

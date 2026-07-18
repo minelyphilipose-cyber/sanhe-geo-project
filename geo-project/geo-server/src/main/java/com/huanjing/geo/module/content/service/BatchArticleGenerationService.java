@@ -1038,6 +1038,7 @@ public class BatchArticleGenerationService {
                         contentProject.getBrandId(),
                         task.getChannelGroupCode(),
                         task.getChannelSubCode(),
+                        promptContext.perspectiveCode(),
                         generated.title(),
                         generated.content(),
                         contentBrand,
@@ -1053,6 +1054,7 @@ public class BatchArticleGenerationService {
                                 contentProject.getBrandId(),
                                 task.getChannelGroupCode(),
                                 task.getChannelSubCode(),
+                                promptContext.perspectiveCode(),
                                 generated.title(),
                                 generated.content(),
                                 contentBrand,
@@ -1256,6 +1258,7 @@ public class BatchArticleGenerationService {
                             project.getBrandId(),
                             task.getChannelGroupCode(),
                             task.getChannelSubCode(),
+                            task.getPerspectiveCode(),
                             title,
                             generated == null ? "" : generated.content(),
                             null,
@@ -2418,7 +2421,7 @@ public class BatchArticleGenerationService {
             result.addAll(parseJsonArray(brand.getForbiddenPhrases()));
         }
         result.addAll(parseJsonArray(project.getExtraForbiddenPhrases()));
-        return result.stream().filter(StringUtils::hasText).map(String::trim).distinct().toList();
+        return ArticleForbiddenPhrasePolicy.effectivePhrases(result);
     }
 
     private List<String> parseJsonArray(String raw) {

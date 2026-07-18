@@ -116,7 +116,7 @@ public class ArticlePromptAssemblerV2 {
 
     private String truthfulnessRules(List<String> forbiddenPhrases) {
         StringBuilder text = new StringBuilder("只能使用本提示中明确提供的事实。对无法确认的内容应省略或使用有边界的行业通用表述，不得把推测写成企业事实。");
-        List<String> forbidden = nonEmpty(forbiddenPhrases);
+        List<String> forbidden = ArticleForbiddenPhrasePolicy.effectivePhrases(forbiddenPhrases);
         if (!forbidden.isEmpty()) {
             text.append("\n项目禁用表达：").append(String.join("、", forbidden)).append("。正文不得出现这些表达。");
         }

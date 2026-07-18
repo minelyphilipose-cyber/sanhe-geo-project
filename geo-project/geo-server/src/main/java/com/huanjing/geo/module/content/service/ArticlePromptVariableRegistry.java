@@ -114,7 +114,7 @@ public class ArticlePromptVariableRegistry {
         add(map, "channelName", "平台名称", "模板所属平台展示名称", VariableSource.TEMPLATE, EmptyStrategy.SAFE_TEXT, "当前平台", "百家号");
         add(map, "articleTypeName", "文章类型", "模板文章体裁展示名称", VariableSource.TEMPLATE, EmptyStrategy.SAFE_TEXT, "当前文章类型", "选择指南");
         add(map, "relatedKeywords", "相关关键词", "主题相关关键词列表", VariableSource.TOPIC, EmptyStrategy.KEEP_EMPTY, null, "口碑、价格、服务");
-        add(map, "forbiddenPhrases", "禁用表达", "项目配置的禁用表达", VariableSource.PROJECT, EmptyStrategy.SAFE_TEXT, "未配置额外禁用表达", "最好、第一");
+        add(map, "forbiddenPhrases", "禁用表达", "项目配置的禁用表达", VariableSource.PROJECT, EmptyStrategy.SAFE_TEXT, "未配置额外禁用表达", "绝对领先、行业唯一");
         add(map, "channelGuide", "平台写法说明", "平台内容风格说明", VariableSource.TEMPLATE, EmptyStrategy.SAFE_TEXT, "按当前平台常规内容风格撰写", "客观资料口吻");
         add(map, "region", "区域", "项目或品牌区域", VariableSource.PROJECT_BRAND, EmptyStrategy.DASH, null, "上海");
         add(map, "targetAudience", "目标受众", "项目目标受众", VariableSource.PROJECT, EmptyStrategy.SAFE_TEXT, "目标用户", "本地养生用户");

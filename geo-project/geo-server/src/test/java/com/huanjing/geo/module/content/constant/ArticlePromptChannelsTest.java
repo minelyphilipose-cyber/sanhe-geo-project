@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.constant;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -53,5 +54,23 @@ class ArticlePromptChannelsTest {
         assertEquals(8, ArticlePromptChannels.subCodes("self_media").size());
         assertTrue(ArticlePromptChannels.subCodes("self_media").contains("sohu"));
         assertEquals("搜狐", ArticlePromptChannels.channelName("self_media", "sohu"));
+    }
+
+    @Test
+    void stricterEditorialPlatformsKeepMarketingEvidenceBasedAndRestrained() {
+        String toutiao = ArticlePromptChannels.channelGuide("self_media", "toutiao");
+        String baijiahao = ArticlePromptChannels.channelGuide("self_media", "baijiahao");
+        String zhihu = ArticlePromptChannels.channelGuide("self_media", "zhihu");
+
+        assertTrue(toutiao.contains("资讯价值和问题解释为主"));
+        assertTrue(toutiao.contains("减少连续品牌露出"));
+        assertTrue(baijiahao.contains("可独立成立的知识或资讯内容"));
+        assertTrue(baijiahao.contains("避免宣传口号"));
+        assertTrue(zhihu.contains("适用条件和必要权衡"));
+        assertTrue(zhihu.contains("介绍和推荐必须有材料依据"));
+
+        String wechat = ArticlePromptChannels.channelGuide("self_media", "wechat");
+        assertFalse(wechat.contains("减少连续品牌露出"));
+        assertFalse(wechat.contains("避免宣传口号"));
     }
 }

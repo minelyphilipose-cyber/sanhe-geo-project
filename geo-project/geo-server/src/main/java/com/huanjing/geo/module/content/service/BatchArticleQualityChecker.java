@@ -37,11 +37,9 @@ public class BatchArticleQualityChecker {
                 issues.add(new Issue("empty_heading", "存在空泛标题：" + heading, false));
             }
         }
-        if (projectForbiddenPhrases != null) {
-            for (String phrase : projectForbiddenPhrases) {
-                if (StringUtils.hasText(phrase) && markdown.contains(phrase.trim())) {
-                    issues.add(new Issue("forbidden_phrase", "命中项目禁用词：" + phrase.trim(), true));
-                }
+        for (String phrase : ArticleForbiddenPhrasePolicy.effectivePhrases(projectForbiddenPhrases)) {
+            if (markdown.contains(phrase)) {
+                issues.add(new Issue("forbidden_phrase", "命中项目禁用词：" + phrase, true));
             }
         }
         return result(issues);

@@ -538,7 +538,7 @@ public class ArticleGenerationPromptContextFactory {
         if (project != null) {
             result.addAll(parseJsonArray(project.getExtraForbiddenPhrases()));
         }
-        return result.stream().filter(StringUtils::hasText).map(String::trim).distinct().toList();
+        return ArticleForbiddenPhrasePolicy.effectivePhrases(result);
     }
 
     private List<String> parseJsonArray(String raw) {

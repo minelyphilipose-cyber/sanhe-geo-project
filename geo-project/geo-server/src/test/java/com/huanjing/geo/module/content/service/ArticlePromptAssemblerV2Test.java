@@ -50,7 +50,7 @@ class ArticlePromptAssemblerV2Test {
         BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
                 project, brand, project.getCustomStatement(), "manual", "企业知识库怎么建设", null,
                 null, null, List.of("企业知识库", "知识管理"), "industry_article", "authority_media",
-                "medium", null, 1, List.of("绝对领先"), null,
+                "medium", null, 1, List.of("第一", "最", "最好", "唯一", "专业", "权威", "绝对领先"), null,
                 TemplatePerspectiveCodes.INDUSTRY_NEUTRAL, "default", null, List.of()
         );
         ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
@@ -69,6 +69,13 @@ class ArticlePromptAssemblerV2Test {
         assertTrue(result.userPrompt().contains("测试品牌"));
         assertTrue(result.userPrompt().contains("https://example.com"));
         assertFalse(result.userPrompt().contains("选择逻辑和常见误区"));
+        assertFalse(result.userPrompt().contains("项目禁用表达：第一"));
+        assertFalse(result.userPrompt().contains("、最"));
+        assertFalse(result.userPrompt().contains("、最好"));
+        assertFalse(result.userPrompt().contains("、唯一"));
+        assertFalse(result.userPrompt().contains("、专业"));
+        assertFalse(result.userPrompt().contains("、权威"));
+        assertTrue(result.userPrompt().contains("项目禁用表达：绝对领先"));
         assertNull(result.contentAngle());
         assertNull(result.audiencePerspective());
 
@@ -109,6 +116,37 @@ class ArticlePromptAssemblerV2Test {
         assertTrue(result.userPrompt().contains("标题不超过28个字"));
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals(28, snapshot.path("effectiveTitleMaxChars").asInt());
+    }
+
+    @Test
+    void injectsRestrainedZhihuDirectionWithoutRemovingBrandUse() {
+        Project project = new Project();
+        project.setId(1L);
+        project.setBrandId(2L);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试品牌");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setName("知乎问答模板");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setVersionNo(2);
+        version.setUserPromptTemplate("围绕{{topic}}完成本次任务");
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "企业知识库怎么建设", null,
+                null, null, List.of(), "faq", "zhihu", "long", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "zhihu",
+                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
+
+        assertTrue(result.userPrompt().contains("优先完整回答具体问题"));
+        assertTrue(result.userPrompt().contains("品牌可以作为相关选择或文章主体"));
+        assertTrue(result.userPrompt().contains("介绍和推荐必须有材料依据并说明限制"));
     }
 
     private int occurrences(String source, String target) {

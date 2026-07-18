@@ -172,9 +172,9 @@ class ArticleGenerationPromptContextFactoryTest {
     @Test
     void thirdPartyBatchMergesSourceAndSubjectForbiddenPhrases() {
         Project sourceProject = project();
-        sourceProject.setExtraForbiddenPhrases("[\"源项目禁词\"]");
+        sourceProject.setExtraForbiddenPhrases("[\"源项目禁词\", \"第一\"]");
         Brand sourceBrand = brand();
-        sourceBrand.setForbiddenPhrases("[\"源品牌禁词\"]");
+        sourceBrand.setForbiddenPhrases("[\"源品牌禁词\", \"最\"]");
         Project subjectProject = project();
         subjectProject.setId(11L);
         subjectProject.setBrandId(21L);

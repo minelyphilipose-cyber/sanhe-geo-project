@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.entity.MedicalComplianceHitLog;
 import com.huanjing.geo.module.content.entity.MedicalComplianceRule;
 import com.huanjing.geo.module.content.mapper.MedicalComplianceHitLogMapper;
@@ -248,35 +249,50 @@ class MedicalArticleComplianceCheckerTest {
     }
 
     @Test
-    void personalSelfMediaBlocksOfficialToneConversionExperienceAndMissingBrand() {
+    void selfMediaUsesPerspectiveAndCompletePromotionalPhrases() {
         when(ruleMapper.selectList(any())).thenReturn(List.of());
 
-        MedicalArticleComplianceChecker.CheckResult result = checker.check(
-                input("种植牙怎么了解", "我们机构可以预约咨询，亲测案例很多，但仍需关注风险、禁忌和个体差异。", false, 2, "xiaohongshu")
+        MedicalArticleComplianceChecker.CheckResult officialAccount = checker.check(
+                input("种植牙怎么了解",
+                        "本院建议到店前核验资质，不要只看优惠套餐，也不要把亲测当作依据，还需关注风险、禁忌和个体差异。",
+                        false,
+                        2,
+                        "self_media",
+                        "xiaohongshu",
+                        TemplatePerspectiveCodes.CUSTOMER)
+        );
+        MedicalArticleComplianceChecker.CheckResult thirdPartyPromotion = checker.check(
+                input("种植牙怎么了解",
+                        "我们机构推出限时优惠套餐，可以预约咨询，亲测体验很好，但仍需关注风险、禁忌和个体差异。",
+                        false,
+                        2,
+                        "self_media",
+                        "xiaohongshu",
+                        TemplatePerspectiveCodes.INDUSTRY_NEUTRAL)
         );
 
-        assertThat(result.passed()).isFalse();
-        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+        assertThat(officialAccount.passed()).isTrue();
+        assertThat(thirdPartyPromotion.passed()).isFalse();
+        assertThat(thirdPartyPromotion.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
                 .contains(
-                        "personal_account_official_tone",
-                        "personal_account_conversion_hint",
-                        "personal_account_experience_seeding",
-                        "personal_account_brand_exposure_missing"
+                        "third_party_official_tone",
+                        "self_media_conversion_hint",
+                        "self_media_experience_seeding"
                 );
     }
 
     @Test
-    void forumAllowsContextualForbiddenPhraseReference() {
+    void allChannelsAllowContextualForbiddenPhraseReference() {
         MedicalComplianceRule rule = rule(31L, "efficacy_claim", "保证效果", "contains");
         when(ruleMapper.selectList(any())).thenReturn(List.of(rule));
 
         MedicalArticleComplianceChecker.CheckResult result = checker.check(
                 input("医美咨询怎么避坑",
-                        "论坛里讨论医美项目时，不要使用保证效果这类营销话术，仍需关注风险、禁忌、个体差异和医生评估。",
-                        true,
-                        5,
-                        "forum",
-                        null)
+                        "介绍医美项目时，不要使用保证效果这类营销话术，仍需关注风险、禁忌、个体差异和医生评估。",
+                        false,
+                        2,
+                        "self_media",
+                        "zhihu")
         );
 
         assertThat(result.passed()).isTrue();
@@ -296,6 +312,25 @@ class MedicalArticleComplianceCheckerTest {
                         5,
                         "forum",
                         null)
+        );
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                .contains("efficacy_claim");
+    }
+
+    @Test
+    void contextualReferenceDoesNotHideAnotherPromotionalOccurrence() {
+        MedicalComplianceRule rule = rule(33L, "efficacy_claim", "保证效果", "contains");
+        when(ruleMapper.selectList(any())).thenReturn(List.of(rule));
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("医美项目怎么判断",
+                        "不要使用保证效果这类营销话术，但我们的项目确实保证效果，仍需关注风险和个体差异。",
+                        false,
+                        2,
+                        "self_media",
+                        "zhihu")
         );
 
         assertThat(result.passed()).isFalse();
@@ -324,6 +359,17 @@ class MedicalArticleComplianceCheckerTest {
                                                             int brandExposureLimit,
                                                             String channelGroupCode,
                                                             String channelSubCode) {
+        return input(title, content, highRisk, brandExposureLimit, channelGroupCode, channelSubCode,
+                TemplatePerspectiveCodes.CUSTOMER);
+    }
+
+    private MedicalArticleComplianceChecker.CheckInput input(String title,
+                                                            String content,
+                                                            boolean highRisk,
+                                                            int brandExposureLimit,
+                                                            String channelGroupCode,
+                                                            String channelSubCode,
+                                                            String perspectiveCode) {
         Brand brand = new Brand();
         brand.setId(3L);
         brand.setBrandName("星链口腔");
@@ -354,6 +400,7 @@ class MedicalArticleComplianceCheckerTest {
                 3L,
                 channelGroupCode,
                 channelSubCode,
+                perspectiveCode,
                 title,
                 content,
                 brand,

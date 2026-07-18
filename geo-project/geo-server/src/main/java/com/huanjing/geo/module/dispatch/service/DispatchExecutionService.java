@@ -24,9 +24,10 @@ import com.huanjing.geo.module.content.entity.PackageContentConfig;
 import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
 import com.huanjing.geo.module.content.mapper.ArticleGenerationLogMapper;
 import com.huanjing.geo.module.content.mapper.PackageContentConfigMapper;
+import com.huanjing.geo.module.content.service.ArticleForbiddenPhrasePolicy;
+import com.huanjing.geo.module.content.service.ArticleGenerationPersistenceService;
 import com.huanjing.geo.module.content.service.ContentArticleService;
 import com.huanjing.geo.module.content.service.GeoPromptBuilder;
-import com.huanjing.geo.module.content.service.ArticleGenerationPersistenceService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
@@ -871,10 +872,11 @@ public class DispatchExecutionService {
                 words.add(item.getDictKey().trim());
             }
         }
-        if (words.isEmpty()) {
+        List<String> effectiveWords = ArticleForbiddenPhrasePolicy.effectivePhrases(words);
+        if (effectiveWords.isEmpty()) {
             return "无";
         }
-        return String.join("、", words);
+        return String.join("、", effectiveWords);
     }
 
     private String normalizeGeneratedContent(String responseText) {

@@ -496,6 +496,7 @@ public class MedicalArticleConfigService {
                 null,
                 trimToNull(req.channelGroupCode()),
                 trimToNull(req.channelSubCode()),
+                com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes.CUSTOMER,
                 req.title(),
                 req.content(),
                 brand,

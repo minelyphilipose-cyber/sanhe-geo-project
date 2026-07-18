@@ -1147,13 +1147,15 @@ public class ContentArticleService {
         if (brand != null && brand.getDeletedAt() != null) {
             brand = null;
         }
-        for (String phrase : parseStringList(brand == null ? null : brand.getForbiddenPhrases())) {
+        for (String phrase : ArticleForbiddenPhrasePolicy.effectivePhrases(
+                parseStringList(brand == null ? null : brand.getForbiddenPhrases()))) {
             if (lower.contains(phrase.toLowerCase(Locale.ROOT))) {
                 hits.add(Map.of("word", phrase, "severity", "block", "source", "brand"));
                 hasBlock = true;
             }
         }
-        for (String phrase : parseStringList(project.getExtraForbiddenPhrases())) {
+        for (String phrase : ArticleForbiddenPhrasePolicy.effectivePhrases(
+                parseStringList(project.getExtraForbiddenPhrases()))) {
             if (lower.contains(phrase.toLowerCase(Locale.ROOT))) {
                 hits.add(Map.of("word", phrase, "severity", "block", "source", "project"));
                 hasBlock = true;
@@ -1167,9 +1169,10 @@ public class ContentArticleService {
         boolean hasWarn = false;
         for (SysDictItem item : globals) {
             String word = item.getDictKey();
-            if (!StringUtils.hasText(word)) {
+            if (!ArticleForbiddenPhrasePolicy.isEffectivePhrase(word)) {
                 continue;
             }
+            word = word.trim();
             if (lower.contains(word.toLowerCase(Locale.ROOT))) {
                 String severity = "warn".equalsIgnoreCase(item.getDictValue()) ? "warn" : "block";
                 hits.add(Map.of("word", word, "severity", severity, "source", "global"));
