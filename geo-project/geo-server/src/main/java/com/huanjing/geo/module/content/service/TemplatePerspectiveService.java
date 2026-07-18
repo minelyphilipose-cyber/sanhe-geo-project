@@ -76,11 +76,11 @@ public class TemplatePerspectiveService {
     }
 
     public ResolvedPerspective resolve(Long brandId, String channelGroupCode, String channelSubCode) {
-        if (brandId == null) {
-            return ResolvedPerspective.customer();
-        }
         String group = normalizeGroup(channelGroupCode);
         String sub = normalizeSub(group, channelSubCode);
+        if (brandId == null) {
+            return ResolvedPerspective.defaultFor(group);
+        }
         BrandChannelTemplatePerspective exact = sub == null ? null : findEnabledConfig(brandId, group, sub);
         if (exact != null) {
             assertPerspectiveCodeExists(exact.getPerspectiveCode());
@@ -91,7 +91,7 @@ public class TemplatePerspectiveService {
             assertPerspectiveCodeExists(channelAll.getPerspectiveCode());
             return new ResolvedPerspective(channelAll.getPerspectiveCode(), MATCH_SCOPE_CHANNEL_ALL, channelAll.getId());
         }
-        return ResolvedPerspective.customer();
+        return ResolvedPerspective.defaultFor(group);
     }
 
     @Transactional
@@ -282,6 +282,16 @@ public class TemplatePerspectiveService {
                                       Long matchedConfigId) {
         public static ResolvedPerspective customer() {
             return new ResolvedPerspective(TemplatePerspectiveCodes.CUSTOMER, MATCH_SCOPE_DEFAULT, null);
+        }
+
+        public static ResolvedPerspective defaultFor(String channelGroupCode) {
+            String perspective = switch (channelGroupCode) {
+                case ArticlePromptChannels.INDUSTRY_SITE, ArticlePromptChannels.AUTHORITY_MEDIA ->
+                        TemplatePerspectiveCodes.INDUSTRY_NEUTRAL;
+                case ArticlePromptChannels.FORUM -> TemplatePerspectiveCodes.REVIEW_RECOMMEND;
+                default -> TemplatePerspectiveCodes.CUSTOMER;
+            };
+            return new ResolvedPerspective(perspective, MATCH_SCOPE_DEFAULT, null);
         }
     }
 }

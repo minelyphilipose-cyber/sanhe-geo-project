@@ -391,7 +391,7 @@ export function previewArticleTemplate(data: ArticleTemplatePreviewRequest) {
 
 export function generateArticleTemplate(data: ArticleTemplatePreviewRequest) {
   return request.post<R<ArticleTemplateGenerateResponse>>('/content/articles/template-generate', data, {
-    timeout: 180000,
+    timeout: 300000,
   })
 }
 
@@ -1162,8 +1162,10 @@ export function testSpecialIndustryRules(data: SpecialIndustryRuleTestRequest) {
   return request.post<R<SpecialIndustryRuleTestResult>>('/content/special-industry/rules/test', data)
 }
 
-export function getArticleGenerationOptions() {
-  return request.get<R<ArticleGenerationOptions>>('/content/article-prompt-templates/generation-options')
+export function getArticleGenerationOptions(projectId?: number) {
+  return request.get<R<ArticleGenerationOptions>>('/content/article-prompt-templates/generation-options', {
+    params: projectId ? { projectId } : undefined,
+  })
 }
 
 export function previewArticleTemplateAllocation(data: {

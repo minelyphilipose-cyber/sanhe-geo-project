@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.content.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.llm.LlmCallStatus;
 import com.huanjing.geo.common.llm.LlmCallFacade;
 import com.huanjing.geo.common.llm.LlmCallRequest;
@@ -31,11 +32,11 @@ class ArticleGenerationEngineTest {
         LlmCallFacade llmCallFacade = mock(LlmCallFacade.class);
         ArticleModelResolver modelResolver = mock(ArticleModelResolver.class);
         ArticleAiDraftPromptFilter promptFilter = mock(ArticleAiDraftPromptFilter.class);
-        BatchArticleQualityChecker qualityChecker = mock(BatchArticleQualityChecker.class);
+        BatchArticleQualityChecker qualityChecker = new BatchArticleQualityChecker(new ObjectMapper());
         when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean())).thenAnswer(invocation -> invocation.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any(), anyBoolean())).thenAnswer(invocation -> invocation.getArgument(0));
         LlmInvokeResult invokeResult = new LlmInvokeResult(
-                "# Routed title\n\ncontent",
+                "# 这是一个为了验证自媒体平台标题长度限制而特意生成的超长文章标题\n\ncontent",
                 10,
                 20,
                 100L,
@@ -63,11 +64,14 @@ class ArticleGenerationEngineTest {
                 modelResolver,
                 mock(MarkdownImageReferenceValidator.class),
                 promptFilter,
-                qualityChecker
+                qualityChecker,
+                mock(ArticleTitleDuplicateChecker.class)
         );
 
+        Project project = new Project();
+        project.setId(1L);
         ArticleGenerationEngine.GeneratedArticle generated = engine.generate(new ArticleGenerationEngine.GenerateInput(
-                new Project(),
+                project,
                 new Brand(),
                 "system",
                 "user",
@@ -75,13 +79,18 @@ class ArticleGenerationEngineTest {
                 null,
                 true,
                 false,
-                false,
-                List.of()
+                true,
+                List.of(),
+                28
         ));
 
         assertEquals("qwen", generated.model().platformCode());
         assertEquals("qwen-plus", generated.model().modelId());
-        assertThat(generated.content()).contains("Routed title");
+        assertThat(generated.title().codePointCount(0, generated.title().length())).isLessThanOrEqualTo(28);
+        assertThat(generated.content()).startsWith("# " + generated.title());
+        assertThat(generated.quality().issues())
+                .extracting(BatchArticleQualityChecker.Issue::type)
+                .contains("title_truncated");
         verify(modelResolver, never()).resolve(any(), any(), any(), anyBoolean());
         ArgumentCaptor<LlmCallRequest> requestCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
         verify(llmCallFacade).execute(requestCaptor.capture());

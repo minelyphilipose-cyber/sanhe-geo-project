@@ -83,9 +83,6 @@ public class MedicalArticleGenerationService {
         }
         String channelTier = resolveChannelTier(channelGroupCode, channelSubCode);
         List<BrandOffering> enabledOfferings = enabledMedicalOfferings(brand.getId(), industryCode);
-        if (enabledOfferings.isEmpty()) {
-            throw new BizException(400, "特殊行业项目未配置已启用的资质项目，不能生成特殊行业文章");
-        }
 
         MedicalTopicAngle topicAngle = resolveTopicAngle(project, topicConfig, industryCode, enabledOfferings);
         String skeleton = resolveSkeleton(topicConfig == null ? null : topicConfig.getStructureSkeleton());
@@ -97,7 +94,7 @@ public class MedicalArticleGenerationService {
         BrandOffering offering = enabledOfferings.stream()
                 .filter(item -> Objects.equals(trim(item.getMedicalCategoryCode()), topicAngle.getCategoryCode()))
                 .findFirst()
-                .orElse(enabledOfferings.get(0));
+                .orElse(enabledOfferings.isEmpty() ? null : enabledOfferings.get(0));
         return Optional.of(new MedicalPromptContext(
                 industryCode,
                 channelTier,
@@ -109,10 +106,10 @@ public class MedicalArticleGenerationService {
                 pair.focus(),
                 kernel.getSystemPrompt(),
                 kernel.getBrandExposureLimit(),
-                Boolean.TRUE.equals(kernel.getRequireManualPublishReview()),
+                false,
                 style.getStylePrompt(),
                 Boolean.TRUE.equals(style.getHighRisk()),
-                trimToNull(offering.getQualificationRef()),
+                offering == null ? null : trimToNull(offering.getQualificationRef()),
                 qualificationSnapshot(brand, industryCode),
                 scopeSnapshot(brand, industryCode),
                 trimToNull(brand.getMedicalAdReviewNo())
@@ -172,6 +169,42 @@ public class MedicalArticleGenerationService {
         );
     }
 
+    public BatchArticlePromptBuilder.PromptBuildResult applyMedicalPromptV2(
+            BatchArticlePromptBuilder.PromptBuildResult prompt,
+            MedicalPromptContext context
+    ) {
+        if (context == null) {
+            return prompt;
+        }
+        List<String> facts = new ArrayList<>();
+        appendFact(facts, "特殊行业", specialIndustryService.industryLabel(context.industryCode()));
+        appendFact(facts, "项目或服务品类", context.categoryName());
+        appendFact(facts, "本篇关注方向", context.focus());
+        appendFact(facts, "项目或服务资质", context.qualificationRef());
+        appendFact(facts, "主体资质", context.medicalLicense());
+        appendFact(facts, "服务或业务范围", context.diagnosisScope());
+        appendFact(facts, "审查或备案编号", context.medicalAdReviewNo());
+
+        StringBuilder specialRules = new StringBuilder("# 特殊行业合规边界\n")
+                .append(context.complianceKernelPrompt().trim());
+        if (StringUtils.hasText(context.channelStylePrompt())) {
+            specialRules.append("\n").append(context.channelStylePrompt().trim());
+        }
+        if (!facts.isEmpty()) {
+            specialRules.append("\n以下为可引用的特殊行业事实，未列出的资质、范围或编号不得补写：\n")
+                    .append(String.join("\n", facts));
+        }
+        String userPrompt = specialRules + "\n\n" + prompt.userPrompt();
+        return new BatchArticlePromptBuilder.PromptBuildResult(
+                prompt.systemPrompt(),
+                userPrompt,
+                null,
+                null,
+                enrichSnapshotV2(prompt.promptSnapshot(), context),
+                enrichSnapshotV2(prompt.inputSnapshot(), context)
+        );
+    }
+
     public void recordHistory(Project project, Brand brand, MedicalPromptContext context, Long articleId) {
         if (project == null || context == null) {
             return;
@@ -209,28 +242,30 @@ public class MedicalArticleGenerationService {
                 allowedCategories.add(offering.getMedicalCategoryCode().trim());
             }
         }
-        if (allowedCategories.isEmpty()) {
-            throw new BizException(400, "特殊行业项目未配置项目品类，不能生成特殊行业文章");
-        }
         String requestedCategory = topicConfig == null ? null : trimToNull(topicConfig.getMedicalCategoryCode());
-        if (requestedCategory != null && !allowedCategories.contains(requestedCategory)) {
+        if (!allowedCategories.isEmpty() && requestedCategory != null && !allowedCategories.contains(requestedCategory)) {
             throw new BizException(400, "特殊行业品类不属于该品牌已启用资质项目");
         }
         if (topicConfig != null && topicConfig.getTopicAngleId() != null) {
             MedicalTopicAngle angle = topicAngleMapper.selectById(topicConfig.getTopicAngleId());
             if (angle == null || angle.getDeletedAt() != null || !Boolean.TRUE.equals(angle.getEnabled())
-                    || !industryCode.equals(angle.getIndustryCode()) || !allowedCategories.contains(angle.getCategoryCode())) {
-            throw new BizException(400, "特殊行业选题不属于该品牌已启用资质项目");
+                    || !industryCode.equals(angle.getIndustryCode())
+                    || (!allowedCategories.isEmpty() && !allowedCategories.contains(angle.getCategoryCode()))
+                    || (requestedCategory != null && !requestedCategory.equals(angle.getCategoryCode()))) {
+                throw new BizException(400, "特殊行业选题不属于该品牌已启用资质项目");
             }
             return angle;
         }
-        List<MedicalTopicAngle> candidates = topicAngleMapper.selectList(new LambdaQueryWrapper<MedicalTopicAngle>()
+        LambdaQueryWrapper<MedicalTopicAngle> query = new LambdaQueryWrapper<MedicalTopicAngle>()
                 .eq(MedicalTopicAngle::getIndustryCode, industryCode)
-                .in(MedicalTopicAngle::getCategoryCode, allowedCategories)
                 .eq(requestedCategory != null, MedicalTopicAngle::getCategoryCode, requestedCategory)
                 .eq(MedicalTopicAngle::getEnabled, true)
                 .isNull(MedicalTopicAngle::getDeletedAt)
-                .orderByAsc(MedicalTopicAngle::getSortOrder, MedicalTopicAngle::getId));
+                .orderByAsc(MedicalTopicAngle::getSortOrder, MedicalTopicAngle::getId);
+        if (!allowedCategories.isEmpty()) {
+            query.in(MedicalTopicAngle::getCategoryCode, allowedCategories);
+        }
+        List<MedicalTopicAngle> candidates = topicAngleMapper.selectList(query);
         if (candidates.isEmpty()) {
             throw new BizException(400, "特殊行业选题库没有可用选题，请先维护选题角度");
         }
@@ -383,6 +418,32 @@ public class MedicalArticleGenerationService {
             return objectMapper.writeValueAsString(map);
         } catch (JsonProcessingException ex) {
             return raw;
+        }
+    }
+
+    private String enrichSnapshotV2(String raw, MedicalPromptContext context) {
+        try {
+            Map<String, Object> map = StringUtils.hasText(raw)
+                    ? objectMapper.readValue(raw, MAP_TYPE)
+                    : new java.util.LinkedHashMap<>();
+            map.put("medicalIndustryCode", context.industryCode());
+            map.put("medicalChannelTier", context.channelTier());
+            map.put("medicalCategoryCode", context.categoryCode());
+            map.put("medicalCategoryName", context.categoryName());
+            map.put("topicAngleId", context.topicAngleId());
+            map.put("medicalLicense", context.medicalLicense());
+            map.put("diagnosisScope", context.diagnosisScope());
+            map.put("medicalAdReviewNo", context.medicalAdReviewNo());
+            map.put("medicalBrandExposureLimit", context.brandExposureLimit());
+            return objectMapper.writeValueAsString(map);
+        } catch (JsonProcessingException ex) {
+            return raw;
+        }
+    }
+
+    private void appendFact(List<String> facts, String label, String value) {
+        if (StringUtils.hasText(value)) {
+            facts.add("- " + label + "：" + value.trim());
         }
     }
 

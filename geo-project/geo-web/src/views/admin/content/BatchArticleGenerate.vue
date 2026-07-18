@@ -789,7 +789,7 @@ async function handleBatchProjectChange() {
   readinessReport.value = null
   readinessLoadedKey.value = ''
   await loadSelectedBrand()
-  syncTopicPlatformKeys()
+  await loadPublishPlatformOptions()
 }
 
 async function loadReadiness(force = false) {
@@ -1051,7 +1051,7 @@ async function loadPublishPlatformOptions() {
   try {
     const [{ data }, optionResponse] = await Promise.all([
       getPublishSites({ status: 'active' }),
-      getArticleGenerationOptions(),
+      getArticleGenerationOptions(batchForm.projectId),
     ])
     publishSites.value = data.data || []
     generationOptions.value = optionResponse.data.data

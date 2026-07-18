@@ -18,7 +18,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -26,12 +29,14 @@ public class ArticleGenerationEngine {
 
     private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
     private static final double ARTICLE_TEMPERATURE = 0.4D;
+    private static final Pattern MARKDOWN_TITLE_PREFIX = Pattern.compile("^(#+)\\s*");
 
     private final LlmCallFacade llmCallFacade;
     private final ArticleModelResolver modelResolver;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
     private final ArticleAiDraftPromptFilter promptFilter;
     private final BatchArticleQualityChecker qualityChecker;
+    private final ArticleTitleDuplicateChecker titleDuplicateChecker;
 
     public GeneratedArticle generate(GenerateInput input) throws LlmInvokeException {
         String outboundPrompt = promptFilter.filterOutboundPrompt(
@@ -52,12 +57,26 @@ public class ArticleGenerationEngine {
         if (!StringUtils.hasText(content)) {
             throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI generated empty article");
         }
+        TitleLimitResult titleLimit = limitTitle(content, input.maxTitleChars());
+        content = titleLimit.content();
         markdownImageReferenceValidator.validate(input.project(), content);
         BatchArticleQualityChecker.QualityResult quality = null;
+        String title = extractTitle(content);
         if (input.checkQuality()) {
             quality = qualityChecker.check(content, input.brand(), input.forbiddenPhrases());
+            if (titleLimit.truncated()) {
+                quality = qualityChecker.withWarning(quality, "title_truncated",
+                        "标题超过" + input.maxTitleChars() + "字，已自动截短");
+            }
+            if (titleDuplicateChecker.exists(input.project().getId(), title)) {
+                quality = qualityChecker.withWarning(quality, "duplicate_title", "标题与项目历史文章标准化后完全相同");
+            }
+            if (quality != null && quality.rewriteRequired()) {
+                throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED,
+                        "生成内容命中确定性质量硬错误：" + qualityChecker.toJson(quality));
+            }
         }
-        return new GeneratedArticle(extractTitle(content), content, model, result, quality);
+        return new GeneratedArticle(title, content, model, result, quality);
     }
 
     private GenerationCall invokeModel(GenerateInput input, String outboundPrompt) throws LlmInvokeException {
@@ -110,6 +129,36 @@ public class ArticleGenerationEngine {
                 .trim();
     }
 
+    private TitleLimitResult limitTitle(String content, Integer maxTitleChars) {
+        if (!StringUtils.hasText(content) || maxTitleChars == null || maxTitleChars <= 0) {
+            return new TitleLimitResult(content, false);
+        }
+        String[] lines = content.split("\\r?\\n", -1);
+        for (int index = 0; index < lines.length; index++) {
+            String line = lines[index].trim();
+            if (!StringUtils.hasText(line)) {
+                continue;
+            }
+            Matcher matcher = MARKDOWN_TITLE_PREFIX.matcher(line);
+            boolean hasMarkdownPrefix = matcher.find();
+            String prefix = hasMarkdownPrefix ? matcher.group(1) + " " : "";
+            String title = hasMarkdownPrefix ? line.substring(matcher.end()).trim() : line;
+            if (title.codePointCount(0, title.length()) <= maxTitleChars) {
+                return new TitleLimitResult(content, false);
+            }
+            int end = title.offsetByCodePoints(0, maxTitleChars);
+            String shortenedTitle = trimTrailingTitlePunctuation(title.substring(0, end));
+            lines[index] = prefix + shortenedTitle;
+            return new TitleLimitResult(String.join("\n", Arrays.asList(lines)).trim(), true);
+        }
+        return new TitleLimitResult(content, false);
+    }
+
+    private String trimTrailingTitlePunctuation(String title) {
+        String value = title.replaceFirst("[，、：；。！？,.!?:;—\\-\\s]+$", "").trim();
+        return StringUtils.hasText(value) ? value : title.trim();
+    }
+
     public String extractTitle(String content) {
         String[] lines = content.split("\\r?\\n");
         for (String line : lines) {
@@ -134,7 +183,8 @@ public class ArticleGenerationEngine {
                                 boolean longForm,
                                 boolean allowContactInfo,
                                 boolean checkQuality,
-                                List<String> forbiddenPhrases) {
+                                List<String> forbiddenPhrases,
+                                Integer maxTitleChars) {
     }
 
     public record GeneratedArticle(String title,
@@ -146,5 +196,8 @@ public class ArticleGenerationEngine {
 
     private record GenerationCall(ArticleModelResolver.ModelSelection model,
                                   LlmInvokeResult result) {
+    }
+
+    private record TitleLimitResult(String content, boolean truncated) {
     }
 }

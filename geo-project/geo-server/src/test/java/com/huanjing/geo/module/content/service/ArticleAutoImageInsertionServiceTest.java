@@ -82,7 +82,7 @@ class ArticleAutoImageInsertionServiceTest {
     }
 
     @Test
-    void insertForChannel_addsImagesForSupportedSelfMediaExceptExcludedPlatforms() {
+    void insertForChannel_addsImagesOnlyForSelfMediaThatAllowBodyImages() {
         BrandMaterial image = material(1L, "配图.png", "https://cdn.example.com/image.png");
         when(folderMapper.selectList(any())).thenReturn(List.of(folder(100L, "插图_1")));
         when(brandMaterialMapper.selectList(any())).thenReturn(List.of(image));
@@ -103,7 +103,7 @@ class ArticleAutoImageInsertionServiceTest {
         String xiaohongshu = service.insertForChannel(project(), "self_media", "xiaohongshu", "正文", null);
         String toutiao = service.insertForChannel(project(), "self_media", "toutiao", "正文", null);
 
-        assertThat(douyin).contains("![配图.png](https://app.example.com/api/public/brand-materials/1/stream)");
+        assertThat(douyin).isEqualTo("正文");
         assertThat(xiaohongshu).isEqualTo("正文");
         assertThat(toutiao).isEqualTo("正文");
     }
@@ -209,29 +209,24 @@ class ArticleAutoImageInsertionServiceTest {
     }
 
     @Test
-    void insertForChannel_addsDouyinHeadImageFromIllustrationsAndExcludesCover() {
-        BrandMaterial cover = material(1L, "封面.png", "https://cdn.example.com/cover.png");
-        BrandMaterial head = material(2L, "头图.png", "https://cdn.example.com/head.png");
-        when(folderMapper.selectList(any())).thenReturn(List.of(folder(100L, "插图_产品")));
-        when(brandMaterialMapper.selectList(any())).thenReturn(List.of(cover, head));
-        when(publicUrlService.buildPublicStreamUrl(cover))
-                .thenReturn("https://app.example.com/api/public/brand-materials/1/stream");
-        when(publicUrlService.buildPublicStreamUrl(head))
-                .thenReturn("https://app.example.com/api/public/brand-materials/2/stream");
-
+    void insertForChannel_stripsExistingImagesForDouyinBody() {
         String result = service.insertForChannel(project(), "self_media", "douyin", """
                 # 标题
 
                 第一段文字。
 
-                第二段文字。
+                ![正文配图](https://app.example.com/api/public/brand-materials/2/stream)
+
+                第二段文字。<img src="https://cdn.example.com/inline.png" alt="内嵌图">
                 """, "https://app.example.com/api/public/brand-materials/1/stream");
 
-        assertThat(result).contains("![头图.png](https://app.example.com/api/public/brand-materials/2/stream)");
-        assertThat(result).doesNotContain("brand-materials/1/stream");
-        assertThat(result.indexOf("brand-materials/2/stream"))
-                .isGreaterThan(result.indexOf("第一段文字。"))
-                .isLessThan(result.indexOf("第二段文字。"));
+        assertThat(result).contains("# 标题");
+        assertThat(result).contains("第一段文字。");
+        assertThat(result).contains("第二段文字。");
+        assertThat(result).doesNotContain("![");
+        assertThat(result).doesNotContain("<img");
+        verify(folderMapper, never()).selectList(any());
+        verify(brandMaterialMapper, never()).selectList(any());
     }
 
     @Test

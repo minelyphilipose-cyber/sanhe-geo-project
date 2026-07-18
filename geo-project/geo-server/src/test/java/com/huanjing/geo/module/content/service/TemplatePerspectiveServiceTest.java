@@ -90,6 +90,18 @@ class TemplatePerspectiveServiceTest {
     }
 
     @Test
+    void resolveUsesBusinessDefaultsForThirdPartyChannels() {
+        when(configMapper.selectOne(any())).thenReturn(null);
+
+        assertEquals(TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
+                service.resolve(3L, "industry_site", null).perspectiveCode());
+        assertEquals(TemplatePerspectiveCodes.REVIEW_RECOMMEND,
+                service.resolve(3L, "forum", null).perspectiveCode());
+        assertEquals(TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
+                service.resolve(null, "authority_media", "news_source").perspectiveCode());
+    }
+
+    @Test
     void deleteBrandConfigRejectsRowsReferencedByFrozenTasks() {
         when(taskMapper.selectCount(any())).thenReturn(1L);
 

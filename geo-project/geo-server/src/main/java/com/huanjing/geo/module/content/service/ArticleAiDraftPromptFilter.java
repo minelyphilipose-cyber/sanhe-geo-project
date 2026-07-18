@@ -21,7 +21,9 @@ public class ArticleAiDraftPromptFilter {
 
     private static final String SENSITIVE_REDACTED_KEY = "SENSITIVE_REDACTED";
     private static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
-    private static final Pattern MOBILE = Pattern.compile("(?<!\\d)1[3-9]\\d{9}(?!\\d)");
+    private static final Pattern PHONE = Pattern.compile(
+            "(?<!\\d)(?:1[3-9]\\d{9}|(?:400|800)[-\\s]?\\d{3}[-\\s]?\\d{4}|0\\d{2,3}[-\\s]?\\d{7,8})(?!\\d)"
+    );
     private static final Pattern ID_CARD = Pattern.compile("(?<![0-9A-Za-z])\\d{17}[0-9Xx](?![0-9A-Za-z])");
     private static final Pattern BANK_CARD = Pattern.compile("(?<!\\d)(\\d{13,19})(?!\\d)");
     private static final Pattern ADDRESS_LIKE = Pattern.compile(
@@ -98,7 +100,7 @@ public class ArticleAiDraftPromptFilter {
     }
 
     private String redactMobiles(String value, Set<String> allowedPhones) {
-        Matcher matcher = MOBILE.matcher(value);
+        Matcher matcher = PHONE.matcher(value);
         StringBuffer result = new StringBuffer();
         while (matcher.find()) {
             String phone = matcher.group();
@@ -130,7 +132,7 @@ public class ArticleAiDraftPromptFilter {
         }
         Set<String> phones = new HashSet<>();
         String publicPhone = brand.getPublicPhone();
-        Matcher matcher = MOBILE.matcher(publicPhone);
+        Matcher matcher = PHONE.matcher(publicPhone);
         while (matcher.find()) {
             phones.add(normalizeDigits(matcher.group()));
         }

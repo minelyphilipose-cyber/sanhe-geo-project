@@ -126,4 +126,24 @@ class ArticleAiDraftPromptFilterTest {
         assertFalse(filtered.contains("13912345678"));
         assertTrue(filtered.contains("[PHONE_REDACTED]"));
     }
+
+    @Test
+    void fullModeOnlyPreservesConfiguredLandlineOrServiceNumber() {
+        SysDictItemMapper mapper = mock(SysDictItemMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of());
+        ArticleAiDraftPromptFilter filter = new ArticleAiDraftPromptFilter(mapper);
+        Brand brand = new Brand();
+        brand.setPublicPhone("400-123-4567");
+
+        String filtered = filter.filterOutboundPrompt(
+                "公开电话 400-123-4567，其他电话 010-12345678",
+                null,
+                brand,
+                true
+        );
+
+        assertTrue(filtered.contains("400-123-4567"));
+        assertFalse(filtered.contains("010-12345678"));
+        assertTrue(filtered.contains("[PHONE_REDACTED]"));
+    }
 }

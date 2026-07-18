@@ -45,7 +45,7 @@ public class ArticleAutoImageInsertionService {
             ArticlePromptChannels.INDUSTRY_SITE, ChannelImagePolicy.body()
     );
     private static final Set<String> SELF_MEDIA_EXCLUDED_SUB_CODES = Set.of("xiaohongshu");
-    private static final Set<String> SELF_MEDIA_STRIP_IMAGE_SUB_CODES = Set.of("toutiao");
+    private static final Set<String> SELF_MEDIA_STRIP_IMAGE_SUB_CODES = Set.of("toutiao", "douyin");
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "webp");
     private static final Set<String> TRAILING_SECTIONS = Set.of("结语", "总结", "免责声明", "联系方式", "联系我们");
 
@@ -74,9 +74,6 @@ public class ArticleAutoImageInsertionService {
         }
         Set<String> excludedUrls = existingImageUrls(contentMarkdown);
         addExcludedUrl(excludedUrls, excludedImageUrl);
-        if (policy.mode() == ImageInsertionMode.HEAD) {
-            return insertHeadImage(project, contentMarkdown, excludedUrls);
-        }
         int imageCount = bodyImageCount(contentMarkdown);
         List<ImageRef> images = selectRandomIllustrationImages(project.getBrandId(), imageCount, excludedUrls);
         if (images.isEmpty()) {
@@ -138,7 +135,7 @@ public class ArticleAutoImageInsertionService {
                     || SELF_MEDIA_EXCLUDED_SUB_CODES.contains(subCode)) {
                 return ChannelImagePolicy.none();
             }
-            return "douyin".equals(subCode) ? ChannelImagePolicy.head() : ChannelImagePolicy.body();
+            return ChannelImagePolicy.body();
         }
         return CHANNEL_POLICIES.getOrDefault(groupCode, ChannelImagePolicy.none());
     }
@@ -150,14 +147,6 @@ public class ArticleAutoImageInsertionService {
                 .replaceAll("(?m)^[ \\t]+$", "")
                 .replaceAll("\\R{3,}", "\n\n")
                 .trim();
-    }
-
-    private String insertHeadImage(Project project, String contentMarkdown, Set<String> excludedUrls) {
-        List<ImageRef> images = selectRandomIllustrationImages(project.getBrandId(), 1, excludedUrls);
-        if (images.isEmpty()) {
-            return contentMarkdown;
-        }
-        return insertImageAfterOpeningParagraph(contentMarkdown, images.get(0));
     }
 
     private List<ImageRef> selectRandomIllustrationImages(Long brandId, int limit, Set<String> excludedUrls) {
@@ -447,8 +436,7 @@ public class ArticleAutoImageInsertionService {
     private enum ImageInsertionMode {
         NONE,
         STRIP,
-        BODY,
-        HEAD
+        BODY
     }
 
     private record ChannelImagePolicy(ImageInsertionMode mode) {
@@ -464,8 +452,5 @@ public class ArticleAutoImageInsertionService {
             return new ChannelImagePolicy(ImageInsertionMode.BODY);
         }
 
-        private static ChannelImagePolicy head() {
-            return new ChannelImagePolicy(ImageInsertionMode.HEAD);
-        }
     }
 }

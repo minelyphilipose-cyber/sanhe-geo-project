@@ -250,9 +250,10 @@ public class ArticleAiDraftService {
                             requestedPlatformCode,
                             requestedModelId,
                             true,
+                            context.runtimePolicy().allowContactInfo(),
                             true,
-                            true,
-                            context.forbiddenPhrases()
+                            context.forbiddenPhrases(),
+                            ArticlePromptChannels.maxTitleChars(context.channelGroupCode())
                     )
             );
             model = generated.model();
@@ -325,21 +326,15 @@ public class ArticleAiDraftService {
                             requestedPlatformCode,
                             requestedModelId,
                             true,
+                            context.runtimePolicy().allowContactInfo(),
                             true,
-                            true,
-                            context.forbiddenPhrases()
+                            context.forbiddenPhrases(),
+                            ArticlePromptChannels.maxTitleChars(context.channelGroupCode())
                     )
             );
             model = generated.model();
             ensureMedicalCompliancePassed(context, generated);
             ArticleDraft draft = persistTemplateDraft(context, operator, generated, model);
-            specialIndustryComplianceAlertService.notifyPublishReviewPending(
-                    context.project(),
-                    context.brand(),
-                    null,
-                    draft.getId(),
-                    context.medicalContext()
-            );
             auditGenerated(AuditResult.SUCCESS, operator, context.project(), draft.getId(), context.prompt().userPrompt().length(),
                     model.platformCode(), model.modelId(), elapsedMs(started), "template_generation_generated", null);
             return new ArticleAiDraftResponse(draft.getId(), STATUS_APPROVED);
@@ -393,7 +388,8 @@ public class ArticleAiDraftService {
                             true,
                             allowContactInfo,
                             false,
-                            List.of()
+                            List.of(),
+                            null
                     )
             );
             model = generated.model();
@@ -461,7 +457,8 @@ public class ArticleAiDraftService {
                             false,
                             false,
                             false,
-                            List.of()
+                            List.of(),
+                            null
                     )
             );
             model = generated.model();
@@ -627,6 +624,7 @@ public class ArticleAiDraftService {
 
     private void applyMedicalDraftFields(ArticleDraft draft,
                                          MedicalArticleGenerationService.MedicalPromptContext context) {
+        draft.setPublishReviewStatus(MedicalArticleConstants.REVIEW_NOT_REQUIRED);
         if (context == null) {
             return;
         }
@@ -635,13 +633,6 @@ public class ArticleAiDraftService {
         draft.setMedicalChannelTier(context.channelTier());
         draft.setMedicalIndustryCode(context.industryCode());
         draft.setMedicalCategoryCode(context.categoryCode());
-        if (MedicalArticleConstants.TIER_OFFICIAL_SITE.equals(context.channelTier())) {
-            draft.setPublishReviewStatus(StringUtils.hasText(context.medicalAdReviewNo())
-                    ? MedicalArticleConstants.REVIEW_PASSED
-                    : MedicalArticleConstants.REVIEW_PENDING);
-        } else {
-            draft.setPublishReviewStatus(MedicalArticleConstants.REVIEW_NOT_REQUIRED);
-        }
     }
 
     private Project requireProject(Long projectId) {

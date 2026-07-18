@@ -74,6 +74,7 @@ class ArticleGenerationPromptContextFactoryTest {
                 new ObjectMapper(),
                 new ArticlePromptVariableRegistry(new ObjectMapper())
         );
+        ObjectMapper objectMapper = new ObjectMapper();
         factory = new ArticleGenerationPromptContextFactory(
                 projectMapper,
                 brandMapper,
@@ -83,6 +84,9 @@ class ArticleGenerationPromptContextFactoryTest {
                 promptTemplateMapper,
                 promptTemplateVersionMapper,
                 promptBuilder,
+                new ArticlePromptAssemblerV2(objectMapper, new ArticleContentLengthPolicyResolver()),
+                new ArticlePromptContractResolver(objectMapper),
+                new ArticleRuntimePolicyResolver(),
                 perspectiveService,
                 offeringPromptSelector,
                 medicalArticleGenerationService
@@ -229,6 +233,54 @@ class ArticleGenerationPromptContextFactoryTest {
         assertThat(result.prompt().userPrompt()).doesNotContain("本篇从");
         assertThat(result.prompt().userPrompt()).doesNotContain("内容角度");
         assertThat(result.prompt().userPrompt()).doesNotContain("{{contentAngle}}");
+    }
+
+    @Test
+    void v2TemplateDoesNotExpandMissingTopicQuestionAndUsesRuntimePolicy() {
+        ArticlePromptTemplate template = selfMediaTemplate();
+        ArticlePromptTemplateVersion version = selfMediaVersion();
+        version.setQualityRulesJson("{\"promptContract\":\"v2\"}");
+        when(promptTemplateMapper.selectById(101L)).thenReturn(template);
+        when(promptTemplateVersionMapper.selectById(201L)).thenReturn(version);
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result =
+                factory.buildStrict(new PromptContextRequest(
+                        10L, "manual", "industry_article", "self_media", "baijiahao",
+                        "阜阳SPA行业发展趋势", null, "medium", null, null, null,
+                        101L, 201L, null, null, null, 3
+                ));
+
+        assertThat(result.topicAsQuestion()).isNull();
+        assertThat(result.promptInput().topicAsQuestion()).isNull();
+        assertThat(result.prompt().contentAngle()).isNull();
+        assertThat(result.prompt().audiencePerspective()).isNull();
+        assertThat(result.prompt().promptSnapshot()).contains("\"promptContract\":\"article_v2\"");
+        assertThat(result.runtimePolicy().contactDisclosureMode()).isEqualTo("none");
+        assertThat(result.runtimePolicy().allowContactInfo()).isFalse();
+        assertThat(result.prompt().userPrompt()).doesNotContain("选择逻辑和常见误区");
+        assertThat(result.prompt().userPrompt()).contains("正文不含标题不少于2000字");
+        assertThat(result.prompt().promptSnapshot()).contains("\"targetMinChars\":2000");
+        assertThat(result.prompt().promptSnapshot()).contains("\"targetMaxChars\":3000");
+    }
+
+    @Test
+    void publishedV2CandidateCanBePreviewedBeforeCurrentVersionSwitch() {
+        ArticlePromptTemplate template = selfMediaTemplate();
+        template.setCurrentVersionId(999L);
+        ArticlePromptTemplateVersion version = selfMediaVersion();
+        version.setQualityRulesJson("{\"promptContract\":\"v2\"}");
+        when(promptTemplateMapper.selectById(101L)).thenReturn(template);
+        when(promptTemplateVersionMapper.selectById(201L)).thenReturn(version);
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result =
+                factory.buildStrict(new PromptContextRequest(
+                        10L, "manual", "industry_article", "self_media", "baijiahao",
+                        "阜阳SPA行业发展趋势", null, "medium", null, null, null,
+                        101L, 201L, null, null, null, 1
+                ));
+
+        assertThat(result.version().getId()).isEqualTo(201L);
+        assertThat(result.prompt().promptSnapshot()).contains("\"promptContract\":\"article_v2\"");
     }
 
     private void assertPromptInputEquivalent(BatchArticlePromptBuilder.PromptBuildInput actual,

@@ -65,18 +65,23 @@ class MedicalArticleGenerationServiceTest {
     }
 
     @Test
-    void medicalBrandWithoutEnabledQualifiedOfferingIsBlockedBeforeTopicFallback() {
+    void medicalBrandWithoutEnabledQualifiedOfferingCanUseIndustryTopicLibrary() {
         when(brandOfferingMapper.selectList(any())).thenReturn(List.of());
+        when(topicAngleMapper.selectList(any())).thenReturn(List.of(oralTopicAngle()));
+        when(kernelMapper.selectOne(any())).thenReturn(kernel());
+        when(channelStyleMapper.selectOne(any())).thenReturn(style());
 
-        BizException ex = assertThrows(BizException.class, () -> service.resolveContext(
+        MedicalArticleGenerationService.MedicalPromptContext context = service.resolveContext(
                 project(),
                 oralBrand(),
                 "self_media",
                 "wechat",
                 topicConfig("implant")
-        ));
+        ).orElseThrow();
 
-        assertThat(ex.getMessage()).contains("特殊行业项目未配置已启用的资质项目");
+        assertThat(context.categoryCode()).isEqualTo("implant");
+        assertThat(context.qualificationRef()).isNull();
+        assertThat(context.requireManualPublishReview()).isFalse();
     }
 
     @Test
@@ -195,6 +200,19 @@ class MedicalArticleGenerationServiceTest {
         angle.setCategoryCode("wealth_consulting");
         angle.setCategoryName("理财咨询");
         angle.setTopicAngle("理财咨询前需要确认哪些风险");
+        angle.setRecommendedFocus("risk");
+        angle.setEnabled(true);
+        return angle;
+    }
+
+    private MedicalTopicAngle oralTopicAngle() {
+        MedicalTopicAngle angle = new MedicalTopicAngle();
+        angle.setId(101L);
+        angle.setIndustryCode(MedicalArticleConstants.INDUSTRY_ORAL);
+        angle.setIndustryName("口腔");
+        angle.setCategoryCode("implant");
+        angle.setCategoryName("种植牙");
+        angle.setTopicAngle("种植牙选择前需要了解哪些信息");
         angle.setRecommendedFocus("risk");
         angle.setEnabled(true);
         return angle;

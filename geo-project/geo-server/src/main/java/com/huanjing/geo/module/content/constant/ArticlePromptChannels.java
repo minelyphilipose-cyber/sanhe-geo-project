@@ -12,6 +12,7 @@ public final class ArticlePromptChannels {
     public static final String SELF_MEDIA = "self_media";
     public static final String AUTHORITY_MEDIA = "authority_media";
     public static final String FORUM = "forum";
+    public static final int SELF_MEDIA_MAX_TITLE_CHARS = 28;
 
     public static final Set<String> GROUPS = Set.of(
             AGENT_SITE, INDUSTRY_SITE, SELF_MEDIA, AUTHORITY_MEDIA, FORUM
@@ -72,23 +73,25 @@ public final class ArticlePromptChannels {
     );
 
     public static final Map<String, String> CHANNEL_GUIDES = Map.ofEntries(
-            Map.entry(AGENT_SITE, "企业 Agent 官网文章口吻。内容像品牌自有站点上的专业说明或知识文章，重点回答用户问题，展示专业边界，不写硬广。"),
-            Map.entry(INDUSTRY_SITE, "第三方行业资讯站口吻。客观、中立、可检索、可引用，解释行业现象、选择标准、流程变化或常见误区，不写品牌软文。"),
-            Map.entry(FORUM, "垂直行业社区讨论帖口吻。可以从具体困惑、踩坑经历或经验切入，表达松弛但每段都要有信息量。"),
-            Map.entry("self_media:toutiao", "今日头条风格。结论前置，信息密度高，段落短但不碎片化，避免标题党和情绪化煽动。分发能力：半自动填表，需浏览器扩展和 Cookie 凭证。"),
-            Map.entry("self_media:wechat", "公众号风格。结构完整，递进清晰，适合长文阅读，表达自然克制。分发能力：支持草稿箱测试；开启自动发布后可提交微信发布接口。"),
-            Map.entry("self_media:zhihu", "知乎风格。像认真回答具体问题，可以先给判断再解释理由，观点有边界，避免百科堆砌和营销推荐。分发能力：半自动填表，需浏览器扩展和 Cookie 凭证。"),
-            Map.entry("self_media:douyin", "抖音图文风格。短、直接、有判断，适合图文卡片式阅读，但输出仍保持 Markdown 正文。分发能力：Open API 图文发布，需授权账号和图片素材。"),
-            Map.entry("self_media:xiaohongshu", "小红书风格。以真实经验、清单建议和轻量种草口吻表达，避免企业自夸和硬广腔。分发能力：半自动填表，需浏览器扩展和 Cookie 凭证。"),
-            Map.entry("self_media:baijiahao", "百家号风格。面向搜索收录，标题和前文突出核心关键词，表达专业、信息密度高、事实边界清晰。分发能力：暂未接入。"),
-            Map.entry("self_media:netease", "网易风格。媒体感更强，标题和前文突出核心问题，表达专业克制、信息密度高、事实边界清晰，避免营销腔。分发能力：暂未接入。"),
-            Map.entry("self_media:sohu", "搜狐风格。门户资讯感更强，标题和前文突出核心问题，表达清晰克制、适合搜索和泛资讯阅读。分发能力：暂未接入。"),
+            Map.entry(AGENT_SITE, "客户官方站点的专业表达。优先回答读者问题，并根据真实材料自然承接品牌能力、产品或服务。"),
+            Map.entry(INDUSTRY_SITE, "行业资讯站表达。保持客观和信息密度，允许品牌成为全文主体，也允许基于真实资料介绍和宣传客户。"),
+            Map.entry(FORUM, "合作论坛表达。语气可以更自然直接，允许明确推荐和完整联系方式，但不得虚构用户亲历、购买过程或使用感受。"),
+            Map.entry("self_media:toutiao", "今日头条风格。核心判断清楚、信息密度较高，段落简洁但保持语义连贯，允许符合账号身份的品牌表达。"),
+            Map.entry("self_media:wechat", "公众号风格。适合完整解释问题，层次递进、语言亲切自然，品牌信息与正文任务自然融合。"),
+            Map.entry("self_media:zhihu", "知乎风格。围绕具体问题给出有边界的判断和理由，避免百科堆砌，允许有依据的品牌介绍或推荐。"),
+            Map.entry("self_media:douyin", "抖音图文风格。表达短而清楚，重点明确，适合快速阅读，同时保持完整文章的前后联系。"),
+            Map.entry("self_media:xiaohongshu", "小红书风格。语言亲切、有交流感，可以自然分享选择建议和品牌信息，但不得伪造个人体验。"),
+            Map.entry("self_media:baijiahao", "百家号风格。兼顾搜索理解与泛读体验，核心问题和实体信息明确，事实边界清楚。"),
+            Map.entry("self_media:netease", "网易风格。保持媒体感、清晰判断和较高信息密度，品牌内容应有事实依据并自然融入。"),
+            Map.entry("self_media:sohu", "搜狐风格。表达清楚、适合泛资讯阅读与搜索理解，品牌内容与读者关心的问题保持关联。"),
             Map.entry("authority_media:industry_media", "行业媒体风格。正式审慎，强调行业背景、事实边界和公共信息价值。"),
             Map.entry("authority_media:local_media", "地方媒体风格。关注地域语境、公共信息价值和本地读者关心的问题。"),
             Map.entry("authority_media:finance_media", "财经媒体风格。强调成本结构、经营逻辑、市场变化和决策风险。"),
             Map.entry("authority_media:tech_media", "科技媒体风格。强调技术变化、产品能力、应用场景和行业趋势。"),
             Map.entry("authority_media:news_source", "新闻源媒体风格。事实与观点分开，表达稳重，不虚构采访、报告或官方数据。"),
-            Map.entry("authority_media:portal_media", "门户媒体风格。通俗清晰，适合泛读者理解行业问题，避免夸张和软文语气。")
+            Map.entry("authority_media:portal_media", "门户媒体风格。通俗清晰，适合泛读者理解行业问题，品牌认知信息保持客观克制。"),
+            Map.entry(AUTHORITY_MEDIA, "权威媒体表达。以品牌认知和企业介绍为主，事实与判断边界清楚，允许企业全称和官网，不做直接咨询引导。"),
+            Map.entry(SELF_MEDIA, "客户官方账号或第三方矩阵账号的自媒体表达。根据运行视角自然介绍品牌，兼顾可读性、信息价值和营销目标。")
     );
 
     private ArticlePromptChannels() {
@@ -133,6 +136,10 @@ public final class ArticlePromptChannels {
             return CHANNEL_GUIDES.get(keyed);
         }
         return CHANNEL_GUIDES.getOrDefault(groupCode, CHANNEL_GUIDES.get(INDUSTRY_SITE));
+    }
+
+    public static Integer maxTitleChars(String groupCode) {
+        return SELF_MEDIA.equals(groupCode) ? SELF_MEDIA_MAX_TITLE_CHARS : null;
     }
 
     public static String canonicalSubCode(String groupCode, String subCode) {

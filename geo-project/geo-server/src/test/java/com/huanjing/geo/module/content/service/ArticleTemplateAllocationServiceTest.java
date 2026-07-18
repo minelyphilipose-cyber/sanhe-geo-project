@@ -11,20 +11,27 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ArticleTemplateAllocationServiceTest {
 
     private ArticlePromptTemplateMapper templateMapper;
     private ArticlePromptTemplateVersionMapper versionMapper;
+    private TemplatePerspectiveService perspectiveService;
     private ArticleTemplateAllocationService service;
 
     @BeforeEach
     void setUp() {
         templateMapper = mock(ArticlePromptTemplateMapper.class);
         versionMapper = mock(ArticlePromptTemplateVersionMapper.class);
-        service = new ArticleTemplateAllocationService(templateMapper, versionMapper, new QuestionScenePlatformSuggestionService());
+        perspectiveService = mock(TemplatePerspectiveService.class);
+        when(perspectiveService.resolve(any(), any(), any())).thenAnswer(invocation ->
+                TemplatePerspectiveService.ResolvedPerspective.defaultFor(invocation.getArgument(1)));
+        service = new ArticleTemplateAllocationService(
+                templateMapper, versionMapper, new QuestionScenePlatformSuggestionService(), perspectiveService);
     }
 
     @Test
@@ -57,6 +64,17 @@ class ArticleTemplateAllocationServiceTest {
         assertEquals(1, allocated.size());
         assertEquals(2L, allocated.get(0).template().getId());
         assertEquals(2, allocated.get(0).count());
+    }
+
+    @Test
+    void generationOptionsResolvePerspectiveForEachChannelAndBrand() {
+        when(templateMapper.selectList(any())).thenReturn(List.of());
+
+        service.options(88L);
+
+        verify(perspectiveService).resolve(eq(88L), eq("industry_site"), any());
+        verify(perspectiveService).resolve(eq(88L), eq("authority_media"), eq("industry_media"));
+        verify(perspectiveService).resolve(eq(88L), eq("forum"), any());
     }
 
     private ArticlePromptTemplate template(Long id, String questionSceneCode, int weight) {

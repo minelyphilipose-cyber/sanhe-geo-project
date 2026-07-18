@@ -459,7 +459,7 @@ public class BatchArticleGenerationService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<Long, String> brandNameMap = brandIds.isEmpty()
-                ? Map.of()
+                ? java.util.Collections.emptyMap()
                 : brandMapper.selectBatchIds(brandIds).stream()
                 .collect(Collectors.toMap(Brand::getId, Brand::getBrandName, (first, ignored) -> first));
         Set<Long> promptTemplateIds = tasks.stream()
@@ -467,7 +467,7 @@ public class BatchArticleGenerationService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<Long, String> promptTemplateNameMap = promptTemplateIds.isEmpty()
-                ? Map.of()
+                ? java.util.Collections.emptyMap()
                 : promptTemplateMapper.selectBatchIds(promptTemplateIds).stream()
                 .collect(Collectors.toMap(ArticlePromptTemplate::getId, ArticlePromptTemplate::getName, (first, ignored) -> first));
         Set<Long> promptTemplateVersionIds = tasks.stream()
@@ -475,7 +475,7 @@ public class BatchArticleGenerationService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<Long, Integer> promptTemplateVersionNoMap = promptTemplateVersionIds.isEmpty()
-                ? Map.of()
+                ? java.util.Collections.emptyMap()
                 : promptTemplateVersionMapper.selectBatchIds(promptTemplateVersionIds).stream()
                 .collect(Collectors.toMap(ArticlePromptTemplateVersion::getId, ArticlePromptTemplateVersion::getVersionNo, (first, ignored) -> first));
         List<BatchArticleGenerationDetailResponse.Task> taskItems = tasks.stream()
@@ -1025,9 +1025,10 @@ public class BatchArticleGenerationService {
                                 selectedModel.platformCode(),
                                 selectedModel.modelId(),
                                 true,
+                                promptContext.runtimePolicy().allowContactInfo(),
                                 true,
-                                true,
-                                forbiddenPhrases
+                                forbiddenPhrases,
+                                ArticlePromptChannels.maxTitleChars(task.getChannelGroupCode())
                         )
                 );
                 complianceResult = medicalComplianceChecker.check(new MedicalArticleComplianceChecker.CheckInput(
@@ -1076,7 +1077,6 @@ public class BatchArticleGenerationService {
             Long articleId = persistArticle(project, task, generated.title(), generated.content(), prompt, generated.model(), generated.result(),
                     promptContext.medicalContext(), MedicalArticleConstants.COMPLIANCE_PASSED);
             medicalArticleGenerationService.recordHistory(contentProject, contentBrand, promptContext.medicalContext(), articleId);
-            specialIndustryComplianceAlertService.notifyPublishReviewPending(contentProject, contentBrand, task, articleId, promptContext.medicalContext());
             markTaskSuccess(task, articleId, prompt, generated.model(), generated.result(), generated.quality(), retryCount);
         } catch (Exception ex) {
             log.warn("Batch article generation task failed batchId={} taskId={}", batch.getId(), task.getId(), ex);
@@ -1311,6 +1311,7 @@ public class BatchArticleGenerationService {
     private void applyMedicalDraftFields(ArticleDraft draft,
                                          MedicalArticleGenerationService.MedicalPromptContext context,
                                          String complianceStatus) {
+        draft.setPublishReviewStatus(MedicalArticleConstants.REVIEW_NOT_REQUIRED);
         if (context == null) {
             draft.setComplianceStatus(complianceStatus);
             return;
@@ -1320,13 +1321,6 @@ public class BatchArticleGenerationService {
         draft.setMedicalChannelTier(context.channelTier());
         draft.setMedicalIndustryCode(context.industryCode());
         draft.setMedicalCategoryCode(context.categoryCode());
-        if (MedicalArticleConstants.TIER_OFFICIAL_SITE.equals(context.channelTier())) {
-            draft.setPublishReviewStatus(StringUtils.hasText(context.medicalAdReviewNo())
-                    ? MedicalArticleConstants.REVIEW_PASSED
-                    : MedicalArticleConstants.REVIEW_PENDING);
-        } else {
-            draft.setPublishReviewStatus(MedicalArticleConstants.REVIEW_NOT_REQUIRED);
-        }
     }
 
     private String enrichComplianceInputSnapshot(String inputSnapshot,

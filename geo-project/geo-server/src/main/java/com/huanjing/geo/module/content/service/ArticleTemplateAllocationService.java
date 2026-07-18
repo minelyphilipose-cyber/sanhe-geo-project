@@ -35,31 +35,39 @@ public class ArticleTemplateAllocationService {
     private final ArticlePromptTemplateMapper templateMapper;
     private final ArticlePromptTemplateVersionMapper versionMapper;
     private final QuestionScenePlatformSuggestionService suggestionService;
+    private final TemplatePerspectiveService perspectiveService;
 
     public GenerationOptionsVO options() {
+        return options(null);
+    }
+
+    public GenerationOptionsVO options(Long brandId) {
         List<ChannelGroupVO> groups = new ArrayList<>();
         groups.add(new ChannelGroupVO(ArticlePromptChannels.AGENT_SITE, "官网平台",
                 "用于 Agent 官网发布，发布时根据模板元数据进入 FAQ / 知识库 / 产品服务模块。",
-                List.of(channelOption(ArticlePromptChannels.AGENT_SITE, null, "Agent 官网", "官网文章风格，适合品牌自有 GEO 站点发布"))));
+                List.of(channelOption(brandId, ArticlePromptChannels.AGENT_SITE, null,
+                        "Agent 官网", "官网文章风格，适合品牌自有 GEO 站点发布"))));
         groups.add(new ChannelGroupVO(ArticlePromptChannels.INDUSTRY_SITE, "行业资讯站",
                 "统一按行业资讯口吻生成，发布目标由品牌绑定站点决定。",
-                List.of(channelOption(ArticlePromptChannels.INDUSTRY_SITE, null, "行业资讯站", "行业资讯站稿件，客观中立、可检索、可引用"))));
+                List.of(channelOption(brandId, ArticlePromptChannels.INDUSTRY_SITE, null,
+                        "行业资讯站", "行业资讯站稿件，客观中立、可检索、可引用"))));
         groups.add(new ChannelGroupVO(ArticlePromptChannels.SELF_MEDIA, "自媒体平台",
                 "不同平台独立配置模板，按平台阅读习惯生成内容。",
                 channelSubCodes(ArticlePromptChannels.SELF_MEDIA).stream()
-                        .map(sub -> channelOption(ArticlePromptChannels.SELF_MEDIA, sub,
+                        .map(sub -> channelOption(brandId, ArticlePromptChannels.SELF_MEDIA, sub,
                                 ArticlePromptChannels.SUB_LABELS.getOrDefault(sub, sub), selfMediaDesc(sub)))
                         .toList()));
         groups.add(new ChannelGroupVO(ArticlePromptChannels.AUTHORITY_MEDIA, "权威媒体",
                 "按媒体类型配置模板，强调事实边界和正式表达。",
                 channelSubCodes(ArticlePromptChannels.AUTHORITY_MEDIA).stream()
-                        .map(sub -> channelOption(ArticlePromptChannels.AUTHORITY_MEDIA, sub,
+                        .map(sub -> channelOption(brandId, ArticlePromptChannels.AUTHORITY_MEDIA, sub,
                                 ArticlePromptChannels.SUB_LABELS.getOrDefault(sub, sub), "正式审慎，事实边界清晰"))
                         .toList()));
         groups.add(new ChannelGroupVO(ArticlePromptChannels.FORUM, "平台网站",
                 "统一按平台网站的社区讨论、经验分享、避坑帖风格生成。",
-                List.of(channelOption(ArticlePromptChannels.FORUM, null, "平台网站", "平台网站讨论感"))));
-        groups.addAll(customGroups());
+                List.of(channelOption(brandId, ArticlePromptChannels.FORUM, null,
+                        "平台网站", "平台网站讨论感"))));
+        groups.addAll(customGroups(brandId));
         List<QuestionScenePlatformSuggestionVO> suggestions = suggestionService.suggestions().stream()
                 .map(item -> new QuestionScenePlatformSuggestionVO(
                         item.questionSceneCode(),
@@ -212,11 +220,18 @@ public class ArticleTemplateAllocationService {
     }
 
     public Map<String, List<TemplateWithVersion>> activeTemplateMap() {
+        return activeTemplateMap(null);
+    }
+
+    public Map<String, List<TemplateWithVersion>> activeTemplateMap(Long brandId) {
         Map<String, List<TemplateWithVersion>> map = new LinkedHashMap<>();
-        for (ChannelGroupVO group : options().groups()) {
+        for (ChannelGroupVO group : options(brandId).groups()) {
             for (ChannelOptionVO channel : group.channels()) {
+                TemplatePerspectiveService.ResolvedPerspective perspective = perspectiveService.resolve(
+                        brandId, channel.channelGroupCode(), channel.channelSubCode());
                 map.put(key(channel.channelGroupCode(), channel.channelSubCode()),
-                        activeTemplates(channel.channelGroupCode(), channel.channelSubCode()));
+                        activeTemplates(channel.channelGroupCode(), channel.channelSubCode(), null,
+                                perspective.perspectiveCode()));
             }
         }
         return map;
@@ -235,8 +250,15 @@ public class ArticleTemplateAllocationService {
     private record TemplateChannel(String groupCode, String subCode) {
     }
 
-    private ChannelOptionVO channelOption(String groupCode, String subCode, String label, String description) {
-        List<TemplateOptionVO> templates = activeTemplates(groupCode, subCode).stream()
+    private ChannelOptionVO channelOption(Long brandId,
+                                          String groupCode,
+                                          String subCode,
+                                          String label,
+                                          String description) {
+        TemplatePerspectiveService.ResolvedPerspective perspective = perspectiveService.resolve(
+                brandId, groupCode, subCode);
+        List<TemplateOptionVO> templates = activeTemplates(
+                groupCode, subCode, null, perspective.perspectiveCode()).stream()
                 .map(this::toTemplateOption)
                 .toList();
         return new ChannelOptionVO(
@@ -264,7 +286,7 @@ public class ArticleTemplateAllocationService {
         return new ArrayList<>(codes);
     }
 
-    private List<ChannelGroupVO> customGroups() {
+    private List<ChannelGroupVO> customGroups(Long brandId) {
         Map<String, Set<String>> groupMap = new LinkedHashMap<>();
         for (TemplateChannel channel : templateChannels()) {
             if (ArticlePromptChannels.GROUPS.contains(channel.groupCode())) {
@@ -278,7 +300,8 @@ public class ArticleTemplateAllocationService {
             String groupCode = entry.getKey();
             List<ChannelOptionVO> channels = entry.getValue().stream()
                     .map(this::trimToNull)
-                    .map(sub -> channelOption(groupCode, sub, sub == null ? groupCode : sub, "自定义分发渠道"))
+                    .map(sub -> channelOption(brandId, groupCode, sub,
+                            sub == null ? groupCode : sub, "自定义分发渠道"))
                     .toList();
             groups.add(new ChannelGroupVO(groupCode, groupCode, "自定义分发渠道", channels));
         }

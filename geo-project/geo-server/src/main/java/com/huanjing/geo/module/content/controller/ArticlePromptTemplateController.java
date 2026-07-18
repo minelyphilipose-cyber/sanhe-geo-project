@@ -96,8 +96,10 @@ public class ArticlePromptTemplateController {
     }
 
     @GetMapping("/generation-options")
-    public R<GenerationOptionsVO> generationOptions() {
-        return R.ok(allocationService.options());
+    public R<GenerationOptionsVO> generationOptions(@RequestParam(required = false) Long projectId) {
+        Project project = projectId == null ? null : projectMapper.selectById(projectId);
+        Long brandId = project == null || project.getDeletedAt() != null ? null : project.getBrandId();
+        return R.ok(allocationService.options(brandId));
     }
 
     @PostMapping("/preview-allocation")
@@ -108,11 +110,8 @@ public class ArticlePromptTemplateController {
     }
 
     private TemplatePerspectiveService.ResolvedPerspective resolvePreviewPerspective(AllocationPreviewRequest req) {
-        if (req.projectId() == null) {
-            return TemplatePerspectiveService.ResolvedPerspective.customer();
-        }
-        Project project = projectMapper.selectById(req.projectId());
-        Long brandId = project == null ? null : project.getBrandId();
+        Project project = req.projectId() == null ? null : projectMapper.selectById(req.projectId());
+        Long brandId = project == null || project.getDeletedAt() != null ? null : project.getBrandId();
         return perspectiveService.resolve(brandId, req.channelGroupCode(), req.channelSubCode());
     }
 }

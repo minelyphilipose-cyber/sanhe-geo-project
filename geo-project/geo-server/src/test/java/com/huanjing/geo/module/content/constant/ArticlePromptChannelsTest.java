@@ -13,7 +13,7 @@ class ArticlePromptChannelsTest {
         assertEquals("douyin", ArticlePromptChannels.canonicalSubCode("self_media", "douyin_image_text"));
         assertEquals("douyin", ArticlePromptChannels.contentStyle("self_media", "douyin_image_text"));
         assertEquals("抖音图文", ArticlePromptChannels.channelName("self_media", "douyin_image_text"));
-        assertTrue(ArticlePromptChannels.channelGuide("self_media", "douyin_image_text").contains("Open API"));
+        assertTrue(ArticlePromptChannels.channelGuide("self_media", "douyin_image_text").contains("抖音图文"));
     }
 
     @Test
