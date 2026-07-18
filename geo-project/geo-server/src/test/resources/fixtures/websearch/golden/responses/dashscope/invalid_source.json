@@ -1,0 +1,47 @@
+{
+  "providerRequestId": "qwen_invalid",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "fixture-model",
+  "answer": "\u56DE\u7B54[ref_1]",
+  "searchStatus": "NO_VALID_SOURCE",
+  "generationSkipped": false,
+  "searchEvidence": [
+    {
+      "eventIndex": 1,
+      "evidenceType": "search_info",
+      "query": "\u95EE\u9898",
+      "attributes": {
+        "queryCount": 1,
+        "resultCount": 1
+      }
+    }
+  ],
+  "sources": [
+    {
+      "searchEventIndex": 1,
+      "rank": 1,
+      "query": null,
+      "title": "\u975E\u6CD5\u6765\u6E90",
+      "originalUrl": "not-a-url",
+      "normalizedUrl": null,
+      "domain": null,
+      "snippet": null,
+      "publishTime": null,
+      "brandMatchStrength": "NONE",
+      "matchedKeywords": []
+    }
+  ],
+  "citations": [
+    {
+      "citationIndex": 1,
+      "sourceOccurrenceIndex": 0,
+      "answerStart": 2,
+      "answerEnd": 9,
+      "citationText": "[ref_1]",
+      "confidence": "NONE",
+      "validationStatus": "SOURCE_INDEX_NOT_FOUND"
+    }
+  ],
+  "usage": {},
+  "finishReason": "stop"
+}

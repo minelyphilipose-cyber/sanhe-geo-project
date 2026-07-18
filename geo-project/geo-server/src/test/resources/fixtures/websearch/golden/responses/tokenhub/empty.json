@@ -1,0 +1,27 @@
+{
+  "providerRequestId": "tokenhub_empty",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "fixture-model",
+  "answer": "\u672A\u68C0\u7D22\u5230\u7ED3\u679C\u3002",
+  "searchStatus": "EMPTY",
+  "generationSkipped": false,
+  "searchEvidence": [
+    {
+      "eventIndex": 1,
+      "evidenceType": "web_search_call",
+      "query": null,
+      "attributes": {
+        "id": "ws_t_empty",
+        "action": "search"
+      }
+    }
+  ],
+  "sources": [],
+  "citations": [],
+  "usage": {
+    "tool_usage": {
+      "web_search_call": 1
+    }
+  },
+  "finishReason": "completed"
+}

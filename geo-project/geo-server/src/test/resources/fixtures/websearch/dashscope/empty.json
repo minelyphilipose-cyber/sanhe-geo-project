@@ -1,0 +1,9 @@
+{
+  "request_id": "qwen_empty",
+  "output": {
+    "finish_reason": "stop",
+    "search_info": {"search_queries": ["无结果问题"], "search_results": []},
+    "choices": [{"message": {"role": "assistant", "content": "未检索到结果。"}}]
+  },
+  "usage": {"input_tokens": 10, "output_tokens": 5}
+}

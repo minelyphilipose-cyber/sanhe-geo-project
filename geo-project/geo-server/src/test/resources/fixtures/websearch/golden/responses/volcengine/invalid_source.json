@@ -1,0 +1,51 @@
+{
+  "providerRequestId": "resp_volc_invalid",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "fixture-model",
+  "answer": "\u7ED3\u679C[1]",
+  "searchStatus": "NO_VALID_SOURCE",
+  "generationSkipped": false,
+  "searchEvidence": [
+    {
+      "eventIndex": 1,
+      "evidenceType": "web_search_call",
+      "query": null,
+      "attributes": {
+        "id": "ws_invalid",
+        "action": "search"
+      }
+    }
+  ],
+  "sources": [
+    {
+      "searchEventIndex": 1,
+      "rank": 1,
+      "query": null,
+      "title": "\u975E\u6CD5\u6765\u6E90",
+      "originalUrl": "javascript:alert(1)",
+      "normalizedUrl": null,
+      "domain": null,
+      "snippet": null,
+      "publishTime": null,
+      "brandMatchStrength": "NONE",
+      "matchedKeywords": []
+    }
+  ],
+  "citations": [
+    {
+      "citationIndex": 1,
+      "sourceOccurrenceIndex": 0,
+      "answerStart": 2,
+      "answerEnd": 5,
+      "citationText": "[1]",
+      "confidence": "NONE",
+      "validationStatus": "INCOMPLETE_PROVIDER_METADATA"
+    }
+  ],
+  "usage": {
+    "tool_usage": {
+      "web_search": 1
+    }
+  },
+  "finishReason": "completed"
+}

@@ -43,6 +43,12 @@ import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
+import com.huanjing.geo.module.dispatch.websearch.WebSearchPollCommand;
+import com.huanjing.geo.module.dispatch.websearch.QuestionPollPromptTemplate;
+import com.huanjing.geo.module.dispatch.websearch.WebSearchPollExecutionOutcome;
+import com.huanjing.geo.module.dispatch.websearch.WebSearchPollExecutionService;
+import com.huanjing.geo.module.dispatch.websearch.enums.IntegrationType;
+import com.huanjing.geo.module.dispatch.websearch.enums.TriggerType;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
@@ -117,6 +123,7 @@ public class DispatchExecutionService {
     private final DispatchQuestionPollPlanningService questionPollPlanningService;
     private final DispatchPollShardPersistenceService pollShardPersistenceService;
     private final DispatchPollAggregationService pollAggregationService;
+    private final WebSearchPollExecutionService webSearchPollExecutionService;
     private final LlmCapacityFailureClassifier capacityFailureClassifier;
 
     @Value("${geo.llm.routing.article-excluded-platform-codes:hunyuan,yuanbao}")
@@ -230,6 +237,35 @@ public class DispatchExecutionService {
                             0,
                             null
                     );
+                } else if (isWebSearchPlatform(platform)) {
+                    PollResult pending = buildPollResultIdentity(batch, task, project, platform, keyword);
+                    pending.setStatus("running");
+                    pending.setRecordType("pending");
+                    pending.setRequestCount(0);
+                    pending.setDetailJson("{}");
+                    PollResult persisted = pollShardPersistenceService.ensurePollResult(pending);
+                    WebSearchPollExecutionOutcome outcome = webSearchPollExecutionService.execute(
+                            new WebSearchPollCommand(
+                                    persisted.getId(), item.getId(), task.getId(), project.getId(),
+                                    keyword.keywordResultId(), keyword.keywordText(),
+                                    QuestionPollPromptTemplate.SYSTEM_PROMPT,
+                                    platform,
+                                    resolvePollTriggerType(batch),
+                                    dispatchProperties.getModelConnectTimeoutMs(),
+                                    requestTimeoutMs,
+                                    judgeBrandNames
+                            )
+                    );
+                    task.setPlatformCode(platform.getPlatformCode());
+                    task.setCurrentChannel("web_search");
+                    invokeResult = outcome.success()
+                            ? InvocationResult.success(
+                                    platform.getPlatformCode(), "web_search", outcome.response().answer(),
+                                    outcome.latencyMs(), outcome.attemptCount())
+                            : InvocationResult.failure(
+                                    outcome.errorCategory() == null ? "INTERNAL_ERROR" : outcome.errorCategory().name(),
+                                    outcome.errorMessage(), outcome.attemptCount(),
+                                    new IllegalStateException(outcome.errorMessage()));
                 } else {
                     invokeResult = invokeMonitoringWithRouter(platform, task, keyword.keywordText(), requestTimeoutMs);
                 }
@@ -352,17 +388,7 @@ public class DispatchExecutionService {
             detail.put("error_payload", errorPayload);
         }
 
-        PollResult result = new PollResult();
-        result.setBatchId(batch.getId());
-        result.setDispatchTaskId(task.getId());
-        result.setProjectId(project.getId());
-        result.setKeywordResultId(keyword.keywordResultId());
-        result.setKeywordTextSnapshot(keyword.keywordText());
-        result.setPlatformId(platform.getId());
-        result.setPlatformCode(platform.getPlatformCode());
-        result.setBatchDate(batch.getBatchDate());
-        result.setBatchNo(batch.getBatchNo());
-        result.setQuestionTier(batch.getQuestionTier());
+        PollResult result = buildPollResultIdentity(batch, task, project, platform, keyword);
         result.setStatus(invokeResult.success ? "completed" : "failed");
         result.setRequestCount(invokeResult.requestCount);
         result.setResponseTimeMs(invokeResult.responseTimeMs);
@@ -384,6 +410,50 @@ public class DispatchExecutionService {
         result.setRecordType(recordType);
         result.setDetailJson(JSONUtil.toJsonStr(detail));
         return result;
+    }
+
+    private PollResult buildPollResultIdentity(PollBatch batch,
+                                               DispatchTask task,
+                                               Project project,
+                                               AiPlatformConfig platform,
+                                               PollKeywordCandidate keyword) {
+        PollResult result = new PollResult();
+        result.setBatchId(batch.getId());
+        result.setDispatchTaskId(task.getId());
+        result.setProjectId(project.getId());
+        result.setKeywordResultId(keyword.keywordResultId());
+        result.setKeywordTextSnapshot(keyword.keywordText());
+        result.setPlatformId(platform.getId());
+        result.setPlatformCode(platform.getPlatformCode());
+        result.setChannelCode(StringUtils.hasText(platform.getChannelCode())
+                ? platform.getChannelCode() : platform.getPlatformCode());
+        result.setTriggerType(resolvePollTriggerType(batch).name());
+        result.setBatchDate(batch.getBatchDate());
+        result.setBatchNo(batch.getBatchNo());
+        result.setQuestionTier(batch.getQuestionTier());
+        return result;
+    }
+
+    private boolean isWebSearchPlatform(AiPlatformConfig platform) {
+        if (platform == null || !StringUtils.hasText(platform.getIntegrationType())) {
+            return false;
+        }
+        try {
+            return IntegrationType.valueOf(platform.getIntegrationType()).isWebSearch();
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private TriggerType resolvePollTriggerType(PollBatch batch) {
+        if (batch != null && StringUtils.hasText(batch.getTriggerType())) {
+            try {
+                return TriggerType.valueOf(batch.getTriggerType());
+            } catch (IllegalArgumentException ignored) {
+                // Preserve compatibility with pre-web batches.
+            }
+        }
+        return TriggerType.SCHEDULED;
     }
 
     private void executeContentGeneration(DispatchTask task, List<AiPlatformConfig> platformConfigs) {
@@ -1516,6 +1586,7 @@ public class DispatchExecutionService {
                 new LambdaQueryWrapper<AiPlatformConfig>()
                         .eq(AiPlatformConfig::getEnabled, true)
                         .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
+                        .eq(AiPlatformConfig::getUsageScene, "QUESTION_POLL_WEB")
                         .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId)
         );
     }

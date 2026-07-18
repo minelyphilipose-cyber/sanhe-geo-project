@@ -2,6 +2,9 @@ package com.huanjing.geo.module.system.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.image.CompressedImage;
 import com.huanjing.geo.common.image.ImageCompressionService;
@@ -11,12 +14,16 @@ import com.huanjing.geo.module.system.dto.AiPlatformConfigUpdateRequest;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+import com.huanjing.geo.module.dispatch.websearch.enums.IntegrationType;
+import com.huanjing.geo.module.dispatch.websearch.enums.UsageScene;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
+import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -41,6 +48,7 @@ public class AiPlatformConfigService {
     private final PlatformCredentialService platformCredentialService;
     private final MinioStorageService minioStorageService;
     private final ImageCompressionService imageCompressionService;
+    private final ObjectMapper objectMapper;
 
     public Page<AiPlatformConfig> page(long current, long size, String keyword, String priorityLevel, Boolean enabled) {
         currentUserService.ensureUserManageOperator();
@@ -67,6 +75,10 @@ public class AiPlatformConfigService {
         currentUserService.ensurePermission("user.manage");
         validateRequest(
                 req.getPlatformCode(),
+                normalize(req.getChannelCode(), req.getPlatformCode()),
+                normalize(req.getUsageScene(), UsageScene.STANDARD_CHAT.name()),
+                normalize(req.getIntegrationType(), IntegrationType.OPENAI_CHAT.name()),
+                req.getProviderConfig(),
                 req.getPlatformName(),
                 req.getPriorityLevel(),
                 req.getRpmLimit(),
@@ -87,6 +99,11 @@ public class AiPlatformConfigService {
                 req.getDegradedReason()
         );
         ensureUniqueCode(req.getPlatformCode(), null);
+        ensureUniqueChannelScene(
+                normalize(req.getChannelCode(), req.getPlatformCode()),
+                normalize(req.getUsageScene(), UsageScene.STANDARD_CHAT.name()),
+                null
+        );
 
         AiPlatformConfig entity = new AiPlatformConfig();
         fillEntity(entity, req);
@@ -104,17 +121,36 @@ public class AiPlatformConfigService {
         return entity;
     }
 
+    @Transactional
     public AiPlatformConfig update(Long id, AiPlatformConfigUpdateRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("user.manage");
+        AiPlatformConfig entity = requireById(id);
+        String channelCode = normalize(req.getChannelCode(), entity.getChannelCode());
+        String usageScene = normalize(req.getUsageScene(), entity.getUsageScene());
+        String integrationType = normalize(req.getIntegrationType(), entity.getIntegrationType());
+        JsonNode providerConfig = req.getProviderConfig() != null
+                ? req.getProviderConfig()
+                : readJson(entity.getProviderConfigJson());
+        String effectiveApiKey = Boolean.TRUE.equals(req.getClearApiKey())
+                ? null
+                : (StringUtils.hasText(req.getApiKey()) ? req.getApiKey() : entity.getApiKey());
+        String effectivePrimaryKeyRef = Boolean.TRUE.equals(req.getClearPrimaryKeyRef())
+                ? null
+                : (StringUtils.hasText(req.getPrimaryKeyRef())
+                        ? req.getPrimaryKeyRef() : entity.getPrimaryKeyRef());
         validateRequest(
                 req.getPlatformCode(),
+                channelCode,
+                usageScene,
+                integrationType,
+                providerConfig,
                 req.getPlatformName(),
                 req.getPriorityLevel(),
                 req.getRpmLimit(),
                 req.getTpmLimit(),
-                req.getApiKey(),
-                req.getPrimaryKeyRef(),
+                effectiveApiKey,
+                effectivePrimaryKeyRef,
                 req.getApiUrl(),
                 req.getModelId(),
                 req.getLowModelId(),
@@ -128,13 +164,17 @@ public class AiPlatformConfigService {
                 req.getDegraded(),
                 req.getDegradedReason()
         );
-        AiPlatformConfig entity = requireById(id);
         ensureUniqueCode(req.getPlatformCode(), id);
+        ensureUniqueChannelScene(channelCode, usageScene, id);
 
         Map<String, Object> before = snapshot(entity);
 
         fillEntity(entity, req);
         aiPlatformConfigMapper.updateById(entity);
+        // MyBatis-Plus omits null fields in updateById. Persist both credential columns
+        // explicitly so switching sources also removes the previous source atomically.
+        aiPlatformConfigMapper.updateCredentialSources(
+                entity.getId(), entity.getApiKey(), entity.getPrimaryKeyRef());
 
         activityLogService.logAction(
                 operator.getId(),
@@ -235,6 +275,10 @@ public class AiPlatformConfigService {
 
     private void validateRequest(
             String platformCode,
+            String channelCode,
+            String usageScene,
+            String integrationType,
+            JsonNode providerConfig,
             String platformName,
             String priorityLevel,
             Integer rpmLimit,
@@ -257,15 +301,18 @@ public class AiPlatformConfigService {
         if (!StringUtils.hasText(platformCode) || !CODE_PATTERN.matcher(platformCode.trim()).matches()) {
             throw new BizException(400, "Invalid platform_code");
         }
+        if (!StringUtils.hasText(channelCode) || !CODE_PATTERN.matcher(channelCode.trim()).matches()) {
+            throw new BizException(400, "Invalid channel_code");
+        }
+        UsageScene scene = parseEnum(UsageScene.class, usageScene, "usage_scene");
+        IntegrationType integration = parseEnum(IntegrationType.class, integrationType, "integration_type");
         if (!StringUtils.hasText(platformName)) {
             throw new BizException(400, "platform_name is required");
         }
         if (!StringUtils.hasText(priorityLevel) || !PRIORITY_SET.contains(priorityLevel.trim())) {
             throw new BizException(400, "priority_level must be P0/P1/P2");
         }
-        if (!StringUtils.hasText(apiKey) && !StringUtils.hasText(primaryKeyRef)) {
-            throw new BizException(400, "api_key or primary_key_ref is required");
-        }
+        validateCredentialSource(scene, integration, apiKey, primaryKeyRef, providerConfig);
         if (rpmLimit != null && rpmLimit <= 0) {
             throw new BizException(400, "rpm_limit must be > 0");
         }
@@ -274,6 +321,9 @@ public class AiPlatformConfigService {
         }
         if (!StringUtils.hasText(apiUrl)) {
             throw new BizException(400, "api_url is required");
+        }
+        if (integration.isWebSearch()) {
+            validateFinalHttpsEndpoint(apiUrl, "api_url");
         }
         if (!StringUtils.hasText(modelId)) {
             throw new BizException(400, "model_id is required");
@@ -324,8 +374,123 @@ public class AiPlatformConfigService {
         }
     }
 
+    private void ensureUniqueChannelScene(String channelCode, String usageScene, Long excludeId) {
+        AiPlatformConfig exists = aiPlatformConfigMapper.selectOne(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getChannelCode, channelCode.trim())
+                        .eq(AiPlatformConfig::getUsageScene, usageScene.trim())
+                        .ne(excludeId != null, AiPlatformConfig::getId, excludeId)
+                        .last("LIMIT 1")
+        );
+        if (exists != null) {
+            throw new BizException(400, "channel_code and usage_scene already exist");
+        }
+    }
+
+    private void validateCredentialSource(UsageScene scene,
+                                          IntegrationType integration,
+                                          String apiKey,
+                                          String primaryKeyRef,
+                                          JsonNode providerConfig) {
+        if (!integration.isWebSearch()) {
+            if (!StringUtils.hasText(apiKey) && !StringUtils.hasText(primaryKeyRef)) {
+                throw new BizException(400, "api_key or primary_key_ref is required");
+            }
+            return;
+        }
+        if (scene != UsageScene.QUESTION_POLL_WEB) {
+            throw new BizException(400, "web-search integration requires usage_scene=QUESTION_POLL_WEB");
+        }
+        boolean hasApiKey = StringUtils.hasText(apiKey);
+        boolean hasPrimaryRef = StringUtils.hasText(primaryKeyRef);
+        if (hasApiKey == hasPrimaryRef) {
+            throw new BizException(400,
+                    "web-search configuration requires exactly one of api_key or primary_key_ref");
+        }
+        if (hasPrimaryRef) {
+            validateEnvRef(primaryKeyRef, "primary_key_ref");
+        }
+        if (providerConfig != null && (providerConfig.hasNonNull("credentialRef")
+                || providerConfig.hasNonNull("searchCredentialRef")
+                || providerConfig.hasNonNull("generationCredentialRef"))) {
+            throw new BizException(400, "single-provider web credentials must use primary_key_ref only");
+        }
+    }
+
+    private void requireEnvRef(JsonNode providerConfig, String fieldName) {
+        JsonNode value = requireText(providerConfig, fieldName);
+        validateEnvRef(value.asText(), "provider_config." + fieldName);
+    }
+
+    private JsonNode requireText(JsonNode providerConfig, String fieldName) {
+        if (providerConfig == null || !providerConfig.isObject()) {
+            throw new BizException(400, "provider_config must be a JSON object");
+        }
+        JsonNode value = providerConfig.get(fieldName);
+        if (value == null || !value.isTextual() || !StringUtils.hasText(value.asText())) {
+            throw new BizException(400, "provider_config." + fieldName + " is required");
+        }
+        return value;
+    }
+
+    private void validateEnvRef(String value, String fieldName) {
+        if (!StringUtils.hasText(value) || !value.trim().matches("^env://[A-Za-z_][A-Za-z0-9_]*$")) {
+            throw new BizException(400, fieldName + " must use env://ENVIRONMENT_VARIABLE");
+        }
+    }
+
+    private void validateFinalHttpsEndpoint(String value, String fieldName) {
+        try {
+            URI uri = URI.create(value.trim());
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || !StringUtils.hasText(uri.getHost())) {
+                throw new IllegalArgumentException("HTTPS endpoint required");
+            }
+        } catch (IllegalArgumentException ex) {
+            throw new BizException(400, fieldName + " must be a complete HTTPS request URL");
+        }
+    }
+
+    private <E extends Enum<E>> E parseEnum(Class<E> enumType, String value, String fieldName) {
+        try {
+            return Enum.valueOf(enumType, value.trim().toUpperCase(Locale.ROOT));
+        } catch (Exception ex) {
+            throw new BizException(400, "Invalid " + fieldName + ": " + value);
+        }
+    }
+
+    private String normalize(String value, String fallback) {
+        return StringUtils.hasText(value) ? value.trim() : fallback.trim();
+    }
+
+    private String writeJson(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new BizException("Failed to serialize provider_config", ex);
+        }
+    }
+
+    private JsonNode readJson(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(value);
+        } catch (JsonProcessingException ex) {
+            throw new BizException("Stored provider_config is invalid JSON", ex);
+        }
+    }
+
     private void fillEntity(AiPlatformConfig entity, AiPlatformConfigCreateRequest req) {
         entity.setPlatformCode(req.getPlatformCode().trim());
+        entity.setChannelCode(normalize(req.getChannelCode(), req.getPlatformCode()));
+        entity.setUsageScene(normalize(req.getUsageScene(), UsageScene.STANDARD_CHAT.name()));
+        entity.setIntegrationType(normalize(req.getIntegrationType(), IntegrationType.OPENAI_CHAT.name()));
+        entity.setProviderConfigJson(writeJson(req.getProviderConfig()));
+        entity.setConfigVersion(1L);
         entity.setPlatformName(req.getPlatformName().trim());
         entity.setPlatformHomeUrl(StringUtils.hasText(req.getPlatformHomeUrl()) ? req.getPlatformHomeUrl().trim() : null);
         entity.setPlatformLogoUrl(StringUtils.hasText(req.getPlatformLogoUrl()) ? req.getPlatformLogoUrl().trim() : null);
@@ -361,6 +526,13 @@ public class AiPlatformConfigService {
 
     private void fillEntity(AiPlatformConfig entity, AiPlatformConfigUpdateRequest req) {
         entity.setPlatformCode(req.getPlatformCode().trim());
+        entity.setChannelCode(normalize(req.getChannelCode(), entity.getChannelCode()));
+        entity.setUsageScene(normalize(req.getUsageScene(), entity.getUsageScene()));
+        entity.setIntegrationType(normalize(req.getIntegrationType(), entity.getIntegrationType()));
+        if (req.getProviderConfig() != null) {
+            entity.setProviderConfigJson(writeJson(req.getProviderConfig()));
+        }
+        entity.setConfigVersion((entity.getConfigVersion() == null ? 0L : entity.getConfigVersion()) + 1L);
         entity.setPlatformName(req.getPlatformName().trim());
         entity.setPlatformHomeUrl(StringUtils.hasText(req.getPlatformHomeUrl()) ? req.getPlatformHomeUrl().trim() : null);
         entity.setPlatformLogoUrl(StringUtils.hasText(req.getPlatformLogoUrl()) ? req.getPlatformLogoUrl().trim() : null);
@@ -370,8 +542,16 @@ public class AiPlatformConfigService {
         entity.setPriorityLevel(req.getPriorityLevel().trim());
         entity.setRpmLimit(req.getRpmLimit() != null ? req.getRpmLimit() : entity.getRpmLimit());
         entity.setTpmLimit(req.getTpmLimit() != null ? req.getTpmLimit() : entity.getTpmLimit());
-        entity.setApiKey(platformCredentialService.encryptForStorage(req.getApiKey()));
-        entity.setPrimaryKeyRef(StringUtils.hasText(req.getPrimaryKeyRef()) ? req.getPrimaryKeyRef().trim() : null);
+        if (Boolean.TRUE.equals(req.getClearApiKey())) {
+            entity.setApiKey(null);
+        } else if (StringUtils.hasText(req.getApiKey())) {
+            entity.setApiKey(platformCredentialService.encryptForStorage(req.getApiKey()));
+        }
+        if (Boolean.TRUE.equals(req.getClearPrimaryKeyRef())) {
+            entity.setPrimaryKeyRef(null);
+        } else if (StringUtils.hasText(req.getPrimaryKeyRef())) {
+            entity.setPrimaryKeyRef(req.getPrimaryKeyRef().trim());
+        }
         entity.setBackupKeyRef(StringUtils.hasText(req.getBackupKeyRef()) ? req.getBackupKeyRef().trim() : null);
         entity.setBackupProviderName(StringUtils.hasText(req.getBackupProviderName()) ? req.getBackupProviderName().trim() : null);
         entity.setBackupApiUrl(StringUtils.hasText(req.getBackupApiUrl()) ? req.getBackupApiUrl().trim() : null);
@@ -398,6 +578,11 @@ public class AiPlatformConfigService {
     private Map<String, Object> snapshot(AiPlatformConfig entity) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("platformCode", entity.getPlatformCode());
+        snapshot.put("channelCode", entity.getChannelCode());
+        snapshot.put("usageScene", entity.getUsageScene());
+        snapshot.put("integrationType", entity.getIntegrationType());
+        snapshot.put("providerConfigJson", entity.getProviderConfigJson());
+        snapshot.put("configVersion", entity.getConfigVersion());
         snapshot.put("platformName", entity.getPlatformName());
         snapshot.put("platformHomeUrl", entity.getPlatformHomeUrl());
         snapshot.put("platformLogoUrl", entity.getPlatformLogoUrl());

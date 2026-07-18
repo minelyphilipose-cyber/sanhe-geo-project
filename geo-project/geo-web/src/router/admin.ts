@@ -316,6 +316,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '平台健康', permissions: ['content.read', 'delivery.overview.read', 'user.manage'] },
     },
     {
+      path: 'monitoring/question-poll-verification',
+      name: 'QuestionPollVerification',
+      component: () => import('@/views/admin/monitoring/QuestionPollVerification.vue'),
+      meta: { title: '轮询链路验证', icon: 'VideoPlay', permissions: ['dispatch.question_poll.manual'] },
+    },
+    {
       path: 'reports/:id',
       name: 'ReportPreview',
       component: () => import('@/views/admin/report/ReportPreview.vue'),
@@ -438,6 +444,12 @@ const adminRoutes: RouteRecordRaw = {
       name: 'ActivityLogs',
       component: () => import('@/views/admin/system/ActivityLogs.vue'),
       meta: { title: '操作日志', icon: 'Document', permissions: ['user.manage'] },
+    },
+    {
+      path: 'model-diagnostics',
+      name: 'ModelDiagnosticConsole',
+      component: () => import('@/views/admin/system/ModelDiagnosticConsole.vue'),
+      meta: { title: '大模型诊断台', icon: 'ChatDotRound', permissions: ['ai.platform.diagnose'] },
     },
     {
       path: 'settings/platforms',

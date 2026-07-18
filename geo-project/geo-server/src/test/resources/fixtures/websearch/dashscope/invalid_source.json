@@ -1,0 +1,11 @@
+{
+  "request_id": "qwen_invalid",
+  "output": {
+    "finish_reason": "stop",
+    "search_info": {"search_queries": ["问题"], "search_results": [
+      {"index": 1, "title": "非法来源", "url": "not-a-url"}
+    ]},
+    "choices": [{"message": {"role": "assistant", "content": "回答[ref_1]"}}]
+  },
+  "usage": {}
+}

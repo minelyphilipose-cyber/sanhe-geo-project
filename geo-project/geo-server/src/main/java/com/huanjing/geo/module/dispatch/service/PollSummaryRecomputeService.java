@@ -7,6 +7,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -116,6 +118,7 @@ public class PollSummaryRecomputeService {
                        pr.question_tier,
                        pr.platform_id,
                        pr.platform_code,
+                       pr.channel_code,
                        ap.platform_name AS platform_name_snapshot,
                        pr.status,
                        pr.request_count,
@@ -125,14 +128,24 @@ public class PollSummaryRecomputeService {
                        pr.site_mentioned,
                        pr.contact_mentioned,
                        pr.contact_mention_count,
+                       pr.effective_attempt_id,
+                       pr.execution_finalized,
+                       pr.search_requested,
+                       pr.search_triggered,
+                       pr.brand_in_search,
+                       pr.brand_in_answer,
+                       pr.confirmed_citation_exposure,
                        pr.record_type,
                        pr.created_at,
                        pr.updated_at
                   FROM poll_results pr
+                  LEFT JOIN poll_batches pb ON pb.id = pr.batch_id
                   LEFT JOIN ai_platform_config ap ON ap.id = pr.platform_id
                  WHERE pr.project_id = ?
                    AND pr.batch_date = ?
                    AND pr.question_tier = ?
+                   AND pr.deleted_at IS NULL
+                   AND COALESCE(pb.trigger_type, 'SCHEDULED') != 'MANUAL'
                  ORDER BY pr.id ASC
                 """, (rs, rowNum) -> mapSourceRow(rs), projectId, Date.valueOf(batchDate), questionTier);
     }
@@ -146,6 +159,7 @@ public class PollSummaryRecomputeService {
                 rs.getString("question_tier"),
                 nullableLong(rs, "platform_id"),
                 rs.getString("platform_code"),
+                rs.getString("channel_code"),
                 rs.getString("platform_name_snapshot"),
                 rs.getString("status"),
                 nullableInt(rs, "request_count"),
@@ -155,6 +169,13 @@ public class PollSummaryRecomputeService {
                 nullableBoolean(rs, "site_mentioned"),
                 nullableBoolean(rs, "contact_mentioned"),
                 nullableInt(rs, "contact_mention_count"),
+                nullableLong(rs, "effective_attempt_id"),
+                nullableBoolean(rs, "execution_finalized"),
+                nullableBoolean(rs, "search_requested"),
+                nullableBoolean(rs, "search_triggered"),
+                nullableBoolean(rs, "brand_in_search"),
+                nullableBoolean(rs, "brand_in_answer"),
+                nullableBoolean(rs, "confirmed_citation_exposure"),
                 rs.getString("record_type"),
                 nullableDateTime(rs, "created_at"),
                 nullableDateTime(rs, "updated_at")
@@ -202,9 +223,16 @@ public class PollSummaryRecomputeService {
                       keyword_result_id, keyword_text_snapshot, keyword_text_normalized,
                       source_row_count, platform_count, completed_count, failed_count, hit_count, effective_hit_count,
                       site_mention_count, contact_mention_count, contact_mention_total,
+                      search_confirmed_count, brand_search_count, brand_answer_count,
+                      confirmed_citation_exposure_count, confirmed_citation_exposure_rate,
                       request_count_total, response_time_ms_total, last_source_created_at, last_source_updated_at,
                       source_checksum, recomputed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                    )
                     ON DUPLICATE KEY UPDATE
                       keyword_identity_type = VALUES(keyword_identity_type),
                       keyword_identity_value = VALUES(keyword_identity_value),
@@ -220,6 +248,11 @@ public class PollSummaryRecomputeService {
                       site_mention_count = VALUES(site_mention_count),
                       contact_mention_count = VALUES(contact_mention_count),
                       contact_mention_total = VALUES(contact_mention_total),
+                      search_confirmed_count = VALUES(search_confirmed_count),
+                      brand_search_count = VALUES(brand_search_count),
+                      brand_answer_count = VALUES(brand_answer_count),
+                      confirmed_citation_exposure_count = VALUES(confirmed_citation_exposure_count),
+                      confirmed_citation_exposure_rate = VALUES(confirmed_citation_exposure_rate),
                       request_count_total = VALUES(request_count_total),
                       response_time_ms_total = VALUES(response_time_ms_total),
                       last_source_created_at = VALUES(last_source_created_at),
@@ -231,8 +264,10 @@ public class PollSummaryRecomputeService {
                     row.keywordIdentityValue(), row.dimHash(), row.keywordResultId(), row.keywordTextSnapshot(),
                     row.keywordTextNormalized(), row.sourceRowCount(), row.platformCount(), row.completedCount(),
                     row.failedCount(), row.hitCount(), row.effectiveHitCount(), row.siteMentionCount(),
-                    row.contactMentionCount(), row.contactMentionTotal(), row.requestCountTotal(),
-                    row.responseTimeMsTotal(), timestamp(row.lastSourceCreatedAt()),
+                    row.contactMentionCount(), row.contactMentionTotal(), row.searchConfirmedCount(),
+                    row.brandSearchCount(), row.brandAnswerCount(), row.confirmedCitationExposureCount(),
+                    row.confirmedCitationExposureRate(), row.requestCountTotal(), row.responseTimeMsTotal(),
+                    timestamp(row.lastSourceCreatedAt()),
                     timestamp(row.lastSourceUpdatedAt()), row.sourceChecksum());
         }
         return affected;
@@ -243,14 +278,23 @@ public class PollSummaryRecomputeService {
         for (PlatformSummaryRow row : rows) {
             affected += jdbcTemplate.update("""
                     INSERT INTO poll_platform_daily_summary (
-                      project_id, batch_date, question_tier, platform_id, dim_hash, platform_code, platform_name_snapshot,
+                      project_id, batch_date, question_tier, platform_id, dim_hash, platform_code, channel_code,
+                      platform_name_snapshot,
                       source_row_count, completed_count, failed_count, hit_count, effective_hit_count,
                       site_mention_count, contact_mention_count, contact_mention_total,
+                      search_confirmed_count, brand_search_count, brand_answer_count,
+                      confirmed_citation_exposure_count, confirmed_citation_exposure_rate,
                       request_count_total, response_time_ms_total, last_source_created_at, last_source_updated_at,
                       source_checksum, recomputed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                    )
                     ON DUPLICATE KEY UPDATE
                       platform_code = VALUES(platform_code),
+                      channel_code = VALUES(channel_code),
                       platform_name_snapshot = VALUES(platform_name_snapshot),
                       source_row_count = VALUES(source_row_count),
                       completed_count = VALUES(completed_count),
@@ -260,6 +304,11 @@ public class PollSummaryRecomputeService {
                       site_mention_count = VALUES(site_mention_count),
                       contact_mention_count = VALUES(contact_mention_count),
                       contact_mention_total = VALUES(contact_mention_total),
+                      search_confirmed_count = VALUES(search_confirmed_count),
+                      brand_search_count = VALUES(brand_search_count),
+                      brand_answer_count = VALUES(brand_answer_count),
+                      confirmed_citation_exposure_count = VALUES(confirmed_citation_exposure_count),
+                      confirmed_citation_exposure_rate = VALUES(confirmed_citation_exposure_rate),
                       request_count_total = VALUES(request_count_total),
                       response_time_ms_total = VALUES(response_time_ms_total),
                       last_source_created_at = VALUES(last_source_created_at),
@@ -268,9 +317,11 @@ public class PollSummaryRecomputeService {
                       recomputed_at = CURRENT_TIMESTAMP
                     """,
                     row.projectId(), Date.valueOf(row.batchDate()), row.questionTier(), row.platformId(),
-                    row.dimHash(), row.platformCode(), row.platformNameSnapshot(), row.sourceRowCount(),
+                    row.dimHash(), row.platformCode(), row.channelCode(), row.platformNameSnapshot(), row.sourceRowCount(),
                     row.completedCount(), row.failedCount(), row.hitCount(), row.effectiveHitCount(),
                     row.siteMentionCount(), row.contactMentionCount(), row.contactMentionTotal(),
+                    row.searchConfirmedCount(), row.brandSearchCount(), row.brandAnswerCount(),
+                    row.confirmedCitationExposureCount(), row.confirmedCitationExposureRate(),
                     row.requestCountTotal(), row.responseTimeMsTotal(), timestamp(row.lastSourceCreatedAt()),
                     timestamp(row.lastSourceUpdatedAt()), row.sourceChecksum());
         }
@@ -412,6 +463,7 @@ public class PollSummaryRecomputeService {
                                  String questionTier,
                                  Long platformId,
                                  String platformCode,
+                                 String channelCode,
                                  String platformNameSnapshot,
                                  String status,
                                  Integer requestCount,
@@ -421,6 +473,13 @@ public class PollSummaryRecomputeService {
                                  Boolean siteMentioned,
                                  Boolean contactMentioned,
                                  Integer contactMentionCount,
+                                 Long effectiveAttemptId,
+                                 Boolean executionFinalized,
+                                 Boolean searchRequested,
+                                 Boolean searchTriggered,
+                                 Boolean brandInSearch,
+                                 Boolean brandInAnswer,
+                                 Boolean confirmedCitationExposure,
                                  String recordType,
                                  LocalDateTime createdAt,
                                  LocalDateTime updatedAt) {
@@ -465,7 +524,8 @@ public class PollSummaryRecomputeService {
             return new KeywordSummaryRow(projectId, batchDate, questionTier, identity.type(), identity.value(), dimHash,
                     identity.keywordResultId(), keywordTextSnapshot, identity.normalizedText(), sourceRows.size(),
                     platformIds.size(), completedCount, failedCount, hitCount, effectiveHitCount, siteMentionCount,
-                    contactMentionCount, contactMentionTotal, requestCountTotal, responseTimeMsTotal,
+                    contactMentionCount, contactMentionTotal, searchConfirmedCount, brandSearchCount, brandAnswerCount,
+                    confirmedCitationExposureCount, confirmedCitationExposureRate(), requestCountTotal, responseTimeMsTotal,
                     lastSourceCreatedAt, lastSourceUpdatedAt, sourceChecksum());
         }
     }
@@ -477,6 +537,7 @@ public class PollSummaryRecomputeService {
         private final Long platformId;
         private final String dimHash;
         private String platformCode;
+        private String channelCode;
         private String platformNameSnapshot;
         private LocalDateTime latestPlatformAt;
         private Long latestPlatformRowId;
@@ -494,6 +555,7 @@ public class PollSummaryRecomputeService {
             super.accept(row);
             if (isLater(row, latestPlatformAt, latestPlatformRowId)) {
                 platformCode = row.platformCode();
+                channelCode = row.channelCode();
                 platformNameSnapshot = row.platformNameSnapshot();
                 latestPlatformAt = latestAt(row);
                 latestPlatformRowId = row.id();
@@ -502,9 +564,13 @@ public class PollSummaryRecomputeService {
 
         PlatformSummaryRow toRow() {
             return new PlatformSummaryRow(projectId, batchDate, questionTier, platformId, dimHash,
-                    platformCode == null ? "" : platformCode, platformNameSnapshot, sourceRows.size(), completedCount,
+                    platformCode == null ? "" : platformCode,
+                    channelCode == null || channelCode.isBlank() ? platformCode : channelCode,
+                    platformNameSnapshot, sourceRows.size(), completedCount,
                     failedCount, hitCount, effectiveHitCount, siteMentionCount, contactMentionCount,
-                    contactMentionTotal, requestCountTotal, responseTimeMsTotal, lastSourceCreatedAt,
+                    contactMentionTotal, searchConfirmedCount, brandSearchCount, brandAnswerCount,
+                    confirmedCitationExposureCount, confirmedCitationExposureRate(), requestCountTotal,
+                    responseTimeMsTotal, lastSourceCreatedAt,
                     lastSourceUpdatedAt, sourceChecksum());
         }
     }
@@ -517,6 +583,10 @@ public class PollSummaryRecomputeService {
         int effectiveHitCount;
         int siteMentionCount;
         int contactMentionCount;
+        int searchConfirmedCount;
+        int brandSearchCount;
+        int brandAnswerCount;
+        int confirmedCitationExposureCount;
         long contactMentionTotal;
         long requestCountTotal;
         long responseTimeMsTotal;
@@ -543,6 +613,20 @@ public class PollSummaryRecomputeService {
             if (Boolean.TRUE.equals(row.contactMentioned())) {
                 contactMentionCount++;
             }
+            if (isEffectiveWebSearchResult(row)) {
+                if (Boolean.TRUE.equals(row.searchTriggered())) {
+                    searchConfirmedCount++;
+                }
+                if (Boolean.TRUE.equals(row.brandInSearch())) {
+                    brandSearchCount++;
+                }
+                if (Boolean.TRUE.equals(row.brandInAnswer())) {
+                    brandAnswerCount++;
+                }
+                if (Boolean.TRUE.equals(row.confirmedCitationExposure())) {
+                    confirmedCitationExposureCount++;
+                }
+            }
             contactMentionTotal += row.contactMentionCount() == null ? 0 : row.contactMentionCount();
             requestCountTotal += row.requestCount() == null ? 0 : row.requestCount();
             responseTimeMsTotal += row.responseTimeMs() == null ? 0L : row.responseTimeMs();
@@ -556,8 +640,25 @@ public class PollSummaryRecomputeService {
                     .map(row -> canonical(row.id(), row.keywordResultId(), row.keywordTextSnapshot(), row.platformId(),
                             row.platformCode(), row.status(), row.requestCount(), row.responseTimeMs(), row.isHit(),
                             row.effectiveHit(), row.siteMentioned(), row.contactMentioned(), row.contactMentionCount(),
+                            row.channelCode(), row.effectiveAttemptId(), row.executionFinalized(), row.searchRequested(),
+                            row.searchTriggered(), row.brandInSearch(), row.brandInAnswer(),
+                            row.confirmedCitationExposure(),
                             row.recordType(), row.createdAt(), row.updatedAt()))
                     .collect(Collectors.joining(RECORD_SEPARATOR)));
+        }
+
+        BigDecimal confirmedCitationExposureRate() {
+            if (completedCount <= 0) {
+                return BigDecimal.ZERO.setScale(4, RoundingMode.UNNECESSARY);
+            }
+            return BigDecimal.valueOf(confirmedCitationExposureCount)
+                    .divide(BigDecimal.valueOf(completedCount), 4, RoundingMode.HALF_UP);
+        }
+
+        private boolean isEffectiveWebSearchResult(PollSourceRow row) {
+            return Boolean.TRUE.equals(row.executionFinalized())
+                    && row.effectiveAttemptId() != null
+                    && Boolean.TRUE.equals(row.searchRequested());
         }
     }
 
@@ -605,6 +706,11 @@ public class PollSummaryRecomputeService {
                                      int siteMentionCount,
                                      int contactMentionCount,
                                      long contactMentionTotal,
+                                     int searchConfirmedCount,
+                                     int brandSearchCount,
+                                     int brandAnswerCount,
+                                     int confirmedCitationExposureCount,
+                                     BigDecimal confirmedCitationExposureRate,
                                      long requestCountTotal,
                                      long responseTimeMsTotal,
                                      LocalDateTime lastSourceCreatedAt,
@@ -618,6 +724,7 @@ public class PollSummaryRecomputeService {
                                       Long platformId,
                                       String dimHash,
                                       String platformCode,
+                                      String channelCode,
                                       String platformNameSnapshot,
                                       int sourceRowCount,
                                       int completedCount,
@@ -627,6 +734,11 @@ public class PollSummaryRecomputeService {
                                       int siteMentionCount,
                                       int contactMentionCount,
                                       long contactMentionTotal,
+                                      int searchConfirmedCount,
+                                      int brandSearchCount,
+                                      int brandAnswerCount,
+                                      int confirmedCitationExposureCount,
+                                      BigDecimal confirmedCitationExposureRate,
                                       long requestCountTotal,
                                       long responseTimeMsTotal,
                                       LocalDateTime lastSourceCreatedAt,

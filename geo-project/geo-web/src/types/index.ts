@@ -474,7 +474,8 @@ export interface AIPlatformConfigItem {
   priorityLevel: 'P0' | 'P1' | 'P2'
   rpmLimit?: number | null
   tpmLimit?: number | null
-  apiKey: string
+  apiKey?: never
+  apiKeyConfigured?: boolean
   primaryKeyRef?: string | null
   backupKeyRef?: string | null
   backupProviderName?: string | null

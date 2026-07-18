@@ -40,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -139,7 +140,7 @@ class DispatchQuestionPollPlanningServiceTest {
         when(provider.getObject()).thenReturn(taskService);
         when(taskService.createTaskWithoutEnqueue(
                 eq(1L),
-                eq(DispatchTaskType.BI_DAILY_POLL),
+                eq(DispatchTaskType.QUESTION_POLL),
                 eq(LocalDate.of(2026, 6, 18)),
                 eq(LocalDate.of(2026, 6, 24)),
                 any(LocalDateTime.class),
@@ -151,7 +152,7 @@ class DispatchQuestionPollPlanningServiceTest {
             DispatchTask task = new DispatchTask();
             task.setId(ids.getAndIncrement());
             task.setProjectId(1L);
-            task.setTaskType(DispatchTaskType.BI_DAILY_POLL.name());
+            task.setTaskType(DispatchTaskType.QUESTION_POLL.name());
             return task;
         });
 
@@ -209,6 +210,103 @@ class DispatchQuestionPollPlanningServiceTest {
         assertEquals(keywordIdsByPlatform.get("deepseek"), keywordIdsByPlatform.get("doubao"));
         assertEquals(keywordIdsByPlatform.get("deepseek"), keywordIdsByPlatform.get("qwen"));
         assertEquals(3, rotation.getRotationOffset());
+        verify(taskService).enqueueQuestionPollShardTasksWithStagger(any());
+    }
+
+    @Test
+    void manualPlanUsesRequestedQuestionsWithoutAdvancingScheduledRotation() {
+        DispatchProperties properties = new DispatchProperties();
+        properties.setQuestionPollShardSize(20);
+        properties.setQuestionPollMaxShardSize(20);
+
+        PollBatchMapper batchMapper = mock(PollBatchMapper.class);
+        PollBatchShardMapper shardMapper = mock(PollBatchShardMapper.class);
+        PollBatchShardItemMapper itemMapper = mock(PollBatchShardItemMapper.class);
+        ProjectPollRotationMapper rotationMapper = mock(ProjectPollRotationMapper.class);
+        ProjectKeywordGroupRelMapper relMapper = mock(ProjectKeywordGroupRelMapper.class);
+        KeywordGroupResultMapper resultMapper = mock(KeywordGroupResultMapper.class);
+        AiPlatformConfigMapper platformMapper = mock(AiPlatformConfigMapper.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<DispatchTaskService> provider = mock(ObjectProvider.class);
+        DispatchTaskService taskService = mock(DispatchTaskService.class);
+
+        AtomicLong ids = new AtomicLong(100);
+        List<PollBatchShardItem> insertedItems = new ArrayList<>();
+        doAnswer(invocation -> {
+            PollBatch batch = invocation.getArgument(0);
+            batch.setId(ids.getAndIncrement());
+            return 1;
+        }).when(batchMapper).insert(any(PollBatch.class));
+        doAnswer(invocation -> {
+            PollBatchShard shard = invocation.getArgument(0);
+            shard.setId(ids.getAndIncrement());
+            return 1;
+        }).when(shardMapper).insert(any(PollBatchShard.class));
+        doAnswer(invocation -> {
+            insertedItems.add(copyItem(invocation.getArgument(0)));
+            return 1;
+        }).when(itemMapper).insert(any(PollBatchShardItem.class));
+        when(relMapper.selectList(any())).thenReturn(List.of(rel(100L)));
+        when(resultMapper.selectList(any())).thenReturn(List.of(
+                keyword(1L, "q1"),
+                keyword(2L, "q2"),
+                keyword(3L, "q3")
+        ));
+        when(provider.getObject()).thenReturn(taskService);
+        when(taskService.createTaskWithoutEnqueue(
+                eq(1L),
+                eq(DispatchTaskType.QUESTION_POLL),
+                eq(LocalDate.of(2026, 7, 16)),
+                eq(LocalDate.of(2026, 7, 16)),
+                any(LocalDateTime.class),
+                anyMap(),
+                any(),
+                eq(null),
+                eq(null)
+        )).thenAnswer(invocation -> {
+            DispatchTask task = new DispatchTask();
+            task.setId(ids.getAndIncrement());
+            task.setProjectId(1L);
+            task.setTaskType(DispatchTaskType.QUESTION_POLL.name());
+            return task;
+        });
+
+        DispatchQuestionPollPlanningService service = new DispatchQuestionPollPlanningService(
+                batchMapper,
+                shardMapper,
+                itemMapper,
+                rotationMapper,
+                relMapper,
+                resultMapper,
+                platformMapper,
+                properties,
+                provider
+        );
+        Project project = new Project();
+        project.setId(1L);
+
+        PollBatch batch = service.planManualProjectTierPoll(
+                project,
+                LocalDate.of(2026, 7, 16),
+                "A",
+                1_000_000,
+                List.of(platform(55L, "doubao_web")),
+                2,
+                9L,
+                "7ea365c2-0b9a-4cc6-8e11-6d1d89927f0f",
+                "fingerprint"
+        );
+
+        assertEquals("MANUAL", batch.getTriggerType());
+        assertEquals(2, batch.getManualQuestionLimit());
+        assertEquals(1_000_000, batch.getBatchNo());
+        assertEquals(List.of(1L, 2L), insertedItems.stream()
+                .sorted(Comparator.comparing(PollBatchShardItem::getSortOrder))
+                .map(PollBatchShardItem::getKeywordResultId)
+                .toList());
+        verify(rotationMapper, never()).selectForUpdate(any(), any());
+        verify(rotationMapper, never()).insert(any());
+        verify(rotationMapper, never()).updateById(any());
         verify(taskService).enqueueQuestionPollShardTasksWithStagger(any());
     }
 

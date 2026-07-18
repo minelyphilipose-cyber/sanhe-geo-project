@@ -126,6 +126,7 @@ public class DispatchPollAggregationService {
         );
         List<PollBatchShard> shards = pollBatchShardMapper.selectByBatchId(batchId);
         boolean hasFailedShard = shards.stream().anyMatch(shard -> "failed".equals(shard.getStatus()));
+        boolean formalStatisticsBatch = !"MANUAL".equalsIgnoreCase(batch.getTriggerType());
         Project project = projectMapper.selectById(batch.getProjectId());
         String projectName = project == null ? "" : project.getProjectName();
 
@@ -161,6 +162,20 @@ public class DispatchPollAggregationService {
                 if (contactMentionCount > 0) {
                     agg.contactMentionCount += contactMentionCount;
                 }
+                if (isEffectiveWebSearchResult(result)) {
+                    if (Boolean.TRUE.equals(result.getSearchTriggered())) {
+                        agg.searchConfirmedCount++;
+                    }
+                    if (Boolean.TRUE.equals(result.getBrandInSearch())) {
+                        agg.brandSearchCount++;
+                    }
+                    if (Boolean.TRUE.equals(result.getBrandInAnswer())) {
+                        agg.brandAnswerCount++;
+                    }
+                    if (Boolean.TRUE.equals(result.getConfirmedCitationExposure())) {
+                        agg.confirmedCitationExposureCount++;
+                    }
+                }
             } else {
                 totalFailed++;
                 agg.failedCount++;
@@ -170,6 +185,9 @@ public class DispatchPollAggregationService {
         for (PlatformAgg agg : aggByPlatform.values()) {
             int missingCount = Math.max(0, agg.expectedCount - agg.questionCount);
             agg.failedCount += missingCount;
+            if (!formalStatisticsBatch) {
+                continue;
+            }
             PollDailyStat stat = new PollDailyStat();
             stat.setBatchId(batch.getId());
             stat.setDispatchTaskId(null);
@@ -177,6 +195,7 @@ public class DispatchPollAggregationService {
             stat.setProjectName(projectName);
             stat.setPlatformId(agg.platformId);
             stat.setPlatformCode(agg.platformCode);
+            stat.setChannelCode(agg.channelCode);
             stat.setPlatformName(agg.platformName);
             stat.setBatchDate(batch.getBatchDate());
             stat.setBatchNo(batch.getBatchNo());
@@ -188,6 +207,14 @@ public class DispatchPollAggregationService {
             stat.setHitCount(agg.hitCount);
             stat.setSiteMentionCount(agg.siteMentionCount);
             stat.setContactMentionCount(agg.contactMentionCount);
+            stat.setSearchConfirmedCount(agg.searchConfirmedCount);
+            stat.setBrandSearchCount(agg.brandSearchCount);
+            stat.setBrandAnswerCount(agg.brandAnswerCount);
+            stat.setConfirmedCitationExposureCount(agg.confirmedCitationExposureCount);
+            stat.setConfirmedCitationExposureRate(agg.completedCount <= 0
+                    ? BigDecimal.ZERO
+                    : BigDecimal.valueOf(agg.confirmedCitationExposureCount)
+                    .divide(BigDecimal.valueOf(agg.completedCount), 4, RoundingMode.HALF_UP));
             stat.setHitRate(agg.completedCount <= 0
                     ? BigDecimal.ZERO
                     : BigDecimal.valueOf(agg.hitCount).divide(BigDecimal.valueOf(agg.completedCount), 4, RoundingMode.HALF_UP));
@@ -207,8 +234,11 @@ public class DispatchPollAggregationService {
         batch.setStatus(hasFailedShard ? BATCH_STATUS_FINISHED_WITH_FAILURES : BATCH_STATUS_FINISHED);
         batch.setFinishedAt(LocalDateTime.now());
         pollBatchMapper.updateById(batch);
-        publishFailureAlertIfNeeded(batch, projectName, aggByPlatform, results, expectedResultCount, finalFailedCount, hasFailedShard);
-        recomputeSummaryAfterCommit(batch.getProjectId(), batch.getBatchDate(), batch.getQuestionTier());
+        if (formalStatisticsBatch) {
+            publishFailureAlertIfNeeded(batch, projectName, aggByPlatform, results,
+                    expectedResultCount, finalFailedCount, hasFailedShard);
+            recomputeSummaryAfterCommit(batch.getProjectId(), batch.getBatchDate(), batch.getQuestionTier());
+        }
     }
 
     private void publishFailureAlertIfNeeded(PollBatch batch,
@@ -377,9 +407,16 @@ public class DispatchPollAggregationService {
         return value == null ? 0 : value;
     }
 
+    private boolean isEffectiveWebSearchResult(PollResult result) {
+        return Boolean.TRUE.equals(result.getExecutionFinalized())
+                && result.getEffectiveAttemptId() != null
+                && Boolean.TRUE.equals(result.getSearchRequested());
+    }
+
     private static final class PlatformAgg {
         private final Long platformId;
         private final String platformCode;
+        private final String channelCode;
         private final String platformName;
         private int expectedCount;
         private int questionCount;
@@ -389,10 +426,17 @@ public class DispatchPollAggregationService {
         private int hitCount;
         private int siteMentionCount;
         private int contactMentionCount;
+        private int searchConfirmedCount;
+        private int brandSearchCount;
+        private int brandAnswerCount;
+        private int confirmedCitationExposureCount;
 
         private PlatformAgg(PollBatchShard shard) {
             this.platformId = shard.getPlatformId();
             this.platformCode = shard.getPlatformCode();
+            this.channelCode = shard.getChannelCode() == null || shard.getChannelCode().isBlank()
+                    ? shard.getPlatformCode()
+                    : shard.getChannelCode();
             this.platformName = shard.getPlatformName();
         }
     }

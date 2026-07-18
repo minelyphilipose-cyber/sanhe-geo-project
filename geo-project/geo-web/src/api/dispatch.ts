@@ -36,6 +36,111 @@ export interface DispatchAlertQuery extends DispatchRangeParams {
   status?: string
 }
 
+export interface ManualQuestionPollPlatformOption {
+  platformId: number
+  platformCode: string
+  channelCode: string
+  platformName: string
+  integrationType: string
+  modelId: string | null
+  enabled: boolean
+  enabledForQuestionPoll: boolean
+  selectable: boolean
+  unavailableReason: string | null
+}
+
+export interface ManualQuestionPollRequest {
+  projectId: number
+  questionTier: 'A' | 'B' | 'C'
+  platformIds: number[]
+  questionLimit: number
+  clientRequestId: string
+}
+
+export interface ManualQuestionPollPlatformProgress {
+  platformId: number
+  platformCode: string
+  channelCode: string
+  platformName: string
+  shardCount: number
+  readyCount: number
+  runningCount: number
+  completedShardCount: number
+  failedShardCount: number
+  expectedCount: number
+  completedCount: number
+  failedCount: number
+  resourceWaitCount: number
+}
+
+export interface ManualQuestionPollSourceDetail {
+  sourceId: number
+  rankNo: number | null
+  title: string | null
+  url: string | null
+  domain: string | null
+  brandMatched: boolean | null
+  brandMatchStrength: string | null
+}
+
+export interface ManualQuestionPollCitationDetail {
+  citationIndex: number | null
+  sourceId: number | null
+  sourceTitle: string | null
+  sourceUrl: string | null
+  answerStart: number | null
+  answerEnd: number | null
+  confidence: string | null
+  validationStatus: string | null
+}
+
+export interface ManualQuestionPollResultDetail {
+  pollResultId: number
+  platformId: number
+  platformCode: string
+  platformName: string
+  question: string
+  status: string
+  resultCode: string | null
+  requestCount: number | null
+  responseTimeMs: number | null
+  executionFinalized: boolean | null
+  searchStatus: string | null
+  searchTriggered: boolean | null
+  confirmedCitationExposure: boolean | null
+  answer: string | null
+  errorCategory: string | null
+  errorMessage: string | null
+  latencyMs: number | null
+  sources: ManualQuestionPollSourceDetail[]
+  citations: ManualQuestionPollCitationDetail[]
+}
+
+export interface ManualQuestionPollBatchView {
+  batchId: number
+  projectId: number
+  projectName: string
+  batchDate: string
+  batchNo: number
+  questionTier: string
+  triggerType: 'MANUAL'
+  status: string
+  questionLimit: number
+  platformCount: number
+  shardCount: number
+  terminalShardCount: number
+  failedShardCount: number
+  resultCount: number
+  completedCount: number
+  failedCount: number
+  searchConfirmedCount: number
+  confirmedCitationExposureCount: number
+  triggeredAt: string
+  finishedAt: string | null
+  platforms: ManualQuestionPollPlatformProgress[]
+  results: ManualQuestionPollResultDetail[]
+}
+
 export function getDispatchDashboard(params?: DispatchRangeParams) {
   return request.get<R<DispatchDashboardMetrics>>('/dispatch/monitor/dashboard', { params })
 }
@@ -86,4 +191,22 @@ export function replayDispatchTask(taskId: number) {
 
 export function getDispatchTask(taskId: number) {
   return request.get<R<DispatchTaskItem>>(`/dispatch/monitor/tasks/${taskId}`)
+}
+
+export function getManualQuestionPollPlatforms() {
+  return request.get<R<ManualQuestionPollPlatformOption[]>>('/dispatch/question-poll/manual/platforms')
+}
+
+export function startManualQuestionPoll(payload: ManualQuestionPollRequest) {
+  return request.post<R<ManualQuestionPollBatchView>>('/dispatch/question-poll/manual', payload)
+}
+
+export function getRecentManualQuestionPollBatches(size = 20) {
+  return request.get<R<ManualQuestionPollBatchView[]>>('/dispatch/question-poll/manual', {
+    params: { size },
+  })
+}
+
+export function getManualQuestionPollBatch(batchId: number) {
+  return request.get<R<ManualQuestionPollBatchView>>(`/dispatch/question-poll/manual/${batchId}`)
 }

@@ -1,0 +1,16 @@
+{
+  "providerRequestId": "qwen_no_search",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "fixture-model",
+  "answer": "\u57FA\u4E8E\u6A21\u578B\u77E5\u8BC6\u56DE\u7B54\u3002",
+  "searchStatus": "NOT_CONFIRMED",
+  "generationSkipped": false,
+  "searchEvidence": [],
+  "sources": [],
+  "citations": [],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
+  "finishReason": "stop"
+}

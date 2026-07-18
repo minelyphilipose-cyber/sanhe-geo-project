@@ -1,0 +1,27 @@
+{
+  "providerRequestId": "resp_volc_empty",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "fixture-model",
+  "answer": "\u672A\u68C0\u7D22\u5230\u6709\u6548\u7ED3\u679C\u3002",
+  "searchStatus": "EMPTY",
+  "generationSkipped": false,
+  "searchEvidence": [
+    {
+      "eventIndex": 1,
+      "evidenceType": "web_search_call",
+      "query": null,
+      "attributes": {
+        "id": "ws_empty",
+        "action": "search"
+      }
+    }
+  ],
+  "sources": [],
+  "citations": [],
+  "usage": {
+    "tool_usage": {
+      "web_search": 1
+    }
+  },
+  "finishReason": "completed"
+}

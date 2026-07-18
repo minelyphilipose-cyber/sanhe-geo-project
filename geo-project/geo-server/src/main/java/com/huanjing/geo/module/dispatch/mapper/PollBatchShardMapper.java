@@ -40,19 +40,21 @@ public interface PollBatchShardMapper extends BaseMapper<PollBatchShard> {
     @Select("""
             <script>
             SELECT
-              platform_code AS platformCode,
-              COALESCE(SUM(expected_count), 0) AS expectedCount,
-              COALESCE(SUM(completed_count), 0) AS completedCount,
-              COALESCE(SUM(failed_count), 0) AS failedCount,
-              COALESCE(SUM(resource_wait_count), 0) AS resourceWaitCount
-            FROM poll_batch_shards
-            WHERE batch_date = #{batchDate}
-              AND question_tier = #{questionTier}
-              AND platform_code IN
+              s.platform_code AS platformCode,
+              COALESCE(SUM(s.expected_count), 0) AS expectedCount,
+              COALESCE(SUM(s.completed_count), 0) AS completedCount,
+              COALESCE(SUM(s.failed_count), 0) AS failedCount,
+              COALESCE(SUM(s.resource_wait_count), 0) AS resourceWaitCount
+            FROM poll_batch_shards s
+            JOIN poll_batches b ON b.id = s.batch_id
+            WHERE s.batch_date = #{batchDate}
+              AND s.question_tier = #{questionTier}
+              AND COALESCE(b.trigger_type, 'SCHEDULED') != 'MANUAL'
+              AND s.platform_code IN
               <foreach collection="platformCodes" item="code" open="(" separator="," close=")">
                 #{code}
               </foreach>
-            GROUP BY platform_code
+            GROUP BY s.platform_code
             </script>
             """)
     List<PollPlatformSliceProgressRow> aggregatePlatformSliceProgress(@Param("batchDate") LocalDate batchDate,

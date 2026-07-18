@@ -1,0 +1,51 @@
+{
+  "providerRequestId": "resp_volc_success",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "doubao-seed-2-1-pro-260628",
+  "answer": "\u70ED\u70B9\u65B0\u95FB[1]",
+  "searchStatus": "TRIGGERED",
+  "generationSkipped": false,
+  "searchEvidence": [
+    {
+      "eventIndex": 1,
+      "evidenceType": "web_search_call",
+      "query": "\u4ECA\u65E5\u70ED\u70B9",
+      "attributes": {
+        "id": "ws_1",
+        "action": "search"
+      }
+    }
+  ],
+  "sources": [
+    {
+      "searchEventIndex": 1,
+      "rank": 1,
+      "query": null,
+      "title": "\u70ED\u70B9\u65B0\u95FB",
+      "originalUrl": "https://news.example.com/a",
+      "normalizedUrl": "https://news.example.com/a",
+      "domain": "news.example.com",
+      "snippet": null,
+      "publishTime": null,
+      "brandMatchStrength": "NONE",
+      "matchedKeywords": []
+    }
+  ],
+  "citations": [
+    {
+      "citationIndex": 1,
+      "sourceOccurrenceIndex": 0,
+      "answerStart": 4,
+      "answerEnd": 7,
+      "citationText": "[1]",
+      "confidence": "CONFIRMED",
+      "validationStatus": "VALID"
+    }
+  ],
+  "usage": {
+    "tool_usage": {
+      "web_search": 1
+    }
+  },
+  "finishReason": "completed"
+}

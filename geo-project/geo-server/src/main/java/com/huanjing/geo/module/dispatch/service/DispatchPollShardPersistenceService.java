@@ -9,10 +9,12 @@ import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -22,10 +24,22 @@ public class DispatchPollShardPersistenceService {
     static final String SHARD_STATUS_RUNNING = "running";
     static final String SHARD_STATUS_COMPLETED = "completed";
     static final String SHARD_STATUS_FAILED = "failed";
+    static final String TRIGGER_TYPE_SCHEDULED = "SCHEDULED";
 
     private final PollBatchShardMapper pollBatchShardMapper;
     private final PollBatchShardItemMapper pollBatchShardItemMapper;
     private final PollResultMapper pollResultMapper;
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PollResult ensurePollResult(PollResult result) {
+        normalizeRequiredIdentity(result);
+        PollResult existing = findPollResult(result);
+        if (existing != null) {
+            return existing;
+        }
+        pollResultMapper.insert(result);
+        return result;
+    }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PollBatchShard markShardRunning(Long shardId, Long taskId) {
@@ -47,19 +61,8 @@ public class DispatchPollShardPersistenceService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PollResult upsertPollResultAndMarkItem(PollResult result, PollBatchShardItem item) {
-        LambdaQueryWrapper<PollResult> wrapper = new LambdaQueryWrapper<PollResult>()
-                .eq(PollResult::getProjectId, result.getProjectId())
-                .eq(PollResult::getPlatformId, result.getPlatformId())
-                .eq(PollResult::getBatchDate, result.getBatchDate())
-                .eq(PollResult::getBatchNo, result.getBatchNo())
-                .eq(PollResult::getQuestionTier, result.getQuestionTier());
-        if (result.getKeywordResultId() == null) {
-            wrapper.isNull(PollResult::getKeywordResultId)
-                    .eq(PollResult::getKeywordTextSnapshot, result.getKeywordTextSnapshot());
-        } else {
-            wrapper.eq(PollResult::getKeywordResultId, result.getKeywordResultId());
-        }
-        PollResult existing = pollResultMapper.selectOne(wrapper.last("LIMIT 1"));
+        normalizeRequiredIdentity(result);
+        PollResult existing = findPollResult(result);
         if (existing == null) {
             pollResultMapper.insert(result);
         } else {
@@ -72,6 +75,39 @@ public class DispatchPollShardPersistenceService {
         item.setLastError("completed".equals(result.getStatus()) ? null : trim(result.getDetailJson()));
         pollBatchShardItemMapper.updateById(item);
         return result;
+    }
+
+    private PollResult findPollResult(PollResult result) {
+        LambdaQueryWrapper<PollResult> wrapper = new LambdaQueryWrapper<PollResult>()
+                .eq(PollResult::getProjectId, result.getProjectId())
+                .eq(PollResult::getPlatformId, result.getPlatformId())
+                .eq(PollResult::getBatchDate, result.getBatchDate())
+                .eq(PollResult::getBatchNo, result.getBatchNo())
+                .eq(PollResult::getQuestionTier, result.getQuestionTier());
+        if (result.getKeywordResultId() == null) {
+            wrapper.isNull(PollResult::getKeywordResultId)
+                    .eq(PollResult::getKeywordTextSnapshot, result.getKeywordTextSnapshot());
+        } else {
+            wrapper.eq(PollResult::getKeywordResultId, result.getKeywordResultId());
+        }
+        return pollResultMapper.selectOne(wrapper.last("LIMIT 1"));
+    }
+
+    private void normalizeRequiredIdentity(PollResult result) {
+        Objects.requireNonNull(result, "Poll result must not be null");
+        if (!StringUtils.hasText(result.getChannelCode())) {
+            if (!StringUtils.hasText(result.getPlatformCode())) {
+                throw new IllegalArgumentException("Poll result platformCode is required when channelCode is blank");
+            }
+            result.setChannelCode(result.getPlatformCode().trim());
+        } else {
+            result.setChannelCode(result.getChannelCode().trim());
+        }
+        if (!StringUtils.hasText(result.getTriggerType())) {
+            result.setTriggerType(TRIGGER_TYPE_SCHEDULED);
+        } else {
+            result.setTriggerType(result.getTriggerType().trim());
+        }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

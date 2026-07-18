@@ -1,0 +1,15 @@
+{
+  "request_id": "qwen_success",
+  "model": "qwen-plus",
+  "output": {
+    "finish_reason": "stop",
+    "search_info": {
+      "search_queries": ["今日热点"],
+      "search_results": [
+        {"index": 1, "title": "热点新闻", "url": "https://news.example.com/qwen", "snippet": "摘要"}
+      ]
+    },
+    "choices": [{"message": {"role": "assistant", "content": "热点新闻[ref_1]"}}]
+  },
+  "usage": {"input_tokens": 10, "output_tokens": 5}
+}

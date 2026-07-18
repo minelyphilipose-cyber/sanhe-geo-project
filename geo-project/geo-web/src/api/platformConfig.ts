@@ -55,6 +55,8 @@ export function updatePlatformConfig(id: number, data: {
   rpmLimit?: number
   tpmLimit?: number
   apiKey: string
+  clearApiKey?: boolean
+  clearPrimaryKeyRef?: boolean
   primaryKeyRef?: string
   backupKeyRef?: string
   backupProviderName?: string

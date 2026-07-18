@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.system.dto;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -8,6 +9,10 @@ import lombok.Data;
 public class AiPlatformConfigUpdateRequest {
     @NotBlank
     private String platformCode;
+    private String channelCode;
+    private String usageScene;
+    private String integrationType;
+    private JsonNode providerConfig;
     @NotBlank
     private String platformName;
     private String platformHomeUrl;
@@ -17,6 +22,8 @@ public class AiPlatformConfigUpdateRequest {
     private Integer rpmLimit;
     private Integer tpmLimit;
     private String apiKey;
+    private Boolean clearApiKey;
+    private Boolean clearPrimaryKeyRef;
     private String primaryKeyRef;
     private String backupKeyRef;
     private String backupProviderName;

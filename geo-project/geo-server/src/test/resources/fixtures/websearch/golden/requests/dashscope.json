@@ -1,0 +1,26 @@
+{
+  "model": "fixture-model",
+  "input": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "\u5FC5\u987B\u5F15\u7528\u8054\u7F51\u6765\u6E90\u3002"
+      },
+      {
+        "role": "user",
+        "content": "\u4ECA\u5929\u6709\u4EC0\u4E48\u70ED\u70B9\u65B0\u95FB"
+      }
+    ]
+  },
+  "parameters": {
+    "result_format": "message",
+    "enable_search": true,
+    "search_options": {
+      "forced_search": true,
+      "enable_source": true,
+      "enable_citation": true,
+      "citation_format": "[ref_<number>]",
+      "search_strategy": "turbo"
+    }
+  }
+}

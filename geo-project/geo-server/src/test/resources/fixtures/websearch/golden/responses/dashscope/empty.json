@@ -1,0 +1,26 @@
+{
+  "providerRequestId": "qwen_empty",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "fixture-model",
+  "answer": "\u672A\u68C0\u7D22\u5230\u7ED3\u679C\u3002",
+  "searchStatus": "EMPTY",
+  "generationSkipped": false,
+  "searchEvidence": [
+    {
+      "eventIndex": 1,
+      "evidenceType": "search_info",
+      "query": "\u65E0\u7ED3\u679C\u95EE\u9898",
+      "attributes": {
+        "queryCount": 1,
+        "resultCount": 0
+      }
+    }
+  ],
+  "sources": [],
+  "citations": [],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
+  "finishReason": "stop"
+}

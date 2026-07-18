@@ -239,16 +239,16 @@
             <small>API 地址、密钥与 Key 引用</small>
             <i />
           </div>
-          <div class="constraint-hint">「密钥」与「主密钥引用」至少填写一个</div>
+          <div class="constraint-hint">密钥来源二选一：页面密钥会加密保存；填写新密钥或主密钥引用时会自动切换来源</div>
           <div class="form-grid is-two">
             <el-form-item label="接口地址" prop="apiUrl">
               <el-input v-model="form.apiUrl" placeholder="https://xxx/v1" />
             </el-form-item>
             <el-form-item label="密钥" prop="apiKey">
-              <el-input v-model="form.apiKey" type="password" show-password placeholder="输入平台密钥" />
+              <el-input v-model="form.apiKey" type="password" show-password :placeholder="apiKeyPlaceholder" />
             </el-form-item>
             <el-form-item label="主密钥引用" prop="primaryKeyRef">
-              <el-input v-model="form.primaryKeyRef" placeholder="如: vault://keys/doubao-primary" />
+              <el-input v-model="form.primaryKeyRef" placeholder="如: env://ARK_API_KEY" />
             </el-form-item>
             <el-form-item label="备用密钥引用" prop="backupKeyRef">
               <el-input v-model="form.backupKeyRef" placeholder="如: vault://keys/doubao-backup" />
@@ -524,6 +524,10 @@ import {
 } from '@/api/platformConfig'
 import type { AIPlatformConfigItem } from '@/types'
 import { normalizeObjectStorageUrl } from '@/utils/objectStorageUrl'
+import {
+  platformCredentialClearFlags,
+  switchPlatformCredentialSource,
+} from './platformConfigCredential'
 import ai360Logo from '@/assets/ai-model-logos/ai360-color.png'
 import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
 import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
@@ -581,6 +585,7 @@ const dialogVisible = ref(false)
 const formRef = ref<FormInstance>()
 const mode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
+const existingApiKeyConfigured = ref(false)
 
 const form = reactive({
   platformCode: '',
@@ -618,6 +623,9 @@ const formPlatformLogoSrc = computed(() => platformLogoSrc({
   platformLogoUrl: form.platformLogoUrl,
   platformLogoObjectKey: rows.value.find((item) => item.id === editingId.value)?.platformLogoObjectKey || null,
 }))
+const apiKeyPlaceholder = computed(() => mode.value === 'edit' && existingApiKeyConfigured.value
+  ? '已配置页面密钥；留空表示不更换'
+  : '输入平台密钥（加密保存）')
 
 const rules: FormRules = {
   platformCode: [
@@ -631,7 +639,7 @@ const rules: FormRules = {
       validator: (_rule, value, callback) => {
         const hasApiKey = !!(value && String(value).trim())
         const hasPrimaryRef = !!(form.primaryKeyRef && form.primaryKeyRef.trim())
-        if (hasApiKey || hasPrimaryRef) callback()
+        if (hasApiKey || hasPrimaryRef || (mode.value === 'edit' && existingApiKeyConfigured.value)) callback()
         else callback(new Error('API Key 与 primary_key_ref 至少填写一个'))
       },
       trigger: ['blur', 'change'],
@@ -659,6 +667,24 @@ watch(
     if (!canEnablePresaleEvaluate(value)) {
       form.presaleEvaluateEnabled = false
     }
+  },
+)
+watch(
+  () => form.apiKey,
+  (value) => {
+    const next = switchPlatformCredentialSource(
+      'apiKey', value, form.primaryKeyRef,
+    )
+    form.primaryKeyRef = next.primaryKeyRef
+  },
+)
+watch(
+  () => form.primaryKeyRef,
+  (value) => {
+    const next = switchPlatformCredentialSource(
+      'primaryKeyRef', form.apiKey, value,
+    )
+    form.apiKey = next.apiKey
   },
 )
 
@@ -771,6 +797,7 @@ function fallbackFormPlatformLogo(event: Event) {
 function openCreate() {
   mode.value = 'create'
   editingId.value = null
+  existingApiKeyConfigured.value = false
   resetForm()
   dialogVisible.value = true
 }
@@ -778,12 +805,13 @@ function openCreate() {
 function openEdit(row: AIPlatformConfigItem) {
   mode.value = 'edit'
   editingId.value = row.id
+  existingApiKeyConfigured.value = !!row.apiKeyConfigured
   form.platformCode = row.platformCode
   form.platformName = row.platformName
   form.platformHomeUrl = row.platformHomeUrl || ''
   form.platformLogoUrl = normalizeObjectStorageUrl(row.platformLogoUrl) || row.platformLogoUrl || ''
   form.priorityLevel = row.priorityLevel
-  form.apiKey = row.apiKey
+  form.apiKey = ''
   form.primaryKeyRef = row.primaryKeyRef || ''
   form.backupKeyRef = row.backupKeyRef || ''
   form.backupProviderName = row.backupProviderName || ''
@@ -817,6 +845,9 @@ async function submit() {
   }
   saving.value = true
   try {
+    const credentialClearFlags = platformCredentialClearFlags(
+      form.apiKey, form.primaryKeyRef,
+    )
     const payload = {
       platformCode: form.platformCode.trim(),
       platformName: form.platformName.trim(),
@@ -825,6 +856,7 @@ async function submit() {
       priorityLevel: form.priorityLevel,
       apiKey: form.apiKey.trim(),
       primaryKeyRef: form.primaryKeyRef.trim() || undefined,
+      ...(mode.value === 'edit' ? credentialClearFlags : {}),
       backupKeyRef: form.backupKeyRef.trim() || undefined,
       backupProviderName: form.backupProviderName.trim() || undefined,
       backupApiUrl: form.backupApiUrl.trim() || undefined,

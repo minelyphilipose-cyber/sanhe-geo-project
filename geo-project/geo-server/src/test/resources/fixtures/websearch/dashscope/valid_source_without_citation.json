@@ -1,0 +1,11 @@
+{
+  "request_id": "qwen_source_without_citation",
+  "output": {
+    "finish_reason": "stop",
+    "search_info": {"search_queries": ["问题"], "search_results": [
+      {"index": 1, "title": "有效来源", "url": "https://news.example.com/no-citation"}
+    ]},
+    "choices": [{"message": {"role": "assistant", "content": "回答未带引用编号"}}]
+  },
+  "usage": {}
+}

@@ -1,0 +1,14 @@
+{
+  "id": "tokenhub_invalid",
+  "status": "completed",
+  "output": [
+    {"type": "web_search_call", "id": "ws_t_invalid", "action": "search"},
+    {"type": "message", "role": "assistant", "content": [
+      {"type": "output_text", "text": "结果[1]", "annotations": [
+        {"type": "url_citation", "index": 1, "start_index": 2, "end_index": 5,
+         "url": "file:///etc/passwd", "title": "非法来源"}
+      ]}
+    ]}
+  ],
+  "usage": {"tool_usage": {"web_search_call": 1}}
+}

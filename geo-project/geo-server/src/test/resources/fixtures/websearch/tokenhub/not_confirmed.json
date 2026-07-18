@@ -1,0 +1,8 @@
+{
+  "id": "tokenhub_no_search",
+  "status": "completed",
+  "output": [{"type": "message", "role": "assistant", "content": [
+    {"type": "output_text", "text": "基于模型知识回答。", "annotations": []}
+  ]}],
+  "usage": {"tool_usage": {"web_search_call": 0}}
+}

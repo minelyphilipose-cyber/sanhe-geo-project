@@ -18,6 +18,7 @@ public class PollBatchShard {
     private Long projectId;
     private Long platformId;
     private String platformCode;
+    private String channelCode;
     private String platformName;
     private LocalDate batchDate;
     private Integer batchNo;

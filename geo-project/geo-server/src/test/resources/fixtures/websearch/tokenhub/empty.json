@@ -1,0 +1,11 @@
+{
+  "id": "tokenhub_empty",
+  "status": "completed",
+  "output": [
+    {"type": "web_search_call", "id": "ws_t_empty", "action": "search"},
+    {"type": "message", "role": "assistant", "content": [
+      {"type": "output_text", "text": "未检索到结果。", "annotations": []}
+    ]}
+  ],
+  "usage": {"tool_usage": {"web_search_call": 1}}
+}

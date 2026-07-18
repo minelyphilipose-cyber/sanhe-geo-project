@@ -19,8 +19,10 @@ public class PollResult {
     private Long keywordResultId;
     private String keywordTextSnapshot;
     private String questionTier;
+    private String triggerType;
     private Long platformId;
     private String platformCode;
+    private String channelCode;
     private LocalDate batchDate;
     private Integer batchNo;
     private String status;
@@ -43,6 +45,23 @@ public class PollResult {
     private String judgeError;
     private String recordType;
     private String detailJson;
+    private Long latestAttemptId;
+    private Long effectiveAttemptId;
+    private String latestAttemptStatus;
+    private Boolean executionFinalized;
+    private String retryChainStatus;
+    private String resultCode;
+    private Boolean searchRequested;
+    private Boolean searchTriggered;
+    private String searchStatus;
+    private Boolean brandInSearch;
+    private Boolean brandInAnswer;
+    private String citationConfidence;
+    private Boolean confirmedCitationExposure;
+    private Long version;
+    private LocalDateTime deletedAt;
+    private Long deletedBy;
+    private String deleteReason;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

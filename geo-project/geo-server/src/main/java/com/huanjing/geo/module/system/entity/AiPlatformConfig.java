@@ -2,7 +2,9 @@ package com.huanjing.geo.module.system.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -13,6 +15,11 @@ public class AiPlatformConfig {
     @TableId(type = IdType.AUTO)
     private Long id;
     private String platformCode;
+    private String channelCode;
+    private String usageScene;
+    private String integrationType;
+    private String providerConfigJson;
+    private Long configVersion;
     private String platformName;
     private String platformHomeUrl;
     private String platformLogoUrl;
@@ -20,7 +27,10 @@ public class AiPlatformConfig {
     private String priorityLevel;
     private Integer rpmLimit;
     private Integer tpmLimit;
+    @JsonIgnore
     private String apiKey;
+    @TableField(exist = false)
+    private Boolean apiKeyConfigured;
     private String primaryKeyRef;
     private String backupKeyRef;
     private String backupProviderName;
@@ -47,4 +57,11 @@ public class AiPlatformConfig {
     private String remark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    public Boolean getApiKeyConfigured() {
+        if (apiKeyConfigured != null) {
+            return apiKeyConfigured;
+        }
+        return apiKey != null && !apiKey.isBlank();
+    }
 }

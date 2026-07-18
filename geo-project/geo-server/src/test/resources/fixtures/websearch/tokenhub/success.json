@@ -1,0 +1,15 @@
+{
+  "id": "tokenhub_success",
+  "model": "hy3-preview",
+  "status": "completed",
+  "output": [
+    {"type": "web_search_call", "id": "ws_t1", "action": {"type": "search", "query": "今日热点"}},
+    {"type": "message", "role": "assistant", "content": [
+      {"type": "output_text", "text": "热点新闻[1]", "annotations": [
+        {"type": "url_citation", "index": 1, "start_index": 4, "end_index": 7,
+         "url": "https://news.example.com/tencent", "title": "热点新闻"}
+      ]}
+    ]}
+  ],
+  "usage": {"tool_usage": {"web_search_call": 1}}
+}

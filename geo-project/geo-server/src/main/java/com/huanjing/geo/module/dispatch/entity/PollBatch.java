@@ -19,6 +19,11 @@ public class PollBatch {
     private LocalDate batchDate;
     private Integer batchNo;
     private String questionTier;
+    private String triggerType;
+    private Long createdBy;
+    private String clientRequestId;
+    private String requestFingerprint;
+    private Integer manualQuestionLimit;
     private LocalDateTime triggeredAt;
     private LocalDateTime planningStartedAt;
     private LocalDateTime readyAt;

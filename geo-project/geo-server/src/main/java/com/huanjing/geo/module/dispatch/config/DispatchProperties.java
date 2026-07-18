@@ -99,7 +99,7 @@ public class DispatchProperties {
     @Data
     public static class Stagger {
         private boolean enabled = false;
-        private String taskTypes = "BI_DAILY_POLL";
+        private String taskTypes = "QUESTION_POLL";
         private int windowMinutes = 60;
         private int maxDelayMinutes = 60;
         private int jitterSeconds = 60;

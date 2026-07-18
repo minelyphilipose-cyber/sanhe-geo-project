@@ -86,6 +86,71 @@ public class DispatchQuestionPollPlanningService {
         int planCap = resolveTierPollLimit(project, questionTier);
         int takeCount = resolveDailyTakeCount(allKeywords.size(), planCap, questionTier);
         List<PollKeywordCandidate> selected = selectRotatedKeywords(project.getId(), questionTier, allKeywords, takeCount);
+        return createPlannedBatch(
+                existing,
+                project,
+                batchDate,
+                windowStart,
+                questionTier,
+                batchNo,
+                "SCHEDULED",
+                null,
+                null,
+                null,
+                null,
+                platforms,
+                selected
+        );
+    }
+
+    @Transactional
+    public PollBatch planManualProjectTierPoll(Project project,
+                                               LocalDate batchDate,
+                                               String questionTier,
+                                               int batchNo,
+                                               List<AiPlatformConfig> platforms,
+                                               int questionLimit,
+                                               Long createdBy,
+                                               String clientRequestId,
+                                               String requestFingerprint) {
+        List<PollKeywordCandidate> allKeywords = loadProjectPollKeywords(project.getId(), questionTier);
+        if (allKeywords.isEmpty()) {
+            throw new com.huanjing.geo.common.exception.BizException(
+                    400, "Project has no saved " + questionTier + "-tier questions", 400, null
+            );
+        }
+        int effectiveLimit = Math.max(1, Math.min(questionLimit, allKeywords.size()));
+        List<PollKeywordCandidate> selected = new ArrayList<>(allKeywords.subList(0, effectiveLimit));
+        return createPlannedBatch(
+                null,
+                project,
+                batchDate,
+                batchDate,
+                questionTier,
+                batchNo,
+                "MANUAL",
+                createdBy,
+                clientRequestId,
+                requestFingerprint,
+                effectiveLimit,
+                platforms,
+                selected
+        );
+    }
+
+    private PollBatch createPlannedBatch(PollBatch existing,
+                                         Project project,
+                                         LocalDate batchDate,
+                                         LocalDate windowStart,
+                                         String questionTier,
+                                         int batchNo,
+                                         String triggerType,
+                                         Long createdBy,
+                                         String clientRequestId,
+                                         String requestFingerprint,
+                                         Integer manualQuestionLimit,
+                                         List<AiPlatformConfig> platforms,
+                                         List<PollKeywordCandidate> selected) {
         int shardSize = resolveEffectiveShardSize();
         int shardCountPerPlatform = (int) Math.ceil(selected.size() / (double) shardSize);
         int totalShardCount = shardCountPerPlatform * platforms.size();
@@ -96,6 +161,11 @@ public class DispatchQuestionPollPlanningService {
         batch.setBatchDate(batchDate);
         batch.setBatchNo(batchNo);
         batch.setQuestionTier(questionTier);
+        batch.setTriggerType(triggerType);
+        batch.setCreatedBy(createdBy);
+        batch.setClientRequestId(clientRequestId);
+        batch.setRequestFingerprint(requestFingerprint);
+        batch.setManualQuestionLimit(manualQuestionLimit);
         batch.setTriggeredAt(LocalDateTime.now());
         batch.setPlanningStartedAt(LocalDateTime.now());
         batch.setReadyAt(null);
@@ -180,6 +250,8 @@ public class DispatchQuestionPollPlanningService {
                 shard.setProjectId(project.getId());
                 shard.setPlatformId(platform.getId());
                 shard.setPlatformCode(platform.getPlatformCode());
+                shard.setChannelCode(StringUtils.hasText(platform.getChannelCode())
+                        ? platform.getChannelCode() : platform.getPlatformCode());
                 shard.setPlatformName(platform.getPlatformName());
                 shard.setBatchDate(batchDate);
                 shard.setBatchNo(batchNo);
@@ -207,6 +279,8 @@ public class DispatchQuestionPollPlanningService {
                 Map<String, Object> payload = new HashMap<>();
                 payload.put("mode", "question-poll-shard");
                 payload.put("shardId", shard.getId());
+                payload.put("batchId", batch.getId());
+                payload.put("triggerType", batch.getTriggerType());
                 DispatchTask task = dispatchTaskService.createTaskWithoutEnqueue(
                         project.getId(),
                         DispatchTaskType.QUESTION_POLL,
@@ -263,6 +337,7 @@ public class DispatchQuestionPollPlanningService {
                 new LambdaQueryWrapper<AiPlatformConfig>()
                         .eq(AiPlatformConfig::getEnabled, true)
                         .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
+                        .eq(AiPlatformConfig::getUsageScene, "QUESTION_POLL_WEB")
                         .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId)
         );
     }

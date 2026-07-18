@@ -247,6 +247,7 @@ class DispatchExecutionServicePlatformCandidateTest {
                 mock(DispatchQuestionPollPlanningService.class),
                 mock(DispatchPollShardPersistenceService.class),
                 mock(DispatchPollAggregationService.class),
+                mock(com.huanjing.geo.module.dispatch.websearch.WebSearchPollExecutionService.class),
                 new LlmCapacityFailureClassifier()
         );
     }

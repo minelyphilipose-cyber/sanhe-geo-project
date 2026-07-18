@@ -1,0 +1,8 @@
+{
+  "request_id": "qwen_no_search",
+  "output": {
+    "finish_reason": "stop",
+    "choices": [{"message": {"role": "assistant", "content": "基于模型知识回答。"}}]
+  },
+  "usage": {"input_tokens": 10, "output_tokens": 5}
+}

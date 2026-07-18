@@ -20,6 +20,7 @@ public class PollDailyStat {
     private String projectName;
     private Long platformId;
     private String platformCode;
+    private String channelCode;
     private String platformName;
     private LocalDate batchDate;
     private Integer batchNo;
@@ -31,6 +32,11 @@ public class PollDailyStat {
     private Integer hitCount;
     private Integer siteMentionCount;
     private Integer contactMentionCount;
+    private Integer searchConfirmedCount;
+    private Integer brandSearchCount;
+    private Integer brandAnswerCount;
+    private Integer confirmedCitationExposureCount;
+    private BigDecimal confirmedCitationExposureRate;
     private BigDecimal hitRate;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
