@@ -108,6 +108,7 @@ class SelfMediaPublishScheduleServiceTest {
     private LocalAgentSessionMapper localAgentSessionMapper;
     private LocalAgentRuntimeStatusMapper localAgentRuntimeStatusMapper;
     private LocalAgentExecutionAuthorizationService localAgentExecutionAuthorizationService;
+    private CurrentUserService currentUserService;
     private BusinessCalendarService businessCalendarService;
     private ThirdPartySubjectRotationService thirdPartySubjectRotationService;
     private SelfMediaPublishScheduleService service;
@@ -151,7 +152,7 @@ class SelfMediaPublishScheduleServiceTest {
         when(brandAccessService.listAccessibleBrandIds(anyLong(), eq(BrandAccessAction.OPERATE)))
                 .thenReturn(List.of(8L));
         when(localAgentSessionMapper.countOnlineSessionsByOperator(anyLong(), any(), any())).thenReturn(1L);
-        CurrentUserService currentUserService = mock(CurrentUserService.class);
+        currentUserService = mock(CurrentUserService.class);
         SysUser user = new SysUser();
         user.setId(99L);
         when(currentUserService.requireCurrentUser()).thenReturn(user);
@@ -2201,6 +2202,39 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void markLocalAgentExecutionFailedQueuesPostSubmissionRecheckWithoutWebLogin() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        row.setId(128L);
+        row.setCreatedBy(88L);
+        row.setRuntimeWorkerId("99");
+        row.setAttemptCount(1);
+        row.setMaxAttempts(2);
+        row.setLockedUntil(LocalDateTime.now().plusMinutes(2));
+        when(scheduleMapper.selectByIdForUpdate(128L)).thenReturn(row);
+        when(scheduleMapper.selectById(128L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markLocalAgentExecutionFailed(
+                99L,
+                51L,
+                1,
+                128L,
+                "ZHIHU_PUBLISH_NOT_CONFIRMED",
+                "published page opened but result was not confirmed",
+                "{\"lastStage\":\"verifying_publish_result\"}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals("ZHIHU_PUBLISH_NOT_CONFIRMED", response.getFailureCode());
+        assertEquals("publish_result_recheck", row.getRuntimeStage());
+        assertEquals(99L, row.getUpdatedBy());
+        assertNull(row.getLockedUntil());
+        verify(currentUserService, never()).requireCurrentUser();
+        verify(scheduleMapper).updateById(row);
+        verify(environmentLockService).release(128L);
+    }
+
+    @Test
     void markClaimFailedBoundsExternalFailureCodeToDatabaseColumnLength() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
         row.setId(108L);
@@ -2366,6 +2400,7 @@ class SelfMediaPublishScheduleServiceTest {
     void recoverTimedOutLocalAgentSchedulesOnlyRechecksWhenSubmissionMayHaveStarted() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
         row.setId(121L);
+        row.setCreatedBy(88L);
         row.setRuntimeStage("publish_submitting");
         row.setAttemptCount(1);
         row.setMaxAttempts(3);
@@ -2380,6 +2415,8 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, row.getQueueKind());
         assertEquals("LOCAL_AGENT_HEARTBEAT_TIMEOUT", row.getFailureCode());
         assertNotNull(row.getNextAttemptAt());
+        assertEquals(88L, row.getUpdatedBy());
+        verify(currentUserService, never()).requireCurrentUser();
         verify(environmentLockService).release(121L);
     }
 

@@ -1723,7 +1723,7 @@ public class SelfMediaPublishScheduleService {
                 normalizedAllowedPlatforms
         );
         for (SelfMediaPublishSchedule candidate : candidates) {
-            refreshScheduleEnvironmentBinding(candidate);
+            refreshScheduleEnvironmentBinding(candidate, operatorId);
             if (operatorId != null && postponeLocalAgentClaimOutsideBusinessWindow(candidate, now)) {
                 continue;
             }
@@ -1971,7 +1971,7 @@ public class SelfMediaPublishScheduleService {
         return evaluation.blockedReasons().get(0);
     }
 
-    private void refreshScheduleEnvironmentBinding(SelfMediaPublishSchedule schedule) {
+    private void refreshScheduleEnvironmentBinding(SelfMediaPublishSchedule schedule, Long auditOperatorId) {
         if (schedule == null || schedule.getSelfMediaAccountId() == null || !requiresBrowserEnvironment(schedule.getPlatform())) {
             return;
         }
@@ -1985,7 +1985,7 @@ public class SelfMediaPublishScheduleService {
         }
         schedule.setBrowserEnvironmentId(binding.getBrowserEnvironmentId());
         schedule.setBrowserEnvironmentAccountId(binding.getId());
-        touch(schedule);
+        touch(schedule, auditOperatorId);
         scheduleMapper.updateById(schedule);
     }
 
@@ -2338,6 +2338,15 @@ public class SelfMediaPublishScheduleService {
                                                                 String failureCode,
                                                                 String failureMessage,
                                                                 String diagnosticsJson) {
+        queueUncertainSubmissionForPublishResultCheck(
+                row, failureCode, failureMessage, diagnosticsJson, null);
+    }
+
+    private void queueUncertainSubmissionForPublishResultCheck(SelfMediaPublishSchedule row,
+                                                                String failureCode,
+                                                                String failureMessage,
+                                                                String diagnosticsJson,
+                                                                Long auditOperatorId) {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
         row.setNextAttemptAt(nextBrandSafeAttemptAt(
@@ -2351,7 +2360,7 @@ public class SelfMediaPublishScheduleService {
         row.setMaxAttempts(Math.max(effectivePublishCheckMaxAttempts(row),
                 (row.getAttemptCount() == null ? 0 : row.getAttemptCount()) + 1));
         applyRuntimeStage(row, "publish_result_recheck", "平台提交结果待确认，仅允许回查，禁止重复发布");
-        touch(row);
+        touch(row, auditOperatorId);
         scheduleMapper.updateById(row);
         environmentLockService.release(row.getId());
         reconcileAlerts(row);
@@ -2857,6 +2866,24 @@ public class SelfMediaPublishScheduleService {
                                                       String failureMessage,
                                                       String diagnosticsJson,
                                                       LocalDateTime nextAttemptAt) {
+        return markClaimFailed(
+                id,
+                expectedRunningStatus,
+                failureCode,
+                failureMessage,
+                diagnosticsJson,
+                nextAttemptAt,
+                null
+        );
+    }
+
+    private SelfMediaPublishScheduleVO markClaimFailed(Long id,
+                                                       String expectedRunningStatus,
+                                                       String failureCode,
+                                                       String failureMessage,
+                                                       String diagnosticsJson,
+                                                       LocalDateTime nextAttemptAt,
+                                                       Long auditOperatorId) {
         SelfMediaPublishSchedule row = requireSchedule(id);
         if (!normalize(expectedRunningStatus).equals(normalize(row.getStatus()))) {
             fail("SCHEDULE_STATUS_NOT_CLAIMED", "当前排期不处于预期执行状态");
@@ -2865,7 +2892,8 @@ public class SelfMediaPublishScheduleService {
                 || hasCrossedPlatformSubmissionBoundary(row)
                 || diagnosticsIndicatesSubmissionBoundary(diagnosticsJson)
                 || SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure(failureCode)) {
-            queueUncertainSubmissionForPublishResultCheck(row, failureCode, failureMessage, diagnosticsJson);
+            queueUncertainSubmissionForPublishResultCheck(
+                    row, failureCode, failureMessage, diagnosticsJson, auditOperatorId);
             return SelfMediaPublishScheduleVO.from(row);
         }
         row.setLockedUntil(null);
@@ -2919,7 +2947,7 @@ public class SelfMediaPublishScheduleService {
                 ),
                 true
         );
-        return markLocalAgentExecutionFailed(id, failureCode, failureMessage, diagnosticsJson);
+        return markLocalAgentExecutionFailed(id, failureCode, failureMessage, diagnosticsJson, operatorId);
     }
 
     @Transactional
@@ -2927,6 +2955,14 @@ public class SelfMediaPublishScheduleService {
                                                                     String failureCode,
                                                                     String failureMessage,
                                                                     String diagnosticsJson) {
+        return markLocalAgentExecutionFailed(id, failureCode, failureMessage, diagnosticsJson, null);
+    }
+
+    private SelfMediaPublishScheduleVO markLocalAgentExecutionFailed(Long id,
+                                                                     String failureCode,
+                                                                     String failureMessage,
+                                                                     String diagnosticsJson,
+                                                                     Long auditOperatorId) {
         SelfMediaPublishSchedule row = requireSchedule(id);
         if (SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(normalize(row.getStatus()))
                 && isPublishResultFailureCode(failureCode)) {
@@ -2942,7 +2978,8 @@ public class SelfMediaPublishScheduleService {
                 failureCode,
                 failureMessage,
                 diagnosticsJson,
-                nextScheduleExecutionRetryAt(row, failureCode)
+                nextScheduleExecutionRetryAt(row, failureCode),
+                auditOperatorId
         );
     }
 
@@ -3147,7 +3184,7 @@ public class SelfMediaPublishScheduleService {
             fail("SCHEDULE_LOCK_STILL_ACTIVE", "当前排期仍被本地助手锁定，请等待心跳超时或先转人工处理");
         }
         LocalDateTime now = LocalDateTime.now();
-        refreshScheduleEnvironmentBinding(row);
+        refreshScheduleEnvironmentBinding(row, null);
         String strategy = StringUtils.hasText(row.getScheduleStrategy())
                 ? normalize(row.getScheduleStrategy())
                 : quickScheduleStrategy(row.getPlatform());
@@ -4687,7 +4724,18 @@ public class SelfMediaPublishScheduleService {
     }
 
     private void touch(SelfMediaPublishSchedule row) {
-        row.setUpdatedBy(currentUserService.requireCurrentUser().getId());
+        touch(row, currentUserService.requireCurrentUser().getId());
+    }
+
+    private void touch(SelfMediaPublishSchedule row, Long auditOperatorId) {
+        Long resolvedOperatorId = auditOperatorId != null && auditOperatorId > 0
+                ? auditOperatorId
+                : row.getUpdatedBy() != null && row.getUpdatedBy() > 0
+                ? row.getUpdatedBy()
+                : row.getCreatedBy();
+        if (resolvedOperatorId != null && resolvedOperatorId > 0) {
+            row.setUpdatedBy(resolvedOperatorId);
+        }
         row.setUpdatedAt(LocalDateTime.now());
     }
 
