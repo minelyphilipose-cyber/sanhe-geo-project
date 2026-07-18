@@ -39,7 +39,10 @@ public class BaijiahaoPlatformScheduleAdapter implements SelfMediaPlatformSchedu
                 true,
                 false,
                 false,
-                true
+                true,
+                true,
+                60,
+                PLATFORM_SCHEDULE_MAX_ATTEMPTS
         );
     }
 

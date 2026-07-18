@@ -32,6 +32,9 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     public static final String PLATFORM = "wechat_mp";
     private static final int WECHAT_API_UNAUTHORIZED_CODE = 48001;
     private static final String WECHAT_API_UNAUTHORIZED = "WECHAT_API_UNAUTHORIZED";
+    private static final String WECHAT_COVER_MATERIAL_NOT_FOUND = "WECHAT_COVER_MATERIAL_NOT_FOUND";
+    private static final String WECHAT_COVER_MATERIAL_INVALID = "WECHAT_COVER_MATERIAL_INVALID";
+    private static final String WECHAT_COVER_FILE_MISSING = "WECHAT_COVER_FILE_MISSING";
     private static final String STAGE_PREPARE_COVER_MATERIAL = "WECHAT_PREPARE_COVER_MATERIAL";
     private static final String STAGE_RENDER_CONTENT = "WECHAT_RENDER_CONTENT";
     private static final String STAGE_ADD_DRAFT = "WECHAT_ADD_DRAFT";
@@ -304,6 +307,15 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
         if (code == WECHAT_API_UNAUTHORIZED_CODE || containsIgnoreCase(message, "api unauthorized")) {
             return WECHAT_API_UNAUTHORIZED;
         }
+        if (containsIgnoreCase(message, "cover material not found")) {
+            return WECHAT_COVER_MATERIAL_NOT_FOUND;
+        }
+        if (containsIgnoreCase(message, "cover_type_invalid")) {
+            return WECHAT_COVER_MATERIAL_INVALID;
+        }
+        if (containsIgnoreCase(message, "cover_file_missing")) {
+            return WECHAT_COVER_FILE_MISSING;
+        }
         if (code == 40001 || code == 42001) {
             return FailureKind.AUTH_EXPIRED;
         }
@@ -339,7 +351,15 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
                         "当前公众号缺少发布所需授权。请在品牌详情重新授权公众号，并确认授权时已勾选素材、草稿和发布相关权限。";
             };
         }
-        return ex.getMessage();
+        return switch (failureKind(ex.getCode(), ex.getMessage())) {
+            case WECHAT_COVER_MATERIAL_NOT_FOUND ->
+                    "公众号封面素材不存在或不属于当前品牌。请打开文章详情更换封面素材后重新创建排期。";
+            case WECHAT_COVER_MATERIAL_INVALID ->
+                    "公众号封面素材不是支持的图片类型。请更换 JPG、PNG、GIF 或 BMP 图片后重新创建排期。";
+            case WECHAT_COVER_FILE_MISSING ->
+                    "公众号封面素材缺少可读取的文件。请重新上传封面素材后重新创建排期。";
+            default -> ex.getMessage();
+        };
     }
 
     private boolean containsIgnoreCase(String value, String needle) {

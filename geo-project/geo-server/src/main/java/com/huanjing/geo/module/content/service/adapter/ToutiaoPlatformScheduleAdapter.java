@@ -36,7 +36,10 @@ public class ToutiaoPlatformScheduleAdapter implements SelfMediaPlatformSchedule
                 true,
                 true,
                 false,
-                true
+                true,
+                true,
+                60,
+                PLATFORM_SCHEDULE_MAX_ATTEMPTS
         );
     }
 

@@ -199,9 +199,13 @@ public class ExtensionTaskStateService {
             auditDenied("SEMI_AUTO_TASK_FILL_FAILED", context, operatorId, extensionSessionId, "STALE_STATE");
             throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
         }
-        restoreArticleApproved(context.task());
-        companyChannelQuotaService.refundDistribution(taskId);
-        LocalDateTime nextAttemptAt = isScheduleRetryableFailure(failureKind)
+        boolean postSubmissionVerificationFailure = SelfMediaPublishFailureCodes
+                .isPostSubmissionVerificationFailure(failureKind);
+        if (!postSubmissionVerificationFailure) {
+            restoreArticleApproved(context.task());
+            companyChannelQuotaService.refundDistribution(taskId);
+        }
+        LocalDateTime nextAttemptAt = !postSubmissionVerificationFailure && isScheduleRetryableFailure(failureKind)
                 ? now.plus(SCHEDULE_RETRY_BACKOFF)
                 : null;
         selfMediaPublishScheduleService.markDistributionTaskScheduleFailed(

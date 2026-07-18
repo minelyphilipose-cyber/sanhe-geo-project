@@ -37,7 +37,10 @@ public class XiaohongshuPlatformScheduleAdapter implements SelfMediaPlatformSche
                 false,
                 true,
                 true,
-                true
+                true,
+                true,
+                60,
+                PLATFORM_SCHEDULE_MAX_ATTEMPTS
         );
     }
 

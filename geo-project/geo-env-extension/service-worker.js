@@ -1,7 +1,7 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
 const EXTENSION_VERSION = '0.1.11'
-const EXTENSION_BUILD_REVISION = '20260714.1'
+const EXTENSION_BUILD_REVISION = '20260717.1'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
 const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/graphic/articles'
 const ZHIHU_MANAGE_URL = 'https://www.zhihu.com/creator/manage/creation/article'
@@ -913,7 +913,7 @@ function classifyTaskFailureCode(text, platform = '') {
   const textMatchedPlatformCode = classifyPlatformTaskFailureCode(text, '')
   if (textMatchedPlatformCode) return textMatchedPlatformCode
   if (text.includes('知乎发布被草稿加载阻塞') || text.includes('知乎草稿加载未完成') || text.includes('草稿加载中')) return 'ZHIHU_DRAFT_LOADING'
-  if (text.includes('知乎发布后未检测到完成状态')) return 'ZHIHU_PUBLISH_NOT_SUBMITTED'
+  if (text.includes('知乎发布后未检测到完成状态')) return 'ZHIHU_PUBLISH_NOT_CONFIRMED'
   if (text.includes('小红书一键排版按钮未找到')) return 'XIAOHONGSHU_FORMAT_BUTTON_NOT_FOUND'
   if (text.includes('小红书一键排版后未进入排版页') || text.includes('小红书排版页未就绪')) return 'XIAOHONGSHU_FORMAT_NOT_READY'
   if (text.includes('小红书下一步按钮未找到')) return 'XIAOHONGSHU_NEXT_BUTTON_NOT_FOUND'
@@ -1346,7 +1346,7 @@ async function recoverPublishAfterFillError(tabId, task, payload, error) {
     return null
   })
   if (douyinResult) return douyinResult
-  const zhihuResult = await recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload, error).catch((zhihuError) => {
+  const zhihuResult = await recoverZhihuPublishAfterFillError(tabId, task, payload, error).catch((zhihuError) => {
     if (zhihuError !== error) throw zhihuError
     return null
   })
@@ -1601,9 +1601,18 @@ function isRecoverableDouyinPublishVerifyError(error, message) {
     || (text.includes('抖音发布后未检测到成功状态') && text.includes('作品管理'))
 }
 
-async function recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload, error) {
+function isRecoverableZhihuPublishVerifyError(error, message) {
+  const code = String(error?.code || '').trim().toUpperCase()
+  const text = String(message || '')
+  return isMessageChannelClosedError(text)
+    || ['ZHIHU_PUBLISH_NOT_SUBMITTED', 'ZHIHU_PUBLISH_NOT_CONFIRMED'].includes(code)
+    || text.includes('知乎发布后未检测到完成状态')
+}
+
+async function recoverZhihuPublishAfterFillError(tabId, task, payload, error) {
   const message = error?.message || String(error || '')
-  if (normalizePlatform(task?.platform || payload?.platform) !== 'zhihu' || !isMessageChannelClosedError(message)) {
+  if (normalizePlatform(task?.platform || payload?.platform) !== 'zhihu'
+      || !isRecoverableZhihuPublishVerifyError(error, message)) {
     throw error
   }
   const context = {
@@ -1627,8 +1636,8 @@ async function recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload
       publishVerification: verification,
       message: '知乎发布后页面跳转，已通过文章页或创作管理页确认发布',
     },
-    recoveredAfterMessageChannelClosed: true,
-    messageChannelClosedError: message,
+    recoveredAfterPublishUncertain: true,
+    publishUncertainError: message,
   }
 }
 
@@ -1908,7 +1917,9 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
 async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload, error) {
   const message = error?.message || String(error || '')
   const platform = normalizePlatform(task?.platform || payload?.platform)
-  if (platform !== 'toutiao' || (!isWorksListVerifyTimeout(error, message) && !isMessageChannelClosedError(message))) throw error
+  if (platform !== 'toutiao' || (!isWorksListVerifyTimeout(error, message)
+      && error?.code !== 'TOUTIAO_PUBLISH_NOT_CONFIRMED'
+      && !isMessageChannelClosedError(message))) throw error
 
   const context = buildToutiaoWorksListVerifyContext(payload)
   if (!context.title) throw error
@@ -2670,7 +2681,7 @@ async function verifyTaskIdentityOnTab(tabId, task) {
     return null
   }
   const tab = await chrome.tabs.get(identityTabId).catch(() => null)
-  if (!tab?.url || !isAllowedLoginReportUrl(task.platform, tab.url)) {
+  if (!tab?.url || !isIdentityPrecheckUrl(task.platform, tab.url)) {
     if (requiresPrecheck) {
       const error = new Error(`账号名称未预检：当前页面不是 ${platformReportPageHint(task.platform)}，已阻止填充`)
       error.code = 'TASK_ACCOUNT_IDENTITY_NOT_CONFIRMED'
@@ -2680,38 +2691,78 @@ async function verifyTaskIdentityOnTab(tabId, task) {
   }
   await ensureContentScript(identityTabId)
   await waitForContentScript(identityTabId, 8, 500)
-  try {
-    const response = await chrome.tabs.sendMessage(identityTabId, {
+  return verifyTaskIdentityWithRetry(identityTabId, task)
+}
+
+async function verifyTaskIdentityWithRetry(tabId, task, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts || 12))
+  let lastError = null
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await chrome.tabs.sendMessage(tabId, {
       type: 'GEO_ENV_CHECK_IDENTITY',
       payload: {
         platform: task.platform,
         expectedAccountName: task.expectedAccountName || null,
         expectedPlatformAccountId: task.expectedPlatformAccountId || null,
       },
-    }, { frameId: 0 })
-    if (!response?.ok) throw new Error(response?.error || '账号身份校验失败')
-    if (response.result?.warning) {
-      const error = new Error(response.result.message || '账号身份未确认，已阻止填充')
-      error.code = 'TASK_ACCOUNT_IDENTITY_MISMATCH'
-      throw error
+    }, { frameId: 0 }).catch((error) => {
+      lastError = error instanceof Error ? error : new Error(String(error || '账号身份校验失败'))
+      return null
+    })
+    if (response?.ok) {
+      if (response.result?.warning) {
+        const warning = new Error(response.result.message || '账号身份未确认，已阻止填充')
+        warning.code = 'TASK_ACCOUNT_IDENTITY_MISMATCH'
+        throw warning
+      }
+      return response.result
     }
-    return response.result
-  } catch (error) {
-    const normalized = error instanceof Error ? error : new Error(String(error || '账号身份校验失败'))
-    normalized.code = normalized.code || 'TASK_ACCOUNT_IDENTITY_NOT_CONFIRMED'
-    throw normalized
+    if (response?.error) {
+      const responseError = new Error(response.error)
+      responseError.code = response.failureCode || 'TASK_ACCOUNT_IDENTITY_NOT_CONFIRMED'
+      lastError = responseError
+      if (!isIdentityReaderNotReadyError(response.error)) {
+        throw responseError
+      }
+    }
+    await delay(750)
   }
+
+  if (normalizePlatform(task.platform) === 'baijiahao' && options.allowReload !== false) {
+    await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
+    await waitForTabComplete(tabId, 45_000).catch(() => null)
+    await delay(1500)
+    await ensureContentScript(tabId)
+    await waitForContentScript(tabId, 8, 500)
+    return verifyTaskIdentityWithRetry(tabId, task, { attempts: 8, allowReload: false })
+  }
+
+  const normalized = lastError instanceof Error
+    ? lastError
+    : new Error('账号身份校验失败：平台账号名称未在页面加载期限内出现')
+  normalized.code = normalized.code || 'TASK_ACCOUNT_IDENTITY_NOT_CONFIRMED'
+  throw normalized
+}
+
+function isIdentityReaderNotReadyError(message) {
+  const text = String(message || '').toLowerCase()
+  return !text
+    || text.includes('未读取到')
+    || text.includes('未找到平台账号身份')
+    || text.includes('页面脚本未就绪')
+    || text.includes('receiving end does not exist')
+    || text.includes('message port closed')
 }
 
 async function resolveIdentityPrecheckTabId(candidateTabId, platform, requiresPrecheck) {
   if (!requiresPrecheck) return candidateTabId || null
   const candidate = candidateTabId ? await chrome.tabs.get(candidateTabId).catch(() => null) : null
-  if (candidate?.id && candidate.url && isAllowedLoginReportUrl(platform, candidate.url)) {
+  if (candidate?.id && candidate.url && isIdentityPrecheckUrl(platform, candidate.url)) {
     return candidate.id
   }
 
   const tabs = await chrome.tabs.query({}).catch(() => [])
-  const existing = tabs.find((tab) => tab.id && tab.url && isAllowedLoginReportUrl(platform, tab.url))
+  const existing = tabs.find((tab) => tab.id && tab.url && isIdentityPrecheckUrl(platform, tab.url))
   if (existing?.id) return existing.id
 
   const identityUrl = defaultLoginReportUrl(platform)
@@ -2894,8 +2945,7 @@ function isAllowedLoginReportUrl(platform, urlValue) {
       return url.hostname === 'creator.xiaohongshu.com'
     }
     if (normalizedPlatform === 'baijiahao') {
-      return url.hostname === 'baijiahao.baidu.com'
-        && !url.pathname.includes('/builder/rc/edit')
+      return isBaijiahaoIdentityUrl(url)
     }
     if (normalizedPlatform === 'douyin') {
       return url.hostname === 'creator.douyin.com'
@@ -2905,6 +2955,24 @@ function isAllowedLoginReportUrl(platform, urlValue) {
   } catch {
     return false
   }
+}
+
+function isIdentityPrecheckUrl(platform, urlValue) {
+  try {
+    const url = new URL(urlValue)
+    if (normalizePlatform(platform) === 'baijiahao') {
+      return isBaijiahaoIdentityUrl(url)
+    }
+    return isAllowedLoginReportUrl(platform, urlValue)
+  } catch {
+    return false
+  }
+}
+
+function isBaijiahaoIdentityUrl(url) {
+  return url.hostname === 'baijiahao.baidu.com'
+    && (url.pathname === '/builder/rc/settings/accountSet'
+      || url.pathname === '/builder/rc/settings/accountSet/')
 }
 
 function isDouyinPublishPath(url) {
@@ -3148,6 +3216,7 @@ async function sendFillMessageOnce(tabId, message, options = {}) {
 
 function fillMessageTimeoutMs(platform) {
   if (normalizePlatform(platform) === 'xiaohongshu') return 150_000
+  if (normalizePlatform(platform) === 'toutiao') return 150_000
   return 90_000
 }
 
@@ -3158,10 +3227,21 @@ async function enrichFillMessageError(tabId, platform, error) {
   if (!snapshot) return error
   const page = snapshot.page || {}
   const activeFillTask = page.activeFillTask || null
+  const activeStage = String(activeFillTask?.stage || '')
   const stageText = activeFillTask?.stage ? `；stage=${activeFillTask.stage}` : ''
   const diagnosticsText = page.diagnostics ? `；${String(page.diagnostics).slice(0, 800)}` : ''
   const enriched = new Error(`${message}${stageText}${diagnosticsText}`)
-  enriched.code = error?.code || 'PAGE_LOAD_TIMEOUT'
+  const normalizedPlatform = normalizePlatform(platform)
+  const postSubmissionCode = {
+    toutiao: 'TOUTIAO_PUBLISH_NOT_CONFIRMED',
+    zhihu: 'ZHIHU_PUBLISH_NOT_CONFIRMED',
+  }[normalizedPlatform]
+  enriched.code = postSubmissionCode
+      && ['submitting_publish', 'verifying_publish_result'].includes(activeStage)
+    ? postSubmissionCode
+    : normalizedPlatform === 'toutiao' && activeStage === 'filling_cover'
+      ? 'COVER_UPLOAD_TIMEOUT'
+      : error?.code || 'PAGE_LOAD_TIMEOUT'
   enriched.diagnostics = page
   enriched.failureSnapshot = snapshot
   enriched.extensionVersion = EXTENSION_VERSION
@@ -4156,6 +4236,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message?.type === 'GEO_ENV_POLL_ONCE') {
       return pollOnce()
+    }
+    if (message?.type === 'GEO_ENV_TASK_PROGRESS') {
+      const { config, session } = await getConfig()
+      const taskId = Number(message.taskId)
+      const environmentKey = String(message.environmentKey || config.environmentKey || '').trim()
+      if (!Number.isInteger(taskId) || taskId <= 0 || !environmentKey) {
+        return { ok: false, skipped: true, reason: 'invalid_task_progress' }
+      }
+      return helperRequest(
+        { ...config, environmentKey },
+        `/v1/extension/tasks/${taskId}/progress`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ environmentKey, stage: message.stage, updatedAt: message.updatedAt || null }),
+        },
+        session,
+      )
     }
     if (message?.type === 'GEO_ENV_REPORT_LOGIN_STATUS') {
       const status = await reportActiveTabLoginStatus()

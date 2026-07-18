@@ -203,6 +203,9 @@ public class LocalAgentController {
         String providerProfileId = environment == null ? null : environment.getProviderProfileId();
         if (!StringUtils.hasText(environmentKey) || !StringUtils.hasText(providerProfileId)) {
             scheduleService.markClaimedPublishCheckUnknown(
+                    session.getOperatorId(),
+                    session.getId(),
+                    schedule.getAttemptCount(),
                     schedule.getId(),
                     diagnosticsJson(
                             "found", false,
@@ -246,10 +249,13 @@ public class LocalAgentController {
 
     @PostMapping("/self-media-schedules/{scheduleId}/heartbeat")
     public R<SelfMediaPublishScheduleVO> heartbeatSelfMediaSchedule(@PathVariable Long scheduleId,
+                                                                    @RequestParam Integer claimAttempt,
                                                                     HttpServletRequest request) {
         LocalAgentSession session = verifySignedRequest(request);
         return R.ok(scheduleService.heartbeatLocalAgentSchedule(
                 session.getOperatorId(),
+                session.getId(),
+                claimAttempt,
                 scheduleId,
                 SELF_MEDIA_SCHEDULE_LOCK_MINUTES
         ));
@@ -297,8 +303,11 @@ public class LocalAgentController {
             @RequestParam(required = false) String diagnosticsJson,
             @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
-        verifySignedRequest(request);
+        LocalAgentSession session = verifySignedRequest(request);
         scheduleService.markClaimedPublishedConfirmed(
+                session.getOperatorId(),
+                session.getId(),
+                jsonInteger(body, "claimAttempt"),
                 scheduleId,
                 firstText(jsonText(body, "platformPublishedUrl"), platformPublishedUrl),
                 firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson)
@@ -312,8 +321,11 @@ public class LocalAgentController {
             @RequestParam(required = false) String diagnosticsJson,
             @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
-        verifySignedRequest(request);
+        LocalAgentSession session = verifySignedRequest(request);
         scheduleService.markClaimedPublishCheckUnknown(
+                session.getOperatorId(),
+                session.getId(),
+                jsonInteger(body, "claimAttempt"),
                 scheduleId,
                 firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson)
         );
@@ -328,8 +340,11 @@ public class LocalAgentController {
             @RequestParam(required = false) String diagnosticsJson,
             @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
-        verifySignedRequest(request);
+        LocalAgentSession session = verifySignedRequest(request);
         scheduleService.markClaimedPublishFailed(
+                session.getOperatorId(),
+                session.getId(),
+                jsonInteger(body, "claimAttempt"),
                 scheduleId,
                 firstText(jsonText(body, "failureCode"), failureCode),
                 firstText(jsonText(body, "failureMessage"), failureMessage),
@@ -346,8 +361,11 @@ public class LocalAgentController {
             @RequestParam(required = false) String diagnosticsJson,
             @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
-        verifySignedRequest(request);
+        LocalAgentSession session = verifySignedRequest(request);
         scheduleService.markLocalAgentExecutionFailed(
+                session.getOperatorId(),
+                session.getId(),
+                jsonInteger(body, "claimAttempt"),
                 scheduleId,
                 firstText(jsonText(body, "failureCode"), failureCode),
                 firstText(jsonText(body, "failureMessage"), failureMessage),
@@ -362,8 +380,13 @@ public class LocalAgentController {
             @RequestParam(required = false) String diagnosticsJson,
             @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
-        verifySignedRequest(request);
-        scheduleService.markLocalAgentExecutionFilled(scheduleId, firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson));
+        LocalAgentSession session = verifySignedRequest(request);
+        scheduleService.markLocalAgentExecutionFilled(
+                session.getOperatorId(),
+                session.getId(),
+                jsonInteger(body, "claimAttempt"),
+                scheduleId,
+                firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson));
         return R.ok(Map.of("ok", true, "scheduleId", scheduleId));
     }
 
@@ -373,8 +396,13 @@ public class LocalAgentController {
             @RequestParam(required = false) String diagnosticsJson,
             @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
-        verifySignedRequest(request);
-        scheduleService.markLocalAgentExecutionScheduled(scheduleId, firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson));
+        LocalAgentSession session = verifySignedRequest(request);
+        scheduleService.markLocalAgentExecutionScheduled(
+                session.getOperatorId(),
+                session.getId(),
+                jsonInteger(body, "claimAttempt"),
+                scheduleId,
+                firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson));
         return R.ok(Map.of("ok", true, "scheduleId", scheduleId));
     }
 
@@ -385,8 +413,11 @@ public class LocalAgentController {
             @RequestParam(required = false) String diagnosticsJson,
             @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
-        verifySignedRequest(request);
+        LocalAgentSession session = verifySignedRequest(request);
         scheduleService.markLocalAgentExecutionPublishedConfirmed(
+                session.getOperatorId(),
+                session.getId(),
+                jsonInteger(body, "claimAttempt"),
                 scheduleId,
                 firstText(jsonText(body, "platformPublishedUrl"), platformPublishedUrl),
                 firstText(jsonText(body, "diagnosticsJson"), diagnosticsJson)
@@ -535,6 +566,21 @@ public class LocalAgentController {
         }
         String value = body.get(fieldName).asText(null);
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private Integer jsonInteger(JsonNode body, String fieldName) {
+        if (body == null || !body.has(fieldName) || body.get(fieldName).isNull()) {
+            return null;
+        }
+        JsonNode value = body.get(fieldName);
+        if (value.canConvertToInt()) {
+            return value.intValue();
+        }
+        try {
+            return Integer.valueOf(value.asText().trim());
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private String sha256Hex(String value) {

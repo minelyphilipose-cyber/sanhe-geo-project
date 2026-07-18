@@ -185,6 +185,24 @@ class WechatMpAdapterTest {
     }
 
     @Test
+    void submitToTarget_mapsMissingCoverMaterialToActionableFailure() {
+        Fixture fixture = fixture(true);
+        TargetContext.SelfMediaTarget target = target(fixture.account, Map.of("publishAction", "publish"));
+        WechatMediaService mediaService = fixture.mediaService();
+        when(mediaService.ensureThumbMediaId(fixture.account, 10L, 100L))
+                .thenThrow(new BizException(404, "cover material not found"));
+
+        SubmitResult result = fixture.adapter.submitToTarget(article(), "markdown body", target);
+
+        assertFalse(result.isSuccess());
+        assertEquals(404, result.getStatusCode());
+        assertEquals("WECHAT_COVER_MATERIAL_NOT_FOUND", result.getFailureKind());
+        assertEquals("WECHAT_PREPARE_COVER_MATERIAL", result.getOperationStage());
+        assertEquals("公众号封面素材不存在或不属于当前品牌。请打开文章详情更换封面素材后重新创建排期。", result.getErrorMessage());
+        verify(fixture.wechatMpClient, never()).addDraft(any(), any());
+    }
+
+    @Test
     void refreshReviewStatus_publishedReturnsArticleId() {
         Fixture fixture = fixture(true);
         DistributionTask task = reviewTask("publish_id");
@@ -277,7 +295,7 @@ class WechatMpAdapterTest {
                 brandService,
                 objectMapper
         );
-        return new Fixture(tested, account, wechatMpClient);
+        return new Fixture(tested, account, wechatMpClient, mediaService);
     }
 
     private SelfMediaAccount account() {
@@ -309,6 +327,6 @@ class WechatMpAdapterTest {
         return task;
     }
 
-    private record Fixture(WechatMpAdapter adapter, SelfMediaAccount account, WechatMpClient wechatMpClient) {
+    private record Fixture(WechatMpAdapter adapter, SelfMediaAccount account, WechatMpClient wechatMpClient, WechatMediaService mediaService) {
     }
 }

@@ -38,7 +38,10 @@ public class DouyinPlatformScheduleAdapter implements SelfMediaPlatformScheduleA
                 true,
                 false,
                 false,
-                true
+                true,
+                false,
+                60,
+                PLATFORM_SCHEDULE_MAX_ATTEMPTS
         );
     }
 

@@ -28,7 +28,20 @@ class SelfMediaPublishFailureCodesTest {
         assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("XIAOHONGSHU_PUBLISH_NOT_CONFIRMED"));
         assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("ZHIHU_PUBLISH_NOT_CONFIRMED"));
         assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("BAIJIAHAO_PUBLISH_NOT_CONFIRMED"));
+        assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("EXTENSION_CLAIM_TIMEOUT"));
         assertEquals("立即重试", SelfMediaPublishFailureCodes.actionLabel("PLATFORM_TAB_GONE"));
         assertEquals("重新校验", SelfMediaPublishFailureCodes.actionLabel("DOUYIN_PUBLISH_NOT_CONFIRMED"));
+        assertEquals("重新校验", SelfMediaPublishFailureCodes.actionLabel("EXTENSION_CLAIM_TIMEOUT"));
+    }
+
+    @Test
+    void postSubmissionVerificationFailuresAreNeverFreshPublishRetries() {
+        assertTrue(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("WORKS_LIST_VERIFY_TIMEOUT"));
+        assertTrue(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("TOUTIAO_PUBLISH_NOT_CONFIRMED"));
+        assertTrue(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("douyin_publish_not_confirmed"));
+        assertTrue(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("ZHIHU_PUBLISH_NOT_SUBMITTED"));
+        assertTrue(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("ZHIHU_PUBLISH_NOT_CONFIRMED"));
+        assertFalse(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("PAGE_LOAD_TIMEOUT"));
+        assertFalse(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("COVER_UPLOAD_TIMEOUT"));
     }
 }

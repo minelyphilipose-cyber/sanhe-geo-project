@@ -7,8 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 class PlatformAccountIdentityPolicyTest {
     @Test
-    void comparablePlatformAccountIdSkipsBaijiahaoUntilExtensionCanReadStableIds() {
-        assertNull(PlatformAccountIdentityPolicy.comparablePlatformAccountId("baijiahao", "1867055852901021"));
+    void comparablePlatformAccountIdKeepsBaijiahaoAppId() {
+        assertEquals("1867055852901021",
+                PlatformAccountIdentityPolicy.comparablePlatformAccountId("baijiahao", "1867055852901021"));
     }
 
     @Test

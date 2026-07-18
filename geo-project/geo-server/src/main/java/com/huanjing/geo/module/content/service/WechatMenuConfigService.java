@@ -47,6 +47,7 @@ public class WechatMenuConfigService {
     private static final String STATUS_MENU_FULL = "menu_full";
     private static final String STATUS_CONFIG_FAILED = "config_failed";
     private static final String STATUS_MANUAL_REQUIRED = "manual_required";
+    private static final int WECHAT_API_UNAUTHORIZED = 48001;
 
     private final WechatMenuConfigMapper menuConfigMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
@@ -168,9 +169,12 @@ public class WechatMenuConfigService {
             return config;
         } catch (Exception ex) {
             log.warn("WeChat menu init failed accountId={} appid={}", account.getId(), account.getPlatformAccountId(), ex);
-            config.setMenuStatus(STATUS_CONFIG_FAILED);
+            boolean permissionMissing = isMenuPermissionMissing(ex);
+            config.setMenuStatus(permissionMissing ? STATUS_PERMISSION_MISSING : STATUS_CONFIG_FAILED);
             config.setLastSyncAt(now);
-            config.setLastSyncError(trimError(ex.getMessage()));
+            config.setLastSyncError(permissionMissing
+                    ? menuPermissionMissingMessage(ex)
+                    : trimError(ex.getMessage()));
             menuConfigMapper.updateById(config);
             return config;
         }
@@ -276,6 +280,31 @@ public class WechatMenuConfigService {
         }
         String text = message.trim();
         return text.length() <= 500 ? text : text.substring(0, 500);
+    }
+
+    private boolean isMenuPermissionMissing(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof BizException bizException
+                    && bizException.getCode() == WECHAT_API_UNAUTHORIZED) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (StringUtils.hasText(message)
+                    && message.toLowerCase(Locale.ROOT).contains("api unauthorized")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private String menuPermissionMissingMessage(Throwable error) {
+        String platformMessage = trimError(error == null ? null : error.getMessage());
+        String guidance = "微信公众号未开放或未确认自定义菜单 API 权限（微信错误 48001），请在公众平台及第三方平台确认权限后重新授权";
+        return StringUtils.hasText(platformMessage)
+                ? trimError(guidance + "；微信返回：" + platformMessage)
+                : guidance;
     }
 
     private void requireWechatAccount(SelfMediaAccount account) {

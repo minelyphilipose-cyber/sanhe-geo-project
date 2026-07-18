@@ -27,7 +27,10 @@ public class WechatMpPlatformScheduleAdapter implements SelfMediaPlatformSchedul
                 false,
                 false,
                 false,
-                true
+                true,
+                true,
+                60,
+                6
         );
     }
 }

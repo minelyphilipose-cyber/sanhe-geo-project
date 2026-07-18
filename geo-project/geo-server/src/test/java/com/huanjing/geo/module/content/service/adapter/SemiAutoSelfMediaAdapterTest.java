@@ -147,7 +147,7 @@ class SemiAutoSelfMediaAdapterTest {
     void xiaohongshuProfileComesFromConfiguration() {
         SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
         SemiAutoPlatformProperties.Platform profile = new SemiAutoPlatformProperties.Platform();
-        profile.setPublishUrl("https://creator.xiaohongshu.com/publish/publish");
+        profile.setPublishUrl("https://creator.xiaohongshu.com/publish/publish?from=tab_switch&target=article");
         profile.setCookieDomains(List.of(".xiaohongshu.com", ".xhscdn.com"));
         profile.setRequiredCookieNames(List.of("web_session", "a1"));
         profile.setEditorSelectors(Map.of("title", "input[placeholder*='标题']"));
@@ -161,7 +161,7 @@ class SemiAutoSelfMediaAdapterTest {
         SemiAutoFillTask task = adapter.prepareFillTask(article, "**内容**", fillProfile);
 
         assertEquals("xiaohongshu", adapter.platform());
-        assertEquals("https://creator.xiaohongshu.com/publish/publish", fillProfile.publishUrl());
+        assertEquals("https://creator.xiaohongshu.com/publish/publish?from=tab_switch&target=article", fillProfile.publishUrl());
         assertEquals(List.of(".xiaohongshu.com", ".xhscdn.com"), fillProfile.cookieDomains());
         assertEquals(List.of("web_session", "a1"), fillProfile.requiredCookieNames());
         assertEquals("xiaohongshu", task.platform());

@@ -29,7 +29,7 @@ const tasksById = new Map()
 const extensionBindIntentsByHash = new Map()
 const CLAIM_TIMEOUT_MS = 30_000
 const EXTENSION_CLAIM_TIMEOUT_MS = 90_000
-const CLAIM_BACKEND_HEARTBEAT_MAX_MS = 3 * 60_000
+const SCHEDULE_PROGRESS_STALL_TIMEOUT_MS = 15 * 60_000
 const CLAIMABLE_STATUSES = new Set(['pending', 'requeued'])
 const SIGNATURE_MAX_SKEW_SECONDS = 300
 const NONCE_FLUSH_DELAY_MS = 1_000
@@ -48,6 +48,14 @@ const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
 const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
 const LOCAL_AGENT_RUNTIME_STATUS_HEARTBEAT_MS = 60_000
 const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
+const TERMINAL_SCHEDULE_CLAIM_ERROR_CODES = new Set([
+  'SCHEDULE_EXECUTOR_MISMATCH',
+  'SCHEDULE_ENVIRONMENT_MISMATCH',
+  'SCHEDULE_STATUS_NOT_RUNNING',
+  'SCHEDULE_CLAIM_GENERATION_MISMATCH',
+  'SCHEDULE_LOCK_RENEW_FAILED',
+  'SCHEDULE_ENVIRONMENT_LOCK_LOST',
+])
 const RUNTIME_TASK_MAX_RECORDS = 200
 const RUNTIME_TASK_TERMINAL_TTL_MS = 7 * 24 * 60 * 60 * 1000
 const SELF_MEDIA_SCHEDULE_PLATFORMS_CACHE_MS = 60_000
@@ -1570,7 +1578,8 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
   }
   const taskId = Number(claim.launch.taskId || claim.task.id)
   const existing = tasksById.get(taskId)
-  if (isReusableActiveTask(existing)) {
+  const claimedAttempt = Number(claim.schedule?.attemptCount || 0) || null
+  if (isReusableActiveTask(existing) && claimAttemptOfTask(existing) === claimedAttempt) {
     return { ok: true, claimed: true, reused: true, task: existing, schedule: claim.schedule }
   }
   try {
@@ -1634,6 +1643,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     return { ok: true, claimed: false, claimBlockedReason: claim?.claimBlockedReason || 'NO_DUE_TASK' }
   }
   const scheduleId = Number(claim.launch.scheduleId || claim.schedule.id)
+  const claimAttempt = Number(claim.schedule.attemptCount || 0) || null
   let runtimeTask = null
   let result
   try {
@@ -1692,7 +1702,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
         platformScheduledAt: claim.schedule?.platformScheduledAt || '',
         url: claim.launch?.url || '',
       }
-      await reportPublishCheckUnknown(config, scheduleId, configResult).catch((reportError) => {
+      await reportPublishCheckUnknown(config, scheduleId, claimAttempt, configResult).catch((reportError) => {
         if (runtimeTask) {
           runtimeTask.backendUnknownReportAttempts = Number(runtimeTask.backendUnknownReportAttempts || 0) + 1
           runtimeTask.backendUnknownReportLastError = formatBackendError(reportError)
@@ -1716,7 +1726,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
         platformScheduledAt: claim.schedule?.platformScheduledAt || '',
         url: claim.launch?.url || '',
       }
-      await reportPublishCheckUnknown(config, scheduleId, timeoutResult).catch((reportError) => {
+      await reportPublishCheckUnknown(config, scheduleId, claimAttempt, timeoutResult).catch((reportError) => {
         if (runtimeTask) {
           runtimeTask.backendUnknownReportAttempts = Number(runtimeTask.backendUnknownReportAttempts || 0) + 1
           runtimeTask.backendUnknownReportLastError = formatBackendError(reportError)
@@ -1734,7 +1744,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
       failureCode: 'PUBLISH_RESULT_CHECK_HELPER_FAILED',
       failureMessage: error instanceof Error ? error.message : String(error),
     }
-    await reportPublishCheckFailed(config, scheduleId, failureResult).catch((reportError) => {
+    await reportPublishCheckFailed(config, scheduleId, claimAttempt, failureResult).catch((reportError) => {
       console.error('Failed to report publish check helper failure:', formatBackendError(reportError))
     })
     markPublishCheckRuntimeTaskFinished(runtimeTask, 'failed', failureResult)
@@ -1745,7 +1755,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     markPublishCheckRuntimeTaskStage(runtimeTask, 'reporting_failed')
     upsertTask(runtimeTask)
     await saveRuntimeTasks()
-    await reportPublishCheckFailed(config, scheduleId, result)
+    await reportPublishCheckFailed(config, scheduleId, claimAttempt, result)
     markPublishCheckRuntimeTaskFinished(runtimeTask, 'failed', result)
     await saveRuntimeTasks().catch(() => null)
     return { ok: true, claimed: true, scheduleId, outcome: 'failed', result }
@@ -1757,7 +1767,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     await saveRuntimeTasks()
     try {
       await withTimeout(
-        reportPublishCheckPublished(config, scheduleId, result),
+        reportPublishCheckPublished(config, scheduleId, claimAttempt, result),
         BACKEND_FETCH_TIMEOUT_MS + RESPONSE_JSON_TIMEOUT_MS + 5_000,
         `report publish check published ${scheduleId}`,
       )
@@ -1766,6 +1776,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     } catch (error) {
       runtimeTask.backendSuccessReportAttempts = Number(runtimeTask.backendSuccessReportAttempts || 0) + 1
       runtimeTask.backendSuccessReportLastError = formatBackendError(error)
+      terminateTaskForScheduleClaimError(runtimeTask, error)
       markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result)
       await saveRuntimeTasks().catch(() => null)
       return { ok: true, claimed: true, scheduleId, outcome: 'published_report_pending', result }
@@ -1779,7 +1790,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
   await saveRuntimeTasks()
   try {
     await withTimeout(
-      reportPublishCheckUnknown(config, scheduleId, result),
+      reportPublishCheckUnknown(config, scheduleId, claimAttempt, result),
       BACKEND_FETCH_TIMEOUT_MS + RESPONSE_JSON_TIMEOUT_MS + 5_000,
       `report publish check unknown ${scheduleId}`,
     )
@@ -1788,6 +1799,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
   } catch (error) {
     runtimeTask.backendUnknownReportAttempts = Number(runtimeTask.backendUnknownReportAttempts || 0) + 1
     runtimeTask.backendUnknownReportLastError = formatBackendError(error)
+    terminateTaskForScheduleClaimError(runtimeTask, error)
     markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result)
     await saveRuntimeTasks().catch(() => null)
     return { ok: true, claimed: true, scheduleId, outcome: 'unknown_report_pending', result }
@@ -2576,9 +2588,10 @@ async function evaluateDouyinPublishResult(page, schedule) {
   }, target)
 }
 
-async function reportPublishCheckPublished(config, scheduleId, result) {
+async function reportPublishCheckPublished(config, scheduleId, claimAttempt, result) {
   const publishedUrl = publishedUrlFromPublishCheckResult(result)
   const body = JSON.stringify({
+    claimAttempt,
     platformPublishedUrl: publishedUrl || undefined,
     diagnosticsJson: publishCheckReportDiagnosticsJson(result),
   })
@@ -2586,16 +2599,18 @@ async function reportPublishCheckPublished(config, scheduleId, result) {
   return signedTrustedBackendRequest(config, path, { method: 'POST', body, signatureBodyText: '' })
 }
 
-async function reportPublishCheckUnknown(config, scheduleId, result) {
+async function reportPublishCheckUnknown(config, scheduleId, claimAttempt, result) {
   const body = JSON.stringify({
+    claimAttempt,
     diagnosticsJson: publishCheckReportDiagnosticsJson(result),
   })
   const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/publish-checks/unknown`
   return signedTrustedBackendRequest(config, path, { method: 'POST', body, signatureBodyText: '' })
 }
 
-async function reportPublishCheckFailed(config, scheduleId, result) {
+async function reportPublishCheckFailed(config, scheduleId, claimAttempt, result) {
   const body = JSON.stringify({
+    claimAttempt,
     failureCode: result?.failureCode || 'PUBLISH_RESULT_CHECK_HELPER_FAILED',
     failureMessage: String(result?.failureMessage || 'publish result check failed').slice(0, 480),
     diagnosticsJson: publishCheckReportDiagnosticsJson(result),
@@ -2610,12 +2625,15 @@ async function reportScheduleExecutionFailed(config, task, result) {
   const failureCode = result?.failureCode || task?.lastError?.code || task?.failureCode || 'FILL_FAILED'
   const failureMessage = String(result?.failureMessage || task?.lastError?.message || 'schedule execution failed').slice(0, 480)
   const body = JSON.stringify({
+    claimAttempt: claimAttemptOfTask(task),
     failureCode,
     failureMessage,
     diagnosticsJson: shortDiagnosticsJson({
       ...result,
       taskId: task?.taskId,
       platform: task?.platform,
+      lastStage: task?.lastStage || null,
+      lastStageAt: task?.lastStageAt || null,
       error: task?.lastError || null,
     }),
   })
@@ -2625,12 +2643,15 @@ async function reportScheduleExecutionFailed(config, task, result) {
   } catch (error) {
     if (Number(error?.statusCode || 0) < 500) throw error
     const fallbackBody = JSON.stringify({
+      claimAttempt: claimAttemptOfTask(task),
       failureCode: String(failureCode).slice(0, 64),
       failureMessage: failureMessage.slice(0, 240),
       diagnosticsJson: JSON.stringify({
         fallbackReport: true,
         taskId: task?.taskId || null,
         platform: task?.platform || null,
+        lastStage: task?.lastStage || null,
+        lastStageAt: task?.lastStageAt || null,
       }),
     })
     try {
@@ -2656,6 +2677,7 @@ async function reportScheduleExecutionSuccess(config, task, fillResult) {
   const outcome = resolveScheduleExecutionOutcome(fillResult)
   const publishedUrl = extractPublishedUrl(fillResult)
   const body = JSON.stringify({
+    claimAttempt: claimAttemptOfTask(task),
     platformPublishedUrl: outcome === 'published' && publishedUrl ? publishedUrl : undefined,
     diagnosticsJson: shortDiagnosticsJson({
       fillResult,
@@ -2689,9 +2711,11 @@ function extractPublishedUrl(fillResult) {
     || ''
 }
 
-async function reportScheduleHeartbeat(config, scheduleId) {
+async function reportScheduleHeartbeat(config, task) {
+  const scheduleId = scheduleIdOfTask(task)
   if (!scheduleId) return null
-  const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/heartbeat`
+  const claimAttempt = claimAttemptOfTask(task)
+  const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/heartbeat?claimAttempt=${encodeURIComponent(claimAttempt || '')}`
   return signedTrustedBackendRequest(config, path, { method: 'POST' })
 }
 
@@ -2699,8 +2723,25 @@ function scheduleIdOfTask(task) {
   return task?.schedule?.id || task?.backendTask?.platformOptions?.scheduleId || task?.backendTask?.scheduleId
 }
 
+function claimAttemptOfTask(task) {
+  const value = task?.schedule?.attemptCount
+    ?? task?.backendTask?.platformOptions?.claimAttempt
+    ?? task?.backendTask?.claimAttempt
+  const claimAttempt = Number(value)
+  return Number.isInteger(claimAttempt) && claimAttempt > 0 ? claimAttempt : null
+}
+
 function claimedTimeoutMsForTask(task) {
-  return scheduleIdOfTask(task) ? CLAIM_BACKEND_HEARTBEAT_MAX_MS : CLAIM_TIMEOUT_MS
+  return scheduleIdOfTask(task) ? SCHEDULE_PROGRESS_STALL_TIMEOUT_MS : CLAIM_TIMEOUT_MS
+}
+
+function taskProgressAt(task) {
+  return task?.lastProgressAt || task?.lastStageAt || task?.claimedAt || task?.createdAt || null
+}
+
+function taskProgressAgeMs(task) {
+  const timestamp = Date.parse(taskProgressAt(task) || '')
+  return Number.isFinite(timestamp) ? Date.now() - timestamp : Number.POSITIVE_INFINITY
 }
 
 function expireClaimedTask(task) {
@@ -2762,12 +2803,8 @@ function shouldHeartbeatScheduleTask(task) {
   if (!scheduleIdOfTask(task)) return false
   if (!task.backendTask && !task.schedule) return false
   if (task.status !== 'pending' && task.status !== 'claimed') return false
-  const activeSince = Date.parse(task.claimedAt || task.createdAt || '')
-  if (!Number.isFinite(activeSince)) return false
-  const maxAgeMs = task.status === 'pending'
-    ? EXTENSION_CLAIM_TIMEOUT_MS
-    : CLAIM_BACKEND_HEARTBEAT_MAX_MS
-  return Date.now() - activeSince <= maxAgeMs
+  const maxAgeMs = task.status === 'pending' ? EXTENSION_CLAIM_TIMEOUT_MS : SCHEDULE_PROGRESS_STALL_TIMEOUT_MS
+  return taskProgressAgeMs(task) <= maxAgeMs
 }
 
 function activeScheduleHeartbeatTasks() {
@@ -2948,8 +2985,7 @@ async function heartbeatActiveScheduleTasks(config) {
   const staleClaimKeys = new Set()
   for (const task of tasksById.values()) {
     if (task.status !== 'claimed' || !task.claimedAt) continue
-    const claimedMs = Date.now() - Date.parse(task.claimedAt)
-    if (claimedMs <= CLAIM_BACKEND_HEARTBEAT_MAX_MS) continue
+    if (taskProgressAgeMs(task) <= SCHEDULE_PROGRESS_STALL_TIMEOUT_MS) continue
     if (task.environmentKey) staleClaimKeys.add(`env:${task.environmentKey}`)
     if (task.platform) staleClaimKeys.add(`platform:${task.platform}`)
   }
@@ -2961,7 +2997,7 @@ async function heartbeatActiveScheduleTasks(config) {
     if (!shouldHeartbeatScheduleTask(task)) continue
     const scheduleId = scheduleIdOfTask(task)
     try {
-      const schedule = await reportScheduleHeartbeat(config, scheduleId)
+      const schedule = await reportScheduleHeartbeat(config, task)
       task.schedule = schedule || task.schedule || null
       task.backendHeartbeatAt = nowIso()
       task.backendHeartbeatLastError = null
@@ -2971,7 +3007,9 @@ async function heartbeatActiveScheduleTasks(config) {
       task.backendHeartbeatLastError = formatBackendError(error)
       failed += 1
       changed = true
-      console.error('Failed to heartbeat self-media schedule:', task.backendHeartbeatLastError)
+      if (!terminateTaskForScheduleClaimError(task, error)) {
+        console.error('Failed to heartbeat self-media schedule:', task.backendHeartbeatLastError)
+      }
     }
   }
   if (changed) await saveRuntimeTasks()
@@ -3027,7 +3065,7 @@ async function flushPendingPublishCheckSuccessReports(config, platform = '') {
     task.backendSuccessReportAttempts = Number(task.backendSuccessReportAttempts || 0) + 1
     try {
       task.schedule = await withTimeout(
-        reportPublishCheckPublished(config, scheduleIdOfTask(task), task.lastResult),
+        reportPublishCheckPublished(config, scheduleIdOfTask(task), claimAttemptOfTask(task), task.lastResult),
         BACKEND_FETCH_TIMEOUT_MS + RESPONSE_JSON_TIMEOUT_MS + 5_000,
         `flush publish check published ${scheduleIdOfTask(task)}`,
       ) || task.schedule || null
@@ -3035,10 +3073,11 @@ async function flushPendingPublishCheckSuccessReports(config, platform = '') {
       task.backendSuccessReportLastError = null
     } catch (error) {
       task.backendSuccessReportLastError = formatBackendError(error)
-      if (isNonRetryableBackendReportError(error)) {
+      const terminated = terminateTaskForScheduleClaimError(task, error)
+      if (!terminated && isNonRetryableBackendReportError(error)) {
         task.backendSuccessReportRejectedAt = nowIso()
       }
-      console.error('Failed to report pending publish check success:', task.backendSuccessReportLastError)
+      if (!terminated) console.error('Failed to report pending publish check success:', task.backendSuccessReportLastError)
     }
     changed = true
   }
@@ -3052,7 +3091,7 @@ async function flushPendingPublishCheckUnknownReports(config, platform = '') {
     task.backendUnknownReportAttempts = Number(task.backendUnknownReportAttempts || 0) + 1
     try {
       task.schedule = await withTimeout(
-        reportPublishCheckUnknown(config, scheduleIdOfTask(task), task.lastResult),
+        reportPublishCheckUnknown(config, scheduleIdOfTask(task), claimAttemptOfTask(task), task.lastResult),
         BACKEND_FETCH_TIMEOUT_MS + RESPONSE_JSON_TIMEOUT_MS + 5_000,
         `flush publish check unknown ${scheduleIdOfTask(task)}`,
       ) || task.schedule || null
@@ -3060,10 +3099,11 @@ async function flushPendingPublishCheckUnknownReports(config, platform = '') {
       task.backendUnknownReportLastError = null
     } catch (error) {
       task.backendUnknownReportLastError = formatBackendError(error)
-      if (isNonRetryableBackendReportError(error)) {
+      const terminated = terminateTaskForScheduleClaimError(task, error)
+      if (!terminated && isNonRetryableBackendReportError(error)) {
         task.backendUnknownReportRejectedAt = nowIso()
       }
-      console.error('Failed to report pending publish check unknown:', task.backendUnknownReportLastError)
+      if (!terminated) console.error('Failed to report pending publish check unknown:', task.backendUnknownReportLastError)
     }
     changed = true
   }
@@ -3090,15 +3130,18 @@ async function flushPendingPublishCheckFailureReports(config, platform = '') {
         backendHeartbeatAt: task.backendHeartbeatAt || '',
         backendHeartbeatLastError: task.backendHeartbeatLastError || null,
       }
-      task.schedule = await reportPublishCheckUnknown(config, scheduleId, result) || task.schedule || null
+      task.schedule = await reportPublishCheckUnknown(
+        config, scheduleId, claimAttemptOfTask(task), result,
+      ) || task.schedule || null
       task.backendFailureReportedAt = nowIso()
       task.backendFailureReportLastError = null
     } catch (error) {
       task.backendFailureReportLastError = formatBackendError(error)
-      if (isNonRetryableBackendReportError(error)) {
+      const terminated = terminateTaskForScheduleClaimError(task, error)
+      if (!terminated && isNonRetryableBackendReportError(error)) {
         task.backendFailureReportRejectedAt = nowIso()
       }
-      console.error('Failed to report pending publish check failure:', task.backendFailureReportLastError)
+      if (!terminated) console.error('Failed to report pending publish check failure:', task.backendFailureReportLastError)
     }
     changed = true
   }
@@ -3119,10 +3162,11 @@ async function flushPendingScheduleFailureReports(config, platform = '') {
       task.backendFailureReportLastError = null
     } catch (error) {
       task.backendFailureReportLastError = formatBackendError(error)
-      if (isNonRetryableBackendReportError(error)) {
+      const terminated = terminateTaskForScheduleClaimError(task, error)
+      if (!terminated && isNonRetryableBackendReportError(error)) {
         task.backendFailureReportRejectedAt = nowIso()
       }
-      console.error('Failed to report pending schedule execution failure:', task.backendFailureReportLastError)
+      if (!terminated) console.error('Failed to report pending schedule execution failure:', task.backendFailureReportLastError)
     }
     changed = true
   }
@@ -3150,10 +3194,11 @@ async function flushPendingScheduleSuccessReports(config, platform = '') {
       task.backendSuccessReportLastError = null
     } catch (error) {
       task.backendSuccessReportLastError = formatBackendError(error)
-      if (isNonRetryableBackendReportError(error)) {
+      const terminated = terminateTaskForScheduleClaimError(task, error)
+      if (!terminated && isNonRetryableBackendReportError(error)) {
         task.backendSuccessReportRejectedAt = nowIso()
       }
-      console.error('Failed to report pending schedule execution success:', task.backendSuccessReportLastError)
+      if (!terminated) console.error('Failed to report pending schedule execution success:', task.backendSuccessReportLastError)
     }
     changed = true
   }
@@ -3170,6 +3215,36 @@ function formatBackendError(error) {
 function isNonRetryableBackendReportError(error) {
   if (error?.statusCode === 400) return true
   return error?.backendCode === 'SCHEDULE_STATUS_NOT_CHECKING_PUBLISH_RESULT'
+    || isTerminalScheduleClaimError(error)
+}
+
+function isTerminalScheduleClaimError(error) {
+  return TERMINAL_SCHEDULE_CLAIM_ERROR_CODES.has(String(error?.backendCode || ''))
+}
+
+function terminateTaskForScheduleClaimError(task, error) {
+  if (!task || !isTerminalScheduleClaimError(error)) return false
+  const firstTermination = !task.scheduleClaimTerminatedAt
+  const terminatedAt = task.scheduleClaimTerminatedAt || nowIso()
+  task.scheduleClaimTerminatedAt = terminatedAt
+  task.scheduleClaimTerminationCode = error.backendCode || 'SCHEDULE_CLAIM_TERMINATED'
+  task.backendFailureReportRejectedAt = task.backendFailureReportRejectedAt || terminatedAt
+  task.backendSuccessReportRejectedAt = task.backendSuccessReportRejectedAt || terminatedAt
+  task.backendUnknownReportRejectedAt = task.backendUnknownReportRejectedAt || terminatedAt
+  if (task.status === 'pending' || task.status === 'claimed') {
+    task.status = 'failed'
+    task.failedAt = terminatedAt
+    task.claimedAt = null
+    task.claimOwner = null
+  }
+  task.lastError = {
+    code: task.scheduleClaimTerminationCode,
+    message: formatBackendError(error),
+  }
+  if (firstTermination) {
+    console.error('Self-media schedule claim terminated:', task.lastError.message)
+  }
+  return true
 }
 
 function shortDiagnosticsJson(value) {
@@ -3582,6 +3657,9 @@ async function handleNextTask(req, res, config, url) {
   }
   task.status = 'claimed'
   task.claimedAt = nowIso()
+  task.lastProgressAt = task.claimedAt
+  task.lastStageAt = task.claimedAt
+  task.lastStage = 'extension_claimed'
   task.claimOwner = {
     environmentKey: task.environmentKey,
     claimedAt: task.claimedAt,
@@ -3594,8 +3672,7 @@ async function requeueTimedOutClaims(environmentKey) {
   let changed = false
   for (const task of tasksById.values()) {
     if (task.environmentKey !== environmentKey || task.status !== 'claimed' || !task.claimedAt) continue
-    const claimedMs = Date.now() - Date.parse(task.claimedAt)
-    if (claimedMs <= claimedTimeoutMsForTask(task)) continue
+    if (taskProgressAgeMs(task) <= claimedTimeoutMsForTask(task)) continue
     expireClaimedTask(task)
     changed = true
   }
@@ -3607,8 +3684,7 @@ async function requeueTimedOutClaimsByPlatform(platform) {
   for (const task of tasksById.values()) {
     if (platform && task.platform !== platform) continue
     if (task.status !== 'claimed' || !task.claimedAt) continue
-    const claimedMs = Date.now() - Date.parse(task.claimedAt)
-    if (claimedMs <= claimedTimeoutMsForTask(task)) continue
+    if (taskProgressAgeMs(task) <= claimedTimeoutMsForTask(task)) continue
     expireClaimedTask(task)
     changed = true
   }
@@ -3686,10 +3762,11 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     }).catch((error) => {
       task.backendSuccessReportAttempts += 1
       task.backendSuccessReportLastError = formatBackendError(error)
-      if (isNonRetryableBackendReportError(error)) {
+      const terminated = terminateTaskForScheduleClaimError(task, error)
+      if (!terminated && isNonRetryableBackendReportError(error)) {
         task.backendSuccessReportRejectedAt = nowIso()
       }
-      console.error('Failed to report schedule execution success:', task.backendSuccessReportLastError)
+      if (!terminated) console.error('Failed to report schedule execution success:', task.backendSuccessReportLastError)
     })
   } else {
     task.status = 'failed'
@@ -3710,10 +3787,11 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     }).catch((error) => {
       task.backendFailureReportAttempts += 1
       task.backendFailureReportLastError = formatBackendError(error)
-      if (isNonRetryableBackendReportError(error)) {
+      const terminated = terminateTaskForScheduleClaimError(task, error)
+      if (!terminated && isNonRetryableBackendReportError(error)) {
         task.backendFailureReportRejectedAt = nowIso()
       }
-      console.error('Failed to report schedule execution failure:', task.backendFailureReportLastError)
+      if (!terminated) console.error('Failed to report schedule execution failure:', task.backendFailureReportLastError)
     })
   }
   await saveRuntimeTasks()
@@ -3723,6 +3801,49 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     force: true,
   }).catch(() => null)
   sendJson(req, res, config, 200, { ok: true, task })
+}
+
+async function handleTaskProgress(req, res, config, taskId) {
+  const body = await readJson(req)
+  await requireHelperAccess(req, config)
+  const environmentKey = String(body.environmentKey || '').trim()
+  if (!environmentKey) {
+    const error = new Error('environmentKey is required for task progress')
+    error.statusCode = 400
+    error.code = 'ENVIRONMENT_KEY_REQUIRED'
+    throw error
+  }
+  const task = tasksById.get(Number(taskId))
+  if (!task) {
+    const error = new Error('task not found')
+    error.statusCode = 404
+    throw error
+  }
+  if (task.environmentKey !== environmentKey) {
+    const error = new Error('task environment mismatch')
+    error.statusCode = 409
+    error.code = 'TASK_ENVIRONMENT_MISMATCH'
+    throw error
+  }
+  if (task.status !== 'claimed') {
+    const error = new Error(`task is not claimed: ${task.status}`)
+    error.statusCode = 409
+    error.code = 'TASK_NOT_CLAIMED'
+    throw error
+  }
+  const stage = String(body.stage || '').trim().slice(0, 80)
+  if (!stage) {
+    const error = new Error('stage is required for task progress')
+    error.statusCode = 400
+    error.code = 'TASK_STAGE_REQUIRED'
+    throw error
+  }
+  const reportedAt = nowIso()
+  task.lastStage = stage
+  task.lastStageAt = reportedAt
+  task.lastProgressAt = reportedAt
+  await saveRuntimeTasks()
+  sendJson(req, res, config, 200, { ok: true, taskId: task.taskId, stage, progressAt: reportedAt })
 }
 
 function classifyFailureStatus(error) {
@@ -3845,6 +3966,9 @@ async function uploadImageFileToAdsPowerPage(config, body, filePath) {
     if (platform === 'douyin' && body.uploadTarget !== 'douyin_article_head_image') {
       throw new Error(`douyin upload target is not allowed: ${body.uploadTarget || '-'}`)
     }
+    if (platform === 'toutiao' && body.uploadTarget !== 'toutiao_article_cover') {
+      throw new Error(`toutiao upload target is not allowed: ${body.uploadTarget || '-'}`)
+    }
     const chooserState = await acceptPlatformFileChooser(page, filePath, platform, {
       uploadTarget: body.uploadTarget || '',
       click: body.click || null,
@@ -3894,6 +4018,9 @@ async function acceptPlatformFileChooser(page, filePath, platform, options = {})
   }
   if (normalized === 'douyin') {
     return acceptDouyinArticleHeadFileChooser(page, filePath, options)
+  }
+  if (normalized === 'toutiao' && options.uploadTarget !== 'toutiao_article_cover') {
+    throw new Error(`toutiao upload target is not allowed: ${options.uploadTarget || '-'}`)
   }
 
   const chooserPromise = page.waitForFileChooser({ timeout: 3_000 }).catch(() => null)
@@ -4647,6 +4774,9 @@ async function route(req, res, config) {
 
   const failMatch = url.pathname.match(/^\/v1\/extension\/tasks\/(\d+)\/fail$/)
   if (req.method === 'POST' && failMatch) return handleTaskComplete(req, res, config, failMatch[1], 'failed')
+
+  const progressMatch = url.pathname.match(/^\/v1\/extension\/tasks\/(\d+)\/progress$/)
+  if (req.method === 'POST' && progressMatch) return handleTaskProgress(req, res, config, progressMatch[1])
 
   sendJson(req, res, config, 404, { ok: false, error: 'not found' })
 }

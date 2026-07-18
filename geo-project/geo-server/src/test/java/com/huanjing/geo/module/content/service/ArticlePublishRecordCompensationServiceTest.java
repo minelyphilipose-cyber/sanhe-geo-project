@@ -56,6 +56,74 @@ class ArticlePublishRecordCompensationServiceTest {
                 """, Long.class)).isZero();
     }
 
+    @Test
+    void backfillPublishedTasks_repairsExistingWechatScheduleRecords() {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createTables(jdbcTemplate);
+        jdbcTemplate.update("""
+                INSERT INTO article_draft (id, project_id, source_brand_id, title, cover_image_url)
+                VALUES (2197, 7001, 5, '阜阳找价格实在服务靠谱的电动车？', 'https://cdn.example/cover-209.jpg')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO self_media_account (id, brand_id, platform)
+                VALUES (33, 5, 'wechat_mp')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO distribution_tasks
+                    (id, article_id, project_id, target_kind, integration_method, published_url, platform_article_id,
+                     platform_publish_id, status, review_status, published_at, finished_at, created_at, self_media_account_id,
+                     response_payload)
+                VALUES
+                    (1638, 2197, NULL, 'self_media', 'wechat_mp', 'http://mp.weixin.qq.com/s/old',
+                     'ADmwqirvKYn', '2247483717', 'published', NULL,
+                     TIMESTAMP '2026-07-03 17:55:07', TIMESTAMP '2026-07-03 17:55:07',
+                     TIMESTAMP '2026-07-03 17:50:00', 33, '{"ok":true}')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO self_media_publish_schedule
+                    (id, distribution_task_id, article_id, self_media_account_id, brand_id, platform,
+                     platform_published_url, platform_publish_id, status, published_confirmed_at, updated_at, created_at)
+                VALUES
+                    (209, 1638, 2197, 33, 5, 'wechat_mp',
+                     'http://mp.weixin.qq.com/s?__biz=test-209', '2247483717', 'published_confirmed',
+                     TIMESTAMP '2026-07-03 17:55:07', TIMESTAMP '2026-07-03 17:55:05',
+                     TIMESTAMP '2026-07-03 17:00:00')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO article_publish_record
+                    (article_id, distribution_task_id, project_id, self_media_account_id, brand_id, source_type, source_id,
+                     target_kind, target_channel, published_url, publish_status)
+                VALUES
+                    (2197, 1638, NULL, NULL, NULL, 'self_media_publish_schedule', 209,
+                     'self_media', 'wechat_mp', 'http://mp.weixin.qq.com/s?__biz=test-209', 'published_confirmed')
+                """);
+        ArticlePublishRecordCompensationService service =
+                new ArticlePublishRecordCompensationService(jdbcTemplate, currentUserService());
+
+        ArticlePublishRecordCompensationService.CompensationResult result = service.backfillPublishedTasks(100, false);
+
+        assertThat(result.inserted()).isPositive();
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT project_id,
+                       self_media_account_id,
+                       brand_id,
+                       title,
+                       cover_url,
+                       platform_article_id,
+                       platform_publish_id
+                  FROM article_publish_record
+                 WHERE source_type = 'self_media_publish_schedule'
+                   AND source_id = 209
+                """))
+                .containsEntry("project_id", 7001L)
+                .containsEntry("self_media_account_id", 33L)
+                .containsEntry("brand_id", 5L)
+                .containsEntry("title", "阜阳找价格实在服务靠谱的电动车？")
+                .containsEntry("cover_url", "https://cdn.example/cover-209.jpg")
+                .containsEntry("platform_article_id", "ADmwqirvKYn")
+                .containsEntry("platform_publish_id", "2247483717");
+    }
+
     private static Map<String, Object> row(JdbcTemplate jdbcTemplate, Long sourceId) {
         return jdbcTemplate.queryForMap("""
                 SELECT target_channel, publish_status
@@ -96,13 +164,24 @@ class ArticlePublishRecordCompensationServiceTest {
                     published_at TIMESTAMP,
                     finished_at TIMESTAMP,
                     created_at TIMESTAMP,
-                    self_media_account_id BIGINT
+                    self_media_account_id BIGINT,
+                    response_payload JSON
                 )
                 """);
         jdbcTemplate.execute("""
                 CREATE TABLE self_media_account (
                     id BIGINT,
+                    brand_id BIGINT,
                     platform VARCHAR(64)
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE article_draft (
+                    id BIGINT,
+                    project_id BIGINT,
+                    source_brand_id BIGINT,
+                    title VARCHAR(255),
+                    cover_image_url VARCHAR(1000)
                 )
                 """);
         jdbcTemplate.execute("""
@@ -110,6 +189,8 @@ class ArticlePublishRecordCompensationServiceTest {
                     id BIGINT,
                     distribution_task_id BIGINT,
                     article_id BIGINT,
+                    self_media_account_id BIGINT,
+                    brand_id BIGINT,
                     platform VARCHAR(64),
                     platform_published_url VARCHAR(1000),
                     platform_publish_id VARCHAR(128),
@@ -125,6 +206,8 @@ class ArticlePublishRecordCompensationServiceTest {
                     article_id BIGINT,
                     distribution_task_id BIGINT,
                     project_id BIGINT,
+                    self_media_account_id BIGINT,
+                    brand_id BIGINT,
                     source_type VARCHAR(32),
                     source_id BIGINT,
                     target_kind VARCHAR(64),
@@ -135,9 +218,16 @@ class ArticlePublishRecordCompensationServiceTest {
                     platform_article_id VARCHAR(128),
                     platform_publish_id VARCHAR(128),
                     publish_status VARCHAR(32),
+                    title VARCHAR(255),
+                    cover_url VARCHAR(1000),
+                    raw_response JSON,
                     published_at TIMESTAMP,
                     verified_at TIMESTAMP
                 )
+                """);
+        jdbcTemplate.execute("""
+                CREATE UNIQUE INDEX uk_article_publish_source
+                    ON article_publish_record (source_type, source_id)
                 """);
     }
 }

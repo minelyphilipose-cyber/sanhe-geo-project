@@ -73,6 +73,19 @@ public interface LocalAgentSessionMapper extends BaseMapper<LocalAgentSession> {
                                        @Param("onlineSince") LocalDateTime onlineSince);
 
     @Select("""
+            SELECT COUNT(1)
+            FROM local_agent_session
+            WHERE brand_id = #{brandId}
+              AND status = 'active'
+              AND expires_at > #{now}
+              AND last_seen_at IS NOT NULL
+              AND last_seen_at >= #{onlineSince}
+            """)
+    long countOnlineSessionsByBrand(@Param("brandId") Long brandId,
+                                    @Param("now") LocalDateTime now,
+                                    @Param("onlineSince") LocalDateTime onlineSince);
+
+    @Select("""
             SELECT *
             FROM local_agent_session
             WHERE status = 'active'

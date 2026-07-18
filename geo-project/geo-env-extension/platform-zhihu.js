@@ -24,7 +24,7 @@
     if (text.includes('知乎平台适配器未加载')) return 'ZHIHU_ADAPTER_NOT_LOADED'
     if (normalizePlatform(platform) !== 'zhihu' && !text.includes('知乎') && !text.includes('草稿加载中')) return ''
     if (text.includes('草稿加载中') || text.includes('草稿加载未完成') || text.includes('发布被草稿加载阻塞')) return 'ZHIHU_DRAFT_LOADING'
-    if (text.includes('发布后未检测到完成状态')) return 'ZHIHU_PUBLISH_NOT_SUBMITTED'
+    if (text.includes('发布后未检测到完成状态')) return 'ZHIHU_PUBLISH_NOT_CONFIRMED'
     if (text.includes('封面填充后未检测到封面图片')) return 'ZHIHU_COVER_UPLOAD_NOT_CONFIRMED'
     if (text.includes('封面上传入口未找到')) return 'ZHIHU_COVER_UPLOAD_ENTRY_NOT_FOUND'
     if (text.includes('等待知乎封面图片上传完成超时') || text.includes('封面图片上传完成超时')) return 'ZHIHU_COVER_UPLOAD_TIMEOUT'
@@ -502,6 +502,7 @@
     const options = resolvePublishOptions(payload, deps)
     const actions = []
     if (options.coverImageUrl) {
+      updateStage(deps, 'filling_cover')
       const cover = await requireDependency(deps.fillCover, 'fillCover')(options.coverImageUrl, fillProfile.platform)
       if (cover?.filled) actions.push(cover.message)
       if (!requireDependency(deps.hasCoverImage, 'hasCoverImage')()) {
@@ -509,6 +510,7 @@
       }
     }
 
+    updateStage(deps, 'preparing_publish')
     const publish = await requireDependency(deps.publishArticle, 'publishArticle')(fillProfile.platform, {
       expectedTitle: payload.title || payload.articleTitle || '',
       expectedAccountName: payload.expectedAccountName || '',
@@ -961,6 +963,7 @@
         10000,
         `知乎发布按钮未找到；${describeWith(deps)}`,
       )
+      updateStage(deps, 'submitting_publish')
       await clickPublishAction(button, platform, deps)
       await requireDependency(deps.delay, 'delay')(1200)
 
@@ -974,10 +977,12 @@
 
       const confirm = findPublishConfirmButton(button, deps)
       if (confirm) {
+        updateStage(deps, 'submitting_publish')
         await clickPublishAction(confirm, platform, deps)
         await requireDependency(deps.delay, 'delay')(1200)
       }
 
+      updateStage(deps, 'verifying_publish_result')
       const outcome = await waitForPublishAttemptOutcome(platform, context, deps)
       if (outcome?.verified) {
         return {
@@ -1032,20 +1037,12 @@
   async function clickPublishAction(el, platform, deps) {
     const target = el?.closest?.('button, [role="button"]') || el
     if (!target) return
-    target.scrollIntoView?.({ block: 'center', inline: 'center' })
-    await requireDependency(deps.delay, 'delay')(100)
-    requireDependency(deps.firePointerClick, 'firePointerClick')(target)
-    target.click?.()
-    await requireDependency(deps.delay, 'delay')(400)
-    if (hasPublishProgressSignal(deps)) return
-    await requireDependency(deps.requestTrustedClick, 'requestTrustedClick')(target, { platform })
+    await requireDependency(deps.clickTrustedActionOnce, 'clickTrustedActionOnce')(target, { platform })
     await requireDependency(deps.delay, 'delay')(600)
-    if (hasPublishProgressSignal(deps)) return
-    requireDependency(deps.firePointerClick, 'firePointerClick')(target, { clickRatioX: 0.42, clickRatioY: 0.5 })
-    target.click?.()
-    await requireDependency(deps.delay, 'delay')(300)
-    if (hasPublishProgressSignal(deps)) return
-    await requireDependency(deps.requestTrustedClick, 'requestTrustedClick')(target, { platform, clickRatioX: 0.42, clickRatioY: 0.5 })
+  }
+
+  function updateStage(deps, stage) {
+    if (typeof deps?.updateStage === 'function') deps.updateStage(stage)
   }
 
   function hasPublishProgressSignal(deps) {

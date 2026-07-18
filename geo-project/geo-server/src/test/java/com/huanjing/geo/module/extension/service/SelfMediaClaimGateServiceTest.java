@@ -19,6 +19,7 @@ class SelfMediaClaimGateServiceTest {
     void observeOnlyRecordsWouldBlockWithoutBlockingClaim() {
         SelfMediaRuntimeReadinessService readinessService = mock(SelfMediaRuntimeReadinessService.class);
         SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
+        properties.getGate().setDefaultMode(SelfMediaClaimGateService.MODE_OBSERVE_ONLY);
         RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, null, 20L, "toutiao", "claim", "fill");
         when(readinessService.evaluate(query)).thenReturn(RuntimeReadinessResult.blocked(
                 List.of(SelfMediaRuntimeReadinessService.EXTENSION_NOT_SEEN),
@@ -33,6 +34,70 @@ class SelfMediaClaimGateServiceTest {
         assertTrue(evaluation.wouldBlock());
         assertFalse(evaluation.blockClaim());
         assertFalse(evaluation.markManualRequired());
+    }
+
+    @Test
+    void defaultModeBlocksClaimWhenExtensionIsNotSeen() {
+        SelfMediaRuntimeReadinessService readinessService = mock(SelfMediaRuntimeReadinessService.class);
+        SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, null, 20L, "toutiao", "claim", "fill");
+        when(readinessService.evaluate(query)).thenReturn(RuntimeReadinessResult.blocked(
+                List.of(SelfMediaRuntimeReadinessService.EXTENSION_NOT_SEEN),
+                null,
+                1L,
+                30
+        ));
+        SelfMediaClaimGateService service = new SelfMediaClaimGateService(readinessService, properties);
+
+        ClaimGateEvaluation evaluation = service.evaluate(query);
+
+        assertTrue(evaluation.wouldBlock());
+        assertTrue(evaluation.blockClaim());
+        assertFalse(evaluation.markManualRequired());
+    }
+
+    @Test
+    void browserLaunchAllowsExtensionBootstrapButStillBlocksHelperFailures() {
+        SelfMediaRuntimeReadinessService readinessService = mock(SelfMediaRuntimeReadinessService.class);
+        SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, null, 20L, "toutiao", "claim", "fill");
+        when(readinessService.evaluate(query)).thenReturn(RuntimeReadinessResult.blocked(
+                List.of(
+                        SelfMediaRuntimeReadinessService.EXTENSION_NOT_SEEN,
+                        SelfMediaRuntimeReadinessService.HELPER_OFFLINE
+                ),
+                null,
+                null,
+                30
+        ));
+        SelfMediaClaimGateService service = new SelfMediaClaimGateService(readinessService, properties);
+
+        ClaimGateEvaluation evaluation = service.evaluateForBrowserLaunch(query);
+
+        assertTrue(evaluation.wouldBlock());
+        assertTrue(evaluation.blockClaim());
+        assertFalse(evaluation.blockedReasons().contains(SelfMediaRuntimeReadinessService.EXTENSION_NOT_SEEN));
+        assertTrue(evaluation.blockedReasons().contains(SelfMediaRuntimeReadinessService.HELPER_OFFLINE));
+    }
+
+    @Test
+    void browserLaunchCanStartAdsPowerWhenOnlyExtensionIsNotSeen() {
+        SelfMediaRuntimeReadinessService readinessService = mock(SelfMediaRuntimeReadinessService.class);
+        SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(10L, 99L, null, 20L, "toutiao", "claim", "fill");
+        when(readinessService.evaluate(query)).thenReturn(RuntimeReadinessResult.blocked(
+                List.of(SelfMediaRuntimeReadinessService.EXTENSION_NOT_SEEN),
+                null,
+                1L,
+                30
+        ));
+        SelfMediaClaimGateService service = new SelfMediaClaimGateService(readinessService, properties);
+
+        ClaimGateEvaluation evaluation = service.evaluateForBrowserLaunch(query);
+
+        assertFalse(evaluation.wouldBlock());
+        assertFalse(evaluation.blockClaim());
+        assertTrue(evaluation.blockedReasons().isEmpty());
     }
 
     @Test

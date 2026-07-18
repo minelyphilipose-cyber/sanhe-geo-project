@@ -57,7 +57,7 @@ public class WechatFuncInfoValidator {
             if (root.isArray()) {
                 for (JsonNode item : root) {
                     int id = item.path("funcscope_category").path("id").asInt(-1);
-                    if (id > 0) {
+                    if (id > 0 && isConfirmed(item.path("confirm_info"))) {
                         actual.add(id);
                     }
                 }
@@ -69,5 +69,13 @@ public class WechatFuncInfoValidator {
         Set<Integer> missing = new HashSet<>(required);
         missing.removeAll(actual);
         return missing;
+    }
+
+    private boolean isConfirmed(JsonNode confirmInfo) {
+        if (confirmInfo == null || confirmInfo.isMissingNode() || confirmInfo.isNull()) {
+            return true;
+        }
+        return confirmInfo.path("need_confirm").asInt(0) != 1
+                || confirmInfo.path("already_confirm").asInt(0) == 1;
     }
 }

@@ -26,27 +26,45 @@ public class SelfMediaClaimGateService {
             "HELPER_CAPABILITY_UNSUPPORTED",
             "BROWSER_ENVIRONMENT_DISABLED"
     );
+    private static final Set<String> EXTENSION_BOOTSTRAP_REASONS = Set.of(
+            SelfMediaRuntimeReadinessService.EXTENSION_NOT_SEEN,
+            SelfMediaRuntimeReadinessService.EXTENSION_STALE,
+            SelfMediaRuntimeReadinessService.ACCOUNT_NOT_VERIFIED
+    );
 
     private final SelfMediaRuntimeReadinessService readinessService;
     private final SelfMediaRuntimeProperties properties;
 
     public ClaimGateEvaluation evaluate(RuntimeReadinessQuery query) {
+        return evaluate(query, false);
+    }
+
+    public ClaimGateEvaluation evaluateForBrowserLaunch(RuntimeReadinessQuery query) {
+        return evaluate(query, true);
+    }
+
+    private ClaimGateEvaluation evaluate(RuntimeReadinessQuery query, boolean allowExtensionBootstrap) {
         RuntimeReadinessResult readiness = readinessService.evaluate(query);
+        var blockedReasons = allowExtensionBootstrap
+                ? readiness.blockedReasons().stream()
+                    .filter(reason -> !EXTENSION_BOOTSTRAP_REASONS.contains(reason))
+                    .toList()
+                : readiness.blockedReasons();
         String mode = properties.getGate().modeFor(
                 query == null ? null : query.brandId(),
                 query == null ? null : query.platform()
         );
-        boolean wouldBlock = !readiness.ready();
+        boolean wouldBlock = !blockedReasons.isEmpty();
         boolean blockClaim = wouldBlock && MODE_BLOCK_NON_DESTRUCTIVE.equalsIgnoreCase(mode);
         boolean markManualRequired = wouldBlock
                 && MODE_MANUAL_REQUIRED_TERMINAL.equalsIgnoreCase(mode)
-                && readiness.blockedReasons().stream().anyMatch(TERMINAL_REASONS::contains);
+                && blockedReasons.stream().anyMatch(TERMINAL_REASONS::contains);
         return new ClaimGateEvaluation(
                 mode,
                 wouldBlock,
                 blockClaim,
                 markManualRequired,
-                readiness.blockedReasons(),
+                blockedReasons,
                 readiness.retryAfterSeconds(),
                 LocalDateTime.now()
         );

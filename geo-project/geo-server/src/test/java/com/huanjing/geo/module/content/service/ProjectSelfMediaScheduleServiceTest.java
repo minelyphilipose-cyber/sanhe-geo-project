@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
@@ -1587,6 +1588,11 @@ class ProjectSelfMediaScheduleServiceTest {
         created.setCreatedSchedules(List.of(schedule));
         when(scheduleService.createSystemSchedules(any(), org.mockito.ArgumentMatchers.startsWith("project-auto-33-55-retry-"), eq(99L)))
                 .thenReturn(created);
+        SelfMediaPublishSchedule persisted = new SelfMediaPublishSchedule();
+        persisted.setId(88L);
+        persisted.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
+                .thenReturn(null, persisted);
 
         ProjectSelfMediaScheduleBatchDetailVO detail = service.retryFailedItems(7L, "2026-06");
 
@@ -1619,8 +1625,11 @@ class ProjectSelfMediaScheduleServiceTest {
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
         when(selfMediaPublishScheduleRequestMapper.selectByRequestKey(8L, "project-auto-33-55"))
                 .thenReturn(null);
+        SelfMediaPublishSchedule persisted = new SelfMediaPublishSchedule();
+        persisted.setId(88L);
+        persisted.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
-                .thenReturn(null);
+                .thenReturn(null, persisted);
         when(businessCalendarService.allPublishSlots(any(), eq(false)))
                 .thenReturn(List.of(slot(15, 9)));
         when(scheduleAdapterRouter.rules(eq("toutiao"), anyString()))

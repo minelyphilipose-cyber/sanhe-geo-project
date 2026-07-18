@@ -16,6 +16,7 @@ public final class SelfMediaPublishScheduleConstants {
     public static final String STATUS_PUBLISH_DUE = "publish_due";
     public static final String STATUS_CHECKING_PUBLISH_RESULT = "checking_publish_result";
     public static final String STATUS_PUBLISHED_CONFIRMED = "published_confirmed";
+    public static final String STATUS_PUBLISHED_URL_PENDING = "published_url_pending";
     public static final String STATUS_PUBLISH_UNKNOWN = "publish_unknown";
     public static final String STATUS_SCHEDULE_FAILED = "schedule_failed";
     public static final String STATUS_PUBLISH_FAILED = "publish_failed";
@@ -35,6 +36,7 @@ public final class SelfMediaPublishScheduleConstants {
             STATUS_SCHEDULED,
             STATUS_PUBLISH_DUE,
             STATUS_CHECKING_PUBLISH_RESULT,
+            STATUS_PUBLISHED_URL_PENDING,
             STATUS_PUBLISH_UNKNOWN,
             STATUS_CANCEL_PENDING_PLATFORM
     );

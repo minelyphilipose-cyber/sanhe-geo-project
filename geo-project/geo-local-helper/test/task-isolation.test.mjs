@@ -111,13 +111,27 @@ test('local helper releases unclaimed schedules and reports only claimed work as
   )
   assert.match(
     server,
-    /task\.status === 'pending'[\s\S]+\? EXTENSION_CLAIM_TIMEOUT_MS\s+: CLAIM_BACKEND_HEARTBEAT_MAX_MS/,
-    'pending handoffs must stop extending the backend lock at the extension claim timeout',
+    /task\.status === 'pending' \? EXTENSION_CLAIM_TIMEOUT_MS : SCHEDULE_PROGRESS_STALL_TIMEOUT_MS/,
+    'pending handoffs and claimed execution stalls must use separate timeout boundaries',
   )
+  assert.match(server, /function taskProgressAgeMs\(task\)[\s\S]+lastProgressAt/)
+  assert.match(server, /async function handleTaskProgress\([\s\S]+task\.lastProgressAt = reportedAt/)
+  assert.match(server, /\/v1\\\/extension\\\/tasks\\\/\(\\d\+\)\\\/progress/)
+  assert.match(server, /diagnosticsJson: shortDiagnosticsJson\(\{[\s\S]+lastStage: task\?\.lastStage/)
   assert.match(
     server,
     /awaitingExtension[\s\S]+running[\s\S]+oldestAwaitingExtensionAgeSeconds/,
     'health output must distinguish helper process health from extension handoff health',
+  )
+  assert.match(
+    server,
+    /function claimAttemptOfTask\(task\)[\s\S]+attemptCount[\s\S]+claimAttempt/,
+    'every helper callback must retain the backend claim generation',
+  )
+  assert.match(
+    server,
+    /function terminateTaskForScheduleClaimError\(task, error\)[\s\S]+backendSuccessReportRejectedAt[\s\S]+backendFailureReportRejectedAt/,
+    'deterministic ownership errors must stop every later report for the stale task',
   )
 })
 
@@ -138,6 +152,11 @@ test('local helper applies capacity locally and rotates platform polling fairly'
     server,
     /function rotateSchedulePlatforms\(platforms\)[\s\S]+schedulePlatformCursor[\s\S]+platforms\.slice\(offset\)\.concat\(platforms\.slice\(0, offset\)\)/,
     'each polling cycle must start from the next platform instead of starving later platforms',
+  )
+  assert.match(
+    server,
+    /const claimedAttempt = Number\(claim\.schedule\?\.attemptCount \|\| 0\) \|\| null[\s\S]+isReusableActiveTask\(existing\) && claimAttemptOfTask\(existing\) === claimedAttempt/,
+    'a reused local task must belong to the same backend claim generation',
   )
 })
 
@@ -203,6 +222,7 @@ test('extension distinguishes backend security failures and recovers login repor
 
 test('baijiahao login reporting reads the current account page structure', () => {
   const contentScript = readProjectFile('geo-env-extension/content-script.js')
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
 
   assert.match(
     contentScript,
@@ -223,6 +243,21 @@ test('baijiahao login reporting reads the current account page structure', () =>
     contentScript.includes('if (/^\\d{6,}$/.test(text)) return false'),
     'numeric-only Baijiahao IDs must be rejected without rejecting names such as yqx2002528',
   )
+  assert.match(
+    serviceWorker,
+    /function isBaijiahaoIdentityUrl\(url\)[\s\S]+\/builder\/rc\/settings\/accountSet/,
+    'Baijiahao identity checks must use the authoritative account settings page',
+  )
+  assert.match(
+    serviceWorker,
+    /verifyTaskIdentityWithRetry[\s\S]+isIdentityReaderNotReadyError[\s\S]+chrome\.tabs\.reload/,
+    'Baijiahao identity checks must wait for React hydration and recover once from an empty identity page',
+  )
+  assert.match(
+    serviceWorker,
+    /tabs\.find\(\(tab\) => tab\.id && tab\.url && isIdentityPrecheckUrl\(platform, tab\.url\)\)/,
+    'Baijiahao identity precheck must not reuse an arbitrary works-list or editor tab',
+  )
 })
 
 test('extension and helper packages expose and enforce the same build revision', () => {
@@ -234,7 +269,7 @@ test('extension and helper packages expose and enforce the same build revision',
   assert.equal(manifest.version, helperPackage.version)
   assert.equal(manifest.version, '0.1.11')
   assert.match(manifest.version_name, new RegExp(`${helperPackage.version}-.+-${helperPackage.buildRevision.replaceAll('.', '\\.')}`))
-  assert.equal(helperPackage.buildRevision, '20260714.1')
+  assert.equal(helperPackage.buildRevision, '20260717.1')
   assert.match(contentScript, new RegExp(`GEO_ENV_CONTENT_SCRIPT_VERSION = '${helperPackage.version.replaceAll('.', '\\.')}'`))
   assert.match(serviceWorker, /EXTENSION_HELPER_BUILD_MISMATCH/)
 })
@@ -287,7 +322,7 @@ test('all browser platforms recover channel-close through result pages without r
   )
   assert.match(
     serviceWorker,
-    /recoverZhihuPublishAfterMessageChannelClosed[\s\S]+findVerifiedPlatformTab\('zhihu'[\s\S]+openPlatformManageVerifyTab\(recoveryTabId, 'zhihu'/,
+    /recoverZhihuPublishAfterFillError[\s\S]+findVerifiedPlatformTab\('zhihu'[\s\S]+openPlatformManageVerifyTab\(recoveryTabId, 'zhihu'/,
   )
   assert.match(
     serviceWorker,
@@ -298,6 +333,49 @@ test('all browser platforms recover channel-close through result pages without r
   assert.match(serviceWorker, /publishNotConfirmedError\('ZHIHU'/)
   assert.match(serviceWorker, /publishNotConfirmedError\('XIAOHONGSHU'/)
   assert.match(serviceWorker, /publishNotConfirmedError\('BAIJIAHAO'/)
+})
+
+test('zhihu post-submit uncertainty can only enter result verification, never a fresh publish', () => {
+  const platform = readProjectFile('geo-env-extension/platform-zhihu.js')
+  const contentScript = readProjectFile('geo-env-extension/content-script.js')
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+
+  assert.match(platform, /\u53d1\u5e03\u540e\u672a\u68c0\u6d4b\u5230\u5b8c\u6210\u72b6\u6001[\s\S]+ZHIHU_PUBLISH_NOT_CONFIRMED/)
+  assert.match(platform, /updateStage\(deps, 'submitting_publish'\)[\s\S]+updateStage\(deps, 'verifying_publish_result'\)/)
+  assert.match(platform, /async function clickPublishAction[\s\S]+clickTrustedActionOnce[\s\S]+function updateStage/)
+  assert.match(contentScript, /updateStage: updateActiveFillStage/)
+  assert.match(serviceWorker, /isRecoverableZhihuPublishVerifyError[\s\S]+ZHIHU_PUBLISH_NOT_SUBMITTED[\s\S]+ZHIHU_PUBLISH_NOT_CONFIRMED/)
+  assert.match(serviceWorker, /zhihu: 'ZHIHU_PUBLISH_NOT_CONFIRMED'/)
+})
+
+test('toutiao cover selection and post-submit timeout cannot fall back to republishing', () => {
+  const contentScript = readProjectFile('geo-env-extension/content-script.js')
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+  const helper = readProjectFile('geo-local-helper/src/server.js')
+  const scheduleService = readProjectFile('geo-server/src/main/java/com/huanjing/geo/module/content/service/SelfMediaPublishScheduleService.java')
+
+  assert.match(
+    contentScript,
+    /optionText === '单图' \? '2' : optionText === '三图' \? '3' : optionText === '无封面' \? '1'/,
+    'toutiao cover mode must use the platform radio values instead of clicking approximate text coordinates',
+  )
+  assert.match(contentScript, /\.article-cover-radio-group/)
+  assert.match(contentScript, /uploadTarget: 'toutiao_article_cover'/)
+  assert.match(helper, /platform === 'toutiao' && body\.uploadTarget !== 'toutiao_article_cover'/)
+  assert.match(contentScript, /updateActiveFillStage\('submitting_publish'\)/)
+  assert.match(contentScript, /updateActiveFillStage\('verifying_publish_result'\)/)
+  assert.match(contentScript, /type: 'GEO_ENV_TASK_PROGRESS'/)
+  assert.match(serviceWorker, /message\?\.type === 'GEO_ENV_TASK_PROGRESS'[\s\S]+\/progress/)
+  assert.match(
+    serviceWorker,
+    /toutiao: 'TOUTIAO_PUBLISH_NOT_CONFIRMED'[\s\S]+\['submitting_publish', 'verifying_publish_result'\]\.includes\(activeStage\)[\s\S]+\? postSubmissionCode/,
+    'a timeout after the final publish click must be classified as result uncertainty, not as a fresh fill failure',
+  )
+  assert.match(
+    scheduleService,
+    /isPostSubmissionVerificationFailure\(failureCode\)[\s\S]+queueUncertainSubmissionForPublishResultCheck/,
+    'the backend must move an uncertain submission to result checking instead of schedule execution retry',
+  )
 })
 
 test('AdsPower extension status refreshes a stale dynamic DevTools endpoint once', () => {
@@ -464,6 +542,31 @@ test('douyin article head upload never falls back to every image input', () => {
     helper,
     /selectUploadTargetPage\(pages,[\s\S]+browserTargetId: body\.browserTargetId \|\| ''/,
     'the local helper must select the upload page by browser target id',
+  )
+  assert.match(
+    contentScript,
+    /\['toutiao', 'baijiahao', 'douyin'\]\.includes\(platform\)[\s\S]+querySelectorAll\('img'\)[\s\S]+platform !== 'douyin' && !isUnsupportedPlatformImageUrl\(src\)/,
+    'Douyin article content must be text-only so body images cannot masquerade as the article head image',
+  )
+  assert.match(
+    platform,
+    /function hasSectionImage[\s\S]+const section = findSection\(label, deps\)[\s\S]+section\.querySelectorAll\('img'\)/,
+    'Douyin upload verification must inspect the matching upload section',
+  )
+  assert.doesNotMatch(
+    platform,
+    /function hasSectionImage[\s\S]{0,300}hasUploadResultNearLabel/,
+    'Douyin upload verification must not use viewport proximity because an editor image can align with the head-image label',
+  )
+  assert.match(
+    platform,
+    /closest\('\[contenteditable="true"\], \.ProseMirror, \[class\*="editor"\], \[class\*="Editor"\]'\)/,
+    'editor-owned images must never satisfy Douyin head-image verification',
+  )
+  assert.match(
+    platform,
+    /DOUYIN_BODY_IMAGE_NOT_ALLOWED[\s\S]+function hasEditorBodyImage/,
+    'the final Douyin preflight must stop if an upload was accidentally routed into the article body',
   )
 })
 

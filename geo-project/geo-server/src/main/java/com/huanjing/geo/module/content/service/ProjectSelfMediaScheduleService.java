@@ -87,7 +87,6 @@ public class ProjectSelfMediaScheduleService {
     private static final int GENERATION_BATCH_LIMIT = 30;
     private static final int AUTO_COMPENSATION_MAX_ATTEMPTS = 3;
     private static final int LOCAL_AGENT_ONLINE_WINDOW_MINUTES = 10;
-    private static final int LOCAL_AGENT_ASSUMED_CAPACITY = 2;
     private static final String ERROR_CAPACITY_INSUFFICIENT = "SELF_MEDIA_SCHEDULE_CAPACITY_INSUFFICIENT";
     private static final String ERROR_COMPRESS_NOT_SUPPORTED = "SELF_MEDIA_SCHEDULE_COMPRESS_NOT_SUPPORTED";
     private static final String ERROR_DECISION_REASON_REQUIRED = "SELF_MEDIA_SCHEDULE_DECISION_REASON_REQUIRED";
@@ -2728,19 +2727,21 @@ public class ProjectSelfMediaScheduleService {
         if (schedule.getNextAttemptAt() != null && schedule.getNextAttemptAt().isAfter(now)) {
             return new ClaimDiagnostic("NOT_DUE", "还没到处理时间，预计 " + schedule.getNextAttemptAt());
         }
-        if (schedule.getCreatedBy() == null || schedule.getCreatedBy() <= 0) {
-            return new ClaimDiagnostic("OPERATOR_MISSING", "未找到负责运营，请先绑定运营人员");
+        Long brandId = schedule.getBrandId();
+        if (brandId == null || brandId <= 0) {
+            return new ClaimDiagnostic("BRAND_MISSING", "发布任务缺少品牌归属，请重新生成排期");
         }
-        long onlineSessions = localAgentSessionMapper.countOnlineSessionsByOperator(
-                schedule.getCreatedBy(),
+        LocalDateTime onlineSince = now.minusMinutes(LOCAL_AGENT_ONLINE_WINDOW_MINUTES);
+        long onlineSessions = localAgentSessionMapper.countOnlineSessionsByBrand(
+                brandId,
                 now,
-                now.minusMinutes(LOCAL_AGENT_ONLINE_WINDOW_MINUTES)
+                onlineSince
         );
         if (onlineSessions <= 0) {
-            return new ClaimDiagnostic("LOCAL_AGENT_OFFLINE", "负责运营的本地助手未在线，请先打开本地助手");
+            return new ClaimDiagnostic("LOCAL_AGENT_OFFLINE", "该品牌绑定的本地助手未在线，请在绑定环境所在电脑启动助手");
         }
-        long runningLoad = selfMediaPublishScheduleMapper.countLockedByOperatorAndStatuses(
-                schedule.getCreatedBy(),
+        long runningLoad = selfMediaPublishScheduleMapper.countLockedByBrandAndStatuses(
+                brandId,
                 List.of(
                         SelfMediaPublishScheduleConstants.STATUS_FILLING,
                         SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
@@ -2749,8 +2750,15 @@ public class ProjectSelfMediaScheduleService {
                 ),
                 now
         );
-        long estimatedCapacity = onlineSessions * LOCAL_AGENT_ASSUMED_CAPACITY;
-        if (runningLoad >= estimatedCapacity) {
+        long actualCapacity = selfMediaPublishScheduleMapper.sumOnlineLocalAgentCapacityByBrand(
+                brandId,
+                now,
+                onlineSince
+        );
+        if (actualCapacity <= 0) {
+            return new ClaimDiagnostic("LOCAL_AGENT_CAPACITY_UNAVAILABLE", "该品牌本地助手尚未上报可用容量，请刷新助手状态");
+        }
+        if (runningLoad >= actualCapacity) {
             return new ClaimDiagnostic("LOCAL_AGENT_CAPACITY_FULL", "本地助手正在处理其他任务，请稍后再试或增加在线助手");
         }
         return new ClaimDiagnostic("CLAIMABLE", "已到处理时间，等待本地助手开始处理");

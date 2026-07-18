@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -502,10 +503,9 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
-    void failRetryableScheduleVerificationErrorPassesNextAttemptToScheduleService() {
+    void failPostSubmissionVerificationErrorDoesNotScheduleFreshPublishRetry() {
         stubTask("filling");
         when(taskMapper.markSemiAutoFailed(eq(30L), eq("WORKS_LIST_VERIFY_TIMEOUT"), any(), any())).thenReturn(1);
-        when(articleDraftMapper.update(any(), any())).thenReturn(1);
         Map<String, Object> request = Map.of(
                 "error", Map.of(
                         "code", "WORKS_LIST_VERIFY_TIMEOUT",
@@ -520,8 +520,10 @@ class ExtensionTaskStateServiceTest {
                 eq("WORKS_LIST_VERIFY_TIMEOUT"),
                 eq("作品列表未匹配到定时文章"),
                 any(String.class),
-                any(LocalDateTime.class)
+                isNull()
         );
+        verifyNoInteractions(articleDraftMapper);
+        verifyNoInteractions(companyChannelQuotaService);
     }
 
     @Test
@@ -548,10 +550,9 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
-    void failZhihuPublishNotSubmittedPassesNextAttemptToScheduleService() {
+    void failZhihuPublishNotSubmittedOnlyRequestsResultCheckWithoutRestoringArticle() {
         stubTask("filling");
         when(taskMapper.markSemiAutoFailed(eq(30L), eq("ZHIHU_PUBLISH_NOT_SUBMITTED"), any(), any())).thenReturn(1);
-        when(articleDraftMapper.update(any(), any())).thenReturn(1);
         Map<String, Object> request = Map.of(
                 "error", Map.of(
                         "code", "ZHIHU_PUBLISH_NOT_SUBMITTED",
@@ -566,8 +567,10 @@ class ExtensionTaskStateServiceTest {
                 eq("ZHIHU_PUBLISH_NOT_SUBMITTED"),
                 eq("知乎发布后未检测到完成状态"),
                 any(String.class),
-                any(LocalDateTime.class)
+                isNull()
         );
+        verifyNoInteractions(articleDraftMapper);
+        verifyNoInteractions(companyChannelQuotaService);
     }
 
     @Test

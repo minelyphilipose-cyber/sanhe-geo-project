@@ -48,10 +48,38 @@ class WechatFuncInfoValidatorTest {
         assertThat(validator.missingRequired("not-json")).containsExactlyInAnyOrder(1, 13);
     }
 
+    @Test
+    void menuPermissionRejectsScopeThatStillNeedsConfirmation() {
+        WechatFuncInfoValidator validator = menuValidator();
+        String funcInfo = """
+                [{"funcscope_category":{"id":15},"confirm_info":{"need_confirm":1,"already_confirm":0,"can_confirm":1}}]
+                """;
+
+        assertThat(validator.hasMenuPermission(funcInfo)).isFalse();
+        assertThat(validator.missingMenuRequired(funcInfo)).containsExactly(15);
+    }
+
+    @Test
+    void menuPermissionAcceptsConfirmedScope() {
+        WechatFuncInfoValidator validator = menuValidator();
+        String funcInfo = """
+                [{"funcscope_category":{"id":15},"confirm_info":{"need_confirm":1,"already_confirm":1,"can_confirm":1}}]
+                """;
+
+        assertThat(validator.hasMenuPermission(funcInfo)).isTrue();
+        assertThat(validator.missingMenuRequired(funcInfo)).isEmpty();
+    }
+
     private WechatFuncInfoValidator validator(boolean strictMode, List<Integer> requiredScopes) {
         WechatOpenPlatformProperties properties = new WechatOpenPlatformProperties();
         properties.setFuncScopeStrictMode(strictMode);
         properties.setRequiredDraftFuncScopes(requiredScopes);
+        return new WechatFuncInfoValidator(new ObjectMapper(), properties);
+    }
+
+    private WechatFuncInfoValidator menuValidator() {
+        WechatOpenPlatformProperties properties = new WechatOpenPlatformProperties();
+        properties.setRequiredMenuFuncScopes(List.of(15));
         return new WechatFuncInfoValidator(new ObjectMapper(), properties);
     }
 }

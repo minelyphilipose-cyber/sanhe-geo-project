@@ -18,6 +18,7 @@ import com.huanjing.geo.module.partner.service.PartnerFeatureAccessGuard;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,6 +27,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDateTime;
 
 @Tag(name = "SelfMediaPublishSchedule")
 @RestController
@@ -91,10 +94,12 @@ public class SelfMediaPublishScheduleController {
                                                              @RequestParam(required = false) String articleTitle,
                                                              @RequestParam(required = false) Long selfMediaAccountId,
                                                              @RequestParam(required = false) String selfMediaAccountName,
+                                                             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime plannedPublishStart,
+                                                             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime plannedPublishEnd,
                                                              @RequestParam(defaultValue = "1") Long current,
                                                              @RequestParam(defaultValue = "20") Long size) {
         ensureInternalSelfMediaScheduleAccess();
-        return R.ok(scheduleService.pageSchedules(brandId, brandName, platform, status, failureCode, articleId, articleTitle, selfMediaAccountId, selfMediaAccountName, current, size));
+        return R.ok(scheduleService.pageSchedules(brandId, brandName, platform, status, failureCode, articleId, articleTitle, selfMediaAccountId, selfMediaAccountName, plannedPublishStart, plannedPublishEnd, current, size));
     }
 
     @GetMapping("/self-media-automation/overview")

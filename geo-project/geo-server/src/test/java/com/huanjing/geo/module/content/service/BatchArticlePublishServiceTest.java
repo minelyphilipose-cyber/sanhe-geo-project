@@ -32,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
@@ -39,12 +40,14 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -65,6 +68,7 @@ class BatchArticlePublishServiceTest {
     private ContentDistributionService contentDistributionService;
     private ForumBoardRoutingService forumBoardRoutingService;
     private StringRedisTemplate redisTemplate;
+    private ValueOperations<String, String> valueOperations;
     private BatchArticlePublishService service;
     private final List<BatchArticlePublishJob> insertedJobs = new ArrayList<>();
     private final List<BatchArticlePublishItem> insertedItems = new ArrayList<>();
@@ -91,6 +95,9 @@ class BatchArticlePublishServiceTest {
         contentDistributionService = mock(ContentDistributionService.class);
         forumBoardRoutingService = mock(ForumBoardRoutingService.class);
         redisTemplate = mock(StringRedisTemplate.class);
+        valueOperations = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(any(), any(), anyLong(), any())).thenReturn(true);
         service = new BatchArticlePublishService(
                 jobMapper,
                 itemMapper,
@@ -105,7 +112,16 @@ class BatchArticlePublishServiceTest {
                 forumBoardRoutingService,
                 redisTemplate
         );
+        AtomicBoolean executorBusy = new AtomicBoolean(false);
         ReflectionTestUtils.setField(service, "batchPublishExecutor", (Executor) command -> {
+            if (!executorBusy.compareAndSet(false, true)) {
+                return;
+            }
+            try {
+                command.run();
+            } finally {
+                executorBusy.set(false);
+            }
         });
 
         SysUser operator = new SysUser();
@@ -302,7 +318,7 @@ class BatchArticlePublishServiceTest {
     void executeDueItems_skipsWhenSamePlatformAlreadyRunning() {
         BatchArticlePublishItem item = publishItem(1000L, "industry_site", "pending");
         when(itemMapper.selectList(any())).thenReturn(List.of(item));
-        when(itemMapper.selectCount(any())).thenReturn(1L);
+        when(valueOperations.setIfAbsent(any(), any(), anyLong(), any())).thenReturn(false);
 
         service.executeDueItems(20);
 
@@ -311,10 +327,10 @@ class BatchArticlePublishServiceTest {
     }
 
     @Test
-    void executeDueItems_revertsLockWhenAnotherPlatformItemStartsAfterLock() {
+    void executeDueItems_marksDuplicateTargetSuccessfulAfterLock() {
         BatchArticlePublishItem item = publishItem(1000L, "industry_site", "pending");
         when(itemMapper.selectList(any())).thenReturn(List.of(item));
-        when(itemMapper.selectCount(any())).thenReturn(0L, 0L, 1L);
+        when(itemMapper.selectCount(any())).thenReturn(1L);
         when(itemMapper.update(eq(null), any())).thenReturn(1);
 
         service.executeDueItems(20);
@@ -322,7 +338,7 @@ class BatchArticlePublishServiceTest {
         ArgumentCaptor<LambdaUpdateWrapper<BatchArticlePublishItem>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
         verify(itemMapper, org.mockito.Mockito.times(2)).update(eq(null), captor.capture());
         assertTrue(captor.getAllValues().get(0).getParamNameValuePairs().values().contains("running"));
-        assertTrue(captor.getAllValues().get(1).getParamNameValuePairs().values().contains("pending"));
+        assertTrue(captor.getAllValues().get(1).getParamNameValuePairs().values().contains("success"));
         verify(contentDistributionService, never()).distributeToAsOperator(any(), any(), any());
     }
 

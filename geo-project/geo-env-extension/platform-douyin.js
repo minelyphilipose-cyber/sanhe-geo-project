@@ -23,6 +23,7 @@
     if (explicit) return explicit
     if (normalizePlatform(platform) !== 'douyin' && !text.includes('抖音')) return ''
     if (text.includes('文章表单')) return 'DOUYIN_ARTICLE_FORM_NOT_READY'
+    if (text.includes('正文不允许包含图片')) return 'DOUYIN_BODY_IMAGE_NOT_ALLOWED'
     if (text.includes('头图上传')) return 'DOUYIN_HEAD_IMAGE_UPLOAD_FAILED'
     if (text.includes('封面上传')) return 'DOUYIN_COVER_UPLOAD_TIMEOUT'
     if (text.includes('封面图片')) return 'DOUYIN_COVER_REQUIRED'
@@ -376,6 +377,9 @@
     const editorText = getArticleEditorText(deps)
     if (editorText.length < 10 || editorText.includes('请输入正文')) {
       throw new Error(`DOUYIN_PREFLIGHT_CONTENT_MISSING：抖音发布前正文校验失败；contentLength=${editorText.length}；${describeState(deps)}`)
+    }
+    if (hasEditorBodyImage()) {
+      throw new Error(`DOUYIN_BODY_IMAGE_NOT_ALLOWED：抖音文章正文不允许包含图片，图片只能上传至文章头图/封面区域；${describeState(deps)}`)
     }
     if (!hasSectionImage('文章头图', deps) && !hasSectionImage('封面设置', deps)) {
       throw new Error(`DOUYIN_PREFLIGHT_IMAGE_MISSING：抖音发布前头图/封面校验失败；${describeState(deps)}`)
@@ -748,14 +752,22 @@
 
   function hasSectionImage(label, deps = {}) {
     if (hasUploadResultInCompactBlock(label, deps)) return true
-    if (hasUploadResultNearLabel(label, deps)) return true
     const section = findSection(label, deps)
     if (!section) return false
     const text = bodyText({ ...deps, root: section })
-    const hasImage = Array.from(section.querySelectorAll('img')).some(isVisible)
+    const hasImage = Array.from(section.querySelectorAll('img'))
+      .filter((image) => !image.closest('[contenteditable="true"], .ProseMirror, [class*="editor"], [class*="Editor"]'))
+      .some(isVisible)
     return hasImage
       || hasBackgroundImage(section)
       || /点击替换图片|编辑封面|编辑头图|重新上传|更换图片|已上传/.test(text)
+  }
+
+  function hasEditorBodyImage() {
+    const editor = document.querySelector(
+      '.ProseMirror[contenteditable="true"], [data-slate-editor="true"][contenteditable="true"], [contenteditable="true"][role="textbox"]',
+    )
+    return Boolean(editor?.querySelector('img, picture, [style*="background-image"]'))
   }
 
   function hasUploadResultInCompactBlock(label, deps = {}) {
@@ -772,44 +784,11 @@
       })
   }
 
-  function hasUploadResultNearLabel(label, deps = {}) {
-    const normalizeText = deps.normalizeText || defaultNormalizeText
-    const labels = Array.from(document.querySelectorAll('label, div, span, p'))
-      .filter(isVisible)
-      .filter((el) => isSectionLabel(el, label, normalizeText))
-      .filter((el) => {
-        const rect = el.getBoundingClientRect()
-        return rect.width <= 180 && rect.height <= 80
-      })
-    const indicators = Array.from(document.querySelectorAll('img, button, a, [role="button"], div, span'))
-      .filter(isVisible)
-      .map((el) => ({
-        el,
-        rect: el.getBoundingClientRect(),
-        text: normalizeText(el.textContent || ''),
-        hasBackgroundImage: hasBackgroundImage(el),
-      }))
-      .filter((item) => item.el.tagName === 'IMG'
-        || item.hasBackgroundImage
-        || /点击替换图片|编辑封面|编辑头图|重新上传|更换图片|已上传/.test(item.text))
-
-    return labels.some((labelEl) => {
-      const labelRect = labelEl.getBoundingClientRect()
-      const labelCenterY = labelRect.top + labelRect.height / 2
-      return indicators.some((item) => {
-        const centerY = item.rect.top + item.rect.height / 2
-        const alignedVertically = Math.abs(centerY - labelCenterY) <= 80
-        const onRightSide = item.rect.left >= labelRect.right - 10 && item.rect.left - labelRect.right <= 900
-        const normalSize = item.rect.width <= 260 && item.rect.height <= 160
-        return alignedVertically && onRightSide && normalSize
-      })
-    })
-  }
-
   function hasBackgroundImage(root) {
     const nodes = root === document ? Array.from(document.querySelectorAll('*')) : [root, ...Array.from(root.querySelectorAll?.('*') || [])]
     return nodes.some((el) => {
       if (!isVisible(el)) return false
+      if (el.closest?.('[contenteditable="true"], .ProseMirror, [class*="editor"], [class*="Editor"]')) return false
       const backgroundImage = getComputedStyle(el).backgroundImage || ''
       return /^url\(["']?https?:\/\//i.test(backgroundImage)
     })

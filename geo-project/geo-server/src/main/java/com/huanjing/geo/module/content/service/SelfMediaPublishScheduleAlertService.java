@@ -56,6 +56,7 @@ public class SelfMediaPublishScheduleAlertService {
             SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
             SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT,
             SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED,
+            SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING,
             SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN,
             SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
             SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED,
@@ -161,10 +162,11 @@ public class SelfMediaPublishScheduleAlertService {
             return List.of();
         }
         List<AlertDraft> alerts = new ArrayList<>();
-        if (SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(status)
+        if ((SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING.equals(status))
                 && !StringUtils.hasText(row.getPlatformPublishedUrl())) {
             alerts.add(alert(TYPE_PUBLISH_LINK_MISSING, SEVERITY_WARNING,
-                    "排期已确认发布但平台发布链接未回写"));
+                    "平台已确认发布但发布链接尚未回写"));
             return alerts;
         }
         if (SelfMediaPublishScheduleConstants.STATUS_PENDING.equals(status)
@@ -274,6 +276,7 @@ public class SelfMediaPublishScheduleAlertService {
                 && List.of(
                 SelfMediaPublishScheduleConstants.STATUS_PENDING,
                 SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+                SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING,
                 SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
         ).contains(status);
     }

@@ -199,7 +199,7 @@ function classifyZhihuFailureCode(message) {
   const text = String(message || '')
   if (text.includes('知乎平台适配器未加载')) return 'ZHIHU_ADAPTER_NOT_LOADED'
   if (text.includes('草稿加载中') || text.includes('草稿加载未完成') || text.includes('发布被草稿加载阻塞')) return 'ZHIHU_DRAFT_LOADING'
-  if (text.includes('发布后未检测到完成状态')) return 'ZHIHU_PUBLISH_NOT_SUBMITTED'
+  if (text.includes('发布后未检测到完成状态')) return 'ZHIHU_PUBLISH_NOT_CONFIRMED'
   if (text.includes('封面填充后未检测到封面图片')) return 'ZHIHU_COVER_UPLOAD_NOT_CONFIRMED'
   if (text.includes('封面上传入口未找到')) return 'ZHIHU_COVER_UPLOAD_ENTRY_NOT_FOUND'
   if (text.includes('封面图片上传完成超时')) return 'ZHIHU_COVER_UPLOAD_TIMEOUT'
@@ -264,7 +264,11 @@ async function fillPayload(payload) {
   const contentText = [
     normalizedContent.removedTitle ? '已去除正文重复标题' : '',
     coverImageCleanup.removed ? '已去除正文重复头图/封面图' : '',
-    imageCleanup.removed ? `已去除${imageCleanup.count}张平台不可访问正文图片` : '',
+    imageCleanup.removed
+      ? imageCleanup.reason === 'douyin_text_only'
+        ? `已按抖音文章规则去除${imageCleanup.count}张正文图片`
+        : `已去除${imageCleanup.count}张平台不可访问正文图片`
+      : '',
   ].filter(Boolean).join('，')
   const optionText = publishOptions.message ? `${publishOptions.message}，` : ''
   const draftText = draftState.message ? `${draftState.message}，` : ''
@@ -295,6 +299,16 @@ function updateActiveFillStage(stage, extra = {}) {
     ...extra,
     stage,
     updatedAt: new Date().toISOString(),
+  }
+  const context = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT
+  if (context?.taskId && context?.environmentKey) {
+    void safeRuntimeRequest({
+      type: 'GEO_ENV_TASK_PROGRESS',
+      taskId: context.taskId,
+      environmentKey: context.environmentKey,
+      stage,
+      updatedAt: context.updatedAt,
+    })
   }
 }
 
@@ -327,6 +341,7 @@ var ZHIHU_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_ZHIHU_PLATFORM__?.createPub
   hasCoverImage: hasZhihuCoverImage,
   publishArticle: publishZhihuArticle,
   describeSettings: describeZhihuPublishSettings,
+  updateStage: updateActiveFillStage,
 }) || {
   platform: 'zhihu',
   fillPublishOptions: async () => {
@@ -386,17 +401,21 @@ var DOUYIN_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_DOUYIN_PLATFORM__?.createP
 
 async function fillToutiaoPublishOptions(payload, fillProfile) {
   const options = resolveToutiaoPublishOptions(payload)
+  options.taskId = payload.taskId || payload.scheduleId || null
   const actions = []
   let scheduled = false
   if (options.coverMode || options.coverImageUrl) {
+    updateActiveFillStage('filling_cover')
     const cover = await fillToutiaoCover(options, fillProfile.platform)
     if (cover.filled) actions.push(cover.message)
   }
   if (options.locationName) {
+    updateActiveFillStage('filling_location')
     const locationResult = await fillToutiaoLocation(options.locationName, fillProfile.platform)
     if (locationResult.filled) actions.push(locationResult.message)
   }
   if (options.scheduledAt) {
+    updateActiveFillStage('configuring_schedule')
     const scheduleResult = await fillToutiaoScheduledPublish(options.scheduledAt, fillProfile.platform, {
       title: payload.title || payload.articleTitle || '',
       locationName: options.locationName,
@@ -567,6 +586,7 @@ function zhihuDomAdapter() {
     readIdentity: readZhihuIdentity,
     describeLastTrustedClick,
     describeSettings: describeZhihuPublishSettings,
+    updateStage: updateActiveFillStage,
   })
   return globalThis.__GEO_ZHIHU_DOM_ADAPTER__
 }
@@ -688,9 +708,9 @@ async function fillToutiaoCover(options, platform) {
 
   const optionText = coverMode === 'none' ? '无封面' : coverMode === 'triple' ? '三图' : '单图'
   await scrollToToutiaoSection('展示封面')
-  await clickToutiaoOptionNearLabel('展示封面', optionText, platform)
-  if (coverMode === 'single') {
-    await ensureToutiaoCoverModeSelected('单图', platform)
+  const coverModeSelected = await ensureToutiaoCoverModeSelected(optionText, platform)
+  if (!coverModeSelected) {
+    throw new Error(`头条展示封面选项未找到：${optionText}；${describeToutiaoCoverArea(findVisibleTextElement('展示封面'))}`)
   }
 
   if (coverMode === 'none') {
@@ -700,8 +720,8 @@ async function fillToutiaoCover(options, platform) {
     return { filled: true, message: `已选择${optionText}` }
   }
 
-  const alreadyUploaded = hasToutiaoCoverThumbnail()
-  if (!alreadyUploaded || options.coverImageUrl) {
+  const alreadyUploadedForTask = hasToutiaoCoverThumbnail() && isToutiaoCoverRecordedForTask(options)
+  if (!alreadyUploadedForTask) {
     await openToutiaoCoverDrawer(platform)
     await uploadToutiaoCoverImage(options.coverImageUrl, platform)
     await confirmToutiaoCoverDrawer(platform)
@@ -710,6 +730,7 @@ async function fillToutiaoCover(options, platform) {
       10000,
       `等待头条封面回填超时；${describeToutiaoCoverArea(findVisibleTextElement('展示封面'))}; ${describeToutiaoUploadState(null)}`,
     )
+    recordToutiaoCoverForTask(options)
   }
   return { filled: true, message: '已上传封面' }
 }
@@ -1541,6 +1562,7 @@ async function confirmToutiaoPreviewPublishAfterSchedule(value, platform) {
       await delay(500)
       continue
     }
+    updateActiveFillStage('submitting_publish')
     await clickTrustedActionOnce(current, { platform })
     const completed = await waitForCondition(
       () => isToutiaoPreviewPublishCompleted(),
@@ -1553,6 +1575,7 @@ async function confirmToutiaoPreviewPublishAfterSchedule(value, platform) {
 }
 
 async function verifyToutiaoScheduledWorkInList(value, context = {}) {
+  updateActiveFillStage('verifying_publish_result')
   const entered = await waitForCondition(
     () => isToutiaoWorksManagePage(),
     18000,
@@ -2215,6 +2238,31 @@ function hasToutiaoCoverThumbnail() {
     .some((img) => isVisibleElement(img) && img.getBoundingClientRect().width >= 40 && img.getBoundingClientRect().height >= 40)
 }
 
+function toutiaoCoverTaskStorageKey(options = {}) {
+  const taskId = String(options.taskId || '').trim()
+  return taskId ? `geo:toutiao:cover:${taskId}` : ''
+}
+
+function isToutiaoCoverRecordedForTask(options = {}) {
+  const key = toutiaoCoverTaskStorageKey(options)
+  if (!key || !options.coverImageUrl) return false
+  try {
+    return sessionStorage.getItem(key) === String(options.coverImageUrl)
+  } catch {
+    return false
+  }
+}
+
+function recordToutiaoCoverForTask(options = {}) {
+  const key = toutiaoCoverTaskStorageKey(options)
+  if (!key || !options.coverImageUrl) return
+  try {
+    sessionStorage.setItem(key, String(options.coverImageUrl))
+  } catch {
+    // The upload is already confirmed in the DOM; storage is only a retry optimization.
+  }
+}
+
 async function openToutiaoCoverDrawer(platform) {
   if (findToutiaoCoverDrawerFileInput()) return
   const label = findVisibleTextElement('展示封面')
@@ -2260,17 +2308,44 @@ async function ensureToutiaoCoverModeSelected(optionText, platform) {
   if (!label) return false
   const selected = findToutiaoSelectedCoverMode(label)
   if (selected === optionText) return true
-  const option = findTextElementNear(label, optionText, 420)
+  const option = findExactToutiaoCoverModeControl(optionText, label)
   if (!option) return false
-  await clickToutiaoRadioText(option, platform, optionText)
-  await delay(300)
+  const clickTarget = option.closest?.('label') || option
+  clickTarget.scrollIntoView?.({ block: 'center', inline: 'nearest' })
+  await delay(100)
+  firePointerClick(clickTarget)
+  clickTarget.click?.()
+  if (requiresTrustedClick(platform)) {
+    await requestTrustedClick(clickTarget, { platform })
+  }
+  const matched = await waitForCondition(
+    () => findToutiaoSelectedCoverMode(label) === optionText,
+    2000,
+    `头条封面模式未保持目标选项：${optionText}；${describeToutiaoCoverArea(label)}`,
+  ).catch(() => false)
+  if (!matched) {
+    throw new Error(`头条封面模式未保持目标选项：${optionText}；${describeToutiaoCoverArea(label)}`)
+  }
   return true
+}
+
+function findExactToutiaoCoverModeControl(optionText, label) {
+  const expectedValue = optionText === '单图' ? '2' : optionText === '三图' ? '3' : optionText === '无封面' ? '1' : ''
+  const group = label?.closest?.('.pgc-edit-cell')?.querySelector?.('.article-cover-radio-group')
+    || document.querySelector('.article-cover-radio-group')
+  if (!group) return null
+  if (expectedValue) {
+    const byValue = group.querySelector(`input[type="radio"][value="${expectedValue}"]`)
+    if (byValue) return byValue
+  }
+  return Array.from(group.querySelectorAll('label.byte-radio, label, [role="radio"]'))
+    .find((item) => normalizeText(item.textContent || '') === optionText) || null
 }
 
 function findToutiaoSelectedCoverMode(label) {
   const modes = ['单图', '三图', '无封面']
   for (const mode of modes) {
-    const option = findTextElementNear(label, mode, 420)
+    const option = findExactToutiaoCoverModeControl(mode, label) || findTextElementNear(label, mode, 420)
     const radio = option ? findToutiaoRadioControlNear(option) : null
     if (radio?.checked || radio?.getAttribute?.('aria-checked') === 'true'
         || String(radio?.className || '').includes('checked')) {
@@ -2351,7 +2426,9 @@ async function uploadToutiaoCoverImage(imageUrl, platform) {
   } else {
     await delay(200)
   }
-  const localUpload = await setFileInputFromLocalHelper(imageUrl, platform).catch((error) => ({ ok: false, error }))
+  const localUpload = await setFileInputFromLocalHelper(imageUrl, platform, {
+    uploadTarget: 'toutiao_article_cover',
+  }).catch((error) => ({ ok: false, error }))
   if (localUpload?.ok) {
     await waitForCondition(
       () => isToutiaoCoverDrawerImageUploaded(),
@@ -2855,20 +2932,25 @@ function removeCoverImageFromContent(html, coverImageUrl) {
 
 function removeUnsupportedContentImages(html, fillProfile) {
   const platform = normalizePlatform(fillProfile?.platform)
-  if (!html || !['toutiao', 'baijiahao'].includes(platform)) {
-    return { html, removed: false, count: 0 }
+  if (!html || !['toutiao', 'baijiahao', 'douyin'].includes(platform)) {
+    return { html, removed: false, count: 0, reason: '' }
   }
   const template = document.createElement('template')
   template.innerHTML = html
   let count = 0
-  const images = Array.from(template.content.querySelectorAll('img[src], img[data-src]'))
+  const images = Array.from(template.content.querySelectorAll('img'))
   for (const image of images) {
     const src = image.getAttribute('src') || image.getAttribute('data-src') || ''
-    if (!isUnsupportedPlatformImageUrl(src)) continue
+    if (platform !== 'douyin' && !isUnsupportedPlatformImageUrl(src)) continue
     removableImageBlock(image).remove()
     count += 1
   }
-  return { html: template.innerHTML, removed: count > 0, count }
+  return {
+    html: template.innerHTML,
+    removed: count > 0,
+    count,
+    reason: platform === 'douyin' ? 'douyin_text_only' : 'unsupported_url',
+  }
 }
 
 function isUnsupportedPlatformImageUrl(value) {
@@ -3384,6 +3466,8 @@ function findBaijiahaoAccountInfoRoot() {
 
 function collectBaijiahaoExactAccountName(root, accountNames) {
   const selectors = [
+    '#personCenterBaseInfo [class*="userInfoBox"] [class*="userName"]',
+    '#personCenterBaseInfo [class*="userName"]',
     '[class*="userInfoBox"] [class*="userName"]',
     '[class*="UserInfoBox"] [class*="UserName"]',
     '[class*="user-info"] [class*="user-name"]',

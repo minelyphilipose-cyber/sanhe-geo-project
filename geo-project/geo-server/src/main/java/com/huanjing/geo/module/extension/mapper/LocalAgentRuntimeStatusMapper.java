@@ -46,6 +46,16 @@ public interface LocalAgentRuntimeStatusMapper extends BaseMapper<LocalAgentRunt
     @Select("""
             SELECT *
             FROM local_agent_runtime_status
+            WHERE session_id = #{sessionId}
+            ORDER BY last_seen_at DESC, updated_at DESC
+            LIMIT 1
+            FOR UPDATE
+            """)
+    LocalAgentRuntimeStatus selectLatestBySessionIdForUpdate(@Param("sessionId") Long sessionId);
+
+    @Select("""
+            SELECT *
+            FROM local_agent_runtime_status
             WHERE operator_id = #{operatorId}
             ORDER BY last_seen_at DESC, updated_at DESC
             LIMIT #{limit}

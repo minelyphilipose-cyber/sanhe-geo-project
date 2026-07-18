@@ -18,7 +18,7 @@ public class SelfMediaRuntimeProperties {
 
     @Data
     public static class Gate {
-        private String defaultMode = "observe_only";
+        private String defaultMode = "block_non_destructive";
         private int extensionFreshnessMinutes = 10;
         private int helperFreshnessMinutes = 2;
         private int retryAfterSeconds = 30;

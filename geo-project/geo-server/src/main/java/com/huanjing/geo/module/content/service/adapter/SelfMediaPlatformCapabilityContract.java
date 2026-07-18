@@ -13,8 +13,25 @@ public record SelfMediaPlatformCapabilityContract(
         boolean requiresCoverUpload,
         boolean supportsLocation,
         boolean supportsOneClickFormat,
-        boolean supportsPublishCheck
+        boolean supportsPublishCheck,
+        boolean requiresPublishedUrl,
+        int publishCheckDelayMinutes,
+        int publishCheckMaxAttempts
 ) {
+    public SelfMediaPlatformCapabilityContract(String platform,
+                                               String displayName,
+                                               SelfMediaPlatformPublishChannel publishChannel,
+                                               SelfMediaPlatformScheduleMode scheduleMode,
+                                               SelfMediaPlatformScheduleRules scheduleRules,
+                                               boolean requiresCoverUpload,
+                                               boolean supportsLocation,
+                                               boolean supportsOneClickFormat,
+                                               boolean supportsPublishCheck) {
+        this(platform, displayName, publishChannel, scheduleMode, scheduleRules,
+                requiresCoverUpload, supportsLocation, supportsOneClickFormat, supportsPublishCheck,
+                true, 60, Math.max(1, scheduleRules == null ? 1 : scheduleRules.maxAttempts()));
+    }
+
     public boolean supportsPlatformSchedule() {
         return SelfMediaPlatformScheduleMode.PLATFORM_NATIVE.equals(scheduleMode);
     }
@@ -38,7 +55,10 @@ public record SelfMediaPlatformCapabilityContract(
                 false,
                 false,
                 false,
-                false
+                false,
+                true,
+                60,
+                6
         );
     }
 }

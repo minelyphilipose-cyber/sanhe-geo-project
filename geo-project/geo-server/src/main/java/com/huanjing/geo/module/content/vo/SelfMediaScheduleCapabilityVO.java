@@ -29,6 +29,9 @@ public class SelfMediaScheduleCapabilityVO {
     private Boolean contractSupportsLocation;
     private Boolean contractSupportsOneClickFormat;
     private Boolean contractSupportsPublishCheck;
+    private Boolean contractRequiresPublishedUrl;
+    private Integer contractPublishCheckDelayMinutes;
+    private Integer contractPublishCheckMaxAttempts;
     private Integer fillLeadMinutes;
     private Integer minRemainingMinutes;
     private Integer maxAttempts;
@@ -75,5 +78,8 @@ public class SelfMediaScheduleCapabilityVO {
         setContractSupportsLocation(contract.supportsLocation());
         setContractSupportsOneClickFormat(contract.supportsOneClickFormat());
         setContractSupportsPublishCheck(contract.supportsPublishCheck());
+        setContractRequiresPublishedUrl(contract.requiresPublishedUrl());
+        setContractPublishCheckDelayMinutes(contract.publishCheckDelayMinutes());
+        setContractPublishCheckMaxAttempts(contract.publishCheckMaxAttempts());
     }
 }

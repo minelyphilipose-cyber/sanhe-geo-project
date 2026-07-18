@@ -18,8 +18,11 @@ class SelfMediaPublishScheduleConstantsTest {
 
     @Test
     void activeStatusesStayAlignedWithMigrationGeneratedColumns() throws Exception {
-        String migration = Files.readString(Path.of(
+        String foundationMigration = Files.readString(Path.of(
                 "src/main/resources/db/migration/V203__self_media_publish_schedule.sql"
+        ));
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V311__self_media_published_url_pending_active_status.sql"
         ));
 
         List<Set<String>> generatedColumnStatusSets = extractGeneratedColumnStatusSets(migration);
@@ -28,10 +31,10 @@ class SelfMediaPublishScheduleConstantsTest {
                 "migration must define active status generated columns for schedule key and task binding");
         generatedColumnStatusSets.forEach(statuses ->
                 assertEquals(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES, statuses));
-        assertTrue(migration.contains("UNIQUE KEY uk_self_media_schedule_active_task (active_distribution_task_id)"),
+        assertTrue(foundationMigration.contains("UNIQUE KEY uk_self_media_schedule_active_task (active_distribution_task_id)"),
                 "migration must keep distribution_task_id uniqueness scoped to active rows");
         assertFalse(Pattern.compile("UNIQUE KEY\\s+\\w+\\s*\\(\\s*distribution_task_id\\s*\\)", Pattern.CASE_INSENSITIVE)
-                        .matcher(migration)
+                        .matcher(foundationMigration)
                         .find(),
                 "migration must not add a full-scope unique key on distribution_task_id");
     }

@@ -36,8 +36,19 @@ public final class SelfMediaPublishFailureCodes {
             "BAIJIAHAO_SCHEDULE_DIALOG_NOT_READY",
             "BAIJIAHAO_SCHEDULE_OPTION_NOT_FOUND",
             "BAIJIAHAO_PUBLISH_NOT_CONFIRMED",
+            "EXTENSION_CLAIM_TIMEOUT",
             "LOCAL_AGENT_HEARTBEAT_TIMEOUT",
             BAIJIAHAO_PLATFORM_RATE_LIMITED
+    );
+
+    private static final Set<String> POST_SUBMISSION_VERIFICATION_CODES = Set.of(
+            "DOUYIN_PUBLISH_NOT_CONFIRMED",
+            "TOUTIAO_PUBLISH_NOT_CONFIRMED",
+            "XIAOHONGSHU_PUBLISH_NOT_CONFIRMED",
+            "ZHIHU_PUBLISH_NOT_SUBMITTED",
+            "ZHIHU_PUBLISH_NOT_CONFIRMED",
+            "BAIJIAHAO_PUBLISH_NOT_CONFIRMED",
+            "WORKS_LIST_VERIFY_TIMEOUT"
     );
 
     private static final Map<String, FailureMetadata> METADATA = Map.ofEntries(
@@ -50,6 +61,9 @@ public final class SelfMediaPublishFailureCodes {
             entry("AUTH_EXPIRED", "平台授权已过期", false, "在品牌详情重新授权对应平台账号后重新创建排期。", "OPEN_BRAND_SELF_MEDIA_ACCOUNTS", "重新授权", "navigate"),
             entry("CLIENT_ERROR", "平台账号或内容异常", false, "检查平台账号授权、文章内容和平台返回信息后重新创建排期。", "OPEN_DIAGNOSTICS", "查看诊断", "diagnostics"),
             entry("WECHAT_API_UNAUTHORIZED", "微信公众号发布权限不足", false, "当前公众号缺少发布所需授权。请在品牌详情重新授权公众号，并确认授权时已勾选素材、草稿和发布相关权限。", "OPEN_BRAND_SELF_MEDIA_ACCOUNTS", "重新授权公众号", "navigate"),
+            entry("WECHAT_COVER_MATERIAL_NOT_FOUND", "微信公众号封面素材不存在", false, "打开文章详情更换封面素材后重新创建排期。", "OPEN_ARTICLE_MATERIALS", "处理封面素材", "navigate"),
+            entry("WECHAT_COVER_MATERIAL_INVALID", "微信公众号封面格式不支持", false, "更换 JPG、PNG、GIF 或 BMP 图片后重新创建排期。", "OPEN_ARTICLE_MATERIALS", "处理封面素材", "navigate"),
+            entry("WECHAT_COVER_FILE_MISSING", "微信公众号封面文件缺失", false, "重新上传封面素材后重新创建排期。", "OPEN_ARTICLE_MATERIALS", "处理封面素材", "navigate"),
             entry("PLATFORM_CAPABILITY_DISABLED", "平台排期能力未启用", false, "在排期能力管理中启用并验证该平台后重新创建排期。", "OPEN_SCHEDULE_CAPABILITY", "打开排期能力", "navigate"),
             entry("BACKEND_CLAIM_BLOCKED", "后台领取被阻塞", true, "检查本地助手领取状态和后台日志，等待自动重试。", "RETRY_NOW", "立即重试", "api"),
             entry("LOCAL_AGENT_OFFLINE", "本地助手离线", true, "确认本地助手和浏览器扩展在线后等待自动重试。", "OPEN_LOCAL_HELPER", "打开本地助手", "local"),
@@ -91,6 +105,7 @@ public final class SelfMediaPublishFailureCodes {
             entry("PUBLISH_CHECK_FAILED", "发布结果校验失败", true, "检查本地助手和平台作品管理页后重新校验。"),
             entry("PUBLISH_CHECK_PAGE_TIMEOUT", "发布结果页面回查超时", true, "检查本地助手和平台作品管理页后重新校验。", "RETRY_NOW", "重新校验", "api"),
             entry("LOCAL_HELPER_CLAIM_TIMEOUT", "本地助手处理超时", true, "确认本地助手运行状态，系统会自动释放锁；可重新校验。", "RETRY_NOW", "重新校验", "api"),
+            entry("EXTENSION_CLAIM_TIMEOUT", "浏览器扩展领取超时", true, "确认对应 AdsPower 实例中的扩展已启用，系统已释放锁并自动重试。", "RETRY_NOW", "重新校验", "api"),
             entry("MANUAL_RETRY_REQUESTED", "操作员已请求立即重试", true, "已重新放回自动处理队列，等待本地助手领取。"),
             entry("MANUAL_REQUIRED_BY_OPERATOR", "操作员已转人工处理", false, "由操作员人工处理，修复后可重新触发自动处理。"),
             entry("MANUAL_CONFIRMED_FAILED", "人工确认失败", false, "已由操作员确认失败。"),
@@ -133,6 +148,11 @@ public final class SelfMediaPublishFailureCodes {
 
     public static boolean isScheduleExecutionRetryable(String code) {
         return StringUtils.hasText(code) && SCHEDULE_EXECUTION_RETRYABLE_CODES.contains(code.trim());
+    }
+
+    public static boolean isPostSubmissionVerificationFailure(String code) {
+        return StringUtils.hasText(code)
+                && POST_SUBMISSION_VERIFICATION_CODES.contains(code.trim().toUpperCase());
     }
 
     public static Boolean retryable(String code) {
@@ -195,6 +215,15 @@ public final class SelfMediaPublishFailureCodes {
         }
         if (containsAny(text, "api unauthorized", "48001")) {
             return "WECHAT_API_UNAUTHORIZED";
+        }
+        if (containsAny(text, "cover material not found", "公众号封面素材不存在")) {
+            return "WECHAT_COVER_MATERIAL_NOT_FOUND";
+        }
+        if (containsAny(text, "cover_type_invalid", "公众号封面格式")) {
+            return "WECHAT_COVER_MATERIAL_INVALID";
+        }
+        if (containsAny(text, "cover_file_missing", "公众号封面文件")) {
+            return "WECHAT_COVER_FILE_MISSING";
         }
         if (containsAny(text, "平台能力", "能力未启用")) {
             return "PLATFORM_CAPABILITY_DISABLED";
