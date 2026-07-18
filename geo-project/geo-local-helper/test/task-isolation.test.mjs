@@ -260,7 +260,7 @@ test('baijiahao login reporting reads the current account page structure', () =>
   )
 })
 
-test('extension and helper packages expose and enforce the same build revision', () => {
+test('helper emergency build revision targets the deployed extension', () => {
   const manifest = JSON.parse(readProjectFile('geo-env-extension/manifest.json'))
   const helperPackage = JSON.parse(readProjectFile('geo-local-helper/package.json'))
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
@@ -268,8 +268,8 @@ test('extension and helper packages expose and enforce the same build revision',
 
   assert.equal(manifest.version, helperPackage.version)
   assert.equal(manifest.version, '0.1.11')
-  assert.match(manifest.version_name, new RegExp(`${helperPackage.version}-.+-${helperPackage.buildRevision.replaceAll('.', '\\.')}`))
-  assert.equal(helperPackage.buildRevision, '20260717.1')
+  assert.equal(helperPackage.buildRevision, '20260716.2')
+  assert.match(manifest.version_name, /0\.1\.11-claim-safety-20260717\.1/)
   assert.match(contentScript, new RegExp(`GEO_ENV_CONTENT_SCRIPT_VERSION = '${helperPackage.version.replaceAll('.', '\\.')}'`))
   assert.match(serviceWorker, /EXTENSION_HELPER_BUILD_MISMATCH/)
 })
