@@ -616,15 +616,15 @@ public class PollSummaryRecomputeService {
             if (isEffectiveWebSearchResult(row)) {
                 if (Boolean.TRUE.equals(row.searchTriggered())) {
                     searchConfirmedCount++;
-                }
-                if (Boolean.TRUE.equals(row.brandInSearch())) {
-                    brandSearchCount++;
-                }
-                if (Boolean.TRUE.equals(row.brandInAnswer())) {
-                    brandAnswerCount++;
-                }
-                if (Boolean.TRUE.equals(row.confirmedCitationExposure())) {
-                    confirmedCitationExposureCount++;
+                    if (Boolean.TRUE.equals(row.brandInSearch())) {
+                        brandSearchCount++;
+                    }
+                    if (Boolean.TRUE.equals(row.brandInAnswer())) {
+                        brandAnswerCount++;
+                    }
+                    if (Boolean.TRUE.equals(row.confirmedCitationExposure())) {
+                        confirmedCitationExposureCount++;
+                    }
                 }
             }
             contactMentionTotal += row.contactMentionCount() == null ? 0 : row.contactMentionCount();

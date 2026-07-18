@@ -24,6 +24,9 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -46,6 +49,7 @@ class DispatchPollAggregationServiceTest {
         PollDailyStatMapper dailyStatMapper = mock(PollDailyStatMapper.class);
         ProjectMapper projectMapper = mock(ProjectMapper.class);
         PollSummaryRecomputeService summaryService = mock(PollSummaryRecomputeService.class);
+        DispatchAlertService alertService = mock(DispatchAlertService.class);
 
         DispatchPollAggregationService service = new DispatchPollAggregationService(
                 batchMapper,
@@ -55,7 +59,7 @@ class DispatchPollAggregationServiceTest {
                 mock(StringRedisTemplate.class),
                 projectMapper,
                 summaryService,
-                mock(DispatchAlertService.class)
+                alertService
         );
 
         LocalDate batchDate = LocalDate.of(2026, 7, 16);
@@ -65,7 +69,7 @@ class DispatchPollAggregationServiceTest {
         batch.setBatchDate(batchDate);
         batch.setBatchNo(1);
         batch.setQuestionTier("A");
-        batch.setTotalQuestionCount(2);
+        batch.setTotalQuestionCount(3);
         batch.setTotalPlatformCount(1);
         batch.setTotalShardCount(1);
         batch.setStatus("ready");
@@ -76,7 +80,7 @@ class DispatchPollAggregationServiceTest {
         shard.setPlatformCode("doubao_web");
         shard.setChannelCode("doubao");
         shard.setPlatformName("豆包联网问答");
-        shard.setExpectedCount(2);
+        shard.setExpectedCount(3);
         shard.setStatus("completed");
 
         PollResult effective = completedResult(1L);
@@ -97,6 +101,15 @@ class DispatchPollAggregationServiceTest {
         unfinishedProjection.setBrandInAnswer(true);
         unfinishedProjection.setConfirmedCitationExposure(true);
 
+        PollResult searchNotTriggered = completedResult(3L);
+        searchNotTriggered.setExecutionFinalized(true);
+        searchNotTriggered.setEffectiveAttemptId(9002L);
+        searchNotTriggered.setSearchRequested(true);
+        searchNotTriggered.setSearchTriggered(false);
+        searchNotTriggered.setBrandInSearch(true);
+        searchNotTriggered.setBrandInAnswer(true);
+        searchNotTriggered.setConfirmedCitationExposure(true);
+
         Project project = new Project();
         project.setId(batch.getProjectId());
         project.setProjectName("测试项目");
@@ -104,7 +117,7 @@ class DispatchPollAggregationServiceTest {
         when(batchMapper.selectByIdForUpdate(batch.getId())).thenReturn(batch);
         when(shardMapper.countTerminalByBatchId(batch.getId())).thenReturn(1L);
         when(shardMapper.selectByBatchId(batch.getId())).thenReturn(List.of(shard));
-        when(resultMapper.selectList(any())).thenReturn(List.of(effective, unfinishedProjection));
+        when(resultMapper.selectList(any())).thenReturn(List.of(effective, unfinishedProjection, searchNotTriggered));
         when(projectMapper.selectById(batch.getProjectId())).thenReturn(project);
         when(dailyStatMapper.selectOne(any())).thenReturn(null);
         when(summaryService.recomputeSlice(batch.getProjectId(), batchDate, "A"))
@@ -123,7 +136,17 @@ class DispatchPollAggregationServiceTest {
         assertEquals(1, stat.getBrandSearchCount());
         assertEquals(1, stat.getBrandAnswerCount());
         assertEquals(1, stat.getConfirmedCitationExposureCount());
-        assertEquals(new BigDecimal("0.5000"), stat.getConfirmedCitationExposureRate());
+        assertEquals(new BigDecimal("0.3333"), stat.getConfirmedCitationExposureRate());
+        verify(alertService).createOrRefreshAlert(
+                any(),
+                eq(batch.getProjectId()),
+                contains("web_search_trigger_rate:"),
+                eq(com.huanjing.geo.module.dispatch.enums.DispatchAlertSeverity.WARN),
+                anyString(),
+                anyString(),
+                eq(0),
+                anyString()
+        );
     }
 
     @Test

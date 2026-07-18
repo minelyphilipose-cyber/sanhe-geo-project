@@ -24,7 +24,7 @@
             <p>{{ hitPlatformLabel(item) }} · 核心问题</p>
             <h2>{{ item.questionTitle }}</h2>
           </div>
-          <span class="detail-status" :class="{ building: !hasPositiveSignal(item) }">{{ rightStatus(item) }}</span>
+          <span class="detail-status" :class="detailStatusClass(item)">{{ rightStatus(item) }}</span>
         </section>
 
         <section class="result-card">
@@ -33,8 +33,8 @@
             <strong>{{ resultTitle(item) }}</strong>
           </div>
           <div class="tag-row detail-tags">
-            <span class="tag" :class="hasPositiveSignal(item) ? 'platform-tag' : 'building'">
-              {{ hasPositiveSignal(item) ? hitPlatformLabel(item) : '持续覆盖' }}
+            <span class="tag" :class="baseStatusTag(item).kind">
+              {{ baseStatusTag(item).text }}
             </span>
             <span v-for="tag in statusTags(item)" :key="tag.text" class="tag" :class="tag.kind">
               {{ tag.text }}
@@ -61,11 +61,16 @@
             class="answer-content markdown-answer"
             v-html="renderedResponse"
           />
-          <p v-else-if="hasPositiveSignal(item)" class="empty-answer">
+          <p v-else-if="hasPositiveSignal(item) || item.pollResultId" class="empty-answer">
             该条历史监测记录未保留原始回答文本，命中结论以系统分析结果为准。
           </p>
           <p v-else class="empty-answer">该核心问题相关场景内容正在持续建设与覆盖，暂无命中平台问答详情。</p>
         </section>
+
+        <QuestionSearchSources
+          :platform-label="hitPlatformLabel(item)"
+          :search-sources="item.searchSources"
+        />
 
         <section v-if="relatedContentTasks.length" class="detail-block">
           <div class="block-title">
@@ -109,8 +114,8 @@
           </div>
           <div class="meta-grid">
             <div>
-              <span>命中平台</span>
-              <strong>{{ hasPositiveSignal(item) ? hitPlatformLabel(item) : '暂无' }}</strong>
+              <span>监测平台</span>
+              <strong>{{ item.pollResultId ? hitPlatformLabel(item) : '暂无' }}</strong>
             </div>
             <div>
               <span>监测时间</span>
@@ -133,10 +138,12 @@ import { getMobileDashboardQuestionDetail, withRenewedMobileDashboardSession } f
 import DashboardCard from '@/components/mobile-dashboard/DashboardCard.vue'
 import EmptyState from '@/components/mobile-dashboard/EmptyState.vue'
 import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
+import QuestionSearchSources from '@/components/mobile-dashboard/QuestionSearchSources.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { DashboardMetric, QuestionMonitorItem } from '@/types/mobileDashboard'
 import { aiPlatformLabel, contentPlatformLabel } from '@/utils/mobileDashboardDictionaries'
 import { aiPlatformLogoSrc, fallbackAiPlatformLogo } from '@/utils/aiPlatformLogo'
+import { isSearchNotTriggered, questionMonitorStatus } from '@/utils/mobileDashboardQuestionStatus'
 
 const QUESTION_DETAIL_CACHE_KEY = 'mobile_dashboard_question_detail'
 const route = useRoute()
@@ -181,10 +188,12 @@ function hitPlatformLabel(row: QuestionMonitorItem) {
 }
 
 function rightStatus(row: QuestionMonitorItem) {
+  if (isSearchNotTriggered(row)) return '联网未触发'
   if (metricBool(row.firstRecommend)) return '首推'
   if (row.rankPosition?.available && row.rankPosition.value) return `第${row.rankPosition.value}位`
   if (metricBool(row.recommended)) return '已推荐'
   if (row.mentioned) return '已提及'
+  if (row.pollResultId) return '未提及'
   return '建设中'
 }
 
@@ -200,14 +209,20 @@ function hasBrandMentionSignal(row: QuestionMonitorItem) {
 }
 
 function resultTitle(row: QuestionMonitorItem) {
+  if (isSearchNotTriggered(row)) return '本轮回答未实际触发联网搜索'
   if (metricBool(row.firstRecommend)) return '该平台回答已首推品牌'
   if (metricBool(row.recommended)) return '该平台回答已推荐品牌'
   if (row.mentioned) return '该平台回答已提及品牌'
+  if (row.pollResultId) return '本轮联网回答暂未提及品牌'
   return '相关内容建设中'
 }
 
 function statusTags(row: QuestionMonitorItem) {
   const tags: Array<{ text: string; kind: string }> = []
+  if (isSearchNotTriggered(row)) {
+    tags.push({ text: '不计入提及率', kind: 'warning' })
+    return tags
+  }
   if (hasBrandMentionSignal(row)) {
     tags.push({ text: '已提及品牌', kind: 'success' })
   }
@@ -217,9 +232,13 @@ function statusTags(row: QuestionMonitorItem) {
 }
 
 function fullSummary(row: QuestionMonitorItem) {
+  if (isSearchNotTriggered(row)) {
+    return '该平台回答已经完成，但联网搜索工具未实际触发。本条结果不会计入提及率，请检查对应平台的联网配置或调用能力。'
+  }
   if (row.evidence?.trim()) return row.evidence.trim()
   if (metricBool(row.recommended)) return '本轮回答中出现主动推荐，推荐详情已通过样本分析校验。'
   if (row.mentioned) return `${hitPlatformLabel(row)} 回答已提及品牌。推荐与排名结果将在核心样本分析充分后展示。`
+  if (row.pollResultId) return '本轮联网回答已完成，暂未提及品牌。'
   return '相关场景内容正在持续建设与覆盖。'
 }
 
@@ -241,12 +260,33 @@ function rankText(row: QuestionMonitorItem) {
 }
 
 function analysisRows(row: QuestionMonitorItem) {
+  if (isSearchNotTriggered(row)) {
+    return [
+      { label: '联网状态', value: '未实际触发' },
+      { label: '统计口径', value: '不计入提及率' },
+      { label: '推荐判定', value: '不参与判定' },
+      { label: '处理建议', value: '检查平台联网配置' },
+    ]
+  }
   return [
-    { label: '品牌提及', value: hasBrandMentionSignal(row) ? '已提及品牌' : '建设中' },
+    { label: '品牌提及', value: hasBrandMentionSignal(row) ? '已提及品牌' : (row.pollResultId ? '未提及' : '建设中') },
     { label: '推荐判定', value: metricStatus(row.recommended, '已推荐', '未推荐') },
     { label: '首推/排名', value: rankText(row) },
     { label: '分析进度', value: judgeState(row) },
   ]
+}
+
+function detailStatusClass(row: QuestionMonitorItem) {
+  return {
+    building: questionMonitorStatus(row) === 'pending',
+    warning: isSearchNotTriggered(row),
+  }
+}
+
+function baseStatusTag(row: QuestionMonitorItem) {
+  if (isSearchNotTriggered(row)) return { text: '联网异常', kind: 'warning' }
+  if (hasPositiveSignal(row) || row.pollResultId) return { text: hitPlatformLabel(row), kind: 'platform-tag' }
+  return { text: '持续覆盖', kind: 'building' }
 }
 
 function formatDateTime(value?: string | null) {
@@ -377,6 +417,10 @@ onMounted(loadItem)
   color: #006D44;
 }
 
+.detail-status.warning {
+  color: #b45309;
+}
+
 .result-card {
   margin-top: 14px;
   padding: 12px;
@@ -454,6 +498,12 @@ onMounted(loadItem)
   border: 1px solid #d7dee8;
   background: #f8fafc;
   color: #52625C;
+}
+
+.tag.warning {
+  border-color: #f4d7a1;
+  background: #fff8e8;
+  color: #a95d00;
 }
 
 .detail-block {

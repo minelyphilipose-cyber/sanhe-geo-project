@@ -111,13 +111,28 @@ public final class MobileDashboardAggregateVO {
         private String questionTitle;
         private LocalDateTime completedAt;
         private Boolean mentioned;
+        private String monitorStatus;
         private MobileDashboardMetricVO<Boolean> recommended;
         private MobileDashboardMetricVO<Boolean> firstRecommend;
         private MobileDashboardMetricVO<Integer> rankPosition;
         private String evidence;
         private String responseText;
         private List<String> tags = new ArrayList<>();
+        private List<QuestionSearchSource> searchSources = new ArrayList<>();
         private List<ContentTaskItem> relatedContentTasks = new ArrayList<>();
+    }
+
+    @Data
+    public static class QuestionSearchSource {
+        private Long sourceId;
+        private Integer rankNo;
+        private String title;
+        private String url;
+        private String domain;
+        private String snippet;
+        private LocalDateTime publishTime;
+        private Boolean cited;
+        private Boolean brandMatched;
     }
 
     @Data

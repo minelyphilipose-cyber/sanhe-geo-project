@@ -163,17 +163,18 @@ public class DispatchPollAggregationService {
                     agg.contactMentionCount += contactMentionCount;
                 }
                 if (isEffectiveWebSearchResult(result)) {
+                    agg.searchRequestedCount++;
                     if (Boolean.TRUE.equals(result.getSearchTriggered())) {
                         agg.searchConfirmedCount++;
-                    }
-                    if (Boolean.TRUE.equals(result.getBrandInSearch())) {
-                        agg.brandSearchCount++;
-                    }
-                    if (Boolean.TRUE.equals(result.getBrandInAnswer())) {
-                        agg.brandAnswerCount++;
-                    }
-                    if (Boolean.TRUE.equals(result.getConfirmedCitationExposure())) {
-                        agg.confirmedCitationExposureCount++;
+                        if (Boolean.TRUE.equals(result.getBrandInSearch())) {
+                            agg.brandSearchCount++;
+                        }
+                        if (Boolean.TRUE.equals(result.getBrandInAnswer())) {
+                            agg.brandAnswerCount++;
+                        }
+                        if (Boolean.TRUE.equals(result.getConfirmedCitationExposure())) {
+                            agg.confirmedCitationExposureCount++;
+                        }
                     }
                 }
             } else {
@@ -237,8 +238,61 @@ public class DispatchPollAggregationService {
         if (formalStatisticsBatch) {
             publishFailureAlertIfNeeded(batch, projectName, aggByPlatform, results,
                     expectedResultCount, finalFailedCount, hasFailedShard);
+            publishSearchTriggerAlertIfNeeded(batch, projectName, aggByPlatform);
             recomputeSummaryAfterCommit(batch.getProjectId(), batch.getBatchDate(), batch.getQuestionTier());
         }
+    }
+
+    private void publishSearchTriggerAlertIfNeeded(PollBatch batch,
+                                                   String projectName,
+                                                   Map<Long, PlatformAgg> aggByPlatform) {
+        List<Map<String, Object>> platformRates = aggByPlatform.values().stream()
+                .filter(agg -> agg.searchRequestedCount > 0 && agg.searchConfirmedCount < agg.searchRequestedCount)
+                .map(agg -> {
+                    Map<String, Object> rate = new LinkedHashMap<>();
+                    rate.put("platformId", agg.platformId);
+                    rate.put("platformCode", agg.platformCode);
+                    rate.put("channelCode", agg.channelCode);
+                    rate.put("platformName", agg.platformName);
+                    rate.put("requestedCount", agg.searchRequestedCount);
+                    rate.put("triggeredCount", agg.searchConfirmedCount);
+                    rate.put("triggerRate", percentage(agg.searchConfirmedCount, agg.searchRequestedCount));
+                    return rate;
+                })
+                .toList();
+        if (platformRates.isEmpty()) {
+            return;
+        }
+
+        int requestedCount = aggByPlatform.values().stream().mapToInt(agg -> agg.searchRequestedCount).sum();
+        int triggeredCount = aggByPlatform.values().stream().mapToInt(agg -> agg.searchConfirmedCount).sum();
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("alertType", "web_search_trigger_rate");
+        context.put("batchId", batch.getId());
+        context.put("projectId", batch.getProjectId());
+        context.put("projectName", projectName);
+        context.put("batchDate", batch.getBatchDate() == null ? null : batch.getBatchDate().toString());
+        context.put("batchNo", batch.getBatchNo());
+        context.put("questionTier", batch.getQuestionTier());
+        context.put("requestedCount", requestedCount);
+        context.put("triggeredCount", triggeredCount);
+        context.put("triggerRate", percentage(triggeredCount, requestedCount));
+        context.put("platformRates", platformRates);
+
+        String dedupeKey = "web_search_trigger_rate:" + batch.getProjectId() + ":" + batch.getBatchDate()
+                + ":" + batch.getBatchNo() + ":" + batch.getQuestionTier();
+        String content = "问题轮询已请求联网搜索 " + requestedCount + " 次，实际触发 " + triggeredCount
+                + " 次，触发率 " + percentage(triggeredCount, requestedCount) + "%";
+        dispatchAlertService.createOrRefreshAlert(
+                batch.getDispatchTaskId(),
+                batch.getProjectId(),
+                dedupeKey,
+                DispatchAlertSeverity.WARN,
+                "Web search trigger rate is below 100%",
+                content,
+                0,
+                JSONUtil.toJsonStr(context)
+        );
     }
 
     private void publishFailureAlertIfNeeded(PollBatch batch,
@@ -267,14 +321,14 @@ public class DispatchPollAggregationService {
         context.put("expectedResultCount", expectedResultCount);
         context.put("completedCount", defaultInt(batch.getCompletedCount()));
         context.put("failedCount", finalFailedCount);
-        context.put("failureRate", failureRate(finalFailedCount, expectedResultCount));
+        context.put("failureRate", percentage(finalFailedCount, expectedResultCount));
         context.put("hasFailedShard", hasFailedShard);
         context.put("platformFailures", platformFailures);
 
         String dedupeKey = "question_poll_batch:" + batch.getProjectId() + ":" + batch.getBatchDate()
                 + ":" + batch.getBatchNo() + ":" + batch.getQuestionTier();
         String content = "问题轮询跑批完成，存在 " + finalFailedCount + " 条失败结果，失败率 "
-                + failureRate(finalFailedCount, expectedResultCount) + "%";
+                + percentage(finalFailedCount, expectedResultCount) + "%";
         dispatchAlertService.createOrRefreshAlert(
                 batch.getDispatchTaskId(),
                 batch.getProjectId(),
@@ -347,11 +401,11 @@ public class DispatchPollAggregationService {
         return reason;
     }
 
-    private double failureRate(int failedCount, int totalCount) {
+    private double percentage(int value, int totalCount) {
         if (totalCount <= 0) {
-            return failedCount > 0 ? 100D : 0D;
+            return value > 0 ? 100D : 0D;
         }
-        return BigDecimal.valueOf(failedCount * 100D)
+        return BigDecimal.valueOf(value * 100D)
                 .divide(BigDecimal.valueOf(totalCount), 2, RoundingMode.HALF_UP)
                 .doubleValue();
     }
@@ -426,6 +480,7 @@ public class DispatchPollAggregationService {
         private int hitCount;
         private int siteMentionCount;
         private int contactMentionCount;
+        private int searchRequestedCount;
         private int searchConfirmedCount;
         private int brandSearchCount;
         private int brandAnswerCount;

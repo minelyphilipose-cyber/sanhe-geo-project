@@ -138,13 +138,27 @@ export interface QuestionMonitorItem {
   questionTitle: string
   completedAt?: string | null
   mentioned: boolean
+  monitorStatus?: 'mentioned' | 'not_mentioned' | 'search_not_triggered' | 'pending' | string
   recommended: DashboardMetric<boolean>
   firstRecommend: DashboardMetric<boolean>
   rankPosition: DashboardMetric<number>
   evidence?: string | null
   responseText?: string | null
   tags: string[]
+  searchSources?: QuestionSearchSource[]
   relatedContentTasks?: ContentTaskItem[]
+}
+
+export interface QuestionSearchSource {
+  sourceId: number
+  rankNo?: number | null
+  title?: string | null
+  url: string
+  domain?: string | null
+  snippet?: string | null
+  publishTime?: string | null
+  cited?: boolean | null
+  brandMatched?: boolean | null
 }
 
 export interface PlatformCompletion {

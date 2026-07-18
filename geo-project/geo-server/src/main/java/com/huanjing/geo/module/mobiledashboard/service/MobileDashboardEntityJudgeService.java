@@ -52,6 +52,13 @@ public class MobileDashboardEntityJudgeService {
     private static final String MOBILE_QUESTION_TIER = "A";
     private static final String FOCUS_BRAND = "focus_brand";
     private static final String COMPETITOR = "competitor";
+    private static final String EFFECTIVE_WEB_SEARCH_RESULT_SQL = """
+            pr.execution_finalized = 1
+            AND pr.effective_attempt_id IS NOT NULL
+            AND pr.search_requested = 1
+            AND pr.search_triggered = 1
+            """;
+    private static final String POLL_CHANNEL_SQL = "COALESCE(NULLIF(TRIM(pr.channel_code), ''), pr.platform_code)";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -178,7 +185,7 @@ public class MobileDashboardEntityJudgeService {
                 WITH latest AS (
                     SELECT pr.id,
                            ROW_NUMBER() OVER (
-                               PARTITION BY pr.keyword_result_id, pr.platform_code
+                               PARTITION BY pr.keyword_result_id, %1$s
                                ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
                            ) AS rn
                       FROM poll_results pr
@@ -186,6 +193,7 @@ public class MobileDashboardEntityJudgeService {
                        AND pr.status = 'completed'
                        AND pr.question_tier = ?
                        AND pr.keyword_result_id IS NOT NULL
+                       AND %2$s
                 ),
                 latest_count AS (
                     SELECT COUNT(*) AS expected_count
@@ -214,7 +222,7 @@ public class MobileDashboardEntityJudgeService {
                    AND c.status = 'active'
                  GROUP BY c.id, c.competitor_name, c.display_order, c.qa_status
                  ORDER BY c.display_order ASC, c.id ASC
-                """, (rs, rowNum) -> new CompetitorSummary(
+                """.formatted(POLL_CHANNEL_SQL, EFFECTIVE_WEB_SEARCH_RESULT_SQL), (rs, rowNum) -> new CompetitorSummary(
                 rs.getLong("entity_ref_id"),
                 rs.getString("competitor_name"),
                 rs.getInt("display_order"),
@@ -231,13 +239,13 @@ public class MobileDashboardEntityJudgeService {
     private JudgeCoverage latestCoverage(Long projectId, String entityType, Long entityRefId, String platformCode) {
         String platformClause = "";
         if (StringUtils.hasText(platformCode)) {
-            platformClause = " AND pr.platform_code IN (%s) ".formatted(platformAliasSql(platformCode));
+            platformClause = " AND %s IN (%s) ".formatted(POLL_CHANNEL_SQL, platformAliasSql(platformCode));
         }
         JudgeCoverage row = jdbcTemplate.queryForObject("""
                 WITH latest AS (
                     SELECT pr.id,
                            ROW_NUMBER() OVER (
-                               PARTITION BY pr.keyword_result_id, pr.platform_code
+                               PARTITION BY pr.keyword_result_id, %1$s
                                ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
                            ) AS rn
                       FROM poll_results pr
@@ -245,7 +253,8 @@ public class MobileDashboardEntityJudgeService {
                        AND pr.status = 'completed'
                        AND pr.question_tier = ?
                        AND pr.keyword_result_id IS NOT NULL
-                       %s
+                       AND %2$s
+                       %3$s
                 )
                 SELECT COUNT(*) AS expected_count,
                        COALESCE(SUM(CASE WHEN j.judge_status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
@@ -258,7 +267,7 @@ public class MobileDashboardEntityJudgeService {
                    AND j.entity_ref_id = ?
                    AND j.judge_prompt_version = ?
                  WHERE l.rn = 1
-                """.formatted(platformClause), (rs, rowNum) -> new JudgeCoverage(
+                """.formatted(POLL_CHANNEL_SQL, EFFECTIVE_WEB_SEARCH_RESULT_SQL, platformClause), (rs, rowNum) -> new JudgeCoverage(
                 rs.getLong("expected_count"),
                 rs.getLong("success_count"),
                 rs.getLong("recommended_count"),
@@ -295,6 +304,7 @@ public class MobileDashboardEntityJudgeService {
                  WHERE pr.status = 'completed'
                    AND pr.batch_date BETWEEN ? AND ?
                    AND pr.question_tier = ?
+                   AND %s
                    AND JSON_EXTRACT(pr.detail_json, '$.platform_response') IS NOT NULL
                    AND NOT EXISTS (
                          SELECT 1
@@ -309,7 +319,7 @@ public class MobileDashboardEntityJudgeService {
                  GROUP BY pr.project_id
                  ORDER BY MIN(pr.batch_date) ASC, MIN(pr.id) ASC
                  LIMIT ?
-                """, (rs, rowNum) -> rs.getLong("project_id"),
+                """.formatted(EFFECTIVE_WEB_SEARCH_RESULT_SQL), (rs, rowNum) -> rs.getLong("project_id"),
                 Date.valueOf(startDate), Date.valueOf(endDate), MOBILE_QUESTION_TIER, PROMPT_VERSION, limit);
     }
 
@@ -317,6 +327,7 @@ public class MobileDashboardEntityJudgeService {
         List<Object> args = new ArrayList<>();
         StringBuilder where = new StringBuilder("""
                 WHERE pr.status = 'completed'
+                  AND %s
                   AND JSON_EXTRACT(pr.detail_json, '$.platform_response') IS NOT NULL
                   AND NOT EXISTS (
                         SELECT 1
@@ -328,7 +339,7 @@ public class MobileDashboardEntityJudgeService {
                            AND j.entity_config_version = 1
                            AND j.judge_status = 'success'
                   )
-                """);
+                """.formatted(EFFECTIVE_WEB_SEARCH_RESULT_SQL));
         args.add(PROMPT_VERSION);
         if (projectId != null) {
             where.append(" AND pr.project_id = ? ");
@@ -353,14 +364,14 @@ public class MobileDashboardEntityJudgeService {
                        pr.batch_date,
                        pr.question_tier,
                        pr.platform_id,
-                       pr.platform_code,
-                       pr.effective_hit,
+                       %s AS platform_code,
+                       pr.brand_in_answer AS effective_hit,
                        p.brand_name,
                        p.project_aliases,
                        JSON_UNQUOTE(JSON_EXTRACT(pr.detail_json, '$.platform_response')) AS response_text
                   FROM poll_results pr
                   JOIN project p ON p.id = pr.project_id
-                """ + where + """
+                """.formatted(POLL_CHANNEL_SQL) + where + """
                  ORDER BY pr.batch_date DESC, pr.id DESC
                  LIMIT ?
                 """, (rs, rowNum) -> mapCandidate(rs), args.toArray());

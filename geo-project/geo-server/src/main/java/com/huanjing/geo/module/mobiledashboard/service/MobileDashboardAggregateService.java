@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.net.URI;
 import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -27,6 +28,20 @@ public class MobileDashboardAggregateService {
     private static final String CURRENT_VISIBLE_PUBLISH_STATUS_SQL = "'published','published_confirmed','distributed'";
     private static final String DELIVERY_DRAFT_STATUS_SQL = "'approved','unpublished','distributing','pending_review','under_revision','published','distributed'";
     private static final String MOBILE_QUESTION_TIER = "A";
+    private static final String MONITOR_STATUS_MENTIONED = "mentioned";
+    private static final String MONITOR_STATUS_NOT_MENTIONED = "not_mentioned";
+    private static final String MONITOR_STATUS_SEARCH_NOT_TRIGGERED = "search_not_triggered";
+    private static final String MONITOR_STATUS_PENDING = "pending";
+    private static final String EFFECTIVE_WEB_SEARCH_REQUEST_SQL = """
+            pr.execution_finalized = 1
+            AND pr.effective_attempt_id IS NOT NULL
+            AND pr.search_requested = 1
+            """;
+    private static final String EFFECTIVE_WEB_SEARCH_RESULT_SQL = EFFECTIVE_WEB_SEARCH_REQUEST_SQL + """
+            AND pr.search_triggered = 1
+            """;
+    private static final String WEB_SEARCH_MENTION_SQL = "CASE WHEN pr.search_triggered = 1 AND pr.brand_in_answer = 1 THEN 1 ELSE 0 END";
+    private static final String POLL_CHANNEL_SQL = "COALESCE(NULLIF(TRIM(pr.channel_code), ''), pr.platform_code)";
     private static final String POLL_RESPONSE_TEXT_SQL = """
             COALESCE(
                 JSON_UNQUOTE(JSON_EXTRACT(pr.detail_json, '$.platform_response')),
@@ -123,7 +138,8 @@ public class MobileDashboardAggregateService {
                        %1$s AS platform_code,
                        COALESCE(NULLIF(pr.keyword_text_snapshot, ''), CONCAT('问题 #', pr.id)) AS question_title,
                        pr.updated_at AS completed_at,
-                       CASE WHEN pr.effective_hit = 1 OR (pr.effective_hit IS NULL AND pr.is_hit = 1) THEN 1 ELSE 0 END AS mentioned,
+                       %4$s AS mentioned,
+                       pr.search_triggered,
                        j.judge_status,
                        j.recommended,
                        j.first_recommend,
@@ -141,9 +157,15 @@ public class MobileDashboardAggregateService {
                    AND pr.id = ?
                    AND pr.status = 'completed'
                    AND pr.question_tier = ?
-                   AND pr.platform_code IN (%3$s)
-                """.formatted(aiPlatformSqlCase("pr.platform_code"), POLL_RESPONSE_TEXT_SQL, supportedAiPlatformAliasSql()), (rs, rowNum) -> {
-            boolean rowJudgeReady = judgeReady && "success".equalsIgnoreCase(rs.getString("judge_status"));
+                   AND %5$s
+                   AND %6$s IN (%3$s)
+                """.formatted(aiPlatformSqlCase(POLL_CHANNEL_SQL), POLL_RESPONSE_TEXT_SQL,
+                supportedAiPlatformAliasSql(), WEB_SEARCH_MENTION_SQL,
+                EFFECTIVE_WEB_SEARCH_REQUEST_SQL, POLL_CHANNEL_SQL), (rs, rowNum) -> {
+            Boolean searchTriggered = nullableBoolean(rs, "search_triggered");
+            boolean rowJudgeReady = Boolean.TRUE.equals(searchTriggered)
+                    && judgeReady
+                    && "success".equalsIgnoreCase(rs.getString("judge_status"));
             return new QuestionMonitorRow(
                     rs.getLong("keyword_result_id"),
                     rs.getLong("poll_result_id"),
@@ -151,6 +173,7 @@ public class MobileDashboardAggregateService {
                     rs.getString("question_title"),
                     nullableDateTime(rs, "completed_at"),
                     rs.getBoolean("mentioned"),
+                    searchTriggered,
                     rowJudgeReady,
                     nullableBoolean(rs, "recommended"),
                     nullableBoolean(rs, "first_recommend"),
@@ -164,8 +187,71 @@ public class MobileDashboardAggregateService {
         }
         MobileDashboardAggregateVO.QuestionMonitorItem item = mergeQuestionMonitorRows(rows, judgeReady, judgeReason).get(0);
         enrichQuestionMonitorItems(List.of(item));
+        item.setSearchSources(loadQuestionSearchSources(projectId, pollResultId));
         item.setRelatedContentTasks(loadRelatedBuildingContentTasks(projectId, item.getKeywordResultId()));
         return item;
+    }
+
+    private List<MobileDashboardAggregateVO.QuestionSearchSource> loadQuestionSearchSources(Long projectId,
+                                                                                             Long pollResultId) {
+        List<MobileDashboardAggregateVO.QuestionSearchSource> candidates = jdbcTemplate.query("""
+                SELECT s.id AS source_id,
+                       s.rank_no,
+                       s.title,
+                       COALESCE(NULLIF(TRIM(s.normalized_url), ''), NULLIF(TRIM(s.original_url), '')) AS source_url,
+                       s.domain,
+                       s.snippet,
+                       s.publish_time,
+                       s.brand_matched,
+                       CASE WHEN EXISTS (
+                            SELECT 1
+                              FROM poll_citations c
+                             WHERE c.attempt_id = pr.effective_attempt_id
+                               AND c.source_id = s.id
+                               AND c.confidence IN ('CONFIRMED', 'PROBABLE')
+                       ) THEN 1 ELSE 0 END AS cited
+                  FROM poll_results pr
+                  JOIN poll_search_sources s ON s.attempt_id = pr.effective_attempt_id
+                 WHERE pr.project_id = ?
+                   AND pr.id = ?
+                   AND pr.status = 'completed'
+                   AND %s
+                 ORDER BY cited DESC,
+                          COALESCE(s.brand_matched, 0) DESC,
+                          COALESCE(s.rank_no, 2147483647) ASC,
+                          s.id ASC
+                 LIMIT 30
+                """.formatted(EFFECTIVE_WEB_SEARCH_RESULT_SQL), (rs, rowNum) -> {
+            String url = safePublicSourceUrl(rs.getString("source_url"));
+            if (!StringUtils.hasText(url)) {
+                return null;
+            }
+            MobileDashboardAggregateVO.QuestionSearchSource source =
+                    new MobileDashboardAggregateVO.QuestionSearchSource();
+            source.setSourceId(rs.getLong("source_id"));
+            source.setRankNo(nullableInt(rs, "rank_no"));
+            source.setTitle(boundedText(rs.getString("title"), 160));
+            source.setUrl(url);
+            source.setDomain(sourceDomain(url));
+            source.setSnippet(boundedText(rs.getString("snippet"), 220));
+            source.setPublishTime(nullableDateTime(rs, "publish_time"));
+            source.setCited(rs.getBoolean("cited"));
+            source.setBrandMatched(nullableBoolean(rs, "brand_matched"));
+            return source;
+        }, projectId, pollResultId);
+
+        Set<String> seenUrls = new LinkedHashSet<>();
+        List<MobileDashboardAggregateVO.QuestionSearchSource> sources = new ArrayList<>();
+        for (MobileDashboardAggregateVO.QuestionSearchSource candidate : candidates) {
+            if (candidate == null || !seenUrls.add(sourceUrlDedupKey(candidate.getUrl()))) {
+                continue;
+            }
+            sources.add(candidate);
+            if (sources.size() >= 6) {
+                break;
+            }
+        }
+        return sources;
     }
 
     public MobileDashboardAggregateVO.Content content(Long projectId, YearMonth month) {
@@ -223,19 +309,19 @@ public class MobileDashboardAggregateService {
         List<Object> args = new ArrayList<>(List.of(projectId, Date.valueOf(range.start()), Date.valueOf(range.end()), MOBILE_QUESTION_TIER));
         String platformClause = "";
         if (StringUtils.hasText(platformCode)) {
-            platformClause = " AND platform_code IN (%s) ".formatted(aliasSql(normalizeAiPlatformCode(platformCode)));
+            platformClause = " AND channel_code IN (%s) ".formatted(aliasSql(normalizeAiPlatformCode(platformCode)));
         }
         return jdbcTemplate.queryForObject("""
-                SELECT COALESCE(SUM(completed_count), 0) AS completed_count,
-                       COALESCE(SUM(CASE WHEN effective_hit_count > 0 THEN effective_hit_count ELSE hit_count END), 0) AS mention_count,
+                SELECT COALESCE(SUM(search_confirmed_count), 0) AS completed_count,
+                       COALESCE(SUM(brand_answer_count), 0) AS mention_count,
                        COUNT(DISTINCT CASE
-                           WHEN (CASE WHEN effective_hit_count > 0 THEN effective_hit_count ELSE hit_count END) > 0
-                           THEN %s END) AS covered_platform_count
+                           WHEN brand_answer_count > 0 THEN %s END) AS covered_platform_count
                  FROM poll_platform_daily_summary
                  WHERE project_id = ?
                    AND batch_date BETWEEN ? AND ?
                    AND question_tier = ?
-                """.formatted(aiPlatformSqlCase("platform_code")) + platformClause,
+                   AND search_confirmed_count > 0
+                """.formatted(aiPlatformSqlCase("channel_code")) + platformClause,
                 (rs, rowNum) -> new MentionAggregate(
                         rs.getLong("completed_count"),
                         rs.getLong("mention_count"),
@@ -246,13 +332,13 @@ public class MobileDashboardAggregateService {
     private MentionAggregate loadLatestMentionAggregate(Long projectId, String platformCode) {
         String platformClause = "";
         if (StringUtils.hasText(platformCode)) {
-            platformClause = " AND pr.platform_code IN (%s) ".formatted(aliasSql(normalizeAiPlatformCode(platformCode)));
+            platformClause = " AND %s IN (%s) ".formatted(POLL_CHANNEL_SQL, aliasSql(normalizeAiPlatformCode(platformCode)));
         }
         return jdbcTemplate.queryForObject("""
                 WITH latest AS (
                     SELECT pr.id,
                            %1$s AS platform_code,
-                           CASE WHEN pr.effective_hit = 1 OR (pr.effective_hit IS NULL AND pr.is_hit = 1) THEN 1 ELSE 0 END AS hit_flag,
+                           %4$s AS hit_flag,
                            ROW_NUMBER() OVER (
                                PARTITION BY pr.keyword_result_id, %1$s
                                ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
@@ -262,7 +348,8 @@ public class MobileDashboardAggregateService {
                        AND pr.status = 'completed'
                        AND pr.question_tier = ?
                        AND pr.keyword_result_id IS NOT NULL
-                       AND pr.platform_code IN (%2$s)
+                       AND %5$s
+                       AND %6$s IN (%2$s)
                        %3$s
                 )
                 SELECT COUNT(*) AS completed_count,
@@ -270,7 +357,8 @@ public class MobileDashboardAggregateService {
                        COUNT(DISTINCT CASE WHEN hit_flag > 0 THEN platform_code END) AS covered_platform_count
                   FROM latest
                  WHERE rn = 1
-                """.formatted(aiPlatformSqlCase("pr.platform_code"), supportedAiPlatformAliasSql(), platformClause),
+                """.formatted(aiPlatformSqlCase(POLL_CHANNEL_SQL), supportedAiPlatformAliasSql(), platformClause,
+                WEB_SEARCH_MENTION_SQL, EFFECTIVE_WEB_SEARCH_RESULT_SQL, POLL_CHANNEL_SQL),
                 (rs, rowNum) -> new MentionAggregate(
                         rs.getLong("completed_count"),
                         rs.getLong("mention_count"),
@@ -289,12 +377,13 @@ public class MobileDashboardAggregateService {
         Map<LocalDate, MentionAggregate> byDate = new LinkedHashMap<>();
         jdbcTemplate.query("""
                 SELECT batch_date,
-                       COALESCE(SUM(completed_count), 0) AS completed_count,
-                       COALESCE(SUM(CASE WHEN effective_hit_count > 0 THEN effective_hit_count ELSE hit_count END), 0) AS mention_count
+                       COALESCE(SUM(search_confirmed_count), 0) AS completed_count,
+                       COALESCE(SUM(brand_answer_count), 0) AS mention_count
                  FROM poll_platform_daily_summary
                  WHERE project_id = ?
                    AND batch_date BETWEEN ? AND ?
                    AND question_tier = ?
+                   AND search_confirmed_count > 0
                  GROUP BY batch_date
                  ORDER BY batch_date ASC
                 """, (RowCallbackHandler) rs -> byDate.put(rs.getDate("batch_date").toLocalDate(),
@@ -319,15 +408,16 @@ public class MobileDashboardAggregateService {
     private List<MobileDashboardAggregateVO.PlatformMetric> loadPlatformPerformance(Long projectId, DateRange range) {
         return enrichPlatformMetrics(jdbcTemplate.query("""
                 SELECT %s AS platform_code,
-                       COALESCE(SUM(completed_count), 0) AS completed_count,
-                       COALESCE(SUM(CASE WHEN effective_hit_count > 0 THEN effective_hit_count ELSE hit_count END), 0) AS mention_count
+                       COALESCE(SUM(search_confirmed_count), 0) AS completed_count,
+                       COALESCE(SUM(brand_answer_count), 0) AS mention_count
                  FROM poll_platform_daily_summary
                  WHERE project_id = ?
                    AND batch_date BETWEEN ? AND ?
                    AND question_tier = ?
-                   AND platform_code IN (%s)
+                   AND channel_code IN (%s)
+                   AND search_confirmed_count > 0
                  GROUP BY %s
-                """.formatted(aiPlatformSqlCase("platform_code"), supportedAiPlatformAliasSql(), aiPlatformSqlCase("platform_code")), (rs, rowNum) -> {
+                """.formatted(aiPlatformSqlCase("channel_code"), supportedAiPlatformAliasSql(), aiPlatformSqlCase("channel_code")), (rs, rowNum) -> {
                     String code = normalizeAiPlatformCode(rs.getString("platform_code"));
                     if (!StringUtils.hasText(code)) {
                         return null;
@@ -354,7 +444,7 @@ public class MobileDashboardAggregateService {
                 WITH latest AS (
                     SELECT pr.id,
                            %1$s AS platform_code,
-                           CASE WHEN pr.effective_hit = 1 OR (pr.effective_hit IS NULL AND pr.is_hit = 1) THEN 1 ELSE 0 END AS effective_hit,
+                           %3$s AS effective_hit,
                            ROW_NUMBER() OVER (
                                PARTITION BY pr.keyword_result_id, %1$s
                                ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
@@ -364,7 +454,8 @@ public class MobileDashboardAggregateService {
                        AND pr.status = 'completed'
                        AND pr.question_tier = ?
                        AND pr.keyword_result_id IS NOT NULL
-                       AND pr.platform_code IN (%2$s)
+                       AND %4$s
+                       AND %5$s IN (%2$s)
                 )
                 SELECT platform_code,
                        COUNT(*) AS completed_count,
@@ -372,7 +463,8 @@ public class MobileDashboardAggregateService {
                   FROM latest
                  WHERE rn = 1
                  GROUP BY platform_code
-                """.formatted(aiPlatformSqlCase("pr.platform_code"), supportedAiPlatformAliasSql()), (rs, rowNum) -> {
+                """.formatted(aiPlatformSqlCase(POLL_CHANNEL_SQL), supportedAiPlatformAliasSql(), WEB_SEARCH_MENTION_SQL,
+                EFFECTIVE_WEB_SEARCH_RESULT_SQL, POLL_CHANNEL_SQL), (rs, rowNum) -> {
                     String code = normalizeAiPlatformCode(rs.getString("platform_code"));
                     if (!StringUtils.hasText(code)) {
                         return null;
@@ -466,15 +558,16 @@ public class MobileDashboardAggregateService {
                                 SELECT pr.project_id,
                                        pr.question_tier,
                                        pr.keyword_result_id,
-                                       CASE WHEN pr.effective_hit = 1 OR (pr.effective_hit IS NULL AND pr.is_hit = 1) THEN 1 ELSE 0 END AS hit_flag,
+                                       %2$s AS hit_flag,
                                        ROW_NUMBER() OVER (
-                                           PARTITION BY pr.project_id, pr.question_tier, pr.keyword_result_id, pr.platform_code
+                                           PARTITION BY pr.project_id, pr.question_tier, pr.keyword_result_id, %3$s
                                            ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
                                        ) AS rn
                                   FROM poll_results pr
                                  WHERE pr.status = 'completed'
                                    AND pr.keyword_result_id IS NOT NULL
-                                   AND pr.platform_code IN (%s)
+                                   AND %4$s
+                                   AND %3$s IN (%1$s)
                           ) latest
                          WHERE rn = 1
                          GROUP BY project_id, question_tier, keyword_result_id
@@ -485,7 +578,8 @@ public class MobileDashboardAggregateService {
                    AND COALESCE(kg.deleted, 0) = 0
                    AND r.question_tier = ?
                  GROUP BY COALESCE(r.scene_code, '')
-                """.formatted(supportedAiPlatformAliasSql()),
+                """.formatted(supportedAiPlatformAliasSql(), WEB_SEARCH_MENTION_SQL, POLL_CHANNEL_SQL,
+                EFFECTIVE_WEB_SEARCH_RESULT_SQL),
                 (rs, rowNum) -> new SceneRow(
                         normalizeSceneCode(rs.getString("scene_code")),
                         rs.getLong("covered_count"),
@@ -540,15 +634,16 @@ public class MobileDashboardAggregateService {
                                 SELECT pr.project_id,
                                        pr.question_tier,
                                        pr.keyword_result_id,
-                                       CASE WHEN pr.effective_hit = 1 OR (pr.effective_hit IS NULL AND pr.is_hit = 1) THEN 1 ELSE 0 END AS hit_flag,
+                                       %2$s AS hit_flag,
                                        ROW_NUMBER() OVER (
-                                           PARTITION BY pr.project_id, pr.question_tier, pr.keyword_result_id, pr.platform_code
+                                           PARTITION BY pr.project_id, pr.question_tier, pr.keyword_result_id, %3$s
                                            ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
                                        ) AS rn
                                   FROM poll_results pr
                                  WHERE pr.status = 'completed'
                                    AND pr.keyword_result_id IS NOT NULL
-                                   AND pr.platform_code IN (%s)
+                                   AND %4$s
+                                   AND %3$s IN (%1$s)
                           ) latest
                          WHERE rn = 1
                          GROUP BY project_id, question_tier, keyword_result_id
@@ -558,7 +653,8 @@ public class MobileDashboardAggregateService {
                  WHERE rel.project_id = ?
                    AND COALESCE(kg.deleted, 0) = 0
                    AND r.question_tier = ?
-                """.formatted(supportedAiPlatformAliasSql()),
+                """.formatted(supportedAiPlatformAliasSql(), WEB_SEARCH_MENTION_SQL, POLL_CHANNEL_SQL,
+                EFFECTIVE_WEB_SEARCH_RESULT_SQL),
                 (rs, rowNum) -> new QuestionCoverage(rs.getLong("covered_count"), rs.getLong("total_count")),
                 projectId, MOBILE_QUESTION_TIER);
     }
@@ -810,6 +906,7 @@ public class MobileDashboardAggregateService {
                             rs.getString("question_title"),
                             nullableDateTime(rs, "completed_at"),
                             rs.getBoolean("mentioned"),
+                            true,
                             rowJudgeReady,
                             nullableBoolean(rs, "recommended"),
                             nullableBoolean(rs, "first_recommend"),
@@ -833,7 +930,7 @@ public class MobileDashboardAggregateService {
         int resolvedSize = normalizePageSize(size);
         String platformClause = "";
         if (StringUtils.hasText(platformCode)) {
-            platformClause = " AND pr.platform_code IN (%s) ".formatted(aliasSql(normalizeAiPlatformCode(platformCode)));
+            platformClause = " AND %s IN (%s) ".formatted(POLL_CHANNEL_SQL, aliasSql(normalizeAiPlatformCode(platformCode)));
         }
         List<QuestionMonitorRow> rows = jdbcTemplate.query("""
                 WITH question_pool AS (
@@ -858,7 +955,8 @@ public class MobileDashboardAggregateService {
                        AND pr.status = 'completed'
                        AND pr.question_tier = ?
                        AND pr.keyword_result_id IS NOT NULL
-                       AND pr.platform_code IN (%2$s)
+                       AND %5$s
+                       AND %6$s IN (%2$s)
                        %3$s
                 )
                 SELECT qp.keyword_result_id,
@@ -866,7 +964,8 @@ public class MobileDashboardAggregateService {
                        COALESCE(%1$s, ?) AS platform_code,
                        COALESCE(NULLIF(pr.keyword_text_snapshot, ''), qp.question_title, CONCAT('问题 #', qp.keyword_result_id)) AS question_title,
                        pr.updated_at AS completed_at,
-                       CASE WHEN pr.effective_hit = 1 OR (pr.effective_hit IS NULL AND pr.is_hit = 1) THEN 1 ELSE 0 END AS mentioned,
+                       %7$s AS mentioned,
+                       pr.search_triggered,
                        j.judge_status,
                        j.recommended,
                        j.first_recommend,
@@ -882,14 +981,19 @@ public class MobileDashboardAggregateService {
                    AND j.entity_ref_id = 0
                    AND j.entity_config_version = 1
                    AND j.judge_prompt_version = ?
-                 ORDER BY CASE WHEN pr.effective_hit = 1 OR (pr.effective_hit IS NULL AND pr.is_hit = 1) THEN 0 ELSE 1 END,
+                 ORDER BY CASE WHEN pr.brand_in_answer = 1 THEN 0 ELSE 1 END,
                           pr.batch_date DESC,
                           pr.updated_at DESC,
                           pr.id DESC,
                           qp.sort_order ASC,
                           qp.keyword_result_id ASC
-                """.formatted(aiPlatformSqlCase("pr.platform_code"), supportedAiPlatformAliasSql(), platformClause, POLL_RESPONSE_TEXT_SQL), (rs, rowNum) -> {
-            boolean rowJudgeReady = judgeReady && "success".equalsIgnoreCase(rs.getString("judge_status"));
+                """.formatted(aiPlatformSqlCase(POLL_CHANNEL_SQL), supportedAiPlatformAliasSql(), platformClause,
+                POLL_RESPONSE_TEXT_SQL, EFFECTIVE_WEB_SEARCH_REQUEST_SQL, POLL_CHANNEL_SQL,
+                WEB_SEARCH_MENTION_SQL), (rs, rowNum) -> {
+            Boolean searchTriggered = nullableBoolean(rs, "search_triggered");
+            boolean rowJudgeReady = Boolean.TRUE.equals(searchTriggered)
+                    && judgeReady
+                    && "success".equalsIgnoreCase(rs.getString("judge_status"));
             return new QuestionMonitorRow(
                     rs.getLong("keyword_result_id"),
                     nullableLong(rs, "poll_result_id"),
@@ -897,6 +1001,7 @@ public class MobileDashboardAggregateService {
                     rs.getString("question_title"),
                     nullableDateTime(rs, "completed_at"),
                     rs.getBoolean("mentioned"),
+                    searchTriggered,
                     rowJudgeReady,
                     nullableBoolean(rs, "recommended"),
                     nullableBoolean(rs, "first_recommend"),
@@ -977,6 +1082,7 @@ public class MobileDashboardAggregateService {
                     rs.getString("question_title"),
                     nullableDateTime(rs, "completed_at"),
                     rs.getBoolean("mentioned"),
+                    true,
                     rowJudgeReady,
                     nullableBoolean(rs, "recommended"),
                     nullableBoolean(rs, "first_recommend"),
@@ -1002,6 +1108,8 @@ public class MobileDashboardAggregateService {
             QuestionMonitorRow first = group.get(0);
             QuestionMonitorRow displayRow = chooseQuestionMonitorDisplayRow(group, first);
             boolean mentioned = group.stream().anyMatch(QuestionMonitorRow::mentioned);
+            boolean searchTriggered = group.stream().anyMatch(row -> Boolean.TRUE.equals(row.searchTriggered()));
+            boolean hasCompletedResult = group.stream().anyMatch(row -> row.pollResultId() != null);
             boolean hasSuccessfulJudge = group.stream().anyMatch(QuestionMonitorRow::rowJudgeReady);
             boolean recommended = group.stream().anyMatch(row -> row.rowJudgeReady() && Boolean.TRUE.equals(row.recommended()));
             boolean firstRecommend = group.stream().anyMatch(row -> row.rowJudgeReady() && Boolean.TRUE.equals(row.firstRecommend()));
@@ -1022,6 +1130,11 @@ public class MobileDashboardAggregateService {
             item.setQuestionTitle(displayRow.questionTitle());
             item.setCompletedAt(displayRow.completedAt());
             item.setMentioned(mentioned);
+            item.setMonitorStatus(mentioned
+                    ? MONITOR_STATUS_MENTIONED
+                    : (searchTriggered
+                    ? MONITOR_STATUS_NOT_MENTIONED
+                    : (hasCompletedResult ? MONITOR_STATUS_SEARCH_NOT_TRIGGERED : MONITOR_STATUS_PENDING)));
             item.setRecommended(hasSuccessfulJudge
                     ? MobileDashboardMetricVO.available(recommended)
                     : MobileDashboardMetricVO.unavailable(judgeReady ? "当前问题暂无成功裁判结果" : judgeReason));
@@ -1102,7 +1215,10 @@ public class MobileDashboardAggregateService {
         if (row.mentioned() && StringUtils.hasText(row.platformCode())) {
             return 4;
         }
-        return 5;
+        if (Boolean.TRUE.equals(row.searchTriggered())) {
+            return 5;
+        }
+        return row.pollResultId() != null ? 6 : 7;
     }
 
     private MobileDashboardAggregateVO.QuestionMonitorList toQuestionMonitorList(List<MobileDashboardAggregateVO.QuestionMonitorItem> items,
@@ -1590,15 +1706,16 @@ public class MobileDashboardAggregateService {
                                 SELECT pr.project_id,
                                        pr.question_tier,
                                        pr.keyword_result_id,
-                                       CASE WHEN pr.effective_hit = 1 OR (pr.effective_hit IS NULL AND pr.is_hit = 1) THEN 1 ELSE 0 END AS hit_flag,
+                                       %2$s AS hit_flag,
                                        ROW_NUMBER() OVER (
-                                           PARTITION BY pr.project_id, pr.question_tier, pr.keyword_result_id, pr.platform_code
+                                           PARTITION BY pr.project_id, pr.question_tier, pr.keyword_result_id, %3$s
                                            ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
                                        ) AS rn
                                   FROM poll_results pr
                                  WHERE pr.status = 'completed'
                                    AND pr.keyword_result_id IS NOT NULL
-                                   AND pr.platform_code IN (%s)
+                                   AND %4$s
+                                   AND %3$s IN (%1$s)
                           ) latest
                          WHERE rn = 1
                          GROUP BY project_id, question_tier, keyword_result_id
@@ -1608,7 +1725,8 @@ public class MobileDashboardAggregateService {
                  WHERE rel.project_id = ?
                    AND COALESCE(kg.deleted, 0) = 0
                    AND r.question_tier = ?
-                """.formatted(supportedAiPlatformAliasSql()),
+                """.formatted(supportedAiPlatformAliasSql(), WEB_SEARCH_MENTION_SQL, POLL_CHANNEL_SQL,
+                EFFECTIVE_WEB_SEARCH_RESULT_SQL),
                 (rs, rowNum) -> new QuestionSceneCoverageRow(
                         rs.getLong("keyword_result_id"),
                         normalizeSceneCode(rs.getString("scene_code")),
@@ -1876,6 +1994,110 @@ public class MobileDashboardAggregateService {
         return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
     }
 
+    private String safePublicSourceUrl(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(value.trim());
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+            String host = uri.getHost();
+            if (!("http".equals(scheme) || "https".equals(scheme))
+                    || !StringUtils.hasText(host)
+                    || StringUtils.hasText(uri.getUserInfo())
+                    || !isPublicSourceHost(host)) {
+                return null;
+            }
+            return uri.normalize().toString();
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private String sourceDomain(String url) {
+        try {
+            String host = URI.create(url).getHost();
+            return boundedText(host == null ? null : host.replaceFirst("(?i)^www\\.", ""), 120);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private String sourceUrlDedupKey(String value) {
+        URI uri = URI.create(value);
+        String scheme = uri.getScheme().toLowerCase(Locale.ROOT);
+        String host = uri.getHost().toLowerCase(Locale.ROOT);
+        int port = uri.getPort();
+        if (("http".equals(scheme) && port == 80) || ("https".equals(scheme) && port == 443)) {
+            port = -1;
+        }
+        String path = StringUtils.hasText(uri.getRawPath()) ? uri.getRawPath() : "/";
+        String query = canonicalSourceQuery(uri.getRawQuery());
+        try {
+            return new URI(scheme, null, host, port, path, query, null).normalize().toString();
+        } catch (Exception ex) {
+            return value;
+        }
+    }
+
+    private String canonicalSourceQuery(String rawQuery) {
+        if (!StringUtils.hasText(rawQuery)) {
+            return null;
+        }
+        String query = Arrays.stream(rawQuery.split("&"))
+                .filter(StringUtils::hasText)
+                .filter(parameter -> !isTrackingQueryParameter(parameter))
+                .sorted()
+                .collect(java.util.stream.Collectors.joining("&"));
+        return StringUtils.hasText(query) ? query : null;
+    }
+
+    private boolean isTrackingQueryParameter(String parameter) {
+        String name = parameter.split("=", 2)[0].toLowerCase(Locale.ROOT);
+        return name.startsWith("utm_")
+                || Set.of("spm", "gclid", "fbclid", "msclkid", "mc_cid", "mc_eid", "_hsenc", "_hsmi")
+                .contains(name);
+    }
+
+    private boolean isPublicSourceHost(String value) {
+        String host = value.toLowerCase(Locale.ROOT).replace("[", "").replace("]", "");
+        if ("localhost".equals(host) || host.endsWith(".localhost") || host.endsWith(".local")) {
+            return false;
+        }
+        if (host.contains(":")) {
+            return !("::".equals(host)
+                    || "::1".equals(host)
+                    || host.startsWith("fe8")
+                    || host.startsWith("fe9")
+                    || host.startsWith("fea")
+                    || host.startsWith("feb")
+                    || host.startsWith("fc")
+                    || host.startsWith("fd"));
+        }
+        String[] parts = host.split("\\.");
+        if (parts.length != 4 || Arrays.stream(parts).anyMatch(part -> !part.matches("\\d{1,3}"))) {
+            return true;
+        }
+        int[] octets;
+        try {
+            octets = Arrays.stream(parts).mapToInt(Integer::parseInt).toArray();
+        } catch (NumberFormatException ex) {
+            return false;
+        }
+        if (Arrays.stream(octets).anyMatch(octet -> octet < 0 || octet > 255)) {
+            return false;
+        }
+        return octets[0] != 0
+                && octets[0] != 10
+                && octets[0] != 127
+                && !(octets[0] == 100 && octets[1] >= 64 && octets[1] <= 127)
+                && !(octets[0] == 169 && octets[1] == 254)
+                && !(octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31)
+                && !(octets[0] == 192 && octets[1] == 168)
+                && !(octets[0] == 198 && (octets[1] == 18 || octets[1] == 19))
+                && octets[0] < 224;
+    }
+
     private List<String> taskKeywords(String topicAsQuestion, String topic) {
         List<String> values = new ArrayList<>();
         addIfText(values, topicAsQuestion);
@@ -2039,6 +2261,7 @@ public class MobileDashboardAggregateService {
                                       String questionTitle,
                                       LocalDateTime completedAt,
                                       boolean mentioned,
+                                      Boolean searchTriggered,
                                       boolean rowJudgeReady,
                                       Boolean recommended,
                                       Boolean firstRecommend,

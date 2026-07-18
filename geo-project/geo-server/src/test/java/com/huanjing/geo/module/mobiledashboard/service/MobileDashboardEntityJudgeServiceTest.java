@@ -278,9 +278,14 @@ class MobileDashboardEntityJudgeServiceTest {
                     project_id BIGINT,
                     keyword_result_id BIGINT,
                     platform_code VARCHAR(32),
+                    channel_code VARCHAR(32),
                     batch_date DATE,
                     question_tier VARCHAR(8),
                     status VARCHAR(32),
+                    execution_finalized INT DEFAULT 1,
+                    effective_attempt_id BIGINT DEFAULT 1,
+                    search_requested INT DEFAULT 1,
+                    search_triggered INT DEFAULT 1,
                     updated_at TIMESTAMP
                 )
                 """);

@@ -31,6 +31,7 @@ class PollSummaryRecomputeServiceTest {
     void recomputePersistsEffectiveWebMetricsAndUsesMatchingSqlArguments() throws Exception {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         ResultSet resultSet = mock(ResultSet.class);
+        ResultSet searchNotTriggeredResultSet = mock(ResultSet.class);
         AtomicReference<String> sourceQuerySql = new AtomicReference<>();
         LocalDate batchDate = LocalDate.of(2026, 7, 16);
         LocalDateTime sourceTime = LocalDateTime.of(2026, 7, 16, 10, 0);
@@ -68,10 +69,35 @@ class PollSummaryRecomputeServiceTest {
         when(resultSet.getTimestamp("created_at")).thenReturn(Timestamp.valueOf(sourceTime));
         when(resultSet.getTimestamp("updated_at")).thenReturn(Timestamp.valueOf(sourceTime));
 
+        when(searchNotTriggeredResultSet.wasNull()).thenReturn(false);
+        when(searchNotTriggeredResultSet.getLong("id")).thenReturn(2L);
+        when(searchNotTriggeredResultSet.getLong("project_id")).thenReturn(200L);
+        when(searchNotTriggeredResultSet.getLong("keyword_result_id")).thenReturn(300L);
+        when(searchNotTriggeredResultSet.getLong("platform_id")).thenReturn(55L);
+        when(searchNotTriggeredResultSet.getLong("effective_attempt_id")).thenReturn(9002L);
+        when(searchNotTriggeredResultSet.getLong("response_time_ms")).thenReturn(1000L);
+        when(searchNotTriggeredResultSet.getInt("request_count")).thenReturn(1);
+        when(searchNotTriggeredResultSet.getInt("contact_mention_count")).thenReturn(0);
+        when(searchNotTriggeredResultSet.getString("keyword_text_snapshot")).thenReturn("联网测试问题");
+        when(searchNotTriggeredResultSet.getString("question_tier")).thenReturn("A");
+        when(searchNotTriggeredResultSet.getString("platform_code")).thenReturn("doubao_web");
+        when(searchNotTriggeredResultSet.getString("channel_code")).thenReturn("doubao");
+        when(searchNotTriggeredResultSet.getString("platform_name_snapshot")).thenReturn("豆包联网问答");
+        when(searchNotTriggeredResultSet.getString("status")).thenReturn("completed");
+        when(searchNotTriggeredResultSet.getString("record_type")).thenReturn("normal");
+        when(searchNotTriggeredResultSet.getObject("execution_finalized")).thenReturn(Boolean.TRUE);
+        when(searchNotTriggeredResultSet.getObject("search_requested")).thenReturn(Boolean.TRUE);
+        when(searchNotTriggeredResultSet.getObject("search_triggered")).thenReturn(Boolean.FALSE);
+        when(searchNotTriggeredResultSet.getObject("brand_in_search")).thenReturn(Boolean.TRUE);
+        when(searchNotTriggeredResultSet.getObject("brand_in_answer")).thenReturn(Boolean.TRUE);
+        when(searchNotTriggeredResultSet.getObject("confirmed_citation_exposure")).thenReturn(Boolean.TRUE);
+        when(searchNotTriggeredResultSet.getTimestamp("created_at")).thenReturn(Timestamp.valueOf(sourceTime));
+        when(searchNotTriggeredResultSet.getTimestamp("updated_at")).thenReturn(Timestamp.valueOf(sourceTime));
+
         doAnswer(invocation -> {
             sourceQuerySql.set(invocation.getArgument(0));
             RowMapper mapper = invocation.getArgument(1);
-            return List.of(mapper.mapRow(resultSet, 0));
+            return List.of(mapper.mapRow(resultSet, 0), mapper.mapRow(searchNotTriggeredResultSet, 1));
         }).when(jdbcTemplate).query(anyString(), any(RowMapper.class), any(), any(), any());
         when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
 
@@ -92,7 +118,7 @@ class PollSummaryRecomputeServiceTest {
         assertEquals(1, keywordCall.args()[19]);
         assertEquals(1, keywordCall.args()[20]);
         assertEquals(1, keywordCall.args()[21]);
-        assertEquals(new BigDecimal("1.0000"), keywordCall.args()[22]);
+        assertEquals(new BigDecimal("0.5000"), keywordCall.args()[22]);
 
         assertEquals(countPlaceholders(platformCall.sql()), platformCall.args().length);
         assertEquals("doubao", platformCall.args()[6]);
@@ -100,7 +126,7 @@ class PollSummaryRecomputeServiceTest {
         assertEquals(1, platformCall.args()[17]);
         assertEquals(1, platformCall.args()[18]);
         assertEquals(1, platformCall.args()[19]);
-        assertEquals(new BigDecimal("1.0000"), platformCall.args()[20]);
+        assertEquals(new BigDecimal("0.5000"), platformCall.args()[20]);
         org.junit.jupiter.api.Assertions.assertTrue(
                 sourceQuerySql.get().contains("COALESCE(pb.trigger_type, 'SCHEDULED') != 'MANUAL'"),
                 "formal summary recompute must exclude manual verification batches"

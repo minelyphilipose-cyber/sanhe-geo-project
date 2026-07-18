@@ -56,14 +56,14 @@
           <div class="question-main">
             <div class="question-title-row">
               <h3>{{ item.questionTitle }}</h3>
-              <span class="question-rank" :class="{ building: !hasPositiveSignal(item) }">
+              <span class="question-rank" :class="questionStatusClass(item)">
                 {{ rightStatus(item) }}
                 <MobileIcon v-if="canOpenQuestionDetail(item)" name="chevronRight" />
               </span>
             </div>
             <div class="tag-row">
-              <span class="tag" :class="hasPositiveSignal(item) ? 'platform-tag' : 'building'">
-                {{ hasPositiveSignal(item) ? hitPlatformLabel(item) : '持续覆盖' }}
+              <span class="tag" :class="baseStatusTag(item).kind">
+                {{ baseStatusTag(item).text }}
               </span>
               <span v-for="tag in statusTags(item)" :key="tag.text" class="tag" :class="tag.kind">
                 {{ tag.text }}
@@ -131,6 +131,7 @@ import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { DashboardMetric, MonitorDashboardData, QuestionMonitorItem } from '@/types/mobileDashboard'
 import { aiPlatformLabel, sceneLabel } from '@/utils/mobileDashboardDictionaries'
 import { aiPlatformLogoSrc, fallbackAiPlatformLogo } from '@/utils/aiPlatformLogo'
+import { isSearchNotTriggered, questionMonitorStatus } from '@/utils/mobileDashboardQuestionStatus'
 
 const store = useMobileDashboardStore()
 const router = useRouter()
@@ -198,10 +199,12 @@ function platformInitial(code: string) {
 }
 
 function rightStatus(item: QuestionMonitorItem) {
+  if (isSearchNotTriggered(item)) return '联网未触发'
   if (metricBool(item.firstRecommend)) return '首推'
   if (item.rankPosition?.available && item.rankPosition.value) return `第${item.rankPosition.value}位`
   if (metricBool(item.recommended)) return '已推荐'
   if (item.mentioned) return '已提及'
+  if (item.pollResultId) return '未提及'
   return '建设中'
 }
 
@@ -217,11 +220,15 @@ function hasBrandMentionSignal(item: QuestionMonitorItem) {
 }
 
 function canOpenQuestionDetail(item: QuestionMonitorItem) {
-  return hasPositiveSignal(item) && Boolean(item.pollResultId)
+  return Boolean(item.pollResultId)
 }
 
 function statusTags(item: QuestionMonitorItem) {
   const tags: Array<{ text: string; kind: string }> = []
+  if (isSearchNotTriggered(item)) {
+    tags.push({ text: '不计入提及率', kind: 'warning' })
+    return tags
+  }
   if (hasBrandMentionSignal(item)) {
     tags.push({ text: '已提及品牌', kind: 'success' })
   }
@@ -239,6 +246,21 @@ function hitPlatformLabel(item: QuestionMonitorItem) {
   return platformLabel(codes[0])
 }
 
+function questionStatusClass(item: QuestionMonitorItem) {
+  return {
+    building: questionMonitorStatus(item) === 'pending',
+    warning: isSearchNotTriggered(item),
+  }
+}
+
+function baseStatusTag(item: QuestionMonitorItem) {
+  if (isSearchNotTriggered(item)) return { text: '联网异常', kind: 'warning' }
+  if (hasPositiveSignal(item)) return { text: hitPlatformLabel(item), kind: 'platform-tag' }
+  return item.pollResultId
+    ? { text: hitPlatformLabel(item), kind: 'platform-tag' }
+    : { text: '持续覆盖', kind: 'building' }
+}
+
 function truncateText(text: string, max = 34) {
   const value = text.replace(/\s+/g, ' ').trim()
   if (value.length <= max) return value
@@ -246,10 +268,14 @@ function truncateText(text: string, max = 34) {
 }
 
 function questionSummary(item: QuestionMonitorItem) {
+  if (isSearchNotTriggered(item)) {
+    return '回答已完成，但联网搜索未实际触发；本条不计入提及率，请检查平台联网配置。'
+  }
   const evidence = publicEvidence(item.evidence)
   if (evidence) return truncateText(evidence, 42)
   if (metricBool(item.recommended)) return '本轮回答中出现主动推荐，推荐详情可进入查看。'
   if (item.mentioned) return `${hitPlatformLabel(item)} 回答已提及品牌，推荐与排名结果将在核心样本分析充分后展示。`
+  if (item.pollResultId) return '本轮联网回答已完成，暂未提及品牌。'
   return '相关场景内容正在持续建设与覆盖。'
 }
 
@@ -601,6 +627,10 @@ onMounted(loadData)
   color: #006D44;
 }
 
+.question-rank.warning {
+  color: #b45309;
+}
+
 .tag-row {
   display: flex;
   flex-wrap: wrap;
@@ -645,6 +675,12 @@ onMounted(loadData)
   border: 1px solid #d7dee8;
   background: #f8fafc;
   color: #52625C;
+}
+
+.tag.warning {
+  border-color: #f4d7a1;
+  background: #fff8e8;
+  color: #a95d00;
 }
 
 .question-desc {

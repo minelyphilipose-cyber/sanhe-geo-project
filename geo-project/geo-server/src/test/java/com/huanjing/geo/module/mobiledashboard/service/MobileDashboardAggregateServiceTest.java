@@ -27,19 +27,23 @@ public class MobileDashboardAggregateServiceTest {
                     project_id BIGINT,
                     batch_date DATE,
                     platform_code VARCHAR(32),
+                    channel_code VARCHAR(32),
                     question_tier VARCHAR(8),
                     completed_count BIGINT,
                     hit_count BIGINT,
-                    effective_hit_count BIGINT
+                    effective_hit_count BIGINT,
+                    search_confirmed_count BIGINT,
+                    brand_answer_count BIGINT
                 )
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_platform_daily_summary
-                    (project_id, batch_date, platform_code, question_tier, completed_count, hit_count, effective_hit_count)
+                    (project_id, batch_date, platform_code, channel_code, question_tier, completed_count, hit_count,
+                     effective_hit_count, search_confirmed_count, brand_answer_count)
                 VALUES
-                    (1, DATE '2026-06-10', 'doubao', 'A', 10, 3, 0),
-                    (1, DATE '2026-06-20', 'doubao', 'A', 10, 8, 4),
-                    (1, DATE '2026-06-20', 'deepseek', 'B', 10, 10, 10)
+                    (1, DATE '2026-06-10', 'doubao_web', 'doubao', 'A', 10, 3, 0, 10, 3),
+                    (1, DATE '2026-06-20', 'doubao_web', 'doubao', 'A', 10, 8, 4, 10, 4),
+                    (1, DATE '2026-06-20', 'deepseek_ark_web', 'deepseek', 'B', 10, 10, 10, 10, 10)
                 """);
 
         Object aggregate = invoke(newService(jdbcTemplate), "loadMentionAggregate",
@@ -58,19 +62,23 @@ public class MobileDashboardAggregateServiceTest {
                     project_id BIGINT,
                     batch_date DATE,
                     platform_code VARCHAR(32),
+                    channel_code VARCHAR(32),
                     question_tier VARCHAR(8),
                     completed_count BIGINT,
                     hit_count BIGINT,
-                    effective_hit_count BIGINT
+                    effective_hit_count BIGINT,
+                    search_confirmed_count BIGINT,
+                    brand_answer_count BIGINT
                 )
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_platform_daily_summary
-                    (project_id, batch_date, platform_code, question_tier, completed_count, hit_count, effective_hit_count)
+                    (project_id, batch_date, platform_code, channel_code, question_tier, completed_count, hit_count,
+                     effective_hit_count, search_confirmed_count, brand_answer_count)
                 VALUES
-                    (1, DATE '2026-06-10', 'doubao', 'A', 10, 5, 0),
-                    (1, DATE '2026-06-12', 'doubao', 'A', 0, 0, 0),
-                    (1, DATE '2026-06-13', 'doubao', 'A', 10, 0, 0)
+                    (1, DATE '2026-06-10', 'doubao_web', 'doubao', 'A', 10, 5, 0, 10, 5),
+                    (1, DATE '2026-06-12', 'doubao_web', 'doubao', 'A', 0, 0, 0, 0, 0),
+                    (1, DATE '2026-06-13', 'doubao_web', 'doubao', 'A', 10, 0, 0, 10, 0)
                 """);
 
         @SuppressWarnings("unchecked")
@@ -327,24 +335,29 @@ public class MobileDashboardAggregateServiceTest {
     @Test
     void completeBatchMentionAggregateUsesSummaryFallbackInsteadOfLatestResultEffectiveHit() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createAiPlatformConfigTable(jdbcTemplate);
         jdbcTemplate.execute("""
                 CREATE TABLE poll_platform_daily_summary (
                     project_id BIGINT,
                     batch_date DATE,
                     platform_code VARCHAR(32),
+                    channel_code VARCHAR(32),
                     question_tier VARCHAR(8),
                     completed_count BIGINT,
                     hit_count BIGINT,
-                    effective_hit_count BIGINT
+                    effective_hit_count BIGINT,
+                    search_confirmed_count BIGINT,
+                    brand_answer_count BIGINT
                 )
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_platform_daily_summary
-                    (project_id, batch_date, platform_code, question_tier, completed_count, hit_count, effective_hit_count)
+                    (project_id, batch_date, platform_code, channel_code, question_tier, completed_count, hit_count,
+                     effective_hit_count, search_confirmed_count, brand_answer_count)
                 VALUES
-                    (1, DATE '2026-06-20', 'doubao', 'A', 10, 4, 0),
-                    (1, DATE '2026-06-20', 'deepseek', 'A', 5, 0, 3),
-                    (1, DATE '2026-06-21', 'doubao', 'A', 2, 0, 0)
+                    (1, DATE '2026-06-20', 'doubao_web', 'doubao', 'A', 10, 4, 0, 10, 4),
+                    (1, DATE '2026-06-20', 'deepseek_ark_web', 'deepseek', 'A', 5, 0, 3, 5, 3),
+                    (1, DATE '2026-06-21', 'doubao_web', 'doubao', 'A', 2, 0, 0, 2, 0)
                 """);
         MobileDashboardAggregateService service = newService(jdbcTemplate);
 
@@ -365,25 +378,30 @@ public class MobileDashboardAggregateServiceTest {
     @Test
     void platformPerformanceSortsByRateDescendingThenStableAiPlatformOrder() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createAiPlatformConfigTable(jdbcTemplate);
         jdbcTemplate.execute("""
                 CREATE TABLE poll_platform_daily_summary (
                     project_id BIGINT,
                     batch_date DATE,
                     platform_code VARCHAR(32),
+                    channel_code VARCHAR(32),
                     question_tier VARCHAR(8),
                     completed_count BIGINT,
                     hit_count BIGINT,
-                    effective_hit_count BIGINT
+                    effective_hit_count BIGINT,
+                    search_confirmed_count BIGINT,
+                    brand_answer_count BIGINT
                 )
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_platform_daily_summary
-                    (project_id, batch_date, platform_code, question_tier, completed_count, hit_count, effective_hit_count)
+                    (project_id, batch_date, platform_code, channel_code, question_tier, completed_count, hit_count,
+                     effective_hit_count, search_confirmed_count, brand_answer_count)
                 VALUES
-                    (1, DATE '2026-06-20', 'doubao', 'A', 10, 0, 0),
-                    (1, DATE '2026-06-20', 'deepseek', 'A', 10, 1, 0),
-                    (1, DATE '2026-06-20', 'tongyi', 'A', 10, 0, 1),
-                    (1, DATE '2026-06-20', 'wenxin', 'A', 10, 2, 0)
+                    (1, DATE '2026-06-20', 'doubao_web', 'doubao', 'A', 10, 0, 0, 10, 0),
+                    (1, DATE '2026-06-20', 'deepseek_ark_web', 'deepseek', 'A', 10, 1, 0, 10, 1),
+                    (1, DATE '2026-06-20', 'qwen_web', 'tongyi', 'A', 10, 0, 1, 10, 1),
+                    (1, DATE '2026-06-20', 'wenxin_web', 'wenxin', 'A', 10, 2, 0, 10, 2)
                 """);
 
         @SuppressWarnings("unchecked")
@@ -401,13 +419,14 @@ public class MobileDashboardAggregateServiceTest {
         createPollResultsTable(jdbcTemplate);
         jdbcTemplate.update("""
                 INSERT INTO poll_results
-                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, batch_date, question_tier, status, effective_hit, updated_at)
+                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, brand_in_answer, updated_at)
                 VALUES
-                    (1, 1, 1001, 'q1', 'doubao', DATE '2026-06-10', 'A', 'completed', 1, TIMESTAMP '2026-06-10 09:00:00'),
-                    (2, 1, 1001, 'q1', 'doubao', DATE '2026-06-17', 'A', 'completed', 0, TIMESTAMP '2026-06-17 09:00:00'),
-                    (3, 1, 1001, 'q1', 'qwen', DATE '2026-06-17', 'A', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00'),
-                    (4, 1, 1002, 'q2', 'hunyuan', DATE '2026-06-17', 'A', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00'),
-                    (5, 1, 1002, 'q2', 'ernie', DATE '2026-06-17', 'A', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00')
+                    (1, 1, 1001, 'q1', 'doubao_web', 'doubao', DATE '2026-06-10', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-10 09:00:00'),
+                    (2, 1, 1001, 'q1', 'doubao_web', 'doubao', DATE '2026-06-17', 'A', 'completed', 0, 0, TIMESTAMP '2026-06-17 09:00:00'),
+                    (3, 1, 1001, 'q1', 'qwen_web', 'tongyi', DATE '2026-06-17', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-17 09:00:00'),
+                    (4, 1, 1002, 'q2', 'tencent_search_web', 'yuanbao', DATE '2026-06-17', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-17 09:00:00'),
+                    (5, 1, 1002, 'q2', 'ernie', 'wenxin', DATE '2026-06-17', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-17 09:00:00')
                 """);
 
         Object aggregate = invoke(newService(jdbcTemplate), "loadLatestMentionAggregate", 1L, null);
@@ -415,6 +434,68 @@ public class MobileDashboardAggregateServiceTest {
         assertThat(recordValue(aggregate, "completed")).isEqualTo(3L);
         assertThat(recordValue(aggregate, "mentions")).isEqualTo(2L);
         assertThat(recordValue(aggregate, "coveredPlatformCount")).isEqualTo(2L);
+    }
+
+    @Test
+    void questionSearchSourcesUseEffectiveAttemptDeduplicateAndRejectUnsafeUrls() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createPollResultsTable(jdbcTemplate);
+        jdbcTemplate.execute("""
+                CREATE TABLE poll_search_sources (
+                    id BIGINT,
+                    attempt_id BIGINT,
+                    rank_no INT,
+                    title VARCHAR(255),
+                    original_url VARCHAR(1000),
+                    normalized_url VARCHAR(1000),
+                    domain VARCHAR(255),
+                    snippet VARCHAR(1000),
+                    publish_time TIMESTAMP,
+                    brand_matched INT
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE poll_citations (
+                    id BIGINT,
+                    attempt_id BIGINT,
+                    source_id BIGINT,
+                    confidence VARCHAR(32)
+                )
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, platform_code, channel_code, batch_date, question_tier, status,
+                     execution_finalized, effective_attempt_id, search_requested, search_triggered)
+                VALUES
+                    (10, 1, 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 99, 1, 1)
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_search_sources
+                    (id, attempt_id, rank_no, title, original_url, normalized_url, domain, snippet, publish_time, brand_matched)
+                VALUES
+                    (1, 99, 2, '可信来源', 'https://example.com/a?utm_source=test', 'https://example.com/a?utm_source=test', 'fake.example.net', '来源摘要', NULL, 1),
+                    (2, 99, 3, '重复来源', 'https://example.com/a#section', 'https://example.com/a#section', 'example.com', NULL, NULL, 0),
+                    (3, 99, 1, '不安全来源', 'javascript:alert(1)', 'javascript:alert(1)', NULL, NULL, NULL, 1),
+                    (4, 99, 4, '第二来源', 'https://news.example.org/b', NULL, 'trusted.example.com', NULL, NULL, 0),
+                    (5, 100, 1, '其他尝试', 'https://other.example.net/c', NULL, NULL, NULL, NULL, 1),
+                    (6, 99, 5, '本机地址', 'http://127.0.0.1/private', NULL, NULL, NULL, NULL, 0),
+                    (7, 99, 6, '伪装地址', 'https://trusted.example.com@evil.example.net/a', NULL, NULL, NULL, NULL, 0)
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_citations (id, attempt_id, source_id, confidence)
+                VALUES (1, 99, 1, 'CONFIRMED')
+                """);
+
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.QuestionSearchSource> sources =
+                (List<MobileDashboardAggregateVO.QuestionSearchSource>) invoke(
+                        newService(jdbcTemplate), "loadQuestionSearchSources", 1L, 10L);
+
+        assertThat(sources).extracting(MobileDashboardAggregateVO.QuestionSearchSource::getSourceId)
+                .containsExactly(1L, 4L);
+        assertThat(sources.get(0).getCited()).isTrue();
+        assertThat(sources.get(0).getDomain()).isEqualTo("example.com");
+        assertThat(sources.get(1).getDomain()).isEqualTo("news.example.org");
     }
 
     @Test
@@ -439,10 +520,11 @@ public class MobileDashboardAggregateServiceTest {
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_results
-                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, batch_date, question_tier, status, is_hit, effective_hit, updated_at)
+                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, channel_code, batch_date,
+                     question_tier, status, is_hit, effective_hit, brand_in_answer, updated_at)
                 VALUES
-                    (1, 1, 1001, 'q1', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, NULL, TIMESTAMP '2026-06-20 09:00:00'),
-                    (2, 1, 1002, 'q2', 'doubao', DATE '2026-06-26', 'A', 'completed', 1, NULL, TIMESTAMP '2026-06-26 09:00:00')
+                    (1, 1, 1001, 'q1', 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, NULL, 1, TIMESTAMP '2026-06-20 09:00:00'),
+                    (2, 1, 1002, 'q2', 'doubao_web', 'doubao', DATE '2026-06-26', 'A', 'completed', 1, NULL, 1, TIMESTAMP '2026-06-26 09:00:00')
                 """);
         MobileDashboardAggregateService service = newService(jdbcTemplate);
 
@@ -532,11 +614,12 @@ public class MobileDashboardAggregateServiceTest {
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_results
-                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, batch_date, question_tier, status, is_hit, effective_hit, updated_at)
+                    (id, project_id, keyword_result_id, keyword_text_snapshot, platform_code, channel_code, batch_date,
+                     question_tier, status, is_hit, effective_hit, brand_in_answer, updated_at)
                 VALUES
-                    (1, 1, 1001, '问题1', 'doubao', DATE '2026-06-20', 'A', 'completed', 0, 0, TIMESTAMP '2026-06-20 10:00:00'),
-                    (2, 1, 1002, '问题2', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-20 10:00:00'),
-                    (3, 1, 1004, '问题4', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-20 10:00:00')
+                    (1, 1, 1001, '问题1', 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 0, 0, 0, TIMESTAMP '2026-06-20 10:00:00'),
+                    (2, 1, 1002, '问题2', 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 1, 1, TIMESTAMP '2026-06-20 10:00:00'),
+                    (3, 1, 1004, '问题4', 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 1, 1, TIMESTAMP '2026-06-20 10:00:00')
                 """);
         jdbcTemplate.update("""
                 INSERT INTO article_prompt_template (id, question_scene_code)
@@ -641,6 +724,7 @@ public class MobileDashboardAggregateServiceTest {
                 LocalDateTime.of(2026, 7, 4, 10, 0),
                 true,
                 true,
+                true,
                 false,
                 false,
                 null,
@@ -653,6 +737,7 @@ public class MobileDashboardAggregateServiceTest {
                 "doubao",
                 "阜阳颍州区全屋智能哪家好",
                 LocalDateTime.of(2026, 7, 4, 9, 0),
+                true,
                 true,
                 true,
                 true,
@@ -673,6 +758,38 @@ public class MobileDashboardAggregateServiceTest {
             assertThat(item.getResponseText()).isEqualTo("Doubao answer");
             assertThat(item.getFirstRecommend().getValue()).isTrue();
             assertThat(item.getTags()).contains("mentioned", "recommended", "first_recommend");
+        });
+    }
+
+    @Test
+    void completedResultWithoutActualSearchIsExposedAsSearchNotTriggered() throws Exception {
+        MobileDashboardAggregateService service = newService(jdbcTemplate());
+        Object row = questionMonitorRow(
+                1001L,
+                2001L,
+                "doubao",
+                "联网未触发的问题",
+                LocalDateTime.of(2026, 7, 4, 10, 0),
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                "模型直接回答"
+        );
+
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.QuestionMonitorItem> items =
+                (List<MobileDashboardAggregateVO.QuestionMonitorItem>) invoke(service, "mergeQuestionMonitorRows",
+                        List.of(row), true, "ready");
+
+        assertThat(items).singleElement().satisfies(item -> {
+            assertThat(item.getMonitorStatus()).isEqualTo("search_not_triggered");
+            assertThat(item.getMentioned()).isFalse();
+            assertThat(item.getPollResultId()).isEqualTo(2001L);
+            assertThat(item.getRecommended().isAvailable()).isFalse();
         });
     }
 
@@ -828,6 +945,18 @@ public class MobileDashboardAggregateServiceTest {
                 """);
     }
 
+    private static void createAiPlatformConfigTable(JdbcTemplate jdbcTemplate) {
+        jdbcTemplate.execute("""
+                CREATE TABLE ai_platform_config (
+                    id BIGINT,
+                    platform_code VARCHAR(32),
+                    platform_logo_url VARCHAR(1000),
+                    platform_logo_object_key VARCHAR(1000),
+                    enabled INT
+                )
+                """);
+    }
+
     private static void createQuestionCoverageTables(JdbcTemplate jdbcTemplate) {
         jdbcTemplate.execute("""
                 CREATE TABLE project_keyword_group_rel (
@@ -870,11 +999,17 @@ public class MobileDashboardAggregateServiceTest {
                     keyword_result_id BIGINT,
                     keyword_text_snapshot VARCHAR(255),
                     platform_code VARCHAR(32),
+                    channel_code VARCHAR(32),
                     batch_date DATE,
                     question_tier VARCHAR(8),
                     status VARCHAR(32),
                     is_hit INT,
                     effective_hit INT,
+                    execution_finalized INT DEFAULT 1,
+                    effective_attempt_id BIGINT DEFAULT 1,
+                    search_requested INT DEFAULT 1,
+                    search_triggered INT DEFAULT 1,
+                    brand_in_answer INT DEFAULT 0,
                     detail_json CLOB,
                     updated_at TIMESTAMP
                 )
@@ -917,6 +1052,7 @@ public class MobileDashboardAggregateServiceTest {
                                              String questionTitle,
                                              LocalDateTime completedAt,
                                              boolean mentioned,
+                                             Boolean searchTriggered,
                                              boolean rowJudgeReady,
                                              Boolean recommended,
                                              Boolean firstRecommend,
@@ -932,6 +1068,7 @@ public class MobileDashboardAggregateServiceTest {
                 String.class,
                 LocalDateTime.class,
                 boolean.class,
+                Boolean.class,
                 boolean.class,
                 Boolean.class,
                 Boolean.class,
@@ -940,7 +1077,7 @@ public class MobileDashboardAggregateServiceTest {
                 String.class);
         constructor.setAccessible(true);
         return constructor.newInstance(keywordResultId, pollResultId, platformCode, questionTitle, completedAt,
-                mentioned, rowJudgeReady, recommended, firstRecommend, rankPosition, evidence, responseText);
+                mentioned, searchTriggered, rowJudgeReady, recommended, firstRecommend, rankPosition, evidence, responseText);
     }
 
     public static String substringIndex(String value, String delimiter, int count) {
