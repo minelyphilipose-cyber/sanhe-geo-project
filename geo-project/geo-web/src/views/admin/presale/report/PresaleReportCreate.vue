@@ -543,6 +543,7 @@ import {
   type ReportScopePreviewVO
 } from '@/api/presaleReport'
 import { calculatePromptScope } from '@/utils/presale/prompt-scope'
+import { createIdempotencyKey } from '@/utils/idempotency'
 
 interface PromptDraftItem {
   sourceTemplateId: number
@@ -616,6 +617,7 @@ const llmBaseSnapshot = ref('')
 const llmLastWarning = ref('')
 const llmQuestionSeq = ref(0)
 const llmQuestions = ref<LlmQuestionDraftItem[]>([])
+let pendingCreateRequest: { payloadSignature: string; requestId: string } | null = null
 const DEFAULT_USER_DEMAND = '了解品牌在AI搜索中的真实表现。'
 const llmPlan = reactive<LlmPromptQuestionPlan>({
   totalCount: 0,
@@ -1421,9 +1423,14 @@ async function onSubmit() {
             promptTemplateVersion: promptTemplateVersion.value,
             promptTemplates: buildPromptTemplateDrafts()
           }
-    const reportId = await createReport({
-      ...payload
-    })
+    const payloadSignature = JSON.stringify(payload)
+    if (!pendingCreateRequest || pendingCreateRequest.payloadSignature !== payloadSignature) {
+      pendingCreateRequest = {
+        payloadSignature,
+        requestId: createIdempotencyKey('presale-report')
+      }
+    }
+    const reportId = await createReport({ ...payload, requestId: pendingCreateRequest.requestId })
     ElMessage.success('已创建报告,开始生成')
     router.push(`/admin/presale/report/${reportId}/progress`)
   } catch (err: any) {

@@ -1,6 +1,7 @@
 import request from '@/api/request'
 import { unwrap } from '@/api/presale/unwrap'
 import type { R } from '@/types'
+import { createIdempotencyKey } from '@/utils/idempotency'
 
 // ============================================================================
 // Response VO(与后端一一对应)
@@ -274,6 +275,8 @@ export interface Page<T> {
 // ============================================================================
 
 export interface CreateReportRequest {
+  /** 合伙人额度预占的幂等键；内部用户可省略。 */
+  requestId?: string
   brandName: string
   brandFormerNames?: string[]
   industry: string
@@ -379,7 +382,8 @@ export function listReports(params: ReportListQueryRequest) {
  * 新建报告,返回 reportId。
  */
 export function createReport(data: CreateReportRequest) {
-  return unwrap(request.post<R<number>>('/presale/reports', data))
+  const requestId = data.requestId?.trim() || createIdempotencyKey('presale-report')
+  return unwrap(request.post<R<number>>('/presale/reports', { ...data, requestId }))
 }
 
 /**

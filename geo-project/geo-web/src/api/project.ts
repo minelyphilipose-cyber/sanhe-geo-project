@@ -13,6 +13,7 @@ import type {
   ProjectChannelAllocationQuota,
   ProjectKeywordGroupQuota,
 } from '@/types'
+import { createIdempotencyKey } from '@/utils/idempotency'
 
 export function getProjectList(params: {
   current?: number
@@ -44,7 +45,11 @@ export interface PartnerProjectStartRequest {
 }
 
 export function submitPartnerProjectStartRequest(id: number, data?: { requestId?: string; remark?: string }) {
-  return request.post<R<PartnerProjectStartRequest>>(`/partner/projects/${id}/start-requests`, data || {})
+  const requestId = data?.requestId?.trim() || createIdempotencyKey('project-start')
+  return request.post<R<PartnerProjectStartRequest>>(
+    `/partner/projects/${id}/start-requests`,
+    { ...data, requestId },
+  )
 }
 
 export interface AdminProjectStartRequest {

@@ -442,6 +442,7 @@ import { regionCodesFromPayload, regionPayloadFromCodes } from '@/constants/regi
 import { useDictStore } from '@/stores/dict'
 import { useUserStore } from '@/stores/user'
 import { errorMessage } from '@/utils/error'
+import { createIdempotencyKey } from '@/utils/idempotency'
 
 const dictStore = useDictStore()
 const userStore = useUserStore()
@@ -457,6 +458,7 @@ const loading = ref(false)
 const saving = ref(false)
 const completingCompanyId = ref<number | null>(null)
 const submittingStartRequestId = ref<number | null>(null)
+const startRequestIdempotencyKeys = new Map<number, string>()
 const returningCompanyId = ref<number | null>(null)
 const brandLoading = ref(false)
 const keywordGroupLoading = ref(false)
@@ -986,9 +988,12 @@ async function submitStartRequest(row: Project) {
   }
   submittingStartRequestId.value = row.id
   try {
-    await submitPartnerProjectStartRequest(row.id)
+    const requestId = startRequestIdempotencyKeys.get(row.id) || createIdempotencyKey('project-start')
+    startRequestIdempotencyKeys.set(row.id, requestId)
+    await submitPartnerProjectStartRequest(row.id, { requestId })
     ElMessage.success('工单已提交总部')
     await load()
+    startRequestIdempotencyKeys.delete(row.id)
   } catch (err) {
     ElMessage.error(errorMessage(err, '提交工单失败'))
   } finally {
