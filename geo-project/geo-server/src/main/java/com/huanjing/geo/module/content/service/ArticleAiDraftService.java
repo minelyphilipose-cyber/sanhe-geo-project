@@ -252,7 +252,7 @@ public class ArticleAiDraftService {
                             true,
                             context.runtimePolicy().allowContactInfo(),
                             true,
-                            context.forbiddenPhrases(),
+                            generationForbiddenPhrases(context),
                             ArticlePromptChannels.maxTitleChars(context.channelGroupCode())
                     )
             );
@@ -328,7 +328,7 @@ public class ArticleAiDraftService {
                             true,
                             context.runtimePolicy().allowContactInfo(),
                             true,
-                            context.forbiddenPhrases(),
+                            generationForbiddenPhrases(context),
                             ArticlePromptChannels.maxTitleChars(context.channelGroupCode())
                     )
             );
@@ -598,7 +598,8 @@ public class ArticleAiDraftService {
                         generated.title(),
                         generated.content(),
                         context.brand(),
-                        context.medicalContext()
+                        context.medicalContext(),
+                        medicalForbiddenPhrases(context)
                 )
         );
         if (!result.passed()) {
@@ -614,7 +615,8 @@ public class ArticleAiDraftService {
                             generated.title(),
                             generated.content(),
                             context.brand(),
-                            context.medicalContext()
+                            context.medicalContext(),
+                            medicalForbiddenPhrases(context)
                     ),
                     result,
                     null,
@@ -622,6 +624,14 @@ public class ArticleAiDraftService {
             );
             throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "医疗合规校验未通过：" + medicalComplianceChecker.toJson(result));
         }
+    }
+
+    private List<String> generationForbiddenPhrases(ArticleGenerationPromptContextFactory.PromptContextResult context) {
+        return context.v2() && context.medicalContext() != null ? List.of() : context.forbiddenPhrases();
+    }
+
+    private List<String> medicalForbiddenPhrases(ArticleGenerationPromptContextFactory.PromptContextResult context) {
+        return context.v2() && context.medicalContext() != null ? context.forbiddenPhrases() : List.of();
     }
 
     private void applyMedicalDraftFields(ArticleDraft draft,

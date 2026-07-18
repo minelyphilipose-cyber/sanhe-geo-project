@@ -338,11 +338,76 @@ class MedicalArticleComplianceCheckerTest {
                 .contains("efficacy_claim");
     }
 
+    @Test
+    void projectForbiddenPhraseAllowsNegativeEducationContext() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of());
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("医美宣传怎么判断",
+                        "不要相信一次见效这类宣传话术，实际效果存在个体差异，也需要了解风险和禁忌。",
+                        false, 2, List.of("一次见效"))
+        );
+
+        assertThat(result.passed()).isTrue();
+    }
+
+    @Test
+    void projectForbiddenPhraseBlocksPositivePromise() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of());
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("医美项目介绍",
+                        "该项目可以一次见效，同时仍需了解风险和个体差异。",
+                        false, 2, List.of("一次见效"))
+        );
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                .contains("project_forbidden_phrase");
+    }
+
+    @Test
+    void projectForbiddenPhraseBlocksWhenAnyOccurrenceIsPromotional() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of());
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("医美项目介绍",
+                        "不要相信一次见效的宣传话术，但该项目确实可以一次见效，仍需关注风险和个体差异。",
+                        false, 2, List.of("一次见效"))
+        );
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                .contains("project_forbidden_phrase");
+    }
+
+    @Test
+    void ambiguousStandaloneProjectTermIsNotMatchedAsRawSubstring() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of());
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("医美项目怎么判断",
+                        "最需要注意的是先了解风险和禁忌，并结合个体差异评估。",
+                        false, 2, List.of("最"))
+        );
+
+        assertThat(result.passed()).isTrue();
+    }
+
     private MedicalArticleComplianceChecker.CheckInput input(String title,
                                                             String content,
                                                             boolean highRisk,
                                                             int brandExposureLimit) {
         return input(title, content, highRisk, brandExposureLimit, "baijiahao");
+    }
+
+    private MedicalArticleComplianceChecker.CheckInput input(String title,
+                                                              String content,
+                                                              boolean highRisk,
+                                                              int brandExposureLimit,
+                                                              List<String> projectForbiddenPhrases) {
+        return input(title, content, highRisk, brandExposureLimit, "self_media", "baijiahao",
+                TemplatePerspectiveCodes.CUSTOMER, projectForbiddenPhrases);
     }
 
     private MedicalArticleComplianceChecker.CheckInput input(String title,
@@ -370,6 +435,18 @@ class MedicalArticleComplianceCheckerTest {
                                                             String channelGroupCode,
                                                             String channelSubCode,
                                                             String perspectiveCode) {
+        return input(title, content, highRisk, brandExposureLimit, channelGroupCode, channelSubCode,
+                perspectiveCode, List.of());
+    }
+
+    private MedicalArticleComplianceChecker.CheckInput input(String title,
+                                                             String content,
+                                                             boolean highRisk,
+                                                             int brandExposureLimit,
+                                                             String channelGroupCode,
+                                                             String channelSubCode,
+                                                             String perspectiveCode,
+                                                             List<String> projectForbiddenPhrases) {
         Brand brand = new Brand();
         brand.setId(3L);
         brand.setBrandName("星链口腔");
@@ -404,7 +481,8 @@ class MedicalArticleComplianceCheckerTest {
                 title,
                 content,
                 brand,
-                context
+                context,
+                projectForbiddenPhrases
         );
     }
 

@@ -40,6 +40,11 @@ public class MedicalArticleGenerationService {
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
+    private static final String V2_SPECIAL_INDUSTRY_COMPLIANCE_DIRECTION = """
+            特殊行业内容应以事实解释、适用边界、风险提示和理性决策为主。
+            不得作疗效、收益、安全性、时效或持续周期保证，不得制造焦虑、替代专业判断，
+            不得使用价格促销、咨询预约或其他直接转化表达。材料不足时应收窄表述，不得补造资质、案例或结果。
+            """.trim();
 
     private final BrandOfferingMapper brandOfferingMapper;
     private final MedicalTopicAngleMapper topicAngleMapper;
@@ -116,6 +121,68 @@ public class MedicalArticleGenerationService {
         ));
     }
 
+    /**
+     * V2 keeps the user topic as the primary writing task. A medical topic angle is
+     * resolved only when the caller explicitly selected one, and is then treated as
+     * optional supporting direction rather than a replacement topic.
+     */
+    public Optional<MedicalPromptContext> resolveContextV2(Project project,
+                                                           Brand brand,
+                                                           String channelGroupCode,
+                                                           String channelSubCode,
+                                                           BatchArticleGenerateRequest.TopicConfig topicConfig) {
+        Optional<String> industry = detectIndustryCode(brand);
+        if (industry.isEmpty()) {
+            if (topicConfig != null && StringUtils.hasText(topicConfig.getMedicalIndustryCode())) {
+                throw new BizException(400, "品牌未配置特殊行业类型，不能生成特殊行业文章");
+            }
+            return Optional.empty();
+        }
+        String industryCode = industry.get();
+        if (topicConfig != null && StringUtils.hasText(topicConfig.getMedicalIndustryCode())
+                && !industryCode.equals(topicConfig.getMedicalIndustryCode().trim())) {
+            throw new BizException(400, "特殊行业与品牌行业不匹配，不能生成特殊行业文章");
+        }
+
+        String channelTier = resolveChannelTier(channelGroupCode, channelSubCode);
+        List<BrandOffering> enabledOfferings = enabledMedicalOfferings(brand.getId(), industryCode);
+        String requestedCategory = topicConfig == null ? null : trimToNull(topicConfig.getMedicalCategoryCode());
+        validateRequestedCategory(requestedCategory, enabledOfferings);
+
+        MedicalTopicAngle topicAngle = resolveExplicitTopicAngle(topicConfig, industryCode, requestedCategory, enabledOfferings);
+        String categoryCode = topicAngle == null ? requestedCategory : trimToNull(topicAngle.getCategoryCode());
+        String categoryName = topicAngle == null
+                ? (topicConfig == null ? null : trimToNull(topicConfig.getMedicalCategoryName()))
+                : trimToNull(topicAngle.getCategoryName());
+        String focus = resolveV2Focus(topicConfig, topicAngle);
+        MedicalComplianceKernel kernel = requireKernel(industryCode, channelTier);
+        MedicalChannelStyleModule style = requireStyle(channelGroupCode, channelSubCode, channelTier);
+        BrandOffering offering = enabledOfferings.stream()
+                .filter(item -> categoryCode != null && Objects.equals(trim(item.getMedicalCategoryCode()), categoryCode))
+                .findFirst()
+                .orElse(null);
+
+        return Optional.of(new MedicalPromptContext(
+                industryCode,
+                channelTier,
+                categoryCode,
+                categoryName,
+                topicAngle == null ? null : topicAngle.getId(),
+                topicAngle == null ? null : trimToNull(topicAngle.getTopicAngle()),
+                null,
+                focus,
+                kernel.getSystemPrompt(),
+                kernel.getBrandExposureLimit(),
+                false,
+                style.getStylePrompt(),
+                Boolean.TRUE.equals(style.getHighRisk()),
+                offering == null ? null : trimToNull(offering.getQualificationRef()),
+                qualificationSnapshot(brand, industryCode),
+                scopeSnapshot(brand, industryCode),
+                trimToNull(brand.getMedicalAdReviewNo())
+        ));
+    }
+
     public BatchArticlePromptBuilder.PromptBuildResult applyMedicalPrompt(
             BatchArticlePromptBuilder.PromptBuildResult prompt,
             MedicalPromptContext context
@@ -179,6 +246,7 @@ public class MedicalArticleGenerationService {
         List<String> facts = new ArrayList<>();
         appendFact(facts, "特殊行业", specialIndustryService.industryLabel(context.industryCode()));
         appendFact(facts, "项目或服务品类", context.categoryName());
+        appendFact(facts, "辅助关注角度", context.topicAngle());
         appendFact(facts, "本篇关注方向", context.focus());
         appendFact(facts, "项目或服务资质", context.qualificationRef());
         appendFact(facts, "主体资质", context.medicalLicense());
@@ -186,7 +254,7 @@ public class MedicalArticleGenerationService {
         appendFact(facts, "审查或备案编号", context.medicalAdReviewNo());
 
         StringBuilder specialRules = new StringBuilder("# 特殊行业合规边界\n")
-                .append(context.complianceKernelPrompt().trim());
+                .append(V2_SPECIAL_INDUSTRY_COMPLIANCE_DIRECTION);
         if (StringUtils.hasText(context.channelStylePrompt())) {
             specialRules.append("\n").append(context.channelStylePrompt().trim());
         }
@@ -278,6 +346,54 @@ public class MedicalArticleGenerationService {
                 .toList();
         List<MedicalTopicAngle> pool = filtered.isEmpty() ? candidates : filtered;
         return pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
+    }
+
+    private MedicalTopicAngle resolveExplicitTopicAngle(BatchArticleGenerateRequest.TopicConfig topicConfig,
+                                                         String industryCode,
+                                                         String requestedCategory,
+                                                         List<BrandOffering> enabledOfferings) {
+        if (topicConfig == null || topicConfig.getTopicAngleId() == null) {
+            return null;
+        }
+        Set<String> allowedCategories = enabledCategoryCodes(enabledOfferings);
+        MedicalTopicAngle angle = topicAngleMapper.selectById(topicConfig.getTopicAngleId());
+        if (angle == null || angle.getDeletedAt() != null || !Boolean.TRUE.equals(angle.getEnabled())
+                || !industryCode.equals(angle.getIndustryCode())
+                || (!allowedCategories.isEmpty() && !allowedCategories.contains(angle.getCategoryCode()))
+                || (requestedCategory != null && !requestedCategory.equals(angle.getCategoryCode()))) {
+            throw new BizException(400, "特殊行业选题不属于该品牌已启用资质项目");
+        }
+        return angle;
+    }
+
+    private void validateRequestedCategory(String requestedCategory, List<BrandOffering> enabledOfferings) {
+        Set<String> allowedCategories = enabledCategoryCodes(enabledOfferings);
+        if (!allowedCategories.isEmpty() && requestedCategory != null && !allowedCategories.contains(requestedCategory)) {
+            throw new BizException(400, "特殊行业品类不属于该品牌已启用资质项目");
+        }
+    }
+
+    private Set<String> enabledCategoryCodes(List<BrandOffering> enabledOfferings) {
+        Set<String> result = new HashSet<>();
+        for (BrandOffering offering : enabledOfferings) {
+            String categoryCode = trimToNull(offering.getMedicalCategoryCode());
+            if (categoryCode != null) {
+                result.add(categoryCode);
+            }
+        }
+        return result;
+    }
+
+    private String resolveV2Focus(BatchArticleGenerateRequest.TopicConfig topicConfig, MedicalTopicAngle topicAngle) {
+        String requested = topicConfig == null ? null : trimToNull(topicConfig.getFocus());
+        if (requested != null && MedicalArticleConstants.FOCUSES.contains(requested)) {
+            return requested;
+        }
+        if (topicAngle == null) {
+            return null;
+        }
+        String recommended = trimToNull(topicAngle.getRecommendedFocus());
+        return recommended != null && MedicalArticleConstants.FOCUSES.contains(recommended) ? recommended : null;
     }
 
     private String resolveSkeleton(String requested) {
@@ -431,6 +547,8 @@ public class MedicalArticleGenerationService {
             map.put("medicalCategoryCode", context.categoryCode());
             map.put("medicalCategoryName", context.categoryName());
             map.put("topicAngleId", context.topicAngleId());
+            map.put("topicAngle", context.topicAngle());
+            map.put("focus", context.focus());
             map.put("medicalLicense", context.medicalLicense());
             map.put("diagnosisScope", context.diagnosisScope());
             map.put("medicalAdReviewNo", context.medicalAdReviewNo());

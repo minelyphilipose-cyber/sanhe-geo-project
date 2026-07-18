@@ -279,7 +279,7 @@ class BatchArticleGenerationServiceTest {
                 brand,
                 null,
                 prompt,
-                List.of(),
+                List.of("一次见效"),
                 null,
                 null,
                 "self_media",
@@ -290,7 +290,10 @@ class BatchArticleGenerationServiceTest {
                 TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
                 null,
                 false,
-                medicalContext
+                medicalContext,
+                new ArticleRuntimePolicy("self_media", "wechat", TemplatePerspectiveCodes.CUSTOMER,
+                        ArticleRuntimePolicyResolver.CONTACT_NONE, false),
+                true
         ));
         when(articleModelResolver.resolve(null, null, "system", true))
                 .thenReturn(new ArticleModelResolver.ModelSelection("mock", "mock-model", null));
@@ -310,8 +313,17 @@ class BatchArticleGenerationServiceTest {
 
         ReflectionTestUtils.invokeMethod(service, "runTask", batch, task);
 
-        verify(articleGenerationEngine, times(MedicalArticleConstants.MAX_COMPLIANCE_GENERATION_ATTEMPTS)).generate(any());
-        verify(medicalComplianceChecker, times(MedicalArticleConstants.MAX_COMPLIANCE_GENERATION_ATTEMPTS)).check(any());
+        ArgumentCaptor<ArticleGenerationEngine.GenerateInput> generateInputCaptor = forClass(ArticleGenerationEngine.GenerateInput.class);
+        verify(articleGenerationEngine, times(MedicalArticleConstants.MAX_COMPLIANCE_GENERATION_ATTEMPTS))
+                .generate(generateInputCaptor.capture());
+        assertThat(generateInputCaptor.getAllValues())
+                .allSatisfy(input -> assertThat(input.forbiddenPhrases()).isEmpty());
+        ArgumentCaptor<MedicalArticleComplianceChecker.CheckInput> checkInputCaptor =
+                forClass(MedicalArticleComplianceChecker.CheckInput.class);
+        verify(medicalComplianceChecker, times(MedicalArticleConstants.MAX_COMPLIANCE_GENERATION_ATTEMPTS))
+                .check(checkInputCaptor.capture());
+        assertThat(checkInputCaptor.getAllValues())
+                .allSatisfy(input -> assertThat(input.projectForbiddenPhrases()).containsExactly("一次见效"));
         verify(medicalComplianceChecker, times(MedicalArticleConstants.MAX_COMPLIANCE_GENERATION_ATTEMPTS + 1))
                 .logHits(any(), any(), any(), any());
         verify(medicalArticleGenerationService, never()).recordHistory(any(), any(), any(), any());
@@ -337,8 +349,76 @@ class BatchArticleGenerationServiceTest {
         assertEquals(901L, finalTask.getDiscardedArticleId());
         assertEquals(MedicalArticleConstants.COMPLIANCE_DISCARDED, finalTask.getComplianceStatus());
         assertEquals(2, finalTask.getRetryCount());
+        assertEquals("种植牙怎么选", finalTask.getTopic());
         assertThat(finalTask.getComplianceIssuesJson()).contains("absolute_claim");
         assertThat(finalTask.getErrorMessage()).contains("医疗合规校验失败");
+    }
+
+    @Test
+    void runTaskSavesApprovedArticleWhenSecondMedicalAttemptPasses() throws Exception {
+        Project project = new Project();
+        project.setId(1L);
+        project.setBrandId(2L);
+        project.setStatus("active");
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("星链口腔");
+        when(projectMapper.selectById(1L)).thenReturn(project);
+        when(brandMapper.selectById(2L)).thenReturn(brand);
+
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(10L);
+        batch.setProjectId(1L);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(102L);
+        task.setBatchId(10L);
+        task.setProjectId(1L);
+        task.setTopic("阜阳祛斑医院推荐");
+        task.setArticleType("industry_article");
+        task.setChannelGroupCode("self_media");
+        task.setChannelSubCode("wechat");
+        task.setArticleIndexInBatch(1);
+
+        MedicalArticleGenerationService.MedicalPromptContext medicalContext = medicalContext();
+        when(promptContextFactory.buildForBatch(batch, task)).thenReturn(new ArticleGenerationPromptContextFactory.PromptContextResult(
+                project, brand, null, promptResult(), List.of("一次见效"), null, null,
+                "self_media", "wechat", "wechat", null, TemplatePerspectiveCodes.CUSTOMER,
+                TemplatePerspectiveService.MATCH_SCOPE_DEFAULT, null, false, medicalContext,
+                new ArticleRuntimePolicy("self_media", "wechat", TemplatePerspectiveCodes.CUSTOMER,
+                        ArticleRuntimePolicyResolver.CONTACT_NONE, false), true
+        ));
+        when(articleModelResolver.resolve(null, null, "system", true))
+                .thenReturn(new ArticleModelResolver.ModelSelection("mock", "mock-model", null));
+        when(articleGenerationEngine.generate(any())).thenReturn(generatedArticle());
+        MedicalArticleComplianceChecker.CheckResult failed = new MedicalArticleComplianceChecker.CheckResult(
+                false, List.of(new MedicalArticleComplianceChecker.ComplianceIssue(
+                null, "project_forbidden_phrase", "block", "一次见效", "命中特殊行业项目禁用表达")));
+        when(medicalComplianceChecker.check(any()))
+                .thenReturn(failed)
+                .thenReturn(MedicalArticleComplianceChecker.CheckResult.pass());
+        when(medicalComplianceChecker.toJson(failed)).thenReturn("{\"passed\":false}");
+        when(articleDraftMapper.insert(any())).thenAnswer(invocation -> {
+            ArticleDraft draft = invocation.getArgument(0);
+            draft.setId(902L);
+            return 1;
+        });
+
+        ReflectionTestUtils.invokeMethod(service, "runTask", batch, task);
+
+        verify(articleGenerationEngine, times(2)).generate(any());
+        verify(medicalComplianceChecker, times(2)).check(any());
+        verify(medicalArticleGenerationService).recordHistory(project, brand, medicalContext, 902L);
+        ArgumentCaptor<ArticleDraft> draftCaptor = forClass(ArticleDraft.class);
+        verify(articleDraftMapper).insert(draftCaptor.capture());
+        assertEquals("approved", draftCaptor.getValue().getStatus());
+        assertEquals("阜阳祛斑医院推荐", draftCaptor.getValue().getTopic());
+
+        ArgumentCaptor<BatchArticleGenerationTask> taskCaptor = forClass(BatchArticleGenerationTask.class);
+        verify(taskMapper, atLeast(1)).updateById(taskCaptor.capture());
+        BatchArticleGenerationTask finalTask = taskCaptor.getAllValues().get(taskCaptor.getAllValues().size() - 1);
+        assertEquals("success", finalTask.getStatus());
+        assertEquals(1, finalTask.getRetryCount());
+        assertEquals("阜阳祛斑医院推荐", finalTask.getTopic());
     }
 
     @Test

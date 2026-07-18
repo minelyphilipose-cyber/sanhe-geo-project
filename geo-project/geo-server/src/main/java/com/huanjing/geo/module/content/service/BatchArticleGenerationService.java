@@ -996,7 +996,7 @@ public class BatchArticleGenerationService {
                     promptContextFactory.buildForBatch(batch, task);
             Project contentProject = promptContext.project();
             Brand contentBrand = promptContext.brand();
-            applyMedicalContext(batch, task, promptContext.medicalContext());
+            applyMedicalContext(batch, task, promptContext.medicalContext(), promptContext.v2());
             task.setTopicAsQuestion(promptContext.topicAsQuestion());
             if (promptContext.fallbackToDefaultPrompt()) {
                 task.setTemplateSource(TEMPLATE_SOURCE_FALLBACK_DEFAULT_PROMPT);
@@ -1006,6 +1006,12 @@ public class BatchArticleGenerationService {
             task.setAudiencePerspective(prompt.audiencePerspective());
 
             List<String> forbiddenPhrases = promptContext.forbiddenPhrases();
+            List<String> generationForbiddenPhrases = promptContext.v2() && promptContext.medicalContext() != null
+                    ? List.of()
+                    : forbiddenPhrases;
+            List<String> medicalForbiddenPhrases = promptContext.v2() && promptContext.medicalContext() != null
+                    ? forbiddenPhrases
+                    : List.of();
             ArticleModelResolver.ModelSelection selectedModel = articleModelResolver.resolve(null, null, prompt.systemPrompt(), true);
             task.setModelPlatformCode(selectedModel.platformCode());
             task.setModelId(selectedModel.modelId());
@@ -1027,7 +1033,7 @@ public class BatchArticleGenerationService {
                                 true,
                                 promptContext.runtimePolicy().allowContactInfo(),
                                 true,
-                                forbiddenPhrases,
+                                generationForbiddenPhrases,
                                 ArticlePromptChannels.maxTitleChars(task.getChannelGroupCode())
                         )
                 );
@@ -1042,7 +1048,8 @@ public class BatchArticleGenerationService {
                         generated.title(),
                         generated.content(),
                         contentBrand,
-                        promptContext.medicalContext()
+                        promptContext.medicalContext(),
+                        medicalForbiddenPhrases
                 ));
                 if (complianceResult.passed()) {
                     break;
@@ -1058,7 +1065,8 @@ public class BatchArticleGenerationService {
                                 generated.title(),
                                 generated.content(),
                                 contentBrand,
-                                promptContext.medicalContext()
+                                promptContext.medicalContext(),
+                                medicalForbiddenPhrases
                         ),
                         complianceResult,
                         null,
@@ -1070,7 +1078,7 @@ public class BatchArticleGenerationService {
             }
             if (!complianceResult.passed()) {
                 Long discardedArticleId = persistDiscardedArticle(project, task, generated, prompt, selectedModel, complianceResult,
-                        promptContext.medicalContext());
+                        promptContext.medicalContext(), medicalForbiddenPhrases);
                 markTaskComplianceDiscarded(task, discardedArticleId, prompt, selectedModel, generated, complianceResult, retryCount);
                 specialIndustryComplianceAlertService.notifyComplianceDiscarded(contentProject, contentBrand, task, discardedArticleId, complianceResult);
                 return;
@@ -1205,7 +1213,8 @@ public class BatchArticleGenerationService {
                                          BatchArticlePromptBuilder.PromptBuildResult prompt,
                                          ArticleModelResolver.ModelSelection model,
                                          MedicalArticleComplianceChecker.CheckResult complianceResult,
-                                         MedicalArticleGenerationService.MedicalPromptContext medicalContext) {
+                                         MedicalArticleGenerationService.MedicalPromptContext medicalContext,
+                                         List<String> medicalForbiddenPhrases) {
         return Objects.requireNonNull(transactionTemplate.execute(status -> {
             ArticleDraft draft = new ArticleDraft();
             draft.setBatchId(null);
@@ -1262,7 +1271,8 @@ public class BatchArticleGenerationService {
                             title,
                             generated == null ? "" : generated.content(),
                             null,
-                            null
+                            medicalContext,
+                            medicalForbiddenPhrases
                     ),
                     complianceResult,
                     draft.getId(),
@@ -1273,11 +1283,14 @@ public class BatchArticleGenerationService {
 
     private void applyMedicalContext(BatchArticleGenerationBatch batch,
                                      BatchArticleGenerationTask task,
-                                     MedicalArticleGenerationService.MedicalPromptContext context) {
+                                     MedicalArticleGenerationService.MedicalPromptContext context,
+                                     boolean v2) {
         if (context == null) {
             return;
         }
-        task.setTopic(context.topicAngle());
+        if (!v2) {
+            task.setTopic(context.topicAngle());
+        }
         task.setMedicalIndustryCode(context.industryCode());
         task.setMedicalCategoryCode(context.categoryCode());
         task.setMedicalCategoryName(context.categoryName());

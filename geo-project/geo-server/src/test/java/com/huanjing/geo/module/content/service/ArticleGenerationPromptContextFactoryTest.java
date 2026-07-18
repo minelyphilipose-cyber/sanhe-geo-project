@@ -105,6 +105,9 @@ class ArticleGenerationPromptContextFactoryTest {
                 .thenReturn(new BrandOfferingPromptSelector.SelectionResult(
                         List.<BrandOfferingPromptSelector.SelectedOffering>of()));
         when(medicalArticleGenerationService.resolveContext(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(medicalArticleGenerationService.resolveContextV2(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(medicalArticleGenerationService.applyMedicalPromptV2(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -261,6 +264,39 @@ class ArticleGenerationPromptContextFactoryTest {
         assertThat(result.prompt().userPrompt()).contains("正文不含标题不少于2000字");
         assertThat(result.prompt().promptSnapshot()).contains("\"targetMinChars\":2000");
         assertThat(result.prompt().promptSnapshot()).contains("\"targetMaxChars\":3000");
+    }
+
+    @Test
+    void v2MedicalContextKeepsUserTopicAndOmitsForbiddenPhraseListFromPrompt() {
+        ArticlePromptTemplate template = selfMediaTemplate();
+        ArticlePromptTemplateVersion version = selfMediaVersion();
+        version.setQualityRulesJson("{\"promptContract\":\"v2\"}");
+        when(promptTemplateMapper.selectById(101L)).thenReturn(template);
+        when(promptTemplateVersionMapper.selectById(201L)).thenReturn(version);
+        Brand brand = brand();
+        brand.setForbiddenPhrases("[\"一次见效\"]");
+        when(brandMapper.selectById(20L)).thenReturn(brand);
+        MedicalArticleGenerationService.MedicalPromptContext medicalContext = new MedicalArticleGenerationService.MedicalPromptContext(
+                "medical_beauty", "education", null, null, 55L, "吸脂填充风险怎么判断",
+                null, "risk", "kernel", 2, false, "style", false,
+                null, null, null, null
+        );
+        when(medicalArticleGenerationService.resolveContextV2(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(medicalContext));
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result = factory.buildStrict(new PromptContextRequest(
+                10L, "manual", "industry_article", "self_media", "baijiahao",
+                "阜阳祛斑医院推荐", null, "medium", null, null, null,
+                101L, 201L, null, null, null,
+                "medical_beauty", null, null, null, null, null, 1
+        ));
+
+        assertThat(result.v2()).isTrue();
+        assertThat(result.promptInput().topic()).isEqualTo("阜阳祛斑医院推荐");
+        assertThat(result.promptInput().forbiddenPhrases()).isEmpty();
+        assertThat(result.forbiddenPhrases()).containsExactly("一次见效");
+        assertThat(result.prompt().userPrompt()).contains("阜阳祛斑医院推荐")
+                .doesNotContain("吸脂填充风险怎么判断", "一次见效");
     }
 
     @Test

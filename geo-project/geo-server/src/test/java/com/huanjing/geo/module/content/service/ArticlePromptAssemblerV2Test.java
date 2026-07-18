@@ -149,6 +149,38 @@ class ArticlePromptAssemblerV2Test {
         assertTrue(result.userPrompt().contains("介绍和推荐必须有材料依据并说明限制"));
     }
 
+    @Test
+    void specialIndustryTemplateRemovesConcentratedForbiddenExamples() {
+        Project project = new Project();
+        project.setId(1L);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setName("特殊行业科普模板");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setVersionNo(2);
+        version.setUserPromptTemplate("""
+                围绕{{topic}}解释选择边界。
+                - 不写“种草、无痛、永久、根治、保证、零风险、恢复快”。
+                - 重点说明风险、条件和评估依据。
+                """);
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "阜阳祛斑医院推荐", null,
+                null, null, List.of(), "industry_article", "wechat", "medium", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "wechat", TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy, true);
+
+        assertFalse(result.userPrompt().contains("种草、无痛、永久"));
+        assertTrue(result.userPrompt().contains("避免疗效、安全、时效、持续周期、排名和直接转化类违规承诺"));
+        assertTrue(result.userPrompt().contains("重点说明风险、条件和评估依据"));
+    }
+
     private int occurrences(String source, String target) {
         return (source.length() - source.replace(target, "").length()) / target.length();
     }

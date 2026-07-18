@@ -120,9 +120,12 @@ public class ArticleGenerationPromptContextFactory {
         int articleIndexInBatch = request.articleIndexInBatch();
         BatchArticleGenerateRequest.TopicConfig medicalSelection = medicalSelection(request);
         MedicalArticleGenerationService.MedicalPromptContext medicalContext =
-                medicalArticleGenerationService.resolveContext(project, brand, channel.groupCode(), channel.subCode(), medicalSelection)
+                (v2
+                        ? medicalArticleGenerationService.resolveContextV2(project, brand, channel.groupCode(), channel.subCode(), medicalSelection)
+                        : medicalArticleGenerationService.resolveContext(project, brand, channel.groupCode(), channel.subCode(), medicalSelection))
                         .orElse(null);
-        String topic = medicalContext == null ? requireTopic(request.topic()) : medicalContext.topicAngle();
+        String requestedTopic = requireTopic(request.topic());
+        String topic = !v2 && medicalContext != null ? medicalContext.topicAngle() : requestedTopic;
         String topicAsQuestion = StringUtils.hasText(request.topicAsQuestion())
                 ? request.topicAsQuestion().trim()
                 : v2 ? null : promptBuilder.topicAsQuestion(topic, articleType, articleIndexInBatch, channel.contentStyle());
@@ -131,6 +134,7 @@ public class ArticleGenerationPromptContextFactory {
         Long keywordGroupId = keywordGroup == null ? null : keywordGroup.getId();
         String keywordGroupName = keywordGroup == null && requestedKeywordGroupId != null ? trimToNull(request.keywordGroupName()) : keywordGroup == null ? null : keywordGroup.getName();
         List<String> forbiddenPhrases = forbiddenPhrases(sourceProject, sourceBrand, project, brand);
+        List<String> promptForbiddenPhrases = v2 && medicalContext != null ? List.of() : forbiddenPhrases;
         BrandOfferingPromptSelector.SelectionResult selectedOfferings = offeringPromptSelector.select(
                 project.getBrandId(),
                 topic,
@@ -156,7 +160,7 @@ public class ArticleGenerationPromptContextFactory {
                 StringUtils.hasText(request.length()) ? request.length().trim() : "medium",
                 trimToNull(request.extraPrompt()),
                 articleIndexInBatch,
-                forbiddenPhrases,
+                promptForbiddenPhrases,
                 titleGuide,
                 perspective.perspectiveCode(),
                 perspective.matchedScope(),
@@ -171,7 +175,7 @@ public class ArticleGenerationPromptContextFactory {
         BatchArticlePromptBuilder.PromptBuildResult prompt = resolution.template() == null
                 ? promptBuilder.build(input)
                 : v2
-                ? promptAssemblerV2.assemble(input, resolution.template(), resolution.version(), runtimePolicy)
+                ? promptAssemblerV2.assemble(input, resolution.template(), resolution.version(), runtimePolicy, medicalContext != null)
                 : promptBuilder.buildFromTemplate(input, resolution.template(), resolution.version());
         if (medicalContext != null) {
             prompt = v2
@@ -181,7 +185,7 @@ public class ArticleGenerationPromptContextFactory {
         return new PromptContextResult(project, brand, input, prompt, forbiddenPhrases,
                 resolution.template(), resolution.version(), channel.groupCode(), channel.subCode(), channel.contentStyle(),
                 topicAsQuestion, perspective.perspectiveCode(), perspective.matchedScope(), perspective.matchedConfigId(),
-                resolution.fallbackToDefaultPrompt(), medicalContext, runtimePolicy);
+                resolution.fallbackToDefaultPrompt(), medicalContext, runtimePolicy, v2);
     }
 
     private BatchArticleGenerateRequest.TopicConfig medicalSelection(PromptContextRequest request) {
@@ -614,7 +618,8 @@ public class ArticleGenerationPromptContextFactory {
                                       Long perspectiveMatchedConfigId,
                                       boolean fallbackToDefaultPrompt,
                                       MedicalArticleGenerationService.MedicalPromptContext medicalContext,
-                                      ArticleRuntimePolicy runtimePolicy) {
+                                      ArticleRuntimePolicy runtimePolicy,
+                                      boolean v2) {
         public PromptContextResult(Project project,
                                    Brand brand,
                                    BatchArticlePromptBuilder.PromptBuildInput promptInput,
@@ -635,7 +640,7 @@ public class ArticleGenerationPromptContextFactory {
                     perspectiveCode, perspectiveMatchedScope, perspectiveMatchedConfigId,
                     fallbackToDefaultPrompt, null,
                     new ArticleRuntimePolicy(channelGroupCode, channelSubCode, perspectiveCode,
-                            ArticleRuntimePolicyResolver.CONTACT_NONE, false));
+                            ArticleRuntimePolicyResolver.CONTACT_NONE, false), false);
         }
 
         public PromptContextResult(Project project,
@@ -659,7 +664,30 @@ public class ArticleGenerationPromptContextFactory {
                     perspectiveCode, perspectiveMatchedScope, perspectiveMatchedConfigId,
                     fallbackToDefaultPrompt, medicalContext,
                     new ArticleRuntimePolicy(channelGroupCode, channelSubCode, perspectiveCode,
-                            ArticleRuntimePolicyResolver.CONTACT_NONE, false));
+                            ArticleRuntimePolicyResolver.CONTACT_NONE, false), false);
+        }
+
+        public PromptContextResult(Project project,
+                                   Brand brand,
+                                   BatchArticlePromptBuilder.PromptBuildInput promptInput,
+                                   BatchArticlePromptBuilder.PromptBuildResult prompt,
+                                   List<String> forbiddenPhrases,
+                                   ArticlePromptTemplate template,
+                                   ArticlePromptTemplateVersion version,
+                                   String channelGroupCode,
+                                   String channelSubCode,
+                                   String contentStyle,
+                                   String topicAsQuestion,
+                                   String perspectiveCode,
+                                   String perspectiveMatchedScope,
+                                   Long perspectiveMatchedConfigId,
+                                   boolean fallbackToDefaultPrompt,
+                                   MedicalArticleGenerationService.MedicalPromptContext medicalContext,
+                                   ArticleRuntimePolicy runtimePolicy) {
+            this(project, brand, promptInput, prompt, forbiddenPhrases, template, version,
+                    channelGroupCode, channelSubCode, contentStyle, topicAsQuestion,
+                    perspectiveCode, perspectiveMatchedScope, perspectiveMatchedConfigId,
+                    fallbackToDefaultPrompt, medicalContext, runtimePolicy, false);
         }
     }
 }

@@ -49,6 +49,16 @@ public class ArticlePromptAssemblerV2 {
             ArticlePromptTemplateVersion version,
             ArticleRuntimePolicy runtimePolicy
     ) {
+        return assemble(input, template, version, runtimePolicy, false);
+    }
+
+    public BatchArticlePromptBuilder.PromptBuildResult assemble(
+            BatchArticlePromptBuilder.PromptBuildInput input,
+            ArticlePromptTemplate template,
+            ArticlePromptTemplateVersion version,
+            ArticleRuntimePolicy runtimePolicy,
+            boolean specialIndustry
+    ) {
         List<String> omittedMaterialKeys = new ArrayList<>();
         ArticleContentLengthPolicy contentLengthPolicy = contentLengthPolicyResolver.resolve(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode(), input.length());
@@ -56,7 +66,7 @@ public class ArticlePromptAssemblerV2 {
         section(prompt, "真实性与硬边界", truthfulnessRules(input.forbiddenPhrases()));
         section(prompt, "全局写作原则", GLOBAL_WRITING_RULES);
         section(prompt, "当前渠道与写作视角", channelDirection(runtimePolicy));
-        section(prompt, "当前模板任务", templateTask(input, template, version));
+        section(prompt, "当前模板任务", templateTask(input, template, version, specialIndustry));
         section(prompt, "主题、关键词与读者", topicMaterial(input, omittedMaterialKeys));
         section(prompt, "可用事实材料", factMaterial(input, omittedMaterialKeys));
         section(prompt, "联系方式边界", contactDirection(input.project(), input.brand(), runtimePolicy, omittedMaterialKeys));
@@ -137,12 +147,16 @@ public class ArticlePromptAssemblerV2 {
 
     private String templateTask(BatchArticlePromptBuilder.PromptBuildInput input,
                                 ArticlePromptTemplate template,
-                                ArticlePromptTemplateVersion version) {
+                                ArticlePromptTemplateVersion version,
+                                boolean specialIndustry) {
         List<String> parts = new ArrayList<>();
         add(parts, "模板名称", template == null ? null : template.getName());
         add(parts, "模板说明", safeTemplateDescription(template == null ? null : template.getDescription()));
         add(parts, "文章类型", ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(input.articleType(), input.articleType()));
         String task = renderTemplateTask(version == null ? null : version.getUserPromptTemplate(), input);
+        if (specialIndustry) {
+            task = removeConcentratedComplianceExamples(task);
+        }
         if (StringUtils.hasText(task) && !task.trim().equals(input.topic())) {
             add(parts, "本模板补充任务", task);
         }
@@ -150,6 +164,40 @@ public class ArticlePromptAssemblerV2 {
             add(parts, "本次补充要求", input.extraPrompt());
         }
         return String.join("\n", parts);
+    }
+
+    private String removeConcentratedComplianceExamples(String task) {
+        if (!StringUtils.hasText(task)) {
+            return task;
+        }
+        List<String> lines = new ArrayList<>();
+        boolean directionAdded = false;
+        for (String line : task.split("\\R")) {
+            String value = line.trim();
+            boolean quotedForbiddenList = (value.contains("不写“") || value.contains("不得写“")
+                    || value.contains("不要写“") || value.contains("不得使用“"))
+                    && count(value, '、') >= 2;
+            boolean slashExampleList = value.contains("“") && value.contains("”") && count(value, '/') >= 2;
+            if (quotedForbiddenList || slashExampleList) {
+                if (!directionAdded) {
+                    lines.add("避免疗效、安全、时效、持续周期、排名和直接转化类违规承诺。");
+                    directionAdded = true;
+                }
+                continue;
+            }
+            lines.add(line);
+        }
+        return String.join("\n", lines).trim();
+    }
+
+    private int count(String value, char target) {
+        int count = 0;
+        for (int i = 0; i < value.length(); i++) {
+            if (value.charAt(i) == target) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private String topicMaterial(BatchArticlePromptBuilder.PromptBuildInput input, List<String> omitted) {

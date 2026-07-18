@@ -27,6 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MedicalArticleGenerationServiceTest {
@@ -135,6 +137,66 @@ class MedicalArticleGenerationServiceTest {
         assertThat(context.medicalLicense()).isEqualTo("持牌金融信息服务资质");
         assertThat(context.diagnosisScope()).isEqualTo("理财咨询与金融信息服务");
         assertThat(context.medicalAdReviewNo()).isNull();
+    }
+
+    @Test
+    void v2WithoutExplicitTopicAngleDoesNotQueryOrRandomizeTopicStructureAndFocus() {
+        when(brandOfferingMapper.selectList(any())).thenReturn(List.of());
+        when(kernelMapper.selectOne(any())).thenReturn(kernel());
+        when(channelStyleMapper.selectOne(any())).thenReturn(style());
+        BatchArticleGenerateRequest.TopicConfig topicConfig = topicConfig(null);
+        topicConfig.setTopic("阜阳祛斑医院推荐");
+
+        MedicalArticleGenerationService.MedicalPromptContext context = service.resolveContextV2(
+                project(), oralBrand(), "self_media", "wechat", topicConfig
+        ).orElseThrow();
+
+        assertThat(context.topicAngleId()).isNull();
+        assertThat(context.topicAngle()).isNull();
+        assertThat(context.structureSkeleton()).isNull();
+        assertThat(context.focus()).isNull();
+        verify(topicAngleMapper, never()).selectList(any());
+        verify(topicAngleMapper, never()).selectById(any());
+    }
+
+    @Test
+    void v2ExplicitTopicAngleIsValidatedAndKeptAsAuxiliaryDirection() {
+        when(brandOfferingMapper.selectList(any())).thenReturn(List.of());
+        when(topicAngleMapper.selectById(101L)).thenReturn(oralTopicAngle());
+        when(kernelMapper.selectOne(any())).thenReturn(kernel());
+        when(channelStyleMapper.selectOne(any())).thenReturn(style());
+        BatchArticleGenerateRequest.TopicConfig topicConfig = topicConfig("implant");
+        topicConfig.setTopic("阜阳祛斑医院推荐");
+        topicConfig.setTopicAngleId(101L);
+
+        MedicalArticleGenerationService.MedicalPromptContext context = service.resolveContextV2(
+                project(), oralBrand(), "self_media", "wechat", topicConfig
+        ).orElseThrow();
+
+        assertThat(context.topicAngleId()).isEqualTo(101L);
+        assertThat(context.topicAngle()).isEqualTo("种植牙选择前需要了解哪些信息");
+        assertThat(context.structureSkeleton()).isNull();
+        assertThat(context.focus()).isEqualTo("risk");
+        verify(topicAngleMapper, never()).selectList(any());
+    }
+
+    @Test
+    void v2MedicalPromptUsesComplianceDirectionsWithoutRepeatingKernelExamples() {
+        MedicalArticleGenerationService.MedicalPromptContext context = new MedicalArticleGenerationService.MedicalPromptContext(
+                MedicalArticleConstants.INDUSTRY_ORAL, MedicalArticleConstants.TIER_EDUCATION,
+                null, null, null, null, null, null,
+                "不得使用一次见效、绝对安全、永久有效等表达", 2, false,
+                "保持科普口吻", false, null, null, null, null
+        );
+        BatchArticlePromptBuilder.PromptBuildResult prompt = new BatchArticlePromptBuilder.PromptBuildResult(
+                "system", "围绕阜阳祛斑医院推荐写作", null, null, "{}", "{}"
+        );
+
+        BatchArticlePromptBuilder.PromptBuildResult result = service.applyMedicalPromptV2(prompt, context);
+
+        assertThat(result.userPrompt()).contains("疗效、收益、安全性、时效或持续周期保证")
+                .contains("围绕阜阳祛斑医院推荐写作")
+                .doesNotContain("一次见效", "绝对安全", "永久有效");
     }
 
     private Project project() {
