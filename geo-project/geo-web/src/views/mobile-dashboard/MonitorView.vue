@@ -69,7 +69,7 @@
                 {{ tag.text }}
               </span>
             </div>
-            <p class="question-desc">{{ questionSummary(item) }}</p>
+            <div class="question-desc" v-html="renderQuestionSummary(item)" />
           </div>
         </article>
         <nav v-if="questionPageCount > 1" class="question-pagination" aria-label="核心问题监测分页">
@@ -123,6 +123,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
+import MarkdownIt from 'markdown-it'
 import { getMobileDashboardMonitor, withRenewedMobileDashboardSession } from '@/api/mobileDashboard'
 import DashboardCard from '@/components/mobile-dashboard/DashboardCard.vue'
 import EmptyState from '@/components/mobile-dashboard/EmptyState.vue'
@@ -141,6 +142,7 @@ const questionPage = ref(1)
 const selectedPlatform = ref('all')
 const questionPageSize = 5
 const QUESTION_DETAIL_CACHE_KEY = 'mobile_dashboard_question_detail'
+const summaryMarkdown = new MarkdownIt({ html: false, linkify: false, breaks: false })
 
 const overviewCards = computed(() => {
   const overview = data.value?.overview
@@ -180,7 +182,7 @@ const coverageCards = computed(() => {
 })
 
 function metricText(metric?: DashboardMetric, includeUnit = true) {
-  if (!metric?.available) return '暂未统计'
+  if (!metric?.available) return metric?.reason?.includes('暂无') ? '暂无样本' : '分析中'
   const value = metric.value ?? 0
   return includeUnit && metric.unit ? `${value}${metric.unit}` : `${value}`
 }
@@ -261,22 +263,25 @@ function baseStatusTag(item: QuestionMonitorItem) {
     : { text: '持续覆盖', kind: 'building' }
 }
 
-function truncateText(text: string, max = 34) {
-  const value = text.replace(/\s+/g, ' ').trim()
-  if (value.length <= max) return value
-  return `${value.slice(0, max)}...`
-}
-
 function questionSummary(item: QuestionMonitorItem) {
   if (isSearchNotTriggered(item)) {
     return '回答已完成，但联网搜索未实际触发；本条不计入提及率，请检查平台联网配置。'
   }
   const evidence = publicEvidence(item.evidence)
-  if (evidence) return truncateText(evidence, 42)
+  if (evidence) return evidence
   if (metricBool(item.recommended)) return '本轮回答中出现主动推荐，推荐详情可进入查看。'
   if (item.mentioned) return `${hitPlatformLabel(item)} 回答已提及品牌，推荐与排名结果将在核心样本分析充分后展示。`
   if (item.pollResultId) return '本轮联网回答已完成，暂未提及品牌。'
   return '相关场景内容正在持续建设与覆盖。'
+}
+
+function renderQuestionSummary(item: QuestionMonitorItem) {
+  const normalized = questionSummary(item)
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*(?:[-*+] |\d+[.)]\s+)/gm, '')
+    .replace(/\s*\n+\s*/g, ' ')
+    .trim()
+  return summaryMarkdown.renderInline(normalized)
 }
 
 function publicEvidence(value?: string | null) {
@@ -343,6 +348,7 @@ async function loadData() {
       store,
     )
     data.value = res.data.data
+    store.setMeasurementUpdatedAt(data.value?.measurement?.updatedAt)
     questionPage.value = data.value?.questionList?.page || questionPage.value
   } catch (error: any) {
     showToast(error?.message || '数据加载失败')
@@ -693,6 +699,22 @@ onMounted(loadData)
   overflow: hidden;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.question-desc :deep(*) {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.question-desc :deep(strong) {
+  font-weight: 700;
+}
+
+.question-desc :deep(em) {
+  font-style: italic;
 }
 
 .question-desc.muted {

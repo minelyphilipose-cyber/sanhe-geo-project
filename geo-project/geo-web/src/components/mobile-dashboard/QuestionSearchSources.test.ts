@@ -34,13 +34,20 @@ describe('QuestionSearchSources', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('豆包 联网内容出处')
+    expect(wrapper.text()).toContain('参考资料')
+    expect(wrapper.text()).not.toContain('example.com')
+    expect(wrapper.get('.source-title').attributes('aria-expanded')).toBe('false')
+
+    await wrapper.get('.source-title').trigger('click')
+
+    expect(wrapper.get('.source-title').attributes('aria-expanded')).toBe('true')
     expect(wrapper.text()).toContain('example.com')
     expect(wrapper.text()).not.toContain('fake.example.net')
+    expect(wrapper.find('#reference-1').exists()).toBe(true)
     expect(wrapper.get('a').attributes('href')).toBe('https://www.example.com/article?id=7')
     expect(wrapper.get('a').attributes('rel')).toBe('noopener noreferrer')
 
-    await wrapper.get('button').trigger('click')
+    await wrapper.get('.source-copy').trigger('click')
     await flushPromises()
 
     expect(writeText).toHaveBeenCalledWith('https://www.example.com/article?id=7')

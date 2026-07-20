@@ -16,69 +16,62 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class MobileDashboardAggregateServiceTest {
 
     @Test
-    void mentionAggregateUsesRowLevelEffectiveHitFallbackAcrossTransitionWindow() throws Exception {
+    void judgeRecommendationRateUsesExpectedWebSamplesAsDenominator() throws Exception {
+        MobileDashboardEntityJudgeService judgeService = mock(MobileDashboardEntityJudgeService.class);
+        MobileDashboardEntityJudgeService.JudgeCoverage coverage =
+                new MobileDashboardEntityJudgeService.JudgeCoverage(10, 8, 4, 2);
+        when(judgeService.coverageReady(coverage)).thenReturn(true);
+        MobileDashboardAggregateService service = new MobileDashboardAggregateService(mock(JdbcTemplate.class), judgeService);
+
+        @SuppressWarnings("unchecked")
+        com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardMetricVO<Integer> metric =
+                (com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardMetricVO<Integer>)
+                        invoke(service, "judgeRateMetric", coverage);
+
+        assertThat(metric.getValue()).isEqualTo(40);
+    }
+
+    @Test
+    void mentionAggregateUsesTriggeredWebEffectiveHitInsteadOfExactBrandMatch() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
-        jdbcTemplate.execute("""
-                CREATE TABLE poll_platform_daily_summary (
-                    project_id BIGINT,
-                    batch_date DATE,
-                    platform_code VARCHAR(32),
-                    channel_code VARCHAR(32),
-                    question_tier VARCHAR(8),
-                    completed_count BIGINT,
-                    hit_count BIGINT,
-                    effective_hit_count BIGINT,
-                    search_confirmed_count BIGINT,
-                    brand_answer_count BIGINT
-                )
-                """);
+        createPollResultsTable(jdbcTemplate);
         jdbcTemplate.update("""
-                INSERT INTO poll_platform_daily_summary
-                    (project_id, batch_date, platform_code, channel_code, question_tier, completed_count, hit_count,
-                     effective_hit_count, search_confirmed_count, brand_answer_count)
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, search_triggered, brand_in_answer, updated_at)
                 VALUES
-                    (1, DATE '2026-06-10', 'doubao_web', 'doubao', 'A', 10, 3, 0, 10, 3),
-                    (1, DATE '2026-06-20', 'doubao_web', 'doubao', 'A', 10, 8, 4, 10, 4),
-                    (1, DATE '2026-06-20', 'deepseek_ark_web', 'deepseek', 'B', 10, 10, 10, 10, 10)
+                    (1, 1, 1001, 'doubao_web', 'doubao', DATE '2026-06-10', 'A', 'completed', 1, 1, 0, TIMESTAMP '2026-06-10 09:00:00'),
+                    (2, 1, 1002, 'deepseek_ark_web', 'deepseek', DATE '2026-06-10', 'A', 'completed', 0, 1, 1, TIMESTAMP '2026-06-10 09:01:00'),
+                    (3, 1, 1003, 'qwen_web', 'tongyi', DATE '2026-06-20', 'A', 'completed', 1, 0, 1, TIMESTAMP '2026-06-20 09:00:00'),
+                    (4, 1, 1004, 'qwen_web', 'tongyi', DATE '2026-06-20', 'B', 'completed', 1, 1, 1, TIMESTAMP '2026-06-20 09:01:00')
                 """);
 
         Object aggregate = invoke(newService(jdbcTemplate), "loadMentionAggregate",
                 1L, dateRange(LocalDate.of(2026, 6, 9), LocalDate.of(2026, 6, 21)), null);
 
-        assertThat(recordValue(aggregate, "completed")).isEqualTo(20L);
-        assertThat(recordValue(aggregate, "mentions")).isEqualTo(7L);
+        assertThat(recordValue(aggregate, "completed")).isEqualTo(2L);
+        assertThat(recordValue(aggregate, "mentions")).isEqualTo(1L);
         assertThat(recordValue(aggregate, "coveredPlatformCount")).isEqualTo(1L);
     }
 
     @Test
-    void mentionTrendUsesNullForMissingOrEmptySummaryDays() throws Exception {
+    void mentionTrendUsesQueryCountAsDenominatorAndNullForMissingDays() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
-        jdbcTemplate.execute("""
-                CREATE TABLE poll_platform_daily_summary (
-                    project_id BIGINT,
-                    batch_date DATE,
-                    platform_code VARCHAR(32),
-                    channel_code VARCHAR(32),
-                    question_tier VARCHAR(8),
-                    completed_count BIGINT,
-                    hit_count BIGINT,
-                    effective_hit_count BIGINT,
-                    search_confirmed_count BIGINT,
-                    brand_answer_count BIGINT
-                )
-                """);
+        createPollResultsTable(jdbcTemplate);
         jdbcTemplate.update("""
-                INSERT INTO poll_platform_daily_summary
-                    (project_id, batch_date, platform_code, channel_code, question_tier, completed_count, hit_count,
-                     effective_hit_count, search_confirmed_count, brand_answer_count)
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, search_triggered, brand_in_answer, updated_at)
                 VALUES
-                    (1, DATE '2026-06-10', 'doubao_web', 'doubao', 'A', 10, 5, 0, 10, 5),
-                    (1, DATE '2026-06-12', 'doubao_web', 'doubao', 'A', 0, 0, 0, 0, 0),
-                    (1, DATE '2026-06-13', 'doubao_web', 'doubao', 'A', 10, 0, 0, 10, 0)
+                    (1, 1, 1001, 'doubao_web', 'doubao', DATE '2026-06-10', 'A', 'completed', 1, 1, 0, TIMESTAMP '2026-06-10 09:00:00'),
+                    (2, 1, 1002, 'deepseek_ark_web', 'deepseek', DATE '2026-06-10', 'A', 'completed', 0, 1, 1, TIMESTAMP '2026-06-10 09:01:00'),
+                    (3, 1, 1003, 'qwen_web', 'tongyi', DATE '2026-06-12', 'A', 'completed', 1, 0, 1, TIMESTAMP '2026-06-12 09:00:00'),
+                    (4, 1, 1004, 'qwen_web', 'tongyi', DATE '2026-06-13', 'A', 'completed', 0, 1, 1, TIMESTAMP '2026-06-13 09:00:00')
                 """);
 
         @SuppressWarnings("unchecked")
@@ -87,7 +80,7 @@ public class MobileDashboardAggregateServiceTest {
                         1L, dateRange(LocalDate.of(2026, 6, 10), LocalDate.of(2026, 6, 13)));
 
         assertThat(points).extracting(MobileDashboardAggregateVO.TrendPoint::getValue)
-                .containsExactly(50, null, null, 0);
+                .containsExactly(50, null, 0, 0);
     }
 
     @Test
@@ -172,6 +165,30 @@ public class MobileDashboardAggregateServiceTest {
                 .containsExactly("toutiao", "zhihu");
         assertThat(completion.get(0).getQuota()).isEqualTo(2L);
         assertThat(completion.get(0).getCompletionRate().getValue()).isEqualTo(100);
+    }
+
+    @Test
+    void visibleContentChannelsAreIntersectionOfPackageAndActiveBrandAccounts() {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createProjectAndSelfMediaAccountTables(jdbcTemplate);
+        jdbcTemplate.update("INSERT INTO project (id, brand_id) VALUES (1, 10), (2, 20)");
+        jdbcTemplate.update("""
+                INSERT INTO self_media_account (id, brand_id, platform, status, deleted_at)
+                VALUES
+                    (1, 10, 'douyin_image_text', 'active', NULL),
+                    (2, 10, 'wechat', 'active', NULL),
+                    (3, 10, 'toutiao', 'disabled', NULL),
+                    (4, 10, 'zhihu', 'active', TIMESTAMP '2026-07-01 00:00:00'),
+                    (5, 20, 'baijiahao', 'active', NULL),
+                    (6, 10, 'xiaohongshu', 'active', NULL)
+                """);
+
+        @SuppressWarnings("unchecked")
+        List<String> channels = (List<String>) ReflectionTestUtils.invokeMethod(newService(jdbcTemplate),
+                "loadBoundContentChannels", 1L,
+                List.of("douyin", "wechat_mp", "toutiao", "baijiahao", "zhihu"));
+
+        assertThat(channels).containsExactly("douyin", "wechat_mp");
     }
 
     @Test
@@ -333,31 +350,19 @@ public class MobileDashboardAggregateServiceTest {
     }
 
     @Test
-    void completeBatchMentionAggregateUsesSummaryFallbackInsteadOfLatestResultEffectiveHit() throws Exception {
+    void completeBatchMentionAggregateUsesTriggeredWebResultsFromRequestedDate() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         createAiPlatformConfigTable(jdbcTemplate);
-        jdbcTemplate.execute("""
-                CREATE TABLE poll_platform_daily_summary (
-                    project_id BIGINT,
-                    batch_date DATE,
-                    platform_code VARCHAR(32),
-                    channel_code VARCHAR(32),
-                    question_tier VARCHAR(8),
-                    completed_count BIGINT,
-                    hit_count BIGINT,
-                    effective_hit_count BIGINT,
-                    search_confirmed_count BIGINT,
-                    brand_answer_count BIGINT
-                )
-                """);
+        createPollResultsTable(jdbcTemplate);
         jdbcTemplate.update("""
-                INSERT INTO poll_platform_daily_summary
-                    (project_id, batch_date, platform_code, channel_code, question_tier, completed_count, hit_count,
-                     effective_hit_count, search_confirmed_count, brand_answer_count)
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, search_triggered, brand_in_answer, updated_at)
                 VALUES
-                    (1, DATE '2026-06-20', 'doubao_web', 'doubao', 'A', 10, 4, 0, 10, 4),
-                    (1, DATE '2026-06-20', 'deepseek_ark_web', 'deepseek', 'A', 5, 0, 3, 5, 3),
-                    (1, DATE '2026-06-21', 'doubao_web', 'doubao', 'A', 2, 0, 0, 2, 0)
+                    (1, 1, 1001, 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 1, 0, TIMESTAMP '2026-06-20 09:00:00'),
+                    (2, 1, 1002, 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 0, 1, 1, TIMESTAMP '2026-06-20 09:01:00'),
+                    (3, 1, 1003, 'deepseek_ark_web', 'deepseek', DATE '2026-06-20', 'A', 'completed', 1, 1, 0, TIMESTAMP '2026-06-20 09:02:00'),
+                    (4, 1, 1004, 'deepseek_ark_web', 'deepseek', DATE '2026-06-21', 'A', 'completed', 1, 1, 1, TIMESTAMP '2026-06-21 09:00:00')
                 """);
         MobileDashboardAggregateService service = newService(jdbcTemplate);
 
@@ -367,41 +372,28 @@ public class MobileDashboardAggregateServiceTest {
                 (List<MobileDashboardAggregateVO.PlatformMetric>) invoke(service, "loadCompleteBatchPlatformPerformance",
                         1L, LocalDate.of(2026, 6, 20));
 
-        assertThat(recordValue(aggregate, "completed")).isEqualTo(15L);
-        assertThat(recordValue(aggregate, "mentions")).isEqualTo(7L);
+        assertThat(recordValue(aggregate, "completed")).isEqualTo(3L);
+        assertThat(recordValue(aggregate, "mentions")).isEqualTo(2L);
         assertThat(rows).extracting(MobileDashboardAggregateVO.PlatformMetric::getCode)
                 .containsExactly("deepseek", "doubao");
-        assertThat(rows.get(0).getRate().getValue()).isEqualTo(60);
-        assertThat(rows.get(1).getRate().getValue()).isEqualTo(40);
+        assertThat(rows.get(0).getRate().getValue()).isEqualTo(100);
+        assertThat(rows.get(1).getRate().getValue()).isEqualTo(50);
     }
 
     @Test
     void platformPerformanceSortsByRateDescendingThenStableAiPlatformOrder() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         createAiPlatformConfigTable(jdbcTemplate);
-        jdbcTemplate.execute("""
-                CREATE TABLE poll_platform_daily_summary (
-                    project_id BIGINT,
-                    batch_date DATE,
-                    platform_code VARCHAR(32),
-                    channel_code VARCHAR(32),
-                    question_tier VARCHAR(8),
-                    completed_count BIGINT,
-                    hit_count BIGINT,
-                    effective_hit_count BIGINT,
-                    search_confirmed_count BIGINT,
-                    brand_answer_count BIGINT
-                )
-                """);
+        createPollResultsTable(jdbcTemplate);
         jdbcTemplate.update("""
-                INSERT INTO poll_platform_daily_summary
-                    (project_id, batch_date, platform_code, channel_code, question_tier, completed_count, hit_count,
-                     effective_hit_count, search_confirmed_count, brand_answer_count)
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, search_triggered, brand_in_answer, updated_at)
                 VALUES
-                    (1, DATE '2026-06-20', 'doubao_web', 'doubao', 'A', 10, 0, 0, 10, 0),
-                    (1, DATE '2026-06-20', 'deepseek_ark_web', 'deepseek', 'A', 10, 1, 0, 10, 1),
-                    (1, DATE '2026-06-20', 'qwen_web', 'tongyi', 'A', 10, 0, 1, 10, 1),
-                    (1, DATE '2026-06-20', 'wenxin_web', 'wenxin', 'A', 10, 2, 0, 10, 2)
+                    (1, 1, 1001, 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 0, 1, 0, TIMESTAMP '2026-06-20 09:00:00'),
+                    (2, 1, 1002, 'deepseek_ark_web', 'deepseek', DATE '2026-06-20', 'A', 'completed', 1, 1, 0, TIMESTAMP '2026-06-20 09:01:00'),
+                    (3, 1, 1003, 'qwen_web', 'tongyi', DATE '2026-06-20', 'A', 'completed', 1, 1, 0, TIMESTAMP '2026-06-20 09:02:00'),
+                    (4, 1, 1004, 'wenxin_web', 'wenxin', DATE '2026-06-20', 'A', 'completed', 1, 1, 0, TIMESTAMP '2026-06-20 09:03:00')
                 """);
 
         @SuppressWarnings("unchecked")
@@ -425,7 +417,7 @@ public class MobileDashboardAggregateServiceTest {
                     (1, 1, 1001, 'q1', 'doubao_web', 'doubao', DATE '2026-06-10', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-10 09:00:00'),
                     (2, 1, 1001, 'q1', 'doubao_web', 'doubao', DATE '2026-06-17', 'A', 'completed', 0, 0, TIMESTAMP '2026-06-17 09:00:00'),
                     (3, 1, 1001, 'q1', 'qwen_web', 'tongyi', DATE '2026-06-17', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-17 09:00:00'),
-                    (4, 1, 1002, 'q2', 'tencent_search_web', 'yuanbao', DATE '2026-06-17', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-17 09:00:00'),
+                    (4, 1, 1002, 'q2', 'tencent_search_web', 'yuanbao', DATE '2026-06-17', 'A', 'completed', 1, 0, TIMESTAMP '2026-06-17 09:00:00'),
                     (5, 1, 1002, 'q2', 'ernie', 'wenxin', DATE '2026-06-17', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-17 09:00:00')
                 """);
 
@@ -434,6 +426,62 @@ public class MobileDashboardAggregateServiceTest {
         assertThat(recordValue(aggregate, "completed")).isEqualTo(3L);
         assertThat(recordValue(aggregate, "mentions")).isEqualTo(2L);
         assertThat(recordValue(aggregate, "coveredPlatformCount")).isEqualTo(2L);
+    }
+
+    @Test
+    void latestMentionAggregateDoesNotFallBackToOlderTriggeredResult() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createPollResultsTable(jdbcTemplate);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, search_requested, search_triggered, updated_at)
+                VALUES
+                    (1, 1, 1001, 'doubao_web', NULL, DATE '2026-06-10', 'A', 'completed', 1, 1, 1, TIMESTAMP '2026-06-10 09:00:00'),
+                    (2, 1, 1001, 'doubao_web', NULL, DATE '2026-06-17', 'A', 'completed', 0, 1, 0, TIMESTAMP '2026-06-17 09:00:00'),
+                    (3, 1, 1002, 'tencent_search_web', NULL, DATE '2026-06-17', 'A', 'completed', 1, 1, 1, TIMESTAMP '2026-06-17 09:01:00')
+                """);
+
+        Object aggregate = invoke(newService(jdbcTemplate), "loadLatestMentionAggregate", 1L, null);
+
+        assertThat(recordValue(aggregate, "requested")).isEqualTo(2L);
+        assertThat(recordValue(aggregate, "completed")).isEqualTo(1L);
+        assertThat(recordValue(aggregate, "mentions")).isEqualTo(1L);
+        assertThat(recordValue(aggregate, "coveredPlatformCount")).isEqualTo(1L);
+    }
+
+    @Test
+    void latestCoverageAndScenesRespectSelectedPlatform() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createQuestionCoverageTables(jdbcTemplate);
+        createPollResultsTable(jdbcTemplate);
+        jdbcTemplate.update("INSERT INTO keyword_group (id, deleted) VALUES (10, 0)");
+        jdbcTemplate.update("INSERT INTO project_keyword_group_rel (project_id, keyword_group_id) VALUES (1, 10)");
+        jdbcTemplate.update("""
+                INSERT INTO keyword_group_result (id, group_id, scene_code, question_tier)
+                VALUES (1001, 10, 'brand_awareness', 'A'), (1002, 10, 'qa', 'A')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, search_requested, search_triggered, updated_at)
+                VALUES
+                    (1, 1, 1001, 'doubao_web', NULL, DATE '2026-06-17', 'A', 'completed', 1, 1, 1, TIMESTAMP '2026-06-17 09:00:00'),
+                    (2, 1, 1002, 'tencent_search_web', NULL, DATE '2026-06-17', 'A', 'completed', 1, 1, 1, TIMESTAMP '2026-06-17 09:01:00')
+                """);
+        MobileDashboardAggregateService service = newService(jdbcTemplate);
+
+        Object coverage = invoke(service, "loadLatestQuestionCoverage", 1L, "doubao");
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.SceneMetric> scenes =
+                (List<MobileDashboardAggregateVO.SceneMetric>) invoke(service, "loadLatestSceneCoverage", 1L, "doubao");
+
+        assertThat(recordValue(coverage, "total")).isEqualTo(2L);
+        assertThat(recordValue(coverage, "covered")).isEqualTo(1L);
+        assertThat(scenes).filteredOn(row -> "brand_awareness".equals(row.getCode()))
+                .singleElement().satisfies(row -> assertThat(row.getCovered().getValue()).isEqualTo(1L));
+        assertThat(scenes).filteredOn(row -> "qa".equals(row.getCode()))
+                .singleElement().satisfies(row -> assertThat(row.getCovered().getValue()).isZero());
     }
 
     @Test
@@ -794,6 +842,39 @@ public class MobileDashboardAggregateServiceTest {
     }
 
     @Test
+    void recommendationAndFirstRecommendAreSuppressedWhenFocusBrandWasNotMentioned() throws Exception {
+        MobileDashboardAggregateService service = newService(jdbcTemplate());
+        Object row = questionMonitorRow(
+                1001L,
+                2001L,
+                "doubao",
+                "未提及品牌的问题",
+                LocalDateTime.of(2026, 7, 4, 10, 0),
+                false,
+                true,
+                true,
+                true,
+                true,
+                1,
+                "错误的历史裁判结果",
+                "回答没有提及目标品牌"
+        );
+
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.QuestionMonitorItem> items =
+                (List<MobileDashboardAggregateVO.QuestionMonitorItem>) invoke(service, "mergeQuestionMonitorRows",
+                        List.of(row), true, "ready");
+
+        assertThat(items).singleElement().satisfies(item -> {
+            assertThat(item.getMonitorStatus()).isEqualTo("not_mentioned");
+            assertThat(item.getRecommended().getValue()).isFalse();
+            assertThat(item.getFirstRecommend().getValue()).isFalse();
+            assertThat(item.getRankPosition().isAvailable()).isFalse();
+            assertThat(item.getTags()).doesNotContain("recommended", "first_recommend");
+        });
+    }
+
+    @Test
     void contentTaskListIncludesConfirmedSelfMediaSchedulesWithoutPublishRecord() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         jdbcTemplate.execute("""
@@ -941,6 +1022,24 @@ public class MobileDashboardAggregateServiceTest {
                     channel_code VARCHAR(64),
                     period_type_snapshot VARCHAR(32),
                     allocated_count BIGINT
+                )
+                """);
+    }
+
+    private static void createProjectAndSelfMediaAccountTables(JdbcTemplate jdbcTemplate) {
+        jdbcTemplate.execute("""
+                CREATE TABLE project (
+                    id BIGINT,
+                    brand_id BIGINT
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE self_media_account (
+                    id BIGINT,
+                    brand_id BIGINT,
+                    platform VARCHAR(64),
+                    status VARCHAR(32),
+                    deleted_at TIMESTAMP
                 )
                 """);
     }

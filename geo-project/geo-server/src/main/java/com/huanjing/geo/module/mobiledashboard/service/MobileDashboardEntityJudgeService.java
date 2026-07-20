@@ -52,10 +52,12 @@ public class MobileDashboardEntityJudgeService {
     private static final String MOBILE_QUESTION_TIER = "A";
     private static final String FOCUS_BRAND = "focus_brand";
     private static final String COMPETITOR = "competitor";
-    private static final String EFFECTIVE_WEB_SEARCH_RESULT_SQL = """
+    private static final String EFFECTIVE_WEB_SEARCH_REQUEST_SQL = """
             pr.execution_finalized = 1
             AND pr.effective_attempt_id IS NOT NULL
             AND pr.search_requested = 1
+            """;
+    private static final String EFFECTIVE_WEB_SEARCH_RESULT_SQL = EFFECTIVE_WEB_SEARCH_REQUEST_SQL + """
             AND pr.search_triggered = 1
             """;
     private static final String POLL_CHANNEL_SQL = "COALESCE(NULLIF(TRIM(pr.channel_code), ''), pr.platform_code)";
@@ -184,6 +186,7 @@ public class MobileDashboardEntityJudgeService {
         return jdbcTemplate.query("""
                 WITH latest AS (
                     SELECT pr.id,
+                           pr.search_triggered,
                            ROW_NUMBER() OVER (
                                PARTITION BY pr.keyword_result_id, %1$s
                                ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
@@ -199,6 +202,7 @@ public class MobileDashboardEntityJudgeService {
                     SELECT COUNT(*) AS expected_count
                       FROM latest
                      WHERE rn = 1
+                       AND search_triggered = 1
                 )
                 SELECT c.id AS entity_ref_id,
                        c.competitor_name,
@@ -212,6 +216,7 @@ public class MobileDashboardEntityJudgeService {
                   CROSS JOIN latest_count lc
                   LEFT JOIN latest l
                     ON l.rn = 1
+                   AND l.search_triggered = 1
                   LEFT JOIN poll_result_entity_judge j
                     ON j.poll_result_id = l.id
                    AND j.entity_type = 'competitor'
@@ -222,7 +227,7 @@ public class MobileDashboardEntityJudgeService {
                    AND c.status = 'active'
                  GROUP BY c.id, c.competitor_name, c.display_order, c.qa_status
                  ORDER BY c.display_order ASC, c.id ASC
-                """.formatted(POLL_CHANNEL_SQL, EFFECTIVE_WEB_SEARCH_RESULT_SQL), (rs, rowNum) -> new CompetitorSummary(
+                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL), (rs, rowNum) -> new CompetitorSummary(
                 rs.getLong("entity_ref_id"),
                 rs.getString("competitor_name"),
                 rs.getInt("display_order"),
@@ -244,6 +249,9 @@ public class MobileDashboardEntityJudgeService {
         JudgeCoverage row = jdbcTemplate.queryForObject("""
                 WITH latest AS (
                     SELECT pr.id,
+                           pr.effective_hit,
+                           pr.brand_in_answer,
+                           pr.search_triggered,
                            ROW_NUMBER() OVER (
                                PARTITION BY pr.keyword_result_id, %1$s
                                ORDER BY pr.batch_date DESC, pr.updated_at DESC, pr.id DESC
@@ -258,8 +266,8 @@ public class MobileDashboardEntityJudgeService {
                 )
                 SELECT COUNT(*) AS expected_count,
                        COALESCE(SUM(CASE WHEN j.judge_status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
-                       COALESCE(SUM(CASE WHEN j.judge_status = 'success' AND j.recommended = 1 THEN 1 ELSE 0 END), 0) AS recommended_count,
-                       COALESCE(SUM(CASE WHEN j.judge_status = 'success' AND j.first_recommend = 1 THEN 1 ELSE 0 END), 0) AS first_recommend_count
+                       COALESCE(SUM(CASE WHEN (l.effective_hit = 1 OR (l.effective_hit IS NULL AND l.brand_in_answer = 1)) AND j.judge_status = 'success' AND j.recommended = 1 THEN 1 ELSE 0 END), 0) AS recommended_count,
+                       COALESCE(SUM(CASE WHEN (l.effective_hit = 1 OR (l.effective_hit IS NULL AND l.brand_in_answer = 1)) AND j.judge_status = 'success' AND j.recommended = 1 AND j.first_recommend = 1 THEN 1 ELSE 0 END), 0) AS first_recommend_count
                   FROM latest l
                   LEFT JOIN poll_result_entity_judge j
                     ON j.poll_result_id = l.id
@@ -267,7 +275,8 @@ public class MobileDashboardEntityJudgeService {
                    AND j.entity_ref_id = ?
                    AND j.judge_prompt_version = ?
                  WHERE l.rn = 1
-                """.formatted(POLL_CHANNEL_SQL, EFFECTIVE_WEB_SEARCH_RESULT_SQL, platformClause), (rs, rowNum) -> new JudgeCoverage(
+                   AND l.search_triggered = 1
+                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL, platformClause), (rs, rowNum) -> new JudgeCoverage(
                 rs.getLong("expected_count"),
                 rs.getLong("success_count"),
                 rs.getLong("recommended_count"),
@@ -365,7 +374,8 @@ public class MobileDashboardEntityJudgeService {
                        pr.question_tier,
                        pr.platform_id,
                        %s AS platform_code,
-                       pr.brand_in_answer AS effective_hit,
+                       CASE WHEN pr.effective_hit = 1 OR (pr.effective_hit IS NULL AND pr.brand_in_answer = 1)
+                            THEN 1 ELSE 0 END AS effective_hit,
                        p.brand_name,
                        p.project_aliases,
                        JSON_UNQUOTE(JSON_EXTRACT(pr.detail_json, '$.platform_response')) AS response_text
@@ -777,11 +787,25 @@ public class MobileDashboardEntityJudgeService {
     private static String platformAliasSql(String code) {
         String normalized = StringUtils.hasText(code) ? code.trim().toLowerCase(Locale.ROOT) : "";
         return switch (normalized) {
-            case "tongyi", "qwen" -> "'tongyi','qwen'";
+            case "doubao", "doubao_web" -> "'doubao','doubao_web'";
+            case "deepseek", "deepseek_ark_web" -> "'deepseek','deepseek_ark_web'";
+            case "tongyi", "qwen", "qwen_web" -> "'tongyi','qwen','qwen_web'";
             case "wenxin", "ernie" -> "'wenxin','ernie'";
-            case "yuanbao", "hunyuan" -> "'yuanbao','hunyuan'";
+            case "yuanbao", "hunyuan", "tencent_search_web" -> "'yuanbao','hunyuan','tencent_search_web'";
             default -> "'" + normalized.replace("'", "''") + "'";
         };
+    }
+
+    private static String canonicalPlatformSql(String expression) {
+        return """
+                CASE
+                    WHEN %1$s IN ('doubao', 'doubao_web') THEN 'doubao'
+                    WHEN %1$s IN ('deepseek', 'deepseek_ark_web') THEN 'deepseek'
+                    WHEN %1$s IN ('tongyi', 'qwen', 'qwen_web') THEN 'tongyi'
+                    WHEN %1$s IN ('yuanbao', 'hunyuan', 'tencent_search_web') THEN 'yuanbao'
+                    ELSE %1$s
+                END
+                """.formatted(expression);
     }
 
     private static String trimTo(String value, int max) {

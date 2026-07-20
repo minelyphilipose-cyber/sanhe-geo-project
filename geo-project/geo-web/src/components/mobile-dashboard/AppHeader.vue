@@ -13,17 +13,22 @@
         <MobileIcon name="chevronDown" />
       </button>
     </div>
-    <p :class="subtitleTone">{{ brandName }} | {{ pageName }}</p>
+    <div class="mobile-header__context">
+      <p :class="subtitleTone">{{ brandName }} | {{ pageName }}</p>
+      <span v-if="cutoffText" class="mobile-header__cutoff">数据截至&nbsp;&nbsp;{{ cutoffText }}</span>
+    </div>
   </header>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import systemLogo from '@/assets/brand/fantasy-logo-light.png'
 import MobileIcon from './MobileIcon.vue'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   brandName: string
   pageName: string
+  dataUpdatedAt?: string
   filterLabel?: string
   iconName?: string
   iconSize?: number
@@ -34,6 +39,13 @@ withDefaults(defineProps<{
   iconSize: 24,
   titleTone: 'default',
   subtitleTone: 'body',
+})
+
+const cutoffText = computed(() => {
+  const value = props.dataUpdatedAt?.trim()
+  if (!value) return ''
+  const normalized = value.replace('T', ' ')
+  return normalized.length >= 16 ? normalized.slice(5, 16) : normalized
 })
 </script>
 
@@ -98,13 +110,41 @@ withDefaults(defineProps<{
   white-space: nowrap;
 }
 
+.mobile-header__context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
 .mobile-header p {
+  min-width: 0;
   margin: 0;
   color: var(--mobile-muted, #52625C);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mobile-header__cutoff {
+  flex: 0 0 auto;
+  color: var(--mobile-muted, #52625C);
+  font-size: var(--mobile-text-xs, 12px);
+  font-weight: 500;
+  line-height: var(--mobile-leading-label, 16px);
+  white-space: nowrap;
+}
+
+@media (max-width: 374px) {
+  .mobile-header__context {
+    gap: 8px;
+  }
+
+  .mobile-header__cutoff {
+    font-size: var(--mobile-text-2xs, 10px);
+  }
 }
 
 .mobile-header p.body {

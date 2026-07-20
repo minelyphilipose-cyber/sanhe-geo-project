@@ -69,8 +69,22 @@ public final class MobileDashboardAggregateVO {
     }
 
     @Data
+    public static class MeasurementMeta {
+        private Long requestedCount;
+        private Long triggeredCount;
+        private Long mentionCount;
+        private Long judgeExpectedCount;
+        private Long judgeSuccessCount;
+        private MobileDashboardMetricVO<Integer> searchTriggerRate;
+        private MobileDashboardMetricVO<Integer> judgeCoverageRate;
+        private LocalDate latestBatchDate;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
     public static class Home {
         private MobileDashboardMetricVO<Integer> overallMentionRate;
+        private MeasurementMeta measurement;
         private List<TrendPoint> trend = new ArrayList<>();
         private List<KeyMetric> metrics = new ArrayList<>();
         private List<PlatformMetric> platformPerformance = new ArrayList<>();
@@ -145,6 +159,7 @@ public final class MobileDashboardAggregateVO {
     @Data
     public static class Monitor {
         private MonitorOverview overview;
+        private MeasurementMeta measurement;
         private List<String> platformFilters = new ArrayList<>();
         private QuestionMonitorList questionList;
         private List<SceneMetric> scenePerformance = new ArrayList<>();
@@ -190,6 +205,7 @@ public final class MobileDashboardAggregateVO {
 
     @Data
     public static class Content {
+        private LocalDateTime updatedAt;
         private ContentProgress overview;
         private List<MobileDashboardContentPlatformVO> contentPlatforms = new ArrayList<>();
         private List<PlatformCompletion> platformCompletion = new ArrayList<>();

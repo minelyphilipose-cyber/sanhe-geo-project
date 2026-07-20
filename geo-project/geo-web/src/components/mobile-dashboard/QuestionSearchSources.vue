@@ -1,21 +1,36 @@
 <template>
   <section v-if="sources.length" class="detail-block source-panel">
-    <div class="block-title source-title">
-      <div>
+    <button
+      type="button"
+      class="block-title source-title"
+      :aria-expanded="expanded"
+      aria-controls="reference-source-list"
+      @click="expanded = !expanded"
+    >
+      <span>
         <MobileIcon name="globe" />
-        <h3>{{ platformLabel }} 联网内容出处</h3>
-      </div>
-      <span>{{ sources.length }} 条</span>
-    </div>
-    <div class="source-list">
-      <article v-for="(source, index) in sources" :key="source.sourceId" class="source-card">
+        <span class="source-title__text">参考资料</span>
+      </span>
+      <span class="source-title__meta">
+        {{ sources.length }} 条
+        <MobileIcon name="chevronDown" :class="{ expanded }" />
+      </span>
+    </button>
+    <div v-if="expanded" id="reference-source-list" class="source-list">
+      <article
+        v-for="(source, index) in sources"
+        :id="`reference-${sourceReferenceNumber(source, index)}`"
+        :key="source.sourceId"
+        class="source-card"
+        tabindex="-1"
+      >
         <a
           class="source-card__link"
           :href="source.safeUrl"
           target="_blank"
           rel="noopener noreferrer"
         >
-          <span class="source-index">{{ index + 1 }}</span>
+          <span class="source-index">{{ sourceReferenceNumber(source, index) }}</span>
           <div class="source-card__body">
             <strong>{{ source.title || source.host || '未命名来源' }}</strong>
             <p v-if="source.snippet">{{ source.snippet }}</p>
@@ -38,15 +53,16 @@
         </button>
       </article>
     </div>
-    <p class="source-note">当前仅展示本条 {{ platformLabel }} 回答的搜索来源；可打开原文或复制链接。</p>
+    <p v-if="expanded" class="source-note">当前仅展示本条 {{ platformLabel }} 回答的搜索来源；可打开原文或复制链接。</p>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { showToast } from 'vant'
 import type { QuestionSearchSource } from '@/types/mobileDashboard'
 import { buildDisplaySearchSources } from '@/utils/mobileDashboardSources'
+import { sourceReferenceNumber } from '@/utils/mobileDashboardMarkdown'
 import MobileIcon from './MobileIcon.vue'
 
 const props = defineProps<{
@@ -55,6 +71,17 @@ const props = defineProps<{
 }>()
 
 const sources = computed(() => buildDisplaySearchSources(props.searchSources))
+const expanded = ref(false)
+
+async function openReference(reference: number) {
+  expanded.value = true
+  await nextTick()
+  const target = document.getElementById(`reference-${reference}`)
+  target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  target?.focus({ preventScroll: true })
+}
+
+defineExpose({ openReference })
 
 function formatSourceDate(value: string) {
   return value.slice(0, 10)
@@ -100,7 +127,8 @@ function copySourceUrlFallback(url: string) {
 }
 
 .block-title,
-.source-title > div {
+.source-title > span:first-child,
+.source-title__meta {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -124,10 +152,24 @@ function copySourceUrlFallback(url: string) {
 }
 
 .source-title {
+  width: 100%;
+  min-height: 44px;
   justify-content: space-between;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
 
-.source-title > span {
+.source-title__text {
+  color: #131b2e;
+  font-size: var(--mobile-text-lg, 16px);
+  font-weight: 700;
+  line-height: var(--mobile-leading-lg, 22px);
+}
+
+.source-title__meta {
   flex: 0 0 auto;
   padding: 2px 8px;
   border-radius: 999px;
@@ -136,6 +178,21 @@ function copySourceUrlFallback(url: string) {
   font-size: var(--mobile-text-2xs, 10px);
   font-weight: 700;
   line-height: var(--mobile-leading-label-sm, 14px);
+}
+
+.source-title__meta .mobile-icon {
+  font-size: 13px;
+  transition: transform 160ms ease;
+}
+
+.source-title__meta .mobile-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.source-title:focus-visible {
+  outline: 2px solid #07a66b;
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 
 .source-list {
@@ -171,6 +228,12 @@ function copySourceUrlFallback(url: string) {
   border-color: #a7dbc5;
   background: #f2fbf7;
   transform: scale(0.99);
+}
+
+.source-card:target,
+.source-card:focus {
+  border-color: #07a66b;
+  box-shadow: 0 0 0 3px rgba(7, 166, 107, 0.12);
 }
 
 .source-card__link:focus-visible,

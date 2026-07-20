@@ -266,6 +266,7 @@ async function loadData() {
       store,
     )
     data.value = res.data.data
+    store.setMeasurementUpdatedAt(data.value?.updatedAt)
   } catch (error: any) {
     showToast(error?.message || '数据加载失败')
   }

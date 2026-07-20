@@ -5,7 +5,7 @@
         <div>
           <span class="eyebrow">总体提及率</span>
           <strong>{{ metricText(data?.overallMentionRate) }}</strong>
-          <p>核心问题中，品牌被 AI 回答提及的轮询占比</p>
+          <p>核心问题中，品牌被 AI 回答提及的次数占查询总数比例</p>
         </div>
         <TrendLineChart :labels="trendLabels" :values="trendValues" />
       </div>
@@ -43,6 +43,9 @@
               </span>
               <strong>{{ metricText(item.rate) }}</strong>
             </div>
+            <small class="progress-row__sample">
+              提及 {{ item.mentionCount || 0 }} / AI回答 {{ item.completedCount || 0 }}
+            </small>
             <div class="bar"><i :style="{ width: metricPercent(item.rate) }" /></div>
           </div>
         </div>
@@ -198,7 +201,7 @@ const ecoCards = computed(() => {
 })
 
 function metricText(metric?: DashboardMetric, includeUnit = true) {
-  if (!metric?.available) return '暂未统计'
+  if (!metric?.available) return metric?.reason?.includes('暂无') ? '暂无样本' : '分析中'
   const value = metric.value ?? 0
   return includeUnit && metric.unit ? `${value}${metric.unit}` : `${value}`
 }
@@ -234,6 +237,7 @@ onMounted(async () => {
       store,
     )
     data.value = res.data.data
+    store.setMeasurementUpdatedAt(data.value?.measurement?.updatedAt)
   } catch (error: any) {
     showToast(error?.message || '数据加载失败')
   }
@@ -339,6 +343,18 @@ onMounted(async () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   min-width: 0;
+}
+
+.progress-row__sample {
+  display: block;
+  color: #6b7c74;
+  font-size: var(--mobile-text-2xs, 10px);
+  line-height: var(--mobile-leading-label-sm, 14px);
+}
+
+.progress-row__sample {
+  margin-top: -3px;
+  padding-left: 26px;
 }
 
 .responsive-pair {

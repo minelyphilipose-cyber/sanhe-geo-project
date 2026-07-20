@@ -91,8 +91,21 @@ export interface CompetitorComparison {
   rows: CompetitorComparisonRow[]
 }
 
+export interface MeasurementMeta {
+  requestedCount: number
+  triggeredCount: number
+  mentionCount: number
+  judgeExpectedCount: number
+  judgeSuccessCount: number
+  searchTriggerRate: DashboardMetric<number>
+  judgeCoverageRate: DashboardMetric<number>
+  latestBatchDate?: string | null
+  updatedAt?: string | null
+}
+
 export interface HomeDashboardData {
   overallMentionRate: DashboardMetric<number>
+  measurement?: MeasurementMeta
   trend: TrendPoint[]
   metrics: KeyMetric[]
   platformPerformance: PlatformMetric[]
@@ -109,6 +122,7 @@ export interface MonitorDashboardData {
     aiRecommendRate: DashboardMetric<number>
     firstRecommendCount: DashboardMetric<number>
   }
+  measurement?: MeasurementMeta
   platformFilters: string[]
   questionList: {
     available: boolean
@@ -175,6 +189,7 @@ export interface OwnedPublish {
 }
 
 export interface ContentDashboardData {
+  updatedAt?: string | null
   overview: ContentProgress
   contentPlatforms?: ContentPlatform[]
   platformCompletion: PlatformCompletion[]

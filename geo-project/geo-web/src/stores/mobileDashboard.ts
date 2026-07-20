@@ -25,6 +25,7 @@ export const useMobileDashboardStore = defineStore('mobileDashboard', {
     sessionToken: sessionStorage.getItem(SESSION_TOKEN_KEY) || '',
     shareCode: sessionStorage.getItem(SHARE_CODE_KEY) || '',
     context: readJson<MobileDashboardSession | MobileDashboardBootstrap>(CONTEXT_KEY),
+    measurementUpdatedAt: '',
     initialized: false,
   }),
 
@@ -87,6 +88,10 @@ export const useMobileDashboardStore = defineStore('mobileDashboard', {
       sessionStorage.setItem(CONTEXT_KEY, JSON.stringify(res.data.data))
     },
 
+    setMeasurementUpdatedAt(value?: string | null) {
+      this.measurementUpdatedAt = value?.trim() || ''
+    },
+
     clearSessionOnly() {
       this.sessionToken = ''
       sessionStorage.removeItem(SESSION_TOKEN_KEY)
@@ -96,6 +101,7 @@ export const useMobileDashboardStore = defineStore('mobileDashboard', {
       this.sessionToken = ''
       this.shareCode = ''
       this.context = null
+      this.measurementUpdatedAt = ''
       this.initialized = false
       sessionStorage.removeItem(SESSION_TOKEN_KEY)
       sessionStorage.removeItem(SHARE_CODE_KEY)

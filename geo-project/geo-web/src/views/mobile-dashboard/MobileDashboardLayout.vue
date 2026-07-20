@@ -21,6 +21,7 @@
         :icon-size="currentHeaderConfig.iconSize"
         :title-tone="currentHeaderConfig.titleTone"
         :subtitle-tone="currentHeaderConfig.subtitleTone"
+        :data-updated-at="currentDataUpdatedAt"
       />
       <section
         ref="contentRef"
@@ -62,10 +63,11 @@ const pageConfig: Record<string, {
   iconSize: number
   titleTone: HeaderTone
   subtitleTone: SubtitleTone
+  showDataCutoff?: boolean
 }> = {
-  home: { name: '客户总览', icon: 'dashboard', iconSize: 24, titleTone: 'primary', subtitleTone: 'label' },
-  monitor: { name: 'AI监测', icon: 'dashboard', iconSize: 28, titleTone: 'primary', subtitleTone: 'label' },
-  content: { name: '内容交付', icon: 'bubble', iconSize: 28, titleTone: 'primary', subtitleTone: 'label' },
+  home: { name: '客户总览', icon: 'dashboard', iconSize: 24, titleTone: 'primary', subtitleTone: 'label', showDataCutoff: true },
+  monitor: { name: 'AI监测', icon: 'dashboard', iconSize: 28, titleTone: 'primary', subtitleTone: 'label', showDataCutoff: true },
+  content: { name: '内容交付', icon: 'bubble', iconSize: 28, titleTone: 'primary', subtitleTone: 'label', showDataCutoff: true },
   question: { name: '问答详情', icon: 'dashboard', iconSize: 28, titleTone: 'primary', subtitleTone: 'label' },
 }
 
@@ -80,6 +82,9 @@ const currentPageName = computed(() => {
 })
 const currentFilterLabel = computed(() => pageConfig[currentPageKey.value]?.filter)
 const currentHeaderConfig = computed(() => pageConfig[currentPageKey.value] || pageConfig.home)
+const currentDataUpdatedAt = computed(() => (
+  currentHeaderConfig.value.showDataCutoff ? mobileDashboardStore.measurementUpdatedAt : ''
+))
 
 const swipeTabRouteNames = ['MobileDashboardHome', 'MobileDashboardMonitor', 'MobileDashboardContent']
 const swipeGuardThreshold = 14

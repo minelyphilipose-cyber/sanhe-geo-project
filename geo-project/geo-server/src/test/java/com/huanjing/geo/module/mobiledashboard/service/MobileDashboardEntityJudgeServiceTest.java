@@ -84,20 +84,20 @@ class MobileDashboardEntityJudgeServiceTest {
         createLatestCoverageTables(jdbcTemplate);
         jdbcTemplate.update("""
                 INSERT INTO poll_results
-                    (id, project_id, keyword_result_id, platform_code, batch_date, question_tier, status, updated_at)
+                    (id, project_id, keyword_result_id, platform_code, batch_date, question_tier, status, effective_hit, updated_at)
                 VALUES
-                    (1, 1, 1001, 'doubao', DATE '2026-06-10', 'A', 'completed', TIMESTAMP '2026-06-10 09:00:00'),
-                    (2, 1, 1001, 'doubao', DATE '2026-06-17', 'A', 'completed', TIMESTAMP '2026-06-17 09:00:00'),
-                    (3, 1, 1001, 'qwen', DATE '2026-06-17', 'A', 'completed', TIMESTAMP '2026-06-17 09:00:00'),
-                    (4, 1, 1002, 'doubao', DATE '2026-06-17', 'A', 'running', TIMESTAMP '2026-06-17 09:00:00'),
-                    (5, 1, 1003, 'doubao', DATE '2026-06-17', 'B', 'completed', TIMESTAMP '2026-06-17 09:00:00')
+                    (1, 1, 1001, 'doubao', DATE '2026-06-10', 'A', 'completed', 1, TIMESTAMP '2026-06-10 09:00:00'),
+                    (2, 1, 1001, 'doubao', DATE '2026-06-17', 'A', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00'),
+                    (3, 1, 1001, 'qwen', DATE '2026-06-17', 'A', 'completed', 0, TIMESTAMP '2026-06-17 09:00:00'),
+                    (4, 1, 1002, 'doubao', DATE '2026-06-17', 'A', 'running', 1, TIMESTAMP '2026-06-17 09:00:00'),
+                    (5, 1, 1003, 'doubao', DATE '2026-06-17', 'B', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00')
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_result_entity_judge
                     (poll_result_id, entity_type, entity_ref_id, judge_prompt_version, judge_status, recommended, first_recommend)
                 VALUES
                     (1, 'focus_brand', 0, ?, 'success', 1, 1),
-                    (2, 'focus_brand', 0, ?, 'success', 0, 0),
+                    (2, 'focus_brand', 0, ?, 'success', 1, 1),
                     (3, 'focus_brand', 0, ?, 'success', 1, 0),
                     (4, 'focus_brand', 0, ?, 'success', 1, 1),
                     (5, 'focus_brand', 0, ?, 'success', 1, 1)
@@ -112,7 +112,32 @@ class MobileDashboardEntityJudgeServiceTest {
         assertThat(coverage.expectedCount()).isEqualTo(2);
         assertThat(coverage.successCount()).isEqualTo(2);
         assertThat(coverage.recommendedCount()).isEqualTo(1);
-        assertThat(coverage.firstRecommendCount()).isZero();
+        assertThat(coverage.firstRecommendCount()).isEqualTo(1);
+    }
+
+    @Test
+    void latestFocusCoverageDoesNotFallBackWhenNewestRequestDidNotTriggerSearch() {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createLatestCoverageTables(jdbcTemplate);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, search_requested, search_triggered, updated_at)
+                VALUES
+                    (1, 1, 1001, 'qwen', 'tongyi', DATE '2026-06-10', 'A', 'completed', 1, 1, 1, TIMESTAMP '2026-06-10 09:00:00'),
+                    (2, 1, 1001, 'qwen_web', NULL, DATE '2026-06-17', 'A', 'completed', 0, 1, 0, TIMESTAMP '2026-06-17 09:00:00')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_result_entity_judge
+                    (poll_result_id, entity_type, entity_ref_id, judge_prompt_version, judge_status, recommended, first_recommend)
+                VALUES (1, 'focus_brand', 0, ?, 'success', 1, 1)
+                """, MobileDashboardEntityJudgeService.PROMPT_VERSION);
+
+        MobileDashboardEntityJudgeService.JudgeCoverage coverage = service(jdbcTemplate).latestFocusCoverage(1L);
+
+        assertThat(coverage.expectedCount()).isZero();
+        assertThat(coverage.successCount()).isZero();
+        assertThat(coverage.recommendedCount()).isZero();
     }
 
     @Test
@@ -282,6 +307,8 @@ class MobileDashboardEntityJudgeServiceTest {
                     batch_date DATE,
                     question_tier VARCHAR(8),
                     status VARCHAR(32),
+                    effective_hit INT DEFAULT 1,
+                    brand_in_answer INT DEFAULT 1,
                     execution_finalized INT DEFAULT 1,
                     effective_attempt_id BIGINT DEFAULT 1,
                     search_requested INT DEFAULT 1,

@@ -60,6 +60,7 @@
             v-if="renderedResponse"
             class="answer-content markdown-answer"
             v-html="renderedResponse"
+            @click="handleResponseClick"
           />
           <p v-else-if="hasPositiveSignal(item) || item.pollResultId" class="empty-answer">
             该条历史监测记录未保留原始回答文本，命中结论以系统分析结果为准。
@@ -68,6 +69,7 @@
         </section>
 
         <QuestionSearchSources
+          ref="searchSourcesRef"
           :platform-label="hitPlatformLabel(item)"
           :search-sources="item.searchSources"
         />
@@ -144,6 +146,7 @@ import type { DashboardMetric, QuestionMonitorItem } from '@/types/mobileDashboa
 import { aiPlatformLabel, contentPlatformLabel } from '@/utils/mobileDashboardDictionaries'
 import { aiPlatformLogoSrc, fallbackAiPlatformLogo } from '@/utils/aiPlatformLogo'
 import { isSearchNotTriggered, questionMonitorStatus } from '@/utils/mobileDashboardQuestionStatus'
+import { replaceSourceCitationMarkers } from '@/utils/mobileDashboardMarkdown'
 
 const QUESTION_DETAIL_CACHE_KEY = 'mobile_dashboard_question_detail'
 const route = useRoute()
@@ -151,12 +154,23 @@ const router = useRouter()
 const store = useMobileDashboardStore()
 const loading = ref(false)
 const item = ref<QuestionMonitorItem | null>(null)
+const searchSourcesRef = ref<{ openReference: (reference: number) => Promise<void> } | null>(null)
 const pollResultId = computed(() => Number(route.params.pollResultId))
 const markdown = new MarkdownIt({
   html: false,
   linkify: true,
   breaks: true,
 })
+markdown.renderer.rules.link_open = (tokens, index, options, _env, renderer) => {
+  const token = tokens[index]
+  const href = token.attrGet('href') || ''
+  if (href.startsWith('#reference-')) {
+    const reference = href.slice('#reference-'.length)
+    token.attrSet('class', 'citation-link')
+    token.attrSet('aria-label', `查看参考资料 ${reference}`)
+  }
+  return renderer.renderToken(tokens, index, options)
+}
 const renderedResponse = computed(() => renderMarkdown(item.value?.responseText))
 const relatedContentTasks = computed(() => item.value?.relatedContentTasks || [])
 
@@ -174,7 +188,17 @@ function platformInitial(code: string) {
 
 function renderMarkdown(value?: string | null) {
   const raw = value?.trim() || ''
-  return raw ? markdown.render(raw) : ''
+  return raw ? markdown.render(replaceSourceCitationMarkers(raw, item.value?.searchSources)) : ''
+}
+
+function handleResponseClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const link = target.closest<HTMLAnchorElement>('a[href^="#reference-"]')
+  const match = link?.getAttribute('href')?.match(/^#reference-(\d+)$/)
+  if (!link || !match) return
+  event.preventDefault()
+  void searchSourcesRef.value?.openReference(Number(match[1]))
 }
 
 function contentTaskPlatforms(codes?: string[]) {
@@ -659,6 +683,30 @@ onMounted(loadItem)
   color: #006D44;
   font-weight: 700;
   word-break: break-all;
+}
+
+.markdown-answer :deep(.citation-link) {
+  min-width: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 2px;
+  padding: 0 5px;
+  border: 1px solid #b8dfcf;
+  border-radius: 999px;
+  background: #e6f7ef;
+  color: #006D44;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+  text-decoration: none;
+  vertical-align: 0.16em;
+  word-break: normal;
+}
+
+.markdown-answer :deep(.citation-link:focus-visible) {
+  outline: 2px solid #07a66b;
+  outline-offset: 2px;
 }
 
 .related-task-list {
