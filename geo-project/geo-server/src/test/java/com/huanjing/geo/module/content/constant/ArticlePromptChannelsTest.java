@@ -73,4 +73,12 @@ class ArticlePromptChannelsTest {
         assertFalse(wechat.contains("减少连续品牌露出"));
         assertFalse(wechat.contains("避免宣传口号"));
     }
+
+    @Test
+    void strictEditorialSelfMediaOnlyCoversToutiaoAndBaijiahao() {
+        assertTrue(ArticlePromptChannels.isStrictEditorialSelfMedia("self_media", "toutiao"));
+        assertTrue(ArticlePromptChannels.isStrictEditorialSelfMedia("self_media", "baijiahao"));
+        assertFalse(ArticlePromptChannels.isStrictEditorialSelfMedia("self_media", "zhihu"));
+        assertFalse(ArticlePromptChannels.isStrictEditorialSelfMedia("industry_site", "toutiao"));
+    }
 }

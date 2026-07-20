@@ -150,6 +150,112 @@ class ArticlePromptAssemblerV2Test {
     }
 
     @Test
+    void strictEditorialBrandTemplateRequiresBrandButRemovesRecommendationAnchors() {
+        Project project = new Project();
+        project.setId(1L);
+        project.setBrandId(2L);
+        project.setCompanyName("测试科技有限公司");
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试品牌");
+        brand.setBrandShortName("测试");
+        brand.setMainBusiness("企业知识管理服务");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setName("今日头条-T3（推荐 · brand · industry_article）");
+        template.setDescription("第三方推荐品牌内容");
+        template.setQuestionSceneCode("brand");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setVersionNo(2);
+        version.setUserPromptTemplate("围绕{{topic}}明确推荐测试品牌");
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "测试品牌适合哪些企业", null,
+                null, null, List.of(), "industry_article", "toutiao", "long", null,
+                1, List.of(), null, TemplatePerspectiveCodes.REVIEW_RECOMMEND, "exact", 20L, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "toutiao",
+                TemplatePerspectiveCodes.REVIEW_RECOMMEND, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
+
+        assertTrue(result.userPrompt().contains("每篇必须自然包含品牌信息"));
+        assertTrue(result.userPrompt().contains("至少使用一项与主题直接相关的真实品牌事实"));
+        assertTrue(result.userPrompt().contains("全文通常出现2～3次且不得超过3次"));
+        assertTrue(result.userPrompt().contains("不得把品牌写成默认答案、优先选择或明确推荐结论"));
+        assertTrue(result.userPrompt().contains("测试品牌"));
+        assertTrue(result.userPrompt().contains("企业知识管理服务"));
+        assertFalse(result.userPrompt().contains("可以明确推荐品牌"));
+        assertFalse(result.userPrompt().contains("今日头条-T3（推荐"));
+        assertFalse(result.userPrompt().contains("围绕测试品牌适合哪些企业明确推荐"));
+    }
+
+    @Test
+    void strictEditorialGeneralTopicKeepsControlledBrandExposureForBaijiahao() {
+        Project project = new Project();
+        project.setId(1L);
+        project.setBrandId(2L);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试品牌");
+        brand.setMainBusiness("企业知识管理服务");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setName("百家号知识问答模板");
+        template.setQuestionSceneCode("qa");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setVersionNo(2);
+        version.setUserPromptTemplate("围绕{{topic}}完成知识问答");
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "企业知识库怎么建设", null,
+                null, null, List.of(), "faq", "baijiahao", "long", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "baijiahao",
+                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
+
+        assertTrue(result.userPrompt().contains("全文应自然出现1～2次"));
+        assertTrue(result.userPrompt().contains("标题和开篇不出现品牌"));
+        assertTrue(result.userPrompt().contains("每篇必须自然包含品牌信息"));
+        assertTrue(result.userPrompt().contains("减少连续使用“我们”进行自我评价"));
+        assertFalse(result.userPrompt().contains("围绕企业知识库怎么建设完成知识问答"));
+    }
+
+    @Test
+    void recommendationPerspectiveRemainsAvailableOutsideStrictEditorialPlatforms() {
+        Project project = new Project();
+        project.setId(1L);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试品牌");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setName("公众号推荐模板");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setVersionNo(2);
+        version.setUserPromptTemplate("围绕{{topic}}完成本次任务");
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "企业知识库怎么建设", null,
+                null, null, List.of(), "industry_article", "wechat", "long", null,
+                1, List.of(), null, TemplatePerspectiveCodes.REVIEW_RECOMMEND, "exact", 20L, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "wechat",
+                TemplatePerspectiveCodes.REVIEW_RECOMMEND, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
+
+        assertTrue(result.userPrompt().contains("可以明确推荐品牌"));
+        assertFalse(result.userPrompt().contains("严格审核平台品牌表达要求"));
+    }
+
+    @Test
     void specialIndustryTemplateRemovesConcentratedForbiddenExamples() {
         Project project = new Project();
         project.setId(1L);

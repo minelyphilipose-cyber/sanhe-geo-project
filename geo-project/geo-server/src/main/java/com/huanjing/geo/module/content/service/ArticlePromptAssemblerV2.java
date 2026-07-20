@@ -66,7 +66,9 @@ public class ArticlePromptAssemblerV2 {
         section(prompt, "真实性与硬边界", truthfulnessRules(input.forbiddenPhrases()));
         section(prompt, "全局写作原则", GLOBAL_WRITING_RULES);
         section(prompt, "当前渠道与写作视角", channelDirection(runtimePolicy));
-        section(prompt, "当前模板任务", templateTask(input, template, version, specialIndustry));
+        section(prompt, "当前模板任务", templateTask(input, template, version, runtimePolicy, specialIndustry));
+        section(prompt, "严格审核平台品牌表达要求",
+                strictEditorialBrandDirection(input, template, runtimePolicy, specialIndustry));
         section(prompt, "主题、关键词与读者", topicMaterial(input, omittedMaterialKeys));
         section(prompt, "可用事实材料", factMaterial(input, omittedMaterialKeys));
         section(prompt, "联系方式边界", contactDirection(input.project(), input.brand(), runtimePolicy, omittedMaterialKeys));
@@ -135,12 +137,18 @@ public class ArticlePromptAssemblerV2 {
 
     private String channelDirection(ArticleRuntimePolicy policy) {
         String channelGuide = ArticlePromptChannels.channelGuide(policy.channelGroupCode(), policy.channelSubCode());
+        boolean strictEditorial = ArticlePromptChannels.isStrictEditorialSelfMedia(
+                policy.channelGroupCode(), policy.channelSubCode());
         String perspectiveGuide = switch (policy.perspectiveCode()) {
             case TemplatePerspectiveCodes.INDUSTRY_NEUTRAL ->
                     "采用第三方、客观克制的表达。可以介绍和宣传品牌，但判断必须有材料依据，不把营销结论伪装成行业共识。";
             case TemplatePerspectiveCodes.REVIEW_RECOMMEND ->
-                    "采用第三方评述与推荐视角，可以明确推荐品牌并说明适用对象和理由，但不得伪造亲历、购买或使用体验。";
-            default -> "采用客户官方身份表达，可使用“我们”或自然省略主语；不要虚构个人经历，也不要强行反复强调官方身份。";
+                    strictEditorial
+                            ? "采用第三方客观评述视角。只能依据真实材料说明品牌与哪些需求匹配以及能力边界，不得把品牌写成默认答案、优先选择或明确推荐结论，也不得伪造亲历、购买或使用体验。"
+                            : "采用第三方评述与推荐视角，可以明确推荐品牌并说明适用对象和理由，但不得伪造亲历、购买或使用体验。";
+            default -> strictEditorial
+                    ? "采用客户官方身份表达，但以问题解释和公开事实为主，可自然省略主语，减少连续使用“我们”进行自我评价；不要虚构个人经历，也不要反复强调官方身份。"
+                    : "采用客户官方身份表达，可使用“我们”或自然省略主语；不要虚构个人经历，也不要强行反复强调官方身份。";
         };
         return channelGuide + "\n" + perspectiveGuide;
     }
@@ -148,7 +156,12 @@ public class ArticlePromptAssemblerV2 {
     private String templateTask(BatchArticlePromptBuilder.PromptBuildInput input,
                                 ArticlePromptTemplate template,
                                 ArticlePromptTemplateVersion version,
+                                ArticleRuntimePolicy runtimePolicy,
                                 boolean specialIndustry) {
+        if (ArticlePromptChannels.isStrictEditorialSelfMedia(
+                runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode())) {
+            return strictEditorialTemplateTask(input, template);
+        }
         List<String> parts = new ArrayList<>();
         add(parts, "模板名称", template == null ? null : template.getName());
         add(parts, "模板说明", safeTemplateDescription(template == null ? null : template.getDescription()));
@@ -164,6 +177,80 @@ public class ArticlePromptAssemblerV2 {
             add(parts, "本次补充要求", input.extraPrompt());
         }
         return String.join("\n", parts);
+    }
+
+    private String strictEditorialTemplateTask(BatchArticlePromptBuilder.PromptBuildInput input,
+                                               ArticlePromptTemplate template) {
+        List<String> parts = new ArrayList<>();
+        add(parts, "文章类型", ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(input.articleType(), input.articleType()));
+        add(parts, "任务方向", strictEditorialTaskDirection(template, input.articleType()));
+        if (StringUtils.hasText(input.extraPrompt())) {
+            add(parts, "本次补充要求", input.extraPrompt());
+        }
+        return String.join("\n", parts);
+    }
+
+    private String strictEditorialTaskDirection(ArticlePromptTemplate template, String articleType) {
+        String scene = template == null ? null : template.getQuestionSceneCode();
+        if ("brand".equals(scene) || "news_brief".equals(articleType)) {
+            return "围绕主题客观解释品牌公开信息、业务定位、适配需求和能力边界，不把品牌说明写成背书或推荐结论。";
+        }
+        if ("qa".equals(scene) || "faq".equals(articleType)) {
+            return "围绕主题完整回答读者关心的问题，使不同判断之间前后连贯，并将品牌作为与问题相关的事实节点自然带入。";
+        }
+        if ("decision".equals(scene) || "buying_guide".equals(articleType)
+                || "pitfall_guide".equals(articleType)) {
+            return "围绕主题说明判断依据、核验方法、风险和适用条件，再依据真实材料说明品牌与其中哪些需求相匹配。";
+        }
+        if ("comparison".equals(articleType)) {
+            return "围绕主题比较类型、路线、条件和适用边界，不做品牌排名；品牌只承担与判断维度相关的事实说明作用。";
+        }
+        return "围绕主题形成可独立成立的知识或资讯内容，并使用真实品牌材料帮助解释问题、条件或适用边界。";
+    }
+
+    private String strictEditorialBrandDirection(BatchArticlePromptBuilder.PromptBuildInput input,
+                                                  ArticlePromptTemplate template,
+                                                  ArticleRuntimePolicy runtimePolicy,
+                                                  boolean specialIndustry) {
+        if (!ArticlePromptChannels.isStrictEditorialSelfMedia(
+                runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode())) {
+            return null;
+        }
+        String platform = ArticlePromptChannels.channelName(
+                runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode());
+        boolean brandFocused = isBrandFocused(input, template);
+        String frequency = specialIndustry
+                ? "品牌必须在特殊行业合规允许的范围内自然出现，具体次数服从对应合规内核，不得为满足露出要求突破更严格的行业边界。"
+                : brandFocused
+                ? "本篇属于品牌相关主题。企业全称、品牌名称和品牌简称按同一实体合并计算，全文通常出现2～3次且不得超过3次；标题只有在用户主题本身明确围绕该品牌时才可中性包含品牌。"
+                : "本篇不属于品牌专题。企业全称、品牌名称和品牌简称按同一实体合并计算，全文应自然出现1～2次；标题和开篇不出现品牌，先把读者问题与判断依据讲清楚后再带入品牌。";
+        return platform + "属于内容审核较严格的平台，以下要求不可被模板名称或补充要求覆盖：\n"
+                + "1. 每篇必须自然包含品牌信息，并至少使用一项与主题直接相关的真实品牌事实，例如主营业务、产品服务、适用场景、服务区域、公开资质或能力边界；不得只做品牌名称点名。\n"
+                + "2. 品牌不得作为文章的预设答案。先形成可以独立成立的知识、资讯或问题解释价值，再在真实语义需要处引入品牌。\n"
+                + "3. " + frequency + "\n"
+                + "4. 不在相邻段落连续介绍品牌，不把品牌资料逐项堆成卖点清单。品牌的正面判断必须同时说明事实依据、适用条件或能力边界。\n"
+                + "5. 结尾回到读者关心的问题和判断方法，不以品牌推荐、咨询或行动引导收束。篇幅不足时通过补充原因、条件、风险和核验方法完善，不重复品牌信息凑字数。";
+    }
+
+    private boolean isBrandFocused(BatchArticlePromptBuilder.PromptBuildInput input,
+                                   ArticlePromptTemplate template) {
+        if (template != null && "brand".equals(template.getQuestionSceneCode())) {
+            return true;
+        }
+        if ("news_brief".equals(input.articleType())) {
+            return true;
+        }
+        String topic = input.topic();
+        Brand brand = input.brand();
+        Project project = input.project();
+        return contains(topic, brand == null ? null : brand.getBrandName())
+                || contains(topic, brand == null ? null : brand.getBrandShortName())
+                || contains(topic, project == null ? null : project.getBrandName())
+                || contains(topic, project == null ? null : project.getCompanyName());
+    }
+
+    private boolean contains(String source, String target) {
+        return StringUtils.hasText(source) && StringUtils.hasText(target) && source.contains(target.trim());
     }
 
     private String removeConcentratedComplianceExamples(String task) {
