@@ -205,6 +205,13 @@ public class MobileDashboardAggregateService {
         List<MobileDashboardAggregateVO.QuestionSearchSource> candidates = jdbcTemplate.query("""
                 SELECT s.id AS source_id,
                        s.rank_no,
+                       (
+                           SELECT MIN(c.citation_index)
+                             FROM poll_citations c
+                            WHERE c.attempt_id = pr.effective_attempt_id
+                              AND c.source_id = s.id
+                              AND c.confidence IN ('CONFIRMED', 'PROBABLE')
+                       ) AS citation_index,
                        s.title,
                        COALESCE(NULLIF(TRIM(s.normalized_url), ''), NULLIF(TRIM(s.original_url), '')) AS source_url,
                        s.domain,
@@ -239,6 +246,7 @@ public class MobileDashboardAggregateService {
             source.setSourceId(rs.getLong("source_id"));
             source.setRankNo(nullableInt(rs, "rank_no"));
             source.setTitle(boundedText(rs.getString("title"), 160));
+            source.setCitationIndex(nullableInt(rs, "citation_index"));
             source.setUrl(url);
             source.setDomain(sourceDomain(url));
             source.setSnippet(boundedText(rs.getString("snippet"), 220));

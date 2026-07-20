@@ -507,6 +507,7 @@ public class MobileDashboardAggregateServiceTest {
                     id BIGINT,
                     attempt_id BIGINT,
                     source_id BIGINT,
+                    citation_index INT,
                     confidence VARCHAR(32)
                 )
                 """);
@@ -530,8 +531,8 @@ public class MobileDashboardAggregateServiceTest {
                     (7, 99, 6, '伪装地址', 'https://trusted.example.com@evil.example.net/a', NULL, NULL, NULL, NULL, 0)
                 """);
         jdbcTemplate.update("""
-                INSERT INTO poll_citations (id, attempt_id, source_id, confidence)
-                VALUES (1, 99, 1, 'CONFIRMED')
+                INSERT INTO poll_citations (id, attempt_id, source_id, citation_index, confidence)
+                VALUES (1, 99, 1, 7, 'CONFIRMED')
                 """);
 
         @SuppressWarnings("unchecked")
@@ -542,6 +543,7 @@ public class MobileDashboardAggregateServiceTest {
         assertThat(sources).extracting(MobileDashboardAggregateVO.QuestionSearchSource::getSourceId)
                 .containsExactly(1L, 4L);
         assertThat(sources.get(0).getCited()).isTrue();
+        assertThat(sources.get(0).getCitationIndex()).isEqualTo(7);
         assertThat(sources.get(0).getDomain()).isEqualTo("example.com");
         assertThat(sources.get(1).getDomain()).isEqualTo("news.example.org");
     }

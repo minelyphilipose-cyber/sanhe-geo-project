@@ -165,6 +165,7 @@ export interface QuestionMonitorItem {
 
 export interface QuestionSearchSource {
   sourceId: number
+  citationIndex?: number | null
   rankNo?: number | null
   title?: string | null
   url: string

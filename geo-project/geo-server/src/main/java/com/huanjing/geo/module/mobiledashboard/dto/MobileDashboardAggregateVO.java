@@ -139,6 +139,7 @@ public final class MobileDashboardAggregateVO {
     @Data
     public static class QuestionSearchSource {
         private Long sourceId;
+        private Integer citationIndex;
         private Integer rankNo;
         private String title;
         private String url;
