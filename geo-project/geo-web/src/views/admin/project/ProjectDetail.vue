@@ -832,6 +832,21 @@
             <template #default="{ row }">{{ sceneLabel(row.sceneCode) }}</template>
           </el-table-column>
           <el-table-column prop="questionTier" label="分级" width="80" />
+          <el-table-column label="轮询处理" width="130">
+            <template #default="{ row }">
+              <el-select
+                v-if="row.questionTier === 'A'"
+                :model-value="questionPollingEnabled(row)"
+                :disabled="!canManageQuestionPolling || questionPollingSavingIds.has(row.id)"
+                :loading="questionPollingSavingIds.has(row.id)"
+                @change="changeQuestionPolling(row, $event === true)"
+              >
+                <el-option label="轮询" :value="true" />
+                <el-option label="不轮询" :value="false" />
+              </el-select>
+              <span v-else class="text-gray-400">不适用</span>
+            </template>
+          </el-table-column>
           <el-table-column label="优先级" width="90">
             <template #default="{ row }">{{ priorityLabel(row.priority) }}</template>
           </el-table-column>
@@ -1018,6 +1033,7 @@ import {
   retryProjectSelfMediaScheduleBatchAbnormalSchedules,
   retryProjectSelfMediaScheduleBatchFailedItems,
   updateKeywordGroupQuestion,
+  updateProjectKeywordQuestionPolling,
   updateProject,
   updateProjectChannelAllocations,
   updateProjectSelfMediaScheduleConfig,
@@ -1047,6 +1063,7 @@ import { regionDisplayFromPayload } from '@/constants/region'
 import { isSelfMediaQuotaChannel } from '@/constants/distributionChannels'
 import { selfMediaPlatformLabel } from '@/constants/selfMediaPlatforms'
 import { nullableText } from '@/utils/form'
+import { canManageQuestionPolling as canManageQuestionPollingForProject, isQuestionPollingEnabled, questionPollingLabel } from '@/utils/keywordQuestionPolling'
 import MobileDashboardCompetitorPanel from './MobileDashboardCompetitorPanel.vue'
 
 const route = useRoute()
@@ -1087,6 +1104,12 @@ const canPrepareProject = computed(() => project.value?.status === 'pending_star
 const canCreateKeywordGroup = computed(() => !!project.value && !userStore.isSales && userStore.hasPermission('keyword_group.write'))
 const canDeleteKeywordGroup = computed(() => !!project.value && !userStore.isSales && canPrepareProject.value && userStore.hasPermission('keyword_group.write'))
 const canEditKeywordQuestion = computed(() => !!project.value && !userStore.isSales && canPrepareProject.value && userStore.hasPermission('keyword_group.write'))
+const canManageQuestionPolling = computed(() => {
+  return !!project.value && canManageQuestionPollingForProject(
+    project.value.status,
+    userStore.hasPermission('keyword_group.write'),
+  )
+})
 const projectId = Number(route.params.id)
 const hasValidId = Number.isFinite(projectId) && projectId > 0
 
@@ -1101,6 +1124,7 @@ const requirementEditVisible = ref(false)
 const questionLoading = ref(false)
 const questionSaving = ref(false)
 const questionExporting = ref(false)
+const questionPollingSavingIds = ref<Set<number>>(new Set())
 const channelQuotaLoading = ref(false)
 const channelSaving = ref(false)
 const requirementSaving = ref(false)
@@ -2627,12 +2651,13 @@ function toQuestionXlsx(records: KeywordGroupQuestion[]) {
 }
 
 function questionExportRows(records: KeywordGroupQuestion[]) {
-  const headers = ['ID', '问题文本', '场景', '分级', '优先级', '商业价值', '成交距离', '品牌绑定', '地域行业', '一期可达', '总分', '生成文章备注']
+  const headers = ['ID', '问题文本', '场景', '分级', '轮询处理', '优先级', '商业价值', '成交距离', '品牌绑定', '地域行业', '一期可达', '总分', '生成文章备注']
   const rows = records.map((row) => [
     row.questionCode,
     row.questionText,
     sceneLabel(row.sceneCode),
     row.questionTier,
+    questionPollingLabel(row),
     priorityLabel(row.priority),
     row.scoreRelevance,
     row.scoreIntent,
@@ -2646,7 +2671,7 @@ function questionExportRows(records: KeywordGroupQuestion[]) {
 }
 
 function buildWorksheetXml(rows: unknown[][]) {
-  const columnWidths = [14, 56, 14, 10, 10, 12, 12, 12, 12, 12, 10, 44]
+  const columnWidths = [14, 56, 14, 10, 12, 10, 12, 12, 12, 12, 12, 10, 44]
   const colsXml = columnWidths
     .map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`)
     .join('')
@@ -2797,6 +2822,51 @@ function openQuestionEdit(row: KeywordGroupQuestion) {
   questionForm.scoreCoverage = Number(row.scoreCoverage || 4)
   questionForm.articleGenerationNote = row.articleGenerationNote || ''
   questionEditVisible.value = true
+}
+
+function questionPollingEnabled(row: KeywordGroupQuestion) {
+  return isQuestionPollingEnabled(row)
+}
+
+function setQuestionPollingSaving(questionId: number, saving: boolean) {
+  const next = new Set(questionPollingSavingIds.value)
+  if (saving) next.add(questionId)
+  else next.delete(questionId)
+  questionPollingSavingIds.value = next
+}
+
+async function changeQuestionPolling(row: KeywordGroupQuestion, pollingEnabled: boolean) {
+  if (!canManageQuestionPolling.value || row.questionTier !== 'A' || questionPollingSavingIds.value.has(row.id)) return
+  if (questionPollingEnabled(row) === pollingEnabled || !currentKeywordGroup.value) return
+
+  if (!pollingEnabled) {
+    try {
+      await ElMessageBox.confirm(
+        '关闭后，手机数据看板会立即移除该问题；已经规划的轮询批次仍会继续执行。是否确认关闭？',
+        '确认关闭轮询处理',
+        { type: 'warning', confirmButtonText: '确认关闭', cancelButtonText: '取消' },
+      )
+    } catch (error) {
+      if (error === 'cancel' || error === 'close') return
+      throw error
+    }
+  }
+
+  setQuestionPollingSaving(row.id, true)
+  try {
+    const { data } = await updateProjectKeywordQuestionPolling(
+      projectId,
+      currentKeywordGroup.value.id,
+      row.id,
+      pollingEnabled,
+    )
+    Object.assign(row, data.data)
+    ElMessage.success(pollingEnabled ? '已开启轮询处理' : '已关闭轮询处理')
+  } catch (error) {
+    ElMessage.error('轮询处理更新失败，请重试')
+  } finally {
+    setQuestionPollingSaving(row.id, false)
+  }
 }
 
 async function saveQuestion() {

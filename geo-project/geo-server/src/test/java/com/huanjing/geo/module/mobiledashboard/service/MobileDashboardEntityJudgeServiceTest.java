@@ -328,6 +328,25 @@ class MobileDashboardEntityJudgeServiceTest {
                     first_recommend INT
                 )
                 """);
+        jdbcTemplate.execute("""
+                CREATE VIEW keyword_group_result AS
+                SELECT DISTINCT keyword_result_id AS id,
+                       project_id AS group_id,
+                       question_tier,
+                       1 AS polling_enabled
+                  FROM poll_results
+                 WHERE keyword_result_id IS NOT NULL
+                """);
+        jdbcTemplate.execute("""
+                CREATE VIEW keyword_group AS
+                SELECT DISTINCT project_id AS id, 0 AS deleted
+                  FROM poll_results
+                """);
+        jdbcTemplate.execute("""
+                CREATE VIEW project_keyword_group_rel AS
+                SELECT DISTINCT project_id, project_id AS keyword_group_id
+                  FROM poll_results
+                """);
     }
 
     private AiPlatformConfig platform() {

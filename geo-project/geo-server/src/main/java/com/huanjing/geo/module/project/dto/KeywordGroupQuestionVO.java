@@ -15,6 +15,7 @@ public class KeywordGroupQuestionVO {
     private String questionTier;
     private String priority;
     private String monitorFrequency;
+    private Boolean pollingEnabled;
     private BigDecimal scoreRelevance;
     private BigDecimal scoreIntent;
     private BigDecimal scoreCompetition;

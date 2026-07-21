@@ -442,6 +442,18 @@ export function updateKeywordGroupQuestion(groupId: number, questionId: number, 
   return request.put<R<KeywordGroupQuestion>>(`/keyword-groups/${groupId}/questions/${questionId}`, data)
 }
 
+export function updateProjectKeywordQuestionPolling(
+  projectId: number,
+  groupId: number,
+  questionId: number,
+  pollingEnabled: boolean,
+) {
+  return request.put<R<KeywordGroupQuestion>>(
+    `/projects/${projectId}/keyword-groups/${groupId}/questions/${questionId}/polling`,
+    { pollingEnabled },
+  )
+}
+
 export function importProjectKeywordGroup(projectId: number, file: File) {
   const formData = new FormData()
   formData.append('file', file)

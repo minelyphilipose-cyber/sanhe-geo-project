@@ -283,6 +283,13 @@
                 <span class="question-pill" :class="priorityClass(row.priority)">{{ priorityLabel(row.priority) }}</span>
               </template>
             </el-table-column>
+            <el-table-column label="轮询处理" width="120">
+              <template #default="{ row }">
+                <el-tag :type="row.pollingEnabled === false ? 'info' : 'success'" effect="plain">
+                  {{ isQuestionPollingEnabled(row) ? '轮询' : '不轮询' }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="更新时间" width="190">
               <template #default="{ row }">
                 <span class="question-date">{{ formatDateTimeSeconds(row.updatedAt || row.createdAt) || '-' }}</span>
@@ -434,6 +441,7 @@ import {
 import { getProjectMobileDashboardCompetitors, type ProjectCompetitorConfig } from '@/api/mobileDashboard'
 import DataState from '@/components/ui/DataState.vue'
 import type { KeywordGroup, KeywordGroupQuestion, PageResult, Project, ProjectChannelAllocationItem } from '@/types'
+import { isQuestionPollingEnabled } from '@/utils/keywordQuestionPolling'
 import { useDictStore } from '@/stores/dict'
 import { useUserStore } from '@/stores/user'
 import { errorMessage } from '@/utils/error'

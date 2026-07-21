@@ -295,12 +295,14 @@ class PartnerResponseSanitizerTest {
         question.setId(201L);
         question.setQuestionTier("A");
         question.setQuestionText("core question");
+        question.setPollingEnabled(false);
         Page<KeywordGroupQuestionVO> questionPage = new Page<>(1, 20, 1);
         questionPage.setRecords(List.of(question));
 
         Page<PartnerKeywordGroupQuestionVO> questionVo = assertInstanceOf(Page.class, sanitizer.keywordGroupQuestions(questionPage));
 
         assertEquals("core question", questionVo.getRecords().get(0).getQuestionText());
+        assertFalse(questionVo.getRecords().get(0).getPollingEnabled());
         assertFalse(hasGetter(questionVo.getRecords().get(0), "getQuestionTier"));
     }
 

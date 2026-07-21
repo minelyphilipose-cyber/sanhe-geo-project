@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.project.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
@@ -14,6 +15,7 @@ import com.huanjing.geo.module.project.dto.KeywordGroupImportResultVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupPayloadRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupQuestionUpdateRequest;
+import com.huanjing.geo.module.project.dto.KeywordGroupQuestionPollingUpdateRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupQuestionVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupVO;
 import com.huanjing.geo.module.project.dto.KeywordPreviewItemVO;
@@ -350,6 +352,58 @@ public class KeywordGroupService {
         return toQuestionVO(keywordGroupResultMapper.selectById(questionId));
     }
 
+    @Transactional
+    public KeywordGroupQuestionVO updateQuestionPolling(Long projectId,
+                                                        Long groupId,
+                                                        Long questionId,
+                                                        KeywordGroupQuestionPollingUpdateRequest request) {
+        SysUser currentUser = currentUserService.requireCurrentUser();
+        if (currentUserService.isPartnerUser(currentUser)) {
+            throw new BizException(403, "Partners cannot update question polling settings");
+        }
+        currentUserService.ensurePermission("keyword_group.write");
+        if (request == null || request.getPollingEnabled() == null) {
+            throw new BizException(400, "pollingEnabled is required");
+        }
+
+        Project project = requireProject(projectId);
+        internalScopeService.ensureProjectAccess(currentUser, project, "project");
+        if (!Set.of("pending_start", "active", "paused").contains(project.getStatus())) {
+            throw new BizException(400, "当前项目状态不允许修改问题轮询设置");
+        }
+
+        KeywordGroup group = requireGroup(groupId);
+        Company company = requireCompany(group.getCompanyId());
+        internalScopeService.ensureCompanyAccess(currentUser, company, "keyword group");
+        Long relationCount = projectKeywordGroupRelMapper.selectCount(
+                new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                        .eq(ProjectKeywordGroupRel::getProjectId, projectId)
+                        .eq(ProjectKeywordGroupRel::getKeywordGroupId, groupId));
+        if (relationCount == null || relationCount == 0) {
+            throw new BizException(400, "当前项目未绑定指定拓词组");
+        }
+
+        KeywordGroupResult result = keywordGroupResultMapper.selectById(questionId);
+        if (result == null) {
+            throw new BizException(404, "Question not found");
+        }
+        if (!groupId.equals(result.getGroupId())) {
+            throw new BizException(400, "问题不属于指定拓词组");
+        }
+        if (!DEFAULT_QUESTION_TIER.equals(normalizeQuestionTier(result.getQuestionTier()))) {
+            throw new BizException(400, "仅 A 类问题可配置轮询处理");
+        }
+
+        LocalDateTime updatedAt = LocalDateTime.now();
+        keywordGroupResultMapper.update(null, new LambdaUpdateWrapper<KeywordGroupResult>()
+                .eq(KeywordGroupResult::getId, questionId)
+                .set(KeywordGroupResult::getPollingEnabled, request.getPollingEnabled())
+                .set(KeywordGroupResult::getUpdatedAt, updatedAt));
+        result.setPollingEnabled(request.getPollingEnabled());
+        result.setUpdatedAt(updatedAt);
+        return toQuestionVO(result);
+    }
+
     public KeywordPreviewVO preview(KeywordGroupPayloadRequest req) {
         currentUserService.ensurePermission("keyword_group.read");
         String type = normalizeType(req.getType());
@@ -510,6 +564,7 @@ public class KeywordGroupService {
             result.setSourceType(normalizeResultSource(item.getSourceType()));
             result.setSeedText(RESULT_SOURCE_LLM.equals(normalizeResultSource(item.getSourceType())) ? normalizeNullable(item.getSeedText()) : null);
             result.setQuestionTier(normalizeQuestionTier(item.getQuestionTier()));
+            result.setPollingEnabled(true);
             result.setSortOrder((i + 1) * 10);
             keywordGroupResultMapper.insert(result);
         }
@@ -1225,6 +1280,7 @@ public class KeywordGroupService {
         result.setSceneCode(row.sceneCode());
         result.setPriority(row.priority());
         result.setMonitorFrequency(defaultFrequency(row.tier()));
+        result.setPollingEnabled(true);
         result.setScoreRelevance(row.scoreRelevance());
         result.setScoreIntent(row.scoreIntent());
         result.setScoreCompetition(row.scoreCompetition());
@@ -1245,6 +1301,7 @@ public class KeywordGroupService {
         vo.setQuestionTier(result.getQuestionTier());
         vo.setPriority(result.getPriority());
         vo.setMonitorFrequency(result.getMonitorFrequency());
+        vo.setPollingEnabled(!Boolean.FALSE.equals(result.getPollingEnabled()));
         vo.setScoreRelevance(result.getScoreRelevance());
         vo.setScoreIntent(result.getScoreIntent());
         vo.setScoreCompetition(result.getScoreCompetition());

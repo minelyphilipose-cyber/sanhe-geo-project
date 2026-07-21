@@ -1288,12 +1288,32 @@ public class GeoQuestionService {
                 .orderByAsc(KeywordGroupResult::getQuestionTier)
                 .orderByAsc(KeywordGroupResult::getSortOrder)
                 .orderByAsc(KeywordGroupResult::getId));
+        Map<Long, KeywordGroupResult> existingBySourceQuestionId = existing.stream()
+                .filter(item -> item.getSourceQuestionId() != null)
+                .collect(Collectors.toMap(
+                        KeywordGroupResult::getSourceQuestionId,
+                        item -> item,
+                        (left, ignored) -> left,
+                        LinkedHashMap::new));
+        Set<Long> reusedResultIds = new HashSet<>();
         for (int i = 0; i < questions.size(); i++) {
-            if (i < existing.size()) {
-                applyQuestionToKeywordGroupResult(existing.get(i), workorderId, versionId, questions.get(i), i + 1);
-                keywordGroupResultMapper.updateById(existing.get(i));
+            GeoQuestionItem question = questions.get(i);
+            KeywordGroupResult current = existingBySourceQuestionId.get(question.getId());
+            if (current == null || reusedResultIds.contains(current.getId())) {
+                current = existing.stream()
+                        .filter(item -> !reusedResultIds.contains(item.getId()))
+                        .findFirst()
+                        .orElse(null);
+            }
+            if (current != null) {
+                reusedResultIds.add(current.getId());
+                boolean sameSourceQuestion = Objects.equals(current.getSourceQuestionId(), question.getId());
+                Boolean pollingEnabled = current.getPollingEnabled();
+                applyQuestionToKeywordGroupResult(current, workorderId, versionId, question, i + 1);
+                current.setPollingEnabled(sameSourceQuestion && pollingEnabled != null ? pollingEnabled : true);
+                keywordGroupResultMapper.updateById(current);
             } else {
-                keywordGroupResultMapper.insert(keywordGroupResult(groupId, workorderId, versionId, questions.get(i), i + 1));
+                keywordGroupResultMapper.insert(keywordGroupResult(groupId, workorderId, versionId, question, i + 1));
             }
         }
     }
@@ -1308,6 +1328,7 @@ public class GeoQuestionService {
     private KeywordGroupResult keywordGroupResult(Long groupId, Long workorderId, Long versionId, GeoQuestionItem question, int sort) {
         KeywordGroupResult result = new KeywordGroupResult();
         result.setGroupId(groupId);
+        result.setPollingEnabled(true);
         result.setCreatedAt(LocalDateTime.now());
         applyQuestionToKeywordGroupResult(result, workorderId, versionId, question, sort);
         return result;

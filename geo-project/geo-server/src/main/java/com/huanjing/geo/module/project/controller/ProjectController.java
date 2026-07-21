@@ -12,6 +12,8 @@ import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
 import com.huanjing.geo.module.partner.service.PartnerFeatureAccessGuard;
 import com.huanjing.geo.module.partner.service.PartnerResponseSanitizer;
 import com.huanjing.geo.module.project.dto.KeywordGroupImportResultVO;
+import com.huanjing.geo.module.project.dto.KeywordGroupQuestionPollingUpdateRequest;
+import com.huanjing.geo.module.project.dto.KeywordGroupQuestionVO;
 import com.huanjing.geo.module.project.dto.ProjectChannelAllocationUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
@@ -182,6 +184,15 @@ public class ProjectController {
     @PostMapping("/{id:\\d+}/keyword-groups/import")
     public R<KeywordGroupImportResultVO> importKeywordGroup(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
         return R.ok(keywordGroupService.importProjectKeywordGroup(id, file));
+    }
+
+    @PutMapping("/{projectId:\\d+}/keyword-groups/{groupId:\\d+}/questions/{questionId:\\d+}/polling")
+    public R<KeywordGroupQuestionVO> updateQuestionPolling(
+            @PathVariable Long projectId,
+            @PathVariable Long groupId,
+            @PathVariable Long questionId,
+            @Valid @RequestBody KeywordGroupQuestionPollingUpdateRequest request) {
+        return R.ok(keywordGroupService.updateQuestionPolling(projectId, groupId, questionId, request));
     }
 
     @PutMapping("/{id:\\d+}")

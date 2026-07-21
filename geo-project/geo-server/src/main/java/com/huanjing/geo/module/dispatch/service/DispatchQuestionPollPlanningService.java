@@ -73,7 +73,7 @@ public class DispatchQuestionPollPlanningService {
 
         List<PollKeywordCandidate> allKeywords = loadProjectPollKeywords(project.getId(), questionTier);
         if (allKeywords.isEmpty()) {
-            log.info("Skip question poll planning because no {} tier saved keywords, projectId={}",
+            log.info("Skip question poll planning because no enabled {} tier monitoring questions, projectId={}",
                     questionTier, project.getId());
             return existing;
         }
@@ -116,7 +116,7 @@ public class DispatchQuestionPollPlanningService {
         List<PollKeywordCandidate> allKeywords = loadProjectPollKeywords(project.getId(), questionTier);
         if (allKeywords.isEmpty()) {
             throw new com.huanjing.geo.common.exception.BizException(
-                    400, "Project has no saved " + questionTier + "-tier questions", 400, null
+                    400, "当前项目没有启用的 " + questionTier + " 类监测问题", 400, null
             );
         }
         int effectiveLimit = Math.max(1, Math.min(questionLimit, allKeywords.size()));
@@ -372,6 +372,7 @@ public class DispatchQuestionPollPlanningService {
                 new LambdaQueryWrapper<KeywordGroupResult>()
                         .in(KeywordGroupResult::getGroupId, groupIds)
                         .eq(KeywordGroupResult::getQuestionTier, questionTier)
+                        .eq(KeywordGroupResult::getPollingEnabled, true)
                         .orderByAsc(KeywordGroupResult::getId)
         );
         Map<String, PollKeywordCandidate> deduplicated = new LinkedHashMap<>();

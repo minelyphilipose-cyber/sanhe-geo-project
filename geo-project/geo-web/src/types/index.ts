@@ -867,6 +867,7 @@ export interface KeywordGroupQuestion {
   questionTier?: 'A' | 'B' | 'C' | string
   priority?: string | null
   monitorFrequency?: string | null
+  pollingEnabled?: boolean
   scoreRelevance?: number | null
   scoreIntent?: number | null
   scoreCompetition?: number | null

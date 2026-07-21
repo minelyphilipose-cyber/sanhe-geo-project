@@ -25,6 +25,7 @@ public class KeywordGroupResult {
     private String sceneCode;
     private String priority;
     private String monitorFrequency;
+    private Boolean pollingEnabled = true;
     private java.math.BigDecimal scoreRelevance;
     private java.math.BigDecimal scoreIntent;
     private java.math.BigDecimal scoreCompetition;

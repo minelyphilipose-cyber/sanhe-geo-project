@@ -60,6 +60,33 @@ public class MobileDashboardAggregateServiceTest {
     }
 
     @Test
+    void latestMentionAggregateExcludesQuestionsWithPollingDisabled() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createQuestionCoverageTables(jdbcTemplate);
+        createPollResultsTable(jdbcTemplate);
+        jdbcTemplate.update("INSERT INTO keyword_group (id, deleted) VALUES (10, 0)");
+        jdbcTemplate.update("INSERT INTO project_keyword_group_rel (project_id, keyword_group_id) VALUES (1, 10)");
+        jdbcTemplate.update("""
+                INSERT INTO keyword_group_result (id, group_id, scene_code, question_tier, polling_enabled)
+                VALUES (1001, 10, 'brand', 'A', 1),
+                       (1002, 10, 'brand', 'A', 0)
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, search_triggered, updated_at)
+                VALUES
+                    (1, 1, 1001, 'doubao_web', 'doubao', DATE '2026-06-10', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-10 09:00:00'),
+                    (2, 1, 1002, 'doubao_web', 'doubao', DATE '2026-06-10', 'A', 'completed', 1, 1, TIMESTAMP '2026-06-10 09:01:00')
+                """);
+
+        Object aggregate = invoke(newService(jdbcTemplate), "loadLatestMentionAggregate", 1L, null);
+
+        assertThat(recordValue(aggregate, "requested")).isEqualTo(1L);
+        assertThat(recordValue(aggregate, "mentions")).isEqualTo(1L);
+    }
+
+    @Test
     void mentionTrendUsesQueryCountAsDenominatorAndNullForMissingDays() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         createPollResultsTable(jdbcTemplate);
@@ -513,10 +540,10 @@ public class MobileDashboardAggregateServiceTest {
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_results
-                    (id, project_id, platform_code, channel_code, batch_date, question_tier, status,
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier, status,
                      execution_finalized, effective_attempt_id, search_requested, search_triggered)
                 VALUES
-                    (10, 1, 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 99, 1, 1)
+                    (10, 1, 1001, 'doubao_web', 'doubao', DATE '2026-06-20', 'A', 'completed', 1, 99, 1, 1)
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_search_sources
@@ -1076,7 +1103,8 @@ public class MobileDashboardAggregateServiceTest {
                     id BIGINT,
                     group_id BIGINT,
                     scene_code VARCHAR(64),
-                    question_tier VARCHAR(8)
+                    question_tier VARCHAR(8),
+                    polling_enabled INT DEFAULT 1
                 )
                 """);
         jdbcTemplate.execute("""
@@ -1114,6 +1142,25 @@ public class MobileDashboardAggregateServiceTest {
                     detail_json CLOB,
                     updated_at TIMESTAMP
                 )
+                """);
+        jdbcTemplate.execute("""
+                CREATE VIEW IF NOT EXISTS keyword_group_result AS
+                SELECT DISTINCT keyword_result_id AS id,
+                       project_id AS group_id,
+                       question_tier,
+                       1 AS polling_enabled
+                  FROM poll_results
+                 WHERE keyword_result_id IS NOT NULL
+                """);
+        jdbcTemplate.execute("""
+                CREATE VIEW IF NOT EXISTS keyword_group AS
+                SELECT DISTINCT project_id AS id, 0 AS deleted
+                  FROM poll_results
+                """);
+        jdbcTemplate.execute("""
+                CREATE VIEW IF NOT EXISTS project_keyword_group_rel AS
+                SELECT DISTINCT project_id, project_id AS keyword_group_id
+                  FROM poll_results
                 """);
     }
 

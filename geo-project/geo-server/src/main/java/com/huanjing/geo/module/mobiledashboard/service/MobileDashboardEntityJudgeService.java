@@ -183,7 +183,7 @@ public class MobileDashboardEntityJudgeService {
     }
 
     public List<CompetitorSummary> latestCompetitorSummaries(Long projectId) {
-        return jdbcTemplate.query("""
+        return jdbcTemplate.query(MobileDashboardQuestionScopeSql.apply("""
                 WITH latest AS (
                     SELECT pr.id,
                            pr.search_triggered,
@@ -196,6 +196,7 @@ public class MobileDashboardEntityJudgeService {
                        AND pr.status = 'completed'
                        AND pr.question_tier = ?
                        AND pr.keyword_result_id IS NOT NULL
+                       AND ENABLED_MONITORING_QUESTION_SCOPE
                        AND %2$s
                 ),
                 latest_count AS (
@@ -227,7 +228,7 @@ public class MobileDashboardEntityJudgeService {
                    AND c.status = 'active'
                  GROUP BY c.id, c.competitor_name, c.display_order, c.qa_status
                  ORDER BY c.display_order ASC, c.id ASC
-                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL), (rs, rowNum) -> new CompetitorSummary(
+                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL), "pr"), (rs, rowNum) -> new CompetitorSummary(
                 rs.getLong("entity_ref_id"),
                 rs.getString("competitor_name"),
                 rs.getInt("display_order"),
@@ -246,7 +247,7 @@ public class MobileDashboardEntityJudgeService {
         if (StringUtils.hasText(platformCode)) {
             platformClause = " AND %s IN (%s) ".formatted(POLL_CHANNEL_SQL, platformAliasSql(platformCode));
         }
-        JudgeCoverage row = jdbcTemplate.queryForObject("""
+        JudgeCoverage row = jdbcTemplate.queryForObject(MobileDashboardQuestionScopeSql.apply("""
                 WITH latest AS (
                     SELECT pr.id,
                            pr.effective_hit,
@@ -261,6 +262,7 @@ public class MobileDashboardEntityJudgeService {
                        AND pr.status = 'completed'
                        AND pr.question_tier = ?
                        AND pr.keyword_result_id IS NOT NULL
+                       AND ENABLED_MONITORING_QUESTION_SCOPE
                        AND %2$s
                        %3$s
                 )
@@ -276,7 +278,7 @@ public class MobileDashboardEntityJudgeService {
                    AND j.judge_prompt_version = ?
                  WHERE l.rn = 1
                    AND l.search_triggered = 1
-                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL, platformClause), (rs, rowNum) -> new JudgeCoverage(
+                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL, platformClause), "pr"), (rs, rowNum) -> new JudgeCoverage(
                 rs.getLong("expected_count"),
                 rs.getLong("success_count"),
                 rs.getLong("recommended_count"),
@@ -307,12 +309,13 @@ public class MobileDashboardEntityJudgeService {
     }
 
     private List<Long> loadPendingProjectIds(LocalDate startDate, LocalDate endDate, int limit) {
-        return jdbcTemplate.query("""
+        return jdbcTemplate.query(MobileDashboardQuestionScopeSql.apply("""
                 SELECT pr.project_id
                  FROM poll_results pr
                  WHERE pr.status = 'completed'
                    AND pr.batch_date BETWEEN ? AND ?
                    AND pr.question_tier = ?
+                   AND ENABLED_MONITORING_QUESTION_SCOPE
                    AND %s
                    AND JSON_EXTRACT(pr.detail_json, '$.platform_response') IS NOT NULL
                    AND NOT EXISTS (
@@ -328,14 +331,15 @@ public class MobileDashboardEntityJudgeService {
                  GROUP BY pr.project_id
                  ORDER BY MIN(pr.batch_date) ASC, MIN(pr.id) ASC
                  LIMIT ?
-                """.formatted(EFFECTIVE_WEB_SEARCH_RESULT_SQL), (rs, rowNum) -> rs.getLong("project_id"),
+                """.formatted(EFFECTIVE_WEB_SEARCH_RESULT_SQL), "pr"), (rs, rowNum) -> rs.getLong("project_id"),
                 Date.valueOf(startDate), Date.valueOf(endDate), MOBILE_QUESTION_TIER, PROMPT_VERSION, limit);
     }
 
     private List<PollCandidate> loadCandidates(Long projectId, LocalDate startDate, LocalDate endDate, int limit) {
         List<Object> args = new ArrayList<>();
-        StringBuilder where = new StringBuilder("""
+        StringBuilder where = new StringBuilder(MobileDashboardQuestionScopeSql.apply("""
                 WHERE pr.status = 'completed'
+                  AND ENABLED_MONITORING_QUESTION_SCOPE
                   AND %s
                   AND JSON_EXTRACT(pr.detail_json, '$.platform_response') IS NOT NULL
                   AND NOT EXISTS (
@@ -348,7 +352,7 @@ public class MobileDashboardEntityJudgeService {
                            AND j.entity_config_version = 1
                            AND j.judge_status = 'success'
                   )
-                """.formatted(EFFECTIVE_WEB_SEARCH_RESULT_SQL));
+                """.formatted(EFFECTIVE_WEB_SEARCH_RESULT_SQL), "pr"));
         args.add(PROMPT_VERSION);
         if (projectId != null) {
             where.append(" AND pr.project_id = ? ");
@@ -679,23 +683,25 @@ public class MobileDashboardEntityJudgeService {
         String tier = safeTier(questionTier);
         String platform = StringUtils.hasText(platformCode) ? platformCode.trim() : "";
         int expected = countExpected(projectId, batchDate, tier, platform);
-        List<SummaryRow> rows = jdbcTemplate.query("""
-                SELECT entity_type,
-                       entity_ref_id,
-                       entity_config_version,
+        List<SummaryRow> rows = jdbcTemplate.query(MobileDashboardQuestionScopeSql.apply("""
+                SELECT j.entity_type,
+                       j.entity_ref_id,
+                       j.entity_config_version,
                        COUNT(*) AS success_count,
-                       SUM(CASE WHEN recommended = 1 THEN 1 ELSE 0 END) AS recommended_count,
-                       SUM(CASE WHEN first_recommend = 1 THEN 1 ELSE 0 END) AS first_recommend_count,
-                       GROUP_CONCAT(id ORDER BY id SEPARATOR ',') AS ids
-                  FROM poll_result_entity_judge
-                 WHERE project_id = ?
-                   AND batch_date = ?
-                   AND question_tier = ?
-                   AND COALESCE(platform_code, '') = ?
-                   AND judge_prompt_version = ?
-                   AND judge_status = 'success'
-                 GROUP BY entity_type, entity_ref_id, entity_config_version
-                """, (rs, rowNum) -> new SummaryRow(
+                       SUM(CASE WHEN j.recommended = 1 THEN 1 ELSE 0 END) AS recommended_count,
+                       SUM(CASE WHEN j.first_recommend = 1 THEN 1 ELSE 0 END) AS first_recommend_count,
+                       GROUP_CONCAT(j.id ORDER BY j.id SEPARATOR ',') AS ids
+                  FROM poll_result_entity_judge j
+                  JOIN poll_results pr ON pr.id = j.poll_result_id
+                 WHERE j.project_id = ?
+                   AND j.batch_date = ?
+                   AND j.question_tier = ?
+                   AND COALESCE(j.platform_code, '') = ?
+                   AND j.judge_prompt_version = ?
+                   AND j.judge_status = 'success'
+                   AND ENABLED_MONITORING_QUESTION_SCOPE
+                 GROUP BY j.entity_type, j.entity_ref_id, j.entity_config_version
+                """, "pr"), (rs, rowNum) -> new SummaryRow(
                 rs.getString("entity_type"),
                 rs.getLong("entity_ref_id"),
                 rs.getInt("entity_config_version"),
@@ -710,15 +716,16 @@ public class MobileDashboardEntityJudgeService {
     }
 
     private int countExpected(Long projectId, LocalDate batchDate, String questionTier, String platformCode) {
-        Integer value = jdbcTemplate.queryForObject("""
+        Integer value = jdbcTemplate.queryForObject(MobileDashboardQuestionScopeSql.apply("""
                 SELECT COUNT(1)
-                  FROM poll_results
-                 WHERE project_id = ?
-                   AND batch_date = ?
-                   AND question_tier = ?
-                   AND COALESCE(platform_code, '') = ?
-                   AND status = 'completed'
-                """, Integer.class, projectId, Date.valueOf(batchDate), questionTier, platformCode);
+                  FROM poll_results pr
+                 WHERE pr.project_id = ?
+                   AND pr.batch_date = ?
+                   AND pr.question_tier = ?
+                   AND COALESCE(pr.platform_code, '') = ?
+                   AND pr.status = 'completed'
+                   AND ENABLED_MONITORING_QUESTION_SCOPE
+                """, "pr"), Integer.class, projectId, Date.valueOf(batchDate), questionTier, platformCode);
         return value == null ? 0 : value;
     }
 

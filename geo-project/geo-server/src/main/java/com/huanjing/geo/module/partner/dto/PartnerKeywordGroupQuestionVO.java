@@ -14,6 +14,7 @@ public class PartnerKeywordGroupQuestionVO {
     private String sceneCode;
     private String priority;
     private String monitorFrequency;
+    private Boolean pollingEnabled;
     private BigDecimal scoreRelevance;
     private BigDecimal scoreIntent;
     private BigDecimal scoreCompetition;
