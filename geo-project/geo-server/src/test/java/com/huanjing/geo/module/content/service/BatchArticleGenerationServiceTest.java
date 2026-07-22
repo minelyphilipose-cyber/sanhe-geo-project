@@ -172,6 +172,26 @@ class BatchArticleGenerationServiceTest {
     }
 
     @Test
+    void v2FrozenTaskSkipsExecutionTimeSmartTemplateRematching() {
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setStatus("pending");
+        task.setAllocationMode("auto");
+        task.setTemplateSource("weighted");
+        task.setChannelGroupCode("self_media");
+        task.setPerspectiveCode(TemplatePerspectiveCodes.CUSTOMER);
+        task.setPromptTemplateVersionId(12L);
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(12L);
+        version.setQualityRulesJson("{\"promptContract\":\"v2\"}");
+        when(promptTemplateVersionMapper.selectById(12L)).thenReturn(version);
+
+        Boolean candidate = ReflectionTestUtils.invokeMethod(
+                service, "isAsyncSmartTemplateCandidate", task);
+
+        assertThat(candidate).isFalse();
+    }
+
+    @Test
     void buildPromptMarksFallbackSourceWhenTaskHasNoTemplateSnapshot() {
         BatchArticleGenerationTask task = new BatchArticleGenerationTask();
         task.setTemplateSource("weighted");
@@ -295,7 +315,7 @@ class BatchArticleGenerationServiceTest {
                         ArticleRuntimePolicyResolver.CONTACT_NONE, false),
                 true
         ));
-        when(articleModelResolver.resolve(null, null, "system", true))
+        when(articleModelResolver.resolve(null, null, "system", true, ArticleGenerationTemperatures.DEFAULT))
                 .thenReturn(new ArticleModelResolver.ModelSelection("mock", "mock-model", null));
         ArticleGenerationEngine.GeneratedArticle generated = generatedArticle();
         when(articleGenerationEngine.generate(any())).thenReturn(generated);
@@ -387,7 +407,7 @@ class BatchArticleGenerationServiceTest {
                 new ArticleRuntimePolicy("self_media", "wechat", TemplatePerspectiveCodes.CUSTOMER,
                         ArticleRuntimePolicyResolver.CONTACT_NONE, false), true
         ));
-        when(articleModelResolver.resolve(null, null, "system", true))
+        when(articleModelResolver.resolve(null, null, "system", true, ArticleGenerationTemperatures.DEFAULT))
                 .thenReturn(new ArticleModelResolver.ModelSelection("mock", "mock-model", null));
         when(articleGenerationEngine.generate(any())).thenReturn(generatedArticle());
         MedicalArticleComplianceChecker.CheckResult failed = new MedicalArticleComplianceChecker.CheckResult(

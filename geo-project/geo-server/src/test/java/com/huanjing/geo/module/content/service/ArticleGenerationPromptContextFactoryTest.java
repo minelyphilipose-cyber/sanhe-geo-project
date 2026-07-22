@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -84,8 +85,13 @@ class ArticleGenerationPromptContextFactoryTest {
                 promptTemplateMapper,
                 promptTemplateVersionMapper,
                 promptBuilder,
-                new ArticlePromptAssemblerV2(objectMapper, new ArticleContentLengthPolicyResolver()),
+                new ArticlePromptAssemblerV2(
+                        objectMapper,
+                        new ArticleContentLengthPolicyResolver(),
+                        new ArticleEditorialMissionResolver(),
+                        new ArticleTemplateCompatibilityResolver()),
                 new ArticlePromptContractResolver(objectMapper),
+                new ArticleQuestionSceneResolver(),
                 new ArticleRuntimePolicyResolver(),
                 perspectiveService,
                 offeringPromptSelector,
@@ -267,6 +273,58 @@ class ArticleGenerationPromptContextFactoryTest {
     }
 
     @Test
+    void v2AutoBatchUsesFrozenRequestedSceneAndDoesNotInheritTemplateScene() {
+        ArticlePromptTemplate template = template();
+        template.setQuestionSceneCode("brand");
+        ArticlePromptTemplateVersion version = version();
+        version.setQualityRulesJson("{\"promptContract\":\"v2\"}");
+        when(promptTemplateMapper.selectById(100L)).thenReturn(template);
+        when(promptTemplateVersionMapper.selectById(200L)).thenReturn(version);
+        BatchArticleGenerationTask task = task();
+        task.setAllocationMode("auto");
+        task.setQuestionSceneCode(null);
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result = factory.buildForBatch(batch(), task);
+
+        assertThat(result.promptInput().requestedQuestionSceneCode()).isNull();
+        assertThat(result.promptInput().effectiveQuestionSceneCode()).isEqualTo("general");
+        assertThat(result.promptInput().questionSceneSource()).isEqualTo("general_fallback");
+        assertThat(result.prompt().userPrompt()).contains("最有信息价值的关系")
+                .doesNotContain("品牌公开事实与需求之间的关系");
+    }
+
+    @Test
+    void v2CustomPreviewCanUseTemplateSceneWhenRequestDoesNotProvideOne() {
+        ArticlePromptTemplate template = template();
+        template.setQuestionSceneCode("brand");
+        ArticlePromptTemplateVersion version = version();
+        version.setQualityRulesJson("{\"promptContract\":\"v2\"}");
+        when(promptTemplateMapper.selectById(100L)).thenReturn(template);
+        when(promptTemplateVersionMapper.selectById(200L)).thenReturn(version);
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result = factory.buildStrict(equivalentRequest());
+
+        assertThat(result.promptInput().effectiveQuestionSceneCode()).isEqualTo("brand");
+        assertThat(result.promptInput().questionSceneSource()).isEqualTo("custom_template");
+        assertThat(result.prompt().userPrompt()).contains("品牌公开事实与需求之间的关系");
+        assertThat(result.prompt().promptSnapshot()).contains("\"templateCompatibilityLevel\":\"exact\"");
+    }
+
+    @Test
+    void v2CustomPreviewRejectsExplicitSceneMismatch() {
+        ArticlePromptTemplate template = template();
+        template.setQuestionSceneCode("brand");
+        ArticlePromptTemplateVersion version = version();
+        version.setQualityRulesJson("{\"promptContract\":\"v2\"}");
+        when(promptTemplateMapper.selectById(100L)).thenReturn(template);
+        when(promptTemplateVersionMapper.selectById(200L)).thenReturn(version);
+
+        assertThatThrownBy(() -> factory.buildStrict(requestWithScene("qa")))
+                .isInstanceOf(com.huanjing.geo.common.exception.BizException.class)
+                .hasMessageContaining("question scene");
+    }
+
+    @Test
     void v2MedicalContextKeepsUserTopicAndOmitsForbiddenPhraseListFromPrompt() {
         ArticlePromptTemplate template = selfMediaTemplate();
         ArticlePromptTemplateVersion version = selfMediaVersion();
@@ -337,6 +395,9 @@ class ArticleGenerationPromptContextFactoryTest {
         assertThat(actual.articleIndexInBatch()).isEqualTo(expected.articleIndexInBatch());
         assertThat(actual.forbiddenPhrases()).isEqualTo(expected.forbiddenPhrases());
         assertThat(actual.titleGuide()).isEqualTo(expected.titleGuide());
+        assertThat(actual.requestedQuestionSceneCode()).isEqualTo(expected.requestedQuestionSceneCode());
+        assertThat(actual.effectiveQuestionSceneCode()).isEqualTo(expected.effectiveQuestionSceneCode());
+        assertThat(actual.questionSceneSource()).isEqualTo(expected.questionSceneSource());
     }
 
     private BatchArticleGenerationBatch batch() {
@@ -382,6 +443,17 @@ class ArticleGenerationPromptContextFactoryTest {
                 null,
                 null,
                 1
+        );
+    }
+
+    private PromptContextRequest requestWithScene(String questionSceneCode) {
+        return new PromptContextRequest(
+                10L, "manual", "stage_advice", "forum", null,
+                "阜阳哪家SPA馆服务好性价比高", "阜阳哪家SPA馆服务好性价比高?", "medium",
+                null, null, "保持真实讨论帖语气", 100L, 200L,
+                null, null, null,
+                null, null, null, null, null, null,
+                1, questionSceneCode
         );
     }
 

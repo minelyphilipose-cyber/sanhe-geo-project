@@ -29,7 +29,7 @@ public class ArticleRuntimePolicyResolver {
         String perspective = StringUtils.hasText(resolvedPerspectiveCode)
                 ? TemplatePerspectiveCodes.normalize(resolvedPerspectiveCode)
                 : defaultPerspective(group);
-        String mode = resolveContactMode(template, group, perspective);
+        String mode = resolveContactMode(template, group, sub);
         return new ArticleRuntimePolicy(group, sub, perspective, mode, CONTACT_FULL.equals(mode));
     }
 
@@ -42,17 +42,19 @@ public class ArticleRuntimePolicyResolver {
         };
     }
 
-    private String resolveContactMode(ArticlePromptTemplate template, String group, String perspective) {
+    private String resolveContactMode(ArticlePromptTemplate template, String group, String sub) {
         if (ArticlePromptChannels.AUTHORITY_MEDIA.equals(group)) {
             return CONTACT_BRAND_ONLY;
+        }
+        if (ArticlePromptChannels.SELF_MEDIA.equals(group) && !"wechat".equals(sub)) {
+            return CONTACT_NONE;
         }
         String configured = normalizeMode(template == null ? null : template.getContactDisclosureMode());
         if (configured != null) {
             return configured;
         }
         return switch (group) {
-            case ArticlePromptChannels.SELF_MEDIA -> TemplatePerspectiveCodes.isThirdParty(perspective)
-                    ? CONTACT_SOFT_HINT : CONTACT_NONE;
+            case ArticlePromptChannels.SELF_MEDIA -> CONTACT_NONE;
             case ArticlePromptChannels.INDUSTRY_SITE -> CONTACT_BRAND_ONLY;
             case ArticlePromptChannels.FORUM -> CONTACT_FULL;
             default -> CONTACT_NONE;

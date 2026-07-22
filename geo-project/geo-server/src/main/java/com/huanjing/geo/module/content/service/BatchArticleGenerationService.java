@@ -115,7 +115,7 @@ public class BatchArticleGenerationService {
 
             规则：
             1. 只返回 JSON，不输出解释性文字。
-            2. 每个 item 可选择 1-3 个模板。只选择 availableTemplates 中存在的 templateId。
+            2. 将匹配结果视为后续分散分配使用的适用候选集。存在多个真正适用的模板时优先选择2-3个，即使本次只生成1篇；只有一个模板真正适用时才只选1个。不得为凑数量加入与主题、场景或视角不匹配的模板。只选择 availableTemplates 中存在的 templateId。
             3. 如果主题包含“哪家、推荐、对比、性价比、口碑、排名、差在哪”，优先选择对比、推荐、选择指南类模板。
             4. 如果主题包含“怎么选、避坑、注意什么、陷阱”，优先选择指南、避坑、经验类模板。
             5. 如果主题包含“是什么、原理、标准、分类、应用”，优先选择知识库、科普类模板。
@@ -740,7 +740,8 @@ public class BatchArticleGenerationService {
                 && "auto".equals(trim(task.getAllocationMode()))
                 && TEMPLATE_SOURCE_WEIGHTED.equals(trim(task.getTemplateSource()))
                 && StringUtils.hasText(task.getChannelGroupCode())
-                && StringUtils.hasText(task.getPerspectiveCode());
+                && StringUtils.hasText(task.getPerspectiveCode())
+                && !isV2Task(task);
     }
 
     private String resolveTaskQuestionSceneCode(BatchArticleGenerationTask task) {
@@ -748,10 +749,32 @@ public class BatchArticleGenerationService {
         if (StringUtils.hasText(questionSceneCode)) {
             return questionSceneCode;
         }
+        if (isV2Task(task)) {
+            return null;
+        }
         ArticlePromptTemplate template = task == null || task.getPromptTemplateId() == null
                 ? null
                 : promptTemplateMapper.selectById(task.getPromptTemplateId());
         return normalizeQuestionScene(template == null ? null : template.getQuestionSceneCode());
+    }
+
+    private boolean isV2Task(BatchArticleGenerationTask task) {
+        if (task == null || task.getPromptTemplateVersionId() == null) {
+            return false;
+        }
+        return isV2Version(promptTemplateVersionMapper.selectById(task.getPromptTemplateVersionId()));
+    }
+
+    private boolean isV2Version(ArticlePromptTemplateVersion version) {
+        if (version == null || !StringUtils.hasText(version.getQualityRulesJson())) {
+            return false;
+        }
+        try {
+            return ArticlePromptContractResolver.CONTRACT_V2.equals(
+                    objectMapper.readTree(version.getQualityRulesJson()).path("promptContract").asText());
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private void applySmartTemplateAllocation(List<BatchArticleGenerationTask> tasks,
@@ -1012,7 +1035,10 @@ public class BatchArticleGenerationService {
             List<String> medicalForbiddenPhrases = promptContext.v2() && promptContext.medicalContext() != null
                     ? forbiddenPhrases
                     : List.of();
-            ArticleModelResolver.ModelSelection selectedModel = articleModelResolver.resolve(null, null, prompt.systemPrompt(), true);
+            double effectiveTemperature = ArticleGenerationTemperatures.resolve(
+                    promptContext.v2(), promptContext.medicalContext() != null);
+            ArticleModelResolver.ModelSelection selectedModel = articleModelResolver.resolve(
+                    null, null, prompt.systemPrompt(), true, effectiveTemperature);
             task.setModelPlatformCode(selectedModel.platformCode());
             task.setModelId(selectedModel.modelId());
             taskMapper.updateById(task);
@@ -1034,7 +1060,8 @@ public class BatchArticleGenerationService {
                                 promptContext.runtimePolicy().allowContactInfo(),
                                 true,
                                 generationForbiddenPhrases,
-                                ArticlePromptChannels.maxTitleChars(task.getChannelGroupCode())
+                                ArticlePromptChannels.maxTitleChars(task.getChannelGroupCode()),
+                                effectiveTemperature
                         )
                 );
                 complianceResult = medicalComplianceChecker.check(new MedicalArticleComplianceChecker.CheckInput(
@@ -1660,7 +1687,8 @@ public class BatchArticleGenerationService {
             }
             String allocationMode = StringUtils.hasText(platform.getAllocationMode()) ? platform.getAllocationMode().trim() : "auto";
             if ("custom".equals(allocationMode)) {
-                result.addAll(validateCustomPlatform(brandId, topic, platform, notices, perspectiveMemo));
+                result.addAll(validateCustomPlatform(
+                        brandId, topic, questionSceneCode, platform, notices, perspectiveMemo));
                 continue;
             }
             result.addAll(validateAutoPlatform(unitKey(topicIndex, platformIndex), brandId, topic, platform,
@@ -1840,6 +1868,7 @@ public class BatchArticleGenerationService {
 
     private List<ValidatedPlatform> validateCustomPlatform(Long brandId,
                                                            String topic,
+                                                           String questionSceneCode,
                                                            BatchArticleGenerateRequest.PlatformCount platform,
                                                            List<BatchArticleGenerateResponse.Notice> notices,
                                                            Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo) {
@@ -1863,6 +1892,15 @@ public class BatchArticleGenerationService {
                 }
                 addSkippedNotice(notices, topic, requestedChannel, templateCount.getTemplateId(), null, count, "模板已失效");
                 continue;
+            }
+            String requestedScene = normalizeQuestionScene(questionSceneCode);
+            String templateScene = normalizeQuestionScene(resolved.template().getQuestionSceneCode());
+            if (isV2Version(resolved.version())
+                    && StringUtils.hasText(requestedScene)
+                    && StringUtils.hasText(templateScene)
+                    && !requestedScene.equals(templateScene)) {
+                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST,
+                        "所选模板场景与文章场景不一致，请改选兼容模板或清空文章场景");
             }
             ChannelRef channel = new ChannelRef(
                     resolved.template().getChannelGroupCode(),
@@ -1978,8 +2016,9 @@ public class BatchArticleGenerationService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("task", "select_article_prompt_templates");
         payload.put("rules", List.of(
-                "根据主题意图选择最适合的模板",
-                "每个 unit 选择 1-3 个模板",
+                "根据主题、场景和视角选择适用模板候选集，而不是唯一最终模板",
+                "存在多个真正适用模板时选择2-3个，即使count=1；只有一个真正适用模板时可只选1个",
+                "不得为凑候选数量加入与主题、场景或视角不匹配的模板",
                 "只返回可用模板中的 templateId",
                 "无法判断时 fallback=true"
         ));

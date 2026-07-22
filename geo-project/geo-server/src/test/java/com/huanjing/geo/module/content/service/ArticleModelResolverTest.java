@@ -41,6 +41,19 @@ class ArticleModelResolverTest {
         ArticleModelResolver.ModelSelection selection = resolver.resolve(null, null, "system", true);
 
         assertThat(selection.platformCode()).isEqualTo("qwen");
+        assertThat(selection.config().temperature()).isEqualTo(ArticleGenerationTemperatures.DEFAULT);
+    }
+
+    @Test
+    void resolveUsesExplicitV2TemperatureForDirectCalls() {
+        AiPlatformConfig qwen = platform("qwen");
+        when(configMapper.selectOne(any())).thenReturn(qwen);
+        when(credentialService.resolveApiKey(eq("qwen"), any(), any())).thenReturn("sk-qwen");
+
+        ArticleModelResolver.ModelSelection selection = resolver.resolve(
+                null, null, "system", true, ArticleGenerationTemperatures.V2_STANDARD);
+
+        assertThat(selection.config().temperature()).isEqualTo(ArticleGenerationTemperatures.V2_STANDARD);
     }
 
     @Test

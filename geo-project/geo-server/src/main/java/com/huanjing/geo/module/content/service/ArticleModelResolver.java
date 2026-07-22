@@ -29,6 +29,14 @@ public class ArticleModelResolver {
     private String articleExcludedPlatformCodes = "hunyuan,yuanbao";
 
     public ModelSelection resolve(String platformCode, String modelId, String systemPrompt, boolean longForm) {
+        return resolve(platformCode, modelId, systemPrompt, longForm, ArticleGenerationTemperatures.DEFAULT);
+    }
+
+    public ModelSelection resolve(String platformCode,
+                                  String modelId,
+                                  String systemPrompt,
+                                  boolean longForm,
+                                  double temperature) {
         LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
                 .eq(AiPlatformConfig::getEnabledForArticle, true)
@@ -74,7 +82,7 @@ public class ArticleModelResolver {
                 config.getApiUrl(),
                 apiKey,
                 systemPrompt,
-                0.4D,
+                temperature,
                 LlmModelConfig.DEFAULT_CONNECT_TIMEOUT_MS,
                 timeout,
                 longForm ? 0 : normalize(config.getMaxRetry(), 2),

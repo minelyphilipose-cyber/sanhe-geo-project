@@ -23,10 +23,10 @@ class ArticleRuntimePolicyResolverTest {
     }
 
     @Test
-    void thirdPartySelfMediaUsesSoftHintAndExplicitFullAllowsContact() {
+    void wechatDefaultsToNoneAndAllowsExplicitFullWhenNeeded() {
         ArticleRuntimePolicy matrix = resolver.resolve(null, ArticlePromptChannels.SELF_MEDIA, "wechat",
                 TemplatePerspectiveCodes.INDUSTRY_NEUTRAL);
-        assertEquals("soft_hint", matrix.contactDisclosureMode());
+        assertEquals("none", matrix.contactDisclosureMode());
         assertFalse(matrix.allowContactInfo());
 
         ArticlePromptTemplate template = new ArticlePromptTemplate();
@@ -35,6 +35,36 @@ class ArticleRuntimePolicyResolverTest {
                 TemplatePerspectiveCodes.CUSTOMER);
         assertEquals("full", official.contactDisclosureMode());
         assertTrue(official.allowContactInfo());
+    }
+
+    @Test
+    void nonWechatSelfMediaForcesNoneEvenWhenTemplateRequestsFull() {
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setContactDisclosureMode("full");
+
+        for (String subCode : ArticlePromptChannels.SELF_MEDIA_SUB_CODES) {
+            if ("wechat".equals(subCode)) {
+                continue;
+            }
+            ArticleRuntimePolicy policy = resolver.resolve(template, ArticlePromptChannels.SELF_MEDIA,
+                    subCode, TemplatePerspectiveCodes.INDUSTRY_NEUTRAL);
+
+            assertEquals("none", policy.contactDisclosureMode(), subCode);
+            assertFalse(policy.allowContactInfo(), subCode);
+        }
+    }
+
+    @Test
+    void nonWechatAliasAlsoForcesNone() {
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setContactDisclosureMode("full");
+
+        ArticleRuntimePolicy policy = resolver.resolve(template, ArticlePromptChannels.SELF_MEDIA,
+                "douyin_image_text", TemplatePerspectiveCodes.CUSTOMER);
+
+        assertEquals("douyin", policy.channelSubCode());
+        assertEquals("none", policy.contactDisclosureMode());
+        assertFalse(policy.allowContactInfo());
     }
 
     @Test

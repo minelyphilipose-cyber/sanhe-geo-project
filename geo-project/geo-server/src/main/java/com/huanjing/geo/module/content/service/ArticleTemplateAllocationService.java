@@ -18,15 +18,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.random.RandomGenerator;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +35,8 @@ public class ArticleTemplateAllocationService {
     private final ArticlePromptTemplateVersionMapper versionMapper;
     private final QuestionScenePlatformSuggestionService suggestionService;
     private final TemplatePerspectiveService perspectiveService;
+    private final ArticlePromptContractResolver promptContractResolver;
+    private final ArticleTemplateCompatibilityResolver compatibilityResolver;
 
     public GenerationOptionsVO options() {
         return options(null);
@@ -124,6 +125,12 @@ public class ArticleTemplateAllocationService {
     }
 
     public List<AllocatedTemplate> allocateCandidates(List<TemplateWithVersion> candidates, int count) {
+        return allocateCandidates(candidates, count, ThreadLocalRandom.current());
+    }
+
+    List<AllocatedTemplate> allocateCandidates(List<TemplateWithVersion> candidates,
+                                               int count,
+                                               RandomGenerator random) {
         if (count <= 0 || candidates == null || candidates.isEmpty()) {
             return List.of();
         }
@@ -133,33 +140,58 @@ public class ArticleTemplateAllocationService {
         if (candidates.isEmpty()) {
             return List.of();
         }
-        int totalWeight = candidates.stream().mapToInt(item -> item.template().getWeight()).sum();
-        List<AllocationRow> rows = new ArrayList<>();
-        int used = 0;
-        for (int i = 0; i < candidates.size(); i++) {
-            TemplateWithVersion item = candidates.get(i);
-            BigDecimal exact = BigDecimal.valueOf(count)
-                    .multiply(BigDecimal.valueOf(item.template().getWeight()))
-                    .divide(BigDecimal.valueOf(totalWeight), 8, RoundingMode.HALF_UP);
-            int base = exact.setScale(0, RoundingMode.DOWN).intValue();
-            BigDecimal remainder = exact.subtract(BigDecimal.valueOf(base));
-            rows.add(new AllocationRow(item, base, remainder, i));
-            used += base;
+        if (candidates.size() == 1) {
+            TemplateWithVersion only = candidates.get(0);
+            return List.of(new AllocatedTemplate(only.template(), only.version(), count));
         }
-        int remaining = count - used;
-        rows.stream()
-                .sorted(Comparator
-                        .comparing(AllocationRow::remainder).reversed()
-                        .thenComparing(row -> row.item().template().getWeight(), Comparator.reverseOrder())
-                        .thenComparing(row -> row.item().template().getUpdatedAt(), Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(row -> row.item().template().getId(), Comparator.reverseOrder()))
-                .limit(Math.max(0, remaining))
-                .forEach(row -> row.count += 1);
-        return rows.stream()
-                .filter(row -> row.count() > 0)
-                .sorted(Comparator.comparingInt(AllocationRow::originalIndex))
-                .map(row -> new AllocatedTemplate(row.item().template(), row.item().version(), row.count()))
-                .toList();
+
+        int[] allocations = new int[candidates.size()];
+        List<Integer> unselected = new ArrayList<>(candidates.size());
+        for (int index = 0; index < candidates.size(); index++) {
+            unselected.add(index);
+        }
+
+        int distinctSelections = Math.min(count, candidates.size());
+        for (int selected = 0; selected < distinctSelections; selected++) {
+            int candidateIndex = weightedCandidateIndex(candidates, unselected, random);
+            allocations[candidateIndex]++;
+            unselected.remove(Integer.valueOf(candidateIndex));
+        }
+
+        List<Integer> allCandidates = new ArrayList<>(candidates.size());
+        for (int index = 0; index < candidates.size(); index++) {
+            allCandidates.add(index);
+        }
+        for (int selected = distinctSelections; selected < count; selected++) {
+            allocations[weightedCandidateIndex(candidates, allCandidates, random)]++;
+        }
+
+        List<AllocatedTemplate> result = new ArrayList<>();
+        for (int index = 0; index < candidates.size(); index++) {
+            if (allocations[index] <= 0) {
+                continue;
+            }
+            TemplateWithVersion item = candidates.get(index);
+            result.add(new AllocatedTemplate(item.template(), item.version(), allocations[index]));
+        }
+        return result;
+    }
+
+    private int weightedCandidateIndex(List<TemplateWithVersion> candidates,
+                                       List<Integer> availableIndexes,
+                                       RandomGenerator random) {
+        long totalWeight = availableIndexes.stream()
+                .mapToLong(index -> candidates.get(index).template().getWeight())
+                .sum();
+        long target = random.nextLong(totalWeight);
+        long accumulated = 0L;
+        for (Integer index : availableIndexes) {
+            accumulated += candidates.get(index).template().getWeight();
+            if (target < accumulated) {
+                return index;
+            }
+        }
+        return availableIndexes.get(availableIndexes.size() - 1);
     }
 
     public List<TemplateWithVersion> activeTemplates(String groupCode, String subCode) {
@@ -174,6 +206,17 @@ public class ArticleTemplateAllocationService {
                                                      String subCode,
                                                      String questionSceneCode,
                                                      String perspectiveCode) {
+        List<TemplateWithVersion> result = allActiveTemplates(groupCode, subCode, perspectiveCode);
+        List<TemplateWithVersion> v2Templates = v2TemplatesOrLegacy(result);
+        if (!v2Templates.isEmpty() && promptContractResolver.isV2(v2Templates.get(0).version())) {
+            return compatibilityResolver.preferredCandidates(v2Templates, questionSceneCode);
+        }
+        return filterLegacyByQuestionScene(result, questionSceneCode);
+    }
+
+    private List<TemplateWithVersion> allActiveTemplates(String groupCode,
+                                                         String subCode,
+                                                         String perspectiveCode) {
         subCode = ArticlePromptChannels.canonicalSubCode(groupCode, subCode);
         String normalizedPerspective = TemplatePerspectiveCodes.normalize(perspectiveCode);
         List<ArticlePromptTemplate> templates = templateMapper.selectList(
@@ -193,7 +236,14 @@ public class ArticleTemplateAllocationService {
                 result.add(new TemplateWithVersion(template, version));
             }
         }
-        return filterByQuestionScene(result, questionSceneCode);
+        return result;
+    }
+
+    private List<TemplateWithVersion> v2TemplatesOrLegacy(List<TemplateWithVersion> templates) {
+        List<TemplateWithVersion> v2Templates = templates.stream()
+                .filter(item -> promptContractResolver.isV2(item.version()))
+                .toList();
+        return v2Templates.isEmpty() ? templates : v2Templates;
     }
 
     public TemplateWithVersion resolveTemplate(Long templateId, Long versionId) {
@@ -230,8 +280,8 @@ public class ArticleTemplateAllocationService {
                 TemplatePerspectiveService.ResolvedPerspective perspective = perspectiveService.resolve(
                         brandId, channel.channelGroupCode(), channel.channelSubCode());
                 map.put(key(channel.channelGroupCode(), channel.channelSubCode()),
-                        activeTemplates(channel.channelGroupCode(), channel.channelSubCode(), null,
-                                perspective.perspectiveCode()));
+                        v2TemplatesOrLegacy(allActiveTemplates(
+                                channel.channelGroupCode(), channel.channelSubCode(), perspective.perspectiveCode())));
             }
         }
         return map;
@@ -257,8 +307,8 @@ public class ArticleTemplateAllocationService {
                                           String description) {
         TemplatePerspectiveService.ResolvedPerspective perspective = perspectiveService.resolve(
                 brandId, groupCode, subCode);
-        List<TemplateOptionVO> templates = activeTemplates(
-                groupCode, subCode, null, perspective.perspectiveCode()).stream()
+        List<TemplateOptionVO> templates = v2TemplatesOrLegacy(
+                allActiveTemplates(groupCode, subCode, perspective.perspectiveCode())).stream()
                 .map(this::toTemplateOption)
                 .toList();
         return new ChannelOptionVO(
@@ -346,7 +396,7 @@ public class ArticleTemplateAllocationService {
         );
     }
 
-    private List<TemplateWithVersion> filterByQuestionScene(List<TemplateWithVersion> templates, String questionSceneCode) {
+    private List<TemplateWithVersion> filterLegacyByQuestionScene(List<TemplateWithVersion> templates, String questionSceneCode) {
         String scene = trimToNull(questionSceneCode);
         if (!StringUtils.hasText(scene)) {
             return templates;
@@ -399,41 +449,7 @@ public class ArticleTemplateAllocationService {
         return ArticlePromptTemplateService.QUESTION_SCENE_LABELS.getOrDefault(value, value);
     }
 
-    private int normalize(Integer value) {
-        return value == null ? 0 : value;
-    }
-
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
-    }
-
-    private static final class AllocationRow {
-        private final TemplateWithVersion item;
-        private int count;
-        private final BigDecimal remainder;
-        private final int originalIndex;
-
-        private AllocationRow(TemplateWithVersion item, int count, BigDecimal remainder, int originalIndex) {
-            this.item = item;
-            this.count = count;
-            this.remainder = remainder;
-            this.originalIndex = originalIndex;
-        }
-
-        private TemplateWithVersion item() {
-            return item;
-        }
-
-        private int count() {
-            return count;
-        }
-
-        private BigDecimal remainder() {
-            return remainder;
-        }
-
-        private int originalIndex() {
-            return originalIndex;
-        }
     }
 }

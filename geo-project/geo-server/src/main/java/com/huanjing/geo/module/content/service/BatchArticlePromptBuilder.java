@@ -638,7 +638,7 @@ public class BatchArticlePromptBuilder {
     }
 
     private String forbiddenPhrasesInstruction(List<String> forbiddenPhrases) {
-        List<String> values = normalizeList(forbiddenPhrases);
+        List<String> values = ArticleForbiddenPhrasePolicy.effectivePhrases(forbiddenPhrases);
         if (values.isEmpty()) {
             return "未配置额外禁用表达，但仍需遵守绝对化词汇和防编造规则。";
         }
@@ -646,19 +646,8 @@ public class BatchArticlePromptBuilder {
     }
 
     private String forbiddenPhrasesText(List<String> forbiddenPhrases) {
-        List<String> values = normalizeList(forbiddenPhrases);
+        List<String> values = ArticleForbiddenPhrasePolicy.effectivePhrases(forbiddenPhrases);
         return values.isEmpty() ? "未配置额外禁用表达" : String.join("、", values);
-    }
-
-    private List<String> normalizeList(List<String> raw) {
-        if (raw == null || raw.isEmpty()) {
-            return List.of();
-        }
-        return raw.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .distinct()
-                .toList();
     }
 
     private String resolveBusinessFocus(String brandStatement, Brand brand) {
@@ -904,7 +893,41 @@ public class BatchArticlePromptBuilder {
                                    Long sourceProjectId,
                                    Long sourceBrandId,
                                    Long subjectProjectId,
-                                   Long subjectBrandId) {
+                                   Long subjectBrandId,
+                                   String requestedQuestionSceneCode,
+                                   String effectiveQuestionSceneCode,
+                                   String questionSceneSource) {
+        public PromptBuildInput(Project project,
+                                Brand brand,
+                                String brandStatement,
+                                String topicSource,
+                                String topic,
+                                String topicAsQuestion,
+                                Long keywordGroupId,
+                                String keywordGroupName,
+                                List<String> relatedKeywords,
+                                String articleType,
+                                String contentStyle,
+                                String length,
+                                String extraPrompt,
+                                int articleIndexInBatch,
+                                List<String> forbiddenPhrases,
+                                String titleGuide,
+                                String perspectiveCode,
+                                String perspectiveMatchedScope,
+                                Long perspectiveMatchedConfigId,
+                                List<BrandOfferingPromptSelector.SelectedOffering> selectedOfferings,
+                                Long sourceProjectId,
+                                Long sourceBrandId,
+                                Long subjectProjectId,
+                                Long subjectBrandId) {
+            this(project, brand, brandStatement, topicSource, topic, topicAsQuestion, keywordGroupId, keywordGroupName,
+                    relatedKeywords, articleType, contentStyle, length, extraPrompt, articleIndexInBatch,
+                    forbiddenPhrases, titleGuide, perspectiveCode, perspectiveMatchedScope, perspectiveMatchedConfigId,
+                    selectedOfferings, sourceProjectId, sourceBrandId, subjectProjectId, subjectBrandId,
+                    null, null, null);
+        }
+
         public PromptBuildInput(Project project,
                                 Brand brand,
                                 String brandStatement,
@@ -932,7 +955,8 @@ public class BatchArticlePromptBuilder {
                     project == null ? null : project.getId(),
                     brand == null ? null : brand.getId(),
                     project == null ? null : project.getId(),
-                    brand == null ? null : brand.getId());
+                    brand == null ? null : brand.getId(),
+                    null, null, null);
         }
     }
 

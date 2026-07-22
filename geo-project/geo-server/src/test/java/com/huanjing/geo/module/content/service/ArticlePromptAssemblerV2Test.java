@@ -21,7 +21,10 @@ class ArticlePromptAssemblerV2Test {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ArticlePromptAssemblerV2 assembler = new ArticlePromptAssemblerV2(
-            objectMapper, new ArticleContentLengthPolicyResolver());
+            objectMapper,
+            new ArticleContentLengthPolicyResolver(),
+            new ArticleEditorialMissionResolver(),
+            new ArticleTemplateCompatibilityResolver());
 
     @Test
     void assemblesSingleGlobalRuleSetAndOmitsEmptyFactsAndStructureAnchors() throws Exception {
@@ -60,9 +63,17 @@ class ArticlePromptAssemblerV2Test {
         BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
 
         assertEquals(1, occurrences(result.userPrompt(), "使用自然、清晰、符合现代中文习惯"));
+        assertTrue(result.userPrompt().contains("判断最值得讲清楚的核心问题"));
+        assertTrue(result.userPrompt().contains("内容顺序服从当前文章的因果关系"));
+        assertFalse(result.userPrompt().contains("相似主题"));
+        assertTrue(result.userPrompt().contains("可选择的事实素材库，不是必须逐项写入"));
+        assertTrue(result.userPrompt().contains("普通主题通常使用1～2项品牌事实"));
         assertFalse(result.userPrompt().contains("未提供"));
         assertFalse(result.userPrompt().contains("结构策略"));
         assertFalse(result.userPrompt().contains("示例标题"));
+        assertFalse(result.userPrompt().contains("品牌知识文章"));
+        assertFalse(result.userPrompt().contains("解释用户关心的问题并自然介绍品牌能力"));
+        assertFalse(result.userPrompt().contains("围绕企业知识库怎么建设完成本次任务"));
         assertFalse(result.userPrompt().contains("400-123-4567"));
         assertFalse(result.userPrompt().contains("测试路1号"));
         assertTrue(result.userPrompt().contains("测试科技有限公司"));
@@ -81,9 +92,12 @@ class ArticlePromptAssemblerV2Test {
 
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals("article_v2", snapshot.path("promptContract").asText());
+        assertEquals("v2_scene_mission_20260721", snapshot.path("promptRevision").asText());
         assertEquals("brand_only", snapshot.path("runtimePolicy").path("contactDisclosureMode").asText());
         assertEquals(1200, snapshot.path("effectiveLengthPolicy").path("targetMinChars").asInt());
         assertEquals(1800, snapshot.path("effectiveLengthPolicy").path("targetMaxChars").asInt());
+        assertEquals(ArticleGenerationTemperatures.V2_STANDARD,
+                snapshot.path("effectiveTemperature").asDouble());
         assertTrue(snapshot.path("omittedMaterialKeys").isArray());
     }
 
@@ -220,7 +234,12 @@ class ArticlePromptAssemblerV2Test {
         BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
 
         assertTrue(result.userPrompt().contains("全文应自然出现1～2次"));
-        assertTrue(result.userPrompt().contains("标题和开篇不出现品牌"));
+        assertTrue(result.userPrompt().contains("标题默认不出现品牌"));
+        assertTrue(result.userPrompt().contains("正文前段、中段或后段"));
+        assertTrue(result.userPrompt().contains("结尾只需自然完成文章的主要任务"));
+        assertFalse(result.userPrompt().contains("标题和开篇不出现品牌"));
+        assertFalse(result.userPrompt().contains("先把读者问题与判断依据讲清楚后再带入品牌"));
+        assertFalse(result.userPrompt().contains("结尾回到读者关心的问题和判断方法"));
         assertTrue(result.userPrompt().contains("每篇必须自然包含品牌信息"));
         assertTrue(result.userPrompt().contains("减少连续使用“我们”进行自我评价"));
         assertFalse(result.userPrompt().contains("围绕企业知识库怎么建设完成知识问答"));
@@ -256,7 +275,7 @@ class ArticlePromptAssemblerV2Test {
     }
 
     @Test
-    void specialIndustryTemplateRemovesConcentratedForbiddenExamples() {
+    void specialIndustryTemplateRemovesConcentratedForbiddenExamples() throws Exception {
         Project project = new Project();
         project.setId(1L);
         Brand brand = new Brand();
@@ -283,11 +302,62 @@ class ArticlePromptAssemblerV2Test {
         BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy, true);
 
         assertFalse(result.userPrompt().contains("种草、无痛、永久"));
-        assertTrue(result.userPrompt().contains("避免疗效、安全、时效、持续周期、排名和直接转化类违规承诺"));
-        assertTrue(result.userPrompt().contains("重点说明风险、条件和评估依据"));
+        assertFalse(result.userPrompt().contains("避免疗效、安全、时效、持续周期、排名和直接转化类违规承诺"));
+        assertFalse(result.userPrompt().contains("重点说明风险、条件和评估依据"));
+        JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
+        assertEquals(ArticleGenerationTemperatures.DEFAULT,
+                snapshot.path("effectiveTemperature").asDouble());
+    }
+
+    @Test
+    void derivesDifferentContentMissionsFromTemplateMetadataWithoutFixedOutline() {
+        Project project = new Project();
+        project.setId(1L);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试品牌");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setName("主题适配模板");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setUserPromptTemplate("围绕{{topic}}形成内容");
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "企业服务如何判断", null,
+                null, null, List.of(), "industry_article", "wechat", "long", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "wechat", TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildInput comparisonInput = withTask(input, "comparison", "compare");
+        String comparisonPrompt = assembler.assemble(comparisonInput, template, version, policy).userPrompt();
+        BatchArticlePromptBuilder.PromptBuildInput costInput = withTask(input, "cost_analysis", "general");
+        String costPrompt = assembler.assemble(costInput, template, version, policy).userPrompt();
+
+        assertTrue(comparisonPrompt.contains("真正有意义的差异、判断依据和适用边界"));
+        assertTrue(comparisonPrompt.contains("不强制使用表格"));
+        assertTrue(costPrompt.contains("形成变量、影响条件和判断边界"));
+        assertTrue(costPrompt.contains("不虚构价格或报价"));
+        assertFalse(comparisonPrompt.contains("第一段"));
+        assertFalse(costPrompt.contains("示范提纲"));
     }
 
     private int occurrences(String source, String target) {
         return (source.length() - source.replace(target, "").length()) / target.length();
+    }
+
+    private BatchArticlePromptBuilder.PromptBuildInput withTask(
+            BatchArticlePromptBuilder.PromptBuildInput input,
+            String articleType,
+            String effectiveScene) {
+        return new BatchArticlePromptBuilder.PromptBuildInput(
+                input.project(), input.brand(), input.brandStatement(), input.topicSource(), input.topic(),
+                input.topicAsQuestion(), input.keywordGroupId(), input.keywordGroupName(), input.relatedKeywords(),
+                articleType, input.contentStyle(), input.length(), input.extraPrompt(), input.articleIndexInBatch(),
+                input.forbiddenPhrases(), input.titleGuide(), input.perspectiveCode(), input.perspectiveMatchedScope(),
+                input.perspectiveMatchedConfigId(), input.selectedOfferings(), input.sourceProjectId(),
+                input.sourceBrandId(), input.subjectProjectId(), input.subjectBrandId(),
+                effectiveScene, effectiveScene, ArticleQuestionSceneResolver.SOURCE_REQUEST);
     }
 }

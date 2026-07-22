@@ -64,10 +64,13 @@ class ArticlePromptChannelsTest {
 
         assertTrue(toutiao.contains("资讯价值和问题解释为主"));
         assertTrue(toutiao.contains("减少连续品牌露出"));
-        assertTrue(baijiahao.contains("可独立成立的知识或资讯内容"));
+        assertTrue(baijiahao.contains("可独立成立的知识或资讯价值"));
+        assertTrue(baijiahao.contains("不规定品牌进入正文的固定位置"));
         assertTrue(baijiahao.contains("避免宣传口号"));
         assertTrue(zhihu.contains("适用条件和必要权衡"));
         assertTrue(zhihu.contains("介绍和推荐必须有材料依据"));
+        assertFalse(toutiao.contains("先讲问题"));
+        assertFalse(baijiahao.contains("先形成"));
 
         String wechat = ArticlePromptChannels.channelGuide("self_media", "wechat");
         assertFalse(wechat.contains("减少连续品牌露出"));

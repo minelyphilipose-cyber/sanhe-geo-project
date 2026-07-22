@@ -51,6 +51,7 @@ public class ArticleGenerationPromptContextFactory {
     private final BatchArticlePromptBuilder promptBuilder;
     private final ArticlePromptAssemblerV2 promptAssemblerV2;
     private final ArticlePromptContractResolver promptContractResolver;
+    private final ArticleQuestionSceneResolver questionSceneResolver;
     private final ArticleRuntimePolicyResolver runtimePolicyResolver;
     private final TemplatePerspectiveService perspectiveService;
     private final BrandOfferingPromptSelector offeringPromptSelector;
@@ -83,7 +84,8 @@ public class ArticleGenerationPromptContextFactory {
                 task.getTopicAngleId(),
                 task.getStructureSkeleton(),
                 task.getFocus(),
-                task.getArticleIndexInBatch()
+                task.getArticleIndexInBatch(),
+                task.getQuestionSceneCode()
         );
         return build(request, true, task);
     }
@@ -115,6 +117,18 @@ public class ArticleGenerationPromptContextFactory {
         String articleType = normalizeArticleType(request.articleType());
         TemplateResolution resolution = resolveTemplate(request, channel, articleType, perspective, allowDefaultPromptFallback);
         boolean v2 = promptContractResolver.isV2(resolution.version());
+        boolean allowTemplateSceneFallback = task == null
+                || "custom".equals(trimToNull(task.getAllocationMode()));
+        ArticleQuestionSceneResolution questionScene = questionSceneResolver.resolve(
+                request.questionSceneCode(), resolution.template(), allowTemplateSceneFallback);
+        if (v2 && allowTemplateSceneFallback
+                && StringUtils.hasText(questionScene.requestedSceneCode())
+                && resolution.template() != null
+                && StringUtils.hasText(resolution.template().getQuestionSceneCode())
+                && !questionScene.requestedSceneCode().equals(resolution.template().getQuestionSceneCode().trim())) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST,
+                    "Prompt template does not match question scene");
+        }
         ArticleRuntimePolicy runtimePolicy = runtimePolicyResolver.resolve(
                 resolution.template(), channel.groupCode(), channel.subCode(), perspective.perspectiveCode());
         int articleIndexInBatch = request.articleIndexInBatch();
@@ -169,7 +183,10 @@ public class ArticleGenerationPromptContextFactory {
                 sourceProject.getId(),
                 sourceBrand == null ? sourceProject.getBrandId() : sourceBrand.getId(),
                 project.getId(),
-                brand == null ? project.getBrandId() : brand.getId()
+                brand == null ? project.getBrandId() : brand.getId(),
+                questionScene.requestedSceneCode(),
+                questionScene.effectiveSceneCode(),
+                questionScene.source()
         );
 
         BatchArticlePromptBuilder.PromptBuildResult prompt = resolution.template() == null

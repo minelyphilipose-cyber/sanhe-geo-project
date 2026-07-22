@@ -28,7 +28,6 @@ import java.util.regex.Pattern;
 public class ArticleGenerationEngine {
 
     private static final int ARTICLE_REQUEST_TIMEOUT_MS = LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS;
-    private static final double ARTICLE_TEMPERATURE = 0.4D;
     private static final Pattern MARKDOWN_TITLE_PREFIX = Pattern.compile("^(#+)\\s*");
 
     private final LlmCallFacade llmCallFacade;
@@ -85,7 +84,8 @@ public class ArticleGenerationEngine {
                     input.modelPlatformCode(),
                     input.modelId(),
                     input.systemPrompt(),
-                    input.longForm()
+                    input.longForm(),
+                    input.effectiveTemperature()
             );
             return new GenerationCall(model, llmCallFacade.execute(LlmCallRequest.direct(outboundPrompt, model.config())).invokeResult());
         }
@@ -94,7 +94,7 @@ public class ArticleGenerationEngine {
                     LlmFeature.ARTICLE,
                     input.systemPrompt(),
                     outboundPrompt,
-                    ARTICLE_TEMPERATURE,
+                    input.effectiveTemperature(),
                     LlmModelConfig.DEFAULT_CONNECT_TIMEOUT_MS,
                     resolveRequestTimeout(input.longForm()),
                     input.longForm() ? LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS : LlmModelConfig.MAX_REQUEST_TIMEOUT_MS,
@@ -184,7 +184,8 @@ public class ArticleGenerationEngine {
                                 boolean allowContactInfo,
                                 boolean checkQuality,
                                 List<String> forbiddenPhrases,
-                                Integer maxTitleChars) {
+                                Integer maxTitleChars,
+                                double effectiveTemperature) {
     }
 
     public record GeneratedArticle(String title,

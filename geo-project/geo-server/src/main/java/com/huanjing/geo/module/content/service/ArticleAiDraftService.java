@@ -253,7 +253,8 @@ public class ArticleAiDraftService {
                             context.runtimePolicy().allowContactInfo(),
                             true,
                             generationForbiddenPhrases(context),
-                            ArticlePromptChannels.maxTitleChars(context.channelGroupCode())
+                            ArticlePromptChannels.maxTitleChars(context.channelGroupCode()),
+                            ArticleGenerationTemperatures.resolve(context.v2(), context.medicalContext() != null)
                     )
             );
             model = generated.model();
@@ -329,7 +330,8 @@ public class ArticleAiDraftService {
                             context.runtimePolicy().allowContactInfo(),
                             true,
                             generationForbiddenPhrases(context),
-                            ArticlePromptChannels.maxTitleChars(context.channelGroupCode())
+                            ArticlePromptChannels.maxTitleChars(context.channelGroupCode()),
+                            ArticleGenerationTemperatures.resolve(context.v2(), context.medicalContext() != null)
                     )
             );
             model = generated.model();
@@ -389,7 +391,8 @@ public class ArticleAiDraftService {
                             allowContactInfo,
                             false,
                             List.of(),
-                            null
+                            null,
+                            ArticleGenerationTemperatures.DEFAULT
                     )
             );
             model = generated.model();
@@ -458,7 +461,8 @@ public class ArticleAiDraftService {
                             false,
                             false,
                             List.of(),
-                            null
+                            null,
+                            ArticleGenerationTemperatures.DEFAULT
                     )
             );
             model = generated.model();

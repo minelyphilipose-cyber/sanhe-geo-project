@@ -217,6 +217,9 @@ class ArticleAiDraftServiceTest {
 
         assertEquals(99L, response.articleId());
         assertEquals("approved", response.status());
+        ArgumentCaptor<LlmModelConfig> modelConfigCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
+        verify(llmInvoker).invoke(any(), modelConfigCaptor.capture());
+        assertEquals(ArticleGenerationTemperatures.V2_STANDARD, modelConfigCaptor.getValue().temperature());
 
         ArgumentCaptor<PromptContextRequest> requestCaptor = ArgumentCaptor.forClass(PromptContextRequest.class);
         verify(promptContextFactory).buildStrict(requestCaptor.capture());
@@ -580,7 +583,11 @@ class ArticleAiDraftServiceTest {
                 "customer",
                 TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
                 null,
-                false
+                false,
+                null,
+                new ArticleRuntimePolicy("social", "wechat_mp", "customer",
+                        ArticleRuntimePolicyResolver.CONTACT_NONE, false),
+                true
         );
     }
 

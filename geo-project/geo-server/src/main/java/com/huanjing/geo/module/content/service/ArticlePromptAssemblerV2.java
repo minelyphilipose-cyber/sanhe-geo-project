@@ -29,19 +29,25 @@ public class ArticlePromptAssemblerV2 {
 
     private static final String GLOBAL_WRITING_RULES = """
             1. 使用自然、清晰、符合现代中文习惯和中文语序的表达，避免翻译腔、生硬拼接和拗口句式。
-            2. 写作前先在内部理解主题、读者和材料，自主确定内容组织方式；不要输出规划过程。
-            3. 全文围绕核心问题展开，段落之间必须存在真实语义联系，前后连贯并形成逻辑闭环。
+            2. 写作前先在内部理解当前主题、读者和材料，判断最值得讲清楚的核心问题，并据此形成自然的内容主线；不要输出规划过程。
+            3. 全文围绕核心问题展开，段落之间必须存在真实语义联系，前后连贯并形成逻辑闭环；逻辑闭环不等于必须另写总结段。
             4. 重要判断需要有事实、原因、适用条件或选择依据支撑；材料不足时收窄判断，不补造结论。
             5. 将品牌能力与读者需求自然建立联系；营销信息必须参与问题解释，不能作为孤立广告块生硬追加。
             6. 结尾回应文章的主要任务，但不要求固定总结句式。
             7. 企业、品牌、产品和服务的实体名称保持一致，关键信息表述明确，便于大模型理解、提取和引用。
-            8. 关键词只在语义需要时自然出现，不堆砌关键词，也不要把全文拆成互不关联的答案片段。
-            9. 不套用固定结构，不模仿案例；根据本次主题、材料和渠道自主决定开篇、论证顺序、品牌进入位置和结尾方式。
+            8. 关键词只在语义需要时自然出现，不堆砌关键词，也不要把全文拆成互不关联的答案片段；GEO 信息明确不等于必须使用 FAQ、清单或标准化小标题。
+            9. 不套用固定结构，不模仿案例，也不为显得完整而罗列所有常见维度。内容顺序服从当前文章的因果关系、判断过程和阅读需要；开篇、段落推进、小标题形式、品牌进入位置和结尾方式均由当前主题与材料决定。
             10. 不虚构企业信息、产品、资质、案例、数据、排名、效果承诺或联系方式；缺失信息直接省略。
+            """.trim();
+
+    private static final String FACT_MATERIAL_USAGE = """
+            以下内容是可选择的事实素材库，不是必须逐项写入的企业介绍清单。只选取与本篇主线直接相关的少量事实；普通主题通常使用1～2项品牌事实，品牌专题也不要求完整罗列企业资料。未被选中的材料可以不写，不得为满足篇幅重复品牌资料，或集中堆叠定位、业务、产品、区域、资质和案例。
             """.trim();
 
     private final ObjectMapper objectMapper;
     private final ArticleContentLengthPolicyResolver contentLengthPolicyResolver;
+    private final ArticleEditorialMissionResolver editorialMissionResolver;
+    private final ArticleTemplateCompatibilityResolver templateCompatibilityResolver;
 
     public BatchArticlePromptBuilder.PromptBuildResult assemble(
             BatchArticlePromptBuilder.PromptBuildInput input,
@@ -66,21 +72,21 @@ public class ArticlePromptAssemblerV2 {
         section(prompt, "真实性与硬边界", truthfulnessRules(input.forbiddenPhrases()));
         section(prompt, "全局写作原则", GLOBAL_WRITING_RULES);
         section(prompt, "当前渠道与写作视角", channelDirection(runtimePolicy));
-        section(prompt, "当前模板任务", templateTask(input, template, version, runtimePolicy, specialIndustry));
+        section(prompt, "当前文章任务", templateTask(input, template));
         section(prompt, "严格审核平台品牌表达要求",
                 strictEditorialBrandDirection(input, template, runtimePolicy, specialIndustry));
         section(prompt, "主题、关键词与读者", topicMaterial(input, omittedMaterialKeys));
-        section(prompt, "可用事实材料", factMaterial(input, omittedMaterialKeys));
+        section(prompt, "可用事实材料", FACT_MATERIAL_USAGE + "\n" + factMaterial(input, omittedMaterialKeys));
         section(prompt, "联系方式边界", contactDirection(input.project(), input.brand(), runtimePolicy, omittedMaterialKeys));
         section(prompt, "输出要求", outputRules(contentLengthPolicy, runtimePolicy));
 
         Map<String, Object> promptSnapshot = baseSnapshot(
-                input, template, version, runtimePolicy, contentLengthPolicy, omittedMaterialKeys);
+                input, template, version, runtimePolicy, contentLengthPolicy, omittedMaterialKeys, specialIndustry);
         promptSnapshot.put("systemPrompt", SYSTEM_PROMPT);
         promptSnapshot.put("userPrompt", prompt.toString().trim());
 
         Map<String, Object> inputSnapshot = baseSnapshot(
-                input, template, version, runtimePolicy, contentLengthPolicy, omittedMaterialKeys);
+                input, template, version, runtimePolicy, contentLengthPolicy, omittedMaterialKeys, specialIndustry);
         inputSnapshot.put("projectId", input.project() == null ? null : input.project().getId());
         inputSnapshot.put("sourceProjectId", input.sourceProjectId());
         inputSnapshot.put("sourceBrandId", input.sourceBrandId());
@@ -111,18 +117,32 @@ public class ArticlePromptAssemblerV2 {
                                              ArticlePromptTemplateVersion version,
                                              ArticleRuntimePolicy runtimePolicy,
                                              ArticleContentLengthPolicy contentLengthPolicy,
-                                             List<String> omittedMaterialKeys) {
+                                             List<String> omittedMaterialKeys,
+                                             boolean specialIndustry) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("promptContract", PROMPT_CONTRACT);
+        snapshot.put("promptRevision", "v2_scene_mission_20260721");
         snapshot.put("templateId", template == null ? null : template.getId());
         snapshot.put("templateVersionId", version == null ? null : version.getId());
         snapshot.put("templateVersionNo", version == null ? null : version.getVersionNo());
         snapshot.put("runtimePolicy", runtimePolicy);
         snapshot.put("effectiveLengthPolicy", contentLengthPolicy);
         snapshot.put("effectiveTitleMaxChars", ArticlePromptChannels.maxTitleChars(runtimePolicy.channelGroupCode()));
+        snapshot.put("effectiveTemperature", ArticleGenerationTemperatures.resolve(true, specialIndustry));
         snapshot.put("omittedMaterialKeys", omittedMaterialKeys.stream().distinct().toList());
         snapshot.put("perspectiveMatchedScope", input.perspectiveMatchedScope());
         snapshot.put("perspectiveMatchedConfigId", input.perspectiveMatchedConfigId());
+        snapshot.put("requestedQuestionSceneCode", input.requestedQuestionSceneCode());
+        snapshot.put("effectiveQuestionSceneCode", input.effectiveQuestionSceneCode());
+        snapshot.put("questionSceneSource", input.questionSceneSource());
+        snapshot.put("selectedTemplateQuestionSceneCode", template == null ? null : template.getQuestionSceneCode());
+        snapshot.put("selectedTemplateArticleTypeCode", template == null ? null : template.getArticleTypeCode());
+        snapshot.put("effectiveArticleTypeCode", resolvedArticleType(input, template));
+        String compatibilityScene = ArticleQuestionSceneResolver.SOURCE_CUSTOM_TEMPLATE.equals(input.questionSceneSource())
+                ? input.effectiveQuestionSceneCode()
+                : input.requestedQuestionSceneCode();
+        snapshot.put("templateCompatibilityLevel", template == null ? null : templateCompatibilityResolver.level(
+                compatibilityScene, template.getQuestionSceneCode()).name().toLowerCase());
         return snapshot;
     }
 
@@ -154,58 +174,26 @@ public class ArticlePromptAssemblerV2 {
     }
 
     private String templateTask(BatchArticlePromptBuilder.PromptBuildInput input,
-                                ArticlePromptTemplate template,
-                                ArticlePromptTemplateVersion version,
-                                ArticleRuntimePolicy runtimePolicy,
-                                boolean specialIndustry) {
-        if (ArticlePromptChannels.isStrictEditorialSelfMedia(
-                runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode())) {
-            return strictEditorialTemplateTask(input, template);
-        }
+                                ArticlePromptTemplate template) {
         List<String> parts = new ArrayList<>();
-        add(parts, "模板名称", template == null ? null : template.getName());
-        add(parts, "模板说明", safeTemplateDescription(template == null ? null : template.getDescription()));
-        add(parts, "文章类型", ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(input.articleType(), input.articleType()));
-        String task = renderTemplateTask(version == null ? null : version.getUserPromptTemplate(), input);
-        if (specialIndustry) {
-            task = removeConcentratedComplianceExamples(task);
-        }
-        if (StringUtils.hasText(task) && !task.trim().equals(input.topic())) {
-            add(parts, "本模板补充任务", task);
-        }
+        String articleType = resolvedArticleType(input, template);
+        add(parts, "文章类型", ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(articleType, articleType));
+        ArticleEditorialMission mission = editorialMissionResolver.resolve(
+                input.effectiveQuestionSceneCode(), articleType);
+        add(parts, "内容任务", mission.missionText());
         if (StringUtils.hasText(input.extraPrompt())) {
             add(parts, "本次补充要求", input.extraPrompt());
         }
         return String.join("\n", parts);
     }
 
-    private String strictEditorialTemplateTask(BatchArticlePromptBuilder.PromptBuildInput input,
-                                               ArticlePromptTemplate template) {
-        List<String> parts = new ArrayList<>();
-        add(parts, "文章类型", ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(input.articleType(), input.articleType()));
-        add(parts, "任务方向", strictEditorialTaskDirection(template, input.articleType()));
-        if (StringUtils.hasText(input.extraPrompt())) {
-            add(parts, "本次补充要求", input.extraPrompt());
-        }
-        return String.join("\n", parts);
-    }
-
-    private String strictEditorialTaskDirection(ArticlePromptTemplate template, String articleType) {
-        String scene = template == null ? null : template.getQuestionSceneCode();
-        if ("brand".equals(scene) || "news_brief".equals(articleType)) {
-            return "围绕主题客观解释品牌公开信息、业务定位、适配需求和能力边界，不把品牌说明写成背书或推荐结论。";
-        }
-        if ("qa".equals(scene) || "faq".equals(articleType)) {
-            return "围绕主题完整回答读者关心的问题，使不同判断之间前后连贯，并将品牌作为与问题相关的事实节点自然带入。";
-        }
-        if ("decision".equals(scene) || "buying_guide".equals(articleType)
-                || "pitfall_guide".equals(articleType)) {
-            return "围绕主题说明判断依据、核验方法、风险和适用条件，再依据真实材料说明品牌与其中哪些需求相匹配。";
-        }
-        if ("comparison".equals(articleType)) {
-            return "围绕主题比较类型、路线、条件和适用边界，不做品牌排名；品牌只承担与判断维度相关的事实说明作用。";
-        }
-        return "围绕主题形成可独立成立的知识或资讯内容，并使用真实品牌材料帮助解释问题、条件或适用边界。";
+    private String resolvedArticleType(BatchArticlePromptBuilder.PromptBuildInput input,
+                                       ArticlePromptTemplate template) {
+        return StringUtils.hasText(input.articleType())
+                ? input.articleType().trim()
+                : template != null && StringUtils.hasText(template.getArticleTypeCode())
+                ? template.getArticleTypeCode().trim()
+                : null;
     }
 
     private String strictEditorialBrandDirection(BatchArticlePromptBuilder.PromptBuildInput input,
@@ -218,26 +206,22 @@ public class ArticlePromptAssemblerV2 {
         }
         String platform = ArticlePromptChannels.channelName(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode());
-        boolean brandFocused = isBrandFocused(input, template);
+        boolean brandFocused = isBrandFocused(input);
         String frequency = specialIndustry
                 ? "品牌必须在特殊行业合规允许的范围内自然出现，具体次数服从对应合规内核，不得为满足露出要求突破更严格的行业边界。"
                 : brandFocused
                 ? "本篇属于品牌相关主题。企业全称、品牌名称和品牌简称按同一实体合并计算，全文通常出现2～3次且不得超过3次；标题只有在用户主题本身明确围绕该品牌时才可中性包含品牌。"
-                : "本篇不属于品牌专题。企业全称、品牌名称和品牌简称按同一实体合并计算，全文应自然出现1～2次；标题和开篇不出现品牌，先把读者问题与判断依据讲清楚后再带入品牌。";
+                : "本篇不属于品牌专题。企业全称、品牌名称和品牌简称按同一实体合并计算，全文应自然出现1～2次；标题默认不出现品牌。品牌可根据语义出现在正文前段、中段或后段，但不得以宣传结论开篇。";
         return platform + "属于内容审核较严格的平台，以下要求不可被模板名称或补充要求覆盖：\n"
                 + "1. 每篇必须自然包含品牌信息，并至少使用一项与主题直接相关的真实品牌事实，例如主营业务、产品服务、适用场景、服务区域、公开资质或能力边界；不得只做品牌名称点名。\n"
-                + "2. 品牌不得作为文章的预设答案。先形成可以独立成立的知识、资讯或问题解释价值，再在真实语义需要处引入品牌。\n"
+                + "2. 品牌不得作为文章的预设答案，也不得用通用铺垫机械推迟品牌出现。品牌可在能够帮助解释主题的任意正文位置自然进入，文章本身同时保持独立的信息价值。\n"
                 + "3. " + frequency + "\n"
                 + "4. 不在相邻段落连续介绍品牌，不把品牌资料逐项堆成卖点清单。品牌的正面判断必须同时说明事实依据、适用条件或能力边界。\n"
-                + "5. 结尾回到读者关心的问题和判断方法，不以品牌推荐、咨询或行动引导收束。篇幅不足时通过补充原因、条件、风险和核验方法完善，不重复品牌信息凑字数。";
+                + "5. 结尾只需自然完成文章的主要任务，不要求固定总结或判断清单；不得以品牌推荐、咨询、预约或行动引导收束，也不得重复品牌信息凑字数。";
     }
 
-    private boolean isBrandFocused(BatchArticlePromptBuilder.PromptBuildInput input,
-                                   ArticlePromptTemplate template) {
-        if (template != null && "brand".equals(template.getQuestionSceneCode())) {
-            return true;
-        }
-        if ("news_brief".equals(input.articleType())) {
+    private boolean isBrandFocused(BatchArticlePromptBuilder.PromptBuildInput input) {
+        if ("brand".equals(input.effectiveQuestionSceneCode())) {
             return true;
         }
         String topic = input.topic();
@@ -253,39 +237,6 @@ public class ArticlePromptAssemblerV2 {
         return StringUtils.hasText(source) && StringUtils.hasText(target) && source.contains(target.trim());
     }
 
-    private String removeConcentratedComplianceExamples(String task) {
-        if (!StringUtils.hasText(task)) {
-            return task;
-        }
-        List<String> lines = new ArrayList<>();
-        boolean directionAdded = false;
-        for (String line : task.split("\\R")) {
-            String value = line.trim();
-            boolean quotedForbiddenList = (value.contains("不写“") || value.contains("不得写“")
-                    || value.contains("不要写“") || value.contains("不得使用“"))
-                    && count(value, '、') >= 2;
-            boolean slashExampleList = value.contains("“") && value.contains("”") && count(value, '/') >= 2;
-            if (quotedForbiddenList || slashExampleList) {
-                if (!directionAdded) {
-                    lines.add("避免疗效、安全、时效、持续周期、排名和直接转化类违规承诺。");
-                    directionAdded = true;
-                }
-                continue;
-            }
-            lines.add(line);
-        }
-        return String.join("\n", lines).trim();
-    }
-
-    private int count(String value, char target) {
-        int count = 0;
-        for (int i = 0; i < value.length(); i++) {
-            if (value.charAt(i) == target) {
-                count++;
-            }
-        }
-        return count;
-    }
 
     private String topicMaterial(BatchArticlePromptBuilder.PromptBuildInput input, List<String> omitted) {
         List<String> parts = new ArrayList<>();
@@ -389,30 +340,7 @@ public class ArticlePromptAssemblerV2 {
         return "输出一篇完整的 Markdown 文章。"
                 + contentLengthPolicyResolver.promptRequirement(contentLengthPolicy)
                 + titleRequirement
-                + "正文自然分段，可按语义需要使用小标题或列表，但不要为了形式强行切段。只输出文章正文。";
-    }
-
-    private String renderTemplateTask(String raw, BatchArticlePromptBuilder.PromptBuildInput input) {
-        if (!StringUtils.hasText(raw)) {
-            return null;
-        }
-        return raw.trim()
-                .replace("{{topic}}", nullToEmpty(input.topic()))
-                .replace("{{topicAsQuestion}}", nullToEmpty(input.topicAsQuestion()))
-                .replace("{{keywordGroupName}}", nullToEmpty(input.keywordGroupName()))
-                .replace("{{relatedKeywords}}", String.join("、", nonEmpty(input.relatedKeywords())))
-                .replace("{{articleType}}", nullToEmpty(input.articleType()))
-                .replace("{{length}}", nullToEmpty(input.length()))
-                .replaceAll("\\{\\{[^{}]+}}", "");
-    }
-
-    private String safeTemplateDescription(String description) {
-        if (!StringUtils.hasText(description)) {
-            return null;
-        }
-        String value = description.trim();
-        List<String> structuralAnchors = List.of("固定结构", "结构骨架", "结构要求", "段式", "示例标题", "示范提纲");
-        return structuralAnchors.stream().anyMatch(value::contains) ? null : value;
+                + "正文自然分段，可按语义需要使用小标题或列表，也可以用衔接紧密的连续段落深入展开；不要为了形式强行切段，不要求各部分长度和形态一致。只输出文章正文。";
     }
 
     private void section(StringBuilder prompt, String title, String content) {
@@ -444,10 +372,6 @@ public class ArticlePromptAssemblerV2 {
             return List.of();
         }
         return values.stream().filter(StringUtils::hasText).map(String::trim).distinct().toList();
-    }
-
-    private String nullToEmpty(String value) {
-        return StringUtils.hasText(value) ? value.trim() : "";
     }
 
     private String json(Map<String, Object> value) {

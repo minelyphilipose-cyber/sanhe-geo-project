@@ -81,7 +81,8 @@ class ArticleGenerationEngineTest {
                 false,
                 true,
                 List.of(),
-                28
+                28,
+                ArticleGenerationTemperatures.V2_STANDARD
         ));
 
         assertEquals("qwen", generated.model().platformCode());
@@ -99,5 +100,6 @@ class ArticleGenerationEngineTest {
         assertEquals(180_000, routeRequest.requestTimeoutMs());
         assertEquals(180_000, routeRequest.requestTimeoutMaxMs());
         assertEquals(0, routeRequest.maxRetry());
+        assertEquals(ArticleGenerationTemperatures.V2_STANDARD, routeRequest.temperature());
     }
 }

@@ -22,7 +22,38 @@ public record PromptContextRequest(Long projectId,
                                    Long topicAngleId,
                                    String structureSkeleton,
                                    String focus,
-                                   int articleIndexInBatch) {
+                                   int articleIndexInBatch,
+                                   String questionSceneCode) {
+    public PromptContextRequest(Long projectId,
+                                String topicSource,
+                                String articleType,
+                                String channelGroupCode,
+                                String channelSubCode,
+                                String topic,
+                                String topicAsQuestion,
+                                String length,
+                                Long keywordGroupId,
+                                String keywordGroupName,
+                                String extraPrompt,
+                                Long promptTemplateId,
+                                Long promptTemplateVersionId,
+                                String perspectiveCode,
+                                String perspectiveMatchedScope,
+                                Long perspectiveMatchedConfigId,
+                                String medicalIndustryCode,
+                                String medicalCategoryCode,
+                                String medicalCategoryName,
+                                Long topicAngleId,
+                                String structureSkeleton,
+                                String focus,
+                                int articleIndexInBatch) {
+        this(projectId, topicSource, articleType, channelGroupCode, channelSubCode, topic, topicAsQuestion, length,
+                keywordGroupId, keywordGroupName, extraPrompt, promptTemplateId, promptTemplateVersionId,
+                perspectiveCode, perspectiveMatchedScope, perspectiveMatchedConfigId,
+                medicalIndustryCode, medicalCategoryCode, medicalCategoryName, topicAngleId, structureSkeleton, focus,
+                articleIndexInBatch, null);
+    }
+
     public PromptContextRequest(Long projectId,
                                 String topicSource,
                                 String articleType,
@@ -43,6 +74,6 @@ public record PromptContextRequest(Long projectId,
         this(projectId, topicSource, articleType, channelGroupCode, channelSubCode, topic, topicAsQuestion, length,
                 keywordGroupId, keywordGroupName, extraPrompt, promptTemplateId, promptTemplateVersionId,
                 perspectiveCode, perspectiveMatchedScope, perspectiveMatchedConfigId,
-                null, null, null, null, null, null, articleIndexInBatch);
+                null, null, null, null, null, null, articleIndexInBatch, null);
     }
 }
