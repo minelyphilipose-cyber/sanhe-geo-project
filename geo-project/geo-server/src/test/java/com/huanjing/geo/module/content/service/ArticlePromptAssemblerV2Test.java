@@ -65,6 +65,8 @@ class ArticlePromptAssemblerV2Test {
         assertEquals(1, occurrences(result.userPrompt(), "使用自然、清晰、符合现代中文习惯"));
         assertTrue(result.userPrompt().contains("判断最值得讲清楚的核心问题"));
         assertTrue(result.userPrompt().contains("内容顺序服从当前文章的因果关系"));
+        assertTrue(result.userPrompt().contains("使用 Markdown 二级标题按语义组织相关段落"));
+        assertTrue(result.userPrompt().contains("不规定标题数量、固定名称或固定顺序"));
         assertFalse(result.userPrompt().contains("相似主题"));
         assertTrue(result.userPrompt().contains("可选择的事实素材库，不是必须逐项写入"));
         assertTrue(result.userPrompt().contains("普通主题通常使用1～2项品牌事实"));
@@ -92,7 +94,7 @@ class ArticlePromptAssemblerV2Test {
 
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals("article_v2", snapshot.path("promptContract").asText());
-        assertEquals("v2_scene_mission_20260721", snapshot.path("promptRevision").asText());
+        assertEquals("v2_semantic_sections_20260723", snapshot.path("promptRevision").asText());
         assertEquals("brand_only", snapshot.path("runtimePolicy").path("contactDisclosureMode").asText());
         assertEquals(1200, snapshot.path("effectiveLengthPolicy").path("targetMinChars").asInt());
         assertEquals(1800, snapshot.path("effectiveLengthPolicy").path("targetMaxChars").asInt());
@@ -128,6 +130,9 @@ class ArticlePromptAssemblerV2Test {
         BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
 
         assertTrue(result.userPrompt().contains("标题不超过28个字"));
+        assertTrue(result.userPrompt().contains("正文篇幅较短时以自然分段为主"));
+        assertTrue(result.userPrompt().contains("只有确实存在多个相对独立的信息单元时才使用 Markdown 二级标题"));
+        assertFalse(result.userPrompt().contains("不得把整篇长文写成从头到尾没有小标题"));
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals(28, snapshot.path("effectiveTitleMaxChars").asInt());
     }
@@ -237,6 +242,9 @@ class ArticlePromptAssemblerV2Test {
         assertTrue(result.userPrompt().contains("标题默认不出现品牌"));
         assertTrue(result.userPrompt().contains("正文前段、中段或后段"));
         assertTrue(result.userPrompt().contains("结尾只需自然完成文章的主要任务"));
+        assertTrue(result.userPrompt().contains("不得把整篇长文写成从头到尾没有小标题的连续正文"));
+        assertTrue(result.userPrompt().contains("相近内容归入同一标题"));
+        assertTrue(result.userPrompt().contains("列表只用于真正并列的信息"));
         assertFalse(result.userPrompt().contains("标题和开篇不出现品牌"));
         assertFalse(result.userPrompt().contains("先把读者问题与判断依据讲清楚后再带入品牌"));
         assertFalse(result.userPrompt().contains("结尾回到读者关心的问题和判断方法"));
@@ -304,6 +312,8 @@ class ArticlePromptAssemblerV2Test {
         assertFalse(result.userPrompt().contains("种草、无痛、永久"));
         assertFalse(result.userPrompt().contains("避免疗效、安全、时效、持续周期、排名和直接转化类违规承诺"));
         assertFalse(result.userPrompt().contains("重点说明风险、条件和评估依据"));
+        assertTrue(result.userPrompt().contains("不得把整篇长文写成从头到尾没有小标题的连续正文"));
+        assertFalse(result.userPrompt().contains("小标题必须包含合规"));
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals(ArticleGenerationTemperatures.DEFAULT,
                 snapshot.path("effectiveTemperature").asDouble());

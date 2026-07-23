@@ -35,8 +35,8 @@ public class ArticlePromptAssemblerV2 {
             5. 将品牌能力与读者需求自然建立联系；营销信息必须参与问题解释，不能作为孤立广告块生硬追加。
             6. 结尾回应文章的主要任务，但不要求固定总结句式。
             7. 企业、品牌、产品和服务的实体名称保持一致，关键信息表述明确，便于大模型理解、提取和引用。
-            8. 关键词只在语义需要时自然出现，不堆砌关键词，也不要把全文拆成互不关联的答案片段；GEO 信息明确不等于必须使用 FAQ、清单或标准化小标题。
-            9. 不套用固定结构，不模仿案例，也不为显得完整而罗列所有常见维度。内容顺序服从当前文章的因果关系、判断过程和阅读需要；开篇、段落推进、小标题形式、品牌进入位置和结尾方式均由当前主题与材料决定。
+            8. 关键词只在语义需要时自然出现，不堆砌关键词，也不要把全文拆成互不关联的答案片段。通过实体一致、信息明确和清晰的语义层级提高 GEO 可解析性与可引用性，但不强制使用 FAQ、清单或统一提纲。
+            9. 不套用固定结构，不模仿案例，也不为显得完整而罗列所有常见维度。内容顺序服从当前文章的因果关系、判断过程和阅读需要；开篇、段落推进、品牌进入位置和结尾方式均由当前主题与材料决定。当正文形成多个相对独立的信息单元时，应按语义分组，并用能够概括该组具体内容的小标题建立层级，不能把长文写成从头到尾无层级的连续段落。
             10. 不虚构企业信息、产品、资质、案例、数据、排名、效果承诺或联系方式；缺失信息直接省略。
             """.trim();
 
@@ -121,7 +121,7 @@ public class ArticlePromptAssemblerV2 {
                                              boolean specialIndustry) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("promptContract", PROMPT_CONTRACT);
-        snapshot.put("promptRevision", "v2_scene_mission_20260721");
+        snapshot.put("promptRevision", "v2_semantic_sections_20260723");
         snapshot.put("templateId", template == null ? null : template.getId());
         snapshot.put("templateVersionId", version == null ? null : version.getId());
         snapshot.put("templateVersionNo", version == null ? null : version.getVersionNo());
@@ -340,7 +340,21 @@ public class ArticlePromptAssemblerV2 {
         return "输出一篇完整的 Markdown 文章。"
                 + contentLengthPolicyResolver.promptRequirement(contentLengthPolicy)
                 + titleRequirement
-                + "正文自然分段，可按语义需要使用小标题或列表，也可以用衔接紧密的连续段落深入展开；不要为了形式强行切段，不要求各部分长度和形态一致。只输出文章正文。";
+                + semanticStructureRequirement(contentLengthPolicy)
+                + "只输出文章正文。";
+    }
+
+    private String semanticStructureRequirement(ArticleContentLengthPolicy contentLengthPolicy) {
+        if (contentLengthPolicy.targetMinChars() >= 2000) {
+            return "一级标题只用于文章标题。正文应根据实际内容划分若干语义单元，进入新的子问题、判断维度或信息阶段时，使用 Markdown 二级标题组织相关段落；不得把整篇长文写成从头到尾没有小标题的连续正文。"
+                    + "每个小标题必须概括所属段落的具体信息，相近内容归入同一标题，不要一段设置一个标题，也不规定标题数量、固定名称或固定顺序。"
+                    + "列表只用于真正并列的信息，不要把所有内容统一改写成清单。";
+        }
+        if (contentLengthPolicy.targetMinChars() >= 1000) {
+            return "一级标题只用于文章标题。正文出现多个相对独立的信息单元时，应使用 Markdown 二级标题按语义组织相关段落；小标题必须概括所属内容，不能使用脱离正文后无法识别信息的泛化表述。"
+                    + "不要一段设置一个标题，也不规定标题数量、固定名称或固定顺序；只有并列信息才使用列表。";
+        }
+        return "正文篇幅较短时以自然分段为主；只有确实存在多个相对独立的信息单元时才使用 Markdown 二级标题，不要为了形式切碎内容，也不要一段设置一个标题。";
     }
 
     private void section(StringBuilder prompt, String title, String content) {
