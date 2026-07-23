@@ -176,8 +176,6 @@
               <div class="admin-row-actions">
                 <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
                 <el-button v-if="canArticleWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
-                <el-button v-if="canReviewMedicalPublish(scope.row)" link type="warning" @click="reviewMedicalPublish(scope.row, 'approve')">法务通过</el-button>
-                <el-button v-if="canReviewMedicalPublish(scope.row)" link type="danger" @click="reviewMedicalPublish(scope.row, 'reject')">驳回</el-button>
                 <el-button v-if="canDistributeOperate && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
                 <el-button v-if="canArticleWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
               </div>
@@ -221,12 +219,8 @@
       :generated-by-label="generatedByLabel"
       :medical-compliance-label="medicalComplianceLabel"
       :medical-compliance-tag="medicalComplianceTag"
-      :medical-review-label="medicalReviewLabel"
-      :medical-review-tag="medicalReviewTag"
-      :can-review-medical-publish="canReviewMedicalPublish"
       @revision="openRevisionFromDetail"
       @style-render="handleDetailStyleRenderCommand"
-      @medical-publish-review="handleDetailMedicalPublishReview"
       @batch-generation-open="openBatchGenerationJob"
     />
 
@@ -606,7 +600,6 @@ import {
   deleteContentArticle,
   getContentArticleDetail,
   getContentArticles,
-  reviewMedicalPublishArticle,
 } from '@/api/content'
 import { getProjectDetail } from '@/api/project'
 import { formatDateTime } from '@/utils/format'
@@ -666,8 +659,7 @@ const distributableCount = computed(() => rows.value.filter((row) => canDistribu
 const showAdvancedFilters = ref(false)
 const blockedCount = computed(() => rows.value.filter((row) =>
   ['failed', 'risk_blocked'].includes(row.status)
-  || row.complianceStatus === 'discarded_compliance_failed'
-  || row.publishReviewStatus === 'rejected',
+  || row.complianceStatus === 'discarded_compliance_failed',
 ).length)
 const scheduleDrawerVisible = ref(false)
 const scheduleInitialFailureCode = ref('')
@@ -1057,64 +1049,6 @@ function medicalComplianceTag(v?: string | null): 'success' | 'warning' | 'dange
   return 'info'
 }
 
-function medicalReviewLabel(v?: string | null) {
-  const map: Record<string, string> = {
-    not_required: '无需法务',
-    pending: '待法务确认',
-    passed: '法务通过',
-    rejected: '法务驳回',
-  }
-  return v ? map[v] || v : '未确认'
-}
-
-function medicalReviewTag(v?: string | null): 'success' | 'warning' | 'danger' | 'info' {
-  if (v === 'passed' || v === 'not_required') return 'success'
-  if (v === 'pending') return 'warning'
-  if (v === 'rejected') return 'danger'
-  return 'info'
-}
-
-function canReviewMedicalPublish(row?: ArticleDraft | null) {
-  return canArticleWrite.value
-    && row?.medicalChannelTier === 'official_site'
-    && row?.complianceStatus === 'passed'
-    && row?.publishReviewStatus !== 'passed'
-}
-
-async function reviewMedicalPublish(row: ArticleDraft, action: 'approve' | 'reject') {
-  const verb = action === 'approve' ? '通过' : '驳回'
-  let comment = ''
-  try {
-    const result = await ElMessageBox.prompt(`请输入医疗官网发布法务${verb}说明`, `医疗发布${verb}`, {
-      confirmButtonText: verb,
-      cancelButtonText: '取消',
-      inputType: 'textarea',
-      inputPlaceholder: action === 'approve' ? '例如：已核对广告审查编号/资质信息' : '例如：缺少审查证明或内容需调整',
-      inputValidator: (value) => action === 'approve' || !!value.trim() || '驳回时需填写原因',
-    })
-    comment = result.value || ''
-  } catch {
-    return
-  }
-  try {
-    await reviewMedicalPublishArticle(row.id, { action, comment })
-    ElMessage.success(`医疗发布已${verb}`)
-    await load()
-    if (detailData.value?.article?.id === row.id) {
-      await openDetail(row.id)
-    }
-  } catch {
-    // Global request handler displays the backend error.
-  }
-}
-
-function handleDetailMedicalPublishReview(action: 'approve' | 'reject') {
-  const article = detailData.value?.article
-  if (article) {
-    void reviewMedicalPublish(article, action)
-  }
-}
-
 function distributionPlatformLabel(v?: string | null) {
   const map: Record<string, string> = {
     wechat_mp: '微信公众号',
@@ -1403,10 +1337,7 @@ function medicalBatchPublishBlockReason(detail: ArticleDetailResponse) {
   if (article.complianceStatus !== 'passed') {
     return '医疗合规未通过，不能发布官网档'
   }
-  if (article.medicalAdReviewNo || article.publishReviewStatus === 'passed') {
-    return ''
-  }
-  return '医疗官网档缺少广告审查号或人工法务确认'
+  return ''
 }
 
 function riskWordHits(article?: Pick<ArticleDraft, 'riskWordsJson'> | null): RiskWordHit[] {

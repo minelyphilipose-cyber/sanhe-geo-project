@@ -925,6 +925,14 @@ export interface MedicalComplianceRule {
   remark?: string | null
 }
 
+export interface SpecialIndustryRuleType {
+  ruleType: string
+  displayName: string
+  disposition: 'hard_block' | 'warning'
+  allowedSeverities: Array<'block' | 'warn'>
+  allowedMatchModes: Array<'contains' | 'regex'>
+}
+
 export interface MedicalComplianceKernel {
   id: number
   industryCode: string
@@ -1090,6 +1098,10 @@ export function deleteSpecialIndustryTopicAngle(id: number) {
 
 export function getSpecialIndustryComplianceRules(params?: Record<string, any>) {
   return request.get<R<PageResult<SpecialIndustryComplianceRule>>>('/content/special-industry/rules', { params })
+}
+
+export function getSpecialIndustryRuleTypes() {
+  return request.get<R<SpecialIndustryRuleType[]>>('/content/special-industry/rule-types')
 }
 
 export function createSpecialIndustryComplianceRule(data: Partial<SpecialIndustryComplianceRule>) {

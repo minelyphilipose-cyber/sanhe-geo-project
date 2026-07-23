@@ -73,7 +73,6 @@ public class ContentArticleService {
     private final ArticleCoverSelectionService coverSelectionService;
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
-    private final SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService;
 
     public Page<ArticleDraft> page(String projectName, String status, String articleType, long current, long size) {
         return page(projectName, status, articleType, null, null, null, null, null, null, null, null, null, null, null, current, size);
@@ -689,43 +688,7 @@ public class ContentArticleService {
 
     @Transactional
     public void reviewMedicalPublish(Long articleId, MedicalPublishReviewRequest req) {
-        SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermissionOrLegacy("content.article.write", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
-        ArticleDraft article = requireArticle(articleId);
-        Project project = requireProject(article.getProjectId());
-        ensureProjectAccess(operator, project, true);
-        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
-        if (!MedicalArticleConstants.TIER_OFFICIAL_SITE.equals(article.getMedicalChannelTier())) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Only medical official-site articles require publish review");
-        }
-        if (!MedicalArticleConstants.COMPLIANCE_PASSED.equals(article.getComplianceStatus())) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Medical compliance must pass before publish review");
-        }
-        String action = trimToNull(req.getAction());
-        action = action == null ? null : action.toLowerCase(Locale.ROOT);
-        if (action == null || !Set.of("approve", "reject").contains(action)) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid medical publish review action");
-        }
-        String oldStatus = article.getPublishReviewStatus();
-        String newStatus = "approve".equals(action)
-                ? MedicalArticleConstants.REVIEW_PASSED
-                : MedicalArticleConstants.REVIEW_REJECTED;
-        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
-                .eq(ArticleDraft::getId, articleId)
-                .set(ArticleDraft::getPublishReviewStatus, newStatus));
-        if (updated != 1) {
-            auditArticleTransition("MEDICAL_PUBLISH_REVIEW", AuditResult.DENIED, operator, project, article,
-                    oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
-            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
-        }
-        auditArticleTransition("MEDICAL_PUBLISH_REVIEW", AuditResult.SUCCESS, operator, project, article,
-                oldStatus, newStatus, req.getComment(), null);
-        specialIndustryComplianceAlertService.closePublishReviewPending(article, project, operator.getId());
-        if (MedicalArticleConstants.REVIEW_REJECTED.equals(newStatus)) {
-            specialIndustryComplianceAlertService.notifyPublishReviewRejected(article, project, operator.getId(), req.getComment());
-        } else {
-            specialIndustryComplianceAlertService.closePublishReviewRejected(article, operator.getId());
-        }
+        throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "特殊行业内部发布审核流程已停用");
     }
 
     @Transactional
@@ -966,6 +929,8 @@ public class ContentArticleService {
         for (ArticleDraft article : articles) {
             article.setSystemGenerated(false);
             article.setGenerationMode("single");
+            article.setComplianceWarningCount(0);
+            article.setHasComplianceWarnings(false);
             BatchArticleGenerationTask task = taskMap.get(article.getId());
             if (task != null) {
                 article.setSystemGenerated(true);
@@ -998,6 +963,9 @@ public class ContentArticleService {
     }
 
     private void fillArticleFromGenerationTask(ArticleDraft article, BatchArticleGenerationTask task) {
+        int warningCount = complianceWarningCount(task.getComplianceIssuesJson());
+        article.setComplianceWarningCount(warningCount);
+        article.setHasComplianceWarnings(warningCount > 0);
         if (article.getSourceBrandId() == null) {
             article.setSourceBrandId(task.getSourceBrandId());
         }
@@ -1012,6 +980,21 @@ public class ContentArticleService {
         }
         if (!StringUtils.hasText(article.getTopicAsQuestion())) {
             article.setTopicAsQuestion(task.getTopicAsQuestion());
+        }
+    }
+
+    private int complianceWarningCount(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return 0;
+        }
+        try {
+            return (int) JSONUtil.parseObj(raw).getJSONArray("issues").stream()
+                    .filter(Objects::nonNull)
+                    .map(JSONUtil::parseObj)
+                    .filter(issue -> "warn".equalsIgnoreCase(issue.getStr("severity")))
+                    .count();
+        } catch (Exception ignored) {
+            return 0;
         }
     }
 

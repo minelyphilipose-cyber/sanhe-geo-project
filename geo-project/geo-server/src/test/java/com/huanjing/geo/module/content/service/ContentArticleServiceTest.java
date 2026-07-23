@@ -120,8 +120,7 @@ class ContentArticleServiceTest {
                 autoImageInsertionService,
                 coverSelectionService,
                 brandAccessService,
-                auditService,
-                mock(SpecialIndustryComplianceAlertService.class)
+                auditService
         );
     }
 

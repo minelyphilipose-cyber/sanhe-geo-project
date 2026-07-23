@@ -1231,6 +1231,8 @@ export interface ArticleDraft {
   promptTemplateId?: number | null
   promptTemplateVersionId?: number | null
   promptTemplateName?: string | null
+  complianceWarningCount?: number | null
+  hasComplianceWarnings?: boolean | null
   topic?: string | null
   topicAsQuestion?: string | null
   title: string

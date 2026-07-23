@@ -107,6 +107,15 @@ public class MedicalArticleDtos {
     ) {
     }
 
+    public record ComplianceRuleTypeVO(
+            String ruleType,
+            String displayName,
+            String disposition,
+            List<String> allowedSeverities,
+            List<String> allowedMatchModes
+    ) {
+    }
+
     public record ComplianceKernelSaveRequest(
             @NotBlank @Size(max = 32) String industryCode,
             @NotBlank @Size(max = 32) String channelTier,

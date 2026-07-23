@@ -767,11 +767,6 @@ public class BatchArticlePublishService {
         if (!MedicalArticleConstants.COMPLIANCE_PASSED.equals(article.getComplianceStatus())) {
             throw new BizException(400, "article " + article.getId() + " medical compliance is not passed");
         }
-        boolean hasAdReviewNo = StringUtils.hasText(article.getMedicalAdReviewNo());
-        boolean manualPassed = MedicalArticleConstants.REVIEW_PASSED.equals(article.getPublishReviewStatus());
-        if (!hasAdReviewNo && !manualPassed) {
-            throw new BizException(400, "article " + article.getId() + " requires medical ad review number or manual legal review before official site publish");
-        }
     }
 
     private Project requireProject(Long projectId) {

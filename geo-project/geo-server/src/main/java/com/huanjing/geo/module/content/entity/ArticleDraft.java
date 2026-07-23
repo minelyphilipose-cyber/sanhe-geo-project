@@ -67,4 +67,8 @@ public class ArticleDraft {
     private String generatedBy;
     @TableField(exist = false)
     private String promptTemplateName;
+    @TableField(exist = false)
+    private Integer complianceWarningCount;
+    @TableField(exist = false)
+    private Boolean hasComplianceWarnings;
 }

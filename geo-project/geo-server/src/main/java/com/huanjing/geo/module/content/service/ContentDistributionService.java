@@ -600,11 +600,6 @@ public class ContentDistributionService {
         if (!MedicalArticleConstants.COMPLIANCE_PASSED.equals(article.getComplianceStatus())) {
             throw new BizException(400, "医疗文章合规状态未通过，不能发布官网");
         }
-        boolean hasAdReviewNo = StringUtils.hasText(article.getMedicalAdReviewNo());
-        boolean manualPassed = MedicalArticleConstants.REVIEW_PASSED.equals(article.getPublishReviewStatus());
-        if (!hasAdReviewNo && !manualPassed) {
-            throw new BizException(400, "医疗官网发布前需要医疗广告审查证明编号或人工法务确认");
-        }
     }
 
     private DistributionTask distributeToBrandGeoSite(ArticleDraft article,

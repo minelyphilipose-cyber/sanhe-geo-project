@@ -160,6 +160,38 @@ class MedicalArticleGenerationServiceTest {
     }
 
     @Test
+    void v2DoesNotBlockWhenSelectedCategoryHasNoEnabledOffering() {
+        BrandOffering orthodontics = new BrandOffering();
+        orthodontics.setMedicalCategoryCode("orthodontics");
+        when(brandOfferingMapper.selectList(any())).thenReturn(List.of(orthodontics));
+        when(kernelMapper.selectOne(any())).thenReturn(kernel());
+        when(channelStyleMapper.selectOne(any())).thenReturn(style());
+
+        MedicalArticleGenerationService.MedicalPromptContext context = service.resolveContextV2(
+                project(), oralBrand(), "self_media", "wechat", topicConfig("implant")
+        ).orElseThrow();
+
+        assertThat(context.categoryCode()).isEqualTo("implant");
+        assertThat(context.qualificationRef()).isNull();
+    }
+
+    @Test
+    void v2FallsBackToGlobalBoundaryWhenKernelOrStyleIsMissing() {
+        when(brandOfferingMapper.selectList(any())).thenReturn(List.of());
+        when(kernelMapper.selectOne(any())).thenReturn(null);
+        when(channelStyleMapper.selectOne(any())).thenReturn(null);
+
+        MedicalArticleGenerationService.MedicalPromptContext context = service.resolveContextV2(
+                project(), oralBrand(), "self_media", "wechat", topicConfig(null)
+        ).orElseThrow();
+
+        assertThat(context.complianceKernelPrompt()).isNull();
+        assertThat(context.channelStylePrompt()).isNull();
+        assertThat(context.brandExposureLimit()).isNull();
+        assertThat(context.highRiskChannel()).isFalse();
+    }
+
+    @Test
     void v2ExplicitTopicAngleIsValidatedAndKeptAsAuxiliaryDirection() {
         when(brandOfferingMapper.selectList(any())).thenReturn(List.of());
         when(topicAngleMapper.selectById(101L)).thenReturn(oralTopicAngle());
@@ -195,7 +227,11 @@ class MedicalArticleGenerationServiceTest {
         BatchArticlePromptBuilder.PromptBuildResult result = service.applyMedicalPromptV2(prompt, context);
 
         assertThat(result.userPrompt()).contains("疗效、收益、安全性、时效或持续周期保证")
+                .contains("特殊行业内容边界")
+                .contains("标题必须直接回应原主题")
+                .contains("仅整理机构或品牌公开信息时")
                 .contains("围绕阜阳祛斑医院推荐写作")
+                .doesNotContain("特殊行业合规边界")
                 .doesNotContain("一次见效", "绝对安全", "永久有效");
     }
 

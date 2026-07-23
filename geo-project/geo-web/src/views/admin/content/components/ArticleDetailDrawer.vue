@@ -48,32 +48,9 @@
             {{ detailData.article.medicalChannelTier }}
           </el-descriptions-item>
           <el-descriptions-item v-if="showArticleMedicalCompliance && detailData.article.complianceStatus" label="合规状态">
-            <el-tag size="small" :type="medicalComplianceTag(detailData.article.complianceStatus)">
-              {{ medicalComplianceLabel(detailData.article.complianceStatus) }}
+            <el-tag size="small" :type="articleComplianceTag(detailData.article)">
+              {{ articleComplianceLabel(detailData.article) }}
             </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item v-if="showArticleMedicalCompliance && detailData.article.medicalChannelTier === 'official_site'" label="发布确认">
-            <div class="medical-review-line">
-              <el-tag size="small" :type="medicalReviewTag(detailData.article.publishReviewStatus)">
-                {{ medicalReviewLabel(detailData.article.publishReviewStatus) }}
-              </el-tag>
-              <el-button
-                v-if="canReviewMedicalPublish(detailData.article)"
-                link
-                type="warning"
-                @click="emit('medicalPublishReview', 'approve')"
-              >
-                法务通过
-              </el-button>
-              <el-button
-                v-if="canReviewMedicalPublish(detailData.article)"
-                link
-                type="danger"
-                @click="emit('medicalPublishReview', 'reject')"
-              >
-                驳回
-              </el-button>
-            </div>
           </el-descriptions-item>
           <el-descriptions-item v-if="showArticleMedicalCompliance && detailData.article.medicalAdReviewNo" label="广告审查号" :span="2">
             {{ detailData.article.medicalAdReviewNo }}
@@ -152,13 +129,27 @@
             </el-descriptions-item>
           </el-descriptions>
           <div v-if="showBatchTaskMedicalCompliance && batchComplianceIssues(detailData.batchGenerationTask).length" class="trace-issue-list">
-            <div class="trace-subtitle">命中规则</div>
+            <div class="trace-subtitle">合规问题与提醒</div>
+            <el-alert
+              v-if="detailData.article.complianceStatus === 'passed'"
+              class="trace-warning-note"
+              type="warning"
+              :closable="false"
+              title="以下内容仅作运营提醒，不阻断文章保存和发布。"
+            />
             <el-table :data="batchComplianceIssues(detailData.batchGenerationTask)" border>
               <el-table-column label="规则" min-width="160">
                 <template #default="scope">{{ scope.row.ruleCode || scope.row.code || '-' }}</template>
               </el-table-column>
               <el-table-column label="类型" min-width="120">
                 <template #default="scope">{{ scope.row.ruleType || scope.row.type || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="级别" width="90">
+                <template #default="scope">
+                  <el-tag size="small" :type="scope.row.severity === 'block' ? 'danger' : 'warning'">
+                    {{ scope.row.severity === 'block' ? '阻断' : '提醒' }}
+                  </el-tag>
+                </template>
               </el-table-column>
               <el-table-column label="命中内容" min-width="160">
                 <template #default="scope">{{ scope.row.matchedText || scope.row.keyword || scope.row.word || '-' }}</template>
@@ -226,6 +217,7 @@ type ComplianceIssueRow = {
   ruleType?: string
   type?: string
   matchedText?: string
+  severity?: string
   keyword?: string
   word?: string
   reason?: string
@@ -256,9 +248,6 @@ const props = defineProps<{
   generatedByLabel: (value?: string | null) => string
   medicalComplianceLabel: (value?: string | null) => string
   medicalComplianceTag: (value?: string | null) => TagType
-  medicalReviewLabel: (value?: string | null) => string
-  medicalReviewTag: (value?: string | null) => TagType
-  canReviewMedicalPublish: (article?: ArticleDraft | null) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -266,7 +255,6 @@ const emit = defineEmits<{
   'update:viewMode': [value: ViewMode]
   revision: []
   styleRender: [command: string]
-  medicalPublishReview: [action: 'approve' | 'reject']
   batchGenerationOpen: [batchId: number]
 }>()
 
@@ -283,6 +271,20 @@ const viewMode = computed({
 const showArticleMedicalCompliance = computed(() =>
   props.detailData ? props.isSpecialIndustryArticle(props.detailData.article) : false,
 )
+
+function articleComplianceLabel(article: ArticleDraft) {
+  if (article.complianceStatus === 'passed' && article.hasComplianceWarnings) {
+    return `合规通过（${article.complianceWarningCount || 0}项提醒）`
+  }
+  return props.medicalComplianceLabel(article.complianceStatus)
+}
+
+function articleComplianceTag(article: ArticleDraft): TagType {
+  if (article.complianceStatus === 'passed' && article.hasComplianceWarnings) {
+    return 'warning'
+  }
+  return props.medicalComplianceTag(article.complianceStatus)
+}
 
 const showBatchTaskMedicalCompliance = computed(() => {
   const task = props.detailData?.batchGenerationTask

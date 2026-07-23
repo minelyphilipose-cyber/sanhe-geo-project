@@ -11,6 +11,7 @@ import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleTest
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleTestResultVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleTypeVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.BatchTraceVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.GenerationHistoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleCategoryVO;
@@ -82,6 +83,11 @@ public class MedicalArticleConfigController {
                                            @RequestParam(defaultValue = "1") long current,
                                            @RequestParam(defaultValue = "10") long size) {
         return R.ok(service.pageRules(ruleType, industryCode, channelTier, enabled, current, size));
+    }
+
+    @GetMapping("/rule-types")
+    public R<java.util.List<ComplianceRuleTypeVO>> ruleTypes() {
+        return R.ok(service.ruleTypes());
     }
 
     @PostMapping("/rules")

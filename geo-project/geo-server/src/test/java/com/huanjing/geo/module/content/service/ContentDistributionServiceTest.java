@@ -164,6 +164,31 @@ class ContentDistributionServiceTest {
     }
 
     @Test
+    void medicalOfficialArticleNeedsCompliancePassButNotAdReviewOrManualReview() {
+        ArticleDraft article = new ArticleDraft();
+        article.setId(1L);
+        article.setMedicalChannelTier("official_site");
+        article.setComplianceStatus("passed");
+        article.setMedicalAdReviewNo(null);
+        article.setPublishReviewStatus("pending");
+
+        ReflectionTestUtils.invokeMethod(contentDistributionService, "ensureMedicalOfficialPublishAllowed", article);
+    }
+
+    @Test
+    void medicalOfficialArticleStillRejectsFailedCompliance() {
+        ArticleDraft article = new ArticleDraft();
+        article.setId(1L);
+        article.setMedicalChannelTier("official_site");
+        article.setComplianceStatus("failed");
+
+        BizException ex = assertThrows(BizException.class,
+                () -> ReflectionTestUtils.invokeMethod(contentDistributionService, "ensureMedicalOfficialPublishAllowed", article));
+
+        assertEquals("医疗文章合规状态未通过，不能发布官网", ex.getMessage());
+    }
+
+    @Test
     void distributeTo_brandOfficialSite_success_writesSubmittedAndQuotaIncreased() {
         givenCommonData();
         officialCmsSiteAdapter.result = SubmitResult.success(201, "{}", "{\"id\":\"pa-1\"}", "https://site/article", "pa-1");

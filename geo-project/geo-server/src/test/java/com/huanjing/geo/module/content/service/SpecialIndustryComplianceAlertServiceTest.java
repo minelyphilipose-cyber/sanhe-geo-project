@@ -1,7 +1,5 @@
 package com.huanjing.geo.module.content.service;
 
-import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
-import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandOperatorAssignment;
@@ -23,9 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -52,57 +48,6 @@ class SpecialIndustryComplianceAlertServiceTest {
     }
 
     @Test
-    void notifyPublishReviewPendingCreatesOwnerTodosAndManagerFallbackWithRouteAndDedupeKey() {
-        MedicalArticleGenerationService.MedicalPromptContext context = medicalContext(null);
-
-        service.notifyPublishReviewPending(project(), brand(), task(), 99L, context);
-
-        ArgumentCaptor<Map<String, Object>> contextCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(systemAlertService, times(3)).createRecipientAlert(
-                eq("special_industry_publish_review_pending"),
-                eq("warn"),
-                eq("special_industry_compliance"),
-                eq("特殊行业官网档文章待法务发布确认"),
-                contextCaptor.capture(),
-                any(),
-                any(),
-                org.mockito.ArgumentMatchers.startsWith("special-industry:publish-review-pending:article:99")
-        );
-        Map<String, Object> alertContext = contextCaptor.getAllValues().get(0);
-        assertEquals("/admin/content/special-industry-compliance", alertContext.get("route"));
-        assertEquals(99L, alertContext.get("articleId"));
-        assertEquals(10L, alertContext.get("projectId"));
-        assertEquals("medical_beauty", alertContext.get("medicalIndustryCode"));
-        assertEquals("official_site", alertContext.get("medicalChannelTier"));
-        verify(systemAlertService).createRecipientAlert(
-                eq("special_industry_publish_review_pending"),
-                eq("warn"),
-                eq("special_industry_compliance"),
-                eq("特殊行业官网档文章待法务发布确认"),
-                any(),
-                isNull(),
-                eq("manager"),
-                eq("special-industry:publish-review-pending:article:99:role:manager")
-        );
-    }
-
-    @Test
-    void notifyPublishReviewPendingSkipsWhenMedicalAdReviewNoExists() {
-        service.notifyPublishReviewPending(project(), brand(), task(), 99L, medicalContext("审字2026-001"));
-
-        verify(systemAlertService, never()).createRecipientAlert(
-                eq("special_industry_publish_review_pending"),
-                eq("warn"),
-                eq("special_industry_compliance"),
-                eq("特殊行业官网档文章待法务发布确认"),
-                org.mockito.ArgumentMatchers.any(),
-                isNull(),
-                eq("manager"),
-                eq("special-industry:publish-review-pending:article:99:role:manager")
-        );
-    }
-
-    @Test
     void notifyComplianceDiscardedCreatesErrorTodoWithHitRuleTypes() {
         MedicalArticleComplianceChecker.CheckResult result = new MedicalArticleComplianceChecker.CheckResult(false, List.of(
                 new MedicalArticleComplianceChecker.ComplianceIssue(1L, "ranking_claim", "block", "排名第一", "命中规则"),
@@ -125,51 +70,6 @@ class SpecialIndustryComplianceAlertServiceTest {
         Map<String, Object> alertContext = contextCaptor.getAllValues().get(0);
         assertEquals("discarded_compliance_failed", alertContext.get("action"));
         assertTrue(((List<?>) alertContext.get("hitRuleTypes")).contains("ranking_claim"));
-    }
-
-    @Test
-    void closePublishReviewPendingResolvesOpenDedupeKey() {
-        ArticleDraft article = new ArticleDraft();
-        article.setId(77L);
-
-        service.closePublishReviewPending(article, project(), 7L);
-
-        verify(systemAlertService).resolveOpenByDedupeKeyPrefix("special-industry:publish-review-pending:article:77", 7L);
-    }
-
-    @Test
-    void notifyPublishReviewRejectedCreatesOperationTodo() {
-        ArticleDraft article = new ArticleDraft();
-        article.setId(66L);
-        article.setMedicalIndustryCode("oral");
-        article.setMedicalChannelTier("official_site");
-
-        service.notifyPublishReviewRejected(article, project(), 7L, "资质信息不足");
-
-        ArgumentCaptor<Map<String, Object>> contextCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(systemAlertService, times(3)).createRecipientAlert(
-                eq("special_industry_publish_review_rejected"),
-                eq("error"),
-                eq("special_industry_compliance"),
-                eq("特殊行业官网档文章法务驳回，需运营处理"),
-                contextCaptor.capture(),
-                any(),
-                any(),
-                org.mockito.ArgumentMatchers.startsWith("special-industry:publish-review-rejected:article:66")
-        );
-        Map<String, Object> alertContext = contextCaptor.getAllValues().get(0);
-        assertEquals("publish_review_rejected", alertContext.get("action"));
-        assertEquals("资质信息不足", alertContext.get("comment"));
-    }
-
-    @Test
-    void closePublishReviewRejectedResolvesOpenDedupeKey() {
-        ArticleDraft article = new ArticleDraft();
-        article.setId(66L);
-
-        service.closePublishReviewRejected(article, 7L);
-
-        verify(systemAlertService).resolveOpenByDedupeKeyPrefix("special-industry:publish-review-rejected:article:66", 7L);
     }
 
     private Project project() {
@@ -221,25 +121,4 @@ class SpecialIndustryComplianceAlertServiceTest {
         return user;
     }
 
-    private MedicalArticleGenerationService.MedicalPromptContext medicalContext(String medicalAdReviewNo) {
-        return new MedicalArticleGenerationService.MedicalPromptContext(
-                "medical_beauty",
-                MedicalArticleConstants.TIER_OFFICIAL_SITE,
-                "skin",
-                "皮肤",
-                1L,
-                "风险科普",
-                "faq",
-                "risk",
-                "合规内核",
-                1,
-                true,
-                "官网文体",
-                false,
-                "资质引用",
-                "许可证",
-                "诊疗范围",
-                medicalAdReviewNo
-        );
-    }
 }

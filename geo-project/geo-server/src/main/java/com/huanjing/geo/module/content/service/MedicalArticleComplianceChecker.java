@@ -16,8 +16,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -33,12 +35,19 @@ public class MedicalArticleComplianceChecker {
     private static final List<String> THIRD_PARTY_OFFICIAL_TONE_HINTS = List.of(
             "我们机构", "本院", "我院", "本机构", "官方推荐", "官方指定", "官方建议"
     );
-    private static final List<String> SELF_MEDIA_CONVERSION_HINTS = List.of(
-            "预约咨询", "私信了解", "私信咨询", "点击咨询", "来院咨询", "联系电话", "加微信", "扫码咨询",
-            "限时优惠", "优惠套餐", "限时名额", "到店优惠", "到店体验", "活动价", "免费体验"
+    private static final List<String> SELF_MEDIA_HARD_CONVERSION_HINTS = List.of(
+            "预约咨询", "私信了解", "私信咨询", "点击咨询", "来院咨询", "加微信", "扫码咨询",
+            "限时优惠", "优惠套餐", "限时名额", "到店优惠", "活动价", "免费体验"
+    );
+    private static final List<String> SELF_MEDIA_NEUTRAL_CONTACT_HINTS = List.of(
+            "联系电话", "到店体验"
     );
     private static final List<String> SELF_MEDIA_EXPERIENCE_HINTS = List.of(
             "亲测", "我做过", "朋友做过", "真实案例", "前后对比", "术前术后"
+    );
+    private static final Pattern EXPLICIT_NEGATION_PREFIX = Pattern.compile(
+            "(?:不要相信|切勿相信|不得宣称|不可宣称|无法保证|不能保证|不代表|并非|不是|不要|不得|不能|不应)"
+                    + "[^，。！？；,.!?;\\n\\r]{0,8}$"
     );
 
     private final MedicalComplianceRuleMapper ruleMapper;
@@ -54,9 +63,21 @@ public class MedicalArticleComplianceChecker {
         collectProjectForbiddenPhraseIssues(input, content, issues);
         collectRuleIssues(input, content, issues);
         collectBuiltInIssues(input, content, issues);
+        issues = deduplicateIssues(issues);
         return issues.stream().anyMatch(this::isBlocking)
                 ? new CheckResult(false, issues)
                 : new CheckResult(true, issues);
+    }
+
+    private List<ComplianceIssue> deduplicateIssues(List<ComplianceIssue> issues) {
+        Map<String, ComplianceIssue> unique = new LinkedHashMap<>();
+        for (ComplianceIssue issue : issues) {
+            String key = MedicalComplianceRulePolicy.canonicalRuleType(issue.ruleType())
+                    + "|" + normalizeForMatch(issue.matchedText())
+                    + "|" + MedicalComplianceRulePolicy.effectiveSeverity(issue.ruleType(), issue.severity());
+            unique.putIfAbsent(key, issue);
+        }
+        return List.copyOf(unique.values());
     }
 
     public String toJson(CheckResult result) {
@@ -67,11 +88,21 @@ public class MedicalArticleComplianceChecker {
         }
     }
 
+    public CheckResult blockingOnly(CheckResult result) {
+        if (result == null || result.issues().isEmpty()) {
+            return CheckResult.pass();
+        }
+        List<ComplianceIssue> blockingIssues = result.issues().stream()
+                .filter(this::isBlocking)
+                .toList();
+        return new CheckResult(blockingIssues.isEmpty(), blockingIssues);
+    }
+
     public void logHits(CheckInput input, CheckResult result, Long articleId, String action) {
         if (input == null || result == null || result.issues().isEmpty()) {
             return;
         }
-        for (ComplianceIssue issue : result.issues()) {
+        for (ComplianceIssue issue : result.issues().stream().filter(this::isBlocking).toList()) {
             MedicalComplianceHitLog row = new MedicalComplianceHitLog();
             row.setArticleId(articleId);
             row.setBatchId(input.batchId());
@@ -109,16 +140,29 @@ public class MedicalArticleComplianceChecker {
                         .eq(MedicalComplianceRule::getChannelSubCode, input.channelSubCode())));
         for (MedicalComplianceRule rule : rules) {
             String pattern = normalize(rule.getPattern());
-            String matchedText = findFirstNonContextualMatch(content, pattern, rule.getMatchMode());
+            String matchedText;
+            try {
+                matchedText = findFirstUnnegatedMatch(content, pattern, rule.getMatchMode());
+            } catch (PatternSyntaxException ex) {
+                issues.add(new ComplianceIssue(
+                        rule.getId(),
+                        "rule_configuration_error",
+                        MedicalComplianceRulePolicy.SEVERITY_WARN,
+                        pattern,
+                        "规则正则表达式无效，已跳过且不阻断文章：" + ex.getDescription()
+                ));
+                continue;
+            }
             if (!StringUtils.hasText(matchedText)) {
                 continue;
             }
+            String ruleType = MedicalComplianceRulePolicy.canonicalRuleType(rule.getRuleType());
             issues.add(new ComplianceIssue(
                     rule.getId(),
-                    normalize(rule.getRuleType()),
-                    normalize(rule.getSeverity()),
+                    ruleType,
+                    MedicalComplianceRulePolicy.effectiveSeverity(ruleType, rule.getSeverity()),
                     matchedText,
-                    "命中医疗合规规则：" + normalize(rule.getRuleType())
+                    "命中特殊行业内容规则：" + ruleType
             ));
         }
     }
@@ -131,16 +175,16 @@ public class MedicalArticleComplianceChecker {
             if (!isPreciseProjectPhrase(normalizedPhrase)) {
                 continue;
             }
-            String matchedText = findFirstNonContextualMatch(content, normalizedPhrase, "contains");
+            String matchedText = findFirstUnnegatedMatch(content, normalizedPhrase, "contains");
             if (!StringUtils.hasText(matchedText)) {
                 continue;
             }
             issues.add(new ComplianceIssue(
                     null,
                     "project_forbidden_phrase",
-                    "block",
+                    MedicalComplianceRulePolicy.SEVERITY_WARN,
                     matchedText,
-                    "命中特殊行业项目禁用表达"
+                    "命中特殊行业项目禁用表达，记录提醒但不阻断生成"
             ));
         }
     }
@@ -148,17 +192,20 @@ public class MedicalArticleComplianceChecker {
     private void collectBuiltInIssues(CheckInput input, String content, List<ComplianceIssue> issues) {
         MedicalArticleGenerationService.MedicalPromptContext context = input.medicalContext();
         if (lacksAny(content, RISK_HINTS)) {
-            issues.add(new ComplianceIssue(null, "risk_disclosure_missing", "block", null, "医疗内容缺少风险、禁忌或个体差异提示"));
+            issues.add(new ComplianceIssue(null, "risk_disclosure_missing", MedicalComplianceRulePolicy.SEVERITY_WARN,
+                    null, "内容未包含风险、禁忌或个体差异提示，记录提醒但不阻断生成"));
         }
         if (context.highRiskChannel() && lacksAny(content, RATIONAL_HINTS)) {
-            issues.add(new ComplianceIssue(null, "rational_decision_missing", "block", null, "高风险渠道内容缺少理性决策提示"));
+            issues.add(new ComplianceIssue(null, "rational_decision_missing", MedicalComplianceRulePolicy.SEVERITY_WARN,
+                    null, "高风险渠道内容未包含理性决策提示，记录提醒但不阻断生成"));
         }
         Integer limit = context.brandExposureLimit();
         if (limit != null && limit >= 0 && input.brand() != null && StringUtils.hasText(input.brand().getBrandName())) {
             int count = countOccurrences(normalize(input.content()), input.brand().getBrandName().trim());
             if (count > limit) {
-                issues.add(new ComplianceIssue(null, "brand_exposure_exceeded", "block", input.brand().getBrandName(),
-                        "正文品牌露出次数超过医疗渠道档位限制：" + count + "/" + limit));
+                issues.add(new ComplianceIssue(null, "brand_exposure_exceeded", MedicalComplianceRulePolicy.SEVERITY_WARN,
+                        input.brand().getBrandName(),
+                        "正文品牌露出次数超过渠道建议值，记录提醒但不阻断生成：" + count + "/" + limit));
             }
         }
         collectSelfMediaIssues(input, content, issues);
@@ -170,23 +217,31 @@ public class MedicalArticleComplianceChecker {
         }
         if (TemplatePerspectiveCodes.isThirdParty(input.perspectiveCode())) {
             addFirstHitIssue(content, THIRD_PARTY_OFFICIAL_TONE_HINTS, issues,
-                    "third_party_official_tone", "特殊行业第三方账号内容出现客户官方/机构身份口吻");
+                    "third_party_official_tone", MedicalComplianceRulePolicy.SEVERITY_WARN,
+                    "特殊行业第三方账号内容疑似出现客户官方/机构身份口吻，记录提醒但不阻断生成");
         }
-        addFirstHitIssue(content, SELF_MEDIA_CONVERSION_HINTS, issues,
-                "self_media_conversion_hint", "特殊行业自媒体内容出现咨询、促销或其他直接转化引导");
+        addFirstHitIssue(content, SELF_MEDIA_HARD_CONVERSION_HINTS, issues,
+                "self_media_conversion_hint", MedicalComplianceRulePolicy.SEVERITY_BLOCK,
+                "特殊行业自媒体内容出现明确咨询、促销或其他直接转化引导");
+        addFirstHitIssue(content, SELF_MEDIA_NEUTRAL_CONTACT_HINTS, issues,
+                "self_media_contact_reference", MedicalComplianceRulePolicy.SEVERITY_WARN,
+                "特殊行业自媒体内容出现中性联系方式或到店描述，记录提醒但不阻断生成");
         addFirstHitIssue(content, SELF_MEDIA_EXPERIENCE_HINTS, issues,
-                "self_media_experience_seeding", "特殊行业自媒体内容出现亲测、案例或前后对比表达");
+                "self_media_experience_seeding", MedicalComplianceRulePolicy.SEVERITY_WARN,
+                "特殊行业自媒体内容出现体验、案例或前后表达，记录提醒但不阻断生成");
     }
 
     private void addFirstHitIssue(String content,
                                   List<String> hints,
                                   List<ComplianceIssue> issues,
                                   String ruleType,
+                                  String severity,
                                   String message) {
-        String normalizedContent = normalizeForMatch(content);
         for (String hint : hints) {
-            if (normalizedContent.contains(normalizeForMatch(hint)) && !isContextualReference(content, hint)) {
-                issues.add(new ComplianceIssue(null, ruleType, "block", hint, message));
+            String matchedText = findFirstUnnegatedMatch(content, hint, "contains");
+            if (StringUtils.hasText(matchedText)) {
+                issues.add(new ComplianceIssue(null, ruleType,
+                        MedicalComplianceRulePolicy.effectiveSeverity(ruleType, severity), matchedText, message));
                 return;
             }
         }
@@ -202,29 +257,28 @@ public class MedicalArticleComplianceChecker {
         return true;
     }
 
-    private String findFirstNonContextualMatch(String content, String pattern, String matchMode) {
+    private String findFirstUnnegatedMatch(String content, String pattern, String matchMode) {
         if (!StringUtils.hasText(pattern)) {
             return null;
         }
         String normalizedContent = normalizeForMatch(content);
         if ("regex".equalsIgnoreCase(matchMode)) {
-            try {
-                java.util.regex.Matcher matcher = Pattern.compile(normalizeForMatch(pattern), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
-                        .matcher(normalizedContent);
-                while (matcher.find()) {
-                    if (!isContextualOccurrence(normalizedContent, matcher.start(), matcher.end() - matcher.start())) {
-                        return matcher.group();
-                    }
+            java.util.regex.Matcher matcher = Pattern.compile(normalizeForMatch(pattern), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                    .matcher(normalizedContent);
+            while (matcher.find()) {
+                if (!isExplicitlyNegated(normalizedContent, matcher.start())) {
+                    return matcher.group();
                 }
-                return null;
-            } catch (PatternSyntaxException ex) {
-                return null;
             }
+            return null;
         }
         String normalizedPattern = normalizeForMatch(pattern);
+        if (normalizedPattern.codePointCount(0, normalizedPattern.length()) < 2) {
+            return null;
+        }
         int index = normalizedContent.indexOf(normalizedPattern);
         while (index >= 0) {
-            if (!isContextualOccurrence(normalizedContent, index, normalizedPattern.length())) {
+            if (!isExplicitlyNegated(normalizedContent, index)) {
                 return pattern;
             }
             index = normalizedContent.indexOf(normalizedPattern, index + normalizedPattern.length());
@@ -233,38 +287,13 @@ public class MedicalArticleComplianceChecker {
     }
 
     private boolean isBlocking(ComplianceIssue issue) {
-        return issue != null && !"warn".equalsIgnoreCase(normalize(issue.severity()));
+        return issue != null && MedicalComplianceRulePolicy.isBlocking(issue.ruleType(), issue.severity());
     }
 
-    private boolean isContextualReference(String content, String matchedText) {
-        if (!StringUtils.hasText(matchedText)) {
-            return false;
-        }
-        String normalizedContent = normalizeForMatch(content);
-        String normalizedHit = normalizeForMatch(matchedText);
-        if (!StringUtils.hasText(normalizedHit)) {
-            return false;
-        }
-        int index = normalizedContent.indexOf(normalizedHit);
-        boolean found = false;
-        while (index >= 0) {
-            found = true;
-            if (!isContextualOccurrence(normalizedContent, index, normalizedHit.length())) {
-                return false;
-            }
-            index = normalizedContent.indexOf(normalizedHit, index + normalizedHit.length());
-        }
-        return found;
-    }
-
-    private boolean isContextualOccurrence(String normalizedContent, int hitIndex, int hitLength) {
-        String window = contextualClauseWindow(normalizedContent, hitIndex, hitLength);
-        return containsAny(window, List.of(
-                "不得", "不要", "不能", "禁止", "避免", "不写", "不应", "不可", "别写", "避开",
-                "慎用", "违规", "并非", "并不", "不是", "不代表", "不可能", "不等于", "无法保证",
-                "不建议使用", "不要使用", "不能写成", "不要写成", "不能作为", "不能等同",
-                "不要只看", "营销话术", "错误观点", "错误说法", "宣传话术", "风险提示", "切勿相信"
-        ));
+    private boolean isExplicitlyNegated(String normalizedContent, int hitIndex) {
+        int start = Math.max(0, hitIndex - 24);
+        String prefix = normalizedContent.substring(start, hitIndex);
+        return EXPLICIT_NEGATION_PREFIX.matcher(prefix).find();
     }
 
     private boolean isPreciseProjectPhrase(String phrase) {
@@ -273,38 +302,6 @@ public class MedicalArticleComplianceChecker {
         }
         String normalized = normalizeForMatch(phrase);
         return normalized.codePointCount(0, normalized.length()) >= 2;
-    }
-
-    private String contextualClauseWindow(String content, int hitIndex, int hitLength) {
-        int start = Math.max(0, hitIndex - 24);
-        for (int i = hitIndex - 1; i >= start; i--) {
-            if (isClauseBoundary(content.charAt(i))) {
-                start = i + 1;
-                break;
-            }
-        }
-        int end = Math.min(content.length(), hitIndex + hitLength + 12);
-        for (int i = hitIndex + hitLength; i < end; i++) {
-            if (isClauseBoundary(content.charAt(i))) {
-                end = i;
-                break;
-            }
-        }
-        return content.substring(start, end);
-    }
-
-    private boolean isClauseBoundary(char ch) {
-        return ch == '，' || ch == ',' || ch == '。' || ch == '.' || ch == '！' || ch == '!'
-                || ch == '？' || ch == '?' || ch == '；' || ch == ';' || ch == '\n' || ch == '\r';
-    }
-
-    private boolean containsAny(String value, List<String> needles) {
-        for (String needle : needles) {
-            if (value.contains(normalizeForMatch(needle))) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private int countOccurrences(String content, String needle) {
@@ -331,6 +328,12 @@ public class MedicalArticleComplianceChecker {
         StringBuilder builder = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
             char ch = value.charAt(i);
+            if (ch == '\n' || ch == '\r') {
+                if (builder.length() == 0 || builder.charAt(builder.length() - 1) != '\n') {
+                    builder.append('\n');
+                }
+                continue;
+            }
             if (Character.isWhitespace(ch) || ch == '\u3000') {
                 continue;
             }

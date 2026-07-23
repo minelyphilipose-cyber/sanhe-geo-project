@@ -4,16 +4,16 @@
       <div>
         <div class="admin-page-kicker">专项运营</div>
         <h1 class="admin-page-title">行业专项工作台</h1>
-        <div class="admin-page-subtitle">集中处理医疗等强监管行业的法务确认、合规失败、命中日志和生成历史。</div>
+        <div class="admin-page-subtitle">集中查看特殊行业的确定性合规结果、提醒、命中日志和生成历史。</div>
       </div>
       <el-button @click="openSpecialIndustryConfig">规则配置</el-button>
     </div>
 
     <div class="admin-metric-grid">
       <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
-        <span class="admin-metric-label">待法务确认</span>
-        <strong class="admin-metric-value">{{ overview?.pendingReviewCount ?? 0 }}</strong>
-        <span class="admin-metric-hint">全局待处理</span>
+        <span class="admin-metric-label">今日硬规则命中</span>
+        <strong class="admin-metric-value">{{ overview?.todayHitCount ?? 0 }}</strong>
+        <span class="admin-metric-hint">触发重试或废弃</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #ef4444; --metric-tone: #fef2f2">
         <span class="admin-metric-label">合规失败/废弃</span>
@@ -34,7 +34,7 @@
 
     <el-tabs v-model="activeTab" class="workbench-tabs" @tab-change="handleTabChange">
       <el-tab-pane label="概览" name="overview" />
-      <el-tab-pane label="待处理文章" name="articles" />
+      <el-tab-pane label="特殊行业文章" name="articles" />
       <el-tab-pane label="批次追溯" name="batches" />
       <el-tab-pane label="命中日志" name="logs" />
       <el-tab-pane label="生成历史" name="history" />
@@ -90,11 +90,6 @@
     </el-card>
 
     <el-card v-show="activeTab === 'articles'" shadow="never" class="admin-table-card">
-      <div class="preset-bar">
-        <el-button v-for="item in articlePresets" :key="item.key" size="small" @click="applyArticlePreset(item.key)">
-          {{ item.label }}
-        </el-button>
-      </div>
       <div class="filter-bar">
         <el-input v-model="articleQuery.projectName" clearable placeholder="搜索项目名称" class="filter-control is-wide" @keyup.enter="loadArticles" />
         <el-select v-model="articleQuery.medicalIndustryCode" clearable placeholder="行业类型" class="filter-control">
@@ -109,12 +104,6 @@
           <el-option label="合规通过" value="passed" />
           <el-option label="合规失败" value="failed" />
           <el-option label="已废弃" value="discarded_compliance_failed" />
-        </el-select>
-        <el-select v-model="articleQuery.publishReviewStatus" clearable placeholder="发布确认" class="filter-control">
-          <el-option label="待法务确认" value="pending" />
-          <el-option label="法务通过" value="passed" />
-          <el-option label="法务驳回" value="rejected" />
-          <el-option label="无需法务" value="not_required" />
         </el-select>
         <el-button type="primary" @click="searchArticles">查询</el-button>
         <el-button @click="resetArticleQuery">重置</el-button>
@@ -140,23 +129,16 @@
           </el-table-column>
           <el-table-column label="合规状态" width="120">
             <template #default="{ row }">
-              <el-tag size="small" :type="complianceTag(row.complianceStatus)">{{ complianceLabel(row.complianceStatus) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="发布确认" width="130">
-            <template #default="{ row }">
-              <el-tag size="small" :type="reviewTag(row.publishReviewStatus)">{{ reviewLabel(row.publishReviewStatus) }}</el-tag>
+              <el-tag size="small" :type="complianceTag(row)">{{ complianceLabel(row) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column label="创建时间" width="170">
             <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="260" fixed="right">
+          <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openContentExecution">内容列表</el-button>
               <el-button link @click="openLogsForArticle(row.id)">命中日志</el-button>
-              <el-button v-if="canReview(row)" link type="warning" @click="reviewMedicalPublish(row, 'approve')">法务通过</el-button>
-              <el-button v-if="canReview(row)" link type="danger" @click="reviewMedicalPublish(row, 'reject')">驳回</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -329,7 +311,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import {
   getSpecialIndustryBatches,
@@ -337,24 +319,22 @@ import {
   getSpecialIndustryGenerationHistory,
   getSpecialIndustryOverview,
   getSpecialIndustryArticles,
-  reviewMedicalPublishArticle,
+  getSpecialIndustryRuleTypes,
   type MedicalComplianceHitLog,
   type MedicalGenerationHistory,
   type SpecialIndustryBatchTrace,
   type SpecialIndustryOverview,
+  type SpecialIndustryRuleType,
 } from '@/api/content'
 import type { ArticleDraft } from '@/types'
 import { useDictStore } from '@/stores/dict'
-import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/format'
 
 type TabName = 'overview' | 'articles' | 'batches' | 'logs' | 'history'
-type ArticlePresetKey = 'pending_review' | 'review_rejected' | 'compliance_discarded' | 'official_pending'
 
 const router = useRouter()
 const route = useRoute()
 const dictStore = useDictStore()
-const userStore = useUserStore()
 const activeTab = ref<TabName>('overview')
 
 const overviewLoading = ref(false)
@@ -367,6 +347,7 @@ const articleRows = ref<ArticleDraft[]>([])
 const batchRows = ref<SpecialIndustryBatchTrace[]>([])
 const logRows = ref<MedicalComplianceHitLog[]>([])
 const historyRows = ref<MedicalGenerationHistory[]>([])
+const complianceRuleTypes = ref<SpecialIndustryRuleType[]>([])
 const articlePage = reactive({ current: 1, size: 10, total: 0 })
 const batchPage = reactive({ current: 1, size: 10, total: 0 })
 const logPage = reactive({ current: 1, size: 10, total: 0 })
@@ -377,7 +358,6 @@ const articleQuery = reactive({
   medicalIndustryCode: '',
   medicalChannelTier: '',
   complianceStatus: '',
-  publishReviewStatus: '',
 })
 const logQuery = reactive<{
   articleId?: number
@@ -410,19 +390,11 @@ const batchQuery = reactive({
   brandName: '',
   topicKeyword: '',
 })
-const articlePresets: Array<{ key: ArticlePresetKey, label: string }> = [
-  { key: 'pending_review', label: '待法务确认' },
-  { key: 'review_rejected', label: '法务驳回' },
-  { key: 'compliance_discarded', label: '合规失败/已废弃' },
-  { key: 'official_pending', label: '官网待处理' },
-]
-
 const industryOptions = computed(() =>
   dictStore.options('compliance_industry')
     .filter((item) => item.dictKey && item.dictKey !== 'none')
     .map((item) => ({ label: item.dictValue, value: item.dictKey })),
 )
-const canArticleWrite = computed(() => userStore.hasPermission(['content.article.write', 'project.update']))
 const workbenchGuides: Record<TabName, { title: string, description: string, steps: string[] }> = {
   overview: {
     title: '先判断是不是系统性问题',
@@ -430,9 +402,9 @@ const workbenchGuides: Record<TabName, { title: string, description: string, ste
     steps: ['看近 7 日命中和废弃趋势', '查看命中 Top 的中文规则类型', '点击问题批次日志定位集中失败原因'],
   },
   articles: {
-    title: '处理当前需要人工关注的文章',
-    description: '待处理文章用于查看合规失败、法务待确认和官网待处理内容，优先按项目名称、行业类型和状态筛选。',
-    steps: ['先用快捷筛选定位待处理范围', '进入内容列表检查正文', '查看命中日志后决定通过、驳回、重试或废弃'],
+    title: '查看特殊行业文章状态',
+    description: '特殊行业文章只区分正常通过、通过但有提醒以及确定性合规废弃，不进入内部法务审核。',
+    steps: ['按项目、行业和合规状态筛选', '有提醒的文章可进入内容列表查看详情', '只有硬规则命中才会出现在失败命中日志中'],
   },
   batches: {
     title: '判断失败是否来自同一批生成',
@@ -458,18 +430,10 @@ const logFocusText = computed(() => {
   if (logQuery.taskId) parts.push(`任务 ${logQuery.taskId}`)
   return parts.length ? `当前已从告警或操作入口聚焦：${parts.join('、')}` : ''
 })
-const ruleTypeOptions = [
-  { label: '缺少理性决策提示', value: 'rational_decision_missing' },
-  { label: '品牌露出超限', value: 'brand_exposure_exceeded' },
-  { label: '缺少风险/禁忌提示', value: 'risk_disclosure_missing' },
-  { label: '命中绝对化/承诺表达', value: 'absolute_claim' },
-  { label: '命中排名/权威化表达', value: 'ranking_claim' },
-  { label: '个人号缺少品牌露出', value: 'personal_account_brand_exposure_missing' },
-  { label: '个人号品牌露出超限', value: 'personal_account_brand_exposure_exceeded' },
-  { label: '个人号出现官方口吻', value: 'personal_account_official_tone' },
-  { label: '个人号出现转化引导', value: 'personal_account_conversion_hint' },
-  { label: '个人号出现体验种草', value: 'personal_account_experience_seeding' },
-]
+const ruleTypeOptions = computed(() => complianceRuleTypes.value.map((item) => ({
+  label: item.displayName,
+  value: item.ruleType,
+})))
 
 async function loadOverview() {
   overviewLoading.value = true
@@ -495,7 +459,6 @@ async function loadArticles() {
       medicalIndustryCode: articleQuery.medicalIndustryCode || undefined,
       medicalChannelTier: articleQuery.medicalChannelTier || undefined,
       complianceStatus: articleQuery.complianceStatus || undefined,
-      publishReviewStatus: articleQuery.publishReviewStatus || undefined,
       specialIndustryOnly: true,
     })
     articleRows.value = data.data.records || []
@@ -593,27 +556,6 @@ function resetArticleQuery() {
   articleQuery.medicalIndustryCode = ''
   articleQuery.medicalChannelTier = ''
   articleQuery.complianceStatus = ''
-  articleQuery.publishReviewStatus = ''
-  searchArticles()
-}
-
-function applyArticlePreset(key: ArticlePresetKey) {
-  articleQuery.articleId = undefined
-  articleQuery.projectName = ''
-  articleQuery.medicalIndustryCode = ''
-  articleQuery.medicalChannelTier = ''
-  articleQuery.complianceStatus = ''
-  articleQuery.publishReviewStatus = ''
-  if (key === 'pending_review') {
-    articleQuery.publishReviewStatus = 'pending'
-  } else if (key === 'review_rejected') {
-    articleQuery.publishReviewStatus = 'rejected'
-  } else if (key === 'compliance_discarded') {
-    articleQuery.complianceStatus = 'discarded_compliance_failed'
-  } else if (key === 'official_pending') {
-    articleQuery.medicalChannelTier = 'official_site'
-    articleQuery.publishReviewStatus = 'pending'
-  }
   searchArticles()
 }
 
@@ -726,23 +668,9 @@ function clearLogFocus() {
 }
 
 function applyRouteFocus() {
-  const action = String(Array.isArray(route.query.action) ? route.query.action[0] : route.query.action || '')
   const articleId = parsePositiveNumber(route.query.articleId)
   const batchId = parsePositiveNumber(route.query.batchId)
   const taskId = parsePositiveNumber(route.query.taskId)
-
-  if (action === 'publish_review_pending' || action === 'publish_review_rejected') {
-    articleQuery.articleId = articleId
-    articleQuery.projectName = ''
-    articleQuery.medicalIndustryCode = ''
-    articleQuery.medicalChannelTier = ''
-    articleQuery.complianceStatus = ''
-    articleQuery.publishReviewStatus = action === 'publish_review_pending' ? 'pending' : 'rejected'
-    articlePage.current = 1
-    activeTab.value = 'articles'
-    void loadArticles()
-    return
-  }
 
   if (articleId || batchId || taskId) {
     clearLogFocus()
@@ -766,33 +694,6 @@ function openContentExecution() {
   router.push('/admin/content/execution')
 }
 
-function canReview(row: ArticleDraft) {
-  return canArticleWrite.value
-    && row.medicalChannelTier === 'official_site'
-    && row.complianceStatus === 'passed'
-    && row.publishReviewStatus !== 'passed'
-}
-
-async function reviewMedicalPublish(row: ArticleDraft, action: 'approve' | 'reject') {
-  const verb = action === 'approve' ? '通过' : '驳回'
-  let comment = ''
-  try {
-    const result = await ElMessageBox.prompt(`请输入医疗官网发布法务${verb}说明`, `医疗发布${verb}`, {
-      confirmButtonText: verb,
-      cancelButtonText: '取消',
-      inputType: 'textarea',
-      inputPlaceholder: action === 'approve' ? '例如：已核对广告审查编号/资质信息' : '例如：缺少审查证明或内容需调整',
-      inputValidator: (value) => action === 'approve' || !!value.trim() || '驳回时需填写原因',
-    })
-    comment = result.value || ''
-  } catch {
-    return
-  }
-  await reviewMedicalPublishArticle(row.id, { action, comment })
-  ElMessage.success(`医疗发布已${verb}`)
-  await Promise.all([loadArticles(), loadOverview()])
-}
-
 function industryLabel(value?: string | null) {
   if (!value) return '-'
   return dictStore.label('compliance_industry', value)
@@ -807,37 +708,23 @@ function tierLabel(value?: string | null) {
   return value ? map[value] || value : '-'
 }
 
-function complianceLabel(value?: string | null) {
+function complianceLabel(row: ArticleDraft) {
+  if (row.complianceStatus === 'passed' && row.hasComplianceWarnings) {
+    return `合规通过（${row.complianceWarningCount || 0}项提醒）`
+  }
   const map: Record<string, string> = {
     pending: '待校验',
     passed: '合规通过',
     failed: '合规失败',
     discarded_compliance_failed: '已废弃',
   }
-  return value ? map[value] || value : '-'
+  return row.complianceStatus ? map[row.complianceStatus] || row.complianceStatus : '-'
 }
 
-function complianceTag(value?: string | null): 'success' | 'warning' | 'danger' | 'info' {
-  if (value === 'passed') return 'success'
-  if (value === 'pending') return 'warning'
-  if (value === 'failed' || value === 'discarded_compliance_failed') return 'danger'
-  return 'info'
-}
-
-function reviewLabel(value?: string | null) {
-  const map: Record<string, string> = {
-    not_required: '无需法务',
-    pending: '待法务确认',
-    passed: '法务通过',
-    rejected: '法务驳回',
-  }
-  return value ? map[value] || value : '-'
-}
-
-function reviewTag(value?: string | null): 'success' | 'warning' | 'danger' | 'info' {
-  if (value === 'passed' || value === 'not_required') return 'success'
-  if (value === 'pending') return 'warning'
-  if (value === 'rejected') return 'danger'
+function complianceTag(row: ArticleDraft): 'success' | 'warning' | 'danger' | 'info' {
+  if (row.complianceStatus === 'passed') return row.hasComplianceWarnings ? 'warning' : 'success'
+  if (row.complianceStatus === 'pending') return 'warning'
+  if (row.complianceStatus === 'failed' || row.complianceStatus === 'discarded_compliance_failed') return 'danger'
   return 'info'
 }
 
@@ -860,30 +747,15 @@ function batchStatusTag(value?: string | null): 'success' | 'warning' | 'danger'
 }
 
 function ruleTypeLabel(value?: string | null) {
-  const map: Record<string, string> = {
-    rational_decision_missing: '缺少理性决策提示',
-    brand_exposure_exceeded: '品牌露出超限',
-    risk_disclosure_missing: '缺少风险/禁忌提示',
-    absolute_claim: '命中绝对化/承诺表达',
-    ranking_claim: '命中排名/权威化表达',
-    beauty_anxiety: '制造容貌焦虑',
-    comparison_case: '前后对比/案例诱导',
-    experience_seeding: '体验种草表达',
-    oral_absolute: '口腔效果绝对化承诺',
-    personal_account_brand_exposure_missing: '个人号缺少品牌露出',
-    personal_account_brand_exposure_exceeded: '个人号品牌露出超限',
-    personal_account_official_tone: '个人号出现官方口吻',
-    personal_account_conversion_hint: '个人号出现转化引导',
-    personal_account_experience_seeding: '个人号出现体验种草',
-  }
-  return value ? map[value] || value : '-'
+  return value
+    ? complianceRuleTypes.value.find((item) => item.ruleType === value)?.displayName || value
+    : '-'
 }
 
 function checkStageLabel(value?: string | null) {
   const map: Record<string, string> = {
     pre_generate: '生成前检查',
     post_generate: '生成后检查',
-    publish_review: '发布确认',
   }
   return value ? map[value] || value : '-'
 }
@@ -950,7 +822,10 @@ function channelSubLabel(value?: string | null) {
 
 onMounted(async () => {
   await dictStore.ensureLoaded()
-  await Promise.all([loadOverview(), loadArticles(), loadBatches(), loadLogs(), loadHistory()])
+  const ruleTypesRequest = getSpecialIndustryRuleTypes()
+    .then(({ data }) => { complianceRuleTypes.value = data.data || [] })
+    .catch(() => { complianceRuleTypes.value = [] })
+  await Promise.all([loadOverview(), loadArticles(), loadBatches(), loadLogs(), loadHistory(), ruleTypesRequest])
   applyRouteFocus()
 })
 

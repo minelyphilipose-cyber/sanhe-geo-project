@@ -1081,40 +1081,42 @@ public class BatchArticleGenerationService {
                 if (complianceResult.passed()) {
                     break;
                 }
-                medicalComplianceChecker.logHits(new MedicalArticleComplianceChecker.CheckInput(
-                                batch.getId(),
-                                task.getId(),
-                                contentProject.getId(),
-                                contentProject.getBrandId(),
-                                task.getChannelGroupCode(),
-                                task.getChannelSubCode(),
-                                promptContext.perspectiveCode(),
-                                generated.title(),
-                                generated.content(),
-                                contentBrand,
-                                promptContext.medicalContext(),
-                                medicalForbiddenPhrases
-                        ),
-                        complianceResult,
-                        null,
-                        attemptNo >= maxAttempts ? "discard" : "retry");
                 if (attemptNo < maxAttempts) {
+                    medicalComplianceChecker.logHits(new MedicalArticleComplianceChecker.CheckInput(
+                                    batch.getId(),
+                                    task.getId(),
+                                    contentProject.getId(),
+                                    contentProject.getBrandId(),
+                                    task.getChannelGroupCode(),
+                                    task.getChannelSubCode(),
+                                    promptContext.perspectiveCode(),
+                                    generated.title(),
+                                    generated.content(),
+                                    contentBrand,
+                                    promptContext.medicalContext(),
+                                    medicalForbiddenPhrases
+                            ),
+                            complianceResult,
+                            null,
+                            "retry");
                     retryCount++;
                     attemptPrompt = appendComplianceRetryGuidance(prompt, complianceResult);
                 }
             }
             if (!complianceResult.passed()) {
-                Long discardedArticleId = persistDiscardedArticle(project, task, generated, prompt, selectedModel, complianceResult,
+                MedicalArticleComplianceChecker.CheckResult blockingResult = medicalComplianceChecker.blockingOnly(complianceResult);
+                Long discardedArticleId = persistDiscardedArticle(project, task, generated, prompt, selectedModel, blockingResult,
                         promptContext.medicalContext(), medicalForbiddenPhrases);
-                markTaskComplianceDiscarded(task, discardedArticleId, prompt, selectedModel, generated, complianceResult, retryCount);
-                specialIndustryComplianceAlertService.notifyComplianceDiscarded(contentProject, contentBrand, task, discardedArticleId, complianceResult);
+                markTaskComplianceDiscarded(task, discardedArticleId, prompt, selectedModel, generated, blockingResult, retryCount);
+                specialIndustryComplianceAlertService.notifyComplianceDiscarded(contentProject, contentBrand, task, discardedArticleId, blockingResult);
                 return;
             }
 
             Long articleId = persistArticle(project, task, generated.title(), generated.content(), prompt, generated.model(), generated.result(),
-                    promptContext.medicalContext(), MedicalArticleConstants.COMPLIANCE_PASSED);
+                    promptContext.medicalContext(), MedicalArticleConstants.COMPLIANCE_PASSED, complianceResult);
             medicalArticleGenerationService.recordHistory(contentProject, contentBrand, promptContext.medicalContext(), articleId);
-            markTaskSuccess(task, articleId, prompt, generated.model(), generated.result(), generated.quality(), retryCount);
+            markTaskSuccess(task, articleId, prompt, generated.model(), generated.result(), generated.quality(), retryCount,
+                    complianceResult, promptContext.medicalContext() != null);
         } catch (Exception ex) {
             log.warn("Batch article generation task failed batchId={} taskId={}", batch.getId(), task.getId(), ex);
             markTaskFailed(task, ex);
@@ -1129,7 +1131,8 @@ public class BatchArticleGenerationService {
                                 ArticleModelResolver.ModelSelection model,
                                 LlmInvokeResult result,
                                 MedicalArticleGenerationService.MedicalPromptContext medicalContext,
-                                String complianceStatus) {
+                                String complianceStatus,
+                                MedicalArticleComplianceChecker.CheckResult complianceResult) {
         return Objects.requireNonNull(transactionTemplate.execute(status -> {
             ArticleDraft draft = new ArticleDraft();
             draft.setBatchId(null);
@@ -1173,7 +1176,9 @@ public class BatchArticleGenerationService {
             version.setContentMarkdown(autoImageInsertionService.insertForChannel(imageProject, task.getChannelGroupCode(),
                     task.getChannelSubCode(), content, coverImageUrl));
             version.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), result));
-            version.setInputSnapshot(prompt.inputSnapshot());
+            version.setInputSnapshot(medicalContext == null
+                    ? prompt.inputSnapshot()
+                    : enrichComplianceInputSnapshot(prompt.inputSnapshot(), complianceResult));
             version.setModelPlatformCode(model.platformCode());
             version.setModelId(model.modelId());
             version.setGeneratedBy(GENERATED_BY_BATCH_AI);
@@ -1335,12 +1340,21 @@ public class BatchArticleGenerationService {
     private BatchArticlePromptBuilder.PromptBuildResult appendComplianceRetryGuidance(
             BatchArticlePromptBuilder.PromptBuildResult prompt,
             MedicalArticleComplianceChecker.CheckResult complianceResult) {
+        String corrections = complianceResult.issues().stream()
+                .filter(issue -> MedicalComplianceRulePolicy.isBlocking(issue.ruleType(), issue.severity()))
+                .map(issue -> StringUtils.hasText(issue.matchedText())
+                        ? "- 删除或改写明确违规表达：“" + issue.matchedText().trim() + "”"
+                        : "- " + issue.message())
+                .distinct()
+                .collect(Collectors.joining("\n"));
         String retryBlock = """
 
-                # 上一次医疗合规校验未通过
-                必须重写正文，避开以下命中项；不要解释校验结果，只输出修正后的完整 Markdown 文章。
+                # 上一次内容边界检查需要修正
+                保持用户原主题、标题任务、事实材料和文章主线，只修改下列明确违规表达，不要把全文改写成规则说明。
+                除非违规表达本身位于标题，否则不要改写标题，也不要主动加入与主题无关的审核术语或风险标签。
+                不要解释检查结果，只输出修正后的完整 Markdown 文章。
                 %s
-                """.formatted(medicalComplianceChecker.toJson(complianceResult));
+                """.formatted(corrections);
         return new BatchArticlePromptBuilder.PromptBuildResult(
                 prompt.systemPrompt(),
                 prompt.userPrompt() + retryBlock,
@@ -1487,7 +1501,9 @@ public class BatchArticleGenerationService {
                                  ArticleModelResolver.ModelSelection model,
                                  LlmInvokeResult result,
                                  BatchArticleQualityChecker.QualityResult quality,
-                                 int retryCount) {
+                                 int retryCount,
+                                 MedicalArticleComplianceChecker.CheckResult complianceResult,
+                                 boolean medicalArticle) {
         task.setArticleId(articleId);
         task.setStatus(STATUS_SUCCESS);
         task.setQualityStatus("rewrite_required".equals(quality.status()) ? "warning" : quality.status());
@@ -1495,14 +1511,18 @@ public class BatchArticleGenerationService {
         task.setContentAngle(prompt.contentAngle());
         task.setAudiencePerspective(prompt.audiencePerspective());
         task.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), result));
-        task.setInputSnapshot(prompt.inputSnapshot());
+        task.setInputSnapshot(medicalArticle
+                ? enrichComplianceInputSnapshot(prompt.inputSnapshot(), complianceResult)
+                : prompt.inputSnapshot());
         task.setResponseSnapshot(responseSnapshot(result));
         task.setModelPlatformCode(model.platformCode());
         task.setModelId(model.modelId());
         task.setRetryCount(retryCount);
-        if (StringUtils.hasText(task.getMedicalIndustryCode())) {
+        if (medicalArticle) {
             task.setComplianceStatus(MedicalArticleConstants.COMPLIANCE_PASSED);
-            task.setComplianceIssuesJson(null);
+            task.setComplianceIssuesJson(complianceResult == null || complianceResult.issues().isEmpty()
+                    ? null
+                    : medicalComplianceChecker.toJson(complianceResult));
         }
         LocalDateTime now = LocalDateTime.now();
         task.setFinishedAt(now);

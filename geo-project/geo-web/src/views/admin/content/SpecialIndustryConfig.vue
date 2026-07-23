@@ -88,13 +88,27 @@
         </template>
 
         <template v-else-if="activeTab === 'rules'">
-          <el-form-item label="规则类型"><el-input v-model="form.ruleType" placeholder="如 efficacy_claim、ranking_claim、patient_testimonial" /></el-form-item>
+          <el-form-item label="规则类型">
+            <el-select v-model="form.ruleType" filterable placeholder="请选择规则类型" style="width: 100%">
+              <el-option
+                v-for="item in ruleTypeOptions"
+                :key="item.ruleType"
+                :label="`${item.displayName}（${item.ruleType}）`"
+                :value="item.ruleType"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="行业"><MedicalIndustrySelect v-model="form.industryCode" clearable /></el-form-item>
           <el-form-item label="渠道档位"><MedicalTierSelect v-model="form.channelTier" clearable /></el-form-item>
           <el-form-item label="渠道组"><el-input v-model="form.channelGroupCode" placeholder="可留空表示通用；如 self_media、forum、official_site" /></el-form-item>
           <el-form-item label="渠道子类"><el-input v-model="form.channelSubCode" placeholder="可留空表示通用；如 wechat、douyin、xiaohongshu" /></el-form-item>
           <el-form-item label="匹配方式"><el-select v-model="form.matchMode"><el-option label="包含" value="contains" /><el-option label="正则" value="regex" /></el-select></el-form-item>
-          <el-form-item label="严重级别"><el-select v-model="form.severity"><el-option label="阻断" value="block" /><el-option label="提醒" value="warn" /></el-select></el-form-item>
+          <el-form-item label="最终有效级别">
+            <el-select v-model="form.severity" :disabled="selectedRuleType?.disposition === 'warning'" style="width: 100%">
+              <el-option v-for="severity in selectedRuleType?.allowedSeverities || ['warn']" :key="severity" :label="severityLabel(severity)" :value="severity" />
+            </el-select>
+            <div class="form-help">{{ selectedRuleType?.disposition === 'hard_block' ? '确定性规则可阻断，也可主动降级为提醒。' : '该规则依赖语境判断，只记录提醒，不阻断文章生成。' }}</div>
+          </el-form-item>
           <el-form-item label="规则内容"><el-input v-model="form.pattern" type="textarea" :rows="3" placeholder="contains 填词或短语；regex 仅用于第一、最、权威等语境依赖表达，避免误杀" /></el-form-item>
           <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" placeholder="说明这条规则的业务依据、适用范围或排除场景" /></el-form-item>
           <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
@@ -106,8 +120,7 @@
           <el-form-item label="内核名称"><el-input v-model="form.kernelName" placeholder="如 医美科普合规内核 v1" /></el-form-item>
           <el-form-item label="版本号"><el-input-number v-model="form.versionNo" :min="1" /></el-form-item>
           <el-form-item label="品牌露出上限"><el-input-number v-model="form.brandExposureLimit" :min="0" /></el-form-item>
-          <el-form-item label="发布前人工确认"><el-switch v-model="form.requireManualPublishReview" /></el-form-item>
-          <el-form-item label="系统提示词"><el-input v-model="form.systemPrompt" type="textarea" :rows="8" placeholder="维护该行业×档位的硬性合规边界，如风险提示、禁用承诺、品牌露出限制、官网发布闸门" /></el-form-item>
+          <el-form-item label="系统提示词"><el-input v-model="form.systemPrompt" type="textarea" :rows="8" placeholder="维护该行业×档位的确定性内容边界；不要强制文章围绕合规、风险或资质展开" /></el-form-item>
           <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
         </template>
 
@@ -144,10 +157,10 @@
       </el-form>
       <div v-if="ruleTestResult" class="rule-test-result">
         <el-alert
-          :type="ruleTestResult.passed ? 'success' : 'error'"
+          :type="ruleTestAlertType"
           :closable="false"
           show-icon
-          :title="ruleTestResult.passed ? '测试通过：未命中阻断规则' : '测试未通过：命中合规规则'"
+          :title="ruleTestTitle"
         />
         <el-table v-if="ruleTestResult.issues.length" :data="ruleTestResult.issues" border>
           <el-table-column prop="ruleType" label="规则类型" min-width="140" />
@@ -165,7 +178,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElOption, ElSelect } from 'element-plus'
 import {
   createSpecialIndustryChannelStyleModule,
@@ -179,6 +192,7 @@ import {
   getSpecialIndustryProfiles,
   getSpecialIndustryProfileOptions,
   getSpecialIndustryComplianceRules,
+  getSpecialIndustryRuleTypes,
   getSpecialIndustryTopicAngles,
   testSpecialIndustryRules,
   updateSpecialIndustryChannelStyleModule,
@@ -186,6 +200,7 @@ import {
   updateSpecialIndustryComplianceRule,
   updateSpecialIndustryTopicAngle,
   type SpecialIndustryProfile,
+  type SpecialIndustryRuleType,
   type SpecialIndustryRuleTestResult,
 } from '@/api/content'
 import { useDictStore } from '@/stores/dict'
@@ -202,6 +217,7 @@ const activeTab = ref<TabName>('industries')
 const dictStore = useDictStore()
 const records = ref<any[]>([])
 const industryOptions = ref<SpecialIndustryProfile[]>([])
+const ruleTypeOptions = ref<SpecialIndustryRuleType[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const ruleTesting = ref(false)
@@ -242,8 +258,8 @@ const guideMap: Record<TabName, { title: string, description: string, tips: stri
   },
   kernels: {
     title: '合规内核用于控制“系统提示词总边界”',
-    description: '内核按行业和渠道档位生效，会在模板提示词之前拼入，约束品牌露出、风险提示、官网发布确认等硬规则。',
-    tips: ['同一行业和档位通常只启用一个主版本。', '品牌露出上限用于约束正文中品牌/机构名称出现次数。', '官网档建议开启发布前人工确认，避免无审查编号自动发布。'],
+    description: '内核按行业和渠道档位生效，用于约束确定性违规表达，不改变用户主题，也不触发内部人工审核。',
+    tips: ['同一行业和档位通常只启用一个主版本。', '品牌露出上限只作为内容提醒，不阻断正常生成。', '资质或审查编号缺失时省略对应材料，不得强制写入标题或正文。'],
   },
   styles: {
     title: '渠道模块用于控制“在哪里怎么写”',
@@ -257,6 +273,13 @@ const guideMap: Record<TabName, { title: string, description: string, tips: stri
   },
 }
 const currentGuide = computed(() => guideMap[activeTab.value])
+const selectedRuleType = computed(() => ruleTypeOptions.value.find((item) => item.ruleType === form.ruleType))
+const ruleTestWarningCount = computed(() => ruleTestResult.value?.issues.filter((item) => item.severity === 'warn').length || 0)
+const ruleTestAlertType = computed(() => ruleTestResult.value?.passed ? (ruleTestWarningCount.value ? 'warning' : 'success') : 'error')
+const ruleTestTitle = computed(() => {
+  if (!ruleTestResult.value?.passed) return '测试未通过：命中确定性硬阻断规则'
+  return ruleTestWarningCount.value ? `测试通过（有 ${ruleTestWarningCount.value} 项提醒）` : '测试通过：未命中规则'
+})
 const specialIndustryOptions = computed(() =>
   industryOptions.value.length
     ? industryOptions.value.map((item) => ({ dictKey: item.industryCode, dictValue: item.industryName }))
@@ -294,21 +317,6 @@ const focusLabels: Record<string, string> = {
   misconception: '误区澄清',
   risk: '风险提示',
   rational_decision: '理性决策',
-}
-
-const ruleTypeLabels: Record<string, string> = {
-  efficacy_claim: '疗效承诺',
-  safety_absolute: '绝对安全',
-  patient_testimonial: '患者证明',
-  urgency_promotion: '促单诱导',
-  anxiety_inducement: '容貌焦虑',
-  before_after: '前后对比',
-  experience_seeding: '体验种草',
-  ranking_claim: '排名/权威绝对化',
-  brand_exposure: '品牌露出超限',
-  risk_disclosure_missing: '缺少风险提示',
-  rational_hint_missing: '缺少理性提示',
-  oral_absolute: '口腔绝对化',
 }
 
 const severityLabels: Record<string, string> = {
@@ -439,7 +447,7 @@ function focusLabel(value?: string | null) {
 
 function ruleTypeLabel(value?: string | null) {
   if (!value) return '通用'
-  return ruleTypeLabels[value] || value
+  return ruleTypeOptions.value.find((item) => item.ruleType === value)?.displayName || value
 }
 
 function severityLabel(value?: string | null) {
@@ -498,9 +506,8 @@ function resetForm() {
     sortOrder: 100,
     regulatoryDomain: 'custom',
     matchMode: 'contains',
-    severity: 'block',
+    severity: 'warn',
     versionNo: 1,
-    requireManualPublishReview: false,
     highRisk: false,
   })
 }
@@ -550,6 +557,11 @@ function openRuleTester() {
 async function loadIndustryOptions() {
   const { data } = await getSpecialIndustryProfileOptions({ enabled: true })
   industryOptions.value = data.data || []
+}
+
+async function loadRuleTypeOptions() {
+  const { data } = await getSpecialIndustryRuleTypes()
+  ruleTypeOptions.value = data.data || []
 }
 
 async function submit() {
@@ -622,14 +634,29 @@ async function submitRuleTest() {
 
 onMounted(async () => {
   await dictStore.ensureLoaded()
-  await loadIndustryOptions()
+  await Promise.all([loadIndustryOptions(), loadRuleTypeOptions()])
   await loadCurrent()
+})
+
+watch(() => form.ruleType, () => {
+  const selected = selectedRuleType.value
+  if (!selected) return
+  if (!selected.allowedSeverities.includes(form.severity)) {
+    form.severity = selected.allowedSeverities[0] || 'warn'
+  }
 })
 </script>
 
 <style scoped>
 .special-industry-config-page {
   padding: 18px;
+}
+
+.form-help {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .admin-page-header {

@@ -217,6 +217,31 @@ class BatchArticlePublishServiceTest {
     }
 
     @Test
+    void medicalOfficialArticleNeedsCompliancePassButNotAdReviewOrManualReview() {
+        ArticleDraft article = new ArticleDraft();
+        article.setId(1L);
+        article.setMedicalChannelTier("official_site");
+        article.setComplianceStatus("passed");
+        article.setMedicalAdReviewNo(null);
+        article.setPublishReviewStatus("pending");
+
+        ReflectionTestUtils.invokeMethod(service, "ensureMedicalOfficialPublishAllowed", article, "agent_site");
+    }
+
+    @Test
+    void medicalOfficialArticleStillRejectsFailedCompliance() {
+        ArticleDraft article = new ArticleDraft();
+        article.setId(1L);
+        article.setMedicalChannelTier("official_site");
+        article.setComplianceStatus("failed");
+
+        BizException ex = assertThrows(BizException.class,
+                () -> ReflectionTestUtils.invokeMethod(service, "ensureMedicalOfficialPublishAllowed", article, "agent_site"));
+
+        assertTrue(ex.getMessage().contains("medical compliance is not passed"));
+    }
+
+    @Test
     void submit_usesArticleContentStyleWhenNoBatchTaskExists() {
         givenManualArticle(1L, "linkedin", 20L);
         givenProject(20L, 30L, "手动官网项目");

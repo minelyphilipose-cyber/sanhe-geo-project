@@ -13,6 +13,7 @@ import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceKernelVO
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleTestRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleTestResultVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleSaveRequest;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleTypeVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.GenerationHistoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.RuleHitSummaryVO;
@@ -61,9 +62,13 @@ import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 
 @Service
@@ -264,6 +269,11 @@ public class MedicalArticleConfigService {
         return result;
     }
 
+    public List<ComplianceRuleTypeVO> ruleTypes() {
+        currentUserService.ensurePermission("project.read");
+        return MedicalComplianceRulePolicy.catalog();
+    }
+
     @Transactional
     public ComplianceRuleVO createRule(ComplianceRuleSaveRequest req) {
         currentUserService.ensurePermission("content.prompt_template.manage");
@@ -305,7 +315,7 @@ public class MedicalArticleConfigService {
         row.setKernelName(trim(req.kernelName()));
         row.setSystemPrompt(trim(req.systemPrompt()));
         row.setBrandExposureLimit(Math.max(0, req.brandExposureLimit()));
-        row.setRequireManualPublishReview(Boolean.TRUE.equals(req.requireManualPublishReview()));
+        row.setRequireManualPublishReview(false);
         row.setEnabled(req.enabled() == null || req.enabled());
         row.setVersionNo(req.versionNo() == null ? 1 : Math.max(1, req.versionNo()));
         row.setCreatedBy(currentUserService.requireCurrentUser().getId());
@@ -602,14 +612,14 @@ public class MedicalArticleConfigService {
 
     private String defaultQualificationSchema(String domain) {
         if ("medical".equals(domain)) {
-            return "[{\"key\":\"medicalLicense\",\"label\":\"医疗机构执业许可\",\"required\":true},{\"key\":\"diagnosisScope\",\"label\":\"诊疗科目范围\",\"required\":true},{\"key\":\"medicalAdReviewNo\",\"label\":\"医疗广告审查证明编号\",\"requiredForOfficialSite\":true}]";
+            return "[{\"key\":\"medicalLicense\",\"label\":\"医疗机构执业许可\",\"required\":true},{\"key\":\"diagnosisScope\",\"label\":\"诊疗科目范围\",\"required\":true},{\"key\":\"medicalAdReviewNo\",\"label\":\"医疗广告审查证明编号\",\"requiredForOfficialSite\":false}]";
         }
         return "[{\"key\":\"brandQualificationDescription\",\"label\":\"行业资质说明\",\"required\":true}]";
     }
 
     private String defaultReadinessPolicy(String domain) {
         if ("medical".equals(domain)) {
-            return "{\"requireProjectQualification\":true,\"requireMedicalLicense\":true,\"requireDiagnosisScope\":true,\"requireAdReviewNoForOfficialSite\":true}";
+            return "{\"requireProjectQualification\":true,\"requireMedicalLicense\":true,\"requireDiagnosisScope\":true,\"requireAdReviewNoForOfficialSite\":false}";
         }
         return "{\"requireProjectQualification\":true,\"requireBrandQualificationDescription\":true,\"requireAdReviewNoForOfficialSite\":false}";
     }
@@ -627,16 +637,50 @@ public class MedicalArticleConfigService {
     }
 
     private void fill(MedicalComplianceRule row, ComplianceRuleSaveRequest req) {
-        row.setRuleType(trim(req.ruleType()));
+        String ruleType = MedicalComplianceRulePolicy.canonicalRuleType(req.ruleType());
+        String matchMode = StringUtils.hasText(req.matchMode())
+                ? trim(req.matchMode()).toLowerCase(Locale.ROOT)
+                : "contains";
+        if (!Set.of("contains", "regex").contains(matchMode)) {
+            throw new BizException(400, "规则匹配方式只能是 contains 或 regex");
+        }
+        String pattern = trim(req.pattern());
+        validateRulePattern(ruleType, matchMode, pattern);
+        String configuredSeverity = StringUtils.hasText(req.severity())
+                ? trim(req.severity()).toLowerCase(Locale.ROOT)
+                : MedicalComplianceRulePolicy.SEVERITY_BLOCK;
+        if (!Set.of(MedicalComplianceRulePolicy.SEVERITY_BLOCK, MedicalComplianceRulePolicy.SEVERITY_WARN)
+                .contains(configuredSeverity)) {
+            throw new BizException(400, "规则严重级别只能是 block 或 warn");
+        }
+        row.setRuleType(ruleType);
         row.setIndustryCode(trimToNull(req.industryCode()));
         row.setChannelTier(trimToNull(req.channelTier()));
         row.setChannelGroupCode(trimToNull(req.channelGroupCode()));
         row.setChannelSubCode(trimToNull(req.channelSubCode()));
-        row.setPattern(trim(req.pattern()));
-        row.setMatchMode(StringUtils.hasText(req.matchMode()) ? trim(req.matchMode()) : "contains");
-        row.setSeverity(StringUtils.hasText(req.severity()) ? trim(req.severity()) : "block");
+        row.setPattern(pattern);
+        row.setMatchMode(matchMode);
+        row.setSeverity(MedicalComplianceRulePolicy.effectiveSeverity(ruleType, configuredSeverity));
         row.setEnabled(req.enabled() == null || req.enabled());
         row.setRemark(trimToNull(req.remark()));
+    }
+
+    private void validateRulePattern(String ruleType, String matchMode, String pattern) {
+        if (!StringUtils.hasText(pattern)) {
+            throw new BizException(400, "规则内容不能为空");
+        }
+        if ("regex".equals(matchMode)) {
+            try {
+                Pattern.compile(pattern, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+            } catch (PatternSyntaxException ex) {
+                throw new BizException(400, "规则正则表达式无效：" + ex.getDescription());
+            }
+            return;
+        }
+        int length = pattern.codePointCount(0, pattern.length());
+        if (MedicalComplianceRulePolicy.canHardBlock(ruleType) && length < 2) {
+            throw new BizException(400, "硬阻断规则必须使用不少于2个字的完整表达");
+        }
     }
 
     private void fill(MedicalChannelStyleModule row, ChannelStyleSaveRequest req) {

@@ -453,7 +453,7 @@ class ArticleAiDraftServiceTest {
                 mock(MarkdownImageReferenceValidator.class), mock(com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService.class),
                 mock(ArticleImagePublicUrlRewriter.class), mock(ArticleAutoImageInsertionService.class),
                 mock(ArticleCoverSelectionService.class),
-                brandAccessService, mock(AuditService.class), mock(SpecialIndustryComplianceAlertService.class));
+                brandAccessService, mock(AuditService.class));
     }
 
     private void verifyAudit(AuditResult result, String status) {

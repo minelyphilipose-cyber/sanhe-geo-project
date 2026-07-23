@@ -324,6 +324,7 @@ class BatchArticleGenerationServiceTest {
                 List.of(new MedicalArticleComplianceChecker.ComplianceIssue(7L, "absolute_claim", "block", "根治", "命中医疗合规规则"))
         );
         when(medicalComplianceChecker.check(any())).thenReturn(failedResult);
+        when(medicalComplianceChecker.blockingOnly(failedResult)).thenReturn(failedResult);
         when(medicalComplianceChecker.toJson(failedResult)).thenReturn("{\"passed\":false,\"issues\":[{\"ruleType\":\"absolute_claim\"}]}");
         when(articleDraftMapper.insert(any())).thenAnswer(invocation -> {
             ArticleDraft draft = invocation.getArgument(0);
@@ -344,8 +345,10 @@ class BatchArticleGenerationServiceTest {
                 .check(checkInputCaptor.capture());
         assertThat(checkInputCaptor.getAllValues())
                 .allSatisfy(input -> assertThat(input.projectForbiddenPhrases()).containsExactly("一次见效"));
-        verify(medicalComplianceChecker, times(MedicalArticleConstants.MAX_COMPLIANCE_GENERATION_ATTEMPTS + 1))
-                .logHits(any(), any(), any(), any());
+        ArgumentCaptor<String> hitActionCaptor = forClass(String.class);
+        verify(medicalComplianceChecker, times(MedicalArticleConstants.MAX_COMPLIANCE_GENERATION_ATTEMPTS))
+                .logHits(any(), any(), any(), hitActionCaptor.capture());
+        assertThat(hitActionCaptor.getAllValues()).containsExactly("retry", "retry", "discard");
         verify(medicalArticleGenerationService, never()).recordHistory(any(), any(), any(), any());
         verify(articleGenerationLogMapper, never()).insert(any());
 
@@ -412,11 +415,16 @@ class BatchArticleGenerationServiceTest {
         when(articleGenerationEngine.generate(any())).thenReturn(generatedArticle());
         MedicalArticleComplianceChecker.CheckResult failed = new MedicalArticleComplianceChecker.CheckResult(
                 false, List.of(new MedicalArticleComplianceChecker.ComplianceIssue(
-                null, "project_forbidden_phrase", "block", "一次见效", "命中特殊行业项目禁用表达")));
+                null, "safety_claim", "block", "绝对安全", "命中特殊行业安全承诺")));
+        MedicalArticleComplianceChecker.CheckResult passedWithWarning = new MedicalArticleComplianceChecker.CheckResult(
+                true, List.of(new MedicalArticleComplianceChecker.ComplianceIssue(
+                null, "brand_exposure_exceeded", "warn", "星链口腔", "品牌露出超过建议值")));
         when(medicalComplianceChecker.check(any()))
                 .thenReturn(failed)
-                .thenReturn(MedicalArticleComplianceChecker.CheckResult.pass());
+                .thenReturn(passedWithWarning);
         when(medicalComplianceChecker.toJson(failed)).thenReturn("{\"passed\":false}");
+        when(medicalComplianceChecker.toJson(passedWithWarning))
+                .thenReturn("{\"passed\":true,\"issues\":[{\"ruleType\":\"brand_exposure_exceeded\",\"severity\":\"warn\"}]}");
         when(articleDraftMapper.insert(any())).thenAnswer(invocation -> {
             ArticleDraft draft = invocation.getArgument(0);
             draft.setId(902L);
@@ -425,7 +433,11 @@ class BatchArticleGenerationServiceTest {
 
         ReflectionTestUtils.invokeMethod(service, "runTask", batch, task);
 
-        verify(articleGenerationEngine, times(2)).generate(any());
+        ArgumentCaptor<ArticleGenerationEngine.GenerateInput> generateInputCaptor = forClass(ArticleGenerationEngine.GenerateInput.class);
+        verify(articleGenerationEngine, times(2)).generate(generateInputCaptor.capture());
+        assertThat(generateInputCaptor.getAllValues().get(1).userPrompt())
+                .contains("删除或改写明确违规表达：“绝对安全”")
+                .doesNotContain("\"passed\"");
         verify(medicalComplianceChecker, times(2)).check(any());
         verify(medicalArticleGenerationService).recordHistory(project, brand, medicalContext, 902L);
         ArgumentCaptor<ArticleDraft> draftCaptor = forClass(ArticleDraft.class);
@@ -439,6 +451,8 @@ class BatchArticleGenerationServiceTest {
         assertEquals("success", finalTask.getStatus());
         assertEquals(1, finalTask.getRetryCount());
         assertEquals("阜阳祛斑医院推荐", finalTask.getTopic());
+        assertThat(finalTask.getComplianceIssuesJson()).contains("brand_exposure_exceeded", "warn");
+        assertThat(finalTask.getInputSnapshot()).contains("medicalComplianceResult", "brand_exposure_exceeded");
     }
 
     @Test
@@ -642,7 +656,8 @@ class BatchArticleGenerationServiceTest {
                 new ArticleModelResolver.ModelSelection("mock", "mock-model", null),
                 generatedArticle().result(),
                 null,
-                MedicalArticleConstants.COMPLIANCE_PASSED
+                MedicalArticleConstants.COMPLIANCE_PASSED,
+                MedicalArticleComplianceChecker.CheckResult.pass()
         );
 
         assertEquals(901L, articleId);

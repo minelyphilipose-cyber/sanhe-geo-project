@@ -1,8 +1,6 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
-import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.customer.entity.BrandOperatorAssignment;
 import com.huanjing.geo.module.customer.entity.Company;
@@ -65,81 +63,6 @@ public class SpecialIndustryComplianceAlertService {
             );
         } catch (Exception ex) {
             log.warn("Create special industry discarded alert failed articleId={}", articleId, ex);
-        }
-    }
-
-    public void notifyPublishReviewPending(Project project,
-                                           Brand brand,
-                                           BatchArticleGenerationTask task,
-                                           Long articleId,
-                                           MedicalArticleGenerationService.MedicalPromptContext context) {
-        if (articleId == null
-                || context == null
-                || !MedicalArticleConstants.TIER_OFFICIAL_SITE.equals(context.channelTier())
-                || StringUtils.hasText(context.medicalAdReviewNo())) {
-            return;
-        }
-        try {
-            createRecipientAlerts(
-                    "special_industry_publish_review_pending",
-                    "warn",
-                    "特殊行业官网档文章待法务发布确认",
-                    baseContext(project, brand, task, articleId)
-                            .with("action", "publish_review_pending")
-                            .with("medicalChannelTier", context.channelTier())
-                            .with("medicalIndustryCode", context.industryCode())
-                            .build(),
-                    project,
-                    publishReviewDedupeKey(articleId)
-            );
-        } catch (Exception ex) {
-            log.warn("Create special industry publish review alert failed articleId={}", articleId, ex);
-        }
-    }
-
-    public void closePublishReviewPending(ArticleDraft article, Project project, Long operatorId) {
-        if (article == null || article.getId() == null) {
-            return;
-        }
-        try {
-            systemAlertService.resolveOpenByDedupeKeyPrefix(publishReviewDedupeKey(article.getId()), operatorId);
-        } catch (Exception ex) {
-            log.warn("Resolve special industry publish review alert failed articleId={}", article.getId(), ex);
-        }
-    }
-
-    public void notifyPublishReviewRejected(ArticleDraft article, Project project, Long operatorId, String comment) {
-        if (article == null || article.getId() == null) {
-            return;
-        }
-        try {
-            createRecipientAlerts(
-                    "special_industry_publish_review_rejected",
-                    "error",
-                    "特殊行业官网档文章法务驳回，需运营处理",
-                    baseContext(project, null, null, article.getId())
-                            .with("action", "publish_review_rejected")
-                            .with("operatorId", operatorId)
-                            .with("comment", StringUtils.hasText(comment) ? comment.trim() : null)
-                            .with("medicalIndustryCode", article.getMedicalIndustryCode())
-                            .with("medicalChannelTier", article.getMedicalChannelTier())
-                            .build(),
-                    project,
-                    publishReviewRejectedDedupeKey(article.getId())
-            );
-        } catch (Exception ex) {
-            log.warn("Create special industry publish review rejected alert failed articleId={}", article.getId(), ex);
-        }
-    }
-
-    public void closePublishReviewRejected(ArticleDraft article, Long operatorId) {
-        if (article == null || article.getId() == null) {
-            return;
-        }
-        try {
-            systemAlertService.resolveOpenByDedupeKeyPrefix(publishReviewRejectedDedupeKey(article.getId()), operatorId);
-        } catch (Exception ex) {
-            log.warn("Resolve special industry publish review rejected alert failed articleId={}", article.getId(), ex);
         }
     }
 
@@ -207,14 +130,6 @@ public class SpecialIndustryComplianceAlertService {
         if (user != null && Boolean.TRUE.equals(user.getIsActive())) {
             userIds.add(userId);
         }
-    }
-
-    private String publishReviewDedupeKey(Long articleId) {
-        return "special-industry:publish-review-pending:article:" + articleId;
-    }
-
-    private String publishReviewRejectedDedupeKey(Long articleId) {
-        return "special-industry:publish-review-rejected:article:" + articleId;
     }
 
     private ContextBuilder baseContext(Project project, Brand brand, BatchArticleGenerationTask task, Long articleId) {
