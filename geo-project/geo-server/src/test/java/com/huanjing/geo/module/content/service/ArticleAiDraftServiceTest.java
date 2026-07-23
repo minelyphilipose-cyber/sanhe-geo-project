@@ -295,7 +295,7 @@ class ArticleAiDraftServiceTest {
         service.preview(previewRequest()).get();
 
         verify(llmInvoker).invoke(any(), configCaptor.capture());
-        assertEquals(180_000, configCaptor.getValue().requestTimeoutMs());
+        assertEquals(LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS, configCaptor.getValue().requestTimeoutMs());
     }
 
     @Test
@@ -346,7 +346,7 @@ class ArticleAiDraftServiceTest {
         service.preview(previewRequest()).get();
 
         verify(llmInvoker).invoke(any(), configCaptor.capture());
-        assertEquals(180_000, configCaptor.getValue().requestTimeoutMs());
+        assertEquals(LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS, configCaptor.getValue().requestTimeoutMs());
     }
 
     @Test

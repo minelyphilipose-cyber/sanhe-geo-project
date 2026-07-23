@@ -45,6 +45,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,7 +53,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentCaptor.forClass;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -169,6 +175,121 @@ class BatchArticleGenerationServiceTest {
         when(profileMapper.selectList(any())).thenReturn(List.of());
         when(mapper.selectList(any())).thenReturn(List.of());
         return new SpecialIndustryService(profileMapper, mapper);
+    }
+
+    @Test
+    void selectModelForTaskUsesWeightedPoolForAnUnassignedTask() {
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(91L);
+        task.setBatchId(19L);
+        ArticleModelResolver.ModelSelection selected = mock(ArticleModelResolver.ModelSelection.class);
+        when(selected.platformCode()).thenReturn("qwen");
+        when(selected.modelId()).thenReturn("qwen-model");
+        when(articleModelResolver.resolveForBatch(
+                eq(91L),
+                eq("system"),
+                eq(true),
+                eq(ArticleGenerationTemperatures.V2_STANDARD),
+                eq(Set.of())
+        )).thenReturn(selected);
+
+        ArticleModelResolver.ModelSelection result = ReflectionTestUtils.invokeMethod(
+                service,
+                "selectModelForTask",
+                task,
+                "system",
+                ArticleGenerationTemperatures.V2_STANDARD
+        );
+
+        assertSame(selected, result);
+        verify(articleModelResolver).resolveForBatch(
+                eq(91L),
+                eq("system"),
+                eq(true),
+                eq(ArticleGenerationTemperatures.V2_STANDARD),
+                eq(Set.of())
+        );
+    }
+
+    @Test
+    void selectModelForTaskKeepsAFrozenModelWithinTheTask() {
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(92L);
+        task.setModelPlatformCode("deepseek");
+        task.setModelId("deepseek-model");
+        ArticleModelResolver.ModelSelection selected = mock(ArticleModelResolver.ModelSelection.class);
+        when(articleModelResolver.resolve(
+                "deepseek",
+                "deepseek-model",
+                "system",
+                true,
+                ArticleGenerationTemperatures.V2_STANDARD
+        )).thenReturn(selected);
+
+        ArticleModelResolver.ModelSelection result = ReflectionTestUtils.invokeMethod(
+                service,
+                "selectModelForTask",
+                task,
+                "system",
+                ArticleGenerationTemperatures.V2_STANDARD
+        );
+
+        assertSame(selected, result);
+        verify(articleModelResolver, never()).resolveForBatch(anyLong(), any(), anyBoolean(), anyDouble(), anySet());
+    }
+
+    @Test
+    void infrastructureRetryRotatesAwayFromThePreviousPlatform() {
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(93L);
+        task.setBatchId(20L);
+        task.setModelPlatformCode("doubao");
+        task.setModelId("doubao-model");
+        LocalDateTime now = LocalDateTime.of(2026, 7, 23, 16, 0);
+        ArticleModelResolver.ModelSelection alternative = mock(ArticleModelResolver.ModelSelection.class);
+        when(alternative.platformCode()).thenReturn("qwen");
+        when(alternative.modelId()).thenReturn("qwen-model");
+        when(articleModelResolver.resolveForBatch(
+                eq(93L),
+                eq(""),
+                eq(true),
+                eq(ArticleGenerationTemperatures.DEFAULT),
+                eq(Set.of("doubao"))
+        )).thenReturn(alternative);
+        when(taskMapper.updateRetryModel(93L, 20L, "qwen", "qwen-model", now)).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "rotateInfrastructureFailureModel",
+                task,
+                "AI article generation failed: HTTP request timed out after 300000ms",
+                now
+        );
+
+        assertThat(task.getModelPlatformCode()).isEqualTo("qwen");
+        assertThat(task.getModelId()).isEqualTo("qwen-model");
+        verify(taskMapper).updateRetryModel(93L, 20L, "qwen", "qwen-model", now);
+    }
+
+    @Test
+    void contentFailureDoesNotRotateTheModel() {
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(94L);
+        task.setBatchId(20L);
+        task.setModelPlatformCode("doubao");
+        task.setModelId("doubao-model");
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "rotateInfrastructureFailureModel",
+                task,
+                "生成内容命中项目禁用表达",
+                LocalDateTime.of(2026, 7, 23, 16, 0)
+        );
+
+        assertThat(task.getModelPlatformCode()).isEqualTo("doubao");
+        verify(articleModelResolver, never()).resolveForBatch(anyLong(), any(), anyBoolean(), anyDouble(), anySet());
+        verify(taskMapper, never()).updateRetryModel(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -315,7 +436,13 @@ class BatchArticleGenerationServiceTest {
                         ArticleRuntimePolicyResolver.CONTACT_NONE, false),
                 true
         ));
-        when(articleModelResolver.resolve(null, null, "system", true, ArticleGenerationTemperatures.DEFAULT))
+        when(articleModelResolver.resolveForBatch(
+                101L,
+                "system",
+                true,
+                ArticleGenerationTemperatures.DEFAULT,
+                Set.of()
+        ))
                 .thenReturn(new ArticleModelResolver.ModelSelection("mock", "mock-model", null));
         ArticleGenerationEngine.GeneratedArticle generated = generatedArticle();
         when(articleGenerationEngine.generate(any())).thenReturn(generated);
@@ -410,7 +537,13 @@ class BatchArticleGenerationServiceTest {
                 new ArticleRuntimePolicy("self_media", "wechat", TemplatePerspectiveCodes.CUSTOMER,
                         ArticleRuntimePolicyResolver.CONTACT_NONE, false), true
         ));
-        when(articleModelResolver.resolve(null, null, "system", true, ArticleGenerationTemperatures.DEFAULT))
+        when(articleModelResolver.resolveForBatch(
+                102L,
+                "system",
+                true,
+                ArticleGenerationTemperatures.DEFAULT,
+                Set.of()
+        ))
                 .thenReturn(new ArticleModelResolver.ModelSelection("mock", "mock-model", null));
         when(articleGenerationEngine.generate(any())).thenReturn(generatedArticle());
         MedicalArticleComplianceChecker.CheckResult failed = new MedicalArticleComplianceChecker.CheckResult(

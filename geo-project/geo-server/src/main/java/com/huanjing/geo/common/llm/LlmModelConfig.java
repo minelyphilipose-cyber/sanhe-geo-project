@@ -28,7 +28,7 @@ public record LlmModelConfig(String platformCode,
     public static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
     public static final int DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
     public static final int MAX_REQUEST_TIMEOUT_MS = 60_000;
-    public static final int LONG_FORM_MAX_REQUEST_TIMEOUT_MS = 180_000;
+    public static final int LONG_FORM_MAX_REQUEST_TIMEOUT_MS = 300_000;
 
     public LlmModelConfig(String platformCode,
                           String platformName,

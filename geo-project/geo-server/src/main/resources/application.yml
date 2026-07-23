@@ -409,6 +409,9 @@ geo:
   llm:
     routing:
       article-excluded-platform-codes: ${GEO_LLM_ROUTING_ARTICLE_EXCLUDED_PLATFORM_CODES:hunyuan,yuanbao}
+      # Long-form article calls need enough headroom for 2000-3000 Chinese characters.
+      # Keep this below the 360-second browser and Nginx timeout.
+      article-request-timeout-ms: ${GEO_LLM_ROUTING_ARTICLE_REQUEST_TIMEOUT_MS:300000}
     pool:
       enabled: ${GEO_LLM_POOL_ENABLED:true}
       global-concurrency: ${GEO_LLM_POOL_GLOBAL_CONCURRENCY:36}

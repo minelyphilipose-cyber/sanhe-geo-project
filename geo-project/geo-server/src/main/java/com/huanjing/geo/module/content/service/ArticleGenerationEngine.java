@@ -15,6 +15,7 @@ import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.project.entity.Project;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -27,7 +28,6 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class ArticleGenerationEngine {
 
-    private static final int ARTICLE_REQUEST_TIMEOUT_MS = LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS;
     private static final Pattern MARKDOWN_TITLE_PREFIX = Pattern.compile("^(#+)\\s*");
 
     private final LlmCallFacade llmCallFacade;
@@ -36,6 +36,9 @@ public class ArticleGenerationEngine {
     private final ArticleAiDraftPromptFilter promptFilter;
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTitleDuplicateChecker titleDuplicateChecker;
+
+    @Value("${geo.llm.routing.article-request-timeout-ms:300000}")
+    private int articleRequestTimeoutMs = LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS;
 
     public GeneratedArticle generate(GenerateInput input) throws LlmInvokeException {
         String outboundPrompt = promptFilter.filterOutboundPrompt(
@@ -116,7 +119,12 @@ public class ArticleGenerationEngine {
     }
 
     private int resolveRequestTimeout(boolean longForm) {
-        return longForm ? ARTICLE_REQUEST_TIMEOUT_MS : LlmModelConfig.DEFAULT_REQUEST_TIMEOUT_MS;
+        if (!longForm) {
+            return LlmModelConfig.DEFAULT_REQUEST_TIMEOUT_MS;
+        }
+        return Math.min(
+                Math.max(articleRequestTimeoutMs, LlmModelConfig.MAX_REQUEST_TIMEOUT_MS),
+                LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS);
     }
 
     private String normalizeContent(String content) {

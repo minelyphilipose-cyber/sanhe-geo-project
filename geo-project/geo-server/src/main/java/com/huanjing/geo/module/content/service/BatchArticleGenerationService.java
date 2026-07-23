@@ -569,6 +569,7 @@ public class BatchArticleGenerationService {
         List<Long> retriedTaskIds = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now().withNano(0);
         for (BatchArticleGenerationTask task : failedTasks) {
+            String previousErrorMessage = task.getErrorMessage();
             int updated = taskMapper.resetFailedForRetry(task.getId(), batchId, now);
             if (updated <= 0) {
                 continue;
@@ -578,6 +579,7 @@ public class BatchArticleGenerationService {
             task.setErrorMessage(null);
             task.setStartedAt(null);
             task.setFinishedAt(null);
+            rotateInfrastructureFailureModel(task, previousErrorMessage, now);
             retriedTaskIds.add(task.getId());
         }
         if (retriedTaskIds.isEmpty()) {
@@ -1037,8 +1039,8 @@ public class BatchArticleGenerationService {
                     : List.of();
             double effectiveTemperature = ArticleGenerationTemperatures.resolve(
                     promptContext.v2(), promptContext.medicalContext() != null);
-            ArticleModelResolver.ModelSelection selectedModel = articleModelResolver.resolve(
-                    null, null, prompt.systemPrompt(), true, effectiveTemperature);
+            ArticleModelResolver.ModelSelection selectedModel = selectModelForTask(
+                    task, prompt.systemPrompt(), effectiveTemperature);
             task.setModelPlatformCode(selectedModel.platformCode());
             task.setModelId(selectedModel.modelId());
             taskMapper.updateById(task);
@@ -1406,6 +1408,80 @@ public class BatchArticleGenerationService {
 
     private ArticleModelResolver.ModelSelection resolveModel(String systemPrompt) {
         return articleModelResolver.resolve(null, null, systemPrompt, true);
+    }
+
+    private ArticleModelResolver.ModelSelection selectModelForTask(BatchArticleGenerationTask task,
+                                                                   String systemPrompt,
+                                                                   double effectiveTemperature) {
+        if (task != null
+                && (StringUtils.hasText(task.getModelPlatformCode()) || StringUtils.hasText(task.getModelId()))) {
+            return articleModelResolver.resolve(
+                    task.getModelPlatformCode(),
+                    task.getModelId(),
+                    systemPrompt,
+                    true,
+                    effectiveTemperature
+            );
+        }
+        long selectionKey = task == null || task.getId() == null ? 0L : task.getId();
+        ArticleModelResolver.ModelSelection selected = articleModelResolver.resolveForBatch(
+                selectionKey,
+                systemPrompt,
+                true,
+                effectiveTemperature,
+                Set.of()
+        );
+        log.info("batch article model assigned batchId={} taskId={} platform={} model={} mode=weighted_pool",
+                task == null ? null : task.getBatchId(),
+                task == null ? null : task.getId(),
+                selected.platformCode(),
+                selected.modelId());
+        return selected;
+    }
+
+    private void rotateInfrastructureFailureModel(BatchArticleGenerationTask task,
+                                                  String previousErrorMessage,
+                                                  LocalDateTime now) {
+        if (task == null
+                || task.getId() == null
+                || task.getBatchId() == null
+                || !StringUtils.hasText(task.getModelPlatformCode())
+                || !ArticleGenerationFailureClassifier.isInfrastructureFailure(previousErrorMessage)) {
+            return;
+        }
+        String previousPlatformCode = task.getModelPlatformCode();
+        String previousModelId = task.getModelId();
+        try {
+            ArticleModelResolver.ModelSelection alternative = articleModelResolver.resolveForBatch(
+                    task.getId(),
+                    "",
+                    true,
+                    ArticleGenerationTemperatures.DEFAULT,
+                    Set.of(previousPlatformCode)
+            );
+            int updated = taskMapper.updateRetryModel(
+                    task.getId(),
+                    task.getBatchId(),
+                    alternative.platformCode(),
+                    alternative.modelId(),
+                    now
+            );
+            if (updated <= 0) {
+                return;
+            }
+            task.setModelPlatformCode(alternative.platformCode());
+            task.setModelId(alternative.modelId());
+            log.info("batch article retry model rotated batchId={} taskId={} from={}/{} to={}/{}",
+                    task.getBatchId(),
+                    task.getId(),
+                    previousPlatformCode,
+                    previousModelId,
+                    alternative.platformCode(),
+                    alternative.modelId());
+        } catch (RuntimeException ex) {
+            log.warn("batch article retry keeps previous model because no alternative is available batchId={} taskId={} platform={} reason={}",
+                    task.getBatchId(), task.getId(), previousPlatformCode, ex.getMessage());
+        }
     }
 
     private void markBatchRunning(BatchArticleGenerationBatch batch) {

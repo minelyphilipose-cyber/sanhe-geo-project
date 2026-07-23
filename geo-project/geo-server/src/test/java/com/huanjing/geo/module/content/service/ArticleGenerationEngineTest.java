@@ -6,6 +6,7 @@ import com.huanjing.geo.common.llm.LlmCallFacade;
 import com.huanjing.geo.common.llm.LlmCallRequest;
 import com.huanjing.geo.common.llm.LlmCallResult;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
+import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.router.LlmFeature;
 import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
@@ -97,8 +98,8 @@ class ArticleGenerationEngineTest {
         verify(llmCallFacade).execute(requestCaptor.capture());
         LlmRouteRequest routeRequest = requestCaptor.getValue().routeRequest();
         assertEquals(LlmFeature.ARTICLE, routeRequest.feature());
-        assertEquals(180_000, routeRequest.requestTimeoutMs());
-        assertEquals(180_000, routeRequest.requestTimeoutMaxMs());
+        assertEquals(LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS, routeRequest.requestTimeoutMs());
+        assertEquals(LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS, routeRequest.requestTimeoutMaxMs());
         assertEquals(0, routeRequest.maxRetry());
         assertEquals(ArticleGenerationTemperatures.V2_STANDARD, routeRequest.temperature());
     }

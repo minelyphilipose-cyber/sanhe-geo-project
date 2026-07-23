@@ -79,6 +79,21 @@ public interface BatchArticleGenerationTaskMapper extends BaseMapper<BatchArticl
 
     @Update("""
             UPDATE batch_article_generation_task
+            SET model_platform_code = #{platformCode},
+                model_id = #{modelId},
+                updated_at = #{now}
+            WHERE id = #{taskId}
+              AND batch_id = #{batchId}
+              AND status = 'pending'
+            """)
+    int updateRetryModel(@Param("taskId") Long taskId,
+                         @Param("batchId") Long batchId,
+                         @Param("platformCode") String platformCode,
+                         @Param("modelId") String modelId,
+                         @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE batch_article_generation_task
             SET status = 'pending',
                 started_at = NULL,
                 finished_at = NULL,
