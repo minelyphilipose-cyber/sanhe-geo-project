@@ -161,6 +161,37 @@ class ContentArticleServiceTest {
     }
 
     @Test
+    void createManualAllowsNeutralImportedArticleWithoutPlatformStyle() {
+        doAnswer(invocation -> {
+            ArticleDraft draft = invocation.getArgument(0);
+            draft.setId(99L);
+            return 1;
+        }).when(articleDraftMapper).insert(any(ArticleDraft.class));
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+
+        ManualArticleCreateRequest request = new ManualArticleCreateRequest();
+        request.setProjectId(10L);
+        request.setArticleType(ArticleTypes.GENERAL_ARTICLE);
+        request.setTopic("Imported title");
+        request.setTitle("Imported title");
+        request.setContentMarkdown("# Imported title\n\nbody");
+        request.setSource("manual");
+
+        service.createManual(request);
+
+        ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
+        verify(articleDraftMapper).insert(draftCaptor.capture());
+        ArticleDraft draft = draftCaptor.getValue();
+        assertEquals(ArticleTypes.GENERAL_ARTICLE, draft.getArticleTypeCode());
+        assertNull(draft.getContentStyle());
+        assertNull(draft.getChannelGroupCode());
+        assertNull(draft.getChannelSubCode());
+        assertNull(draft.getCoverImageUrl());
+        assertEquals("approved", draft.getStatus());
+        verify(coverSelectionService, never()).requireManualCoverUrl(any(), any());
+    }
+
+    @Test
     void createManualAllowsZhihuWithoutCover() {
         doAnswer(invocation -> {
             ArticleDraft draft = invocation.getArgument(0);

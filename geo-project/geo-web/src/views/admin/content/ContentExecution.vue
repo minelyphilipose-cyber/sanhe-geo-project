@@ -73,8 +73,9 @@
         </div>
         <div v-if="hasToolbarActions" class="toolbar-action-row">
           <div class="toolbar-primary-actions">
-            <el-button v-if="canAiGenerate" type="primary" @click="openBatchGeneration">批量生成文章</el-button>
-            <el-button v-if="canArticleWrite" @click="goManualCreate">单篇生成文章</el-button>
+            <el-button v-if="canAiGenerate" type="primary" @click="openBatchGeneration">AI 批量生成</el-button>
+            <el-button v-if="canAiGenerate && canArticleWrite" @click="goAiCreate">AI 单篇生成</el-button>
+            <el-button v-if="canArticleWrite" @click="goManualCreate">导入文章</el-button>
           </div>
           <div class="toolbar-secondary-actions">
             <span v-if="selectedRows.length" class="toolbar-selection-hint">已选 {{ selectedRows.length }} 篇</span>
@@ -595,6 +596,7 @@ import { useArticleDetailRevision } from './composables/useArticleDetailRevision
 import { useArticleDistributionChannels } from './composables/useArticleDistributionChannels'
 import { useSelfMediaDistribution } from './composables/useSelfMediaDistribution'
 import { useUserStore } from '@/stores/user'
+import { ARTICLE_TYPE_OPTIONS, articleTypeLabel } from '@/constants/articleTypes'
 import type { ArticleDetailResponse, ArticleDraft } from '@/types'
 import {
   deleteContentArticle,
@@ -807,19 +809,7 @@ const channelFilterOptions = [
   { label: '权威媒体 / 门户媒体', value: 'authority_media:portal_media' },
 ]
 
-const contentShapeOptions = [
-  { label: '问答文章', value: 'faq' },
-  { label: '场景内容文', value: 'scenario_content' },
-  { label: '行业分析文', value: 'industry_article' },
-  { label: '阶段建议文', value: 'stage_advice' },
-  { label: '选择指南', value: 'buying_guide' },
-  { label: '对比评测', value: 'comparison' },
-  { label: '费用解析', value: 'cost_analysis' },
-  { label: '避坑指南', value: 'pitfall_guide' },
-  { label: '经验笔记', value: 'social_note' },
-  { label: '资讯简讯', value: 'news_brief' },
-  { label: '讨论帖', value: 'forum_discussion' },
-]
+const contentShapeOptions = ARTICLE_TYPE_OPTIONS
 
 function parseChannelKey(value: string) {
   const [channelGroupCode, channelSubCode = ''] = value.split(':')
@@ -829,25 +819,9 @@ function parseChannelKey(value: string) {
   }
 }
 
-function articleTypeLabel(v?: string | null) {
-  const map: Record<string, string> = {
-    faq: 'FAQ',
-    scenario_content: '场景内容',
-    industry_article: '行业文章',
-    stage_advice: '阶段建议',
-    buying_guide: '选择指南',
-    comparison: '对比评测',
-    cost_analysis: '费用解析',
-    pitfall_guide: '避坑指南',
-    social_note: '经验笔记',
-    news_brief: '资讯简讯',
-    forum_discussion: '讨论帖',
-  }
-  return v ? map[v] || v : '-'
-}
-
 function articleTypeInitial(v?: string | null) {
   const map: Record<string, string> = {
+    general_article: '通',
     faq: '问',
     scenario_content: '景',
     industry_article: '文',
@@ -865,6 +839,7 @@ function articleTypeInitial(v?: string | null) {
 
 function articleTypeClass(v?: string | null) {
   const map: Record<string, string> = {
+    general_article: 'is-article',
     faq: 'is-faq',
     scenario_content: 'is-scene',
     industry_article: 'is-article',
@@ -1187,6 +1162,15 @@ function canSelectForBatchPublish(row: ArticleDraft) {
 function goManualCreate() {
   router.push({
     path: '/admin/content/articles/manual-create',
+    query: {
+      articleType: query.articleType || undefined,
+    },
+  })
+}
+
+function goAiCreate() {
+  router.push({
+    path: '/admin/content/articles/ai-create',
     query: {
       articleType: query.articleType || undefined,
     },

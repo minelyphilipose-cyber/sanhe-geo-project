@@ -461,13 +461,13 @@ public class ContentArticleService {
         String channelSubCode = subFromContentStyle(contentStyle);
         String topic = StringUtils.hasText(req.getTopic()) ? req.getTopic().trim() : "";
         String topicAsQuestion = StringUtils.hasText(req.getTopicAsQuestion()) ? req.getTopicAsQuestion().trim() : null;
-        if (!StringUtils.hasText(contentStyle)) {
+        String createSource = normalizeCreateSource(req.getSource());
+        if ("ai_preview".equals(createSource) && !StringUtils.hasText(contentStyle)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Content style is required");
         }
         if (!StringUtils.hasText(topic)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Topic is required");
         }
-        String createSource = normalizeCreateSource(req.getSource());
         String coverImageUrl = resolveManualCreateCoverUrl(project, req, channelGroupCode, channelSubCode, contentStyle, createSource);
         if (isDouyinSelfMedia(channelGroupCode, channelSubCode, contentStyle)) {
             if (req.getHeadImageMaterialId() != null) {
@@ -487,7 +487,7 @@ public class ContentArticleService {
         draft.setProjectId(project.getId());
         draft.setArticleType(articleType);
         draft.setArticleTypeCode(articleType);
-        draft.setContentStyle(contentStyle);
+        draft.setContentStyle(StringUtils.hasText(contentStyle) ? contentStyle : null);
         draft.setChannelGroupCode(channelGroupCode);
         draft.setChannelSubCode(channelSubCode);
         draft.setTopic(topic);

@@ -14,7 +14,6 @@ public class ManualArticleCreateRequest {
     private Long projectId;
     @NotBlank
     private String articleType;
-    @NotBlank
     @Size(max = 64)
     @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
     private String contentStyle;

@@ -1,4 +1,4 @@
-import request from './request'
+import request, { type GeoRequestConfig } from './request'
 import type {
   ArticleDraft,
   ArticleDetailResponse,
@@ -289,7 +289,7 @@ export function getSelfMediaCookieStatusBatch(data: {
 export function createManualContentArticle(data: {
   projectId: number
   articleType: string
-  contentStyle: string
+  contentStyle?: string
   topic: string
   topicAsQuestion?: string
   title?: string
@@ -300,6 +300,41 @@ export function createManualContentArticle(data: {
   aiMetadata?: Record<string, unknown>
 }) {
   return request.post<R<ArticleDraft>>('/content/articles/manual', data)
+}
+
+export interface ManualArticleImportWarning {
+  code: string
+  message: string
+  count?: number | null
+}
+
+export interface ManualArticleImportStats {
+  characters: number
+  paragraphs: number
+  headings: number
+  tables: number
+  omittedImages: number
+}
+
+export interface ManualArticleImportResponse {
+  format: 'docx' | 'md'
+  title: string
+  suggestedTitle: string
+  titleConfidence: 'high' | 'medium' | 'none'
+  contentMarkdown: string
+  warnings: ManualArticleImportWarning[]
+  stats: ManualArticleImportStats
+}
+
+export function parseManualArticleImport(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const config: GeoRequestConfig = {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60_000,
+    silentError: true,
+  }
+  return request.post<R<ManualArticleImportResponse>>('/content/articles/manual-import/parse', form, config)
 }
 
 export interface ArticleAiDraftPreviewRequest {

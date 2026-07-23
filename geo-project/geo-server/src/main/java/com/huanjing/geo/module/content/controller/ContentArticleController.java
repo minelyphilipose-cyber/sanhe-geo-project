@@ -19,6 +19,7 @@ import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerationBatchSummary;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerationDetailResponse;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
+import com.huanjing.geo.module.content.dto.ManualArticleImportResponse;
 import com.huanjing.geo.module.content.dto.MedicalPublishReviewRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchResponse;
@@ -28,10 +29,13 @@ import com.huanjing.geo.module.content.service.ArticleGenerationReadinessService
 import com.huanjing.geo.module.content.service.ArticleSelfMediaCookieStatusService;
 import com.huanjing.geo.module.content.service.BatchArticleGenerationService;
 import com.huanjing.geo.module.content.service.ContentArticleService;
+import com.huanjing.geo.module.content.service.ManualArticleImportService;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -48,6 +52,7 @@ public class ContentArticleController {
     private final ArticleSelfMediaCookieStatusService selfMediaCookieStatusService;
     private final BatchArticleGenerationService batchArticleGenerationService;
     private final ArticleGenerationReadinessService articleGenerationReadinessService;
+    private final ManualArticleImportService manualArticleImportService;
 
     @GetMapping
     public R<Page<ArticleDraft>> page(@RequestParam(required = false) Long articleId,
@@ -75,6 +80,14 @@ public class ContentArticleController {
     @PostMapping("/manual")
     public R<ArticleDraft> createManual(@Valid @RequestBody ManualArticleCreateRequest req) {
         return R.ok(contentArticleService.createManual(req));
+    }
+
+    @PostMapping(value = "/manual-import/parse", consumes = "multipart/form-data")
+    public R<ManualArticleImportResponse> parseManualImport(@RequestPart("file") MultipartFile file,
+                                                            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        response.setHeader("Pragma", "no-cache");
+        return R.ok(manualArticleImportService.parse(file));
     }
 
     @PostMapping("/ai-draft")

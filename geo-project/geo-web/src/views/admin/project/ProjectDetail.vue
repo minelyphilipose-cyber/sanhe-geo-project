@@ -1013,6 +1013,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import { useUserStore } from '@/stores/user'
+import { articleTypeLabel as canonicalArticleTypeLabel } from '@/constants/articleTypes'
 import { useDictStore } from '@/stores/dict'
 import {
   deleteProject,
@@ -1681,20 +1682,7 @@ function selfMediaAccountLabel(account: SelfMediaAccount) {
 }
 
 function articleTypeLabel(value?: string | null) {
-  const labels: Record<string, string> = {
-    faq: 'FAQ',
-    scenario_content: '场景内容',
-    industry_article: '行业文章',
-    stage_advice: '阶段建议',
-    buying_guide: '选择指南',
-    comparison: '对比评测',
-    cost_analysis: '费用解析',
-    pitfall_guide: '避坑指南',
-    social_note: '经验笔记',
-    news_brief: '资讯简讯',
-    forum_discussion: '讨论帖',
-  }
-  return value ? (labels[value] || value) : '-'
+  return canonicalArticleTypeLabel(value)
 }
 
 function selfMediaBatchStatusLabel(status?: string | null) {

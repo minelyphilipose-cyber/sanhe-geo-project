@@ -60,19 +60,7 @@ public final class ArticlePromptChannels {
             Map.entry("portal_media", "门户媒体")
     );
 
-    public static final Map<String, String> ARTICLE_TYPE_LABELS = Map.ofEntries(
-            Map.entry("faq", "问答文章"),
-            Map.entry("industry_article", "行业分析文"),
-            Map.entry("scenario_content", "场景内容文"),
-            Map.entry("stage_advice", "阶段建议文"),
-            Map.entry("buying_guide", "选择指南"),
-            Map.entry("comparison", "对比评测"),
-            Map.entry("cost_analysis", "费用解析"),
-            Map.entry("pitfall_guide", "避坑指南"),
-            Map.entry("social_note", "经验笔记"),
-            Map.entry("news_brief", "资讯简讯"),
-            Map.entry("forum_discussion", "讨论帖")
-    );
+    public static final Map<String, String> ARTICLE_TYPE_LABELS = ArticleTypes.LABELS;
 
     public static final Map<String, String> CHANNEL_GUIDES = Map.ofEntries(
             Map.entry(AGENT_SITE, "客户官方站点的专业表达。优先回答读者问题，并根据真实材料自然承接品牌能力、产品或服务。"),

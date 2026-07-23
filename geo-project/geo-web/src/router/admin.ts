@@ -207,7 +207,13 @@ const adminRoutes: RouteRecordRaw = {
       path: 'content/articles/manual-create',
       name: 'ManualArticleCreate',
       component: () => import('@/views/admin/content/ManualArticleCreate.vue'),
-      meta: { title: '生成文章', hidden: true, permissions: ['content.article.write'] },
+      meta: { title: '导入文章', hidden: true, permissions: ['content.article.write'] },
+    },
+    {
+      path: 'content/articles/ai-create',
+      name: 'AiArticleCreate',
+      component: () => import('@/views/admin/content/AiArticleCreate.vue'),
+      meta: { title: 'AI 单篇生成', hidden: true, permissions: ['content.ai.generate'] },
     },
     {
       path: 'content/articles/batch-generate',

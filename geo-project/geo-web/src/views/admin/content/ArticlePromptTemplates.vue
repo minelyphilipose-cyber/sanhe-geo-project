@@ -379,6 +379,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Plus, Search } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
+import { GENERATED_ARTICLE_TYPE_OPTIONS, articleTypeLabel } from '@/constants/articleTypes'
 import { useUserStore } from '@/stores/user'
 import {
   createArticlePromptTemplate,
@@ -431,19 +432,7 @@ const subOptions: Record<string, Array<{ label: string; value: string }>> = {
     { label: '门户媒体', value: 'portal_media' },
   ],
 }
-const articleTypes = [
-  { label: '问答文章', value: 'faq' },
-  { label: '行业分析文', value: 'industry_article' },
-  { label: '场景内容文', value: 'scenario_content' },
-  { label: '阶段建议文', value: 'stage_advice' },
-  { label: '选择指南', value: 'buying_guide' },
-  { label: '对比评测', value: 'comparison' },
-  { label: '费用解析', value: 'cost_analysis' },
-  { label: '避坑指南', value: 'pitfall_guide' },
-  { label: '经验笔记', value: 'social_note' },
-  { label: '资讯简讯', value: 'news_brief' },
-  { label: '讨论帖', value: 'forum_discussion' },
-]
+const articleTypes = GENERATED_ARTICLE_TYPE_OPTIONS
 const questionScenes = [
   { label: '品牌', value: 'brand' },
   { label: '决策', value: 'decision' },
@@ -589,10 +578,6 @@ function mergedSubOptions(groupCode: string) {
 
 function agentSiteModuleLabel(value: string) {
   return ({ faq: 'FAQ', knowledge: '知识库', product: '产品服务' } as Record<string, string>)[value] || value
-}
-
-function articleTypeLabel(value: string) {
-  return articleTypes.find((item) => item.value === value)?.label || value
 }
 
 function questionSceneLabel(value?: string | null) {
