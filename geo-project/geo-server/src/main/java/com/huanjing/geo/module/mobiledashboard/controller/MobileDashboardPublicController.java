@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -24,8 +25,20 @@ import java.util.function.Supplier;
 @RequiredArgsConstructor
 public class MobileDashboardPublicController {
 
+    private static final String SHARE_CARD_CODE_HEADER = "X-Mobile-Dashboard-Share-Code";
+    private static final String SHARE_CARD_TITLE_HEADER = "X-Mobile-Dashboard-Share-Title";
+
     private final MobileDashboardShareService mobileDashboardShareService;
     private final MobileDashboardAggregateService mobileDashboardAggregateService;
+
+    @GetMapping("/share-card-meta")
+    public ResponseEntity<Void> shareCardMeta(
+            @RequestHeader(value = SHARE_CARD_CODE_HEADER, required = false) String shareCode) {
+        String title = mobileDashboardShareService.resolveShareCardTitle(shareCode);
+        return ResponseEntity.noContent()
+                .header(SHARE_CARD_TITLE_HEADER, encodeAsHtmlEntities(title))
+                .build();
+    }
 
     @PostMapping("/session")
     public R<MobileDashboardSessionVO> exchangeSession(@Valid @RequestBody MobileDashboardSessionRequest request,
@@ -113,5 +126,14 @@ public class MobileDashboardPublicController {
             return "runtime_error";
         }
         return name.length() <= 64 ? name : name.substring(0, 64);
+    }
+
+    private String encodeAsHtmlEntities(String value) {
+        StringBuilder encoded = new StringBuilder();
+        value.codePoints().forEach(codePoint -> encoded
+                .append("&#")
+                .append(codePoint)
+                .append(';'));
+        return encoded.toString();
     }
 }

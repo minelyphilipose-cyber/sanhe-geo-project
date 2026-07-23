@@ -7,7 +7,7 @@
         </div>
         <div>
           <h2>移动看板分享链接</h2>
-          <p>用于客户在微信内访问移动 H5 数据看板，泄露时可立即停用或删除无效链接。</p>
+          <p>发送到微信后以客户名称显示链接卡片，客户点击卡片进入移动 H5 数据看板。</p>
         </div>
       </div>
       <el-tag round type="info">{{ shares.length }} 条</el-tag>
@@ -23,7 +23,14 @@
       <template #title>
         <div class="created-share">
           <span>新链接仅本次展示：</span>
-          <el-input :model-value="createdShareUrl" readonly size="small" />
+          <a
+            class="created-share-link"
+            :href="createdShareUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {{ shareDisplayName }}
+          </a>
           <el-button size="small" type="success" plain @click="copyUrl(createdShareUrl)">复制</el-button>
         </div>
       </template>
@@ -126,6 +133,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { Link, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { getProjectDetail } from '@/api/project'
 import {
   createMobileDashboardShare,
   deleteMobileDashboardShare,
@@ -138,6 +146,7 @@ import type { MobileDashboardShare, MobileDashboardShareAccessSummary } from '@/
 const props = defineProps<{
   projectId: number
   editable: boolean
+  customerName?: string
 }>()
 
 const loading = ref(false)
@@ -147,6 +156,12 @@ const deletingId = ref<number | null>(null)
 const shares = ref<MobileDashboardShare[]>([])
 const summaries = ref<MobileDashboardShareAccessSummary[]>([])
 const createdShareUrl = ref('')
+const loadedCustomerName = ref('')
+const shareDisplayName = computed(() => (
+  props.customerName?.trim()
+  || loadedCustomerName.value
+  || '客户移动数据看板'
+))
 
 const summaryMap = computed(() => {
   const map = new Map<number, MobileDashboardShareAccessSummary>()
@@ -168,7 +183,7 @@ function formatTime(value?: string | null) {
 async function copyUrl(url: string) {
   try {
     await navigator.clipboard.writeText(url)
-    ElMessage.success('链接已复制')
+    ElMessage.success('链接已复制，微信卡片将显示客户名称')
   } catch {
     ElMessage.warning('复制失败，请手动复制')
   }
@@ -187,6 +202,18 @@ async function loadData() {
     ElMessage.error(error?.message || '分享链接加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadCustomerName() {
+  if (props.customerName?.trim()) return
+  try {
+    const { data } = await getProjectDetail(props.projectId)
+    loadedCustomerName.value = data.data?.companyName?.trim()
+      || data.data?.projectName?.trim()
+      || ''
+  } catch {
+    loadedCustomerName.value = ''
   }
 }
 
@@ -230,7 +257,10 @@ async function deleteShare(id: number) {
   }
 }
 
-onMounted(loadData)
+onMounted(() => {
+  loadData()
+  loadCustomerName()
+})
 </script>
 
 <style scoped>
@@ -317,8 +347,15 @@ onMounted(loadData)
   width: 100%;
 }
 
-.created-share .el-input {
+.created-share-link {
+  min-width: 0;
   max-width: 560px;
+  overflow: hidden;
+  color: #047857;
+  font-weight: 700;
+  text-decoration: underline;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .access-summary {

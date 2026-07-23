@@ -69,6 +69,7 @@
         </section>
 
         <QuestionSearchSources
+          v-if="MOBILE_DASHBOARD_FEATURES.showQuestionSearchSources"
           ref="searchSourcesRef"
           :platform-label="hitPlatformLabel(item)"
           :search-sources="item.searchSources"
@@ -146,7 +147,11 @@ import type { DashboardMetric, QuestionMonitorItem } from '@/types/mobileDashboa
 import { aiPlatformLabel, contentPlatformLabel } from '@/utils/mobileDashboardDictionaries'
 import { aiPlatformLogoSrc, fallbackAiPlatformLogo } from '@/utils/aiPlatformLogo'
 import { isSearchNotTriggered, questionMonitorStatus } from '@/utils/mobileDashboardQuestionStatus'
-import { replaceSourceCitationMarkers } from '@/utils/mobileDashboardMarkdown'
+import {
+  replaceSourceCitationMarkers,
+  stripSourceReferencesForDisplay,
+} from '@/utils/mobileDashboardMarkdown'
+import { MOBILE_DASHBOARD_FEATURES } from '@/constants/mobileDashboardFeatures'
 
 const QUESTION_DETAIL_CACHE_KEY = 'mobile_dashboard_question_detail'
 const route = useRoute()
@@ -188,7 +193,11 @@ function platformInitial(code: string) {
 
 function renderMarkdown(value?: string | null) {
   const raw = value?.trim() || ''
-  return raw ? markdown.render(replaceSourceCitationMarkers(raw, item.value?.searchSources)) : ''
+  if (!raw) return ''
+  const normalized = MOBILE_DASHBOARD_FEATURES.showQuestionSearchSources
+    ? replaceSourceCitationMarkers(raw, item.value?.searchSources)
+    : stripSourceReferencesForDisplay(raw, item.value?.searchSources)
+  return markdown.render(normalized)
 }
 
 function handleResponseClick(event: MouseEvent) {

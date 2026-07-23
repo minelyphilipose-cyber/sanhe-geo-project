@@ -33,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -40,8 +41,10 @@ public class MobileDashboardShareService {
 
     private static final String ACTIVE = "active";
     private static final String DISABLED = "disabled";
+    private static final String DEFAULT_SHARE_CARD_TITLE = "移动数据看板";
     private static final char[] SHARE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final Pattern SHARE_CODE_PATTERN = Pattern.compile("[A-HJ-NP-Z2-9]{8}");
 
     private final MobileDashboardShareMapper shareMapper;
     private final MobileDashboardAccessLogMapper accessLogMapper;
@@ -205,6 +208,38 @@ public class MobileDashboardShareService {
         vo.setContentPlatforms(MobileDashboardContentChannelCatalog.platformOptions());
         vo.setMessage("Dashboard aggregation APIs are available. Judge-derived metrics remain unavailable until judge pipeline launch.");
         return vo;
+    }
+
+    public String resolveShareCardTitle(String shareCode) {
+        if (!StringUtils.hasText(shareCode)) {
+            return DEFAULT_SHARE_CARD_TITLE;
+        }
+        String normalized = normalizeShareCode(shareCode);
+        if (!SHARE_CODE_PATTERN.matcher(normalized).matches()) {
+            return DEFAULT_SHARE_CARD_TITLE;
+        }
+        MobileDashboardShare share = shareMapper.selectOne(
+                new LambdaQueryWrapper<MobileDashboardShare>()
+                        .eq(MobileDashboardShare::getShareCode, normalized)
+                        .last("LIMIT 1")
+        );
+        if (share == null
+                || !ACTIVE.equalsIgnoreCase(share.getStatus())
+                || share.getExpiresAt() == null
+                || !share.getExpiresAt().isAfter(LocalDateTime.now())) {
+            return DEFAULT_SHARE_CARD_TITLE;
+        }
+        Project project = projectMapper.selectById(share.getProjectId());
+        if (project == null || project.getDeletedAt() != null) {
+            return DEFAULT_SHARE_CARD_TITLE;
+        }
+        if (StringUtils.hasText(project.getCompanyName())) {
+            return truncate(project.getCompanyName().trim(), 80);
+        }
+        if (StringUtils.hasText(project.getProjectName())) {
+            return truncate(project.getProjectName().trim(), 80);
+        }
+        return DEFAULT_SHARE_CARD_TITLE;
     }
 
     public MobileDashboardSessionTokenService.SessionClaims requireValidSession(String sessionToken) {

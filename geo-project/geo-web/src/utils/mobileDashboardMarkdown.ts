@@ -71,6 +71,20 @@ export function replaceSourceCitationMarkers(
     .trimEnd()
 }
 
+export function stripSourceReferencesForDisplay(
+  value: string,
+  searchSources?: QuestionSearchSource[],
+) {
+  return replaceSourceCitationMarkers(value, searchSources)
+    .replace(/\[\[(\d+)]]\(#reference-\1\)/g, '')
+    .replace(SOURCE_CITATION_PATTERN, '')
+    .replace(SOURCE_ATTRIBUTION_LINE_PATTERN, '')
+    .replace(/[ \t]+([，。；：！？,.!?;:])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 function sourceUrlKey(value: string) {
   const safeUrl = safePublicSourceUrl(value)
   if (!safeUrl) return ''

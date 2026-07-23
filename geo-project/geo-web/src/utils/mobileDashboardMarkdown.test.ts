@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { replaceSourceCitationMarkers, sourceReferenceNumber } from './mobileDashboardMarkdown'
+import {
+  replaceSourceCitationMarkers,
+  sourceReferenceNumber,
+  stripSourceReferencesForDisplay,
+} from './mobileDashboardMarkdown'
 
 describe('mobile dashboard markdown citations', () => {
   it('turns provider reference markers into links to valid source cards', () => {
@@ -47,5 +51,12 @@ describe('mobile dashboard markdown citations', () => {
       '[官网](https://other.example.com)',
       [{ sourceId: 1, rankNo: 1, url: 'https://example.com/a' }],
     )).toBe('[官网](https://other.example.com)')
+  })
+
+  it('removes source markers and attribution when reference display is hidden', () => {
+    expect(stripSourceReferencesForDisplay(
+      '回答结论[ref_1]。\n\n信息来源：https://example.com/a',
+      [{ sourceId: 1, citationIndex: 1, url: 'https://example.com/a' }],
+    )).toBe('回答结论。')
   })
 })
