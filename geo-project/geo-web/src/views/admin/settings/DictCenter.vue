@@ -173,6 +173,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useDictStore } from '@/stores/dict'
@@ -186,6 +187,7 @@ import {
 } from '@/api/dict'
 
 const dictStore = useDictStore()
+const route = useRoute()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -279,6 +281,9 @@ function openCreate() {
   formMode.value = 'create'
   editingId.value = null
   resetForm()
+  if (query.dictType) {
+    form.dictType = query.dictType
+  }
   formVisible.value = true
 }
 
@@ -351,6 +356,9 @@ async function refreshGlobalDict() {
 }
 
 onMounted(async () => {
+  if (typeof route.query.dictType === 'string') {
+    query.dictType = route.query.dictType
+  }
   await Promise.all([loadTypes(), load()])
 })
 </script>
