@@ -836,17 +836,54 @@
     if (href.includes('/new/note-manager') || text.includes('笔记管理')) return 'note_manager'
     return 'unknown'
   }
+
+  function isXiaohongshuImageGenerationMessage(value) {
+    const text = String(value || '').replace(/\s+/g, '')
+    if (!text) return false
+    return text.includes('笔记图片生成中')
+      || text.includes('图片正在生成中')
+      || text.includes('图片生成中')
+      || (text.includes('图片生成') && text.includes('请稍后'))
+  }
   
   function isXiaohongshuImageGenerating() {
-    const text = normalizeText(document.body?.innerText || document.body?.textContent || '')
-    return text.includes('笔记图片生成中') || text.includes('请稍后')
+    return Array.from(document.querySelectorAll('div, span, p, [role="status"], [role="alert"]'))
+      .filter(isVisibleElement)
+      .map((el) => normalizeText(el.textContent || el.getAttribute?.('aria-label') || ''))
+      .filter((text) => text.length > 0 && text.length <= 80)
+      .some(isXiaohongshuImageGenerationMessage)
+  }
+
+  function isXiaohongshuPublishReadinessSnapshot(snapshot = {}) {
+    if (!snapshot.settingsVisible) return false
+    if (snapshot.publishHostReady) return true
+    if (snapshot.generating) return false
+    return Boolean(snapshot.hasPreviewMarkers || Number(snapshot.thumbnailCount || 0) > 0)
+  }
+
+  function isXiaohongshuPublishHostReadyState(submitDisabled, submitLoading) {
+    return String(submitDisabled) === 'false' && String(submitLoading) === 'false'
+  }
+
+  function hasXiaohongshuReadyPublishHost() {
+    return Array.from(document.querySelectorAll('xhs-publish-btn'))
+      .filter(isVisibleElement)
+      .some((host) => isXiaohongshuPublishHostReadyState(
+        host.getAttribute('submit-disabled'),
+        host.getAttribute('submit-loading'),
+      ))
   }
   
   function isXiaohongshuGeneratedImageReady() {
-    if (isXiaohongshuImageGenerating()) return false
     const text = normalizeText(document.body?.innerText || document.body?.textContent || '')
-    if (text.includes('图片编辑') && text.includes('笔记预览')) return true
-    return getXiaohongshuGeneratedImageSnapshot().thumbnailCount > 0
+    const snapshot = getXiaohongshuGeneratedImageSnapshot()
+    return isXiaohongshuPublishReadinessSnapshot({
+      settingsVisible: isXiaohongshuPublishSettingsVisible(),
+      publishHostReady: hasXiaohongshuReadyPublishHost(),
+      generating: snapshot.generating,
+      hasPreviewMarkers: text.includes('图片编辑') && text.includes('笔记预览'),
+      thumbnailCount: snapshot.thumbnailCount,
+    })
   }
   
   function getXiaohongshuGeneratedImageSnapshot() {
@@ -1615,6 +1652,9 @@
     editorSelectors,
     resolvePublishOptions,
     testing: {
+      isXiaohongshuImageGenerationMessage,
+      isXiaohongshuPublishHostReadyState,
+      isXiaohongshuPublishReadinessSnapshot,
       xiaohongshuPublishHostPrimaryButtonPoint,
     },
   }

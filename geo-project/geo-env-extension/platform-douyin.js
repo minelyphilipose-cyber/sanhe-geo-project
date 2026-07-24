@@ -8,6 +8,7 @@
   const RETRYABLE_FAILURE_CODES = new Set([
     'DOUYIN_ARTICLE_FORM_NOT_READY',
     'DOUYIN_COVER_UPLOAD_TIMEOUT',
+    'DOUYIN_IMAGE_EDITOR_CLOSE_TIMEOUT',
     'DOUYIN_PUBLISH_NOT_CONFIRMED',
     'PAGE_LOAD_TIMEOUT',
     'EDITOR_NOT_READY',
@@ -270,9 +271,9 @@
     if (!done) throw new Error(`抖音图片编辑确认按钮未找到；${describeState(deps)}`)
     await click(done, platform, deps)
     await waitForCondition(
-      () => !findDialogByText(['图片编辑', '确定'], deps),
+      () => !isActiveImageEditorDialog(dialog, deps),
       12000,
-      `抖音图片编辑确认后弹窗未关闭；${describeState(deps)}`,
+      `DOUYIN_IMAGE_EDITOR_CLOSE_TIMEOUT：抖音图片编辑确认后弹窗未关闭；${describeState(deps)}`,
     )
     await scrollToSection('文章头图', deps)
     await waitForCondition(
@@ -415,13 +416,19 @@
       12000,
       `抖音最终发布按钮未找到；${describeState(deps)}`,
     )
+    notifyStage(deps, 'submitting_publish')
     await click(publishButton, platform, deps)
+    notifyStage(deps, 'verifying_publish_result')
     const verification = await waitForCondition(
       () => verifyPublishSubmission(payload, scheduledAt, platformStatus, deps, publishAttemptKey),
       45000,
       `抖音发布后未检测到成功状态；${describeState(deps)}`,
     )
     return verification
+  }
+
+  function notifyStage(deps, stage) {
+    if (typeof deps?.updateStage === 'function') deps.updateStage(stage)
   }
 
   function findDouyinSubmitButton(deps = {}) {
@@ -755,11 +762,7 @@
     const section = findSection(label, deps)
     if (!section) return false
     const text = bodyText({ ...deps, root: section })
-    const hasImage = Array.from(section.querySelectorAll('img'))
-      .filter((image) => !image.closest('[contenteditable="true"], .ProseMirror, [class*="editor"], [class*="Editor"]'))
-      .some(isVisible)
-    return hasImage
-      || hasBackgroundImage(section)
+    return hasRenderedUploadMedia(section)
       || /点击替换图片|编辑封面|编辑头图|重新上传|更换图片|已上传/.test(text)
   }
 
@@ -780,18 +783,45 @@
         const text = normalizeText(el.textContent || '')
         return text.includes(label)
           && /点击替换图片|编辑封面|编辑头图|重新上传|更换图片|已上传/.test(text)
-          && hasBackgroundImage(el)
+          && (hasRenderedUploadMedia(el) || /点击替换图片|编辑头图|重新上传|更换图片|已上传/.test(text))
       })
   }
 
+  function hasRenderedUploadMedia(root) {
+    const nodes = root === document
+      ? Array.from(document.querySelectorAll('*'))
+      : [root, ...Array.from(root.querySelectorAll?.('*') || [])]
+    return nodes.some(isRenderedUploadMediaElement)
+  }
+
+  function isRenderedUploadMediaElement(el) {
+    if (!isVisible(el)) return false
+    if (el.closest('[contenteditable="true"], .ProseMirror, [class*="editor"], [class*="Editor"]')) return false
+    const rect = el.getBoundingClientRect()
+    if (rect.width < 24 || rect.height < 24) return false
+    const tagName = String(el.tagName || '').toUpperCase()
+    if (tagName === 'IMG') {
+      return Boolean(el.currentSrc || el.src || el.getAttribute?.('src'))
+    }
+    if (tagName === 'CANVAS') {
+      return Number(el.width || rect.width) >= 24 && Number(el.height || rect.height) >= 24
+    }
+    return isSupportedBackgroundImage(getComputedStyle(el).backgroundImage)
+  }
+
   function hasBackgroundImage(root) {
-    const nodes = root === document ? Array.from(document.querySelectorAll('*')) : [root, ...Array.from(root.querySelectorAll?.('*') || [])]
+    const nodes = root === document
+      ? Array.from(document.querySelectorAll('*'))
+      : [root, ...Array.from(root.querySelectorAll?.('*') || [])]
     return nodes.some((el) => {
       if (!isVisible(el)) return false
-      if (el.closest?.('[contenteditable="true"], .ProseMirror, [class*="editor"], [class*="Editor"]')) return false
-      const backgroundImage = getComputedStyle(el).backgroundImage || ''
-      return /^url\(["']?https?:\/\//i.test(backgroundImage)
+      if (el.closest('[contenteditable="true"], .ProseMirror, [class*="editor"], [class*="Editor"]')) return false
+      return isSupportedBackgroundImage(getComputedStyle(el).backgroundImage)
     })
+  }
+
+  function isSupportedBackgroundImage(value) {
+    return /(?:^|,)\s*url\(\s*(['"]?)(?!\s*['"]?\s*\))[\s\S]+?\1\s*\)/i.test(String(value || ''))
   }
 
   function isSectionLabel(el, label, normalizeText) {
@@ -875,6 +905,11 @@
     const roots = Array.from(document.querySelectorAll('[role="dialog"], .semi-modal, .semi-modal-content, .modal, .dialog'))
       .filter(isVisible)
     return roots.find((root) => texts.every((text) => bodyText({ ...deps, root }).includes(text))) || null
+  }
+
+  function isActiveImageEditorDialog(dialog, deps = {}) {
+    if (!dialog || dialog.isConnected === false || !isVisible(dialog)) return false
+    return Boolean(findActionInRoot(dialog, ['确定', '完成'], deps))
   }
 
   async function clickIfVisible(texts, deps, options = {}) {
@@ -983,12 +1018,17 @@
     return ['文章头图', '封面设置'].map((label) => {
       const section = findSection(label, deps)
       const text = section ? bodyText({ ...deps, root: section }).slice(0, 120) : ''
+      const visibleMedia = section
+        ? [section, ...Array.from(section.querySelectorAll?.('*') || [])].filter(isRenderedUploadMediaElement)
+        : []
       return {
         label,
         found: Boolean(section),
         hasResult: hasSectionImage(label, deps),
         hasBackgroundImage: section ? hasBackgroundImage(section) : false,
         imageCount: section ? Array.from(section.querySelectorAll('img')).filter(isVisible).length : 0,
+        canvasCount: visibleMedia.filter((el) => String(el.tagName || '').toUpperCase() === 'CANVAS').length,
+        renderedMediaCount: visibleMedia.length,
         rect: section ? compactRect(section.getBoundingClientRect()) : null,
         text,
       }
@@ -1015,8 +1055,40 @@
   function isVisible(el) {
     if (!el || !el.getBoundingClientRect) return false
     const rect = el.getBoundingClientRect()
-    const style = getComputedStyle(el)
-    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+    if (rect.width <= 0 || rect.height <= 0) return false
+    let current = el
+    for (let depth = 0; current && depth < 16; depth += 1) {
+      const style = getComputedStyle(current)
+      if (isHiddenPresentationState({
+        hidden: Boolean(current.hidden),
+        inert: Boolean(current.inert),
+        ariaHidden: current.getAttribute?.('aria-hidden'),
+        dataState: current.getAttribute?.('data-state'),
+        dataVisible: current.getAttribute?.('data-visible'),
+        dataShow: current.getAttribute?.('data-show'),
+        display: style.display,
+        visibility: style.visibility,
+        contentVisibility: style.contentVisibility,
+        opacity: style.opacity,
+      })) {
+        return false
+      }
+      current = current.parentElement
+    }
+    return true
+  }
+
+  function isHiddenPresentationState(state = {}) {
+    if (state.hidden || state.inert) return true
+    if (String(state.ariaHidden || '').toLowerCase() === 'true') return true
+    if (/^(closed|hidden|exited)$/i.test(String(state.dataState || ''))) return true
+    if (/^false$/i.test(String(state.dataVisible || ''))) return true
+    if (/^false$/i.test(String(state.dataShow || ''))) return true
+    if (state.display === 'none') return true
+    if (state.visibility === 'hidden' || state.visibility === 'collapse') return true
+    if (state.contentVisibility === 'hidden') return true
+    const opacity = Number.parseFloat(state.opacity)
+    return Number.isFinite(opacity) && opacity <= 0.01
   }
 
   function defaultNormalizeText(value) {
@@ -1031,5 +1103,12 @@
     createPublishOptionsAdapter,
     editorSelectors,
     maybeSelectArticleEditor,
+    testing: {
+      isHiddenPresentationState,
+      isRenderedUploadMediaElement,
+      isRetryableFailureCode,
+      isSupportedBackgroundImage,
+      isVisible,
+    },
   }
 })(globalThis)

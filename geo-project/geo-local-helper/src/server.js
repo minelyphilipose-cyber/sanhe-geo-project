@@ -453,7 +453,7 @@ async function getMachineId() {
 }
 
 function activeRuntimeTaskCount() {
-  return listTasks().filter((task) => task.status === 'claimed').length
+  return occupiedScheduleClaimSlotCount()
 }
 
 function occupiedScheduleClaimSlotCount() {
@@ -1127,7 +1127,7 @@ function isStaleAdspowerBrowserSessionError(error) {
     error?.cause?.code,
     error?.cause?.message,
   ].filter(Boolean).join(' ')
-  return /ECONNREFUSED|ECONNRESET|socket hang up|websocket.*(?:closed|failed)|browser has disconnected/i.test(text)
+  return /ECONNREFUSED|ECONNRESET|socket hang up|websocket.*(?:closed|failed)|browser has disconnected|Network\.enable timed out|protocolTimeout|Protocol error/i.test(text)
 }
 
 function normalizeAdspowerProfile(row) {
@@ -1593,6 +1593,7 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
   if (isReusableActiveTask(existing) && claimAttemptOfTask(existing) === claimedAttempt) {
     return { ok: true, claimed: true, reused: true, task: existing, schedule: claim.schedule }
   }
+  let runtimeTask = null
   try {
     const environment = normalizeProviderEnvironment(
       config,
@@ -1600,8 +1601,8 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
       claim.launch.providerProfileId,
       claim.launch.environmentName,
     )
-    const data = await startAdspowerBrowser(config, environment.providerProfileId)
-    const task = normalizeLaunchTask({
+    let data = await startAdspowerBrowser(config, environment.providerProfileId)
+    runtimeTask = normalizeLaunchTask({
       taskId,
       platform: claim.launch.platform || claim.task.platform,
       backendBase: config.trustedBackendBase,
@@ -1615,31 +1616,72 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
       providerProfileId: claim.launch.providerProfileId || claim.task.providerProfileId,
       environmentName: claim.launch.environmentName || claim.launch.environmentKey || claim.task.environmentKey,
     }, environment, data)
-    task.schedule = claim.schedule || null
-    task.platformScheduledAt = claim.schedule?.platformScheduledAt || null
-    upsertTask(task)
+    runtimeTask.schedule = claim.schedule || null
+    runtimeTask.platformScheduledAt = claim.schedule?.platformScheduledAt || null
+    upsertTask(runtimeTask)
     await saveRuntimeTasks()
-    task.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, task.url)
-    upsertTask(task)
+    try {
+      runtimeTask.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, runtimeTask.url)
+    } catch (error) {
+      if (!isStaleAdspowerBrowserSessionError(error)) throw error
+      data = await startAdspowerBrowser(config, environment.providerProfileId, { forceRefresh: true })
+      runtimeTask.adspower = {
+        puppeteerWs: data?.ws?.puppeteer || null,
+        selenium: data?.ws?.selenium || null,
+      }
+      runtimeTask.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, runtimeTask.url)
+    }
+    upsertTask(runtimeTask)
     await saveRuntimeTasks()
-    return { ok: true, claimed: true, task, schedule: claim.schedule }
+    return { ok: true, claimed: true, task: runtimeTask, schedule: claim.schedule }
   } catch (error) {
-    const failureTask = {
+    const failedAt = nowIso()
+    const failureDetails = {
+      code: 'LOCAL_HELPER_LAUNCH_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+    }
+    const failureTask = runtimeTask || {
       taskId,
       platform: claim.launch.platform || claim.task.platform,
       backendTask: claim.task,
       schedule: claim.schedule || null,
-      lastError: {
-        code: 'LOCAL_HELPER_LAUNCH_FAILED',
-        message: error instanceof Error ? error.message : String(error),
-      },
     }
-    await reportScheduleExecutionFailed(config, failureTask, {
-      failureCode: 'LOCAL_HELPER_LAUNCH_FAILED',
-      failureMessage: failureTask.lastError.message,
-    }).catch((reportError) => {
-      console.error('Failed to report schedule launch failure:', formatBackendError(reportError))
-    })
+    failureTask.status = 'failed'
+    failureTask.failedAt = failedAt
+    failureTask.failureCode = failureDetails.code
+    failureTask.lastError = failureDetails
+    failureTask.claimedAt = null
+    failureTask.claimOwner = null
+    failureTask.backendFailureReportedAt = null
+    failureTask.backendFailureReportAttempts = Number(failureTask.backendFailureReportAttempts || 0) + 1
+    if (runtimeTask) {
+      upsertTask(failureTask)
+      await saveRuntimeTasks().catch((saveError) => {
+        console.error('Failed to persist schedule launch failure:', saveError.message)
+      })
+    }
+    try {
+      await reportScheduleExecutionFailed(config, failureTask, {
+        failureCode: failureDetails.code,
+        failureMessage: failureDetails.message,
+      })
+      failureTask.backendFailureReportedAt = nowIso()
+      failureTask.backendFailureReportLastError = null
+    } catch (reportError) {
+      failureTask.backendFailureReportLastError = formatBackendError(reportError)
+      const terminated = terminateTaskForScheduleClaimError(failureTask, reportError)
+      if (!terminated && isNonRetryableBackendReportError(reportError)) {
+        failureTask.backendFailureReportRejectedAt = nowIso()
+      }
+      if (!terminated) {
+        console.error('Failed to report schedule launch failure:', failureTask.backendFailureReportLastError)
+      }
+    }
+    if (runtimeTask) {
+      await saveRuntimeTasks().catch((saveError) => {
+        console.error('Failed to persist schedule launch report result:', saveError.message)
+      })
+    }
     throw error
   }
 }
@@ -1944,37 +1986,44 @@ async function checkPublishResultInAdspowerPage(config, wsEndpoint, targetUrl, s
         throw new Error('baijiahao publish check requires app_id from self media account platformAccountId')
       }
     }
-    const { page } = await reuseOrCreatePublishCheckPage(browser, platform, effectiveTargetUrl)
-    await page.goto(effectiveTargetUrl, { waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) })
-    await waitForPublishCheckPageReady(page, platform)
-    await delay(1_000)
-    const deadline = Date.now() + publishCheckEvaluateTimeoutMs(platform)
-    let latest = null
-    let reloadCount = 0
-    while (Date.now() < deadline) {
-      latest = await evaluatePublishResult(page, schedule)
-      if (latest.found) return latest
-      if (shouldReloadPublishCheckPage(platform, latest, reloadCount)) {
-        reloadCount += 1
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) }).catch(() => null)
-        await waitForPublishCheckPageReady(page, platform)
-        await delay(1_000)
-        latest = {
-          ...(latest || {}),
-          reloadedForStaleWorksList: true,
-          reloadCount,
-          reason: latest?.reason || 'works list looked stale before reload',
+    const checkPage = await reuseOrCreatePublishCheckPage(browser, platform, effectiveTargetUrl)
+    const { page } = checkPage
+    try {
+      await page.goto(effectiveTargetUrl, { waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) })
+      await waitForPublishCheckPageReady(page, platform)
+      await delay(1_000)
+      const deadline = Date.now() + publishCheckEvaluateTimeoutMs(platform)
+      let latest = null
+      let reloadCount = 0
+      while (Date.now() < deadline) {
+        latest = await evaluatePublishResult(page, schedule)
+        if (latest.found) return latest
+        if (shouldReloadPublishCheckPage(platform, latest, reloadCount)) {
+          reloadCount += 1
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) }).catch(() => null)
+          await waitForPublishCheckPageReady(page, platform)
+          await delay(1_000)
+          latest = {
+            ...(latest || {}),
+            reloadedForStaleWorksList: true,
+            reloadCount,
+            reason: latest?.reason || 'works list looked stale before reload',
+          }
+          continue
         }
-        continue
+        await delay(2_000)
       }
-      await delay(2_000)
-    }
-    return latest ? { ...latest, reloadCount } : {
-      found: false,
-      reason: 'works list not evaluated',
-      targetTitle: schedule?.publishCheckTitle || '',
-      url: page.url(),
-      reloadCount,
+      return latest ? { ...latest, reloadCount } : {
+        found: false,
+        reason: 'works list not evaluated',
+        targetTitle: schedule?.publishCheckTitle || '',
+        url: page.url(),
+        reloadCount,
+      }
+    } finally {
+      if (checkPage.created && !page.isClosed()) {
+        await page.close().catch(() => null)
+      }
     }
   } finally {
     await browser.disconnect()
@@ -2029,7 +2078,6 @@ async function reuseOrCreatePublishCheckPage(browser, platform, targetUrl) {
   const pages = await browser.pages()
   const reusablePage = pages.find((page) => isReusablePublishCheckPage(platform, page.url(), targetUrl))
   if (reusablePage) {
-    await reusablePage.bringToFront().catch(() => {})
     return { page: reusablePage, created: false }
   }
   return { page: await browser.newPage(), created: true }

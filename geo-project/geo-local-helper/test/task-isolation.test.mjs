@@ -81,7 +81,7 @@ test('local helper requires environmentKey for extension task claims and complet
   )
 })
 
-test('local helper releases unclaimed schedules and reports only claimed work as running', () => {
+test('local helper releases unclaimed schedules and reports every occupied schedule slot', () => {
   const server = readProjectFile('geo-local-helper/src/server.js')
 
   assert.match(
@@ -91,8 +91,8 @@ test('local helper releases unclaimed schedules and reports only claimed work as
   )
   assert.match(
     server,
-    /function activeRuntimeTaskCount\(\) \{\s+return listTasks\(\)\.filter\(\(task\) => task\.status === 'claimed'\)\.length/,
-    'pending handoffs must not be reported as actively running tasks',
+    /function activeRuntimeTaskCount\(\) \{\s+return occupiedScheduleClaimSlotCount\(\)/,
+    'backend capacity reporting must match the pending and claimed slots enforced locally',
   )
   assert.match(
     server,
@@ -304,7 +304,7 @@ test('douyin channel-close recovery opens the works manager and recreates a vani
   assert.match(serviceWorker, /DOUYIN_PUBLISH_NOT_CONFIRMED/)
 })
 
-test('all browser platforms recover channel-close through result pages without resubmitting content', () => {
+test('scheduled browser platforms recover channel-close through result pages without resubmitting content', () => {
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
 
   assert.match(serviceWorker, /TOUTIAO_MANAGE_URL = 'https:\/\/mp\.toutiao\.com\/profile_v4\/graphic\/articles'/)
@@ -313,16 +313,11 @@ test('all browser platforms recover channel-close through result pages without r
     /recoverToutiaoScheduleAfterWorksListTimeout[\s\S]+isToutiaoWorksManageUrl\(current\.url\)[\s\S]+reloadPlatformWorksList/,
     'toutiao recovery must preserve the actual redirected works page and refresh it before matching',
   )
-  assert.match(serviceWorker, /ZHIHU_MANAGE_URL = 'https:\/\/www\.zhihu\.com\/creator\/manage\/creation\/article'/)
   assert.match(serviceWorker, /XIAOHONGSHU_MANAGE_URL = 'https:\/\/creator\.xiaohongshu\.com\/new\/note-manager'/)
   assert.match(serviceWorker, /BAIJIAHAO_MANAGE_URL = 'https:\/\/baijiahao\.baidu\.com\/builder\/rc\/content'/)
   assert.match(
     serviceWorker,
     /recoverXiaohongshuPublishAfterMessageChannelClosed[\s\S]+findVerifiedPlatformTab\('xiaohongshu'[\s\S]+openPlatformManageVerifyTab\(recoveryTabId, 'xiaohongshu'/,
-  )
-  assert.match(
-    serviceWorker,
-    /recoverZhihuPublishAfterFillError[\s\S]+findVerifiedPlatformTab\('zhihu'[\s\S]+openPlatformManageVerifyTab\(recoveryTabId, 'zhihu'/,
   )
   assert.match(
     serviceWorker,
@@ -333,9 +328,15 @@ test('all browser platforms recover channel-close through result pages without r
   assert.match(serviceWorker, /publishNotConfirmedError\('ZHIHU'/)
   assert.match(serviceWorker, /publishNotConfirmedError\('XIAOHONGSHU'/)
   assert.match(serviceWorker, /publishNotConfirmedError\('BAIJIAHAO'/)
+  assert.match(
+    serviceWorker,
+    /if \(isAutomatedBrowserPublishPlatform\(options\.platform\)\)[\s\S]+throw error[\s\S]+waitForFillContentScriptReadyWithRecovery/,
+    'a closed post-submit message channel must enter result recovery instead of replaying the full fill command',
+  )
+  assert.match(serviceWorker, /baijiahao: 'BAIJIAHAO_PUBLISH_NOT_CONFIRMED'/)
 })
 
-test('zhihu post-submit uncertainty can only enter result verification, never a fresh publish', () => {
+test('zhihu only accepts immediate-page confirmation and never opens a delayed result-check page', () => {
   const platform = readProjectFile('geo-env-extension/platform-zhihu.js')
   const contentScript = readProjectFile('geo-env-extension/content-script.js')
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
@@ -346,6 +347,30 @@ test('zhihu post-submit uncertainty can only enter result verification, never a 
   assert.match(contentScript, /updateStage: updateActiveFillStage/)
   assert.match(serviceWorker, /isRecoverableZhihuPublishVerifyError[\s\S]+ZHIHU_PUBLISH_NOT_SUBMITTED[\s\S]+ZHIHU_PUBLISH_NOT_CONFIRMED/)
   assert.match(serviceWorker, /zhihu: 'ZHIHU_PUBLISH_NOT_CONFIRMED'/)
+  assert.match(
+    serviceWorker,
+    /recoverZhihuPublishAfterFillError[\s\S]+findVerifiedPlatformTab\('zhihu'[\s\S]+publishNotConfirmedError\('ZHIHU'/,
+  )
+  assert.doesNotMatch(
+    serviceWorker,
+    /recoverZhihuPublishAfterFillError[\s\S]+openPlatformManageVerifyTab\([^)]*'zhihu'/,
+    '知乎无法在当前页面确认时必须转人工，不得自动打开管理页回查',
+  )
+})
+
+test('publish-result checks do not steal focus or leave temporary management tabs open', () => {
+  const server = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.doesNotMatch(
+    server,
+    /reusablePage\.bringToFront/,
+    'an automatic result check must not force a creator management page to the foreground',
+  )
+  assert.match(
+    server,
+    /const checkPage = await reuseOrCreatePublishCheckPage[\s\S]+if \(checkPage\.created && !page\.isClosed\(\)\)[\s\S]+await page\.close/,
+    'a temporary works-list page must be closed after the automatic result check completes',
+  )
 })
 
 test('toutiao cover selection and post-submit timeout cannot fall back to republishing', () => {
@@ -388,8 +413,23 @@ test('AdsPower extension status refreshes a stale dynamic DevTools endpoint once
   )
   assert.match(
     server,
+    /function isStaleAdspowerBrowserSessionError[\s\S]+Network\\\.enable timed out[\s\S]+protocolTimeout/,
+    'helper must also refresh AdsPower sessions when the cached DevTools endpoint stops answering CDP commands',
+  )
+  assert.match(
+    server,
     /handleAdspowerExtensionStatus[\s\S]+isStaleAdspowerBrowserSessionError\(error\)[\s\S]+startAdspowerBrowser\(config, environment\.providerProfileId, \{ forceRefresh: true \}\)[\s\S]+inspectGeoEnvExtension/,
     'extension status must discard the cached session, obtain the current dynamic port, and retry once',
+  )
+  assert.match(
+    server,
+    /claimAndLaunchScheduledTask[\s\S]+isStaleAdspowerBrowserSessionError\(error\)[\s\S]+startAdspowerBrowser\(config, environment\.providerProfileId, \{ forceRefresh: true \}\)[\s\S]+runtimeTask\.openResult/,
+    'schedule launch must refresh the AdsPower session and retry the page open once after a stale CDP failure',
+  )
+  assert.match(
+    server,
+    /failureTask\.status = 'failed'[\s\S]+failureTask\.claimedAt = null[\s\S]+upsertTask\(failureTask\)[\s\S]+saveRuntimeTasks/,
+    'a failed page launch must immediately persist a terminal local task and release its capacity slot',
   )
 })
 

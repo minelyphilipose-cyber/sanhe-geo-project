@@ -153,16 +153,6 @@
           >
             重置账号校验
           </el-button>
-          <el-button
-            v-if="actions.isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
-            size="small"
-            type="primary"
-            :loading="actions.semiAutoAccountActionLoading(account)"
-            :disabled="!actions.canSubmitSemiAutoEnvironmentTask(account)"
-            @click="actions.submitSemiAutoEnvironmentTask(account)"
-          >
-            打开环境并填充
-          </el-button>
         </div>
       </div>
       <el-empty

@@ -178,6 +178,7 @@
       clickPublishAction: (el, platform) => clickPublishAction(el, platform, deps),
       hasPublishProgressSignal: () => hasPublishProgressSignal(deps),
       findPublishConfirmButton: (initialButton) => findPublishConfirmButton(initialButton, deps),
+      detectPublishSuccessModal: () => detectPublishSuccessModal(deps),
       verifyPublishSubmitted: (context) => verifyPublishSubmitted(context, deps),
       setEditablePlainText: (contentElement, text) => setEditablePlainText(contentElement, text, deps),
       resolveEditableContentElement: (contentElement) => resolveEditableContentElement(contentElement, deps),
@@ -1050,7 +1051,6 @@
     return Boolean(
       findDraftLoadingDialog(deps)
       || verifyPublishSubmitted({}, deps)
-      || findVisibleTextElement('发布成功', { exact: false, maxLength: 40 })
       || findVisibleTextElement('审核中', { exact: false, maxLength: 40 })
     )
   }
@@ -1063,13 +1063,48 @@
     return buttons[0]?.el || null
   }
 
+  function detectPublishSuccessModal(deps = {}) {
+    const closeButtons = Array.from(document.querySelectorAll?.('button[aria-label="关闭"]') || [])
+      .filter((button) => isVisibleWithDeps(button, deps))
+    for (const closeButton of closeButtons) {
+      let root = closeButton.parentElement
+      for (let depth = 0; root && depth < 8; depth += 1, root = root.parentElement) {
+        if (root === document.body || root === document.documentElement) break
+        if (!isVisibleWithDeps(root, deps)) continue
+        const text = normalizeDomText(root.textContent || '', deps)
+        const creationMatch = text.match(/感谢你的第(\d+)篇创作[！!]?/)
+        const hasShareSections = text.includes('转发到想法') && text.includes('更多分享')
+        if (!creationMatch && !hasShareSections) continue
+        const title = Array.from(root.querySelectorAll?.('*') || [])
+          .find((element) => isVisibleWithDeps(element, deps)
+            && normalizeDomText(element.textContent || '', deps) === '发布成功')
+        if (!title) continue
+        return {
+          detected: true,
+          title: '发布成功',
+          creationCount: creationMatch ? Number(creationMatch[1]) : null,
+          confirmationText: creationMatch?.[0] || '',
+          closeButtonPresent: true,
+          forwardToIdeaPresent: text.includes('转发到想法'),
+          moreSharePresent: text.includes('更多分享'),
+          signature: 'title+close_button+creation_or_share',
+        }
+      }
+    }
+    return null
+  }
+
   function verifyPublishSubmitted(context = {}, deps) {
     const text = normalizeDomText(document.body?.innerText || '', deps)
-    const url = normalizePublishedUrl(location.href, location.href)
+    const pageUrl = String(location.href || '')
+    const publishedUrl = isPublishedArticleUrl(pageUrl)
+      ? normalizePublishedUrl(pageUrl, pageUrl)
+      : ''
     if (findDraftLoadingDialog(deps)) return null
+    const successModal = detectPublishSuccessModal(deps)
     const editorStillOpen = isEditorStillOpen(text, deps)
     const pathname = location.pathname || ''
-    const success = text.includes('发布成功')
+    const success = Boolean(successModal)
       || (!editorStillOpen && (/^\/p\/[^/]+/.test(pathname) || /^\/article\/[^/]+/.test(pathname) || /^\/question\/[^/]+\/answer\/[^/]+/.test(pathname)))
       || (!editorStillOpen && /发布于\d{4}[-年]\d{1,2}[-月]\d{1,2}/.test(text))
     if (!success) return null
@@ -1082,9 +1117,10 @@
     const draftDialog = findDraftLoadingDialog(deps)
     return {
       verified: true,
-      pageUrl: url,
-      platformPublishedUrl: url,
-      publishedUrl: url,
+      verificationSource: successModal ? 'zhihu_publish_success_modal' : 'zhihu_published_page',
+      pageUrl,
+      platformPublishedUrl: publishedUrl,
+      publishedUrl,
       pageTitle,
       expectedTitle,
       titleMatch,
@@ -1104,9 +1140,10 @@
         lastTrustedClick: requireDependency(deps.describeLastTrustedClick, 'describeLastTrustedClick')(),
       },
       successSignal: {
-        successText: text.includes('发布成功'),
+        successText: Boolean(successModal),
+        successModal,
         reviewText: text.includes('审核中'),
-        publishedUrl: Boolean(url),
+        publishedUrl: Boolean(publishedUrl),
         publishedAtText: Boolean(publishedAtText),
       },
       textSample: text.slice(0, 500),
@@ -1180,6 +1217,7 @@
     normalizeAccountName,
     isLikelyAccountName,
     isRetryableFailureCode,
+    detectPublishSuccessModal,
     createPublishOptionsAdapter,
     createDomAdapter,
     createIdentityReader,

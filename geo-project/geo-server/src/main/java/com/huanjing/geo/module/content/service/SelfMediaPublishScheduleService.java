@@ -99,6 +99,22 @@ public class SelfMediaPublishScheduleService {
             SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
             SelfMediaPublishScheduleConstants.STATUS_SCHEDULING
     );
+    private static final Set<String> DUPLICATE_PROTECTED_STATUSES = Set.of(
+            SelfMediaPublishScheduleConstants.STATUS_PENDING,
+            SelfMediaPublishScheduleConstants.STATUS_FILLING,
+            SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULING,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULED,
+            SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+            SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT,
+            SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED,
+            SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING,
+            SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
+            SelfMediaPublishScheduleConstants.STATUS_CANCEL_PENDING_PLATFORM,
+            SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED,
+            SelfMediaPublishScheduleConstants.STATUS_ROUTED_TO_SEMI_AUTO
+    );
     private static final int QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES = 3;
     private static final int QUICK_SCHEDULE_SLOT_LOOKAHEAD_HOURS = 12;
     private static final int QUICK_DISPATCH_MANUAL_START_DELAY_MINUTES = 2;
@@ -304,6 +320,16 @@ public class SelfMediaPublishScheduleService {
         if ("replace_required".equals(plan.response().getAction())
                 && !Boolean.TRUE.equals(request.getReplaceNextScheduled())) {
             return plan.response();
+        }
+        SelfMediaPublishSchedule duplicate = protectedDuplicateSchedule(plan);
+        if (duplicate != null) {
+            SelfMediaPlatformQuickScheduleResponse response = plan.response();
+            response.setAction("duplicate_blocked");
+            response.setCode("ARTICLE_ACCOUNT_PLATFORM_SCHEDULE_EXISTS");
+            response.setMessage("该文章已在当前" + response.getPlatformLabel()
+                    + "账号存在排期、发布或待确认记录（任务 #" + duplicate.getId()
+                    + "），为避免重复发文，本次未再次创建任务");
+            return response;
         }
 
         SelfMediaPublishSchedule replaced = null;
@@ -1415,7 +1441,8 @@ public class SelfMediaPublishScheduleService {
         if (operatorId == null || operatorId <= 0) {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
         }
-        Set<String> allowedPlatforms = platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION);
+        Set<String> allowedPlatforms = publishCheckPlatformsByChannel(
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION);
         if (allowedPlatforms.isEmpty()) {
             rememberClaimBlock("PLATFORM_CAPABILITY_DISABLED", null);
             return null;
@@ -1790,10 +1817,14 @@ public class SelfMediaPublishScheduleService {
                                                                LocalDateTime lockedUntil,
                                                                Long operatorId,
                                                                Long localAgentSessionId) {
-        if (SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION.equals(normalize(queueKind))
-                && hasUncertainContentMutationBoundary(candidate)) {
-            quarantineUnsafeRecoveredExecution(candidate, expectedStatuses);
-            return null;
+        if (SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION.equals(normalize(queueKind))) {
+            if (suppressDuplicateScheduleExecution(candidate, expectedStatuses)) {
+                return null;
+            }
+            if (hasUncertainContentMutationBoundary(candidate)) {
+                quarantineUnsafeRecoveredExecution(candidate, expectedStatuses);
+                return null;
+            }
         }
         if (localAgentSessionId != null) {
             if (!hasAvailableLocalAgentCapacity(operatorId, localAgentSessionId, now)) {
@@ -1838,6 +1869,46 @@ public class SelfMediaPublishScheduleService {
             environmentLockService.release(candidate.getId());
         }
         return null;
+    }
+
+    private boolean suppressDuplicateScheduleExecution(SelfMediaPublishSchedule candidate,
+                                                       List<String> expectedStatuses) {
+        if (candidate == null
+                || candidate.getId() == null
+                || candidate.getArticleId() == null
+                || candidate.getSelfMediaAccountId() == null
+                || !StringUtils.hasText(candidate.getPlatform())) {
+            return false;
+        }
+        SelfMediaPublishSchedule earlier = scheduleMapper.selectEarlierProtectedDuplicateForExecution(
+                candidate.getId(),
+                candidate.getArticleId(),
+                candidate.getSelfMediaAccountId(),
+                candidate.getPlatform(),
+                new ArrayList<>(DUPLICATE_PROTECTED_STATUSES)
+        );
+        if (earlier == null) {
+            return false;
+        }
+        SelfMediaPublishSchedule latest = scheduleMapper.selectByIdForUpdate(candidate.getId());
+        if (latest == null
+                || !expectedStatuses.contains(normalize(latest.getStatus()))
+                || !SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION.equals(normalize(latest.getQueueKind()))) {
+            return false;
+        }
+        latest.setStatus(SelfMediaPublishScheduleConstants.STATUS_CANCELLED);
+        latest.setNextAttemptAt(null);
+        latest.setLockedUntil(null);
+        latest.setCancelledAt(LocalDateTime.now());
+        latest.setFailureCode("DUPLICATE_SCHEDULE_SUPPRESSED");
+        latest.setFailureMessage("检测到同一文章、账号和平台已有更早任务 #"
+                + earlier.getId() + "，已阻止本任务再次打开平台并重复发布");
+        applyRuntimeStage(latest, "duplicate_execution_suppressed", "重复任务已在执行前拦截");
+        scheduleMapper.updateById(latest);
+        refundScheduleQuotaIfPresent(latest);
+        environmentLockService.release(latest.getId());
+        reconcileAlerts(latest);
+        return true;
     }
 
     private void quarantineUnsafeRecoveredExecution(SelfMediaPublishSchedule candidate,
@@ -2153,6 +2224,19 @@ public class SelfMediaPublishScheduleService {
     }
 
     private void recoverTimedOutPublishCheck(SelfMediaPublishSchedule row) {
+        if (!supportsAutomaticPublishResultCheck(row.getPlatform())) {
+            stopAutomaticPublishResultCheck(
+                    row,
+                    "PUBLISH_RESULT_CHECK_UNSUPPORTED",
+                    "知乎为立即发布平台，发布结果未能当场确认，请人工核对",
+                    diagnosticsJson(
+                            "recoveredAt", LocalDateTime.now(),
+                            "reason", "PUBLISH_RESULT_CHECK_UNSUPPORTED"
+                    ),
+                    null
+            );
+            return;
+        }
         int maxAttempts = effectivePublishCheckMaxAttempts(row);
         LocalDateTime nextAttemptAt = nextPublishCheckRetryAt(row, maxAttempts);
         row.setMaxAttempts(maxAttempts);
@@ -2347,6 +2431,16 @@ public class SelfMediaPublishScheduleService {
                                                                 String failureMessage,
                                                                 String diagnosticsJson,
                                                                 Long auditOperatorId) {
+        if (!supportsAutomaticPublishResultCheck(row.getPlatform())) {
+            stopAutomaticPublishResultCheck(
+                    row,
+                    failureCode,
+                    failureMessage,
+                    diagnosticsJson,
+                    auditOperatorId
+            );
+            return;
+        }
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
         row.setNextAttemptAt(nextBrandSafeAttemptAt(
@@ -2360,6 +2454,31 @@ public class SelfMediaPublishScheduleService {
         row.setMaxAttempts(Math.max(effectivePublishCheckMaxAttempts(row),
                 (row.getAttemptCount() == null ? 0 : row.getAttemptCount()) + 1));
         applyRuntimeStage(row, "publish_result_recheck", "平台提交结果待确认，仅允许回查，禁止重复发布");
+        touch(row, auditOperatorId);
+        scheduleMapper.updateById(row);
+        environmentLockService.release(row.getId());
+        reconcileAlerts(row);
+    }
+
+    private void stopAutomaticPublishResultCheck(SelfMediaPublishSchedule row,
+                                                  String failureCode,
+                                                  String failureMessage,
+                                                  String diagnosticsJson,
+                                                  Long auditOperatorId) {
+        row.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        row.setNextAttemptAt(null);
+        row.setLockedUntil(null);
+        row.setFailureCode(trimFailureCode(failureCode, "PUBLISH_RESULT_MANUAL_CONFIRMATION_REQUIRED"));
+        String originalMessage = firstText(
+                failureMessage,
+                "立即发布结果未能当场确认"
+        );
+        row.setFailureMessage(trimFailureMessage(originalMessage + "；"
+                + platformLabel(row.getPlatform()) + "不执行自动回查，请人工确认发布结果"));
+        row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
+        applyRuntimeStage(row, "publish_result_manual_confirmation",
+                "立即发布结果未能当场确认，停止自动回查");
         touch(row, auditOperatorId);
         scheduleMapper.updateById(row);
         environmentLockService.release(row.getId());
@@ -2606,6 +2725,16 @@ public class SelfMediaPublishScheduleService {
         SelfMediaPublishSchedule row = requireSchedule(id);
         if (!SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(normalize(row.getStatus()))) {
             fail("SCHEDULE_STATUS_NOT_CHECKING_PUBLISH_RESULT", "当前排期未处于发布结果确认中");
+        }
+        if (!supportsAutomaticPublishResultCheck(row.getPlatform())) {
+            stopAutomaticPublishResultCheck(
+                    row,
+                    "PUBLISH_RESULT_CHECK_UNSUPPORTED",
+                    "知乎为立即发布平台，发布结果未能当场确认，请人工核对",
+                    diagnosticsJson,
+                    null
+            );
+            return SelfMediaPublishScheduleVO.from(row);
         }
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
@@ -3288,6 +3417,10 @@ public class SelfMediaPublishScheduleService {
         ).contains(runtimeStage)) {
             return true;
         }
+        if (diagnosticsIndicatesContentMutation(row.getDiagnosticsJson())
+                || diagnosticsIndicatesSubmissionBoundary(row.getDiagnosticsJson())) {
+            return true;
+        }
         String failureCode = normalize(row.getFailureCode());
         return "local_agent_heartbeat_timeout".equals(failureCode)
                 || failureCode.contains("cover_upload_timeout");
@@ -3352,6 +3485,10 @@ public class SelfMediaPublishScheduleService {
     }
 
     private void queuePublishResultRecheck(SelfMediaPublishSchedule row) {
+        if (!supportsAutomaticPublishResultCheck(row.getPlatform())) {
+            fail("PLATFORM_PUBLISH_CHECK_UNSUPPORTED",
+                    platformLabel(row.getPlatform()) + "为立即发布平台，不执行自动回查；请人工确认发布结果");
+        }
         String previousStatus = normalize(row.getStatus());
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
@@ -4090,6 +4227,19 @@ public class SelfMediaPublishScheduleService {
         return brandQueueFullRejected(articleId, accountId, platform, activeCount);
     }
 
+    private SelfMediaPublishSchedule protectedDuplicateSchedule(QuickSchedulePlan plan) {
+        if (plan == null || plan.response() == null) {
+            return null;
+        }
+        SelfMediaPlatformQuickScheduleResponse response = plan.response();
+        return scheduleMapper.selectProtectedDuplicateByArticleAccountAndPlatform(
+                response.getArticleId(),
+                response.getSelfMediaAccountId(),
+                response.getPlatform(),
+                new ArrayList<>(DUPLICATE_PROTECTED_STATUSES)
+        );
+    }
+
     private SelfMediaPublishScheduleRejectedItemVO brandQueueFullRejected(Long articleId,
                                                                           Long accountId,
                                                                           String platform,
@@ -4615,6 +4765,22 @@ public class SelfMediaPublishScheduleService {
     private Set<String> platformsByChannel(SelfMediaPlatformPublishChannel channel) {
         Set<String> platforms = scheduleAdapterRouter.platformsByChannel(channel);
         return normalizePlatforms(platforms);
+    }
+
+    private Set<String> publishCheckPlatformsByChannel(SelfMediaPlatformPublishChannel channel) {
+        LinkedHashSet<String> platforms = new LinkedHashSet<>();
+        for (String platform : platformsByChannel(channel)) {
+            if (supportsAutomaticPublishResultCheck(platform)) {
+                platforms.add(platform);
+            }
+        }
+        return Set.copyOf(platforms);
+    }
+
+    private boolean supportsAutomaticPublishResultCheck(String platform) {
+        return scheduleAdapterRouter.contract(platform)
+                .map(SelfMediaPlatformCapabilityContract::supportsPublishCheck)
+                .orElse(true);
     }
 
     private Set<String> quickSchedulePlatforms() {

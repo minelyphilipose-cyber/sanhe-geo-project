@@ -73,3 +73,33 @@ test('closed publish host click point targets the primary button instead of the 
   assert.deepEqual({ ...point }, { clientX: 556, clientY: 880 })
   assert.ok(point.clientX < 700, 'click should not land near the 824px host right edge')
 })
+
+test('generic wait copy does not masquerade as Xiaohongshu image generation', () => {
+  const platform = loadPlatformForTesting()
+
+  assert.equal(platform.testing.isXiaohongshuImageGenerationMessage('系统处理中，请稍后'), false)
+  assert.equal(platform.testing.isXiaohongshuImageGenerationMessage('笔记图片生成中，请稍后'), true)
+})
+
+test('enabled Xiaohongshu publish host wins over a stale generating hint', () => {
+  const platform = loadPlatformForTesting()
+
+  assert.equal(platform.testing.isXiaohongshuPublishHostReadyState('false', 'false'), true)
+  assert.equal(platform.testing.isXiaohongshuPublishHostReadyState(null, null), false)
+  assert.equal(platform.testing.isXiaohongshuPublishHostReadyState('false', 'true'), false)
+
+  assert.equal(platform.testing.isXiaohongshuPublishReadinessSnapshot({
+    settingsVisible: true,
+    publishHostReady: true,
+    generating: true,
+    hasPreviewMarkers: true,
+    thumbnailCount: 9,
+  }), true)
+  assert.equal(platform.testing.isXiaohongshuPublishReadinessSnapshot({
+    settingsVisible: true,
+    publishHostReady: false,
+    generating: true,
+    hasPreviewMarkers: true,
+    thumbnailCount: 9,
+  }), false)
+})

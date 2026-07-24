@@ -54,3 +54,63 @@ test('treats an uncertain result after clicking publish as verification-only rec
   )
   assert.equal(platform.isRetryableFailureCode('ZHIHU_PUBLISH_NOT_CONFIRMED'), true)
 })
+
+function visibleElement(textContent = '') {
+  return {
+    textContent,
+    parentElement: null,
+    children: [],
+    getBoundingClientRect: () => ({ width: 430, height: 496 }),
+    querySelectorAll() {
+      return this.children.flatMap((child) => [child, ...child.querySelectorAll('*')])
+    },
+  }
+}
+
+function append(parent, child) {
+  parent.children.push(child)
+  child.parentElement = parent
+  return child
+}
+
+test('matches the Zhihu publish-success modal by stable semantic signals', () => {
+  const body = visibleElement()
+  const modal = append(body, visibleElement('发布成功 感谢你的第 24 篇创作！ 转发到想法 更多分享'))
+  append(modal, visibleElement('发布成功'))
+  const closeButton = append(modal, visibleElement(''))
+  const document = {
+    body,
+    documentElement: visibleElement(),
+    querySelectorAll: (selector) => selector === 'button[aria-label="关闭"]' ? [closeButton] : [],
+  }
+  const platform = loadPlatform({
+    document,
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+  })
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(platform.detectPublishSuccessModal({ isVisibleElement: () => true }))),
+    {
+      detected: true,
+      title: '发布成功',
+      creationCount: 24,
+      confirmationText: '感谢你的第24篇创作！',
+      closeButtonPresent: true,
+      forwardToIdeaPresent: true,
+      moreSharePresent: true,
+      signature: 'title+close_button+creation_or_share',
+    },
+  )
+})
+
+test('does not treat unrelated page text as the Zhihu publish-success modal', () => {
+  const body = visibleElement('发布成功')
+  const document = {
+    body,
+    documentElement: visibleElement(),
+    querySelectorAll: () => [],
+  }
+  const platform = loadPlatform({ document })
+
+  assert.equal(platform.detectPublishSuccessModal({ isVisibleElement: () => true }), null)
+})

@@ -373,6 +373,7 @@ var BAIJIAHAO_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_BAIJIAHAO_PLATFORM__?.c
   normalizeText,
   isVisibleElement,
   collectVisibleActionElements,
+  updateStage: updateActiveFillStage,
 }) || {
   platform: 'baijiahao',
   fillPublishOptions: async () => {
@@ -392,6 +393,7 @@ var DOUYIN_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_DOUYIN_PLATFORM__?.createP
   isVisibleElement,
   collectVisibleActionElements,
   showStatus,
+  updateStage: updateActiveFillStage,
 }) || {
   platform: 'douyin',
   fillPublishOptions: async () => {

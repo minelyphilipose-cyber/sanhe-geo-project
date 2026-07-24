@@ -17,6 +17,9 @@ class SelfMediaPlatformCapabilityContractTest {
         assertTrue(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION.equals(contract.publishChannel()));
         assertFalse(contract.requiresCoverUpload());
         assertFalse(contract.supportsLocation());
+        assertFalse(contract.supportsPublishCheck());
+        assertTrue(contract.publishCheckDelayMinutes() == 0);
+        assertTrue(contract.publishCheckMaxAttempts() == 0);
     }
 
     @Test

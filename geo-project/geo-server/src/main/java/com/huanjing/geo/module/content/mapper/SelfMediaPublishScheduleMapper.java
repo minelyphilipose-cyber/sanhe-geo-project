@@ -242,6 +242,50 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
             <script>
             SELECT *
             FROM self_media_publish_schedule
+            WHERE article_id = #{articleId}
+              AND self_media_account_id = #{selfMediaAccountId}
+              AND platform = #{platform}
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            ORDER BY id DESC
+            LIMIT 1
+            </script>
+            """)
+    SelfMediaPublishSchedule selectProtectedDuplicateByArticleAccountAndPlatform(
+            @Param("articleId") Long articleId,
+            @Param("selfMediaAccountId") Long selfMediaAccountId,
+            @Param("platform") String platform,
+            @Param("statuses") List<String> statuses);
+
+    @Select("""
+            <script>
+            SELECT *
+            FROM self_media_publish_schedule
+            WHERE id &lt; #{scheduleId}
+              AND article_id = #{articleId}
+              AND self_media_account_id = #{selfMediaAccountId}
+              AND platform = #{platform}
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            ORDER BY id ASC
+            LIMIT 1
+            </script>
+            """)
+    SelfMediaPublishSchedule selectEarlierProtectedDuplicateForExecution(
+            @Param("scheduleId") Long scheduleId,
+            @Param("articleId") Long articleId,
+            @Param("selfMediaAccountId") Long selfMediaAccountId,
+            @Param("platform") String platform,
+            @Param("statuses") List<String> statuses);
+
+    @Select("""
+            <script>
+            SELECT *
+            FROM self_media_publish_schedule
             WHERE base_idempotency_key = #{baseIdempotencyKey}
               AND status IN
               <foreach collection="activeStatuses" item="status" open="(" separator="," close=")">

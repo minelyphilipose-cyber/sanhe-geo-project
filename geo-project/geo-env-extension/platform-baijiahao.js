@@ -197,6 +197,7 @@
       `百家号定时发布弹窗确认按钮未找到；target=${value.full}；${describeBaijiahaoState(deps)}`,
     )
     await clickScheduleConfirmWithThrottle(confirm, value, platform, deps, timing)
+    notifyStage(deps, 'verifying_publish_result')
     const verification = await waitForPublishSubmitted(value, context, deps)
     await dismissScheduleDialogAfterSubmit(deps, platform)
     return {
@@ -218,6 +219,7 @@
         await delay(timing.confirmRetryDelayMs)
         confirm = await waitForScheduleConfirmReady(findScheduleConfirmButton(deps) || confirm, value, deps, timing)
       }
+      notifyStage(deps, 'submitting_publish')
       await clickTrustedActionOnce(confirm, { platform })
       await delay(timing.afterConfirmClickDelayMs)
       if (!hasClickTooFastWarning(deps)) return
@@ -1282,6 +1284,10 @@ function findCoverFileInput(root = document) {
     return fn
   }
 
+  function notifyStage(deps, stage) {
+    if (typeof deps?.updateStage === 'function') deps.updateStage(stage)
+  }
+
   global.__GEO_BAIJIAHAO_PLATFORM__ = {
     PUBLISH_URL,
     WORKS_LIST_URL,
@@ -1290,5 +1296,6 @@ function findCoverFileInput(root = document) {
     createPublishOptionsAdapter,
     editorSelectors,
     resolvePublishOptions,
+    notifyStage,
   }
 })(globalThis)

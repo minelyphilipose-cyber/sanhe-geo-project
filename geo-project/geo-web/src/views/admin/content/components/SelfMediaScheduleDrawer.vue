@@ -1475,15 +1475,35 @@ function canConfirmFailed(row: SelfMediaPublishSchedule) {
 }
 
 function canRecheck(row: SelfMediaPublishSchedule) {
-  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed'].includes(row.status)
+  if (!props.canPublish) return false
+  if (['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed'].includes(row.status)) return true
+  return row.status === 'manual_required' && isPublishResultContext(row)
 }
 
 function canRetryNow(row: SelfMediaPublishSchedule | null) {
   if (!props.canPublish || !row) return false
   if (['cancelled', 'published_confirmed', 'cancel_pending_platform', 'routed_to_semi_auto'].includes(row.status)) return false
   if (hasPendingRetryRequest(row) || isLocked(row)) return false
-  if (row.queueKind === 'publish_result_check') return ['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed', 'manual_required'].includes(row.status)
+  if (isPublishResultContext(row)) return false
   return ['pending', 'filling', 'filled_verified', 'scheduling', 'schedule_failed', 'manual_required'].includes(row.status)
+}
+
+function isPublishResultContext(row: SelfMediaPublishSchedule | null) {
+  if (!row) return false
+  if (row.queueKind === 'publish_result_check') return true
+  if (['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed'].includes(row.status)) return true
+  const code = String(row.failureCode || '').toLowerCase()
+  if (code.startsWith('publish_result')
+    || code.startsWith('published_url')
+    || code.includes('publish_check')
+    || code.endsWith('_publish_not_confirmed')
+    || code === 'works_list_verify_timeout') return true
+  const diagnostics = String(row.diagnosticsJson || '').toLowerCase()
+  return diagnostics.includes('publish_result_recheck_requested')
+    || diagnostics.includes('publish_result_check_attempt_limit_exceeded')
+    || diagnostics.includes('publish_result_check_heartbeat_timeout')
+    || diagnostics.includes('published_url_required_but_missing')
+    || diagnostics.includes('publish_check_page_timeout')
 }
 
 function hasPendingRetryRequest(row: SelfMediaPublishSchedule | null) {
@@ -1547,6 +1567,7 @@ function allRowActions(row: SelfMediaPublishSchedule): RowAction[] {
 function primaryRowAction(row: SelfMediaPublishSchedule): RowAction | null {
   if (canHandleMaterials(row)) return 'handleMaterials'
   if (row.status === 'published_url_pending' && canConfirmPublished(row)) return 'confirmPublished'
+  if (isPublishResultContext(row) && canRecheck(row)) return 'recheck'
   if (canRetryNow(row)) return 'retryNow'
   if (canRecheck(row)) return 'recheck'
   if (canConfirmPublished(row)) return 'confirmPublished'

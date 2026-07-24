@@ -762,6 +762,29 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void dispatchPlatformQuickScheduleBlocksDuplicateArticleAccountPlatformBeforeReplacementOrCreation() {
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        SelfMediaPublishSchedule existing = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED);
+        existing.setId(77L);
+        when(scheduleMapper.selectProtectedDuplicateByArticleAccountAndPlatform(
+                eq(10L), eq(20L), eq("toutiao"), anyList()
+        )).thenReturn(existing);
+
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(
+                quickRequest("toutiao", false), "second-dispatch-key");
+
+        assertEquals("duplicate_blocked", response.getAction());
+        assertEquals("ARTICLE_ACCOUNT_PLATFORM_SCHEDULE_EXISTS", response.getCode());
+        assertTrue(response.getMessage().contains("任务 #77"));
+        verify(scheduleMapper, never()).selectSafeReplaceablePendingByBrandPlatformAndPeriod(
+                anyLong(), anyString(), any(), any(), any(), any());
+        verify(requestMapper, never()).insert(any());
+        verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
     void dispatchPlatformQuickScheduleIgnoresDailyScheduleLimitForManualDistribution() {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());
@@ -1686,6 +1709,18 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void claimNextPublishCheckDoesNotOfferZhihuToLocalHelper() {
+        when(scheduleAdapterRouter.contract("zhihu"))
+                .thenReturn(Optional.of(zhihuNoPublishCheckContract()));
+
+        SelfMediaPublishScheduleVO response = service.claimNextPublishCheckForLocalAgent(99L, "zhihu", 10);
+
+        assertNull(response);
+        verify(scheduleMapper, never()).selectDueQueueCandidatesForOperator(
+                anyString(), anyList(), any(), anyInt(), anyLong(), any(), any());
+    }
+
+    @Test
     void claimNextTaskForSignedLocalAgentReturnsNullWhenSessionCapacityIsFull() {
         stubCurrentTimeInsideBusinessWindow();
         SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
@@ -2202,9 +2237,10 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
-    void markLocalAgentExecutionFailedQueuesPostSubmissionRecheckWithoutWebLogin() {
+    void markLocalAgentExecutionFailedStopsZhihuPostSubmissionAtManualConfirmation() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
         row.setId(128L);
+        row.setPlatform("zhihu");
         row.setCreatedBy(88L);
         row.setRuntimeWorkerId("99");
         row.setAttemptCount(1);
@@ -2212,6 +2248,8 @@ class SelfMediaPublishScheduleServiceTest {
         row.setLockedUntil(LocalDateTime.now().plusMinutes(2));
         when(scheduleMapper.selectByIdForUpdate(128L)).thenReturn(row);
         when(scheduleMapper.selectById(128L)).thenReturn(row);
+        when(scheduleAdapterRouter.contract("zhihu"))
+                .thenReturn(Optional.of(zhihuNoPublishCheckContract()));
 
         SelfMediaPublishScheduleVO response = service.markLocalAgentExecutionFailed(
                 99L,
@@ -2223,10 +2261,11 @@ class SelfMediaPublishScheduleServiceTest {
                 "{\"lastStage\":\"verifying_publish_result\"}"
         );
 
-        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED, response.getStatus());
         assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
         assertEquals("ZHIHU_PUBLISH_NOT_CONFIRMED", response.getFailureCode());
-        assertEquals("publish_result_recheck", row.getRuntimeStage());
+        assertEquals("publish_result_manual_confirmation", row.getRuntimeStage());
+        assertNull(response.getNextAttemptAt());
         assertEquals(99L, row.getUpdatedBy());
         assertNull(row.getLockedUntil());
         verify(currentUserService, never()).requireCurrentUser();
@@ -3017,8 +3056,9 @@ class SelfMediaPublishScheduleServiceTest {
         candidate.setId(128L);
         candidate.setPlatform("toutiao");
         candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
-        candidate.setFailureCode("LOCAL_AGENT_HEARTBEAT_TIMEOUT");
+        candidate.setFailureCode("PAGE_LOAD_TIMEOUT");
         candidate.setRuntimeStage("claimed");
+        candidate.setDiagnosticsJson("{\"lastStage\":\"filling_publish_options\"}");
         when(scheduleMapper.selectDueQueueCandidatesForOperator(
                 eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
                 eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
@@ -3038,6 +3078,47 @@ class SelfMediaPublishScheduleServiceTest {
         assertNull(candidate.getNextAttemptAt());
         verify(scheduleMapper, never()).claimQueueSchedule(
                 anyLong(), anyString(), anyList(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
+    void claimNextTaskForLocalAgentSuppressesLaterDuplicateDouyinScheduleBeforeOpeningEditor() {
+        stubCurrentTimeInsideBusinessWindow();
+        when(scheduleAdapterRouter.platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION))
+                .thenReturn(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu", "douyin"));
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(228L);
+        candidate.setPlatform("douyin");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        SelfMediaPublishSchedule earlier = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED);
+        earlier.setId(127L);
+        earlier.setPlatform("douyin");
+        when(scheduleMapper.selectDueQueueCandidatesForOperator(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(99L),
+                eq("douyin"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu", "douyin"))
+        )).thenReturn(List.of(candidate));
+        when(scheduleMapper.selectEarlierProtectedDuplicateForExecution(
+                eq(228L), eq(10L), eq(20L), eq("douyin"), anyList()
+        )).thenReturn(earlier);
+        when(scheduleMapper.selectByIdForUpdate(228L)).thenReturn(candidate);
+
+        var response = service.claimNextTaskForLocalAgent(99L, "douyin", 3);
+
+        assertNull(response);
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_CANCELLED, candidate.getStatus());
+        assertEquals("DUPLICATE_SCHEDULE_SUPPRESSED", candidate.getFailureCode());
+        assertEquals("duplicate_execution_suppressed", candidate.getRuntimeStage());
+        assertTrue(candidate.getFailureMessage().contains("任务 #127"));
+        assertNull(candidate.getNextAttemptAt());
+        assertNotNull(candidate.getCancelledAt());
+        verify(scheduleMapper, never()).claimQueueSchedule(
+                anyLong(), anyString(), anyList(), anyString(), any(), any(), any(), any());
+        verify(contentDistributionService, never()).distributeToAsOperator(anyLong(), any(), anyLong());
+        verify(environmentLockService).release(228L);
     }
 
     @Test
@@ -3261,13 +3342,16 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
-    void markDistributionTaskScheduleFailedTreatsLegacyZhihuNotSubmittedAsPostSubmission() {
+    void markDistributionTaskScheduleFailedStopsLegacyZhihuUncertaintyWithoutAutomaticRecheck() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
         row.setId(101L);
+        row.setPlatform("zhihu");
         row.setDistributionTaskId(301L);
         row.setAttemptCount(1);
         row.setMaxAttempts(4);
         when(scheduleMapper.selectActiveByDistributionTaskId(301L)).thenReturn(row);
+        when(scheduleAdapterRouter.contract("zhihu"))
+                .thenReturn(Optional.of(zhihuNoPublishCheckContract()));
 
         SelfMediaPublishScheduleVO response = service.markDistributionTaskScheduleFailed(
                 301L,
@@ -3277,9 +3361,10 @@ class SelfMediaPublishScheduleServiceTest {
                 null
         );
 
-        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED, response.getStatus());
         assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
-        assertEquals("publish_result_recheck", row.getRuntimeStage());
+        assertEquals("publish_result_manual_confirmation", row.getRuntimeStage());
+        assertNull(response.getNextAttemptAt());
         verify(companyChannelQuotaService, never()).refundDistribution(301L);
         verify(environmentLockService).release(101L);
     }
@@ -3399,6 +3484,23 @@ class SelfMediaPublishScheduleServiceTest {
         row.setPlatform("toutiao");
         row.setStatus(status);
         return row;
+    }
+
+    private SelfMediaPlatformCapabilityContract zhihuNoPublishCheckContract() {
+        return new SelfMediaPlatformCapabilityContract(
+                "zhihu",
+                "知乎",
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                new SelfMediaPlatformScheduleRules(0, 0, 2),
+                false,
+                false,
+                false,
+                false,
+                true,
+                0,
+                0
+        );
     }
 
     private void stubLocalAgentCapacity(Long operatorId,

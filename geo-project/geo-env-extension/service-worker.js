@@ -4,7 +4,6 @@ const EXTENSION_VERSION = '0.1.11'
 const EXTENSION_BUILD_REVISION = '20260717.1'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
 const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/graphic/articles'
-const ZHIHU_MANAGE_URL = 'https://www.zhihu.com/creator/manage/creation/article'
 const XIAOHONGSHU_MANAGE_URL = 'https://creator.xiaohongshu.com/new/note-manager'
 const BAIJIAHAO_MANAGE_URL = 'https://baijiahao.baidu.com/builder/rc/content'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
@@ -963,6 +962,7 @@ function classifyPlatformTaskFailureCode(text, platform = '') {
 }
 
 function isRetryableTaskFailureCode(code) {
+  if (globalThis.__GEO_DOUYIN_PLATFORM__?.isRetryableFailureCode?.(code)) return true
   if (globalThis.__GEO_ZHIHU_PLATFORM__?.isRetryableFailureCode?.(code)) return true
   if (globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.isRetryableFailureCode?.(code)) return true
   if (globalThis.__GEO_BAIJIAHAO_PLATFORM__?.isRetryableFailureCode?.(code)) return true
@@ -1587,7 +1587,10 @@ function recoveredPublishResult(payload, verification, message, description) {
 
 function publishNotConfirmedError(platform, title, originalMessage, verification) {
   const code = `${platform}_PUBLISH_NOT_CONFIRMED`
-  const error = new Error(`${code}：页面跳转后已自动打开作品管理页，但暂未匹配到目标作品；targetTitle=${title || '-'}；diagnostics=${verification?.diagnostics || verification?.reason || originalMessage}`)
+  const lookupDescription = platform === 'ZHIHU'
+    ? '知乎立即发布结果未能在当前页面确认，已停止自动回查'
+    : '页面跳转后已自动打开作品管理页，但暂未匹配到目标作品'
+  const error = new Error(`${code}：${lookupDescription}；targetTitle=${title || '-'}；diagnostics=${verification?.diagnostics || verification?.reason || originalMessage}`)
   error.code = code
   error.originalMessage = originalMessage
   return error
@@ -1619,12 +1622,7 @@ async function recoverZhihuPublishAfterFillError(tabId, task, payload, error) {
     expectedTitle: payload?.title || payload?.articleTitle || '',
     expectedAccountName: payload?.expectedAccountName || '',
   }
-  let verification = await findVerifiedPlatformTab('zhihu', context, inspectZhihuPublishedTab, tabId)
-  let recoveryTabId = verification?.tabId || tabId
-  if (!verification?.verified) {
-    recoveryTabId = await openPlatformManageVerifyTab(recoveryTabId, 'zhihu', ZHIHU_MANAGE_URL)
-    verification = await waitForZhihuPublishedTab(recoveryTabId, 15_000, context)
-  }
+  const verification = await findVerifiedPlatformTab('zhihu', context, inspectZhihuPublishedTab, tabId)
   if (!verification?.verified) throw publishNotConfirmedError('ZHIHU', context.expectedTitle, message, verification)
   return {
     titleFilled: true,
@@ -1634,7 +1632,7 @@ async function recoverZhihuPublishAfterFillError(tabId, task, payload, error) {
       filled: true,
       published: true,
       publishVerification: verification,
-      message: '知乎发布后页面跳转，已通过文章页或创作管理页确认发布',
+      message: '知乎发布后页面跳转，已通过当前文章页确认发布',
     },
     recoveredAfterPublishUncertain: true,
     publishUncertainError: message,
@@ -2127,17 +2125,6 @@ async function inspectToutiaoWorksListTab(tabId, context, refreshAttempt) {
   }
 }
 
-async function waitForZhihuPublishedTab(tabId, timeoutMs, context = {}) {
-  const deadline = Date.now() + timeoutMs
-  let latest = null
-  while (Date.now() < deadline) {
-    latest = await inspectZhihuPublishedTab(tabId, context)
-    if (latest?.verified) return latest
-    await delay(500)
-  }
-  return latest
-}
-
 async function inspectZhihuPublishedTab(tabId, context = {}) {
   const tab = await chrome.tabs.get(tabId).catch(() => null)
   const url = tab?.url || ''
@@ -2203,6 +2190,40 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
           || text.match(/\d{4}[-年]\d{1,2}[-月]\d{1,2}[^\s。；;，,]{0,16}发布/)?.[0]
           || ''
       }
+      const isVisible = (element) => {
+        if (!element?.getBoundingClientRect) return false
+        const rect = element.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) return false
+        const style = getComputedStyle(element)
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
+      }
+      const detectPublishSuccessModal = () => {
+        const closeButtons = Array.from(document.querySelectorAll('button[aria-label="关闭"]')).filter(isVisible)
+        for (const closeButton of closeButtons) {
+          let root = closeButton.parentElement
+          for (let depth = 0; root && depth < 8; depth += 1, root = root.parentElement) {
+            if (root === document.body || root === document.documentElement) break
+            if (!isVisible(root)) continue
+            const modalText = normalize(root.textContent || '')
+            const creationMatch = modalText.match(/感谢你的第(\d+)篇创作[！!]?/)
+            const hasShareSections = modalText.includes('转发到想法') && modalText.includes('更多分享')
+            if (!creationMatch && !hasShareSections) continue
+            const title = Array.from(root.querySelectorAll('*'))
+              .find((element) => isVisible(element) && normalize(element.textContent || '') === '发布成功')
+            if (!title) continue
+            return {
+              detected: true,
+              title: '发布成功',
+              creationCount: creationMatch ? Number(creationMatch[1]) : null,
+              closeButtonPresent: true,
+              forwardToIdeaPresent: modalText.includes('转发到想法'),
+              moreSharePresent: modalText.includes('更多分享'),
+              signature: 'title+close_button+creation_or_share',
+            }
+          }
+        }
+        return null
+      }
       const collectIdentity = () => {
         const ids = new Set()
         const names = new Set()
@@ -2254,6 +2275,7 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
       const rawText = document.body?.innerText || document.body?.textContent || ''
       const pageTitle = normalizeTitle(document.querySelector('h1')?.textContent || document.title)
       const publishedAtText = extractPublishedAt(rawText)
+      const successModal = detectPublishSuccessModal()
       const editorStillOpen = location.pathname.startsWith('/write')
         || text.includes('发布设置')
         || text.includes('添加文章封面')
@@ -2271,13 +2293,14 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
           draftLoadingDialogVisible: text.includes('草稿加载中'),
         },
         textSample: text.slice(0, 500),
-        successText: text.includes('发布成功') || text.includes('审核中') || text.includes('已发布'),
+        successModal,
+        successText: Boolean(successModal) || text.includes('审核中') || text.includes('已发布'),
         editorStillOpen,
       }
     },
   }).catch(() => [])
   const result = state?.result || {}
-  if (result.successText && !result.editorStillOpen && result.titleMatch?.matched) {
+  if (result.successText && (result.successModal || !result.editorStillOpen) && result.titleMatch?.matched) {
     return {
       verified: true,
       pageUrl: normalizeZhihuPublishedUrl(result.href || url),
@@ -2290,13 +2313,14 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
       account: result.account || null,
       publishUi: result.publishUi || null,
       successSignal: {
-        successText: Boolean(result.textSample?.includes?.('发布成功')),
+        successText: Boolean(result.successModal),
+        successModal: result.successModal || null,
         reviewText: Boolean(result.textSample?.includes?.('审核中')),
         publishedUrl: Boolean(normalizeZhihuPublishedUrl(result.href || url)),
         publishedAtText: Boolean(result.publishedAtText),
       },
       textSample: result.textSample || '',
-      recoveredFrom: 'page_text',
+      recoveredFrom: result.successModal ? 'zhihu_publish_success_modal' : 'page_text',
     }
   }
   return {
@@ -3193,6 +3217,12 @@ async function sendFillMessageOnce(tabId, message, options = {}) {
     if (!isNoReceivingEndError(error?.message || error)) {
       throw await enrichFillMessageError(tabId, options.platform, error)
     }
+    if (isAutomatedBrowserPublishPlatform(options.platform)) {
+      // The platform commonly destroys the editor's message channel immediately after
+      // accepting the final publish action. Replaying the whole fill message here can
+      // submit the same article again; the caller must switch to works-list recovery.
+      throw error
+    }
     await waitForFillContentScriptReadyWithRecovery(tabId, options.platform, 20_000)
     try {
       response = await withTimeout(
@@ -3214,6 +3244,10 @@ async function sendFillMessageOnce(tabId, message, options = {}) {
   return response
 }
 
+function isAutomatedBrowserPublishPlatform(platform) {
+  return ['baijiahao', 'douyin', 'toutiao', 'xiaohongshu', 'zhihu'].includes(normalizePlatform(platform))
+}
+
 function fillMessageTimeoutMs(platform) {
   if (normalizePlatform(platform) === 'xiaohongshu') return 150_000
   if (normalizePlatform(platform) === 'toutiao') return 150_000
@@ -3233,7 +3267,10 @@ async function enrichFillMessageError(tabId, platform, error) {
   const enriched = new Error(`${message}${stageText}${diagnosticsText}`)
   const normalizedPlatform = normalizePlatform(platform)
   const postSubmissionCode = {
+    baijiahao: 'BAIJIAHAO_PUBLISH_NOT_CONFIRMED',
+    douyin: 'DOUYIN_PUBLISH_NOT_CONFIRMED',
     toutiao: 'TOUTIAO_PUBLISH_NOT_CONFIRMED',
+    xiaohongshu: 'XIAOHONGSHU_PUBLISH_NOT_CONFIRMED',
     zhihu: 'ZHIHU_PUBLISH_NOT_CONFIRMED',
   }[normalizedPlatform]
   enriched.code = postSubmissionCode

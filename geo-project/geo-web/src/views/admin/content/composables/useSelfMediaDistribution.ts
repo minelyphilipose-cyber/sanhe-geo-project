@@ -36,7 +36,7 @@ import {
   listLocalAgentSessions,
   type LocalAgentSession,
 } from '@/api/localAgent'
-import { getLocalHelperHealth, launchLocalHelperTask, openLocalHelperEnvironment, type LocalHelperHealthResponse } from '@/api/localHelper'
+import { getLocalHelperHealth, openLocalHelperEnvironment, type LocalHelperHealthResponse } from '@/api/localHelper'
 import {
   canonicalSelfMediaPlatform,
   selfMediaPlatformLabel,
@@ -492,18 +492,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     return '环境状态未知'
   }
 
-  function environmentAccountActionHint(account: SelfMediaAccount) {
-    const binding = environmentAccountOf(account)
-    if (!binding) return '该账号未配置指纹浏览器环境，请到「品牌详情 > 自媒体账号 > 指纹浏览器环境」完成绑定'
-    if (binding.loginStatus === 'logged_in') return '环境已就绪，可以打开环境并填充'
-    if (binding.loginStatus === 'unknown') return '请点击「打开环境登录」，在 AdsPower 浏览器环境完成登录；扩展会自动上报登录状态'
-    if (binding.loginStatus === 'login_required') return '请点击「打开环境登录」，在 AdsPower 浏览器环境重新登录；扩展会自动上报登录状态'
-    if (binding.loginStatus === 'expired') return '登录状态已过期，请点击「打开环境登录」重新登录，扩展会自动上报登录状态'
-    if (binding.loginStatus === 'mismatch') return '当前环境登录账号与系统绑定账号不一致，请在本页面点击「重置账号校验」后重新打开环境登录，扩展会自动上报登录状态'
-    if (binding.loginStatus === 'error') return '环境状态异常，请到「品牌详情 > 自媒体账号 > 指纹浏览器环境」检查绑定，或重新打开环境登录'
-    return '环境状态未知，请打开环境确认登录状态'
-  }
-
   function browserEnvironmentProviderProfileIdOf(binding: BrowserEnvironmentAccount | null | undefined) {
     return String(binding?.providerProfileId || '').trim()
   }
@@ -520,10 +508,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     if (selfMediaSubmitting.value) return false
     const binding = environmentAccountOf(account)
     return account.status === 'active' && !!binding && binding.loginStatus === 'logged_in'
-  }
-
-  function semiAutoAccountActionLoading(account: SelfMediaAccount) {
-    return selfMediaSubmitting.value && selectedSelfMediaAccountId.value === account.id
   }
 
   function setupPromptPath(target?: SetupPromptTarget) {
@@ -883,7 +867,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     if (platform === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
     if (platform === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1'
     if (platform === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
-    if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish'
+    if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish?from=tab_switch&target=article'
     if (platform === 'douyin') return 'https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page'
     return undefined
   }
@@ -935,104 +919,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     return {
       helperBase,
       localAgentSessionId,
-    }
-  }
-
-  async function submitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
-    if (selfMediaSubmitting.value) {
-      ElMessage.info('已有分发任务正在处理，请稍候')
-      return
-    }
-    if (!mediaDistributeArticleId.value) {
-      ElMessage.warning('请选择要分发的文章')
-      return
-    }
-    if (!mediaDistributeBrandId.value) {
-      await showSetupPrompt({
-        title: '文章品牌缺失',
-        issue: '当前文章未绑定品牌，系统无法判断要使用哪个品牌的自媒体账号和 AdsPower 浏览器环境。',
-        location: '内容管理 > 文章详情',
-        action: '先为文章选择所属品牌，再回到自媒体分发继续操作。',
-      })
-      return
-    }
-    await refreshBrowserEnvironmentAccountStatuses()
-    const binding = environmentAccountOf(account)
-    if (!binding) {
-      await showBrandEnvironmentSetupPrompt('当前自媒体账号未绑定 AdsPower 浏览器环境，无法打开对应环境并填充。')
-      return
-    }
-    if (binding.loginStatus !== 'logged_in') {
-      ElMessage.warning(environmentAccountActionHint(account))
-      return
-    }
-    const backendBase = window.location.origin
-    const environmentKey = binding.environmentKey || ''
-    if (!environmentKey) {
-      await showBrandEnvironmentSetupPrompt('当前账号的浏览器环境配置不完整，请到品牌详情重新保存或重新绑定。')
-      return
-    }
-    const providerProfileId = browserEnvironmentProviderProfileIdOf(binding)
-    if (!providerProfileId) {
-      await showBrandEnvironmentSetupPrompt('当前账号的 AdsPower 浏览器编号缺失，请到品牌详情补全环境配置。')
-      return
-    }
-    let helperAuthConfig: Awaited<ReturnType<typeof currentLocalHelperAuthConfig>>
-    try {
-      helperAuthConfig = await currentLocalHelperAuthConfig()
-    } catch (error) {
-      await showLocalAgentSetupPrompt(error instanceof Error ? error.message : undefined)
-      return
-    }
-    selectedSelfMediaAccountId.value = account.id
-    selfMediaSubmitting.value = true
-    try {
-      const requestId = createRequestId(`env_${account.platform}`)
-      const taskResult = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
-        selfMediaAccountId: account.id,
-        platformOptions: account.platform === 'wechat_mp' || account.platform === 'wechat'
-          ? { publishAction: 'publish' }
-          : undefined,
-        requestId,
-      })
-      const backendTask = taskResult.data.data
-      if (!backendTask?.id) {
-        throw new Error('后台未返回分发任务')
-      }
-      const taskEnvironmentKey = backendTask.environmentKey || environmentKey
-      const taskProviderProfileId = backendTask.providerProfileId || providerProfileId
-      const taskBrowserEnvironmentAccountId = backendTask.browserEnvironmentAccountId || binding.id
-      if (!taskEnvironmentKey || !taskProviderProfileId) {
-        throw new Error('后台分发任务未返回浏览器环境信息，请刷新品牌环境绑定后重试')
-      }
-      await launchLocalHelperTask(
-        helperAuthConfig,
-        {
-          environmentKey: taskEnvironmentKey,
-          providerProfileId: taskProviderProfileId,
-          environmentName: taskEnvironmentKey || account.accountName || null,
-          backendBase,
-          taskId: backendTask.id,
-          selfMediaAccountId: account.id,
-          browserEnvironmentAccountId: taskBrowserEnvironmentAccountId,
-          platform: account.platform,
-          url: defaultSemiAutoPublishUrl(account.platform),
-          expectedPlatformAccountId: null,
-          expectedAccountName: binding.expectedAccountName || account.accountName || null,
-          backendTask,
-        },
-      )
-      ElMessage.success('已启动 AdsPower 浏览器环境，环境内扩展将领取任务并填充草稿')
-      await refreshDistributionHistory()
-      await options.load()
-    } catch (error) {
-      if (isLocalAgentSetupError(error)) {
-        await showLocalAgentSetupPrompt(error instanceof Error ? error.message : undefined)
-      } else {
-        ElMessage.error(error instanceof Error ? error.message : '启动本地助手任务失败')
-      }
-    } finally {
-      selfMediaSubmitting.value = false
     }
   }
 
@@ -1255,8 +1141,6 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     canSubmitSemiAutoEnvironmentTask,
     openSemiAutoEnvironmentForLogin,
     resetEnvironmentAccountIdentity,
-    semiAutoAccountActionLoading,
-    submitSemiAutoEnvironmentTask,
     semiAutoPlatformLabel,
     handleFolderScopeChange,
     selectImageFolder,

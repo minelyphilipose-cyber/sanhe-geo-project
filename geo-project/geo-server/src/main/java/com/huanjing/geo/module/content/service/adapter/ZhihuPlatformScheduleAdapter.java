@@ -28,10 +28,10 @@ public class ZhihuPlatformScheduleAdapter implements SelfMediaPlatformScheduleAd
                 false,
                 false,
                 false,
+                false,
                 true,
-                true,
-                60,
-                2
+                0,
+                0
         );
     }
 }
