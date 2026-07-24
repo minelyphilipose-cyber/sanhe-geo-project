@@ -3,6 +3,7 @@ package com.huanjing.geo.module.mobiledashboard.wechat;
 import com.huanjing.geo.common.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -31,6 +32,17 @@ class WechatRedisSingleFlightTest {
         redisTemplate = mock(StringRedisTemplate.class);
         values = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(values);
+    }
+
+    @Test
+    void springContextUsesTheProductionConstructor() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(StringRedisTemplate.class, () -> redisTemplate);
+            context.register(WechatRedisSingleFlight.class);
+            context.refresh();
+
+            assertThat(context.getBean(WechatRedisSingleFlight.class)).isNotNull();
+        }
     }
 
     @Test

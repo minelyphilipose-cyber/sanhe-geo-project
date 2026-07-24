@@ -2,6 +2,7 @@ package com.huanjing.geo.module.mobiledashboard.wechat;
 
 import com.huanjing.geo.common.exception.BizException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
@@ -29,6 +30,7 @@ public class WechatRedisSingleFlight {
     private final StringRedisTemplate redisTemplate;
     private final Sleeper sleeper;
 
+    @Autowired
     public WechatRedisSingleFlight(StringRedisTemplate redisTemplate) {
         this(redisTemplate, Thread::sleep);
     }
