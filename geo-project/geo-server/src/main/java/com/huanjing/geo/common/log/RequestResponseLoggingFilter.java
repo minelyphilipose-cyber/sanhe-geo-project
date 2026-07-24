@@ -98,9 +98,16 @@ public class RequestResponseLoggingFilter extends OncePerRequestFilter {
         long costMs = System.currentTimeMillis() - startTime;
 
         Map<String, String> headers = HttpLogSanitizer.maskHeaders(readHeaders(request));
-        String requestBody = readRequestBody(request);
-        String responseBody = readResponseBody(response);
+        boolean suppressBody = shouldSuppressBody(uri);
+        String requestBody = suppressBody ? "[suppressed]" : readRequestBody(request);
+        String responseBody = suppressBody ? "[suppressed]" : readResponseBody(response);
         int status = response.getStatus();
+
+        if (shouldSuppressNoopLocalAgentPoll(uri, status, throwable, responseBody)) {
+            HTTP_LOG.debug("http_poll_noop traceId={} userId={} method={} path={} status={} costMs={}",
+                    mdcTraceId(), userId, method, fullPath, status, costMs);
+            return;
+        }
 
         HTTP_LOG.info("http_request traceId={} userId={} method={} path={} ip={} headers={} body={}",
                 mdcTraceId(), userId, method, fullPath, clientIp, headers, requestBody);
@@ -112,6 +119,24 @@ public class RequestResponseLoggingFilter extends OncePerRequestFilter {
                     mdcTraceId(), userId, method, fullPath, status, costMs,
                     throwable.getClass().getSimpleName(), throwable.getMessage());
         }
+    }
+
+    private boolean shouldSuppressNoopLocalAgentPoll(String uri,
+                                                     int status,
+                                                     Throwable throwable,
+                                                     String responseBody) {
+        if (throwable != null || status < 200 || status >= 300) {
+            return false;
+        }
+        if (!"/api/v1/local-agent/self-media-schedules/claim-next".equals(uri)
+                && !"/api/v1/local-agent/self-media-schedules/publish-checks/claim-next".equals(uri)) {
+            return false;
+        }
+        return responseBody.contains("\"claimBlockedReason\":\"NO_DUE_TASK\"");
+    }
+
+    private boolean shouldSuppressBody(String uri) {
+        return "/api/content/articles/manual-import/parse".equals(uri);
     }
 
     private String readRequestBody(ContentCachingRequestWrapper request) {
