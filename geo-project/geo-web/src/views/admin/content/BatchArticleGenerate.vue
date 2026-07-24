@@ -38,7 +38,7 @@
             <span class="section-index">1</span>
             <div class="section-head-text">
               <div class="section-title">选择归属项目</div>
-              <div class="section-desc">沿用手动生成文章的客户 / 品牌 / 项目级联，只展示当前已激活项目。</div>
+              <div class="section-desc">沿用文章导入页的客户 / 品牌 / 项目级联，只展示当前已激活项目。</div>
             </div>
           </div>
           <div class="section-body">

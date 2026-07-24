@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
+import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
@@ -4609,6 +4610,10 @@ public class SelfMediaPublishScheduleService {
     }
 
     private String articlePlatformIncompatibleMessage(ArticleDraft article, String platform) {
+        if (article != null && (ArticleTypes.GENERAL_ARTICLE.equals(article.getArticleTypeCode())
+                || ArticleTypes.GENERAL_ARTICLE.equals(article.getArticleType()))) {
+            return null;
+        }
         String explicit = explicitArticlePlatform(article);
         if (StringUtils.hasText(explicit) && !platform.equals(explicit)) {
             return "当前文章类型适配" + platformLabel(explicit) + "，不能发布到" + platformLabel(platform) + "。请先选择适配该平台的文章后再创建排期。";

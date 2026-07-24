@@ -17,6 +17,15 @@ public class ManualArticleCreateRequest {
     @Size(max = 64)
     @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
     private String contentStyle;
+
+    @Size(max = 64)
+    @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
+    private String channelGroupCode;
+
+    @Size(max = 64)
+    @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
+    private String channelSubCode;
+
     @NotBlank
     @Size(max = 1000)
     private String topic;

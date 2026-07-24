@@ -189,10 +189,11 @@ class ContentArticleServiceTest {
         assertNull(draft.getCoverImageUrl());
         assertEquals("approved", draft.getStatus());
         verify(coverSelectionService, never()).requireManualCoverUrl(any(), any());
+        verify(coverSelectionService, never()).selectRandomCoverUrl(any());
     }
 
     @Test
-    void createManualAllowsZhihuWithoutCover() {
+    void createManualAllowsArticleWithoutCover() {
         doAnswer(invocation -> {
             ArticleDraft draft = invocation.getArgument(0);
             draft.setId(99L);
@@ -216,6 +217,39 @@ class ContentArticleServiceTest {
         assertNull(draftCaptor.getValue().getCoverImageUrl());
         verify(coverSelectionService, never()).requireManualCoverUrl(any(), any());
         verify(coverSelectionService, never()).selectRandomCoverUrl(any());
+    }
+
+    @Test
+    void createManualPersistsSelectedTargetChannelAndRequiresCoverOnlyWhenChannelNeedsIt() {
+        ManualArticleCreateRequest request = new ManualArticleCreateRequest();
+        request.setProjectId(10L);
+        request.setArticleType(ArticleTypes.GENERAL_ARTICLE);
+        request.setChannelGroupCode("self_media");
+        request.setChannelSubCode("wechat");
+        request.setTopic("Imported title");
+        request.setTitle("Imported title");
+        request.setContentMarkdown("# Imported title\n\nbody");
+        request.setSource("manual");
+
+        BizException missingCover = assertThrows(BizException.class, () -> service.createManual(request));
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, missingCover.getCode());
+        assertTrue(missingCover.getMessage().contains("封面"));
+
+        request.setCoverMaterialId(88L);
+        doAnswer(invocation -> {
+            ArticleDraft draft = invocation.getArgument(0);
+            draft.setId(99L);
+            return 1;
+        }).when(articleDraftMapper).insert(any(ArticleDraft.class));
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+
+        service.createManual(request);
+
+        ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
+        verify(articleDraftMapper).insert(draftCaptor.capture());
+        assertEquals("self_media", draftCaptor.getValue().getChannelGroupCode());
+        assertEquals("wechat", draftCaptor.getValue().getChannelSubCode());
+        assertEquals("https://example.test/cover.jpg", draftCaptor.getValue().getCoverImageUrl());
     }
 
     @Test

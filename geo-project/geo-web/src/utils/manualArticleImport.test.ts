@@ -56,7 +56,7 @@ describe('manualArticleImport', () => {
     const completeInput = {
       hasProject: true,
       hasArticleType: true,
-      hasContentStyle: true,
+      hasTargetChannel: true,
       hasTopic: true,
       hasTitle: true,
       hasBody: true,
@@ -66,6 +66,10 @@ describe('manualArticleImport', () => {
 
     expect(evaluateManualArticleSubmission(completeInput).canSubmit).toBe(true)
     expect(evaluateManualArticleSubmission({ ...completeInput, hasTitle: false })).toMatchObject({
+      missingRequiredCount: 1,
+      canSubmit: false,
+    })
+    expect(evaluateManualArticleSubmission({ ...completeInput, hasTargetChannel: false })).toMatchObject({
       missingRequiredCount: 1,
       canSubmit: false,
     })

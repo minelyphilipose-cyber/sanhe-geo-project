@@ -15,7 +15,7 @@ export interface ManualArticleContentStats {
 export interface ManualArticleSubmissionInput {
   hasProject: boolean
   hasArticleType: boolean
-  hasContentStyle: boolean
+  hasTargetChannel: boolean
   hasTopic: boolean
   hasTitle: boolean
   hasBody: boolean
@@ -110,7 +110,7 @@ export function evaluateManualArticleSubmission(input: ManualArticleSubmissionIn
   const missingRequiredCount = [
     input.hasProject,
     input.hasArticleType,
-    input.hasContentStyle,
+    input.hasTargetChannel,
     input.hasTopic,
     input.hasTitle,
     input.hasBody,

@@ -33,10 +33,27 @@
           placeholder="选择客户 / 品牌 / 项目"
         />
       </label>
+      <label class="inline-field channel-field">
+        <span class="field-label required">目标发布渠道</span>
+        <el-select v-model="form.targetChannelKey" filterable placeholder="选择发布渠道">
+          <el-option-group
+            v-for="group in targetChannelGroups"
+            :key="group.label"
+            :label="group.label"
+          >
+            <el-option
+              v-for="item in group.options"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-option-group>
+        </el-select>
+      </label>
       <div class="import-policy">
         <span>通用文章</span>
         <i />
-        <span>发布平台在后续发布时选择</span>
+        <span>仅按目标渠道校验</span>
       </div>
     </section>
 
@@ -103,7 +120,7 @@
             <div v-if="importSource && omittedImageCount > 0" class="image-import-notice">
               <el-icon><Picture /></el-icon>
               <span>原文有 <strong>{{ omittedImageCount }}</strong> 张图片未导入，请按需重新补充。</span>
-              <el-button link type="primary" @click="openImagePicker">补充图片</el-button>
+              <el-button link type="primary" @click="openImagePicker('body')">补充图片</el-button>
             </div>
           </div>
 
@@ -113,12 +130,35 @@
               <el-input v-model="form.title" maxlength="120" show-word-limit placeholder="输入文章标题" />
             </label>
 
+            <div class="media-field cover-field">
+              <div class="media-label-row">
+                <div>
+                  <span class="field-label">文章封面 <em>{{ requiresCover ? '当前渠道必填' : '可选' }}</em></span>
+                  <small>{{ coverRequirementHint }}</small>
+                </div>
+                <el-button size="small" :icon="Picture" @click="openImagePicker('cover')">
+                  {{ selectedCoverMaterial ? '更换封面' : '选择封面' }}
+                </el-button>
+              </div>
+              <div v-if="selectedCoverMaterial" class="selected-media">
+                <img :src="materialThumbUrl(selectedCoverMaterial)" :alt="selectedCoverMaterial.fileName" />
+                <div>
+                  <strong>{{ selectedCoverMaterial.fileName }}</strong>
+                  <span>已指定为文章封面</span>
+                </div>
+                <el-button link type="danger" @click="clearSelectedCover">移除封面</el-button>
+              </div>
+              <div v-else class="cover-auto-hint">
+                {{ requiresCover ? '当前渠道要求封面，请从品牌图库选择一张图片。' : '当前渠道不强制封面，可按内容需要补充。' }}
+              </div>
+            </div>
+
             <div class="body-editor-head">
               <div>
                 <span class="field-label required">文章正文</span>
                 <small>可直接粘贴完整纯文本或 Markdown</small>
               </div>
-              <el-button size="small" :icon="Picture" @click="openImagePicker">
+              <el-button size="small" :icon="Picture" @click="openImagePicker('body')">
                 在光标处插入图片
               </el-button>
             </div>
@@ -156,6 +196,8 @@
           <div class="paper-meta">
             <span>手动导入</span>
             <i />
+            <span>{{ selectedTargetChannel?.label || '未选择渠道' }}</span>
+            <i />
             <span>{{ selectedProject?.projectName || selectedProject?.brandName || '未绑定项目' }}</span>
             <i />
             <span>{{ todayText }}</span>
@@ -174,8 +216,8 @@
       </aside>
     </main>
 
-    <el-dialog v-model="imagePickerVisible" title="补充正文图片" width="860px" append-to-body>
-      <p class="image-picker-guide">选择图片后会插入到正文当前光标位置。新上传图片会保存到当前品牌图库，供后续文章继续使用。</p>
+    <el-dialog v-model="imagePickerVisible" :title="imagePickerTitle" width="860px" append-to-body>
+      <p class="image-picker-guide">{{ imagePickerGuide }}</p>
       <div class="image-picker-toolbar">
         <el-select v-model="selectedImageFolderId" :loading="imageFoldersLoading" placeholder="选择文件夹" style="width: 240px">
           <el-option
@@ -210,7 +252,7 @@
       <template #footer>
         <el-button @click="imagePickerVisible = false">取消</el-button>
         <el-button type="primary" :disabled="!activePickerMaterial" @click="confirmImagePicker">
-          插入正文光标处
+          {{ imagePickerConfirmText }}
         </el-button>
       </template>
     </el-dialog>
@@ -247,8 +289,41 @@ interface ProjectCascadeNode {
   children?: ProjectCascadeNode[]
 }
 
+interface TargetChannelOption {
+  value: string
+  label: string
+  groupCode: string
+  subCode?: string
+}
+
 const MANUAL_ARTICLE_TYPE = 'general_article'
 const MAX_IMAGE_UPLOAD_SIZE = 10 * 1024 * 1024
+const COVER_REQUIRED_SELF_MEDIA_PLATFORMS = new Set(['wechat', 'toutiao', 'baijiahao', 'netease', 'douyin'])
+const targetChannelGroups: Array<{ label: string; options: TargetChannelOption[] }> = [
+  {
+    label: '内容渠道',
+    options: [
+      { value: 'agent_site', label: '官网', groupCode: 'agent_site' },
+      { value: 'industry_site', label: '行业资讯站', groupCode: 'industry_site' },
+      { value: 'forum', label: '平台网站', groupCode: 'forum' },
+      { value: 'authority_media', label: '权重媒体平台', groupCode: 'authority_media' },
+    ],
+  },
+  {
+    label: '自媒体平台',
+    options: [
+      { value: 'self_media:wechat', label: '公众号', groupCode: 'self_media', subCode: 'wechat' },
+      { value: 'self_media:douyin', label: '抖音图文', groupCode: 'self_media', subCode: 'douyin' },
+      { value: 'self_media:baijiahao', label: '百家号', groupCode: 'self_media', subCode: 'baijiahao' },
+      { value: 'self_media:zhihu', label: '知乎', groupCode: 'self_media', subCode: 'zhihu' },
+      { value: 'self_media:xiaohongshu', label: '小红书', groupCode: 'self_media', subCode: 'xiaohongshu' },
+      { value: 'self_media:toutiao', label: '今日头条', groupCode: 'self_media', subCode: 'toutiao' },
+      { value: 'self_media:netease', label: '网易', groupCode: 'self_media', subCode: 'netease' },
+      { value: 'self_media:sohu', label: '搜狐', groupCode: 'self_media', subCode: 'sohu' },
+    ],
+  },
+]
+const targetChannelOptions = targetChannelGroups.flatMap((group) => group.options)
 
 const route = useRoute()
 const router = useRouter()
@@ -257,6 +332,7 @@ const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 const form = reactive({
   projectId: undefined as number | undefined,
+  targetChannelKey: '',
   topic: '',
   title: '',
   bodyMarkdown: '',
@@ -280,11 +356,14 @@ const bodyInputRef = ref<{ textarea?: HTMLTextAreaElement } | null>(null)
 const imageUploadInput = ref<HTMLInputElement | null>(null)
 
 const imagePickerVisible = ref(false)
+const imagePickerPurpose = ref<'body' | 'cover'>('body')
 const imageFoldersLoading = ref(false)
 const uploadingImage = ref(false)
 const imageFolders = ref<BrandImageFolder[]>([])
 const selectedImageFolderId = ref<number | null>(null)
 const selectedImageMaterialId = ref<number | null>(null)
+const selectedCoverMaterialId = ref<number | null>(null)
+const pickerCoverMaterialId = ref<number | null>(null)
 const imageAltText = ref('')
 const imageThumbUrls = ref<Record<number, string | null>>({})
 const imagePreviewUrls = ref<Record<string, string>>({})
@@ -293,6 +372,12 @@ const projectCascadeProps = { value: 'value', label: 'label', children: 'childre
 const canUploadMaterial = computed(() => userStore.hasPermission('brand.material.upload'))
 const projectCascadeOptions = computed(() => buildProjectCascadeOptions(projectOptions.value))
 const selectedProject = computed(() => projectOptions.value.find((project) => project.id === form.projectId) || null)
+const selectedTargetChannel = computed(() => targetChannelOptions.find((item) => item.value === form.targetChannelKey) || null)
+const requiresCover = computed(() => selectedTargetChannel.value?.groupCode === 'self_media'
+  && COVER_REQUIRED_SELF_MEDIA_PLATFORMS.has(selectedTargetChannel.value.subCode || ''))
+const coverRequirementHint = computed(() => requiresCover.value
+  ? `${selectedTargetChannel.value?.label || '当前渠道'}发布要求设置文章封面。`
+  : '封面为可选项，也可以在后续发布时按目标平台要求补充。')
 const selectedProjectPath = computed(() => {
   const project = selectedProject.value
   return project ? [project.companyName, project.brandName, project.projectName].filter(Boolean).join(' / ') : ''
@@ -303,12 +388,12 @@ const bodyStats = computed(() => calculateManualArticleStats(form.bodyMarkdown))
 const submissionState = computed(() => evaluateManualArticleSubmission({
   hasProject: Boolean(form.projectId),
   hasArticleType: true,
-  hasContentStyle: true,
+  hasTargetChannel: Boolean(selectedTargetChannel.value),
   hasTopic: Boolean(form.topic.trim()),
   hasTitle: Boolean(form.title.trim()),
   hasBody: Boolean(form.bodyMarkdown.trim()),
   withinContentLimit: canonicalMarkdown.value.length <= 50000,
-  hasRequiredCover: true,
+  hasRequiredCover: !requiresCover.value || Boolean(selectedCoverMaterialId.value),
 }))
 const missingRequiredCount = computed(() => submissionState.value.missingRequiredCount)
 const canSubmit = computed(() => (
@@ -334,9 +419,16 @@ const imageMaterials = computed(() => {
 })
 const allImageMaterials = computed(() => imageFolders.value.flatMap((folder) => folder.materials || [])
   .filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.publicUrl)))
-const selectedImageMaterial = computed(() => imageMaterials.value.find((item) => item.id === selectedImageMaterialId.value) || null)
-const activePickerMaterialId = computed(() => selectedImageMaterialId.value)
-const activePickerMaterial = computed(() => selectedImageMaterial.value)
+const selectedCoverMaterial = computed(() => allImageMaterials.value.find((item) => item.id === selectedCoverMaterialId.value) || null)
+const activePickerMaterialId = computed(() => imagePickerPurpose.value === 'cover'
+  ? pickerCoverMaterialId.value
+  : selectedImageMaterialId.value)
+const activePickerMaterial = computed(() => allImageMaterials.value.find((item) => item.id === activePickerMaterialId.value) || null)
+const imagePickerTitle = computed(() => imagePickerPurpose.value === 'cover' ? '选择文章封面' : '补充正文图片')
+const imagePickerGuide = computed(() => imagePickerPurpose.value === 'cover'
+  ? '选择一张品牌图库图片作为文章封面。新上传图片会保存在当前品牌图库中。'
+  : '选择图片后会插入到正文当前光标位置。新上传图片会保存到当前品牌图库，供后续文章继续使用。')
+const imagePickerConfirmText = computed(() => imagePickerPurpose.value === 'cover' ? '设为文章封面' : '插入正文光标处')
 
 async function loadProjectOptions() {
   projectLoading.value = true
@@ -472,14 +564,16 @@ function replaceArticleContent() {
   importSource.value = ''
 }
 
-async function openImagePicker() {
+async function openImagePicker(purpose: 'body' | 'cover') {
   if (!selectedProject.value?.brandId) {
-    ElMessage.warning('请先在页面上方选择绑定项目，再补充图片')
+    ElMessage.warning(`请先在页面上方选择绑定项目，再${purpose === 'cover' ? '选择封面' : '补充图片'}`)
     return
   }
+  imagePickerPurpose.value = purpose
+  if (purpose === 'cover') pickerCoverMaterialId.value = selectedCoverMaterialId.value
   imagePickerVisible.value = true
   if (!imageFolders.value.length) await loadImageFolders()
-  if (!selectedImageMaterialId.value) {
+  if (purpose === 'body' && !selectedImageMaterialId.value) {
     selectedImageMaterialId.value = imageMaterials.value[0]?.id || null
   }
 }
@@ -507,16 +601,32 @@ async function loadImageFolders() {
 }
 
 function selectImageMaterial(material: BrandMaterial) {
-  selectedImageMaterialId.value = material.id
+  if (imagePickerPurpose.value === 'cover') {
+    pickerCoverMaterialId.value = material.id
+  } else {
+    selectedImageMaterialId.value = material.id
+  }
   if (!imageAltText.value.trim()) imageAltText.value = filenameWithoutExt(material.fileName)
 }
 
 function confirmImagePicker() {
   const material = activePickerMaterial.value
   if (!material?.publicUrl) return
+  if (imagePickerPurpose.value === 'cover') {
+    selectedCoverMaterialId.value = material.id
+    dirty.value = true
+    ElMessage.success('文章封面已选择')
+    imagePickerVisible.value = false
+    return
+  }
   insertMarkdownAtCursor(`![${escapeMarkdownAlt(imageAltText.value.trim() || filenameWithoutExt(material.fileName))}](${material.publicUrl})`)
   ElMessage.success('图片已插入正文光标位置')
   imagePickerVisible.value = false
+}
+
+function clearSelectedCover() {
+  selectedCoverMaterialId.value = null
+  dirty.value = true
 }
 
 function triggerImageUpload() {
@@ -555,11 +665,15 @@ async function handleImageUpload(event: Event) {
     }
     await loadImageFolders()
     if (lastMaterialId && allImageMaterials.value.some((material) => material.id === lastMaterialId)) {
-      selectedImageMaterialId.value = lastMaterialId
+      if (imagePickerPurpose.value === 'cover') {
+        pickerCoverMaterialId.value = lastMaterialId
+      } else {
+        selectedImageMaterialId.value = lastMaterialId
+      }
       const material = allImageMaterials.value.find((item) => item.id === lastMaterialId)
       imageAltText.value = filenameWithoutExt(material?.fileName)
     }
-    ElMessage.success(`已上传 ${accepted.length} 张图片，请选择后插入正文`)
+    ElMessage.success(`已上传 ${accepted.length} 张图片，请选择后${imagePickerPurpose.value === 'cover' ? '设为封面' : '插入正文'}`)
   } catch (err) {
     console.error(err)
     ElMessage.error(errorMessage(err, '图片上传失败'))
@@ -617,15 +731,19 @@ function renderPreviewMarkdown(content: string) {
 }
 
 async function submitArticle() {
-  if (!canSubmit.value || !form.projectId) return
+  const targetChannel = selectedTargetChannel.value
+  if (!canSubmit.value || !form.projectId || !targetChannel) return
   submitting.value = true
   try {
     const { data } = await createManualContentArticle({
       projectId: form.projectId,
       articleType: MANUAL_ARTICLE_TYPE,
+      channelGroupCode: targetChannel.groupCode,
+      channelSubCode: targetChannel.subCode,
       topic: form.topic.trim(),
       title: form.title.trim(),
       contentMarkdown: canonicalMarkdown.value,
+      coverMaterialId: selectedCoverMaterialId.value || undefined,
       source: 'manual',
     })
     dirty.value = false
@@ -721,6 +839,8 @@ watch(() => form.projectId, () => {
   imageFolders.value = []
   selectedImageFolderId.value = null
   selectedImageMaterialId.value = null
+  selectedCoverMaterialId.value = null
+  pickerCoverMaterialId.value = null
   imageThumbUrls.value = {}
   imagePreviewUrls.value = {}
 })
@@ -815,7 +935,7 @@ onBeforeUnmount(() => {
 
 .metadata-bar {
   display: grid;
-  grid-template-columns: minmax(420px, 660px) auto;
+  grid-template-columns: minmax(360px, 1.15fr) minmax(280px, .85fr) auto;
   align-items: center;
   gap: 24px;
   margin: 24px 0;
@@ -920,6 +1040,10 @@ onBeforeUnmount(() => {
 
 .media-field { display: grid; gap: 10px; padding: 14px; border: 1px solid #e0eaf5; border-radius: 13px; background: #fbfdff; }
 .media-label-row, .body-editor-head { justify-content: space-between; }
+.media-label-row > div { display: grid; gap: 4px; }
+.media-label-row small { color: #8794a9; font-size: 12px; line-height: 1.5; }
+.field-label em { margin-left: 6px; color: #8794a9; font-size: 12px; font-style: normal; font-weight: 400; }
+.cover-auto-hint { padding: 10px 12px; border-radius: 8px; background: #f1f6ff; color: #60718b; font-size: 12px; line-height: 1.5; }
 .selected-media { display: grid; grid-template-columns: 72px 1fr auto; gap: 12px; align-items: center; }
 .selected-media img { width: 72px; height: 52px; border-radius: 8px; object-fit: cover; background: #eef3f8; }
 .selected-media > div { display: grid; gap: 4px; min-width: 0; }
@@ -982,7 +1106,8 @@ onBeforeUnmount(() => {
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 @media (max-width: 1280px) {
-  .metadata-bar { grid-template-columns: minmax(360px, 1fr) auto; }
+  .metadata-bar { grid-template-columns: minmax(340px, 1fr) minmax(260px, .8fr); }
+  .import-policy { grid-column: 1 / -1; justify-content: flex-start; }
   .workspace { grid-template-columns: minmax(540px, 1fr) minmax(400px, .8fr); }
   .preview-paper { padding: 34px 32px 48px; }
 }

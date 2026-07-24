@@ -53,7 +53,7 @@ public class ContentArticleService {
     private static final Set<String> LEGACY_PROJECT_UPDATE_ROLES =
             Set.of("operator", "delivery_manager", "partner", "partner_staff");
     private static final Set<String> MANUAL_CREATE_COVER_REQUIRED_SELF_MEDIA_SUBS =
-            Set.of("toutiao", "baijiahao", "netease", "douyin");
+            Set.of("wechat", "toutiao", "baijiahao", "netease", "douyin");
 
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
@@ -457,8 +457,8 @@ public class ContentArticleService {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Title is required");
         }
         String contentStyle = StringUtils.hasText(req.getContentStyle()) ? req.getContentStyle().trim() : "";
-        String channelGroupCode = groupFromContentStyle(contentStyle);
-        String channelSubCode = subFromContentStyle(contentStyle);
+        String channelGroupCode = resolveManualCreateChannelGroup(req, contentStyle);
+        String channelSubCode = resolveManualCreateChannelSub(req, channelGroupCode, contentStyle);
         String topic = StringUtils.hasText(req.getTopic()) ? req.getTopic().trim() : "";
         String topicAsQuestion = StringUtils.hasText(req.getTopicAsQuestion()) ? req.getTopicAsQuestion().trim() : null;
         String createSource = normalizeCreateSource(req.getSource());
@@ -534,6 +534,17 @@ public class ContentArticleService {
                                                String channelSubCode,
                                                String contentStyle,
                                                String createSource) {
+        if ("manual".equals(createSource)) {
+            if (req.getCoverMaterialId() != null) {
+                return coverSelectionService.requireManualCoverUrl(project.getBrandId(), req.getCoverMaterialId());
+            }
+            if (isSelfMediaChannel(channelGroupCode, channelSubCode, contentStyle)
+                    && requiresManualCreateCover(channelSubCode, contentStyle)) {
+                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST,
+                        ArticlePromptChannels.channelName(channelGroupCode, channelSubCode) + "发布必须选择文章封面");
+            }
+            return null;
+        }
         if (!isSelfMediaChannel(channelGroupCode, channelSubCode, contentStyle)) {
             return null;
         }
@@ -545,6 +556,47 @@ public class ContentArticleService {
             return null;
         }
         return coverSelectionService.requireManualCoverUrl(project.getBrandId(), req.getCoverMaterialId());
+    }
+
+    private String resolveManualCreateChannelGroup(ManualArticleCreateRequest req, String contentStyle) {
+        String groupCode = trimToNull(req.getChannelGroupCode());
+        if (groupCode == null) {
+            if (trimToNull(req.getChannelSubCode()) != null) {
+                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "发布渠道分组不能为空");
+            }
+            return groupFromContentStyle(contentStyle);
+        }
+        if (!ArticlePromptChannels.GROUPS.contains(groupCode)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "不支持的目标发布渠道");
+        }
+        return groupCode;
+    }
+
+    private String resolveManualCreateChannelSub(ManualArticleCreateRequest req,
+                                                 String channelGroupCode,
+                                                 String contentStyle) {
+        String requestedGroup = trimToNull(req.getChannelGroupCode());
+        String subCode = trimToNull(req.getChannelSubCode());
+        if (requestedGroup == null) {
+            return subFromContentStyle(contentStyle);
+        }
+        subCode = ArticlePromptChannels.canonicalSubCode(channelGroupCode, subCode);
+        if (ArticlePromptChannels.SELF_MEDIA.equals(channelGroupCode)) {
+            if (subCode == null || !ArticlePromptChannels.SELF_MEDIA_SUBS.contains(subCode)) {
+                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "请选择具体的自媒体发布平台");
+            }
+            return subCode;
+        }
+        if (ArticlePromptChannels.AUTHORITY_MEDIA.equals(channelGroupCode)) {
+            if (subCode != null && !ArticlePromptChannels.AUTHORITY_MEDIA_SUBS.contains(subCode)) {
+                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "不支持的权重媒体类型");
+            }
+            return subCode;
+        }
+        if (subCode != null) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "当前发布渠道不支持子渠道");
+        }
+        return null;
     }
 
     private boolean requiresManualCreateCover(String channelSubCode, String contentStyle) {

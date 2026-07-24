@@ -37,6 +37,19 @@ public class ImageCompressionService {
         String contentType = file.getContentType();
         String originalType = resolveFileType(originalName, contentType);
 
+        if (isPassThroughType(originalType)) {
+            if (original.length > MAX_IMAGE_BYTES) {
+                throw new BizException(400, "当前图片格式无法压缩，请上传 500KB 以内的 SVG/GIF/WebP，或改用 JPG/PNG");
+            }
+            return new CompressedImage(
+                    original,
+                    StringUtils.hasText(contentType) ? contentType : contentTypeFor(originalType),
+                    originalName,
+                    originalType,
+                    original.length
+            );
+        }
+
         if (original.length <= MAX_IMAGE_BYTES) {
             return new CompressedImage(
                     original,
@@ -193,6 +206,13 @@ public class ImageCompressionService {
             case "webp" -> "image/webp";
             case "svg" -> "image/svg+xml";
             default -> "application/octet-stream";
+        };
+    }
+
+    private boolean isPassThroughType(String fileType) {
+        return switch (fileType == null ? "" : fileType.toLowerCase(Locale.ROOT)) {
+            case "svg", "gif", "webp" -> true;
+            default -> false;
         };
     }
 

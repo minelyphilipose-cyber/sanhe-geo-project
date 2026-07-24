@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
@@ -674,6 +675,21 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("article_type_mismatch", response.getAction());
         assertEquals("ARTICLE_PLATFORM_MISMATCH", response.getCode());
         verify(accountMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void previewPlatformQuickScheduleAllowsManualGeneralArticleRegardlessOfStoredPlatformHints() {
+        ArticleDraft article = article();
+        article.setArticleTypeCode(ArticleTypes.GENERAL_ARTICLE);
+        article.setContentStyle("xiaohongshu_note");
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+
+        SelfMediaPlatformQuickScheduleResponse response = service.previewPlatformQuickSchedule(quickRequest("toutiao", false));
+
+        assertEquals("account_or_environment_not_ready", response.getAction());
+        assertEquals("SELF_MEDIA_ACCOUNT_NOT_FOUND", response.getCode());
+        verify(accountMapper, times(1)).selectOne(any());
     }
 
     @Test

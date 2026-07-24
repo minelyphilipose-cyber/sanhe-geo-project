@@ -290,6 +290,8 @@ export function createManualContentArticle(data: {
   projectId: number
   articleType: string
   contentStyle?: string
+  channelGroupCode?: string
+  channelSubCode?: string
   topic: string
   topicAsQuestion?: string
   title?: string
@@ -363,7 +365,7 @@ export interface ArticleAiDraftPreviewResponse {
 
 export function previewAiContentArticleDraft(data: ArticleAiDraftPreviewRequest) {
   return request.post<R<ArticleAiDraftPreviewResponse>>('/content/articles/ai-draft/preview', data, {
-    timeout: 180000,
+    timeout: 360000,
   })
 }
 
@@ -420,13 +422,13 @@ export interface ArticleTemplateGenerateResponse {
 
 export function previewArticleTemplate(data: ArticleTemplatePreviewRequest) {
   return request.post<R<ArticleTemplatePreviewResponse>>('/content/articles/template-preview', data, {
-    timeout: 180000,
+    timeout: 360000,
   })
 }
 
 export function generateArticleTemplate(data: ArticleTemplatePreviewRequest) {
   return request.post<R<ArticleTemplateGenerateResponse>>('/content/articles/template-generate', data, {
-    timeout: 300000,
+    timeout: 360000,
   })
 }
 
