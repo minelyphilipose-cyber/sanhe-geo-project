@@ -4,6 +4,7 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.dto.BrandStatementUpdateRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
@@ -31,6 +32,7 @@ public class BrandStatementService {
     private final CompanyMapper companyMapper;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
+    private final InternalScopeService internalScopeService;
 
     public Map<String, Object> detail(Long brandId) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -300,6 +302,7 @@ public class BrandStatementService {
             throw new BizException(404, "Company not found");
         }
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
+        internalScopeService.ensureCompanyAccess(user, company, "brand");
     }
 
     private void ensureEditableByInternal(SysUser user) {

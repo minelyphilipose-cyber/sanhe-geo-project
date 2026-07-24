@@ -229,7 +229,8 @@ const dictStore = useDictStore()
 const canCreateCompany = computed(() => userStore.hasPermission('company.create'))
 const canUpdateCompany = computed(() => userStore.hasPermission('company.update'))
 const canDeleteCompany = computed(() => userStore.hasPermission('company.delete'))
-const canSelectSalesOwner = computed(() => userStore.role !== 'sales' && (canCreateCompany.value || canUpdateCompany.value))
+const canEditCompanyForm = computed(() => canCreateCompany.value || canUpdateCompany.value)
+const canSelectSalesOwner = computed(() => !userStore.isSales && canEditCompanyForm.value)
 
 const loading = ref(false)
 const saving = ref(false)
@@ -399,6 +400,10 @@ function onScopeTabChange() {
 }
 
 async function loadPartners() {
+  if (!canEditCompanyForm.value) {
+    partnerOptions.value = []
+    return
+  }
   try {
     const { data } = await getPartnerList({ current: 1, size: 500 })
     partnerOptions.value = data.data.records || []

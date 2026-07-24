@@ -40,7 +40,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const projectId = Number(route.params.id)
 
-const canManageMobileShare = computed(() => userStore.hasPermission('project.report.export'))
+const canManageMobileShare = computed(() => !userStore.isSales && userStore.hasPermission('project.report.export'))
 
 function goBack() {
   router.back()

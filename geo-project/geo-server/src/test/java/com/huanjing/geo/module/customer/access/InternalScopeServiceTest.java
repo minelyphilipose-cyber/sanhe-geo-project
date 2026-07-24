@@ -174,7 +174,7 @@ class InternalScopeServiceTest {
     }
 
     @Test
-    void salesListScopeDefaultsToNoRowsWhenNoDedicatedSalesScopeExists() {
+    void salesListScopeUsesDedicatedSalesOwnerAssignment() {
         SysUser sales = user(4L, "sales");
         LambdaQueryWrapper<Brand> brandWrapper = new LambdaQueryWrapper<>();
         LambdaQueryWrapper<Project> projectWrapper = new LambdaQueryWrapper<>();
@@ -182,8 +182,8 @@ class InternalScopeServiceTest {
         service.applyBrandScope(brandWrapper, sales);
         service.applyProjectScope(projectWrapper, sales);
 
-        assertTrue(brandWrapper.getTargetSql().contains("1 = 0"));
-        assertTrue(projectWrapper.getTargetSql().contains("1 = 0"));
+        assertTrue(brandWrapper.getTargetSql().contains("sales_owner_id = 4"));
+        assertTrue(projectWrapper.getTargetSql().contains("sales_owner_id = 4"));
     }
 
     @Test

@@ -7,6 +7,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.image.CompressedImage;
 import com.huanjing.geo.common.image.ImageCompressionService;
 import com.huanjing.geo.common.storage.MinioStorageService;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.entity.BrandOffering;
@@ -51,6 +52,7 @@ public class BrandProfileService {
     private final BrandImageFolderService brandImageFolderService;
     private final BrandMaterialPublicUrlService publicUrlService;
     private final ObjectMapper objectMapper;
+    private final InternalScopeService internalScopeService;
 
     public List<BrandMaterial> listMaterials(Long brandId, String category) {
         return listMaterials(brandId, category, null);
@@ -393,6 +395,7 @@ public class BrandProfileService {
             throw new BizException(404, "Company not found");
         }
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
+        internalScopeService.ensureCompanyAccess(user, company, "brand");
         return brand;
     }
 

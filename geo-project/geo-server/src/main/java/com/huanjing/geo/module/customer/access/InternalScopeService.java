@@ -68,6 +68,10 @@ public class InternalScopeService {
             applyPartnerCompanyScope(wrapper, user);
             return;
         }
+        if (isSalesUser(user) && user != null && user.getId() != null) {
+            wrapper.eq(Company::getSalesOwnerId, user.getId());
+            return;
+        }
         if (requiresOwnerScope(user)) {
             wrapper.eq(Company::getOwnerId, user.getId());
         } else {
@@ -81,6 +85,10 @@ public class InternalScopeService {
         }
         if (isPartnerUser(user)) {
             wrapper.inSql(Brand::getCompanyId, partnerCompanyIdSql(user));
+            return;
+        }
+        if (isSalesUser(user) && user != null && user.getId() != null) {
+            wrapper.inSql(Brand::getCompanyId, salesCompanyIdSql(user.getId()));
             return;
         }
         if (requiresOwnerScope(user)) {
@@ -98,6 +106,10 @@ public class InternalScopeService {
             wrapper.inSql(Project::getCompanyId, partnerCompanyIdSql(user));
             return;
         }
+        if (isSalesUser(user) && user != null && user.getId() != null) {
+            wrapper.inSql(Project::getCompanyId, salesCompanyIdSql(user.getId()));
+            return;
+        }
         if (requiresOwnerScope(user)) {
             wrapper.inSql(Project::getCompanyId, ownerCompanyIdSql(user.getId()));
         } else {
@@ -108,6 +120,12 @@ public class InternalScopeService {
     public void ensureCompanyAccess(SysUser user, Company company, String resourceName) {
         if (isPartnerUser(user)) {
             ensurePartnerCompanyAccess(user, company, resourceName);
+            return;
+        }
+        if (isSalesUser(user)) {
+            if (company == null || company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
+                throw new BizException(403, "No permission to access this " + resourceName);
+            }
             return;
         }
         if (!requiresOwnerScope(user)) {
@@ -240,6 +258,11 @@ public class InternalScopeService {
     private String ownerCompanyIdSql(Long ownerId) {
         // ownerId must come from the authenticated SysUser id; do not pass external request input here.
         return "select id from company where deleted_at is null and owner_id = " + ownerId;
+    }
+
+    private String salesCompanyIdSql(Long salesOwnerId) {
+        // salesOwnerId must come from the authenticated SysUser id; do not pass external request input here.
+        return "select id from company where deleted_at is null and sales_owner_id = " + salesOwnerId;
     }
 
     private String ownerProjectIdSql(Long ownerId) {

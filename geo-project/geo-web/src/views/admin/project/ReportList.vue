@@ -510,6 +510,7 @@ import {
 } from '@/api/projectDashboard'
 import { getPlatformConfigPage } from '@/api/platformConfig'
 import { getKeywordGroupPage, getKeywordGroupQuestions, getProjectDetail } from '@/api/project'
+import { useUserStore } from '@/stores/user'
 import type {
   AIPlatformConfigItem,
   CompanyPackageBinding,
@@ -537,6 +538,8 @@ import { normalizeObjectStorageUrl } from '@/utils/objectStorageUrl'
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
+const userStore = useUserStore()
+const canManageDashboardShare = computed(() => !userStore.isSales && userStore.hasPermission('project.report.export'))
 
 type MetricTone = 'blue' | 'purple' | 'teal' | 'orange'
 type TrendType = 'up' | 'down'
@@ -1346,6 +1349,10 @@ async function ensureDashboardShare() {
   if (active) {
     activeShare.value = active
     return active
+  }
+  if (!canManageDashboardShare.value) {
+    ElMessage.warning('当前项目暂无可访问的实时看板链接，请联系交付负责人生成链接')
+    return null
   }
   const created = await createProjectDashboardShare(projectId.value)
   activeShare.value = created.data.data

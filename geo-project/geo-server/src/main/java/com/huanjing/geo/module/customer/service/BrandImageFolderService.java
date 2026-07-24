@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderRequest;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderVO;
 import com.huanjing.geo.module.customer.dto.BrandMaterialVO;
@@ -48,7 +49,7 @@ public class BrandImageFolderService {
     private static final String ILLUSTRATION_FOLDER_PREFIX = "插图";
     private static final String COVER_FOLDER_NAME = "封面";
     private static final String ARTICLE_FOLDER_RULE_MESSAGE =
-            "不能这样修改：文章自动生成需要至少一个启用且名称以“插图”开头的文件夹，并保留一个启用且名称为“封面”的文件夹。";
+            "图片资产中需至少一个名称以“插图”开头的文件夹，并保留一个名称为“封面”的文件夹。";
     private static final List<String> REQUIRED_ARTICLE_IMAGE_FOLDERS = List.of(ILLUSTRATION_FOLDER_PREFIX, COVER_FOLDER_NAME);
     private static final List<String> ILLUSTRATION_FOLDER_TAGS = List.of("插图", "场景图");
     private static final List<String> COVER_FOLDER_TAGS = List.of("封面", "首图");
@@ -63,6 +64,7 @@ public class BrandImageFolderService {
     private final BrandImageFolderTagMapper folderTagMapper;
     private final CurrentUserService currentUserService;
     private final BrandMaterialPublicUrlService publicUrlService;
+    private final InternalScopeService internalScopeService;
 
     @Transactional
     public List<BrandImageFolderVO> listFolders(Long brandId, Long projectId, String tag, boolean activeOnly, boolean includeMaterials) {
@@ -368,6 +370,7 @@ public class BrandImageFolderService {
             throw new BizException(404, "客户不存在或已删除");
         }
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
+        internalScopeService.ensureCompanyAccess(user, company, "brand");
         return brand;
     }
 

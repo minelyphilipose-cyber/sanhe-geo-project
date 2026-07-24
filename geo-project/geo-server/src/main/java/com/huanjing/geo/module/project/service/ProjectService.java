@@ -50,17 +50,21 @@ import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
 import com.huanjing.geo.module.project.dto.ProjectChannelAllocationQuotaVO;
 import com.huanjing.geo.module.project.dto.ProjectChannelAllocationUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
+import com.huanjing.geo.module.project.dto.KeywordGroupColumnsVO;
 import com.huanjing.geo.module.project.dto.ProjectKeywordGroupQuotaVO;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
+import com.huanjing.geo.module.project.dto.KeywordWordItemVO;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
+import com.huanjing.geo.module.project.entity.KeywordGroupWord;
 import com.huanjing.geo.module.project.entity.ProjectCustomerRequirement;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectStartRequest;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
+import com.huanjing.geo.module.project.mapper.KeywordGroupWordMapper;
 import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectStartRequestMapper;
@@ -142,6 +146,7 @@ public class ProjectService {
     private final KeywordGroupMapper keywordGroupMapper;
     private final ProjectCustomerRequirementMapper projectCustomerRequirementMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
+    private final KeywordGroupWordMapper keywordGroupWordMapper;
     private final PostsaleReportSnapshotMapper postsaleReportSnapshotMapper;
     private final ReportAccessLogMapper reportAccessLogMapper;
     private final ReportMapper reportMapper;
@@ -154,14 +159,18 @@ public class ProjectService {
     private final SpecialIndustryReadinessService specialIndustryReadinessService;
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
-        return page(current, size, keyword, status, stage, null, partnerId, brandId, false);
+        return page(current, size, keyword, status, stage, null, null, partnerId, brandId, false);
     }
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId, boolean excludeThirdPartySource) {
-        return page(current, size, keyword, status, stage, null, partnerId, brandId, excludeThirdPartySource);
+        return page(current, size, keyword, status, stage, null, null, partnerId, brandId, excludeThirdPartySource);
     }
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, String ownerType, Long partnerId, Long brandId, boolean excludeThirdPartySource) {
+        return page(current, size, keyword, status, stage, ownerType, null, partnerId, brandId, excludeThirdPartySource);
+    }
+
+    public Page<Project> page(long current, long size, String keyword, String status, String stage, String ownerType, Long companyId, Long partnerId, Long brandId, boolean excludeThirdPartySource) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         expireOverdueProjects();
@@ -186,6 +195,9 @@ public class ProjectService {
         if (StringUtils.hasText(ownerType)) {
             wrapper.eq(Project::getOwnerType, ownerType);
         }
+        if (companyId != null) {
+            wrapper.eq(Project::getCompanyId, companyId);
+        }
         if (brandId != null) {
             wrapper.eq(Project::getBrandId, brandId);
         }
@@ -199,17 +211,16 @@ public class ProjectService {
         }
         applyInternalPartnerVisibility(wrapper, user, ownerType, scopePartnerId);
         if (internalScopeService.isSalesUser(user)) {
-            List<Long> signedCompanyIds = companyMapper.selectList(
+            List<Long> salesCompanyIds = companyMapper.selectList(
                     new LambdaQueryWrapper<Company>()
                             .isNull(Company::getDeletedAt)
                             .select(Company::getId)
                             .eq(Company::getSalesOwnerId, user.getId())
-                            .eq(Company::getStatus, "signed")
             ).stream().map(Company::getId).collect(Collectors.toList());
-            if (signedCompanyIds.isEmpty()) {
+            if (salesCompanyIds.isEmpty()) {
                 return new Page<>(current, size);
             }
-            wrapper.in(Project::getCompanyId, signedCompanyIds);
+            wrapper.in(Project::getCompanyId, salesCompanyIds);
         } else {
             internalScopeService.applyProjectScope(wrapper, user);
         }
@@ -856,9 +867,6 @@ public class ProjectService {
                 || company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
             throw new BizException(403, "No permission to access this project");
         }
-        if (!"signed".equals(company.getStatus())) {
-            throw new BizException(403, "Sales can only access projects of signed companies");
-        }
     }
 
     private boolean isActivating(String fromStatus, String targetStatus) {
@@ -879,9 +887,6 @@ public class ProjectService {
             if (company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
                 throw new BizException(403, "No permission to access this company");
             }
-            if (!"signed".equals(company.getStatus())) {
-                throw new BizException(403, "Sales can only access signed companies");
-            }
         }
         return channelAllocationService.quota(companyId, excludeProjectId);
     }
@@ -895,9 +900,6 @@ public class ProjectService {
         if ("sales".equals(user.getRole())) {
             if (company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
                 throw new BizException(403, "No permission to access this company");
-            }
-            if (!"signed".equals(company.getStatus())) {
-                throw new BizException(403, "Sales can only access signed companies");
             }
         }
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
@@ -1206,6 +1208,7 @@ public class ProjectService {
                         .eq(KeywordGroup::getDeleted, false)
         ).stream().collect(Collectors.toMap(KeywordGroup::getId, g -> g, (a, b) -> a, LinkedHashMap::new));
         List<Long> activeGroupIds = new ArrayList<>(groupMap.keySet());
+        Map<Long, KeywordGroupColumnsVO> groupColumnsMap = loadKeywordGroupColumns(activeGroupIds);
         Map<Long, Long> savedCountMap = keywordGroupService.calcSavedCountsByGroupIds(activeGroupIds);
         Map<Long, KeywordGroupService.KeywordTierCounts> tierCountMap = keywordGroupService.calcSavedTierCountsByGroupIds(activeGroupIds);
         for (Project project : projects) {
@@ -1237,6 +1240,7 @@ public class ProjectService {
                     item.setSavedKeywordCountA(tierCounts == null ? 0L : tierCounts.a());
                     item.setSavedKeywordCountB(tierCounts == null ? 0L : tierCounts.b());
                     item.setSavedKeywordCountC(tierCounts == null ? 0L : tierCounts.c());
+                    item.setColumns(groupColumnsMap.get(groupId));
                     item.setUpdatedAt(group.getUpdatedAt());
                     groupItems.add(item);
                 }
@@ -1249,6 +1253,52 @@ public class ProjectService {
             project.setSelectedKeywordSavedKeywordsC(totalC);
             project.setSelectedKeywordGroups(groupItems);
         }
+    }
+
+    private Map<Long, KeywordGroupColumnsVO> loadKeywordGroupColumns(List<Long> groupIds) {
+        if (groupIds == null || groupIds.isEmpty()) {
+            return Map.of();
+        }
+        List<KeywordGroupWord> words = keywordGroupWordMapper.selectList(
+                new LambdaQueryWrapper<KeywordGroupWord>()
+                        .in(KeywordGroupWord::getGroupId, groupIds)
+                        .orderByAsc(KeywordGroupWord::getGroupId)
+                        .orderByAsc(KeywordGroupWord::getColumnType)
+                        .orderByAsc(KeywordGroupWord::getSortOrder)
+                        .orderByAsc(KeywordGroupWord::getId)
+        );
+        Map<Long, Map<String, List<KeywordWordItemVO>>> grouped = new LinkedHashMap<>();
+        for (KeywordGroupWord word : words) {
+            KeywordWordItemVO item = new KeywordWordItemVO();
+            item.setId(word.getId());
+            item.setWordText(word.getWordText());
+            item.setSource(word.getSource());
+            item.setSortOrder(word.getSortOrder());
+            item.setIsManual(false);
+            item.setIsTemporary(false);
+            grouped.computeIfAbsent(word.getGroupId(), key -> new LinkedHashMap<>())
+                    .computeIfAbsent(word.getColumnType(), key -> new ArrayList<>())
+                    .add(item);
+        }
+        Map<Long, KeywordGroupColumnsVO> result = new LinkedHashMap<>();
+        for (Long groupId : groupIds) {
+            Map<String, List<KeywordWordItemVO>> columns = grouped.getOrDefault(groupId, Map.of());
+            KeywordGroupColumnsVO vo = new KeywordGroupColumnsVO();
+            List<KeywordWordItemVO> areaWords = new ArrayList<>();
+            areaWords.addAll(columns.getOrDefault("area", List.of()));
+            areaWords.addAll(columns.getOrDefault("region", List.of()));
+            vo.setAreaWords(areaWords);
+            vo.setRegionWords(areaWords);
+            vo.setPrefixWords(columns.getOrDefault("prefix", List.of()));
+            vo.setCoreWords(columns.getOrDefault("core", List.of()));
+            vo.setIndustryWords(columns.getOrDefault("industry", List.of()));
+            vo.setSuffixWords(columns.getOrDefault("suffix", List.of()));
+            vo.setCoreWordsA(columns.getOrDefault("core_a", List.of()));
+            vo.setCompareWords(columns.getOrDefault("compare", List.of()));
+            vo.setCoreWordsB(columns.getOrDefault("core_b", List.of()));
+            result.put(groupId, vo);
+        }
+        return result;
     }
 
     private Map<String, Object> snapshotProject(Project project) {

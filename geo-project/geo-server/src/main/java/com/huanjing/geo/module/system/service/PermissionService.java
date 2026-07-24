@@ -14,6 +14,9 @@ public class PermissionService {
     private static final Map<String, Set<String>> LEGACY_ROLE_PERMS = Map.of(
             "super_admin", Set.of("*")
     );
+    private static final Map<String, Set<String>> ROLE_READ_FALLBACK_PERMS = Map.of(
+            "sales", Set.of("workbench.sales.read", "company.read", "project.read")
+    );
 
     private final SysPermissionMapper sysPermissionMapper;
 
@@ -24,14 +27,18 @@ public class PermissionService {
             perms.addAll(fromDb);
         }
 
-        // Only super_admin keeps a hardcoded wildcard fallback; normal role grants are DB-authoritative.
         Set<String> legacy = LEGACY_ROLE_PERMS.getOrDefault(user.getRole(), Collections.emptySet());
         perms.addAll(legacy);
+        perms.addAll(ROLE_READ_FALLBACK_PERMS.getOrDefault(normalizeRole(user.getRole()), Collections.emptySet()));
         return perms;
     }
 
     public boolean hasPerm(SysUser user, String permKey) {
         Set<String> perms = listPermKeys(user);
         return perms.contains("*") || perms.contains(permKey);
+    }
+
+    private String normalizeRole(String role) {
+        return role == null ? "" : role.trim().toLowerCase(Locale.ROOT);
     }
 }

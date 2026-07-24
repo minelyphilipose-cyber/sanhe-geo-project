@@ -304,6 +304,37 @@
       </DataState>
     </el-card>
 
+    <el-card v-loading="projectLoading" class="admin-rich-card">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <span>项目列表</span>
+          <el-button v-if="canCreateProject" type="primary" @click="router.push({ path: '/admin/projects', query: { companyId: String(companyId) } })">
+            新建项目
+          </el-button>
+        </div>
+      </template>
+      <DataState :loading="projectLoading" :empty="!projectLoading && projects.length === 0" empty-text="暂无项目数据">
+        <el-table :data="projects" border>
+          <el-table-column prop="projectName" label="项目名称" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="brandName" label="品牌" min-width="160" show-overflow-tooltip />
+          <el-table-column label="状态" width="130">
+            <template #default="scope">{{ dictStore.label('project_status', scope.row.status) || scope.row.status || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="阶段" width="130">
+            <template #default="scope">{{ dictStore.label('project_stage', scope.row.stage) || scope.row.stage || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="创建时间" width="180">
+            <template #default="scope">{{ formatDateTimeSeconds(scope.row.createdAt) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="110" fixed="right">
+            <template #default="scope">
+              <el-button link type="primary" @click="goProjectDetail(scope.row.id)">详情</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </DataState>
+    </el-card>
+
     <el-dialog v-model="editVisible" title="编辑客户" width="820px" class="admin-editor-dialog">
       <el-form ref="companyFormRef" class="admin-dialog-form" :model="companyForm" :rules="companyRules" label-width="100px">
         <el-form-item label="客户名称" required><el-input v-model="companyForm.companyName" /></el-form-item>
@@ -531,7 +562,8 @@ import {
 } from '@/api/customer'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
 import { getPartnerList, type PartnerItem } from '@/api/partner'
-import type { Brand, Company, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyKeywordGroupQuota, PackagePlan } from '@/types'
+import { getProjectList } from '@/api/project'
+import type { Brand, Company, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyKeywordGroupQuota, PackagePlan, Project } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { distributionChannelLabel, isSelfMediaQuotaChannel } from '@/constants/distributionChannels'
@@ -552,13 +584,14 @@ const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
 const canCreateProject = computed(() => userStore.hasPermission('project.create'))
 const isPartnerOwner = computed(() => userStore.role === 'partner')
 const canManagePackageBinding = computed(() => userStore.hasPermission('user.manage') || isPartnerOwner.value)
-const canSelectSalesOwner = computed(() => userStore.role !== 'sales' && canUpdateCompany.value)
+const canSelectSalesOwner = computed(() => !userStore.isSales && canUpdateCompany.value)
 const canTransferOwner = computed(() => userStore.hasPermission('delivery.assignment.manage'))
 const companyId = Number(route.params.id)
 const hasValidId = Number.isFinite(companyId) && companyId > 0
 
 const loading = ref(false)
 const brandLoading = ref(false)
+const projectLoading = ref(false)
 const packageLoading = ref(false)
 const keywordGroupQuotaLoading = ref(false)
 const distributionQuotaLoading = ref(false)
@@ -570,6 +603,7 @@ const partnerStaffAssignSubmitting = ref(false)
 
 const company = ref<Company | null>(null)
 const brands = ref<Brand[]>([])
+const projects = ref<Project[]>([])
 const partnerOptions = ref<PartnerItem[]>([])
 const salesOwnerOptions = ref<SalesOwnerOption[]>([])
 const deliveryOwnerOptions = ref<SalesOwnerOption[]>([])
@@ -917,6 +951,18 @@ async function loadBrands() {
   }
 }
 
+async function loadProjects() {
+  projectLoading.value = true
+  try {
+    const { data } = await getProjectList({ current: 1, size: 200, companyId })
+    projects.value = data.data.records || []
+  } catch {
+    projects.value = []
+  } finally {
+    projectLoading.value = false
+  }
+}
+
 async function submitCompany() {
   const valid = await companyFormRef.value?.validate().catch(() => false)
   if (!valid) return
@@ -1060,6 +1106,10 @@ async function confirmUnbindPackage() {
 }
 
 async function loadPartners() {
+  if (!canUpdateCompany.value && !canCreateBrand.value) {
+    partnerOptions.value = []
+    return
+  }
   try {
     const { data } = await getPartnerList({ current: 1, size: 500 })
     partnerOptions.value = data.data.records || []
@@ -1271,6 +1321,10 @@ function goCreateProject(brandId: number) {
   })
 }
 
+function goProjectDetail(projectId: number) {
+  router.push(`/admin/projects/${projectId}`)
+}
+
 function goBrandDetail(brandId: number) {
   router.push(`${userStore.isPartner ? '/partner' : '/admin'}/brands/${brandId}`)
 }
@@ -1313,7 +1367,7 @@ onMounted(async () => {
   await dictStore.ensureLoaded()
   await Promise.all([loadPartners(), loadSalesOwners(), loadDeliveryOwners()])
   await loadCompany()
-  await Promise.all([loadBrands(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas(), loadPartnerStaffOptions()])
+  await Promise.all([loadBrands(), loadProjects(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas(), loadPartnerStaffOptions()])
 })
 </script>
 

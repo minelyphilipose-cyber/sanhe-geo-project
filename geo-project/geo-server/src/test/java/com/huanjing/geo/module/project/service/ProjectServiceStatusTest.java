@@ -20,6 +20,7 @@ import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
+import com.huanjing.geo.module.project.mapper.KeywordGroupWordMapper;
 import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -58,6 +59,8 @@ class ProjectServiceStatusTest {
     private KeywordGroupService keywordGroupService;
     @Mock
     private KeywordGroupMapper keywordGroupMapper;
+    @Mock
+    private KeywordGroupWordMapper keywordGroupWordMapper;
     @Mock
     private ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     @Mock

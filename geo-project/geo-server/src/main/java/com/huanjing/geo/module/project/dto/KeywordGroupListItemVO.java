@@ -20,5 +20,6 @@ public class KeywordGroupListItemVO {
     private Long savedKeywordCountA;
     private Long savedKeywordCountB;
     private Long savedKeywordCountC;
+    private KeywordGroupColumnsVO columns;
     private LocalDateTime updatedAt;
 }
