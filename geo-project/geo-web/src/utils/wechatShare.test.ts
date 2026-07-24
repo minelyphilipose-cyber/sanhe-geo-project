@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildMobileDashboardDocumentTitle,
   classifyWechatSdkError,
   isWechatBrowser,
   resolveWechatSignatureUrl,
@@ -7,6 +8,13 @@ import {
 } from './wechatShare'
 
 describe('wechatShare utilities', () => {
+  it('uses the project brand instead of the platform brand in the dashboard title', () => {
+    expect(buildMobileDashboardDocumentTitle('移动数据看板', ' 华为鸿蒙智家 '))
+      .toBe('移动数据看板 | 华为鸿蒙智家')
+    expect(buildMobileDashboardDocumentTitle('移动数据看板', ''))
+      .toBe('移动数据看板')
+  })
+
   it('recognizes WeChat but excludes WeCom', () => {
     expect(isWechatBrowser('Mozilla MicroMessenger/8.0')).toBe(true)
     expect(isWechatBrowser('Mozilla MicroMessenger/8.0 wxwork/4.1')).toBe(false)

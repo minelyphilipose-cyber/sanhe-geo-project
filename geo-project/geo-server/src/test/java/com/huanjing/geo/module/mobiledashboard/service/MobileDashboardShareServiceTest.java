@@ -99,7 +99,8 @@ class MobileDashboardShareServiceTest {
                 mock(MobileDashboardSessionTokenService.class)
         );
 
-        assertThat(service.resolveShareCardTitle("mahekskz")).isEqualTo("华为鸿蒙智家");
+        assertThat(service.resolveShareCardTitle("mahekskz"))
+                .isEqualTo("移动数据看板 | 华为鸿蒙智家");
     }
 
     @Test
@@ -124,7 +125,8 @@ class MobileDashboardShareServiceTest {
                 mock(MobileDashboardSessionTokenService.class)
         );
 
-        assertThat(service.resolveShareCardTitle("MAHEKSKZ")).isEqualTo("华为鸿蒙智家");
+        assertThat(service.resolveShareCardTitle("MAHEKSKZ"))
+                .isEqualTo("移动数据看板 | 华为鸿蒙智家");
     }
 
     @Test

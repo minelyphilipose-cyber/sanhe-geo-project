@@ -22,7 +22,7 @@ describe('MobileDashboardSharePanel', () => {
     api.getMobileDashboardWechatSharePreview.mockResolvedValue({
       data: {
         data: {
-          title: '三河市示例客户有限公司',
+          title: '移动数据看板 | 三河市示例客户有限公司',
           description: '手机数据看板｜查看核心问题监测与内容数据',
           imageUrl: '/favicon.png',
           wechatJsSdkEnabled: true,

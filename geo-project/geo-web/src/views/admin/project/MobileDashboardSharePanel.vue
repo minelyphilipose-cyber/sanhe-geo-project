@@ -68,7 +68,7 @@
         </div>
         <div class="wechat-card">
           <div class="wechat-card-copy">
-            <strong>{{ shareDisplayName }}</strong>
+            <strong>{{ shareCardTitle }}</strong>
             <p>{{ sharePreview.description }}</p>
             <span>手机数据看板</span>
           </div>
@@ -192,7 +192,7 @@
           </ol>
           <div class="dialog-card-title">
             <span>卡片标题</span>
-            <strong>{{ shareDisplayName }}</strong>
+            <strong>{{ shareCardTitle }}</strong>
           </div>
           <el-button type="primary" plain @click="copyUrl(selectedShareUrl)">复制备用链接</el-button>
         </div>
@@ -246,11 +246,22 @@ const sharePreview = ref<MobileDashboardWechatSharePreview>({
   wechatJsSdkEnabled: false,
   rolloutMode: 'off',
 })
+const shareCardTitlePrefix = '移动数据看板 | '
+const previewDisplayName = computed(() => {
+  const title = sharePreview.value.title?.trim() || ''
+  return title.startsWith(shareCardTitlePrefix)
+    ? title.slice(shareCardTitlePrefix.length).trim()
+    : title
+})
 const shareDisplayName = computed(() => (
-  sharePreview.value.title?.trim()
+  previewDisplayName.value
   || props.customerName?.trim()
   || loadedCustomerName.value
   || '客户移动数据看板'
+))
+const shareCardTitle = computed(() => (
+  sharePreview.value.title?.trim()
+  || `移动数据看板 | ${shareDisplayName.value}`
 ))
 
 const summaryMap = computed(() => {

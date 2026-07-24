@@ -64,6 +64,7 @@ import BottomTabbar from '@/components/mobile-dashboard/BottomTabbar.vue'
 import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import { useWechatShare } from '@/composables/useWechatShare'
+import { buildMobileDashboardDocumentTitle } from '@/utils/wechatShare'
 
 const route = useRoute()
 const router = useRouter()
@@ -122,6 +123,14 @@ const wechatShare = useWechatShare({
   shareCode: () => shareCode.value,
 })
 const isSwipeTabPage = computed(() => swipeTabRouteNames.includes(String(route.name || '')))
+
+function syncDocumentTitle() {
+  const pageTitle = typeof route.meta.title === 'string' ? route.meta.title : undefined
+  document.title = buildMobileDashboardDocumentTitle(
+    pageTitle,
+    mobileDashboardStore.context?.brandName,
+  )
+}
 
 function findHorizontalScroller(target: EventTarget | null) {
   const root = contentRef.value
@@ -217,6 +226,7 @@ onMounted(async () => {
   errorMessage.value = ''
   try {
     await mobileDashboardStore.initialize(shareCode.value)
+    syncDocumentTitle()
     void wechatShare.configure()
   } catch (error: any) {
     mobileDashboardStore.clearAll()
@@ -230,6 +240,7 @@ watch(
   () => route.fullPath,
   () => {
     if (!loading.value && !errorMessage.value) {
+      syncDocumentTitle()
       void wechatShare.configure()
     }
   },

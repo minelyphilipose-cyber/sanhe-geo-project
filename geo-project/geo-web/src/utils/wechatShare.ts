@@ -1,5 +1,18 @@
 import type { MobileDashboardWechatErrorCode } from '@/types/mobileDashboard'
 
+const DEFAULT_MOBILE_DASHBOARD_TITLE = '移动数据看板'
+
+export function buildMobileDashboardDocumentTitle(
+  pageTitle?: string | null,
+  brandName?: string | null,
+) {
+  const normalizedPageTitle = pageTitle?.trim() || DEFAULT_MOBILE_DASHBOARD_TITLE
+  const normalizedBrandName = brandName?.trim()
+  return normalizedBrandName
+    ? `${normalizedPageTitle} | ${normalizedBrandName}`
+    : normalizedPageTitle
+}
+
 export function isWechatBrowser(userAgent = navigator.userAgent) {
   return /MicroMessenger/i.test(userAgent) && !/wxwork/i.test(userAgent)
 }

@@ -74,7 +74,7 @@ class MobileDashboardWechatShareServiceTest {
         when(shareService.requireValidSession("Bearer session")).thenReturn(claims);
         when(shareMapper.selectById(5L)).thenReturn(share);
         when(projectMapper.selectById(11L)).thenReturn(project);
-        when(shareService.resolveShareCardTitle(project)).thenReturn("华为鸿蒙智家");
+        when(shareService.resolveShareCardTitle(project)).thenReturn("移动数据看板 | 华为鸿蒙智家");
         when(ticketService.getTicket()).thenReturn("ticket");
         HttpServletRequest servletRequest = mock(HttpServletRequest.class);
         when(servletRequest.getRemoteAddr()).thenReturn("127.0.0.1");
@@ -90,7 +90,7 @@ class MobileDashboardWechatShareServiceTest {
         assertThat(result.enabled()).isTrue();
         assertThat(result.appId()).isEqualTo("wx_unit_test");
         assertThat(result.signature()).matches("[0-9a-f]{40}");
-        assertThat(result.share().title()).isEqualTo("华为鸿蒙智家");
+        assertThat(result.share().title()).isEqualTo("移动数据看板 | 华为鸿蒙智家");
         assertThat(result.share().link()).isEqualTo("https://www.huanjingaigeo.com/m/MAHEKSKZ");
         verify(rateLimiter).enforceConfig(5L, "127.0.0.1");
     }

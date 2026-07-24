@@ -42,4 +42,17 @@ class MobileDashboardWechatJsSdkPropertiesTest {
         assertThat(properties.isEnabledForProject(11L)).isTrue();
         assertThat(properties.isEnabledForProject(12L)).isFalse();
     }
+
+    @Test
+    void allModeEnablesEveryProjectWithoutAnAllowlist() {
+        MobileDashboardWechatJsSdkProperties properties = new MobileDashboardWechatJsSdkProperties();
+        properties.setEnabled(true);
+        properties.setAppId("wx_test");
+        properties.setAppSecret("secret");
+        properties.setRolloutMode("all");
+        properties.validate();
+
+        assertThat(properties.isEnabledForProject(11L)).isTrue();
+        assertThat(properties.isEnabledForProject(999L)).isTrue();
+    }
 }

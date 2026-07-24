@@ -149,7 +149,10 @@ function isPublicPath(path: string): boolean {
 
 router.beforeEach(async (to, _from, next) => {
   NProgress.start()
-  document.title = `${to.meta?.title ?? ''} | 幻境AI GEO`
+  const pageTitle = String(to.meta?.title ?? '').trim()
+  document.title = to.path.startsWith('/m/')
+    ? pageTitle
+    : `${pageTitle} | 幻境AI GEO`
 
   const userStore = useUserStore()
 

@@ -241,15 +241,19 @@ public class MobileDashboardShareService {
             return DEFAULT_SHARE_CARD_TITLE;
         }
         if (StringUtils.hasText(project.getBrandName())) {
-            return truncate(project.getBrandName().trim(), 80);
+            return formatShareCardTitle(project.getBrandName());
         }
         if (StringUtils.hasText(project.getCompanyName())) {
-            return truncate(project.getCompanyName().trim(), 80);
+            return formatShareCardTitle(project.getCompanyName());
         }
         if (StringUtils.hasText(project.getProjectName())) {
-            return truncate(project.getProjectName().trim(), 80);
+            return formatShareCardTitle(project.getProjectName());
         }
         return DEFAULT_SHARE_CARD_TITLE;
+    }
+
+    private String formatShareCardTitle(String displayName) {
+        return truncate(DEFAULT_SHARE_CARD_TITLE + " | " + displayName.trim(), 80);
     }
 
     public void ensureProjectReadable(Long projectId) {
