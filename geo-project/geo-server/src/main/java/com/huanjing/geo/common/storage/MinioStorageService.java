@@ -65,6 +65,10 @@ public class MinioStorageService {
         return objectStorageService.openStream(objectKey);
     }
 
+    public String bucketName() {
+        return bucket;
+    }
+
     public String buildFileUrl(String objectKey) {
         if (storageProperties.getProvider() == StorageProperties.Provider.COS) {
             return buildCosFileUrl(objectKey);

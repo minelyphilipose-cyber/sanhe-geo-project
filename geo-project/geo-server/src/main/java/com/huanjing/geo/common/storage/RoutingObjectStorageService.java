@@ -54,6 +54,18 @@ public class RoutingObjectStorageService implements ObjectStorageService {
 
     @Override
     public String presignedGetUrl(String objectKey, int ttlSeconds) {
+        if (storageProperties.getProvider() == StorageProperties.Provider.COS
+                && storageProperties.isReadFallbackToMinio()) {
+            try {
+                cosBackend.stat(objectKey);
+            } catch (BizException ex) {
+                if (ex.getCode() == 404) {
+                    log.warn("Object storage presignedGetUrl COS miss, fell back to MinIO objectKey={}", objectKey);
+                    return minioBackend.presignedGetUrl(objectKey, ttlSeconds);
+                }
+                throw ex;
+            }
+        }
         return currentBackend().presignedGetUrl(objectKey, ttlSeconds);
     }
 

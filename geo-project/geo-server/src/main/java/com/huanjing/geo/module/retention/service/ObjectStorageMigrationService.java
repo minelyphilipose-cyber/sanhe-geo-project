@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.StringJoiner;
 
@@ -150,7 +151,7 @@ public class ObjectStorageMigrationService {
                 return item;
             }
 
-            cosBackend.putBytes(candidate.objectKey(), sourceBytes, contentType(candidate.objectKey()));
+            cosBackend.putBytes(candidate.objectKey(), sourceBytes, contentTypeForObjectKey(candidate.objectKey()));
             byte[] readback = cosBackend.readBytes(candidate.objectKey());
             String readbackChecksum = sha256Hex(readback);
             if (!sourceChecksum.equalsIgnoreCase(readbackChecksum)) {
@@ -311,13 +312,16 @@ public class ObjectStorageMigrationService {
         return metrics;
     }
 
-    private String contentType(String objectKey) {
-        if (objectKey.endsWith(".md")) {
-            return "text/markdown; charset=utf-8";
-        }
-        if (objectKey.endsWith(".json")) {
-            return "application/json; charset=utf-8";
-        }
+    static String contentTypeForObjectKey(String objectKey) {
+        String normalized = objectKey == null ? "" : objectKey.toLowerCase(Locale.ROOT);
+        if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) return "image/jpeg";
+        if (normalized.endsWith(".png")) return "image/png";
+        if (normalized.endsWith(".gif")) return "image/gif";
+        if (normalized.endsWith(".webp")) return "image/webp";
+        if (normalized.endsWith(".svg")) return "image/svg+xml";
+        if (normalized.endsWith(".pdf")) return "application/pdf";
+        if (normalized.endsWith(".md")) return "text/markdown; charset=utf-8";
+        if (normalized.endsWith(".json")) return "application/json; charset=utf-8";
         return "application/octet-stream";
     }
 
