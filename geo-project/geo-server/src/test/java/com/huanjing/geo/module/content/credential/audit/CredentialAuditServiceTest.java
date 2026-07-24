@@ -86,6 +86,8 @@ class CredentialAuditServiceTest {
                 LocalDateTime.now(),
                 null,
                 null,
+                null,
+                null,
                 LocalDateTime.now()
         );
     }

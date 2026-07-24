@@ -109,7 +109,7 @@ class ExtensionCookieCaptureServiceTest {
         when(credentialVaultService.storeCapturedCookies(any())).thenReturn(new CookieCredentialMeta(88L,
                 20L, 10L, "toutiao", 3, null, null, null, null, "Mozilla/5.0",
                 "{\"browser\":\"chrome\"}", "{\"sessionid\":\"present\"}", 99L,
-                capturedAt, capturedAt, null, null, capturedAt));
+                capturedAt, capturedAt, null, null, null, null, capturedAt));
 
         ExtensionCookieCaptureResponse response = service.capture(request(true, 10L, 20L), 99L, 77L);
 

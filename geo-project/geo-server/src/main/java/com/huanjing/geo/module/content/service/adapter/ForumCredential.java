@@ -18,7 +18,7 @@ public class ForumCredential {
     public Account pickAccount() {
         List<Account> candidates = normalizedAccounts();
         if (candidates.isEmpty()) {
-            return new Account(username, password, cookie, userAgent, "active", null);
+            return new Account(username, password, cookie, userAgent, "active", null, null, null, null);
         }
         return candidates.get(ThreadLocalRandom.current().nextInt(candidates.size()));
     }
@@ -37,7 +37,7 @@ public class ForumCredential {
             }
         }
         if (result.isEmpty() && (StringUtils.hasText(cookie) || (StringUtils.hasText(username) && StringUtils.hasText(password)))) {
-            result.add(new Account(username, password, cookie, userAgent, "active", null));
+            result.add(new Account(username, password, cookie, userAgent, "active", null, null, null, null));
         }
         return result;
     }
@@ -52,6 +52,9 @@ public class ForumCredential {
             String cookie,
             String userAgent,
             String status,
+            String capturedAt,
+            String expiresAt,
+            String expirySource,
             String remark
     ) {
     }

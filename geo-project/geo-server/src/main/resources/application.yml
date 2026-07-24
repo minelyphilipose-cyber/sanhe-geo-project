@@ -147,7 +147,7 @@ semi-auto:
           - a
           - img
       xiaohongshu:
-        publish-url: ${SEMI_AUTO_XIAOHONGSHU_PUBLISH_URL:https://creator.xiaohongshu.com/publish/publish}
+        publish-url: ${SEMI_AUTO_XIAOHONGSHU_PUBLISH_URL:https://creator.xiaohongshu.com/publish/publish?from=tab_switch&target=article}
         cookie-domains:
           - ".xiaohongshu.com"
           - ".xhscdn.com"
@@ -262,7 +262,7 @@ geo:
     base-url: ${MEITITEJIA_BASE_URL:https://www.meititejia.com/meijieapi/daili3}
     secret-id: ${MEITITEJIA_SECRET_ID:}
     secret-key: ${MEITITEJIA_SECRET_KEY:}
-    preview-url-base: ${MEITITEJIA_PREVIEW_URL_BASE:}
+    preview-url-base: ${MEITITEJIA_PREVIEW_URL_BASE:https://www.huanjingaigeo.com}
     sync-enabled: true
     order-status-check-enabled: true
     sync-page-limit: 200
@@ -320,6 +320,23 @@ geo:
       publish-time-jitter-minutes: ${CONTENT_AUTO_DISTRIBUTION_JITTER_MINUTES:15}
       operator-user-id: ${CONTENT_AUTO_DISTRIBUTION_OPERATOR_USER_ID:0}
       stale-generation-timeout-hours: ${CONTENT_AUTO_DISTRIBUTION_STALE_GENERATION_TIMEOUT_HOURS:24}
+      plan-window-start: ${CONTENT_AUTO_DISTRIBUTION_PLAN_WINDOW_START:00:30}
+      plan-window-end: ${CONTENT_AUTO_DISTRIBUTION_PLAN_WINDOW_END:18:00}
+      plan-jitter-minutes: ${CONTENT_AUTO_DISTRIBUTION_PLAN_JITTER_MINUTES:10}
+      plan-worker-batch-size: ${CONTENT_AUTO_DISTRIBUTION_PLAN_WORKER_BATCH_SIZE:10}
+      plan-worker-fixed-delay-ms: ${CONTENT_AUTO_DISTRIBUTION_PLAN_WORKER_FIXED_DELAY_MS:60000}
+      plan-retry-max-count: ${CONTENT_AUTO_DISTRIBUTION_PLAN_RETRY_MAX_COUNT:3}
+      include-self-media: ${CONTENT_AUTO_DISTRIBUTION_INCLUDE_SELF_MEDIA:false}
+  self-media:
+    auto-schedule:
+      job:
+        pre-schedule-cron: "${SELF_MEDIA_AUTO_SCHEDULE_PRE_CRON:0 0 2 26 * *}"
+        pre-schedule-window-hours: ${SELF_MEDIA_AUTO_SCHEDULE_PRE_WINDOW_HOURS:96}
+        month-start-window-hours: ${SELF_MEDIA_AUTO_SCHEDULE_MONTH_START_WINDOW_HOURS:40}
+        plan-jitter-minutes: ${SELF_MEDIA_AUTO_SCHEDULE_PLAN_JITTER_MINUTES:10}
+        plan-poll-ms: ${SELF_MEDIA_AUTO_SCHEDULE_PLAN_POLL_MS:60000}
+        plan-retry-max-count: ${SELF_MEDIA_AUTO_SCHEDULE_PLAN_RETRY_MAX_COUNT:3}
+        plan-running-timeout-minutes: ${SELF_MEDIA_AUTO_SCHEDULE_PLAN_RUNNING_TIMEOUT_MINUTES:120}
   presale-export:
     browser:
       enabled: ${PRESALE_EXPORT_BROWSER_ENABLED:true}
