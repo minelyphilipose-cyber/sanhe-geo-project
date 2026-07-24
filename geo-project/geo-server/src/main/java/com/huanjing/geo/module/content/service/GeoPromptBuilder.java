@@ -220,7 +220,7 @@ public class GeoPromptBuilder {
                 words.add(item.getDictKey().trim());
             }
         }
-        return words.stream().map(String::trim).filter(StringUtils::hasText).distinct().toList();
+        return ArticleForbiddenPhrasePolicy.effectivePhrases(words);
     }
 
     private List<String> resolveHistoryTitles(Long projectId, int limit) {

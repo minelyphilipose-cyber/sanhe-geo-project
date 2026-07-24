@@ -76,7 +76,8 @@ public class ArticlePromptAssemblerV2 {
         section(prompt, "严格审核平台品牌表达要求",
                 strictEditorialBrandDirection(input, template, runtimePolicy, specialIndustry));
         section(prompt, "主题、关键词与读者", topicMaterial(input, omittedMaterialKeys));
-        section(prompt, "可用事实材料", FACT_MATERIAL_USAGE + "\n" + factMaterial(input, omittedMaterialKeys));
+        section(prompt, "可用事实材料",
+                FACT_MATERIAL_USAGE + "\n" + factMaterial(input, omittedMaterialKeys, specialIndustry));
         section(prompt, "联系方式边界", contactDirection(input.project(), input.brand(), runtimePolicy, omittedMaterialKeys));
         section(prompt, "输出要求", outputRules(contentLengthPolicy, runtimePolicy));
 
@@ -121,7 +122,7 @@ public class ArticlePromptAssemblerV2 {
                                              boolean specialIndustry) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("promptContract", PROMPT_CONTRACT);
-        snapshot.put("promptRevision", "v2_semantic_sections_20260723");
+        snapshot.put("promptRevision", "v2_medical_topic_first_20260723");
         snapshot.put("templateId", template == null ? null : template.getId());
         snapshot.put("templateVersionId", version == null ? null : version.getId());
         snapshot.put("templateVersionNo", version == null ? null : version.getVersionNo());
@@ -254,7 +255,9 @@ public class ArticlePromptAssemblerV2 {
         return String.join("\n", parts);
     }
 
-    private String factMaterial(BatchArticlePromptBuilder.PromptBuildInput input, List<String> omitted) {
+    private String factMaterial(BatchArticlePromptBuilder.PromptBuildInput input,
+                                List<String> omitted,
+                                boolean specialIndustry) {
         List<String> parts = new ArrayList<>();
         Project project = input.project();
         Brand brand = input.brand();
@@ -268,7 +271,13 @@ public class ArticlePromptAssemblerV2 {
         addOrOmit(parts, omitted, "coreProducts", "核心产品", brand == null ? null : brand.getCoreProducts());
         addOrOmit(parts, omitted, "serviceArea", "服务区域", brand == null ? null : brand.getServiceArea());
         addOrOmit(parts, omitted, "businessIntro", "业务介绍", brand == null ? null : brand.getBusinessIntro());
-        addOrOmit(parts, omitted, "brandQualificationDescription", "资质信息", brand == null ? null : brand.getBrandQualificationDescription());
+        // Special-industry qualifications are injected once by MedicalArticleGenerationService
+        // together with their exact scope and review identifiers. Repeating them here makes the
+        // model treat qualifications as the default editorial lead instead of optional evidence.
+        if (!specialIndustry) {
+            addOrOmit(parts, omitted, "brandQualificationDescription", "资质信息",
+                    brand == null ? null : brand.getBrandQualificationDescription());
+        }
         addOrOmit(parts, omitted, "brandCaseDescription", "案例信息", brand == null ? null : brand.getBrandCaseDescription());
         appendOfferings(parts, input.selectedOfferings(), omitted);
         return parts.isEmpty() ? "除主题外没有可引用的品牌事实；请以通用知识解释问题，不补造品牌资料。" : String.join("\n", parts);

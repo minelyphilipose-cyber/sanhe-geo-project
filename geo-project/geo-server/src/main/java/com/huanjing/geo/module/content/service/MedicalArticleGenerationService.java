@@ -41,9 +41,12 @@ public class MedicalArticleGenerationService {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
     private static final String V2_SPECIAL_INDUSTRY_COMPLIANCE_DIRECTION = """
-            特殊行业属性只用于控制事实和表达边界，不是文章主题，也不要求每篇都采用风险告知或选择指南的写法。
-            涉及具体医疗项目、效果、适用性或选择建议时，应根据主题说明必要的个体差异、风险和专业评估边界；
-            仅整理机构或品牌公开信息时，应围绕与主题直接相关的主体信息、公开业务、服务范围、已有资质和可核验事实展开，不强行扩写无关维度。
+            特殊行业属性只用于控制事实和表达边界，不是文章主题，也不要求每篇都采用资质核验、风险告知或选择指南的写法。
+            首段和首个小标题应先承接用户主题中最需要解释的信息，不得默认把资质、合规或风险前置为固定开篇。
+            只有主题本身讨论资质、机构核验或相关选择依据时，资质才可以成为主要内容；其他主题中如确有必要提及，应把资质作为支撑当前论点的事实自然融入，不单独设置生硬的前置资质段。
+            即使需要引用资质，也只摘取与当前论点直接相关的一项或一句进行概括，不得整段复制主体资质，不得逐项罗列全部诊疗科目、许可范围或编号。
+            涉及具体医疗项目、效果、适用性或选择建议时，仅在与当前主题直接相关的位置说明必要的个体差异、风险和专业评估边界；
+            仅整理机构或品牌公开信息时，应围绕与主题直接相关的主体信息、公开业务、服务范围和可核验事实展开，不强行扩写无关维度。
             不得作疗效、收益、安全性、时效或持续周期保证，不得制造焦虑、替代专业判断，
             不得使用价格促销、咨询预约或其他直接转化表达。材料不足时应收窄表述，不得补造资质、案例或结果。
             """.trim();
@@ -249,19 +252,16 @@ public class MedicalArticleGenerationService {
         appendFact(facts, "项目或服务品类", context.categoryName());
         appendFact(facts, "辅助关注角度", context.topicAngle());
         appendFact(facts, "本篇关注方向", context.focus());
-        appendFact(facts, "项目或服务资质", context.qualificationRef());
-        appendFact(facts, "主体资质", context.medicalLicense());
-        appendFact(facts, "服务或业务范围", context.diagnosisScope());
-        appendFact(facts, "审查或备案编号", context.medicalAdReviewNo());
+        appendFact(facts, "可选项目或服务资质（仅摘取主题所需部分）", context.qualificationRef());
+        appendFact(facts, "可选主体资质（不得整段复制）", context.medicalLicense());
 
         StringBuilder specialRules = new StringBuilder("# 特殊行业内容边界\n")
                 .append("以下规则只约束表达方式，不得改变用户主题。标题必须直接回应原主题，不得为了体现行业规则主动加入与主题无关的审核术语或风险标签。\n")
                 .append(V2_SPECIAL_INDUSTRY_COMPLIANCE_DIRECTION);
-        if (StringUtils.hasText(context.channelStylePrompt())) {
-            specialRules.append("\n").append(context.channelStylePrompt().trim());
-        }
         if (!facts.isEmpty()) {
-            specialRules.append("\n以下为可引用的特殊行业事实，未列出的资质、范围或编号不得补写：\n")
+            specialRules.append("\n以下是备用的特殊行业事实材料，不是必写清单，也不决定文章结构或出现顺序。")
+                    .append("只在能够直接解释当前主题时按需引用；未列出的事实不得补写。")
+                    .append("未列入正文材料的后台审计字段不得写入文章：\n")
                     .append(String.join("\n", facts));
         }
         String userPrompt = specialRules + "\n\n" + prompt.userPrompt();

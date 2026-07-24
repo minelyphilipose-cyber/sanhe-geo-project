@@ -94,7 +94,7 @@ class ArticlePromptAssemblerV2Test {
 
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals("article_v2", snapshot.path("promptContract").asText());
-        assertEquals("v2_semantic_sections_20260723", snapshot.path("promptRevision").asText());
+        assertEquals("v2_medical_topic_first_20260723", snapshot.path("promptRevision").asText());
         assertEquals("brand_only", snapshot.path("runtimePolicy").path("contactDisclosureMode").asText());
         assertEquals(1200, snapshot.path("effectiveLengthPolicy").path("targetMinChars").asInt());
         assertEquals(1800, snapshot.path("effectiveLengthPolicy").path("targetMaxChars").asInt());
@@ -135,6 +135,38 @@ class ArticlePromptAssemblerV2Test {
         assertFalse(result.userPrompt().contains("不得把整篇长文写成从头到尾没有小标题"));
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals(28, snapshot.path("effectiveTitleMaxChars").asInt());
+    }
+
+    @Test
+    void specialIndustryDefersQualificationMaterialToMedicalPromptBlock() {
+        Project project = new Project();
+        project.setId(1L);
+        project.setBrandId(2L);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试医美");
+        brand.setBrandQualificationDescription("医疗机构执业许可");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setArticleTypeCode("cost_analysis");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setVersionNo(2);
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "医美项目收费通常由哪些部分构成", null,
+                null, null, List.of(), "cost_analysis", "toutiao", "medium", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "toutiao",
+                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result =
+                assembler.assemble(input, template, version, policy, true);
+
+        assertTrue(result.userPrompt().contains("医美项目收费通常由哪些部分构成"));
+        assertTrue(result.userPrompt().contains("涉及成本时说明形成变量"));
+        assertFalse(result.userPrompt().contains("资质信息：医疗机构执业许可"));
     }
 
     @Test

@@ -230,9 +230,44 @@ class MedicalArticleGenerationServiceTest {
                 .contains("特殊行业内容边界")
                 .contains("标题必须直接回应原主题")
                 .contains("仅整理机构或品牌公开信息时")
+                .contains("首段和首个小标题应先承接用户主题")
+                .contains("不得默认把资质、合规或风险前置为固定开篇")
                 .contains("围绕阜阳祛斑医院推荐写作")
                 .doesNotContain("特殊行业合规边界")
                 .doesNotContain("一次见效", "绝对安全", "永久有效");
+    }
+
+    @Test
+    void v2MedicalPromptTreatsQualificationsAsOptionalEvidenceAndIgnoresLegacyStyleAgenda() {
+        MedicalArticleGenerationService.MedicalPromptContext context = new MedicalArticleGenerationService.MedicalPromptContext(
+                MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY, MedicalArticleConstants.TIER_EDUCATION,
+                null, null, null, null, null, null,
+                null, 2, false,
+                "首段直接给风险边界，正文围绕公开资质展开", false,
+                "项目资质引用", "医疗机构执业许可", "医疗美容科", "审查编号"
+        );
+        BatchArticlePromptBuilder.PromptBuildResult prompt = new BatchArticlePromptBuilder.PromptBuildResult(
+                "system", "主题：医美项目收费通常由哪些部分构成", null, null, "{}", "{}"
+        );
+
+        BatchArticlePromptBuilder.PromptBuildResult result = service.applyMedicalPromptV2(prompt, context);
+
+        assertThat(result.userPrompt())
+                .contains("主题：医美项目收费通常由哪些部分构成")
+                .contains("备用的特殊行业事实材料，不是必写清单")
+                .contains("只在能够直接解释当前主题时按需引用")
+                .contains("即使需要引用资质，也只摘取与当前论点直接相关的一项或一句")
+                .contains("可选主体资质（不得整段复制）：医疗机构执业许可")
+                .contains("未列入正文材料的后台审计字段不得写入文章")
+                .doesNotContain("医疗美容科")
+                .doesNotContain("医疗广告审查证明")
+                .doesNotContain("审查编号")
+                .doesNotContain("首段直接给风险边界，正文围绕公开资质展开");
+
+        assertThat(result.promptSnapshot()).contains("\"medicalAdReviewNo\":\"审查编号\"");
+        assertThat(result.promptSnapshot()).contains("\"diagnosisScope\":\"医疗美容科\"");
+        assertThat(result.inputSnapshot()).contains("\"medicalAdReviewNo\":\"审查编号\"");
+        assertThat(result.inputSnapshot()).contains("\"diagnosisScope\":\"医疗美容科\"");
     }
 
     private Project project() {
