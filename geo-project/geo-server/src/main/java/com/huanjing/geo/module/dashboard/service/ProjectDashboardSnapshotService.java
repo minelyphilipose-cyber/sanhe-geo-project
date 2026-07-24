@@ -22,15 +22,15 @@ import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.project.service.KeywordGroupService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -38,8 +38,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ProjectDashboardSnapshotService {
 
-    private static final int REFRESH_LOCK_SECONDS = 60;
-    private static final String REFRESH_LOCK_PREFIX = "geo:dashboard:snapshot:refresh:";
+    private static final int SNAPSHOT_INSERT_BATCH_SIZE = 200;
+    private static final int SNAPSHOT_WRITE_MAX_ATTEMPTS = 3;
+    private static final List<String> REPLACEABLE_SNAPSHOT_TYPES = List.of(
+            "summary", "platform", "daily_trend", "daily_platform", "word_freq", "content_progress"
+    );
     private static final Set<String> MEASURABLE_INDEX_CHANNELS = Set.of(
             "official_site", "agent_site", "brand_geo_site", "agent_official_site",
             "forum", "forum_site", "industry_site", "authority_media",
@@ -62,8 +65,8 @@ public class ProjectDashboardSnapshotService {
     private final ArticlePublishRecordMapper articlePublishRecordMapper;
     private final DistributionTaskMapper distributionTaskMapper;
     private final KeywordGroupService keywordGroupService;
-    private final StringRedisTemplate stringRedisTemplate;
-    private final TransactionTemplate transactionTemplate;
+    private final ProjectDashboardRefreshLock refreshLock;
+    private final PlatformTransactionManager transactionManager;
 
     public void refreshAllActive() {
         List<Long> projectIds = shareMapper.selectList(
@@ -81,11 +84,9 @@ public class ProjectDashboardSnapshotService {
     }
 
     public Map<String, Object> refreshProjectWithLock(Long projectId) {
-        String key = REFRESH_LOCK_PREFIX + projectId;
-        String startedAt = LocalDateTime.now().toString();
-        Boolean locked = stringRedisTemplate.opsForValue().setIfAbsent(key, startedAt, REFRESH_LOCK_SECONDS, TimeUnit.SECONDS);
-        if (!Boolean.TRUE.equals(locked)) {
-            String runningStartedAt = stringRedisTemplate.opsForValue().get(key);
+        ProjectDashboardRefreshLock.Lease lease = refreshLock.tryAcquire(projectId);
+        if (lease == null) {
+            String runningStartedAt = refreshLock.getStartedAt(projectId);
             return Map.of(
                     "status", "RUNNING",
                     "message", "Dashboard snapshot refresh is already running",
@@ -93,25 +94,31 @@ public class ProjectDashboardSnapshotService {
                     "refreshedAt", Optional.ofNullable(resolveRefreshedAt(projectId)).map(LocalDateTime::toString).orElse("")
             );
         }
-        try {
-            transactionTemplate.executeWithoutResult(ignored -> refreshProject(projectId));
+        try (lease) {
+            List<ProjectDashboardSnapshot> snapshots = buildSnapshotsConsistently(projectId);
+            writeSnapshotsWithRetry(projectId, snapshots, lease);
             return Map.of(
                     "status", "SUCCESS",
                     "message", "Dashboard snapshot refreshed",
                     "refreshedAt", Optional.ofNullable(resolveRefreshedAt(projectId)).map(LocalDateTime::toString).orElse("")
             );
-        } finally {
-            stringRedisTemplate.delete(key);
         }
     }
 
-    @Transactional
-    public void refreshProject(Long projectId) {
-        LocalDateTime refreshedAt = LocalDateTime.now();
-        snapshotMapper.delete(new LambdaQueryWrapper<ProjectDashboardSnapshot>()
-                .eq(ProjectDashboardSnapshot::getProjectId, projectId)
-                .ne(ProjectDashboardSnapshot::getSnapshotType, "period_summary"));
+    private List<ProjectDashboardSnapshot> buildSnapshotsConsistently(Long projectId) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        transaction.setReadOnly(true);
+        List<ProjectDashboardSnapshot> snapshots = transaction.execute(ignored -> buildSnapshots(projectId));
+        if (snapshots == null) {
+            throw new IllegalStateException("Dashboard snapshot aggregation transaction returned no result");
+        }
+        return snapshots;
+    }
 
+    private List<ProjectDashboardSnapshot> buildSnapshots(Long projectId) {
+        LocalDateTime refreshedAt = LocalDateTime.now();
         List<ProjectDashboardSnapshot> snapshots = new ArrayList<>();
         snapshots.add(buildSummarySnapshot(projectId, refreshedAt));
         snapshots.addAll(buildPlatformSnapshots(projectId, refreshedAt));
@@ -121,9 +128,53 @@ public class ProjectDashboardSnapshotService {
         snapshots.addAll(buildDailyPlatformSnapshots(projectId, refreshedAt));
         snapshots.addAll(buildWordFreqSnapshots(projectId, refreshedAt));
         snapshots.add(buildContentProgressSnapshot(projectId, refreshedAt));
+        return snapshots;
+    }
 
-        for (ProjectDashboardSnapshot snapshot : snapshots) {
-            snapshotMapper.insert(snapshot);
+    private void writeSnapshotsWithRetry(Long projectId,
+                                         List<ProjectDashboardSnapshot> snapshots,
+                                         ProjectDashboardRefreshLock.Lease lease) {
+        for (int attempt = 1; attempt <= SNAPSHOT_WRITE_MAX_ATTEMPTS; attempt++) {
+            lease.ensureHeld();
+            try {
+                executeInShortWriteTransaction(projectId, snapshots);
+                return;
+            } catch (PessimisticLockingFailureException ex) {
+                if (attempt == SNAPSHOT_WRITE_MAX_ATTEMPTS) {
+                    throw ex;
+                }
+                long backoffMillis = 100L * attempt;
+                log.warn("Retry dashboard snapshot write after lock conflict, projectId={}, attempt={}, backoffMs={}",
+                        projectId, attempt, backoffMillis);
+                sleepBeforeRetry(backoffMillis);
+            }
+        }
+    }
+
+    private void executeInShortWriteTransaction(Long projectId, List<ProjectDashboardSnapshot> snapshots) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        transaction.executeWithoutResult(ignored -> replaceSnapshots(projectId, snapshots));
+    }
+
+    private void replaceSnapshots(Long projectId, List<ProjectDashboardSnapshot> snapshots) {
+        snapshotMapper.delete(new LambdaQueryWrapper<ProjectDashboardSnapshot>()
+                .eq(ProjectDashboardSnapshot::getProjectId, projectId)
+                .in(ProjectDashboardSnapshot::getSnapshotType, REPLACEABLE_SNAPSHOT_TYPES));
+
+        for (int start = 0; start < snapshots.size(); start += SNAPSHOT_INSERT_BATCH_SIZE) {
+            int end = Math.min(start + SNAPSHOT_INSERT_BATCH_SIZE, snapshots.size());
+            snapshotMapper.insertBatch(snapshots.subList(start, end));
+        }
+    }
+
+    private void sleepBeforeRetry(long backoffMillis) {
+        try {
+            Thread.sleep(backoffMillis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Dashboard snapshot write retry interrupted", ex);
         }
     }
 

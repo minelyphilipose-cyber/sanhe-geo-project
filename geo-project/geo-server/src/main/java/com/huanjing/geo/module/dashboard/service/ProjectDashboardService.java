@@ -129,7 +129,7 @@ public class ProjectDashboardService {
         share.setStatus("active");
         share.setCreatedBy(currentUserService.requireCurrentUser().getId());
         shareMapper.insert(share);
-        snapshotService.refreshProject(project.getId());
+        snapshotService.refreshProjectWithLock(project.getId());
         return share;
     }
 
