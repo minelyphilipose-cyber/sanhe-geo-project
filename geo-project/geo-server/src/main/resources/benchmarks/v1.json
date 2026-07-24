@@ -214,20 +214,20 @@
       "industry": "_ALL_",
       "industryRole": "_ALL_",
       "industryAvg": {
-        "overall": 55.0,
-        "mention": 57.0,
-        "ranking": 59.0,
-        "sentiment": 54.0,
+        "overall": 47.0,
+        "mention": 49.0,
+        "ranking": 45.0,
+        "sentiment": 44.0,
         "coverage": 48.0
       },
       "top1": {
-        "overall": 80.0,
-        "mention": 79.0,
-        "ranking": 82.0,
+        "overall": 79.0,
+        "mention": 82.0,
+        "ranking": 81.0,
         "sentiment": 75.0,
-        "coverage": 84.0
+        "coverage": 82.0
       },
-      "top10Score": 77.0,
+      "top10Score": 71.0,
       "confidenceLevel": "MEDIUM",
       "source": "HYBRID",
       "sampleSize": 500,

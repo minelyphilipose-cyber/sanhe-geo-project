@@ -4,12 +4,14 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.LlmCallRequest;
+import com.huanjing.geo.common.llm.LlmCallResult;
 import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.router.LlmFeature;
 import com.huanjing.geo.common.llm.router.LlmRouteException;
 import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.dto.BaselinePollBatchVO;
@@ -56,7 +58,7 @@ public class BaselineReportPollService {
     private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final BaselineReportPollBatchMapper batchMapper;
     private final BaselineReportPollResultMapper resultMapper;
-    private final LlmPlatformRouter llmPlatformRouter;
+    private final LlmCallFacade llmCallFacade;
 
     public BaselinePollOptionsVO options(Long projectId) {
         requireReadableActiveProject(projectId);
@@ -157,7 +159,7 @@ public class BaselineReportPollService {
         result.setPlatformCode(platform.getPlatformCode());
         result.setPlatformName(platform.getPlatformName());
         try {
-            LlmRouteResult routeResult = llmPlatformRouter.invoke(new LlmRouteRequest(
+            LlmCallResult callResult = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
                     LlmFeature.GENERIC,
                     "You are a GEO (Generative Engine Optimization) baseline report polling assistant. Answer the user's question directly.",
                     question.getKeywordText(),
@@ -171,7 +173,8 @@ public class BaselineReportPollService {
                     1,
                     0,
                     List.of(platform)
-            ));
+            )));
+            LlmRouteResult routeResult = callResult.routeResult();
             result.setStatus("completed");
             result.setRequestCount(routeResult.requestCount());
             result.setResponseTimeMs(routeResult.durationMs());
@@ -230,10 +233,12 @@ public class BaselineReportPollService {
     private List<AiPlatformConfig> loadProjectPlatforms(Long projectId) {
         return aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
                         .eq(AiPlatformConfig::getEnabled, true)
+                        .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
                         .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId))
                 .stream()
                 .filter(platform -> StringUtils.hasText(platform.getApiUrl()))
-                .filter(platform -> StringUtils.hasText(platform.getModelId()))
+                .filter(platform -> StringUtils.hasText(platform.getLowModelId()))
+                .peek(platform -> platform.setModelId(platform.getLowModelId().trim()))
                 .toList();
     }
 

@@ -7,6 +7,7 @@ import com.huanjing.geo.module.content.service.ArticleGenerationPersistenceServi
 import com.huanjing.geo.module.content.service.ContentArticleService;
 import com.huanjing.geo.module.content.service.GeoPromptBuilder;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.customer.service.BrandStatementService;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
@@ -23,6 +24,7 @@ import com.huanjing.geo.common.llm.capacity.LlmCapacityFailureClassifier;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
@@ -171,6 +173,29 @@ class DispatchExecutionServicePlatformCandidateTest {
         assertEquals("qwen-max", platform.getModelId());
     }
 
+    @Test
+    void questionPollBrandDictionaryIncludesProjectBrandAndPollAliases() throws Exception {
+        DispatchExecutionService service = service(mock(AiPlatformConfigMapper.class));
+        Project project = new Project();
+        project.setBrandName("阜阳植牙口腔门诊有限公司");
+        project.setProjectAliases("阜阳植牙，植牙口腔门诊");
+        project.setPollBrandAliasesJson("[\"阜阳植牙口腔\",\"植牙门诊\"]");
+        Brand brand = new Brand();
+        brand.setBrandName("植牙口腔");
+        brand.setBrandShortName("植牙口腔门诊");
+
+        Set<String> names = resolveJudgeBrandNameSet(service, project, brand);
+
+        assertEquals(Set.of(
+                "植牙口腔",
+                "植牙口腔门诊",
+                "阜阳植牙口腔门诊有限公司",
+                "阜阳植牙",
+                "阜阳植牙口腔",
+                "植牙门诊"
+        ), names);
+    }
+
     @SuppressWarnings("unchecked")
     private static List<AiPlatformConfig> resolvePlatformCandidates(DispatchExecutionService service,
                                                                     Long projectId,
@@ -216,6 +241,19 @@ class DispatchExecutionServicePlatformCandidateTest {
         );
         method.setAccessible(true);
         return (AiPlatformConfig) method.invoke(service, platform);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<String> resolveJudgeBrandNameSet(DispatchExecutionService service,
+                                                         Project project,
+                                                         Brand brand) throws Exception {
+        Method method = DispatchExecutionService.class.getDeclaredMethod(
+                "resolveJudgeBrandNameSet",
+                Project.class,
+                Brand.class
+        );
+        method.setAccessible(true);
+        return (Set<String>) method.invoke(service, project, brand);
     }
 
     private static DispatchExecutionService service(AiPlatformConfigMapper platformMapper) {

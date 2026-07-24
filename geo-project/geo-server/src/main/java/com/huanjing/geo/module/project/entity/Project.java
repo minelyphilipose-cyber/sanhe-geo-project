@@ -28,6 +28,10 @@ public class Project {
     private String projectName;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String projectAliases;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String pollBrandAliasesJson;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String pollExcludeKeywordsJson;
     @TableField(exist = false)
     private String packageType;
     @TableField(exist = false)

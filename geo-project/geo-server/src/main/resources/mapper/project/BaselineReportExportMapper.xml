@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.huanjing.geo.module.project.mapper.BaselineReportExportMapper">
+    <select id="selectByIdempotencyKeyForUpdate" resultType="com.huanjing.geo.module.project.entity.BaselineReportExport">
+        SELECT *
+        FROM baseline_report_export
+        WHERE idempotency_key = #{idempotencyKey}
+        FOR UPDATE
+    </select>
+
+    <select id="selectActiveByUserBaseline" resultType="com.huanjing.geo.module.project.entity.BaselineReportExport">
+        SELECT *
+        FROM baseline_report_export
+        WHERE trigger_user_id = #{triggerUserId}
+          AND project_id = #{projectId}
+          AND baseline_id = #{baselineId}
+          AND status IN ('PENDING', 'RUNNING')
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectOnePendingForUpdateSkipLocked" resultType="com.huanjing.geo.module.project.entity.BaselineReportExport">
+        SELECT *
+        FROM baseline_report_export
+        WHERE status = 'PENDING'
+        ORDER BY id ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+    </select>
+
+    <update id="markClaimed">
+        UPDATE baseline_report_export
+        SET status = 'RUNNING',
+            worker_id = #{workerId},
+            error_msg = NULL,
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="heartbeat">
+        UPDATE baseline_report_export
+        SET updated_at = NOW()
+        WHERE id = #{id}
+          AND worker_id = #{workerId}
+          AND status = 'RUNNING'
+    </update>
+</mapper>

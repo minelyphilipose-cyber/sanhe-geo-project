@@ -67,6 +67,27 @@ public class AsyncExecutorConfig {
     @Value("${article.ai-draft.threadpool.await-termination-seconds:30}")
     private int articleAiDraftAwaitTerminationSeconds;
 
+    @Value("${baseline.collection.sample-executor.core-pool-size:12}")
+    private int baselineCollectionSampleCorePoolSize;
+
+    @Value("${baseline.collection.sample-executor.max-pool-size:18}")
+    private int baselineCollectionSampleMaxPoolSize;
+
+    @Value("${baseline.collection.sample-executor.queue-capacity:512}")
+    private int baselineCollectionSampleQueueCapacity;
+
+    @Value("${baseline.collection.sample-executor.await-termination-seconds:30}")
+    private int baselineCollectionSampleAwaitTerminationSeconds;
+
+    @Value("${geo.llm.measurement.executor.core-pool-size:1}")
+    private int llmMeasurementCorePoolSize;
+
+    @Value("${geo.llm.measurement.executor.max-pool-size:2}")
+    private int llmMeasurementMaxPoolSize;
+
+    @Value("${geo.llm.measurement.executor.queue-capacity:1000}")
+    private int llmMeasurementQueueCapacity;
+
     @Bean("taskExecutor")
     public Executor taskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -158,6 +179,36 @@ public class AsyncExecutorConfig {
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(Math.max(1, articleAiDraftAwaitTerminationSeconds));
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean("baselineCollectionSampleExecutor")
+    public Executor baselineCollectionSampleExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(Math.max(1, baselineCollectionSampleCorePoolSize));
+        executor.setMaxPoolSize(Math.max(baselineCollectionSampleCorePoolSize, baselineCollectionSampleMaxPoolSize));
+        executor.setQueueCapacity(Math.max(1, baselineCollectionSampleQueueCapacity));
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("baseline-sample-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(Math.max(1, baselineCollectionSampleAwaitTerminationSeconds));
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean("llmMeasurementExecutor")
+    public Executor llmMeasurementExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(Math.max(1, llmMeasurementCorePoolSize));
+        executor.setMaxPoolSize(Math.max(llmMeasurementCorePoolSize, llmMeasurementMaxPoolSize));
+        executor.setQueueCapacity(Math.max(1, llmMeasurementQueueCapacity));
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("llm-measurement-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.DiscardPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(10);
         executor.initialize();
         return executor;
     }

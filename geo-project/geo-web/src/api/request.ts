@@ -6,7 +6,7 @@ import type { R } from '@/types'
 import { normalizeLocalAgentErrorMessage } from '@/api/localAgentErrorMessages'
 import { normalizeErrorMessage } from '@/utils/error'
 
-interface GeoRequestConfig extends AxiosRequestConfig {
+export interface GeoRequestConfig extends AxiosRequestConfig {
   silentError?: boolean
 }
 

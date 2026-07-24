@@ -37,7 +37,7 @@
           <div class="space-x-2">
             <el-button size="small" @click="goReports">实时看板</el-button>
             <el-button size="small" type="primary" plain @click="goMobileDashboardAdmin">移动数据看板</el-button>
-            <el-button v-if="project?.status === 'active'" size="small" type="primary" plain @click="goBaselineReport">基线检测报告</el-button>
+            <!-- <el-button v-if="project?.status === 'active'" size="small" type="primary" plain @click="goBaselineReport">基线检测报告</el-button> -->
             <el-tag>{{ projectStatusLabel(project?.status) }}</el-tag>
           </div>
         </div>

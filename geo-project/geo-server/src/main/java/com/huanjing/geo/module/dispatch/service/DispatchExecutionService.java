@@ -1147,6 +1147,18 @@ public class DispatchExecutionService {
                 names.add(brand.getBrandSlug().trim());
             }
         }
+        if (project != null) {
+            if (StringUtils.hasText(project.getBrandName())) {
+                names.add(project.getBrandName().trim());
+            }
+            if (StringUtils.hasText(project.getProjectAliases())) {
+                Arrays.stream(project.getProjectAliases().split("[,，、;；\\n\\r]+"))
+                        .map(String::trim)
+                        .filter(StringUtils::hasText)
+                        .forEach(names::add);
+            }
+            names.addAll(parseStringList(project.getPollBrandAliasesJson()));
+        }
         if (names.isEmpty() && project != null && StringUtils.hasText(project.getProjectName())) {
             names.add(project.getProjectName().trim());
         }
