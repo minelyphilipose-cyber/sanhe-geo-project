@@ -5,7 +5,7 @@
         <div>
           <span class="eyebrow">总体提及率</span>
           <strong>{{ metricText(data?.overallMentionRate) }}</strong>
-          <p>品牌在AI中的可见度与推荐度持续提升</p>
+          <p>品牌在 AI 回答中的可见度与推荐度</p>
         </div>
         <TrendLineChart :labels="trendLabels" :values="trendValues" />
       </div>
