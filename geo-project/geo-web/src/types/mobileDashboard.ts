@@ -258,6 +258,46 @@ export interface MobileDashboardShareAccessSummary {
   latestUserAgent?: string | null
 }
 
+export interface MobileDashboardWechatShareContent {
+  title: string
+  description: string
+  link: string
+  imageUrl: string
+}
+
+export interface MobileDashboardWechatConfig {
+  enabled: boolean
+  appId?: string | null
+  timestamp?: number | null
+  nonceStr?: string | null
+  signature?: string | null
+  share?: MobileDashboardWechatShareContent | null
+}
+
+export interface MobileDashboardWechatSharePreview {
+  title: string
+  description: string
+  imageUrl: string
+  wechatJsSdkEnabled: boolean
+  rolloutMode: 'off' | 'allowlist' | 'all' | string
+}
+
+export type MobileDashboardWechatErrorStage =
+  | 'script_load'
+  | 'config'
+  | 'check_api'
+  | 'share_data'
+
+export type MobileDashboardWechatErrorCode =
+  | 'script_load_failed'
+  | 'timeout'
+  | 'invalid_signature'
+  | 'invalid_url_domain'
+  | 'permission_denied'
+  | 'api_unavailable'
+  | 'sdk_error'
+  | 'unknown'
+
 export interface MobileDashboardOperations {
   projectId: number
   startDate: string

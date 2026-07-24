@@ -11,6 +11,10 @@ import type {
   MobileDashboardSession,
   MobileDashboardShare,
   MobileDashboardShareAccessSummary,
+  MobileDashboardWechatConfig,
+  MobileDashboardWechatErrorCode,
+  MobileDashboardWechatErrorStage,
+  MobileDashboardWechatSharePreview,
   MonitorDashboardData,
   QuestionMonitorItem,
   ReportDashboardData,
@@ -71,6 +75,37 @@ export function getMobileDashboardBootstrap(sessionToken: string) {
   return mobileRequest.get<R<MobileDashboardBootstrap>>('/public/mobile-dashboard/bootstrap', {
     headers: { Authorization: `Bearer ${sessionToken}` },
   })
+}
+
+export function getMobileDashboardWechatConfig(
+  sessionToken: string,
+  url: string,
+  signal?: AbortSignal,
+) {
+  return mobileRequest.post<R<MobileDashboardWechatConfig>>(
+    '/public/mobile-dashboard/wechat-js-sdk/config',
+    { url },
+    {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+      signal,
+      timeout: 60000,
+    },
+  )
+}
+
+export function reportMobileDashboardWechatError(
+  sessionToken: string,
+  stage: MobileDashboardWechatErrorStage,
+  code: MobileDashboardWechatErrorCode,
+) {
+  return mobileRequest.post<R<void>>(
+    '/public/mobile-dashboard/wechat-js-sdk/errors',
+    { stage, code },
+    {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+      timeout: 5000,
+    },
+  )
 }
 
 export function getMobileDashboardHome(sessionToken: string) {
@@ -139,6 +174,12 @@ export function getMobileDashboardShares(projectId: number) {
 
 export function getMobileDashboardShareAccessSummary(projectId: number) {
   return request.get<R<MobileDashboardShareAccessSummary[]>>(`/projects/${projectId}/mobile-dashboard-share/access-summary`)
+}
+
+export function getMobileDashboardWechatSharePreview(projectId: number) {
+  return request.get<R<MobileDashboardWechatSharePreview>>(
+    `/projects/${projectId}/mobile-dashboard-share/preview`,
+  )
 }
 
 export function createMobileDashboardShare(projectId: number, payload?: { expiresAt?: string }) {

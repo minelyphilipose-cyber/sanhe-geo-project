@@ -289,6 +289,18 @@ geo:
     share-token-salt: ${MOBILE_DASHBOARD_SHARE_TOKEN_SALT:${geo.jwt.secret}}
     default-share-ttl-days: ${MOBILE_DASHBOARD_SHARE_TTL_DAYS:90}
     session-ttl-seconds: ${MOBILE_DASHBOARD_SESSION_TTL_SECONDS:7200}
+    wechat-js-sdk:
+      enabled: ${MOBILE_DASHBOARD_WECHAT_JS_SDK_ENABLED:false}
+      client-mode: ${MOBILE_DASHBOARD_WECHAT_CLIENT_MODE:mock}
+      app-id: ${MOBILE_DASHBOARD_WECHAT_APP_ID:}
+      app-secret: ${MOBILE_DASHBOARD_WECHAT_APP_SECRET:}
+      allowed-hosts: ${MOBILE_DASHBOARD_WECHAT_ALLOWED_HOSTS:www.huanjingaigeo.com}
+      share-description: ${MOBILE_DASHBOARD_WECHAT_SHARE_DESCRIPTION:手机数据看板｜查看核心问题监测与内容数据}
+      share-image-url: ${MOBILE_DASHBOARD_WECHAT_SHARE_IMAGE_URL:https://www.huanjingaigeo.com/favicon.png}
+      rollout-mode: ${MOBILE_DASHBOARD_WECHAT_ROLLOUT_MODE:allowlist}
+      rollout-project-ids: ${MOBILE_DASHBOARD_WECHAT_ROLLOUT_PROJECT_IDS:}
+      signature-rate-limit-per-minute: ${MOBILE_DASHBOARD_WECHAT_SIGNATURE_RATE_LIMIT:20}
+      error-report-rate-limit-per-minute: ${MOBILE_DASHBOARD_WECHAT_ERROR_RATE_LIMIT:10}
   content:
     batch-publish:
       poll-ms: ${CONTENT_BATCH_PUBLISH_POLL_MS:30000}

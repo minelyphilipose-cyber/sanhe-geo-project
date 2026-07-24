@@ -103,6 +103,31 @@ class MobileDashboardShareServiceTest {
     }
 
     @Test
+    void resolveShareCardTitlePrefersBrandName() {
+        MobileDashboardShareMapper shareMapper = mock(MobileDashboardShareMapper.class);
+        ProjectMapper projectMapper = mock(ProjectMapper.class);
+        MobileDashboardShare share = share("active", 11L, LocalDateTime.now().plusDays(1));
+        Project project = project();
+        project.setBrandName("华为鸿蒙智家");
+        project.setCompanyName("阜阳某某智能家居有限公司");
+        project.setProjectName("鸿蒙智家项目");
+        when(shareMapper.selectOne(any())).thenReturn(share);
+        when(projectMapper.selectById(11L)).thenReturn(project);
+
+        MobileDashboardShareService service = new MobileDashboardShareService(
+                shareMapper,
+                mock(MobileDashboardAccessLogMapper.class),
+                projectMapper,
+                mock(CurrentUserService.class),
+                mock(ActivityLogService.class),
+                mock(InternalScopeService.class),
+                mock(MobileDashboardSessionTokenService.class)
+        );
+
+        assertThat(service.resolveShareCardTitle("MAHEKSKZ")).isEqualTo("华为鸿蒙智家");
+    }
+
+    @Test
     void resolveShareCardTitleDoesNotExposeCustomerForDisabledShare() {
         MobileDashboardShareMapper shareMapper = mock(MobileDashboardShareMapper.class);
         ProjectMapper projectMapper = mock(ProjectMapper.class);

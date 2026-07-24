@@ -33,7 +33,7 @@ public class MobileDashboardOpsService {
     private final InternalScopeService internalScopeService;
 
     public List<MobileDashboardShareAccessSummaryVO> shareAccessSummary(Long projectId) {
-        requireProjectExport(projectId);
+        requireReadableProject(projectId);
         return jdbcTemplate.query("""
                 SELECT s.id AS share_id,
                        COALESCE(COUNT(l.id), 0) AS total_access,
@@ -241,8 +241,17 @@ public class MobileDashboardOpsService {
         }, Timestamp.valueOf(from), Timestamp.valueOf(to), projectId);
     }
 
+    private Project requireReadableProject(Long projectId) {
+        currentUserService.ensurePermission("project.read");
+        return requireScopedProject(projectId);
+    }
+
     private Project requireProjectExport(Long projectId) {
         currentUserService.ensurePermission("project.report.export");
+        return requireScopedProject(projectId);
+    }
+
+    private Project requireScopedProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
         if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");

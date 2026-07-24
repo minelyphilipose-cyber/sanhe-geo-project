@@ -6,13 +6,18 @@ import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardAggregateVO;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardBootstrapVO;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardSessionRequest;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardSessionVO;
+import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardWechatClientErrorRequest;
+import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardWechatConfigRequest;
+import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardWechatConfigVO;
 import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardAggregateService;
 import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardShareService;
+import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardWechatShareService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -27,16 +32,24 @@ public class MobileDashboardPublicController {
 
     private static final String SHARE_CARD_CODE_HEADER = "X-Mobile-Dashboard-Share-Code";
     private static final String SHARE_CARD_TITLE_HEADER = "X-Mobile-Dashboard-Share-Title";
+    private static final String SHARE_CARD_DESCRIPTION_HEADER = "X-Mobile-Dashboard-Share-Description";
+    private static final String SHARE_CARD_IMAGE_HEADER = "X-Mobile-Dashboard-Share-Image";
+    private static final String SHARE_CARD_URL_HEADER = "X-Mobile-Dashboard-Share-Url";
 
     private final MobileDashboardShareService mobileDashboardShareService;
     private final MobileDashboardAggregateService mobileDashboardAggregateService;
+    private final MobileDashboardWechatShareService mobileDashboardWechatShareService;
 
     @GetMapping("/share-card-meta")
     public ResponseEntity<Void> shareCardMeta(
             @RequestHeader(value = SHARE_CARD_CODE_HEADER, required = false) String shareCode) {
-        String title = mobileDashboardShareService.resolveShareCardTitle(shareCode);
+        MobileDashboardWechatConfigVO.ShareContent content =
+                mobileDashboardWechatShareService.shareCardContent(shareCode);
         return ResponseEntity.noContent()
-                .header(SHARE_CARD_TITLE_HEADER, encodeAsHtmlEntities(title))
+                .header(SHARE_CARD_TITLE_HEADER, encodeAsHtmlEntities(content.title()))
+                .header(SHARE_CARD_DESCRIPTION_HEADER, encodeAsHtmlEntities(content.description()))
+                .header(SHARE_CARD_IMAGE_HEADER, encodeAsHtmlEntities(content.imageUrl()))
+                .header(SHARE_CARD_URL_HEADER, encodeAsHtmlEntities(content.link()))
                 .build();
     }
 
@@ -50,6 +63,33 @@ public class MobileDashboardPublicController {
     public R<MobileDashboardBootstrapVO> bootstrap(@RequestHeader(value = "Authorization", required = false) String authorization,
                                                    HttpServletRequest request) {
         return audited("bootstrap", authorization, request, () -> R.ok(mobileDashboardShareService.getBootstrap(authorization)));
+    }
+
+    @PostMapping("/wechat-js-sdk/config")
+    public ResponseEntity<R<MobileDashboardWechatConfigVO>> wechatJsSdkConfig(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @Valid @RequestBody MobileDashboardWechatConfigRequest configRequest,
+            HttpServletRequest request) {
+        R<MobileDashboardWechatConfigVO> result = audited(
+                "wechat_js_sdk_config",
+                authorization,
+                request,
+                () -> R.ok(mobileDashboardWechatShareService.createConfig(authorization, configRequest, request))
+        );
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(result);
+    }
+
+    @PostMapping("/wechat-js-sdk/errors")
+    public ResponseEntity<R<Void>> reportWechatJsSdkError(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @Valid @RequestBody MobileDashboardWechatClientErrorRequest errorRequest,
+            HttpServletRequest request) {
+        mobileDashboardWechatShareService.reportClientError(authorization, errorRequest, request);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(R.ok());
     }
 
     @GetMapping("/home")

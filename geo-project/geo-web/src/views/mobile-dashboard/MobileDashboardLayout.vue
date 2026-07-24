@@ -23,6 +23,24 @@
         :subtitle-tone="currentHeaderConfig.subtitleTone"
         :data-updated-at="currentDataUpdatedAt"
       />
+      <aside
+        v-if="wechatShare.guideVisible.value"
+        class="wechat-share-guide"
+        role="status"
+        aria-live="polite"
+      >
+        <div>
+          <strong>微信分享已就绪</strong>
+          <p>点击右上角“···”，选择“发送给朋友”。</p>
+        </div>
+        <button
+          type="button"
+          aria-label="关闭微信分享提示"
+          @click="wechatShare.dismissGuide"
+        >
+          ×
+        </button>
+      </aside>
       <section
         ref="contentRef"
         class="mobile-dashboard-content"
@@ -39,12 +57,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppHeader from '@/components/mobile-dashboard/AppHeader.vue'
 import BottomTabbar from '@/components/mobile-dashboard/BottomTabbar.vue'
 import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
+import { useWechatShare } from '@/composables/useWechatShare'
 
 const route = useRoute()
 const router = useRouter()
@@ -98,6 +117,10 @@ let touchState: {
 } | null = null
 
 const shareCode = computed(() => String(route.params.shareCode || ''))
+const wechatShare = useWechatShare({
+  sessionToken: () => mobileDashboardStore.sessionToken,
+  shareCode: () => shareCode.value,
+})
 const isSwipeTabPage = computed(() => swipeTabRouteNames.includes(String(route.name || '')))
 
 function findHorizontalScroller(target: EventTarget | null) {
@@ -194,6 +217,7 @@ onMounted(async () => {
   errorMessage.value = ''
   try {
     await mobileDashboardStore.initialize(shareCode.value)
+    void wechatShare.configure()
   } catch (error: any) {
     mobileDashboardStore.clearAll()
     errorMessage.value = error?.message || '分享链接已失效或已过期，请联系交付顾问重新获取。'
@@ -201,6 +225,16 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+watch(
+  () => route.fullPath,
+  () => {
+    if (!loading.value && !errorMessage.value) {
+      void wechatShare.configure()
+    }
+  },
+  { flush: 'post' },
+)
 </script>
 
 <style scoped>
@@ -276,6 +310,75 @@ onMounted(async () => {
 .mobile-dashboard-content::-webkit-scrollbar {
   width: 0;
   height: 0;
+}
+
+.wechat-share-guide {
+  position: fixed;
+  z-index: 80;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  left: 12px;
+  max-width: 480px;
+  margin-left: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 14px 14px 16px;
+  border: 1px solid rgba(7, 166, 107, 0.22);
+  border-radius: 14px;
+  background: rgba(247, 255, 251, 0.97);
+  color: var(--mobile-text);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(12px);
+}
+
+.wechat-share-guide::before {
+  position: absolute;
+  top: -8px;
+  right: 20px;
+  width: 14px;
+  height: 14px;
+  border-top: 1px solid rgba(7, 166, 107, 0.22);
+  border-left: 1px solid rgba(7, 166, 107, 0.22);
+  background: #f7fffb;
+  content: '';
+  transform: rotate(45deg);
+}
+
+.wechat-share-guide strong {
+  display: block;
+  color: var(--mobile-primary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.wechat-share-guide p {
+  margin: 2px 0 0;
+  color: var(--mobile-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.wechat-share-guide button {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  margin: -8px -8px -8px 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--mobile-muted);
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.wechat-share-guide button:focus-visible {
+  outline: 2px solid var(--mobile-primary-strong);
+  outline-offset: 2px;
 }
 
 .mobile-dashboard-error {

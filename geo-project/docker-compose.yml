@@ -158,7 +158,9 @@ services:
     expose:
       - "80"
     ports:
-      - "0.0.0.0:${WEB_HTTP_PORT:-8080}:80"
+      # The host-level Nginx is the only trusted public entry and overwrites
+      # forwarding headers. Do not expose this bypass port to the Internet.
+      - "127.0.0.1:${WEB_HTTP_PORT:-8080}:80"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
       interval: 15s

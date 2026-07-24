@@ -86,6 +86,8 @@ geo:
     share-token-salt: ${MOBILE_DASHBOARD_SHARE_TOKEN_SALT}
     default-share-ttl-days: ${MOBILE_DASHBOARD_SHARE_TTL_DAYS:90}
     session-ttl-seconds: ${MOBILE_DASHBOARD_SESSION_TTL_SECONDS:7200}
+    wechat-js-sdk:
+      client-mode: ${MOBILE_DASHBOARD_WECHAT_CLIENT_MODE:real}
   minio:
     endpoint: ${MINIO_INTERNAL_ENDPOINT:http://minio:9000}
     public-endpoint: ${MINIO_PUBLIC_ENDPOINT:${MINIO_INTERNAL_ENDPOINT:http://minio:9000}}

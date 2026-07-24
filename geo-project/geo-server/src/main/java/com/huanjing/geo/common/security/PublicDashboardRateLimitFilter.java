@@ -13,7 +13,6 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -32,6 +31,7 @@ public class PublicDashboardRateLimitFilter extends OncePerRequestFilter {
             "/api/public/mobile-dashboard/"
     );
     private static final int LIMIT_PER_MINUTE = 45;
+    private static final int WECHAT_JS_SDK_LIMIT_PER_MINUTE = 120;
     private static final DateTimeFormatter WINDOW_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
     private static final DefaultRedisScript<Long> LIMIT_SCRIPT = new DefaultRedisScript<>(
             "local current = tonumber(redis.call('GET', KEYS[1]) or '0') " +
@@ -62,12 +62,15 @@ public class PublicDashboardRateLimitFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         String clientIp = resolveClientIp(request);
         String minuteWindow = LocalDateTime.now().format(WINDOW_FMT);
-        String key = "geo:public:dashboard:rate:" + clientIp + ":" + minuteWindow;
+        boolean wechatJsSdkPath = request.getRequestURI().startsWith("/api/public/mobile-dashboard/wechat-js-sdk/");
+        int limit = wechatJsSdkPath ? WECHAT_JS_SDK_LIMIT_PER_MINUTE : LIMIT_PER_MINUTE;
+        String operation = wechatJsSdkPath ? "wechat-js-sdk" : "default";
+        String key = "geo:public:dashboard:rate:" + operation + ":" + clientIp + ":" + minuteWindow;
 
         Long result = stringRedisTemplate.execute(
                 LIMIT_SCRIPT,
                 List.of(key),
-                String.valueOf(LIMIT_PER_MINUTE),
+                String.valueOf(limit),
                 "90"
         );
         if (result != null && result > 0) {
@@ -83,15 +86,6 @@ public class PublicDashboardRateLimitFilter extends OncePerRequestFilter {
     }
 
     private String resolveClientIp(HttpServletRequest request) {
-        String[] headerNames = {"X-Forwarded-For", "X-Real-IP", "Proxy-Client-IP", "WL-Proxy-Client-IP"};
-        for (String header : headerNames) {
-            String value = request.getHeader(header);
-            if (!StringUtils.hasText(value) || "unknown".equalsIgnoreCase(value)) {
-                continue;
-            }
-            int comma = value.indexOf(',');
-            return comma > 0 ? value.substring(0, comma).trim() : value.trim();
-        }
-        return request.getRemoteAddr();
+        return TrustedProxyClientIp.resolve(request);
     }
 }

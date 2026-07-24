@@ -7,7 +7,7 @@
         </div>
         <div>
           <h2>移动看板分享链接</h2>
-          <p>发送到微信后以客户名称显示链接卡片，客户点击卡片进入移动 H5 数据看板。</p>
+          <p>在微信内打开看板后，通过右上角“发送给朋友”生成品牌优先的项目卡片。</p>
         </div>
       </div>
       <el-tag round type="info">{{ shares.length }} 条</el-tag>
@@ -31,7 +31,8 @@
           >
             {{ shareDisplayName }}
           </a>
-          <el-button size="small" type="success" plain @click="copyUrl(createdShareUrl)">复制</el-button>
+          <el-button size="small" type="success" plain @click="copyUrl(createdShareUrl)">复制链接</el-button>
+          <el-button size="small" type="success" @click="openShareGuide(createdShareUrl)">扫码分享</el-button>
         </div>
       </template>
     </el-alert>
@@ -42,6 +43,39 @@
       class="mb-3"
       title="生成新链接会自动停用同项目旧 active 链接；停用后客户侧立即失效。"
     />
+
+    <div class="share-workbench">
+      <div class="share-steps" aria-label="微信卡片分享步骤">
+        <span class="workbench-eyebrow">微信分享方式</span>
+        <ol>
+          <li><b>1</b><span>使用微信扫描二维码并打开看板</span></li>
+          <li><b>2</b><span>等待“微信分享已就绪”提示</span></li>
+          <li><b>3</b><span>点击右上角“···”发送给朋友</span></li>
+        </ol>
+        <p>直接粘贴链接不保证生成卡片；修改名称或卡片配置无需重新生成链接。</p>
+      </div>
+
+      <div class="share-card-preview" aria-label="微信分享卡片预览">
+        <div class="preview-heading">
+          <span class="workbench-eyebrow">卡片预览</span>
+          <el-tag
+            round
+            size="small"
+            :type="sharePreview.wechatJsSdkEnabled ? 'success' : 'warning'"
+          >
+            {{ sharePreview.wechatJsSdkEnabled ? '当前项目已灰度' : '当前项目未灰度' }}
+          </el-tag>
+        </div>
+        <div class="wechat-card">
+          <div class="wechat-card-copy">
+            <strong>{{ shareDisplayName }}</strong>
+            <p>{{ sharePreview.description }}</p>
+            <span>手机数据看板</span>
+          </div>
+          <img :src="sharePreview.imageUrl" alt="手机数据看板分享封面" />
+        </div>
+      </div>
+    </div>
 
     <div class="table-toolbar">
       <div>
@@ -88,7 +122,7 @@
       <el-table-column label="最后访问" min-width="160">
         <template #default="{ row }">{{ formatTime(summaryOf(row.id)?.lastAccessAt || row.lastAccessAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
           <div class="row-actions">
             <el-button
@@ -97,7 +131,15 @@
               type="primary"
               @click="copyUrl(row.shareUrl)"
             >
-              复制
+              复制链接
+            </el-button>
+            <el-button
+              v-if="row.shareUrl && row.status === 'active'"
+              link
+              type="success"
+              @click="openShareGuide(row.shareUrl)"
+            >
+              扫码分享
             </el-button>
             <el-popconfirm
               v-if="editable && row.status === 'active'"
@@ -126,6 +168,36 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <el-dialog
+      v-model="shareGuideVisible"
+      title="在微信中打开并分享"
+      width="min(92vw, 680px)"
+      destroy-on-close
+    >
+      <div class="share-dialog">
+        <div class="qr-panel">
+          <div class="qr-frame" v-loading="qrLoading">
+            <img v-if="qrDataUrl" :src="qrDataUrl" alt="手机数据看板微信扫码二维码" />
+          </div>
+          <strong>微信扫码打开</strong>
+          <p>二维码仅编码当前看板链接，不经过第三方二维码服务。</p>
+        </div>
+        <div class="dialog-instructions">
+          <span class="workbench-eyebrow">打开后这样操作</span>
+          <ol>
+            <li>确认看板页面正常加载。</li>
+            <li>等待页面提示“微信分享已就绪”。</li>
+            <li>点击右上角“···”，选择“发送给朋友”。</li>
+          </ol>
+          <div class="dialog-card-title">
+            <span>卡片标题</span>
+            <strong>{{ shareDisplayName }}</strong>
+          </div>
+          <el-button type="primary" plain @click="copyUrl(selectedShareUrl)">复制备用链接</el-button>
+        </div>
+      </div>
+    </el-dialog>
   </section>
 </template>
 
@@ -133,6 +205,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { Link, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import QRCode from 'qrcode'
 import { getProjectDetail } from '@/api/project'
 import {
   createMobileDashboardShare,
@@ -140,8 +213,13 @@ import {
   disableMobileDashboardShare,
   getMobileDashboardShareAccessSummary,
   getMobileDashboardShares,
+  getMobileDashboardWechatSharePreview,
 } from '@/api/mobileDashboard'
-import type { MobileDashboardShare, MobileDashboardShareAccessSummary } from '@/types/mobileDashboard'
+import type {
+  MobileDashboardShare,
+  MobileDashboardShareAccessSummary,
+  MobileDashboardWechatSharePreview,
+} from '@/types/mobileDashboard'
 
 const props = defineProps<{
   projectId: number
@@ -157,8 +235,20 @@ const shares = ref<MobileDashboardShare[]>([])
 const summaries = ref<MobileDashboardShareAccessSummary[]>([])
 const createdShareUrl = ref('')
 const loadedCustomerName = ref('')
+const shareGuideVisible = ref(false)
+const qrLoading = ref(false)
+const qrDataUrl = ref('')
+const selectedShareUrl = ref('')
+const sharePreview = ref<MobileDashboardWechatSharePreview>({
+  title: '',
+  description: '手机数据看板｜查看核心问题监测与内容数据',
+  imageUrl: '/favicon.png',
+  wechatJsSdkEnabled: false,
+  rolloutMode: 'off',
+})
 const shareDisplayName = computed(() => (
-  props.customerName?.trim()
+  sharePreview.value.title?.trim()
+  || props.customerName?.trim()
   || loadedCustomerName.value
   || '客户移动数据看板'
 ))
@@ -181,9 +271,10 @@ function formatTime(value?: string | null) {
 }
 
 async function copyUrl(url: string) {
+  if (!url) return
   try {
     await navigator.clipboard.writeText(url)
-    ElMessage.success('链接已复制，微信卡片将显示客户名称')
+    ElMessage.success('链接已复制。若需卡片分享，请先在微信中打开，再从右上角发送给朋友')
   } catch {
     ElMessage.warning('复制失败，请手动复制')
   }
@@ -192,12 +283,16 @@ async function copyUrl(url: string) {
 async function loadData() {
   loading.value = true
   try {
-    const [shareRes, summaryRes] = await Promise.all([
+    const [shareRes, summaryRes, previewRes] = await Promise.all([
       getMobileDashboardShares(props.projectId),
       getMobileDashboardShareAccessSummary(props.projectId),
+      getMobileDashboardWechatSharePreview(props.projectId),
     ])
     shares.value = shareRes.data.data || []
     summaries.value = summaryRes.data.data || []
+    if (previewRes.data.data) {
+      sharePreview.value = previewRes.data.data
+    }
   } catch (error: any) {
     ElMessage.error(error?.message || '分享链接加载失败')
   } finally {
@@ -209,11 +304,35 @@ async function loadCustomerName() {
   if (props.customerName?.trim()) return
   try {
     const { data } = await getProjectDetail(props.projectId)
-    loadedCustomerName.value = data.data?.companyName?.trim()
+    loadedCustomerName.value = data.data?.brandName?.trim()
+      || data.data?.companyName?.trim()
       || data.data?.projectName?.trim()
       || ''
   } catch {
     loadedCustomerName.value = ''
+  }
+}
+
+async function openShareGuide(url: string) {
+  if (!url) return
+  selectedShareUrl.value = url
+  shareGuideVisible.value = true
+  qrLoading.value = true
+  qrDataUrl.value = ''
+  try {
+    qrDataUrl.value = await QRCode.toDataURL(url, {
+      width: 280,
+      margin: 1,
+      errorCorrectionLevel: 'H',
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff',
+      },
+    })
+  } catch {
+    ElMessage.error('二维码生成失败，请使用复制链接方式')
+  } finally {
+    qrLoading.value = false
   }
 }
 
@@ -336,6 +455,118 @@ onMounted(() => {
   margin: 14px 0 12px;
 }
 
+.share-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  gap: 14px;
+  margin: 14px 0 18px;
+}
+
+.share-steps,
+.share-card-preview {
+  padding: 16px;
+  border: 1px solid #e5eef7;
+  border-radius: 14px;
+  background: rgba(248, 251, 255, 0.86);
+}
+
+.workbench-eyebrow {
+  color: #047857;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.share-steps ol,
+.dialog-instructions ol {
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.share-steps li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 9px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.share-steps li b {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e6f7ef;
+  color: #047857;
+}
+
+.share-steps > p {
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px dashed #d7e3ed;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wechat-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+
+.wechat-card-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.wechat-card-copy strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #111827;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.wechat-card-copy p {
+  margin: 6px 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wechat-card-copy span {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.wechat-card img {
+  flex: 0 0 62px;
+  width: 62px;
+  height: 62px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
 .table-toolbar h3 {
   margin: 0;
   color: #0f172a;
@@ -394,6 +625,88 @@ onMounted(() => {
   height: 58px;
 }
 
+.share-dialog {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 28px;
+  align-items: center;
+}
+
+.qr-panel {
+  text-align: center;
+}
+
+.qr-frame {
+  width: 292px;
+  min-height: 292px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 12px;
+  padding: 6px;
+  border: 1px solid #dbe7ef;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.qr-frame img {
+  width: 280px;
+  height: 280px;
+  display: block;
+}
+
+.qr-panel strong {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.qr-panel p {
+  margin: 5px auto 0;
+  max-width: 260px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dialog-instructions li {
+  position: relative;
+  margin-top: 10px;
+  padding-left: 18px;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.dialog-instructions li::before {
+  position: absolute;
+  top: 8px;
+  left: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #07a66b;
+  content: '';
+}
+
+.dialog-card-title {
+  margin: 16px 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f0fdf7;
+}
+
+.dialog-card-title span {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.dialog-card-title strong {
+  display: block;
+  margin-top: 4px;
+  color: #047857;
+  line-height: 1.45;
+}
+
 @media (max-width: 720px) {
   .section-header,
   .table-toolbar {
@@ -403,6 +716,15 @@ onMounted(() => {
 
   .panel-actions {
     justify-content: flex-start;
+  }
+
+  .share-workbench,
+  .share-dialog {
+    grid-template-columns: 1fr;
+  }
+
+  .qr-frame {
+    width: min(292px, 100%);
   }
 }
 </style>

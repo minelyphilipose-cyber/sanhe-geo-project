@@ -4,8 +4,10 @@ import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardShareCreateRequest;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardShareAccessSummaryVO;
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardShareVO;
+import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardWechatSharePreviewVO;
 import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardOpsService;
 import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardShareService;
+import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardWechatShareService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -19,6 +21,7 @@ public class MobileDashboardManageController {
 
     private final MobileDashboardShareService mobileDashboardShareService;
     private final MobileDashboardOpsService mobileDashboardOpsService;
+    private final MobileDashboardWechatShareService mobileDashboardWechatShareService;
 
     @GetMapping("/api/projects/{projectId}/mobile-dashboard-share")
     public R<List<MobileDashboardShareVO>> listShares(@PathVariable Long projectId) {
@@ -28,6 +31,11 @@ public class MobileDashboardManageController {
     @GetMapping("/api/projects/{projectId}/mobile-dashboard-share/access-summary")
     public R<List<MobileDashboardShareAccessSummaryVO>> shareAccessSummary(@PathVariable Long projectId) {
         return R.ok(mobileDashboardOpsService.shareAccessSummary(projectId));
+    }
+
+    @GetMapping("/api/projects/{projectId}/mobile-dashboard-share/preview")
+    public R<MobileDashboardWechatSharePreviewVO> sharePreview(@PathVariable Long projectId) {
+        return R.ok(mobileDashboardWechatShareService.preview(projectId));
     }
 
     @PostMapping("/api/projects/{projectId}/mobile-dashboard-share")

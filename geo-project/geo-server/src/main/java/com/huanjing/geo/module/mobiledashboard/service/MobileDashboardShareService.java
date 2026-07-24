@@ -233,6 +233,16 @@ public class MobileDashboardShareService {
         if (project == null || project.getDeletedAt() != null) {
             return DEFAULT_SHARE_CARD_TITLE;
         }
+        return resolveShareCardTitle(project);
+    }
+
+    public String resolveShareCardTitle(Project project) {
+        if (project == null || project.getDeletedAt() != null) {
+            return DEFAULT_SHARE_CARD_TITLE;
+        }
+        if (StringUtils.hasText(project.getBrandName())) {
+            return truncate(project.getBrandName().trim(), 80);
+        }
         if (StringUtils.hasText(project.getCompanyName())) {
             return truncate(project.getCompanyName().trim(), 80);
         }
@@ -240,6 +250,10 @@ public class MobileDashboardShareService {
             return truncate(project.getProjectName().trim(), 80);
         }
         return DEFAULT_SHARE_CARD_TITLE;
+    }
+
+    public void ensureProjectReadable(Long projectId) {
+        requireReadableProject(projectId);
     }
 
     public MobileDashboardSessionTokenService.SessionClaims requireValidSession(String sessionToken) {

@@ -83,6 +83,10 @@ geo:
   mobile-dashboard:
     web-base-url: ${MOBILE_DASHBOARD_WEB_BASE_URL:http://localhost:3000}
     share-token-salt: ${MOBILE_DASHBOARD_SHARE_TOKEN_SALT:local-dev-mobile-dashboard-share-salt}
+    wechat-js-sdk:
+      client-mode: mock
+      allowed-hosts: localhost
+      share-image-url: https://www.huanjingaigeo.com/favicon.png
     entity-judge:
       enabled: true
       platform-codes: deepseek,doubao,qwen

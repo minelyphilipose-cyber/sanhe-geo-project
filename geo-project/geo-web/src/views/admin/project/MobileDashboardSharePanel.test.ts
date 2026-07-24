@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   disableMobileDashboardShare: vi.fn(),
   getMobileDashboardShareAccessSummary: vi.fn(),
   getMobileDashboardShares: vi.fn(),
+  getMobileDashboardWechatSharePreview: vi.fn(),
 }))
 
 vi.mock('@/api/mobileDashboard', () => api)
@@ -18,6 +19,17 @@ describe('MobileDashboardSharePanel', () => {
   beforeEach(() => {
     api.getMobileDashboardShares.mockResolvedValue({ data: { data: [] } })
     api.getMobileDashboardShareAccessSummary.mockResolvedValue({ data: { data: [] } })
+    api.getMobileDashboardWechatSharePreview.mockResolvedValue({
+      data: {
+        data: {
+          title: '三河市示例客户有限公司',
+          description: '手机数据看板｜查看核心问题监测与内容数据',
+          imageUrl: '/favicon.png',
+          wechatJsSdkEnabled: true,
+          rolloutMode: 'allowlist',
+        },
+      },
+    })
     api.createMobileDashboardShare.mockResolvedValue({
       data: {
         data: {
@@ -59,7 +71,7 @@ describe('MobileDashboardSharePanel', () => {
     expect(wrapper.text()).not.toContain('http://localhost:3000/m/MAHEKSKZ')
 
     const copyButton = wrapper.findAll('button')
-      .find((button) => button.text().trim() === '复制')
+      .find((button) => button.text().trim() === '复制链接')
     expect(copyButton).toBeDefined()
     await copyButton!.trigger('click')
 

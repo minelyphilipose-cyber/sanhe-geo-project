@@ -2,6 +2,8 @@ package com.huanjing.geo.module.mobiledashboard.controller;
 
 import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardAggregateService;
 import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardShareService;
+import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardWechatShareService;
+import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardWechatConfigVO;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -19,10 +21,19 @@ class MobileDashboardPublicControllerTest {
     @Test
     void shareCardMetaReturnsAsciiHtmlEntitiesForNginxInjection() throws Exception {
         MobileDashboardShareService shareService = mock(MobileDashboardShareService.class);
-        when(shareService.resolveShareCardTitle("MAHEKSKZ")).thenReturn("华为鸿蒙智家");
+        MobileDashboardWechatShareService wechatShareService = mock(MobileDashboardWechatShareService.class);
+        when(wechatShareService.shareCardContent("MAHEKSKZ")).thenReturn(
+                new MobileDashboardWechatConfigVO.ShareContent(
+                        "华为鸿蒙智家",
+                        "看板说明",
+                        "https://www.huanjingaigeo.com/m/MAHEKSKZ",
+                        "https://www.huanjingaigeo.com/share.png"
+                )
+        );
         MobileDashboardPublicController controller = new MobileDashboardPublicController(
                 shareService,
-                mock(MobileDashboardAggregateService.class)
+                mock(MobileDashboardAggregateService.class),
+                wechatShareService
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
@@ -32,6 +43,18 @@ class MobileDashboardPublicControllerTest {
                 .andExpect(header().string(
                         "X-Mobile-Dashboard-Share-Title",
                         htmlEntities("华为鸿蒙智家")
+                ))
+                .andExpect(header().string(
+                        "X-Mobile-Dashboard-Share-Description",
+                        htmlEntities("看板说明")
+                ))
+                .andExpect(header().string(
+                        "X-Mobile-Dashboard-Share-Image",
+                        htmlEntities("https://www.huanjingaigeo.com/share.png")
+                ))
+                .andExpect(header().string(
+                        "X-Mobile-Dashboard-Share-Url",
+                        htmlEntities("https://www.huanjingaigeo.com/m/MAHEKSKZ")
                 ));
     }
 
