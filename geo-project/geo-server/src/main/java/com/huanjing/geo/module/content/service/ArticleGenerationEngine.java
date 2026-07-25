@@ -7,6 +7,7 @@ import com.huanjing.geo.common.llm.LlmCallResult;
 import com.huanjing.geo.common.llm.LlmInvokeException;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
 import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.measurement.LlmCallMeasurementContext;
 import com.huanjing.geo.common.llm.router.LlmFeature;
 import com.huanjing.geo.common.llm.router.LlmRouteException;
 import com.huanjing.geo.common.llm.router.LlmRouteRequest;
@@ -90,7 +91,9 @@ public class ArticleGenerationEngine {
                     input.longForm(),
                     input.effectiveTemperature()
             );
-            return new GenerationCall(model, llmCallFacade.execute(LlmCallRequest.direct(outboundPrompt, model.config())).invokeResult());
+            return new GenerationCall(model, llmCallFacade.execute(
+                    LlmCallRequest.direct(outboundPrompt, model.config())
+                            .withMeasurementContext(input.measurementContext())).invokeResult());
         }
         try {
             LlmCallResult callResult = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
@@ -107,7 +110,7 @@ public class ArticleGenerationEngine {
                     1,
                     0,
                     List.of()
-            )));
+            )).withMeasurementContext(input.measurementContext()));
             LlmRouteResult routed = callResult.routeResult();
             return new GenerationCall(
                     new ArticleModelResolver.ModelSelection(routed.platformCode(), routed.modelId(), null),
@@ -191,9 +194,32 @@ public class ArticleGenerationEngine {
                                 boolean longForm,
                                 boolean allowContactInfo,
                                 boolean checkQuality,
-                                List<String> forbiddenPhrases,
-                                Integer maxTitleChars,
-                                double effectiveTemperature) {
+                                 List<String> forbiddenPhrases,
+                                 Integer maxTitleChars,
+                                 double effectiveTemperature,
+                                 LlmCallMeasurementContext measurementContext) {
+        public GenerateInput(Project project,
+                             Brand brand,
+                             String systemPrompt,
+                             String userPrompt,
+                             String modelPlatformCode,
+                             String modelId,
+                             boolean longForm,
+                             boolean allowContactInfo,
+                             boolean checkQuality,
+                             List<String> forbiddenPhrases,
+                             Integer maxTitleChars,
+                             double effectiveTemperature) {
+            this(project, brand, systemPrompt, userPrompt, modelPlatformCode, modelId, longForm,
+                    allowContactInfo, checkQuality, forbiddenPhrases, maxTitleChars, effectiveTemperature,
+                    LlmCallMeasurementContext.empty());
+        }
+
+        public GenerateInput {
+            measurementContext = measurementContext == null
+                    ? LlmCallMeasurementContext.empty()
+                    : measurementContext;
+        }
     }
 
     public record GeneratedArticle(String title,

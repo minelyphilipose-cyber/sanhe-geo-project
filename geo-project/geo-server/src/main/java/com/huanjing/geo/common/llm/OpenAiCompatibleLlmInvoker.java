@@ -54,22 +54,24 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
     public LlmInvokeResult invoke(String prompt, LlmModelConfig modelConfig) throws LlmInvokeException {
         Exception lastError = null;
         for (int attempt = 0; attempt <= modelConfig.maxRetry(); attempt++) {
-            long started = System.currentTimeMillis();
             try {
                 InvocationResponse response;
+                long invocationStarted;
                 if (executionGateway == null || !modelConfig.useExecutionGateway()) {
                     throttle(modelConfig.platformCode(), modelConfig.rateLimitQps());
+                    invocationStarted = System.currentTimeMillis();
                     response = invokeOnce(prompt == null ? "" : prompt, modelConfig);
                 } else {
                     try (LlmExecutionPermit ignored = executionGateway.acquireBlocking(modelConfig.feature(), toPlatformConfig(modelConfig))) {
                         throttle(modelConfig.platformCode(), modelConfig.rateLimitQps());
+                        invocationStarted = System.currentTimeMillis();
                         response = invokeOnce(prompt == null ? "" : prompt, modelConfig);
                     }
                 }
                 String responseText = modelConfig.normalizeJsonOutput()
                         ? normalizeJsonText(response.text())
                         : response.text();
-                long durationMs = Math.max(1L, System.currentTimeMillis() - started);
+                long durationMs = Math.max(1L, System.currentTimeMillis() - invocationStarted);
                 recordSuccess(modelConfig, durationMs);
                 return new LlmInvokeResult(
                         responseText,

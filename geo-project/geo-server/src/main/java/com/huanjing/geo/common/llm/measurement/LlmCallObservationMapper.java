@@ -11,6 +11,28 @@ import java.util.List;
 @Mapper
 public interface LlmCallObservationMapper extends BaseMapper<LlmCallObservation> {
     @Select("""
+            SELECT id,
+                   feature,
+                   platform_code AS platformCode,
+                   status,
+                   error_category AS errorCategory,
+                   wait_ms AS waitMs,
+                   http_ms AS httpMs,
+                   total_ms AS totalMs,
+                   occurred_at AS occurredAt
+            FROM llm_call_observation
+            WHERE platform_code = #{platformCode}
+              AND feature = #{feature}
+              AND occurred_at >= #{since}
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT #{limit}
+            """)
+    List<LlmCallObservation> selectRecentForFeature(@Param("platformCode") String platformCode,
+                                                    @Param("feature") String feature,
+                                                    @Param("since") LocalDateTime since,
+                                                    @Param("limit") int limit);
+
+    @Select("""
             <script>
             SELECT
               platform_code AS platformCode,

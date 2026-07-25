@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.health.ArticleModelHealthPolicy;
 import com.huanjing.geo.common.llm.router.LlmPlatformCodeFilters;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
@@ -15,8 +16,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -31,6 +35,7 @@ public class ArticleModelResolver {
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
+    private final ArticleModelRoutingHealthService routingHealthService;
 
     @Value("${geo.llm.routing.article-excluded-platform-codes:hunyuan,yuanbao}")
     private String articleExcludedPlatformCodes = "hunyuan,yuanbao";
@@ -78,6 +83,72 @@ public class ArticleModelResolver {
                                           boolean longForm,
                                           double temperature,
                                           Set<String> excludedPlatformCodes) {
+        List<BatchCandidate> candidates = loadBatchCandidates(
+                systemPrompt, longForm, temperature, excludedPlatformCodes);
+        return chooseWeightedCandidate(candidates, selectionKey).selection();
+    }
+
+    public List<ModelSelection> resolveBalancedForBatch(int count,
+                                                        long selectionKey,
+                                                        String systemPrompt,
+                                                        boolean longForm,
+                                                        double temperature,
+                                                        Set<String> excludedPlatformCodes) {
+        if (count <= 0) {
+            return List.of();
+        }
+        List<BatchCandidate> candidates = loadBatchCandidates(
+                systemPrompt, longForm, temperature, excludedPlatformCodes);
+        List<BatchCandidate> remaining = new ArrayList<>(candidates);
+        Map<BatchCandidate, Integer> assignedCounts = new HashMap<>();
+        List<ModelSelection> selections = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            BatchCandidate selected;
+            if (!remaining.isEmpty()) {
+                selected = chooseWeightedCandidate(remaining, selectionKey + index);
+                remaining.remove(selected);
+            } else {
+                selected = chooseFairWeightedCandidate(candidates, assignedCounts, selectionKey + index);
+            }
+            selections.add(selected.selection());
+            assignedCounts.merge(selected, 1, Integer::sum);
+        }
+        return selections;
+    }
+
+    public ModelSelection resolveAssignedForBatch(long selectionKey,
+                                                  String platformCode,
+                                                  String modelId,
+                                                  String systemPrompt,
+                                                  boolean longForm,
+                                                  double temperature) {
+        List<BatchCandidate> candidates = loadBatchCandidates(
+                systemPrompt, longForm, temperature, Set.of());
+        String normalizedPlatformCode = LlmPlatformCodeFilters.normalize(platformCode);
+        for (BatchCandidate candidate : candidates) {
+            if (normalizedPlatformCode.equals(
+                    LlmPlatformCodeFilters.normalize(candidate.config().getPlatformCode()))) {
+                ModelSelection selection = buildSelection(candidate.config(), modelId, systemPrompt, longForm, temperature);
+                return selection.withHealthFallback(candidate.selection().healthFallback());
+            }
+        }
+        BatchCandidate alternative = chooseWeightedCandidate(candidates, selectionKey);
+        log.info("Rotating unavailable assigned article model from={}/{} to={}/{}",
+                platformCode,
+                modelId,
+                alternative.selection().platformCode(),
+                alternative.selection().modelId());
+        return alternative.selection();
+    }
+
+    public void recordInfrastructureFailure(String platformCode) {
+        routingHealthService.recordInfrastructureFailure(platformCode);
+    }
+
+    private List<BatchCandidate> loadBatchCandidates(String systemPrompt,
+                                                     boolean longForm,
+                                                     double temperature,
+                                                     Set<String> excludedPlatformCodes) {
         Set<String> excluded = mergeExcludedPlatformCodes(excludedPlatformCodes);
         List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(
                 new LambdaQueryWrapper<AiPlatformConfig>()
@@ -93,7 +164,7 @@ public class ArticleModelResolver {
                 }
                 try {
                     ModelSelection selection = buildSelection(config, null, systemPrompt, longForm, temperature);
-                    candidates.add(new BatchCandidate(selection, candidateWeight(config)));
+                    candidates.add(new BatchCandidate(selection, config, candidateWeight(config)));
                 } catch (RuntimeException ex) {
                     log.warn("Skipping unusable article model candidate platform={} model={} reason={}",
                             config == null ? null : config.getPlatformCode(),
@@ -105,7 +176,42 @@ public class ArticleModelResolver {
         if (candidates.isEmpty()) {
             throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, "AI article model config missing");
         }
-        return chooseWeightedCandidate(candidates, selectionKey).selection();
+        return applyRecentHealth(candidates);
+    }
+
+    private List<BatchCandidate> applyRecentHealth(List<BatchCandidate> candidates) {
+        Map<String, ArticleModelHealthPolicy.Evaluation> health = routingHealthService.assess(
+                candidates.stream()
+                        .map(candidate -> candidate.selection().platformCode())
+                        .collect(Collectors.toCollection(LinkedHashSet::new))
+        );
+        List<BatchCandidate> available = candidates.stream()
+                .filter(candidate -> !assessment(health, candidate).routingBlocked())
+                .map(candidate -> withHealthWeight(candidate, assessment(health, candidate)))
+                .toList();
+        if (!available.isEmpty()) {
+            return available;
+        }
+        log.warn("All article model candidates are unavailable by recent health; falling back to the full candidate pool");
+        return candidates.stream()
+                .map(candidate -> withHealthWeight(
+                        new BatchCandidate(candidate.selection().withHealthFallback(true), candidate.config(), candidate.weight()),
+                        assessment(health, candidate)))
+                .toList();
+    }
+
+    private ArticleModelHealthPolicy.Evaluation assessment(
+            Map<String, ArticleModelHealthPolicy.Evaluation> health,
+            BatchCandidate candidate) {
+        String platformCode = LlmPlatformCodeFilters.normalize(candidate.selection().platformCode());
+        return health.getOrDefault(platformCode, ArticleModelHealthPolicy.Evaluation.noData());
+    }
+
+    private BatchCandidate withHealthWeight(BatchCandidate candidate,
+                                            ArticleModelHealthPolicy.Evaluation evaluation) {
+        int adjustedWeight = Math.max(1,
+                candidate.weight() * evaluation.routingWeightPercent() / 100);
+        return new BatchCandidate(candidate.selection(), candidate.config(), adjustedWeight);
     }
 
     private ModelSelection buildSelection(AiPlatformConfig config,
@@ -197,6 +303,22 @@ public class ArticleModelResolver {
         return candidates.get(candidates.size() - 1);
     }
 
+    private BatchCandidate chooseFairWeightedCandidate(List<BatchCandidate> candidates,
+                                                       Map<BatchCandidate, Integer> assignedCounts,
+                                                       long selectionKey) {
+        int start = (int) Math.floorMod(mixSelectionKey(selectionKey), candidates.size());
+        BatchCandidate best = candidates.get(start);
+        for (int offset = 1; offset < candidates.size(); offset++) {
+            BatchCandidate candidate = candidates.get((start + offset) % candidates.size());
+            long candidateScore = (long) (assignedCounts.getOrDefault(candidate, 0) + 1) * best.weight();
+            long bestScore = (long) (assignedCounts.getOrDefault(best, 0) + 1) * candidate.weight();
+            if (candidateScore < bestScore) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
     private long mixSelectionKey(long value) {
         long mixed = value + 0x9E3779B97F4A7C15L;
         mixed = (mixed ^ (mixed >>> 30)) * 0xBF58476D1CE4E5B9L;
@@ -229,9 +351,21 @@ public class ArticleModelResolver {
         return value == null || value <= 0 ? fallback : value;
     }
 
-    public record ModelSelection(String platformCode, String modelId, LlmModelConfig config) {
+    public record ModelSelection(String platformCode,
+                                 String modelId,
+                                 LlmModelConfig config,
+                                 boolean healthFallback) {
+        public ModelSelection(String platformCode, String modelId, LlmModelConfig config) {
+            this(platformCode, modelId, config, false);
+        }
+
+        ModelSelection withHealthFallback(boolean fallback) {
+            return fallback == healthFallback
+                    ? this
+                    : new ModelSelection(platformCode, modelId, config, fallback);
+        }
     }
 
-    private record BatchCandidate(ModelSelection selection, int weight) {
+    private record BatchCandidate(ModelSelection selection, AiPlatformConfig config, int weight) {
     }
 }

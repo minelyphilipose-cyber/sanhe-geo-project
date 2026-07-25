@@ -104,7 +104,11 @@ class ArticleAiDraftServiceTest {
         } catch (Exception ex) {
             throw new IllegalStateException(ex);
         }
-        ArticleModelResolver modelResolver = new ArticleModelResolver(configMapper, credentialService);
+        ArticleModelResolver modelResolver = new ArticleModelResolver(
+                configMapper,
+                credentialService,
+                mock(ArticleModelRoutingHealthService.class)
+        );
         ArticleGenerationEngine generationEngine = new ArticleGenerationEngine(
                 llmCallFacade,
                 modelResolver,

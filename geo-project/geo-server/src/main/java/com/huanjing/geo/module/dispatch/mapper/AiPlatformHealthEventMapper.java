@@ -12,6 +12,24 @@ import java.util.List;
 
 @Mapper
 public interface AiPlatformHealthEventMapper extends BaseMapper<AiPlatformHealthEvent> {
+    @Select("""
+            SELECT id,
+                   platform_code AS platformCode,
+                   feature,
+                   event_type AS eventType,
+                   duration_ms AS durationMs,
+                   occurred_at AS occurredAt
+            FROM ai_platform_health_event
+            WHERE platform_code = #{platformCode}
+              AND feature = #{feature}
+              AND occurred_at >= #{since}
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT #{limit}
+            """)
+    List<AiPlatformHealthEvent> selectRecentForFeature(@Param("platformCode") String platformCode,
+                                                      @Param("feature") String feature,
+                                                      @Param("since") LocalDateTime since,
+                                                      @Param("limit") int limit);
 
     @Select("""
             <script>

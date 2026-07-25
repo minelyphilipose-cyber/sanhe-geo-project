@@ -7,6 +7,8 @@ import com.huanjing.geo.common.llm.LlmCallRequest;
 import com.huanjing.geo.common.llm.LlmCallResult;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
 import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.measurement.LlmCallMeasurementContext;
+import com.huanjing.geo.common.llm.measurement.LlmObservationScope;
 import com.huanjing.geo.common.llm.router.LlmFeature;
 import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
@@ -71,6 +73,13 @@ class ArticleGenerationEngineTest {
 
         Project project = new Project();
         project.setId(1L);
+        LlmCallMeasurementContext measurementContext = new LlmCallMeasurementContext(
+                "article-batch:1:task:2:infra:0:attempt:1",
+                null,
+                1L,
+                LlmObservationScope.PROJECT,
+                null
+        );
         ArticleGenerationEngine.GeneratedArticle generated = engine.generate(new ArticleGenerationEngine.GenerateInput(
                 project,
                 new Brand(),
@@ -83,7 +92,8 @@ class ArticleGenerationEngineTest {
                 true,
                 List.of(),
                 28,
-                ArticleGenerationTemperatures.V2_STANDARD
+                ArticleGenerationTemperatures.V2_STANDARD,
+                measurementContext
         ));
 
         assertEquals("qwen", generated.model().platformCode());
@@ -96,6 +106,7 @@ class ArticleGenerationEngineTest {
         verify(modelResolver, never()).resolve(any(), any(), any(), anyBoolean());
         ArgumentCaptor<LlmCallRequest> requestCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
         verify(llmCallFacade).execute(requestCaptor.capture());
+        assertEquals(measurementContext, requestCaptor.getValue().measurementContext());
         LlmRouteRequest routeRequest = requestCaptor.getValue().routeRequest();
         assertEquals(LlmFeature.ARTICLE, routeRequest.feature());
         assertEquals(LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS, routeRequest.requestTimeoutMs());

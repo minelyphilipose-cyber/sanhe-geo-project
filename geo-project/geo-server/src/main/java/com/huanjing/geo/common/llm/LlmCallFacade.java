@@ -185,6 +185,9 @@ public class LlmCallFacade {
     }
 
     private void recordSuccess(LlmCallRequest request, LlmCallResult result, long totalMs) {
+        long httpMs = Math.max(0L, result.durationMs());
+        long effectiveTotalMs = Math.max(totalMs, httpMs);
+        long waitMs = effectiveTotalMs - httpMs;
         measurementCollector.recordObservation(new LlmMeasurementEvent(
                 request.measurementContext(),
                 request.feature(),
@@ -202,9 +205,9 @@ public class LlmCallFacade {
                 null,
                 null,
                 result.requestCount(),
-                null,
-                request.governanceStack() == LlmGovernanceStack.LEGACY_LIMITER ? result.durationMs() : null,
-                totalMs,
+                waitMs,
+                httpMs,
+                effectiveTotalMs,
                 result.invokeResult() == null ? null : result.invokeResult().promptTokens(),
                 result.invokeResult() == null ? null : result.invokeResult().completionTokens(),
                 LocalDateTime.now()

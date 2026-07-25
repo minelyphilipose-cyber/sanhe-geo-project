@@ -5,6 +5,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.limiter.PlatformConcurrencyLimiterService;
 import com.huanjing.geo.common.llm.limiter.PlatformRateLimiterService;
 import com.huanjing.geo.common.llm.measurement.LlmMeasurementCollector;
+import com.huanjing.geo.common.llm.measurement.LlmMeasurementEvent;
 import com.huanjing.geo.common.llm.measurement.RetryAfterParser;
 import com.huanjing.geo.common.llm.router.LlmFeature;
 import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
@@ -12,6 +13,7 @@ import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.time.ZonedDateTime;
@@ -48,6 +50,34 @@ class LlmCallFacadeTest {
         assertEquals(invokeResult, result.invokeResult());
         verify(invoker).invoke("prompt", modelConfig);
         verify(router, never()).invoke(any());
+    }
+
+    @Test
+    void successObservationSeparatesHttpTimeFromFacadeWaitTime() throws Exception {
+        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
+        LlmInvoker invoker = mock(LlmInvoker.class);
+        LlmMeasurementCollector collector = mock(LlmMeasurementCollector.class);
+        LlmModelConfig modelConfig = modelConfig("direct");
+        when(invoker.invoke("prompt", modelConfig)).thenReturn(invokeResult("direct response"));
+        LlmCallFacade facade = new LlmCallFacade(
+                router,
+                invoker,
+                mock(PlatformRateLimiterService.class),
+                new PlatformConcurrencyLimiterService(),
+                mock(LlmHttpClient.class),
+                new ObjectMapper(),
+                collector
+        );
+
+        facade.execute(LlmCallRequest.direct("prompt", modelConfig));
+
+        ArgumentCaptor<LlmMeasurementEvent> eventCaptor =
+                ArgumentCaptor.forClass(LlmMeasurementEvent.class);
+        verify(collector).recordObservation(eventCaptor.capture());
+        LlmMeasurementEvent event = eventCaptor.getValue();
+        assertThat(event.httpMs()).isEqualTo(3L);
+        assertThat(event.totalMs()).isGreaterThanOrEqualTo(event.httpMs());
+        assertThat(event.waitMs()).isEqualTo(event.totalMs() - event.httpMs());
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.service;
 
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -10,6 +11,8 @@ import com.huanjing.geo.common.llm.LlmCallFacade;
 import com.huanjing.geo.common.llm.LlmCallRequest;
 import com.huanjing.geo.common.llm.LlmInvokeException;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
+import com.huanjing.geo.common.llm.measurement.LlmCallMeasurementContext;
+import com.huanjing.geo.common.llm.measurement.LlmObservationScope;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
@@ -109,6 +112,7 @@ public class BatchArticleGenerationService {
     );
     private static final int DEFAULT_TASK_SUBMIT_LIMIT = 5;
     private static final int DEFAULT_RECOVERY_RESUBMIT_LIMIT = 5;
+    private static final int DEFAULT_INFRASTRUCTURE_AUTO_RETRY_LIMIT = 1;
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String SMART_TEMPLATE_MATCH_SYSTEM_PROMPT = """
             你是文章提示词模板匹配器。你的任务是根据文章主题、渠道和可用模板摘要，选择最适合生成该主题文章的模板。
@@ -179,6 +183,9 @@ public class BatchArticleGenerationService {
 
     @Value("${article.ai-draft.dispatch.task-submit-limit:5}")
     private int taskSubmitLimit = DEFAULT_TASK_SUBMIT_LIMIT;
+
+    @Value("${article.ai-draft.infrastructure-auto-retry-limit:1}")
+    private int infrastructureAutoRetryLimit = DEFAULT_INFRASTRUCTURE_AUTO_RETRY_LIMIT;
 
     public BatchArticleGenerationService(ProjectMapper projectMapper,
                                          BrandMapper brandMapper,
@@ -628,6 +635,7 @@ public class BatchArticleGenerationService {
                         .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
         );
         applyAsyncSmartTemplateMatching(batch, tasks);
+        assignBalancedModels(batch, tasks);
         submitBatchTasks(batch, tasks);
     }
 
@@ -647,6 +655,7 @@ public class BatchArticleGenerationService {
                         .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
         );
         applyAsyncSmartTemplateMatching(batch, tasks);
+        assignBalancedModels(batch, tasks);
         submitBatchTasks(batch, tasks);
     }
 
@@ -777,6 +786,62 @@ public class BatchArticleGenerationService {
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private void assignBalancedModels(BatchArticleGenerationBatch batch,
+                                      List<BatchArticleGenerationTask> tasks) {
+        if (batch == null || batch.getId() == null || tasks == null || tasks.isEmpty()) {
+            return;
+        }
+        List<BatchArticleGenerationTask> unassigned = tasks.stream()
+                .filter(task -> task != null
+                        && STATUS_PENDING.equals(task.getStatus())
+                        && !StringUtils.hasText(task.getModelPlatformCode())
+                        && !StringUtils.hasText(task.getModelId()))
+                .sorted((left, right) -> Integer.compare(
+                        left.getArticleIndexInBatch() == null ? Integer.MAX_VALUE : left.getArticleIndexInBatch(),
+                        right.getArticleIndexInBatch() == null ? Integer.MAX_VALUE : right.getArticleIndexInBatch()))
+                .toList();
+        if (unassigned.isEmpty()) {
+            return;
+        }
+        List<ArticleModelResolver.ModelSelection> selections;
+        try {
+            selections = articleModelResolver.resolveBalancedForBatch(
+                    unassigned.size(),
+                    batch.getId(),
+                    "",
+                    true,
+                    ArticleGenerationTemperatures.DEFAULT,
+                    Set.of()
+            );
+        } catch (RuntimeException ex) {
+            log.warn("batch article balanced model assignment skipped batchId={} reason={}",
+                    batch.getId(), ex.getMessage());
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        int assigned = 0;
+        for (int index = 0; index < unassigned.size() && index < selections.size(); index++) {
+            BatchArticleGenerationTask task = unassigned.get(index);
+            ArticleModelResolver.ModelSelection selection = selections.get(index);
+            int updated = taskMapper.assignPendingModel(
+                    task.getId(),
+                    batch.getId(),
+                    selection.platformCode(),
+                    selection.modelId(),
+                    now
+            );
+            if (updated <= 0) {
+                continue;
+            }
+            task.setModelPlatformCode(selection.platformCode());
+            task.setModelId(selection.modelId());
+            task.setUpdatedAt(now);
+            assigned++;
+        }
+        log.info("batch article models assigned batchId={} taskCount={} mode=balanced_pool",
+                batch.getId(), assigned);
     }
 
     private void applySmartTemplateAllocation(List<BatchArticleGenerationTask> tasks,
@@ -934,7 +999,7 @@ public class BatchArticleGenerationService {
             return;
         }
         LocalDateTime now = LocalDateTime.now().withNano(0);
-        taskMapper.releaseRunningClaim(task.getId(), task.getBatchId(), now);
+        taskMapper.releaseRunningClaim(task.getId(), task.getBatchId(), task.getStartedAt(), now);
         task.setStatus(STATUS_PENDING);
         task.setStartedAt(null);
         task.setFinishedAt(null);
@@ -971,8 +1036,9 @@ public class BatchArticleGenerationService {
                 continue;
             }
             if (STATUS_RUNNING.equals(task.getStatus()) && isTaskStalled(task, cutoff)) {
-                resetTaskForRecovery(task);
-                resumableTaskIds.add(task.getId());
+                if (resetTaskForRecovery(task)) {
+                    resumableTaskIds.add(task.getId());
+                }
             }
         }
         if (resumableTaskIds.isEmpty()) {
@@ -996,17 +1062,21 @@ public class BatchArticleGenerationService {
         return marker == null || !marker.isAfter(cutoff);
     }
 
-    private void resetTaskForRecovery(BatchArticleGenerationTask task) {
+    private boolean resetTaskForRecovery(BatchArticleGenerationTask task) {
         if (task == null || task.getId() == null || task.getBatchId() == null) {
-            return;
+            return false;
         }
         LocalDateTime now = LocalDateTime.now().withNano(0);
-        taskMapper.resetRunningForRecovery(task.getId(), task.getBatchId(), now);
+        int updated = taskMapper.resetRunningForRecovery(task.getId(), task.getBatchId(), task.getStartedAt(), now);
+        if (updated <= 0) {
+            return false;
+        }
         task.setStatus(STATUS_PENDING);
         task.setStartedAt(null);
         task.setFinishedAt(null);
         task.setErrorMessage(null);
         task.setUpdatedAt(now);
+        return true;
     }
 
     private void runTask(BatchArticleGenerationBatch batch, BatchArticleGenerationTask task) {
@@ -1043,13 +1113,18 @@ public class BatchArticleGenerationService {
                     task, prompt.systemPrompt(), effectiveTemperature);
             task.setModelPlatformCode(selectedModel.platformCode());
             task.setModelId(selectedModel.modelId());
-            taskMapper.updateById(task);
+            persistSelectedModelForClaim(task);
             ArticleGenerationEngine.GeneratedArticle generated = null;
             MedicalArticleComplianceChecker.CheckResult complianceResult = MedicalArticleComplianceChecker.CheckResult.pass();
-            int retryCount = 0;
+            int infrastructureRetryCount = Math.max(0,
+                    task.getInfrastructureRetryCount() == null ? 0 : task.getInfrastructureRetryCount());
+            int existingComplianceRetryCount = Math.max(0,
+                    task.getComplianceRetryCount() == null ? 0 : task.getComplianceRetryCount());
+            int complianceRetryCount = 0;
             int maxAttempts = promptContext.medicalContext() == null ? 1 : MedicalArticleConstants.MAX_COMPLIANCE_GENERATION_ATTEMPTS;
             BatchArticlePromptBuilder.PromptBuildResult attemptPrompt = prompt;
             for (int attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
+                renewTaskClaim(task);
                 generated = articleGenerationEngine.generate(
                         new ArticleGenerationEngine.GenerateInput(
                                 contentProject,
@@ -1063,9 +1138,11 @@ public class BatchArticleGenerationService {
                                 true,
                                 generationForbiddenPhrases,
                                 ArticlePromptChannels.maxTitleChars(task.getChannelGroupCode()),
-                                effectiveTemperature
+                                effectiveTemperature,
+                                batchMeasurementContext(task, infrastructureRetryCount, attemptNo)
                         )
                 );
+                renewTaskClaim(task);
                 complianceResult = medicalComplianceChecker.check(new MedicalArticleComplianceChecker.CheckInput(
                         batch.getId(),
                         task.getId(),
@@ -1101,28 +1178,132 @@ public class BatchArticleGenerationService {
                             complianceResult,
                             null,
                             "retry");
-                    retryCount++;
+                    complianceRetryCount++;
+                    task.setComplianceRetryCount(existingComplianceRetryCount + complianceRetryCount);
                     attemptPrompt = appendComplianceRetryGuidance(prompt, complianceResult);
                 }
             }
             if (!complianceResult.passed()) {
                 MedicalArticleComplianceChecker.CheckResult blockingResult = medicalComplianceChecker.blockingOnly(complianceResult);
-                Long discardedArticleId = persistDiscardedArticle(project, task, generated, prompt, selectedModel, blockingResult,
-                        promptContext.medicalContext(), medicalForbiddenPhrases);
-                markTaskComplianceDiscarded(task, discardedArticleId, prompt, selectedModel, generated, blockingResult, retryCount);
-                specialIndustryComplianceAlertService.notifyComplianceDiscarded(contentProject, contentBrand, task, discardedArticleId, blockingResult);
+                int totalComplianceRetries = existingComplianceRetryCount + complianceRetryCount;
+                Long discardedArticleId = persistDiscardedArticleAndCompleteTask(
+                        project, task, generated, prompt, selectedModel, blockingResult,
+                        promptContext.medicalContext(), medicalForbiddenPhrases,
+                        infrastructureRetryCount, totalComplianceRetries);
+                try {
+                    specialIndustryComplianceAlertService.notifyComplianceDiscarded(
+                            contentProject, contentBrand, task, discardedArticleId, blockingResult);
+                } catch (RuntimeException alertError) {
+                    log.warn("special industry discard alert failed batchId={} taskId={} reason={}",
+                            task.getBatchId(), task.getId(), alertError.getMessage());
+                }
+                refreshBatchProgress(task.getBatchId(), false);
                 return;
             }
 
-            Long articleId = persistArticle(project, task, generated.title(), generated.content(), prompt, generated.model(), generated.result(),
-                    promptContext.medicalContext(), MedicalArticleConstants.COMPLIANCE_PASSED, complianceResult);
-            medicalArticleGenerationService.recordHistory(contentProject, contentBrand, promptContext.medicalContext(), articleId);
-            markTaskSuccess(task, articleId, prompt, generated.model(), generated.result(), generated.quality(), retryCount,
-                    complianceResult, promptContext.medicalContext() != null);
+            persistApprovedArticleAndCompleteTask(
+                    project, contentProject, contentBrand, task, generated, prompt, selectedModel,
+                    promptContext.medicalContext(), complianceResult,
+                    infrastructureRetryCount, existingComplianceRetryCount + complianceRetryCount);
+            refreshBatchProgress(task.getBatchId(), false);
+        } catch (TaskClaimLostException ex) {
+            log.info("batch article generation stopped because task claim was lost batchId={} taskId={}",
+                    batch.getId(), task.getId());
         } catch (Exception ex) {
             log.warn("Batch article generation task failed batchId={} taskId={}", batch.getId(), task.getId(), ex);
+            if (prepareInfrastructureRetry(task, ex)) {
+                return;
+            }
             markTaskFailed(task, ex);
         }
+    }
+
+    private LlmCallMeasurementContext batchMeasurementContext(BatchArticleGenerationTask task,
+                                                              int infrastructureRetryCount,
+                                                              int attemptNo) {
+        String runId = "article-batch:%d:task:%d:infra:%d:attempt:%d".formatted(
+                task.getBatchId(), task.getId(), infrastructureRetryCount, attemptNo);
+        return new LlmCallMeasurementContext(
+                runId,
+                null,
+                task.getSubjectProjectId() == null ? task.getProjectId() : task.getSubjectProjectId(),
+                LlmObservationScope.PROJECT,
+                null
+        );
+    }
+
+    private void renewTaskClaim(BatchArticleGenerationTask task) {
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        int updated = taskMapper.renewRunningClaim(
+                task.getId(), task.getBatchId(), task.getStartedAt(), now);
+        if (updated <= 0) {
+            throw new TaskClaimLostException();
+        }
+        task.setUpdatedAt(now);
+    }
+
+    private void persistSelectedModelForClaim(BatchArticleGenerationTask task) {
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        int updated = taskMapper.update(null,
+                new UpdateWrapper<BatchArticleGenerationTask>()
+                        .set("model_platform_code", task.getModelPlatformCode())
+                        .set("model_id", task.getModelId())
+                        .set("updated_at", now)
+                        .eq("id", task.getId())
+                        .eq("batch_id", task.getBatchId())
+                        .eq("status", STATUS_RUNNING)
+                        .eq("started_at", task.getStartedAt()));
+        if (updated <= 0) {
+            throw new TaskClaimLostException();
+        }
+        task.setUpdatedAt(now);
+    }
+
+    private void persistApprovedArticleAndCompleteTask(
+            Project project,
+            Project contentProject,
+            Brand contentBrand,
+            BatchArticleGenerationTask task,
+            ArticleGenerationEngine.GeneratedArticle generated,
+            BatchArticlePromptBuilder.PromptBuildResult prompt,
+            ArticleModelResolver.ModelSelection model,
+            MedicalArticleGenerationService.MedicalPromptContext medicalContext,
+            MedicalArticleComplianceChecker.CheckResult complianceResult,
+            int infrastructureRetryCount,
+            int complianceRetryCount) {
+        transactionTemplate.executeWithoutResult(status -> {
+            Long articleId = persistArticle(
+                    project, task, generated.title(), generated.content(), prompt, model, generated.result(),
+                    medicalContext, MedicalArticleConstants.COMPLIANCE_PASSED, complianceResult);
+            medicalArticleGenerationService.recordHistory(
+                    contentProject, contentBrand, medicalContext, articleId);
+            markTaskSuccess(
+                    task, articleId, prompt, model, generated.result(), generated.quality(),
+                    infrastructureRetryCount, complianceRetryCount,
+                    complianceResult, medicalContext != null);
+        });
+    }
+
+    private Long persistDiscardedArticleAndCompleteTask(
+            Project project,
+            BatchArticleGenerationTask task,
+            ArticleGenerationEngine.GeneratedArticle generated,
+            BatchArticlePromptBuilder.PromptBuildResult prompt,
+            ArticleModelResolver.ModelSelection model,
+            MedicalArticleComplianceChecker.CheckResult complianceResult,
+            MedicalArticleGenerationService.MedicalPromptContext medicalContext,
+            List<String> medicalForbiddenPhrases,
+            int infrastructureRetryCount,
+            int complianceRetryCount) {
+        return Objects.requireNonNull(transactionTemplate.execute(status -> {
+            Long discardedArticleId = persistDiscardedArticle(
+                    project, task, generated, prompt, model, complianceResult,
+                    medicalContext, medicalForbiddenPhrases);
+            markTaskComplianceDiscarded(
+                    task, discardedArticleId, prompt, model, generated, complianceResult,
+                    infrastructureRetryCount, complianceRetryCount);
+            return discardedArticleId;
+        }));
     }
 
     private Long persistArticle(Project project,
@@ -1178,9 +1359,10 @@ public class BatchArticleGenerationService {
             version.setContentMarkdown(autoImageInsertionService.insertForChannel(imageProject, task.getChannelGroupCode(),
                     task.getChannelSubCode(), content, coverImageUrl));
             version.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), result));
+            String routingInputSnapshot = enrichRoutingInputSnapshot(prompt.inputSnapshot(), model);
             version.setInputSnapshot(medicalContext == null
-                    ? prompt.inputSnapshot()
-                    : enrichComplianceInputSnapshot(prompt.inputSnapshot(), complianceResult));
+                    ? routingInputSnapshot
+                    : enrichComplianceInputSnapshot(routingInputSnapshot, complianceResult));
             version.setModelPlatformCode(model.platformCode());
             version.setModelId(model.modelId());
             version.setGeneratedBy(GENERATED_BY_BATCH_AI);
@@ -1288,7 +1470,8 @@ public class BatchArticleGenerationService {
             version.setTitle(title);
             version.setContentMarkdown(generated == null ? "" : generated.content());
             version.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), generated == null ? null : generated.result()));
-            version.setInputSnapshot(enrichComplianceInputSnapshot(prompt.inputSnapshot(), complianceResult));
+            version.setInputSnapshot(enrichComplianceInputSnapshot(
+                    enrichRoutingInputSnapshot(prompt.inputSnapshot(), model), complianceResult));
             version.setModelPlatformCode(model.platformCode());
             version.setModelId(model.modelId());
             version.setGeneratedBy(GENERATED_BY_BATCH_AI);
@@ -1389,6 +1572,13 @@ public class BatchArticleGenerationService {
         return writeJson(snapshot);
     }
 
+    private String enrichRoutingInputSnapshot(String inputSnapshot,
+                                              ArticleModelResolver.ModelSelection model) {
+        Map<String, Object> snapshot = readJson(inputSnapshot);
+        snapshot.put("routingFallback", model != null && model.healthFallback());
+        return writeJson(snapshot);
+    }
+
     private BatchArticlePromptBuilder.PromptBuildResult buildPrompt(BatchArticleGenerationTask task,
                                                                     BatchArticlePromptBuilder.PromptBuildInput input) {
         if (task.getPromptTemplateId() == null || task.getPromptTemplateVersionId() == null) {
@@ -1415,7 +1605,8 @@ public class BatchArticleGenerationService {
                                                                    double effectiveTemperature) {
         if (task != null
                 && (StringUtils.hasText(task.getModelPlatformCode()) || StringUtils.hasText(task.getModelId()))) {
-            return articleModelResolver.resolve(
+            return articleModelResolver.resolveAssignedForBatch(
+                    task.getId() == null ? 0L : task.getId(),
                     task.getModelPlatformCode(),
                     task.getModelId(),
                     systemPrompt,
@@ -1437,6 +1628,107 @@ public class BatchArticleGenerationService {
                 selected.platformCode(),
                 selected.modelId());
         return selected;
+    }
+
+    private boolean prepareInfrastructureRetry(BatchArticleGenerationTask task, Exception ex) {
+        if (task == null || task.getId() == null || task.getBatchId() == null) {
+            return false;
+        }
+        String failureMessage = errorMessage(ex);
+        ArticleGenerationFailureClassifier.Classification classification =
+                ArticleGenerationFailureClassifier.classify(ex);
+        if (classification.capacityDeferred()) {
+            return deferCapacityFailure(task, failureMessage);
+        }
+        if (!classification.providerRetryable()
+                || !StringUtils.hasText(task.getModelPlatformCode())) {
+            return false;
+        }
+        String previousPlatformCode = task.getModelPlatformCode();
+        String previousModelId = task.getModelId();
+        articleModelResolver.recordInfrastructureFailure(previousPlatformCode);
+        int retryLimit = Math.max(0, infrastructureAutoRetryLimit);
+        int retryCount = Math.max(0,
+                task.getInfrastructureRetryCount() == null ? 0 : task.getInfrastructureRetryCount());
+        if (retryLimit <= 0 || retryCount >= retryLimit) {
+            return false;
+        }
+        try {
+            ArticleModelResolver.ModelSelection alternative = articleModelResolver.resolveForBatch(
+                    task.getId(),
+                    "",
+                    true,
+                    ArticleGenerationTemperatures.DEFAULT,
+                    Set.of(previousPlatformCode)
+            );
+            LocalDateTime now = LocalDateTime.now().withNano(0);
+            int updated = taskMapper.resetRunningForInfrastructureRetry(
+                    task.getId(),
+                    task.getBatchId(),
+                    task.getStartedAt(),
+                    alternative.platformCode(),
+                    alternative.modelId(),
+                    Math.max(0, task.getComplianceRetryCount() == null
+                            ? 0
+                            : task.getComplianceRetryCount()),
+                    retryLimit,
+                    now
+            );
+            if (updated <= 0) {
+                return false;
+            }
+            task.setStatus(STATUS_PENDING);
+            task.setModelPlatformCode(alternative.platformCode());
+            task.setModelId(alternative.modelId());
+            task.setInfrastructureRetryCount(retryCount + 1);
+            int complianceRetries = Math.max(0,
+                    task.getComplianceRetryCount() == null ? 0 : task.getComplianceRetryCount());
+            task.setRetryCount(retryCount + 1 + complianceRetries);
+            task.setStartedAt(null);
+            task.setFinishedAt(null);
+            task.setErrorMessage(null);
+            task.setUpdatedAt(now);
+            refreshBatchProgress(task.getBatchId(), false);
+            log.info("batch article infrastructure retry queued batchId={} taskId={} from={}/{} to={}/{} retry={}",
+                    task.getBatchId(),
+                    task.getId(),
+                    previousPlatformCode,
+                    previousModelId,
+                    alternative.platformCode(),
+                    alternative.modelId(),
+                    retryCount + 1);
+            return true;
+        } catch (RuntimeException retryPreparationError) {
+            log.warn("batch article infrastructure retry unavailable batchId={} taskId={} platform={} reason={}",
+                    task.getBatchId(),
+                    task.getId(),
+                    previousPlatformCode,
+                    retryPreparationError.getMessage());
+            return false;
+        }
+    }
+
+    private boolean deferCapacityFailure(BatchArticleGenerationTask task, String failureMessage) {
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        int updated = taskMapper.resetRunningForCapacityDeferral(
+                task.getId(),
+                task.getBatchId(),
+                task.getStartedAt(),
+                truncate(failureMessage, 1000),
+                now
+        );
+        if (updated <= 0) {
+            return false;
+        }
+        task.setStatus(STATUS_PENDING);
+        task.setStartedAt(null);
+        task.setFinishedAt(null);
+        task.setErrorMessage(failureMessage);
+        task.setUpdatedAt(now);
+        refreshBatchProgress(task.getBatchId(), false);
+        log.info("batch article task deferred for temporary LLM capacity batchId={} taskId={} platform={}",
+                task.getBatchId(), task.getId(), task.getModelPlatformCode());
+        return true;
     }
 
     private void rotateInfrastructureFailureModel(BatchArticleGenerationTask task,
@@ -1577,7 +1869,8 @@ public class BatchArticleGenerationService {
                                  ArticleModelResolver.ModelSelection model,
                                  LlmInvokeResult result,
                                  BatchArticleQualityChecker.QualityResult quality,
-                                 int retryCount,
+                                 int infrastructureRetryCount,
+                                 int complianceRetryCount,
                                  MedicalArticleComplianceChecker.CheckResult complianceResult,
                                  boolean medicalArticle) {
         task.setArticleId(articleId);
@@ -1587,13 +1880,16 @@ public class BatchArticleGenerationService {
         task.setContentAngle(prompt.contentAngle());
         task.setAudiencePerspective(prompt.audiencePerspective());
         task.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), result));
+        String inputSnapshot = enrichRoutingInputSnapshot(prompt.inputSnapshot(), model);
         task.setInputSnapshot(medicalArticle
-                ? enrichComplianceInputSnapshot(prompt.inputSnapshot(), complianceResult)
-                : prompt.inputSnapshot());
+                ? enrichComplianceInputSnapshot(inputSnapshot, complianceResult)
+                : inputSnapshot);
         task.setResponseSnapshot(responseSnapshot(result));
         task.setModelPlatformCode(model.platformCode());
         task.setModelId(model.modelId());
-        task.setRetryCount(retryCount);
+        task.setInfrastructureRetryCount(infrastructureRetryCount);
+        task.setComplianceRetryCount(complianceRetryCount);
+        task.setRetryCount(infrastructureRetryCount + complianceRetryCount);
         if (medicalArticle) {
             task.setComplianceStatus(MedicalArticleConstants.COMPLIANCE_PASSED);
             task.setComplianceIssuesJson(complianceResult == null || complianceResult.issues().isEmpty()
@@ -1603,17 +1899,17 @@ public class BatchArticleGenerationService {
         LocalDateTime now = LocalDateTime.now();
         task.setFinishedAt(now);
         task.setUpdatedAt(now);
-        taskMapper.updateById(task);
-        refreshBatchProgress(task.getBatchId(), false);
+        updateTerminalTaskOwned(task);
     }
 
     private void markTaskComplianceDiscarded(BatchArticleGenerationTask task,
                                              Long discardedArticleId,
                                              BatchArticlePromptBuilder.PromptBuildResult prompt,
-                                             ArticleModelResolver.ModelSelection model,
-                                             ArticleGenerationEngine.GeneratedArticle generated,
-                                             MedicalArticleComplianceChecker.CheckResult complianceResult,
-                                             int retryCount) {
+                                              ArticleModelResolver.ModelSelection model,
+                                              ArticleGenerationEngine.GeneratedArticle generated,
+                                              MedicalArticleComplianceChecker.CheckResult complianceResult,
+                                              int infrastructureRetryCount,
+                                              int complianceRetryCount) {
         task.setStatus(STATUS_FAILED);
         task.setDiscardedArticleId(discardedArticleId);
         task.setComplianceStatus(MedicalArticleConstants.COMPLIANCE_DISCARDED);
@@ -1622,18 +1918,20 @@ public class BatchArticleGenerationService {
         task.setContentAngle(prompt.contentAngle());
         task.setAudiencePerspective(prompt.audiencePerspective());
         task.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), generated == null ? null : generated.result()));
-        task.setInputSnapshot(enrichComplianceInputSnapshot(prompt.inputSnapshot(), complianceResult));
+        task.setInputSnapshot(enrichComplianceInputSnapshot(
+                enrichRoutingInputSnapshot(prompt.inputSnapshot(), model), complianceResult));
         if (generated != null) {
             task.setResponseSnapshot(responseSnapshot(generated.result()));
         }
         task.setModelPlatformCode(model.platformCode());
         task.setModelId(model.modelId());
-        task.setRetryCount(retryCount);
+        task.setInfrastructureRetryCount(infrastructureRetryCount);
+        task.setComplianceRetryCount(complianceRetryCount);
+        task.setRetryCount(infrastructureRetryCount + complianceRetryCount);
         LocalDateTime now = LocalDateTime.now();
         task.setFinishedAt(now);
         task.setUpdatedAt(now);
-        taskMapper.updateById(task);
-        refreshBatchProgress(task.getBatchId(), false);
+        updateTerminalTaskOwned(task);
     }
 
     private void markTaskFailed(BatchArticleGenerationTask task, Exception ex) {
@@ -1642,8 +1940,24 @@ public class BatchArticleGenerationService {
         LocalDateTime now = LocalDateTime.now();
         task.setFinishedAt(now);
         task.setUpdatedAt(now);
-        taskMapper.updateById(task);
-        refreshBatchProgress(task.getBatchId(), false);
+        try {
+            updateTerminalTaskOwned(task);
+            refreshBatchProgress(task.getBatchId(), false);
+        } catch (TaskClaimLostException claimLost) {
+            log.info("skip stale task failure update batchId={} taskId={}", task.getBatchId(), task.getId());
+        }
+    }
+
+    private void updateTerminalTaskOwned(BatchArticleGenerationTask task) {
+        int updated = taskMapper.update(task,
+                new UpdateWrapper<BatchArticleGenerationTask>()
+                        .eq("id", task.getId())
+                        .eq("batch_id", task.getBatchId())
+                        .eq("status", STATUS_RUNNING)
+                        .eq("started_at", task.getStartedAt()));
+        if (updated <= 0) {
+            throw new TaskClaimLostException();
+        }
     }
 
     private Project requireActiveProject(Long projectId) {
@@ -2738,6 +3052,16 @@ public class BatchArticleGenerationService {
         }
         String trimmed = message.trim();
         return trimmed.length() > 900 ? trimmed.substring(0, 900) : trimmed;
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null || maxLength <= 0 || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
+    }
+
+    private static final class TaskClaimLostException extends RuntimeException {
     }
 
     private record ValidatedTopic(String topic,

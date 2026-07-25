@@ -69,6 +69,8 @@ public class BatchArticleGenerationTask {
     private String modelId;
     private String errorMessage;
     private Integer retryCount;
+    private Integer infrastructureRetryCount;
+    private Integer complianceRetryCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime startedAt;

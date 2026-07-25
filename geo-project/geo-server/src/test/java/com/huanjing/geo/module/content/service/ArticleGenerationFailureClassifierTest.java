@@ -11,11 +11,21 @@ class ArticleGenerationFailureClassifierTest {
         assertThat(ArticleGenerationFailureClassifier.isInfrastructureFailure(
                 "AI article generation failed: HTTP request timed out after 300000ms")).isTrue();
         assertThat(ArticleGenerationFailureClassifier.isInfrastructureFailure(
-                "LLM permit unavailable: FEATURE:article")).isTrue();
+                "LLM permit unavailable: FEATURE:article")).isFalse();
         assertThat(ArticleGenerationFailureClassifier.isInfrastructureFailure(
                 "LLM invoke failed after retries: HTTP 503: unavailable")).isTrue();
         assertThat(ArticleGenerationFailureClassifier.isInfrastructureFailure(
                 "HTTP 429: too many requests")).isTrue();
+    }
+
+    @Test
+    void classifiesTemporaryLocalCapacitySeparatelyFromProviderFailure() {
+        ArticleGenerationFailureClassifier.Classification classification =
+                ArticleGenerationFailureClassifier.classify(
+                        new RuntimeException("LLM permit unavailable: FEATURE:article"));
+
+        assertThat(classification.capacityDeferred()).isTrue();
+        assertThat(classification.providerRetryable()).isFalse();
     }
 
     @Test

@@ -55,6 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentCaptor.forClass;
@@ -123,6 +124,8 @@ class BatchArticleGenerationServiceTest {
         llmCallFacade = mock(LlmCallFacade.class);
         coverSelectionService = mock(ArticleCoverSelectionService.class);
         when(readinessService.detectTaskReadinessWarningCodes(any(), any(), any())).thenReturn(List.of());
+        when(taskMapper.renewRunningClaim(any(), any(), any(), any())).thenReturn(1);
+        when(taskMapper.update(any(), any())).thenReturn(1);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service = new BatchArticleGenerationService(
@@ -212,13 +215,47 @@ class BatchArticleGenerationServiceTest {
     }
 
     @Test
+    void assignBalancedModelsFreezesDistinctSelectionsBeforeExecution() {
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(22L);
+        BatchArticleGenerationTask first = generationTask(201L, 22L);
+        first.setStatus("pending");
+        first.setArticleIndexInBatch(1);
+        BatchArticleGenerationTask second = generationTask(202L, 22L);
+        second.setStatus("pending");
+        second.setArticleIndexInBatch(2);
+        ArticleModelResolver.ModelSelection doubao = mock(ArticleModelResolver.ModelSelection.class);
+        when(doubao.platformCode()).thenReturn("doubao");
+        when(doubao.modelId()).thenReturn("doubao-model");
+        ArticleModelResolver.ModelSelection qwen = mock(ArticleModelResolver.ModelSelection.class);
+        when(qwen.platformCode()).thenReturn("qwen");
+        when(qwen.modelId()).thenReturn("qwen-model");
+        when(articleModelResolver.resolveBalancedForBatch(
+                2, 22L, "", true, ArticleGenerationTemperatures.DEFAULT, Set.of()))
+                .thenReturn(List.of(doubao, qwen));
+        when(taskMapper.assignPendingModel(any(), any(), any(), any(), any())).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "assignBalancedModels",
+                batch,
+                List.of(first, second)
+        );
+
+        assertThat(first.getModelPlatformCode()).isEqualTo("doubao");
+        assertThat(second.getModelPlatformCode()).isEqualTo("qwen");
+        verify(taskMapper, times(2)).assignPendingModel(any(), eq(22L), any(), any(), any());
+    }
+
+    @Test
     void selectModelForTaskKeepsAFrozenModelWithinTheTask() {
         BatchArticleGenerationTask task = new BatchArticleGenerationTask();
         task.setId(92L);
         task.setModelPlatformCode("deepseek");
         task.setModelId("deepseek-model");
         ArticleModelResolver.ModelSelection selected = mock(ArticleModelResolver.ModelSelection.class);
-        when(articleModelResolver.resolve(
+        when(articleModelResolver.resolveAssignedForBatch(
+                92L,
                 "deepseek",
                 "deepseek-model",
                 "system",
@@ -236,6 +273,106 @@ class BatchArticleGenerationServiceTest {
 
         assertSame(selected, result);
         verify(articleModelResolver, never()).resolveForBatch(anyLong(), any(), anyBoolean(), anyDouble(), anySet());
+    }
+
+    @Test
+    void infrastructureFailureQueuesOneAsynchronousCrossPlatformRetry() {
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(95L);
+        task.setBatchId(21L);
+        task.setStatus("running");
+        task.setStartedAt(LocalDateTime.of(2026, 7, 25, 10, 0));
+        task.setRetryCount(0);
+        task.setInfrastructureRetryCount(0);
+        task.setModelPlatformCode("deepseek");
+        task.setModelId("deepseek-model");
+        ArticleModelResolver.ModelSelection alternative = mock(ArticleModelResolver.ModelSelection.class);
+        when(alternative.platformCode()).thenReturn("qwen");
+        when(alternative.modelId()).thenReturn("qwen-model");
+        when(articleModelResolver.resolveForBatch(
+                eq(95L),
+                eq(""),
+                eq(true),
+                eq(ArticleGenerationTemperatures.DEFAULT),
+                eq(Set.of("deepseek"))
+        )).thenReturn(alternative);
+        when(taskMapper.resetRunningForInfrastructureRetry(
+                eq(95L), eq(21L), eq(task.getStartedAt()), eq("qwen"), eq("qwen-model"), eq(0), eq(1), any()))
+                .thenReturn(1);
+
+        Boolean queued = ReflectionTestUtils.invokeMethod(
+                service,
+                "prepareInfrastructureRetry",
+                task,
+                new RuntimeException("HTTP request timed out after 300000ms")
+        );
+
+        assertThat(queued).isTrue();
+        assertThat(task.getStatus()).isEqualTo("pending");
+        assertThat(task.getRetryCount()).isEqualTo(1);
+        assertThat(task.getInfrastructureRetryCount()).isEqualTo(1);
+        assertThat(task.getComplianceRetryCount()).isNull();
+        assertThat(task.getModelPlatformCode()).isEqualTo("qwen");
+        verify(articleModelResolver).recordInfrastructureFailure("deepseek");
+        verify(taskMapper).resetRunningForInfrastructureRetry(
+                eq(95L), eq(21L), any(), eq("qwen"), eq("qwen-model"), eq(0), eq(1), any());
+    }
+
+    @Test
+    void infrastructureFailureDoesNotCreateAnInPlaceRetryLoop() {
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(96L);
+        task.setBatchId(21L);
+        task.setStatus("running");
+        task.setStartedAt(LocalDateTime.of(2026, 7, 25, 10, 0));
+        task.setRetryCount(1);
+        task.setInfrastructureRetryCount(1);
+        task.setModelPlatformCode("qwen");
+        task.setModelId("qwen-model");
+
+        Boolean queued = ReflectionTestUtils.invokeMethod(
+                service,
+                "prepareInfrastructureRetry",
+                task,
+                new RuntimeException("Connection reset")
+        );
+
+        assertThat(queued).isFalse();
+        verify(articleModelResolver).recordInfrastructureFailure("qwen");
+        verify(articleModelResolver, never()).resolveForBatch(anyLong(), any(), anyBoolean(), anyDouble(), anySet());
+        verify(taskMapper, never()).resetRunningForInfrastructureRetry(
+                any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void temporaryPermitExhaustionDefersWithoutRotatingOrConsumingRetry() {
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(97L);
+        task.setBatchId(21L);
+        task.setStatus("running");
+        task.setStartedAt(LocalDateTime.of(2026, 7, 25, 10, 0));
+        task.setRetryCount(0);
+        task.setInfrastructureRetryCount(0);
+        task.setModelPlatformCode("qwen");
+        task.setModelId("qwen-model");
+        when(taskMapper.resetRunningForCapacityDeferral(
+                eq(97L), eq(21L), eq(task.getStartedAt()), any(), any())).thenReturn(1);
+
+        Boolean queued = ReflectionTestUtils.invokeMethod(
+                service,
+                "prepareInfrastructureRetry",
+                task,
+                new RuntimeException("LLM permit unavailable: FEATURE:article")
+        );
+
+        assertThat(queued).isTrue();
+        assertThat(task.getStatus()).isEqualTo("pending");
+        assertThat(task.getInfrastructureRetryCount()).isZero();
+        verify(articleModelResolver, never()).recordInfrastructureFailure(any());
+        verify(articleModelResolver, never()).resolveForBatch(
+                anyLong(), any(), anyBoolean(), anyDouble(), anySet());
+        verify(taskMapper, never()).resetRunningForInfrastructureRetry(
+                any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -499,6 +636,8 @@ class BatchArticleGenerationServiceTest {
         assertEquals(901L, finalTask.getDiscardedArticleId());
         assertEquals(MedicalArticleConstants.COMPLIANCE_DISCARDED, finalTask.getComplianceStatus());
         assertEquals(2, finalTask.getRetryCount());
+        assertEquals(0, finalTask.getInfrastructureRetryCount());
+        assertEquals(2, finalTask.getComplianceRetryCount());
         assertEquals("种植牙怎么选", finalTask.getTopic());
         assertThat(finalTask.getComplianceIssuesJson()).contains("absolute_claim");
         assertThat(finalTask.getErrorMessage()).contains("医疗合规校验失败");
@@ -583,6 +722,8 @@ class BatchArticleGenerationServiceTest {
         BatchArticleGenerationTask finalTask = taskCaptor.getAllValues().get(taskCaptor.getAllValues().size() - 1);
         assertEquals("success", finalTask.getStatus());
         assertEquals(1, finalTask.getRetryCount());
+        assertEquals(0, finalTask.getInfrastructureRetryCount());
+        assertEquals(1, finalTask.getComplianceRetryCount());
         assertEquals("阜阳祛斑医院推荐", finalTask.getTopic());
         assertThat(finalTask.getComplianceIssuesJson()).contains("brand_exposure_exceeded", "warn");
         assertThat(finalTask.getInputSnapshot()).contains("medicalComplianceResult", "brand_exposure_exceeded");
@@ -999,7 +1140,7 @@ class BatchArticleGenerationServiceTest {
         ReflectionTestUtils.invokeMethod(service, "submitBatchTasks", batch, List.of(task));
 
         assertEquals("pending", task.getStatus());
-        verify(taskMapper).releaseRunningClaim(any(), any(), any());
+        verify(taskMapper).releaseRunningClaim(any(), any(), any(), any());
         verify(batchMapper, atLeast(1)).updateById(batch);
     }
 
@@ -1093,6 +1234,7 @@ class BatchArticleGenerationServiceTest {
         task.setStatus("pending");
         when(batchMapper.selectList(any())).thenReturn(List.of(batch));
         when(taskMapper.selectList(any())).thenReturn(List.of(task));
+        when(taskMapper.resetRunningForRecovery(any(), any(), any(), any())).thenReturn(1);
 
         int recovered = service.recoverStalledBatches(10, Duration.ofMinutes(15));
 
@@ -1115,13 +1257,14 @@ class BatchArticleGenerationServiceTest {
         task.setStartedAt(LocalDateTime.now().minusMinutes(30));
         when(batchMapper.selectList(any())).thenReturn(List.of(batch));
         when(taskMapper.selectList(any())).thenReturn(List.of(task));
+        when(taskMapper.resetRunningForRecovery(any(), any(), any(), any())).thenReturn(1);
 
         int recovered = service.recoverStalledBatches(10, Duration.ofMinutes(15));
 
         assertEquals(1, recovered);
         assertEquals("pending", task.getStatus());
         assertThat(executor.commands).hasSize(1);
-        verify(taskMapper).resetRunningForRecovery(any(), any(), any());
+        verify(taskMapper).resetRunningForRecovery(any(), any(), any(), any());
     }
 
     @Test
@@ -1143,6 +1286,7 @@ class BatchArticleGenerationServiceTest {
         third.setStatus("running");
         third.setUpdatedAt(LocalDateTime.now().minusMinutes(30));
         when(taskMapper.selectList(any())).thenReturn(List.of(first, second, third));
+        when(taskMapper.resetRunningForRecovery(any(), any(), any(), any())).thenReturn(1);
 
         Boolean recovered = ReflectionTestUtils.invokeMethod(
                 service,
@@ -1156,7 +1300,7 @@ class BatchArticleGenerationServiceTest {
         assertEquals("pending", second.getStatus());
         assertEquals("running", third.getStatus());
         assertThat(executor.commands).hasSize(1);
-        verify(taskMapper, times(2)).resetRunningForRecovery(any(), any(), any());
+        verify(taskMapper, times(2)).resetRunningForRecovery(any(), any(), any(), any());
         verify(taskMapper, never()).updateById(third);
     }
 
