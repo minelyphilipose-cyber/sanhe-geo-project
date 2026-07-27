@@ -12,6 +12,8 @@ export const aiPlatformLabels: Record<string, string> = {
   hunyuan: '元宝'
 }
 
+const hiddenMobileDashboardAiPlatforms = new Set(['yuanbao', 'hunyuan', 'tencent_search_web'])
+
 export const contentPlatformLabels: Record<string, string> = {
   official_site: 'Agent官网',
   douyin: '抖音',
@@ -44,6 +46,11 @@ export const sceneLabels: Record<string, string> = {
 export function aiPlatformLabel(code?: string | null) {
   if (!code) return '未知平台'
   return aiPlatformLabels[code] || '未知平台'
+}
+
+export function isMobileDashboardAiPlatformVisible(code?: string | null) {
+  if (!code) return true
+  return !hiddenMobileDashboardAiPlatforms.has(code.trim().toLowerCase())
 }
 
 function contentPlatformEntry(code?: string | null, platforms?: ContentPlatform[]) {

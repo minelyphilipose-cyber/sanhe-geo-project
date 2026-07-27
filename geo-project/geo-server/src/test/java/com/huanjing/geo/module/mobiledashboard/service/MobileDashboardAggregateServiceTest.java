@@ -87,7 +87,7 @@ public class MobileDashboardAggregateServiceTest {
     }
 
     @Test
-    void mentionTrendUsesQueryCountAsDenominatorAndNullForMissingDays() throws Exception {
+    void mentionTrendUsesLatestSnapshotAsOfEachDay() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         createPollResultsTable(jdbcTemplate);
         jdbcTemplate.update("""
@@ -98,16 +98,22 @@ public class MobileDashboardAggregateServiceTest {
                     (1, 1, 1001, 'doubao_web', 'doubao', DATE '2026-06-10', 'A', 'completed', 1, 1, 0, TIMESTAMP '2026-06-10 09:00:00'),
                     (2, 1, 1002, 'deepseek_ark_web', 'deepseek', DATE '2026-06-10', 'A', 'completed', 0, 1, 1, TIMESTAMP '2026-06-10 09:01:00'),
                     (3, 1, 1003, 'qwen_web', 'tongyi', DATE '2026-06-12', 'A', 'completed', 1, 0, 1, TIMESTAMP '2026-06-12 09:00:00'),
-                    (4, 1, 1004, 'qwen_web', 'tongyi', DATE '2026-06-13', 'A', 'completed', 0, 1, 1, TIMESTAMP '2026-06-13 09:00:00')
+                    (4, 1, 1004, 'qwen_web', 'tongyi', DATE '2026-06-13', 'A', 'completed', 0, 1, 1, TIMESTAMP '2026-06-13 09:00:00'),
+                    (5, 1, 1005, 'tencent_search_web', 'yuanbao', DATE '2026-06-13', 'A', 'completed', 1, 1, 1, TIMESTAMP '2026-06-13 09:01:00')
                 """);
 
+        MobileDashboardAggregateService service = newService(jdbcTemplate);
         @SuppressWarnings("unchecked")
         List<MobileDashboardAggregateVO.TrendPoint> points =
-                (List<MobileDashboardAggregateVO.TrendPoint>) invoke(newService(jdbcTemplate), "loadMentionTrend",
+                (List<MobileDashboardAggregateVO.TrendPoint>) invoke(service, "loadMentionTrend",
                         1L, dateRange(LocalDate.of(2026, 6, 10), LocalDate.of(2026, 6, 13)));
+        Object overall = invoke(service, "loadLatestMentionAggregate",
+                1L, null, LocalDate.of(2026, 6, 13));
 
         assertThat(points).extracting(MobileDashboardAggregateVO.TrendPoint::getValue)
-                .containsExactly(50, null, 0, 0);
+                .containsExactly(50, 50, 33, 25);
+        assertThat(points.get(points.size() - 1).getValue())
+                .isEqualTo(Math.round(recordValue(overall, "mentions") * 100F / recordValue(overall, "requested")));
     }
 
     @Test
@@ -433,8 +439,9 @@ public class MobileDashboardAggregateServiceTest {
     }
 
     @Test
-    void latestMentionAggregateUsesOnlyNewestCompletedResultPerQuestionAndPlatform() throws Exception {
+    void latestMentionAndPlatformPerformanceExcludeYuanbao() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createAiPlatformConfigTable(jdbcTemplate);
         createPollResultsTable(jdbcTemplate);
         jdbcTemplate.update("""
                 INSERT INTO poll_results
@@ -449,10 +456,17 @@ public class MobileDashboardAggregateServiceTest {
                 """);
 
         Object aggregate = invoke(newService(jdbcTemplate), "loadLatestMentionAggregate", 1L, null);
+        @SuppressWarnings("unchecked")
+        List<MobileDashboardAggregateVO.PlatformMetric> platformRows =
+                (List<MobileDashboardAggregateVO.PlatformMetric>) invoke(
+                        newService(jdbcTemplate), "loadLatestPlatformPerformance", 1L);
 
-        assertThat(recordValue(aggregate, "completed")).isEqualTo(3L);
-        assertThat(recordValue(aggregate, "mentions")).isEqualTo(2L);
-        assertThat(recordValue(aggregate, "coveredPlatformCount")).isEqualTo(2L);
+        assertThat(recordValue(aggregate, "requested")).isEqualTo(2L);
+        assertThat(recordValue(aggregate, "completed")).isEqualTo(2L);
+        assertThat(recordValue(aggregate, "mentions")).isEqualTo(1L);
+        assertThat(recordValue(aggregate, "coveredPlatformCount")).isEqualTo(1L);
+        assertThat(platformRows).extracting(MobileDashboardAggregateVO.PlatformMetric::getCode)
+                .containsExactly("tongyi", "doubao");
     }
 
     @Test
@@ -471,10 +485,10 @@ public class MobileDashboardAggregateServiceTest {
 
         Object aggregate = invoke(newService(jdbcTemplate), "loadLatestMentionAggregate", 1L, null);
 
-        assertThat(recordValue(aggregate, "requested")).isEqualTo(2L);
-        assertThat(recordValue(aggregate, "completed")).isEqualTo(1L);
-        assertThat(recordValue(aggregate, "mentions")).isEqualTo(1L);
-        assertThat(recordValue(aggregate, "coveredPlatformCount")).isEqualTo(1L);
+        assertThat(recordValue(aggregate, "requested")).isEqualTo(1L);
+        assertThat(recordValue(aggregate, "completed")).isZero();
+        assertThat(recordValue(aggregate, "mentions")).isZero();
+        assertThat(recordValue(aggregate, "coveredPlatformCount")).isZero();
     }
 
     @Test

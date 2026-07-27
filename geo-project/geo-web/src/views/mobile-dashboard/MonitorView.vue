@@ -130,7 +130,11 @@ import EmptyState from '@/components/mobile-dashboard/EmptyState.vue'
 import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { DashboardMetric, MonitorDashboardData, QuestionMonitorItem } from '@/types/mobileDashboard'
-import { aiPlatformLabel, sceneLabel } from '@/utils/mobileDashboardDictionaries'
+import {
+  aiPlatformLabel,
+  isMobileDashboardAiPlatformVisible,
+  sceneLabel,
+} from '@/utils/mobileDashboardDictionaries'
 import { aiPlatformLogoSrc, fallbackAiPlatformLogo } from '@/utils/aiPlatformLogo'
 import { isSearchNotTriggered, questionMonitorStatus } from '@/utils/mobileDashboardQuestionStatus'
 
@@ -154,10 +158,16 @@ const overviewCards = computed(() => {
     { label: '首推', icon: 'bars', metric: overview.firstRecommendCount },
   ]
 })
-const questionItems = computed(() => data.value?.questionList?.items || [])
+const questionItems = computed(() =>
+  (data.value?.questionList?.items || []).filter((item) =>
+    isMobileDashboardAiPlatformVisible(item.platformCode),
+  ),
+)
 const platformChips = computed(() => [
   { code: 'all', label: '全部' },
-  ...(data.value?.platformFilters || []).map((code) => ({ code, label: platformLabel(code) })),
+  ...(data.value?.platformFilters || [])
+    .filter(isMobileDashboardAiPlatformVisible)
+    .map((code) => ({ code, label: platformLabel(code) })),
 ])
 const filterSummaryText = computed(() =>
   selectedPlatform.value === 'all'

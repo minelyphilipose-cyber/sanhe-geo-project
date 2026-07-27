@@ -90,7 +90,8 @@ class MobileDashboardEntityJudgeServiceTest {
                     (2, 1, 1001, 'doubao', DATE '2026-06-17', 'A', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00'),
                     (3, 1, 1001, 'qwen', DATE '2026-06-17', 'A', 'completed', 0, TIMESTAMP '2026-06-17 09:00:00'),
                     (4, 1, 1002, 'doubao', DATE '2026-06-17', 'A', 'running', 1, TIMESTAMP '2026-06-17 09:00:00'),
-                    (5, 1, 1003, 'doubao', DATE '2026-06-17', 'B', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00')
+                    (5, 1, 1003, 'doubao', DATE '2026-06-17', 'B', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00'),
+                    (6, 1, 1004, 'tencent_search_web', DATE '2026-06-17', 'A', 'completed', 1, TIMESTAMP '2026-06-17 09:00:00')
                 """);
         jdbcTemplate.update("""
                 INSERT INTO poll_result_entity_judge
@@ -100,8 +101,10 @@ class MobileDashboardEntityJudgeServiceTest {
                     (2, 'focus_brand', 0, ?, 'success', 1, 1),
                     (3, 'focus_brand', 0, ?, 'success', 1, 0),
                     (4, 'focus_brand', 0, ?, 'success', 1, 1),
-                    (5, 'focus_brand', 0, ?, 'success', 1, 1)
+                    (5, 'focus_brand', 0, ?, 'success', 1, 1),
+                    (6, 'focus_brand', 0, ?, 'success', 1, 1)
                 """, MobileDashboardEntityJudgeService.PROMPT_VERSION,
+                MobileDashboardEntityJudgeService.PROMPT_VERSION,
                 MobileDashboardEntityJudgeService.PROMPT_VERSION,
                 MobileDashboardEntityJudgeService.PROMPT_VERSION,
                 MobileDashboardEntityJudgeService.PROMPT_VERSION,

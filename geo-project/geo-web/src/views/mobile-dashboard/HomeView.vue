@@ -23,9 +23,9 @@
     <section class="responsive-pair">
       <DashboardCard title="平台表现" icon="dashboard">
         <p class="card-subtitle">核心问题下各平台提及率</p>
-        <div v-if="data?.platformPerformance?.length" class="progress-list">
+        <div v-if="visiblePlatformPerformance.length" class="progress-list">
           <div
-            v-for="item in data.platformPerformance"
+            v-for="item in visiblePlatformPerformance"
             :key="item.code"
             class="progress-row"
             :class="{ zero: metricNumber(item.rate) === 0 }"
@@ -144,7 +144,11 @@ import MobileIcon from '@/components/mobile-dashboard/MobileIcon.vue'
 import TrendLineChart from '@/components/mobile-dashboard/TrendLineChart.vue'
 import { useMobileDashboardStore } from '@/stores/mobileDashboard'
 import type { DashboardMetric, HomeDashboardData } from '@/types/mobileDashboard'
-import { aiPlatformLabel, sceneLabel } from '@/utils/mobileDashboardDictionaries'
+import {
+  aiPlatformLabel,
+  isMobileDashboardAiPlatformVisible,
+  sceneLabel,
+} from '@/utils/mobileDashboardDictionaries'
 import { aiPlatformLogoSrc, fallbackAiPlatformLogo } from '@/utils/aiPlatformLogo'
 
 const store = useMobileDashboardStore()
@@ -171,6 +175,11 @@ const sceneIcons: Record<string, string> = {
 }
 
 const metricCards = computed(() => data.value?.metrics || [])
+const visiblePlatformPerformance = computed(() =>
+  (data.value?.platformPerformance || []).filter((item) =>
+    isMobileDashboardAiPlatformVisible(item.code),
+  ),
+)
 const visibleScenes = computed(() => (data.value?.sceneCoverage || []).filter((item) => item.visible))
 const trendLabels = computed(() => data.value?.trend?.map((item) => item.date.slice(5)) || [])
 const trendValues = computed(() => data.value?.trend?.map((item) => item.value) || [])

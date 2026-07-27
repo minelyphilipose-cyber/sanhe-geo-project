@@ -61,6 +61,8 @@ public class MobileDashboardEntityJudgeService {
             AND pr.search_triggered = 1
             """;
     private static final String POLL_CHANNEL_SQL = "COALESCE(NULLIF(TRIM(pr.channel_code), ''), pr.platform_code)";
+    private static final String HIDDEN_DASHBOARD_PLATFORM_ALIAS_SQL =
+            "'yuanbao','hunyuan','tencent_search_web'";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -136,7 +138,8 @@ public class MobileDashboardEntityJudgeService {
                    AND entity_type = ?
                    AND entity_ref_id = ?
                    AND judge_prompt_version = ?
-                """ + platformClause, (rs, rowNum) -> new JudgeCoverage(
+                   AND platform_code NOT IN (%s)
+                """.formatted(HIDDEN_DASHBOARD_PLATFORM_ALIAS_SQL) + platformClause, (rs, rowNum) -> new JudgeCoverage(
                 rs.getLong("expected_count"),
                 rs.getLong("success_count"),
                 rs.getLong("recommended_count"),
@@ -164,11 +167,12 @@ public class MobileDashboardEntityJudgeService {
                    AND s.batch_date BETWEEN ? AND ?
                    AND s.question_tier = ?
                    AND s.judge_prompt_version = ?
+                   AND s.platform_code NOT IN (%s)
                  WHERE c.project_id = ?
                    AND c.status = 'active'
                  GROUP BY c.id, c.competitor_name, c.display_order, c.qa_status
                  ORDER BY c.display_order ASC, c.id ASC
-                """, (rs, rowNum) -> new CompetitorSummary(
+                """.formatted(HIDDEN_DASHBOARD_PLATFORM_ALIAS_SQL), (rs, rowNum) -> new CompetitorSummary(
                 rs.getLong("entity_ref_id"),
                 rs.getString("competitor_name"),
                 rs.getInt("display_order"),
@@ -198,6 +202,7 @@ public class MobileDashboardEntityJudgeService {
                        AND pr.keyword_result_id IS NOT NULL
                        AND ENABLED_MONITORING_QUESTION_SCOPE
                        AND %2$s
+                       AND %3$s NOT IN (%4$s)
                 ),
                 latest_count AS (
                     SELECT COUNT(*) AS expected_count
@@ -228,7 +233,8 @@ public class MobileDashboardEntityJudgeService {
                    AND c.status = 'active'
                  GROUP BY c.id, c.competitor_name, c.display_order, c.qa_status
                  ORDER BY c.display_order ASC, c.id ASC
-                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL), "pr"), (rs, rowNum) -> new CompetitorSummary(
+                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL,
+                POLL_CHANNEL_SQL, HIDDEN_DASHBOARD_PLATFORM_ALIAS_SQL), "pr"), (rs, rowNum) -> new CompetitorSummary(
                 rs.getLong("entity_ref_id"),
                 rs.getString("competitor_name"),
                 rs.getInt("display_order"),
@@ -265,6 +271,7 @@ public class MobileDashboardEntityJudgeService {
                        AND ENABLED_MONITORING_QUESTION_SCOPE
                        AND %2$s
                        %3$s
+                       AND %4$s NOT IN (%5$s)
                 )
                 SELECT COUNT(*) AS expected_count,
                        COALESCE(SUM(CASE WHEN j.judge_status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
@@ -278,7 +285,8 @@ public class MobileDashboardEntityJudgeService {
                    AND j.judge_prompt_version = ?
                  WHERE l.rn = 1
                    AND l.search_triggered = 1
-                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL, platformClause), "pr"), (rs, rowNum) -> new JudgeCoverage(
+                """.formatted(canonicalPlatformSql(POLL_CHANNEL_SQL), EFFECTIVE_WEB_SEARCH_REQUEST_SQL, platformClause,
+                POLL_CHANNEL_SQL, HIDDEN_DASHBOARD_PLATFORM_ALIAS_SQL), "pr"), (rs, rowNum) -> new JudgeCoverage(
                 rs.getLong("expected_count"),
                 rs.getLong("success_count"),
                 rs.getLong("recommended_count"),
