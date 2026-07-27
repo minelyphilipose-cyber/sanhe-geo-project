@@ -75,6 +75,8 @@ public class ArticlePromptAssemblerV2 {
         section(prompt, "当前文章任务", templateTask(input, template));
         section(prompt, "严格审核平台品牌表达要求",
                 strictEditorialBrandDirection(input, template, runtimePolicy, specialIndustry));
+        section(prompt, "小红书特殊行业表达要求",
+                xiaohongshuSpecialIndustryDirection(input, runtimePolicy, specialIndustry));
         section(prompt, "主题、关键词与读者", topicMaterial(input, omittedMaterialKeys));
         section(prompt, "可用事实材料",
                 FACT_MATERIAL_USAGE + "\n" + factMaterial(input, omittedMaterialKeys, specialIndustry));
@@ -122,7 +124,7 @@ public class ArticlePromptAssemblerV2 {
                                              boolean specialIndustry) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("promptContract", PROMPT_CONTRACT);
-        snapshot.put("promptRevision", "v2_medical_topic_first_20260723");
+        snapshot.put("promptRevision", "v2_xiaohongshu_special_20260725");
         snapshot.put("templateId", template == null ? null : template.getId());
         snapshot.put("templateVersionId", version == null ? null : version.getId());
         snapshot.put("templateVersionNo", version == null ? null : version.getVersionNo());
@@ -232,6 +234,30 @@ public class ArticlePromptAssemblerV2 {
                 || contains(topic, brand == null ? null : brand.getBrandShortName())
                 || contains(topic, project == null ? null : project.getBrandName())
                 || contains(topic, project == null ? null : project.getCompanyName());
+    }
+
+    private String xiaohongshuSpecialIndustryDirection(BatchArticlePromptBuilder.PromptBuildInput input,
+                                                        ArticleRuntimePolicy runtimePolicy,
+                                                        boolean specialIndustry) {
+        if (!specialIndustry
+                || !ArticlePromptChannels.SELF_MEDIA.equals(runtimePolicy.channelGroupCode())
+                || !"xiaohongshu".equals(ArticlePromptChannels.canonicalSubCode(
+                runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode()))) {
+            return null;
+        }
+        String brandDirection = isBrandFocused(input)
+                ? "当前主题本身围绕品牌展开，品牌可自然出现1～2次，并以与主题直接相关的公开事实支撑内容；不得连续介绍品牌或扩写成企业资料清单。"
+                : "正文仍需自然出现品牌名称，并使用至少一项与主题直接相关的真实品牌事实；通常出现1次，确有解释需要时最多2次，不得把品牌写成默认答案或推荐结论。";
+        return """
+                当前内容用于小红书特殊行业信息笔记。审核收敛只改变表达边界，不得改变用户主题，也不得把文章改写成统一的合规说明、风险清单或机构选择指南。
+                1. 标题和首段直接承接用户主题。除非主题本身要求讨论，否则不要主动加入合规、风险、避雷、资质核验或机构推荐等标签。
+                2. 使用亲切但中性的个人号信息分享口吻，可以省略主语或直接使用品牌名称作为事实主体；不得以“我们机构”“本院”等机构官方身份发声，也不得伪装消费者、患者或到店体验者。
+                3. %s
+                4. 以公开信息、服务边界、流程说明或问题解释体现品牌价值，不使用强种草、强推荐、效果暗示、第三方口碑或催促决策的表达，不以私信、咨询、预约、购买或到店行动收束。
+                5. 资质、个体差异、风险和专业评估只在能够直接解释当前主题时自然带入；资质如需出现，只概括与当前论点相关的一项事实，不罗列完整许可范围、编号或后台审计信息。
+                6. 正文按实际语义自然分段；存在多个独立信息单元时使用少量、具体的小标题，不强制清单格式、固定标题数量、统一开篇或统一总结。
+                7. 默认不添加营销型表情、话题标签或联系方式。保持信息清楚、实体一致和上下文连贯，不为规避审核写成生硬、含混的句子。
+                """.formatted(brandDirection).trim();
     }
 
     private boolean contains(String source, String target) {

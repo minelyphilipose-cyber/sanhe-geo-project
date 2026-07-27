@@ -94,7 +94,7 @@ class ArticlePromptAssemblerV2Test {
 
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals("article_v2", snapshot.path("promptContract").asText());
-        assertEquals("v2_medical_topic_first_20260723", snapshot.path("promptRevision").asText());
+        assertEquals("v2_xiaohongshu_special_20260725", snapshot.path("promptRevision").asText());
         assertEquals("brand_only", snapshot.path("runtimePolicy").path("contactDisclosureMode").asText());
         assertEquals(1200, snapshot.path("effectiveLengthPolicy").path("targetMinChars").asInt());
         assertEquals(1800, snapshot.path("effectiveLengthPolicy").path("targetMaxChars").asInt());
@@ -167,6 +167,78 @@ class ArticlePromptAssemblerV2Test {
         assertTrue(result.userPrompt().contains("医美项目收费通常由哪些部分构成"));
         assertTrue(result.userPrompt().contains("涉及成本时说明形成变量"));
         assertFalse(result.userPrompt().contains("资质信息：医疗机构执业许可"));
+    }
+
+    @Test
+    void specialIndustryXiaohongshuUsesRestrainedInformationNoteDirectionAndKeepsBrandValue() {
+        Project project = new Project();
+        project.setId(1L);
+        project.setBrandId(2L);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试医美");
+        brand.setMainBusiness("皮肤管理与医疗美容服务");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setArticleTypeCode("social_note");
+        template.setQuestionSceneCode("qa");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setVersionNo(2);
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "医美项目收费通常由哪些部分构成", null,
+                null, null, List.of(), "social_note", "xiaohongshu", "short", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "xiaohongshu",
+                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result =
+                assembler.assemble(input, template, version, policy, true);
+
+        assertTrue(result.userPrompt().contains("# 小红书特殊行业表达要求"));
+        assertTrue(result.userPrompt().contains("小红书特殊行业信息笔记"));
+        assertTrue(result.userPrompt().contains("不得改变用户主题"));
+        assertTrue(result.userPrompt().contains("正文仍需自然出现品牌名称"));
+        assertTrue(result.userPrompt().contains("至少一项与主题直接相关的真实品牌事实"));
+        assertTrue(result.userPrompt().contains("通常出现1次，确有解释需要时最多2次"));
+        assertTrue(result.userPrompt().contains("不得以“我们机构”“本院”等机构官方身份发声"));
+        assertTrue(result.userPrompt().contains("不强制清单格式、固定标题数量、统一开篇或统一总结"));
+        assertTrue(result.userPrompt().contains("默认不添加营销型表情、话题标签或联系方式"));
+        assertTrue(result.userPrompt().contains("正文不含标题控制在约600～900字"));
+        assertTrue(result.userPrompt().contains("测试医美"));
+        assertTrue(result.userPrompt().contains("皮肤管理与医疗美容服务"));
+        assertFalse(result.userPrompt().contains("每篇必须包含风险"));
+    }
+
+    @Test
+    void ordinaryXiaohongshuDoesNotReceiveSpecialIndustryDirection() {
+        Project project = new Project();
+        project.setId(1L);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试品牌");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setArticleTypeCode("social_note");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setVersionNo(2);
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "企业服务怎么判断", null,
+                null, null, List.of(), "social_note", "xiaohongshu", "short", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "xiaohongshu",
+                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result =
+                assembler.assemble(input, template, version, policy, false);
+
+        assertTrue(result.userPrompt().contains("小红书信息笔记风格"));
+        assertFalse(result.userPrompt().contains("# 小红书特殊行业表达要求"));
     }
 
     @Test
