@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.content.wechat;
 
+import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.entity.WechatCallbackEvent;
 import com.huanjing.geo.module.content.mapper.WechatCallbackEventMapper;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ public class WechatOpenPlatformMessageService {
 
     private final WechatQueryAuthCodeAsyncService queryAuthCodeAsyncService;
     private final WechatCallbackEventMapper callbackEventMapper;
+    private final WechatOpenPlatformProperties properties;
 
     public String handleAuthorizerMessage(String authorizerAppid, String rawXml) {
         long startedAt = System.currentTimeMillis();
@@ -31,8 +33,10 @@ public class WechatOpenPlatformMessageService {
             String msgType = xml.get("MsgType");
             if ("event".equals(msgType)) {
                 String event = xml.get("Event");
-                response = WechatXmlParser.textReply(xml.get("FromUserName"), xml.get("ToUserName"),
-                        (event == null ? "" : event) + "from_callback");
+                if (isAllNetworkTestAuthorizer(authorizerAppid)) {
+                    response = WechatXmlParser.textReply(xml.get("FromUserName"), xml.get("ToUserName"),
+                            (event == null ? "" : event) + "from_callback");
+                }
                 return response;
             }
             String content = xml.get("Content");
@@ -47,7 +51,7 @@ public class WechatOpenPlatformMessageService {
                 response = "";
                 return response;
             }
-            if ("text".equals(msgType) && content != null) {
+            if ("text".equals(msgType) && content != null && isAllNetworkTestAuthorizer(authorizerAppid)) {
                 response = WechatXmlParser.textReply(xml.get("FromUserName"), xml.get("ToUserName"),
                         content + "_callback");
                 return response;
@@ -60,6 +64,15 @@ public class WechatOpenPlatformMessageService {
         } finally {
             saveAudit(authorizerAppid, rawXml, xml, response, receivedAt, processStatus, processError);
         }
+    }
+
+    private boolean isAllNetworkTestAuthorizer(String authorizerAppid) {
+        return StringUtils.hasText(authorizerAppid)
+                && properties.getAllNetworkTestAuthorizerAppids() != null
+                && properties.getAllNetworkTestAuthorizerAppids().stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .anyMatch(authorizerAppid::equals);
     }
 
     private void saveAudit(String authorizerAppid,

@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.content.wechat;
 
+import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.entity.WechatCallbackEvent;
 import com.huanjing.geo.module.content.mapper.WechatCallbackEventMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +15,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 class WechatOpenPlatformMessageServiceTest {
+    private static final String ALL_NETWORK_TEST_APPID = "wx570bc396a51b8ff8";
 
     private WechatQueryAuthCodeAsyncService queryAuthCodeAsyncService;
     private WechatCallbackEventMapper callbackEventMapper;
@@ -23,7 +25,11 @@ class WechatOpenPlatformMessageServiceTest {
     void setUp() {
         queryAuthCodeAsyncService = mock(WechatQueryAuthCodeAsyncService.class);
         callbackEventMapper = mock(WechatCallbackEventMapper.class);
-        service = new WechatOpenPlatformMessageService(queryAuthCodeAsyncService, callbackEventMapper);
+        service = new WechatOpenPlatformMessageService(
+                queryAuthCodeAsyncService,
+                callbackEventMapper,
+                new WechatOpenPlatformProperties()
+        );
     }
 
     @Test
@@ -44,35 +50,56 @@ class WechatOpenPlatformMessageServiceTest {
     }
 
     @Test
-    void arbitraryTextMessageRepliesWithContentCallback() {
-        Map<String, String> reply = parseReply(service.handleAuthorizerMessage("wx-authorizer",
-                textMessage("hello world")));
+    void arbitraryTextMessageIsIgnoredForCustomerAuthorizer() {
+        String response = service.handleAuthorizerMessage("wx-authorizer", textMessage("hello world"));
 
-        assertThat(reply.get("Content")).isEqualTo("hello world_callback");
+        assertThat(response).isEqualTo("success");
     }
 
     @Test
-    void subscribeEventRepliesWithEventCallback() {
-        Map<String, String> reply = parseReply(service.handleAuthorizerMessage("wx-authorizer",
+    void subscribeEventIsIgnoredForCustomerAuthorizer() {
+        String response = service.handleAuthorizerMessage("wx-authorizer", eventMessage("subscribe"));
+
+        assertThat(response).isEqualTo("success");
+    }
+
+    @Test
+    void clickEventIsIgnoredForCustomerAuthorizer() {
+        String response = service.handleAuthorizerMessage("wx-authorizer", eventMessage("CLICK"));
+
+        assertThat(response).isEqualTo("success");
+    }
+
+    @Test
+    void subscribeEventRepliesForAllNetworkTestAuthorizer() {
+        Map<String, String> reply = parseReply(service.handleAuthorizerMessage(ALL_NETWORK_TEST_APPID,
                 eventMessage("subscribe")));
 
         assertThat(reply.get("Content")).isEqualTo("subscribefrom_callback");
     }
 
     @Test
-    void clickEventPreservesCaseInCallback() {
-        Map<String, String> reply = parseReply(service.handleAuthorizerMessage("wx-authorizer",
+    void clickEventPreservesCaseForAllNetworkTestAuthorizer() {
+        Map<String, String> reply = parseReply(service.handleAuthorizerMessage(ALL_NETWORK_TEST_APPID,
                 eventMessage("CLICK")));
 
         assertThat(reply.get("Content")).isEqualTo("CLICKfrom_callback");
     }
 
     @Test
-    void viewEventPreservesCaseInCallback() {
-        Map<String, String> reply = parseReply(service.handleAuthorizerMessage("wx-authorizer",
+    void viewEventPreservesCaseForAllNetworkTestAuthorizer() {
+        Map<String, String> reply = parseReply(service.handleAuthorizerMessage(ALL_NETWORK_TEST_APPID,
                 eventMessage("VIEW")));
 
         assertThat(reply.get("Content")).isEqualTo("VIEWfrom_callback");
+    }
+
+    @Test
+    void arbitraryTextMessageRepliesForAllNetworkTestAuthorizer() {
+        Map<String, String> reply = parseReply(service.handleAuthorizerMessage(ALL_NETWORK_TEST_APPID,
+                textMessage("hello world")));
+
+        assertThat(reply.get("Content")).isEqualTo("hello world_callback");
     }
 
     @Test

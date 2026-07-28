@@ -20,6 +20,8 @@ public class WechatOpenPlatformProperties {
     private boolean liveVerificationBlocked = true;
     private String liveVerificationReason = "domain_icp_filing_pending";
     private boolean funcScopeStrictMode = false;
+    private List<String> allNetworkTestAuthorizerAppids =
+            new ArrayList<>(List.of("wx570bc396a51b8ff8"));
     private List<Integer> requiredDraftFuncScopes = new ArrayList<>(List.of(1, 13));
     private List<Integer> requiredMenuFuncScopes = new ArrayList<>(List.of(15));
     private int authType = 1;
