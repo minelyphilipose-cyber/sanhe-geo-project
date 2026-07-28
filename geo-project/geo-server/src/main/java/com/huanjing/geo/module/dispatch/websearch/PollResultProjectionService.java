@@ -8,6 +8,7 @@ import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.dispatch.websearch.enums.AttemptStatus;
 import com.huanjing.geo.module.dispatch.websearch.enums.ResultCode;
 import com.huanjing.geo.module.dispatch.websearch.enums.RetryChainStatus;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceGuardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,9 +22,19 @@ public class PollResultProjectionService {
 
     private final PollInvocationAttemptMapper attemptMapper;
     private final PollResultMapper pollResultMapper;
+    private final PollRetentionSliceGuardService retentionSliceGuardService;
 
     @Transactional
     public void finalizeAttempt(Long attemptId, boolean automaticChainFinalized, LocalDateTime finalizedAt) {
+        PollInvocationAttempt identityAttempt = attemptMapper.selectById(attemptId);
+        if (identityAttempt == null) {
+            throw new BizException(404, "Invocation attempt not found: " + attemptId);
+        }
+        PollResult identityResult = pollResultMapper.selectById(identityAttempt.getPollResultId());
+        if (identityResult == null || identityResult.getDeletedAt() != null) {
+            throw new BizException(404, "Poll result not found: " + identityAttempt.getPollResultId());
+        }
+        retentionSliceGuardService.lockAndRequireWritable(identityResult);
         PollInvocationAttempt attempt = attemptMapper.selectByIdForUpdate(attemptId);
         if (attempt == null) {
             throw new BizException(404, "Invocation attempt not found: " + attemptId);

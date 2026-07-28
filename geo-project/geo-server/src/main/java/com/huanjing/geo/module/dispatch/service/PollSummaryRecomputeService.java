@@ -76,6 +76,146 @@ public class PollSummaryRecomputeService {
         );
     }
 
+    public SummaryVerification verifySlice(Long projectId, LocalDate batchDate, String questionTier) {
+        String normalizedTier = normalizeTier(questionTier);
+        List<PollSourceRow> sourceRows = loadSourceRows(projectId, batchDate, normalizedTier);
+        List<KeywordSummaryRow> expectedKeywordRows =
+                buildKeywordRows(projectId, batchDate, normalizedTier, sourceRows);
+        List<PlatformSummaryRow> expectedPlatformRows =
+                buildPlatformRows(projectId, batchDate, normalizedTier, sourceRows);
+        List<KeywordSummaryRow> storedKeywordRows =
+                loadStoredKeywordRows(projectId, batchDate, normalizedTier);
+        List<PlatformSummaryRow> storedPlatformRows =
+                loadStoredPlatformRows(projectId, batchDate, normalizedTier);
+
+        return new SummaryVerification(
+                sourceRows.size(),
+                storedKeywordRows.size(),
+                storedKeywordRows.stream().mapToLong(KeywordSummaryRow::sourceRowCount).sum(),
+                matchesKeywordSummaries(expectedKeywordRows, storedKeywordRows),
+                storedPlatformRows.size(),
+                storedPlatformRows.stream().mapToLong(PlatformSummaryRow::sourceRowCount).sum(),
+                matchesPlatformSummaries(expectedPlatformRows, storedPlatformRows)
+        );
+    }
+
+    private List<KeywordSummaryRow> loadStoredKeywordRows(Long projectId,
+                                                         LocalDate batchDate,
+                                                         String questionTier) {
+        return jdbcTemplate.query("""
+                SELECT project_id, batch_date, question_tier,
+                       keyword_identity_type, keyword_identity_value, dim_hash,
+                       keyword_result_id, keyword_text_snapshot, keyword_text_normalized,
+                       source_row_count, platform_count, completed_count, failed_count,
+                       hit_count, effective_hit_count, site_mention_count,
+                       contact_mention_count, contact_mention_total,
+                       search_confirmed_count, brand_search_count, brand_answer_count,
+                       confirmed_citation_exposure_count, confirmed_citation_exposure_rate,
+                       request_count_total, response_time_ms_total,
+                       last_source_created_at, last_source_updated_at, source_checksum
+                  FROM poll_keyword_daily_summary
+                 WHERE project_id = ?
+                   AND batch_date = ?
+                   AND question_tier = ?
+                """, (rs, rowNum) -> new KeywordSummaryRow(
+                rs.getLong("project_id"),
+                rs.getDate("batch_date").toLocalDate(),
+                rs.getString("question_tier"),
+                rs.getString("keyword_identity_type"),
+                rs.getString("keyword_identity_value"),
+                rs.getString("dim_hash"),
+                nullableLong(rs, "keyword_result_id"),
+                rs.getString("keyword_text_snapshot"),
+                rs.getString("keyword_text_normalized"),
+                rs.getInt("source_row_count"),
+                rs.getInt("platform_count"),
+                rs.getInt("completed_count"),
+                rs.getInt("failed_count"),
+                rs.getInt("hit_count"),
+                rs.getInt("effective_hit_count"),
+                rs.getInt("site_mention_count"),
+                rs.getInt("contact_mention_count"),
+                rs.getLong("contact_mention_total"),
+                rs.getInt("search_confirmed_count"),
+                rs.getInt("brand_search_count"),
+                rs.getInt("brand_answer_count"),
+                rs.getInt("confirmed_citation_exposure_count"),
+                rs.getBigDecimal("confirmed_citation_exposure_rate"),
+                rs.getLong("request_count_total"),
+                rs.getLong("response_time_ms_total"),
+                nullableDateTime(rs, "last_source_created_at"),
+                nullableDateTime(rs, "last_source_updated_at"),
+                rs.getString("source_checksum")
+        ), projectId, Date.valueOf(batchDate), questionTier);
+    }
+
+    private List<PlatformSummaryRow> loadStoredPlatformRows(Long projectId,
+                                                           LocalDate batchDate,
+                                                           String questionTier) {
+        return jdbcTemplate.query("""
+                SELECT project_id, batch_date, question_tier, platform_id, dim_hash,
+                       platform_code, channel_code, platform_name_snapshot,
+                       source_row_count, completed_count, failed_count,
+                       hit_count, effective_hit_count, site_mention_count,
+                       contact_mention_count, contact_mention_total,
+                       search_confirmed_count, brand_search_count, brand_answer_count,
+                       confirmed_citation_exposure_count, confirmed_citation_exposure_rate,
+                       request_count_total, response_time_ms_total,
+                       last_source_created_at, last_source_updated_at, source_checksum
+                  FROM poll_platform_daily_summary
+                 WHERE project_id = ?
+                   AND batch_date = ?
+                   AND question_tier = ?
+                """, (rs, rowNum) -> new PlatformSummaryRow(
+                rs.getLong("project_id"),
+                rs.getDate("batch_date").toLocalDate(),
+                rs.getString("question_tier"),
+                rs.getLong("platform_id"),
+                rs.getString("dim_hash"),
+                rs.getString("platform_code"),
+                rs.getString("channel_code"),
+                rs.getString("platform_name_snapshot"),
+                rs.getInt("source_row_count"),
+                rs.getInt("completed_count"),
+                rs.getInt("failed_count"),
+                rs.getInt("hit_count"),
+                rs.getInt("effective_hit_count"),
+                rs.getInt("site_mention_count"),
+                rs.getInt("contact_mention_count"),
+                rs.getLong("contact_mention_total"),
+                rs.getInt("search_confirmed_count"),
+                rs.getInt("brand_search_count"),
+                rs.getInt("brand_answer_count"),
+                rs.getInt("confirmed_citation_exposure_count"),
+                rs.getBigDecimal("confirmed_citation_exposure_rate"),
+                rs.getLong("request_count_total"),
+                rs.getLong("response_time_ms_total"),
+                nullableDateTime(rs, "last_source_created_at"),
+                nullableDateTime(rs, "last_source_updated_at"),
+                rs.getString("source_checksum")
+        ), projectId, Date.valueOf(batchDate), questionTier);
+    }
+
+    private boolean matchesKeywordSummaries(List<KeywordSummaryRow> expected,
+                                            List<KeywordSummaryRow> stored) {
+        Map<String, KeywordSummaryRow> storedByDimension = stored.stream()
+                .collect(Collectors.toMap(KeywordSummaryRow::dimHash, row -> row));
+        if (expected.size() != storedByDimension.size()) {
+            return false;
+        }
+        return expected.stream().allMatch(row -> row.equals(storedByDimension.get(row.dimHash())));
+    }
+
+    private boolean matchesPlatformSummaries(List<PlatformSummaryRow> expected,
+                                             List<PlatformSummaryRow> stored) {
+        Map<String, PlatformSummaryRow> storedByDimension = stored.stream()
+                .collect(Collectors.toMap(PlatformSummaryRow::dimHash, row -> row));
+        if (expected.size() != storedByDimension.size()) {
+            return false;
+        }
+        return expected.stream().allMatch(row -> row.equals(storedByDimension.get(row.dimHash())));
+    }
+
     private boolean isPurgedSlice(Long projectId, LocalDate batchDate, String questionTier) {
         Integer count = jdbcTemplate.queryForObject("""
                 SELECT COUNT(1)
@@ -454,6 +594,15 @@ public class PollSummaryRecomputeService {
         static RecomputeResult skipped(Long projectId, LocalDate batchDate, String questionTier, String reason) {
             return new RecomputeResult(projectId, batchDate, questionTier, true, reason, 0, 0, 0, 0, 0, 0, 0);
         }
+    }
+
+    public record SummaryVerification(int sourceRowCount,
+                                      int keywordSummaryCount,
+                                      long keywordSummarySourceRowCount,
+                                      boolean keywordMatched,
+                                      int platformSummaryCount,
+                                      long platformSummarySourceRowCount,
+                                      boolean platformMatched) {
     }
 
     private record PollSourceRow(Long id,

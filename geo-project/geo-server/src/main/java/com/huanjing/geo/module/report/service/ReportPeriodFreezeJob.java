@@ -2,12 +2,14 @@ package com.huanjing.geo.module.report.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "geo.retention.report-freeze", name = "enabled", havingValue = "true")
 public class ReportPeriodFreezeJob {
 
     private final ReportPeriodFreezeService reportPeriodFreezeService;

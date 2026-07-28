@@ -69,6 +69,7 @@ public class ContentArticleService {
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
     private final WechatArticleRenderService wechatArticleRenderService;
     private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
+    private final ArticleBodyProvider articleBodyProvider;
     private final ArticleAutoImageInsertionService autoImageInsertionService;
     private final ArticleCoverSelectionService coverSelectionService;
     private final BrandAccessService brandAccessService;
@@ -375,7 +376,7 @@ public class ContentArticleService {
             throw new BizException(ContentErrorCodes.ARTICLE_NOT_FOUND, "Article version not found");
         }
         String title = StringUtils.hasText(version.getTitle()) ? version.getTitle() : article.getTitle();
-        String content = Optional.ofNullable(version.getContentMarkdown()).orElse("");
+        String content = articleBodyProvider.getArticleBody(version).markdown();
         Project project = requireProject(article.getProjectId());
         String html = wechatArticleRenderService.renderOrFallback(article, articleImagePublicUrlRewriter.rewrite(project, content));
         return """
@@ -421,6 +422,7 @@ public class ContentArticleService {
                         .eq(ArticlePublishLog::getArticleId, articleId)
                         .orderByDesc(ArticlePublishLog::getCreatedAt)
         );
+        versions.forEach(articleBodyProvider::hydrateContent);
         BatchArticleGenerationTask batchGenerationTask = batchArticleGenerationTaskMapper.selectOne(
                 new LambdaQueryWrapper<BatchArticleGenerationTask>()
                         .eq(BatchArticleGenerationTask::getArticleId, articleId)

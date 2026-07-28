@@ -11,5 +11,7 @@ public class ArticleArchiveDryRunRequest {
     private LocalDate publishedStartDate;
     private LocalDate publishedEndDate;
     private Integer minPublishedAgeDays;
+    private Long cursorVersionId;
     private Integer limit;
+    private String reason;
 }

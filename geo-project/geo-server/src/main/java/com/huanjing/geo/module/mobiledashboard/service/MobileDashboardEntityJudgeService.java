@@ -16,6 +16,7 @@ import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
 import com.huanjing.geo.module.mobiledashboard.dto.EntityJudgeRunRequest;
 import com.huanjing.geo.module.mobiledashboard.dto.EntityJudgeRunVO;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceWriteService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -24,7 +25,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
@@ -34,6 +34,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -70,6 +71,7 @@ public class MobileDashboardEntityJudgeService {
     private final CurrentUserService currentUserService;
     private final MobileEntityJudgeRuntimeConfig judgeRuntimeConfig;
     private final MobileDashboardAiPlatformCatalog aiPlatformCatalog;
+    private final PollRetentionSliceWriteService retentionSliceWriteService;
 
     public EntityJudgeRunVO runOnce(EntityJudgeRunRequest request) {
         currentUserService.ensurePermission("project.competitor.manage");
@@ -305,9 +307,18 @@ public class MobileDashboardEntityJudgeService {
             try {
                 judgeOne(candidate);
                 judged++;
+            } catch (BizException ex) {
+                if (ex.getCode() == 409) {
+                    skipped++;
+                    log.info("Skip entity judge for purged poll slice, pollResultId={}", candidate.id());
+                    continue;
+                }
+                failed++;
+                markFocusFailedSafely(candidate, ex);
+                log.warn("mobile entity judge failed pollResultId={} msg={}", candidate.id(), ex.getMessage());
             } catch (Exception ex) {
                 failed++;
-                markFocusFailed(candidate, ex.getMessage());
+                markFocusFailedSafely(candidate, ex);
                 log.warn("mobile entity judge failed pollResultId={} msg={}", candidate.id(), ex.getMessage());
             }
         }
@@ -414,29 +425,37 @@ public class MobileDashboardEntityJudgeService {
         );
     }
 
-    @Transactional
     void judgeOne(PollCandidate candidate) throws Exception {
         List<ProjectCompetitorConfigService.CompetitorEntity> competitors = competitorConfigService.activeCompetitors(candidate.projectId());
         MobileEntityMentionMatcher.MatchResult matchResult = mentionMatcher.match(candidate.responseText(), projectAliases(candidate), competitors);
         if (!Boolean.TRUE.equals(candidate.effectiveHit()) && !matchResult.anyMatched()) {
-            upsertDeterministicNoEntityHit(candidate, competitors);
-            recomputeDaily(candidate.projectId(), candidate.batchDate(), candidate.questionTier(), candidate.platformCode());
+            retentionSliceWriteService.execute(
+                    candidate.projectId(), candidate.batchDate(), candidate.questionTier(), () -> {
+                        upsertDeterministicNoEntityHit(candidate, competitors);
+                        recomputeDaily(candidate.projectId(), candidate.batchDate(),
+                                candidate.questionTier(), candidate.platformCode());
+                    });
             return;
         }
         JudgePayload payload = invokeJudge(candidate, competitors, matchResult);
-        String model = payload.model();
-        upsertFocus(candidate, payload.focus(), model, payload.rawJson());
-        Map<Long, EntityResult> byCompetitorId = new LinkedHashMap<>();
-        for (EntityResult result : payload.competitors()) {
-            if (result.entityRefId() != null) {
-                byCompetitorId.put(result.entityRefId(), result);
-            }
-        }
-        for (ProjectCompetitorConfigService.CompetitorEntity competitor : competitors) {
-            EntityResult result = byCompetitorId.getOrDefault(competitor.id(), EntityResult.empty(competitor.id()));
-            upsertCompetitor(candidate, competitor, result, model, payload.rawJson());
-        }
-        recomputeDaily(candidate.projectId(), candidate.batchDate(), candidate.questionTier(), candidate.platformCode());
+        retentionSliceWriteService.execute(
+                candidate.projectId(), candidate.batchDate(), candidate.questionTier(), () -> {
+                    String model = payload.model();
+                    upsertFocus(candidate, payload.focus(), model, payload.rawJson());
+                    Map<Long, EntityResult> byCompetitorId = new LinkedHashMap<>();
+                    for (EntityResult result : payload.competitors()) {
+                        if (result.entityRefId() != null) {
+                            byCompetitorId.put(result.entityRefId(), result);
+                        }
+                    }
+                    for (ProjectCompetitorConfigService.CompetitorEntity competitor : competitors) {
+                        EntityResult result =
+                                byCompetitorId.getOrDefault(competitor.id(), EntityResult.empty(competitor.id()));
+                        upsertCompetitor(candidate, competitor, result, model, payload.rawJson());
+                    }
+                    recomputeDaily(candidate.projectId(), candidate.batchDate(),
+                            candidate.questionTier(), candidate.platformCode());
+                });
     }
 
     private JudgePayload invokeJudge(PollCandidate candidate,
@@ -682,43 +701,277 @@ public class MobileDashboardEntityJudgeService {
     }
 
     private void markFocusFailed(PollCandidate candidate, String error) {
-        upsertJudgeRow(candidate, FOCUS_BRAND, 0L, 1, EntityResult.empty(0L), null, "{}", "failed", trimTo(error, 500));
+        retentionSliceWriteService.execute(
+                candidate.projectId(), candidate.batchDate(), candidate.questionTier(),
+                () -> upsertJudgeRow(candidate, FOCUS_BRAND, 0L, 1,
+                        EntityResult.empty(0L), null, "{}", "failed", trimTo(error, 500)));
+    }
+
+    private void markFocusFailedSafely(PollCandidate candidate, Exception cause) {
+        try {
+            markFocusFailed(candidate, cause.getMessage());
+        } catch (BizException ex) {
+            if (ex.getCode() != 409) {
+                cause.addSuppressed(ex);
+            }
+        } catch (RuntimeException ex) {
+            cause.addSuppressed(ex);
+        }
     }
 
     void recomputeDaily(Long projectId, LocalDate batchDate, String questionTier, String platformCode) {
         String tier = safeTier(questionTier);
         String platform = StringUtils.hasText(platformCode) ? platformCode.trim() : "";
         int expected = countExpected(projectId, batchDate, tier, platform);
-        List<SummaryRow> rows = jdbcTemplate.query(MobileDashboardQuestionScopeSql.apply("""
-                SELECT j.entity_type,
+        List<SummaryRow> rows = buildSummaryRows(
+                loadSuccessfulJudgeRows(projectId, batchDate, tier, platform));
+        for (SummaryRow row : rows) {
+            upsertSummary(projectId, batchDate, tier, platform, expected, row);
+        }
+        deleteSummaryZombies(projectId, batchDate, tier, platform, rows);
+    }
+
+    public int recomputeSummarySlice(Long projectId, LocalDate batchDate, String questionTier) {
+        return retentionSliceWriteService.execute(projectId, batchDate, questionTier,
+                () -> recomputeSummarySliceUnderLock(projectId, batchDate, questionTier));
+    }
+
+    private int recomputeSummarySliceUnderLock(Long projectId,
+                                               LocalDate batchDate,
+                                               String questionTier) {
+        String tier = safeTier(questionTier);
+        List<String> platforms = jdbcTemplate.queryForList("""
+                SELECT platform_code
+                  FROM (
+                        SELECT DISTINCT COALESCE(platform_code, '') AS platform_code
+                          FROM poll_results
+                         WHERE project_id = ?
+                           AND batch_date = ?
+                           AND question_tier = ?
+                        UNION
+                        SELECT DISTINCT COALESCE(platform_code, '') AS platform_code
+                          FROM poll_entity_judge_daily_summary
+                         WHERE project_id = ?
+                           AND batch_date = ?
+                           AND question_tier = ?
+                           AND judge_prompt_version = ?
+                  ) dimensions
+                 ORDER BY platform_code
+                """, String.class,
+                projectId, Date.valueOf(batchDate), tier,
+                projectId, Date.valueOf(batchDate), tier, PROMPT_VERSION);
+        for (String platform : platforms) {
+            recomputeDaily(projectId, batchDate, tier, platform);
+        }
+        return platforms.size();
+    }
+
+    public EntityJudgeSummaryVerification verifySummarySlice(Long projectId,
+                                                             LocalDate batchDate,
+                                                             String questionTier) {
+        String tier = safeTier(questionTier);
+        List<EntityJudgeSourceRow> sourceRows =
+                loadSuccessfulJudgeRows(projectId, batchDate, tier, null);
+        Map<String, Integer> expectedCounts = loadExpectedCounts(projectId, batchDate, tier);
+        Map<EntitySummaryDimension, ExpectedEntitySummary> expected = new LinkedHashMap<>();
+        for (Map.Entry<String, List<EntityJudgeSourceRow>> platformEntry : sourceRows.stream()
+                .collect(Collectors.groupingBy(
+                        EntityJudgeSourceRow::platformCode,
+                        LinkedHashMap::new,
+                        Collectors.toList()))
+                .entrySet()) {
+            String platform = platformEntry.getKey();
+            for (SummaryRow row : buildSummaryRows(platformEntry.getValue())) {
+                EntitySummaryDimension dimension = new EntitySummaryDimension(
+                        platform, row.entityType(), row.entityRefId(),
+                        row.entityConfigVersion(), PROMPT_VERSION);
+                expected.put(dimension, new ExpectedEntitySummary(
+                        expectedCounts.getOrDefault(platform, 0),
+                        row.successCount(),
+                        row.recommendedCount(),
+                        row.firstRecommendCount(),
+                        row.sourceChecksum()));
+            }
+        }
+
+        List<StoredEntitySummary> storedRows = jdbcTemplate.query("""
+                SELECT COALESCE(platform_code, '') AS platform_code,
+                       entity_type,
+                       entity_ref_id,
+                       entity_config_version,
+                       judge_prompt_version,
+                       expected_count,
+                       success_count,
+                       recommended_count,
+                       first_recommend_count,
+                       source_checksum
+                  FROM poll_entity_judge_daily_summary
+                 WHERE project_id = ?
+                   AND batch_date = ?
+                   AND question_tier = ?
+                   AND judge_prompt_version = ?
+                """, (rs, rowNum) -> new StoredEntitySummary(
+                new EntitySummaryDimension(
+                        rs.getString("platform_code"),
+                        rs.getString("entity_type"),
+                        rs.getLong("entity_ref_id"),
+                        rs.getInt("entity_config_version"),
+                        rs.getString("judge_prompt_version")),
+                rs.getInt("expected_count"),
+                rs.getInt("success_count"),
+                rs.getInt("recommended_count"),
+                rs.getInt("first_recommend_count"),
+                rs.getString("source_checksum")
+        ), projectId, Date.valueOf(batchDate), tier, PROMPT_VERSION);
+        Map<EntitySummaryDimension, StoredEntitySummary> stored = storedRows.stream()
+                .collect(Collectors.toMap(StoredEntitySummary::dimension, row -> row));
+        boolean matched = expected.size() == stored.size()
+                && expected.entrySet().stream().allMatch(entry ->
+                matchesStoredEntitySummary(entry.getValue(), stored.get(entry.getKey())));
+        return new EntityJudgeSummaryVerification(
+                storedRows.size(),
+                storedRows.stream().mapToLong(StoredEntitySummary::successCount).sum(),
+                matched
+        );
+    }
+
+    private List<EntityJudgeSourceRow> loadSuccessfulJudgeRows(Long projectId,
+                                                               LocalDate batchDate,
+                                                               String questionTier,
+                                                               String platformCode) {
+        StringBuilder sql = new StringBuilder(MobileDashboardQuestionScopeSql.apply("""
+                SELECT j.id,
+                       COALESCE(j.platform_code, '') AS platform_code,
+                       j.entity_type,
                        j.entity_ref_id,
                        j.entity_config_version,
-                       COUNT(*) AS success_count,
-                       SUM(CASE WHEN j.recommended = 1 THEN 1 ELSE 0 END) AS recommended_count,
-                       SUM(CASE WHEN j.first_recommend = 1 THEN 1 ELSE 0 END) AS first_recommend_count,
-                       GROUP_CONCAT(j.id ORDER BY j.id SEPARATOR ',') AS ids
+                       j.recommended,
+                       j.first_recommend
                   FROM poll_result_entity_judge j
                   JOIN poll_results pr ON pr.id = j.poll_result_id
                  WHERE j.project_id = ?
                    AND j.batch_date = ?
                    AND j.question_tier = ?
-                   AND COALESCE(j.platform_code, '') = ?
                    AND j.judge_prompt_version = ?
                    AND j.judge_status = 'success'
                    AND ENABLED_MONITORING_QUESTION_SCOPE
-                 GROUP BY j.entity_type, j.entity_ref_id, j.entity_config_version
-                """, "pr"), (rs, rowNum) -> new SummaryRow(
+                """, "pr"));
+        List<Object> args = new ArrayList<>(List.of(
+                projectId, Date.valueOf(batchDate), questionTier, PROMPT_VERSION));
+        if (platformCode != null) {
+            sql.append(" AND COALESCE(j.platform_code, '') = ?\n");
+            args.add(platformCode);
+        }
+        sql.append(" ORDER BY j.id ASC");
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new EntityJudgeSourceRow(
+                rs.getLong("id"),
+                rs.getString("platform_code"),
                 rs.getString("entity_type"),
                 rs.getLong("entity_ref_id"),
                 rs.getInt("entity_config_version"),
-                rs.getInt("success_count"),
-                rs.getInt("recommended_count"),
-                rs.getInt("first_recommend_count"),
-                rs.getString("ids")
-        ), projectId, Date.valueOf(batchDate), tier, platform, PROMPT_VERSION);
-        for (SummaryRow row : rows) {
-            upsertSummary(projectId, batchDate, tier, platform, expected, row);
+                nullableBoolean(rs, "recommended"),
+                nullableBoolean(rs, "first_recommend")
+        ), args.toArray());
+    }
+
+    private Map<String, Integer> loadExpectedCounts(Long projectId,
+                                                    LocalDate batchDate,
+                                                    String questionTier) {
+        return jdbcTemplate.query(MobileDashboardQuestionScopeSql.apply("""
+                SELECT COALESCE(pr.platform_code, '') AS platform_code,
+                       COUNT(1) AS expected_count
+                  FROM poll_results pr
+                 WHERE pr.project_id = ?
+                   AND pr.batch_date = ?
+                   AND pr.question_tier = ?
+                   AND pr.status = 'completed'
+                   AND ENABLED_MONITORING_QUESTION_SCOPE
+                 GROUP BY COALESCE(pr.platform_code, '')
+                """, "pr"), rs -> {
+            Map<String, Integer> counts = new LinkedHashMap<>();
+            while (rs.next()) {
+                counts.put(rs.getString("platform_code"), rs.getInt("expected_count"));
+            }
+            return counts;
+        }, projectId, Date.valueOf(batchDate), questionTier);
+    }
+
+    private List<SummaryRow> buildSummaryRows(List<EntityJudgeSourceRow> sourceRows) {
+        return sourceRows.stream()
+                .collect(Collectors.groupingBy(
+                        row -> new EntitySummaryKey(
+                                row.entityType(), row.entityRefId(), row.entityConfigVersion()),
+                        LinkedHashMap::new,
+                        Collectors.toList()))
+                .entrySet()
+                .stream()
+                .map(entry -> {
+                    List<EntityJudgeSourceRow> rows = entry.getValue().stream()
+                            .sorted(Comparator.comparingLong(EntityJudgeSourceRow::id))
+                            .toList();
+                    int recommended = (int) rows.stream()
+                            .filter(row -> Boolean.TRUE.equals(row.recommended()))
+                            .count();
+                    int firstRecommend = (int) rows.stream()
+                            .filter(row -> Boolean.TRUE.equals(row.firstRecommend()))
+                            .count();
+                    String checksumSource = rows.stream()
+                            .map(row -> row.id() + "\u001F"
+                                    + Boolean.TRUE.equals(row.recommended()) + "\u001F"
+                                    + Boolean.TRUE.equals(row.firstRecommend()))
+                            .collect(Collectors.joining("\u001E"));
+                    EntitySummaryKey key = entry.getKey();
+                    return new SummaryRow(
+                            key.entityType(), key.entityRefId(), key.entityConfigVersion(),
+                            rows.size(), recommended, firstRecommend, sha256(checksumSource));
+                })
+                .toList();
+    }
+
+    private boolean matchesStoredEntitySummary(ExpectedEntitySummary expected,
+                                               StoredEntitySummary stored) {
+        return stored != null
+                && expected.expectedCount() == stored.expectedCount()
+                && expected.successCount() == stored.successCount()
+                && expected.recommendedCount() == stored.recommendedCount()
+                && expected.firstRecommendCount() == stored.firstRecommendCount()
+                && Objects.equals(expected.sourceChecksum(), stored.sourceChecksum());
+    }
+
+    private int deleteSummaryZombies(Long projectId,
+                                     LocalDate batchDate,
+                                     String questionTier,
+                                     String platformCode,
+                                     List<SummaryRow> presentRows) {
+        List<Object> args = new ArrayList<>();
+        args.add(projectId);
+        args.add(Date.valueOf(batchDate));
+        args.add(questionTier);
+        args.add(platformCode);
+        args.add(PROMPT_VERSION);
+        StringBuilder sql = new StringBuilder("""
+                DELETE FROM poll_entity_judge_daily_summary
+                 WHERE project_id = ?
+                   AND batch_date = ?
+                   AND question_tier = ?
+                   AND COALESCE(platform_code, '') = ?
+                   AND judge_prompt_version = ?
+                """);
+        if (!presentRows.isEmpty()) {
+            sql.append(" AND NOT (\n");
+            for (int index = 0; index < presentRows.size(); index++) {
+                if (index > 0) {
+                    sql.append(" OR ");
+                }
+                sql.append("(entity_type = ? AND entity_ref_id = ? AND entity_config_version = ?)");
+                SummaryRow row = presentRows.get(index);
+                args.add(row.entityType());
+                args.add(row.entityRefId());
+                args.add(row.entityConfigVersion());
+            }
+            sql.append("\n)");
         }
+        return jdbcTemplate.update(sql.toString(), args.toArray());
     }
 
     private int countExpected(Long projectId, LocalDate batchDate, String questionTier, String platformCode) {
@@ -751,7 +1004,7 @@ public class MobileDashboardEntityJudgeService {
                   recomputed_at = CURRENT_TIMESTAMP
                 """, projectId, Date.valueOf(batchDate), tier, platform, row.entityType(), row.entityRefId(),
                 row.entityConfigVersion(), PROMPT_VERSION, expected, row.successCount(), row.recommendedCount(),
-                row.firstRecommendCount(), sha256(row.ids()));
+                row.firstRecommendCount(), row.sourceChecksum());
     }
 
     public boolean coverageReady(JudgeCoverage coverage) {
@@ -869,12 +1122,51 @@ public class MobileDashboardEntityJudgeService {
                                     JudgeCoverage coverage) {
     }
 
+    public record EntityJudgeSummaryVerification(long summaryRowCount,
+                                                 long summarySuccessRowCount,
+                                                 boolean matched) {
+    }
+
+    private record EntityJudgeSourceRow(long id,
+                                        String platformCode,
+                                        String entityType,
+                                        long entityRefId,
+                                        int entityConfigVersion,
+                                        Boolean recommended,
+                                        Boolean firstRecommend) {
+    }
+
+    private record EntitySummaryKey(String entityType, long entityRefId, int entityConfigVersion) {
+    }
+
+    private record EntitySummaryDimension(String platformCode,
+                                          String entityType,
+                                          long entityRefId,
+                                          int entityConfigVersion,
+                                          String judgePromptVersion) {
+    }
+
+    private record ExpectedEntitySummary(int expectedCount,
+                                         int successCount,
+                                         int recommendedCount,
+                                         int firstRecommendCount,
+                                         String sourceChecksum) {
+    }
+
+    private record StoredEntitySummary(EntitySummaryDimension dimension,
+                                       int expectedCount,
+                                       int successCount,
+                                       int recommendedCount,
+                                       int firstRecommendCount,
+                                       String sourceChecksum) {
+    }
+
     private record SummaryRow(String entityType,
                               Long entityRefId,
                               int entityConfigVersion,
                               int successCount,
                               int recommendedCount,
                               int firstRecommendCount,
-                              String ids) {
+                              String sourceChecksum) {
     }
 }

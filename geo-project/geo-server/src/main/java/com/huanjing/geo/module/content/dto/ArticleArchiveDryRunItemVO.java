@@ -13,6 +13,7 @@ public class ArticleArchiveDryRunItemVO {
     private Long versionId;
     private Long projectId;
     private Integer versionNo;
+    private Boolean currentVersion;
     private String articleStatus;
     private LocalDateTime publishedAt;
     private LocalDateTime contentArchivedAt;
@@ -26,5 +27,7 @@ public class ArticleArchiveDryRunItemVO {
     private String contentChecksum;
     private Long contentBytes;
     private Integer publishRecordCount;
+    private Integer activeDistributionTaskCount;
+    private Integer activeSelfMediaScheduleCount;
     private Map<String, Object> metrics;
 }

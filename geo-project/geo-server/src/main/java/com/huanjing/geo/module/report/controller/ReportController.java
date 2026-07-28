@@ -1,12 +1,11 @@
 package com.huanjing.geo.module.report.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.report.dto.*;
 import com.huanjing.geo.module.report.entity.Report;
-import com.huanjing.geo.module.report.service.ReportPeriodFreezeService;
 import com.huanjing.geo.module.report.service.ReportService;
-import com.huanjing.geo.module.system.service.CurrentUserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,8 +20,6 @@ import java.util.Map;
 public class ReportController {
 
     private final ReportService reportService;
-    private final ReportPeriodFreezeService reportPeriodFreezeService;
-    private final CurrentUserService currentUserService;
 
     @GetMapping
     public R<Page<Report>> page(@RequestParam(defaultValue = "1") Long current,
@@ -59,12 +56,11 @@ public class ReportController {
     }
 
     @PostMapping("/freeze/quarterly")
-    public R<ReportPeriodFreezeResponse> freezeQuarterly(@Valid @RequestBody ReportPeriodFreezeRequest req) {
-        currentUserService.ensurePermission("project.report.export");
-        return R.ok(reportPeriodFreezeService.freezeQuarter(
-                req.getProjectId(),
-                req.getPeriodKey(),
-                Boolean.TRUE.equals(req.getForceRegenerate())
-        ));
+    public R<ReportPeriodFreezeResponse> freezeQuarterly() {
+        throw retiredQuarterlyFreeze();
+    }
+
+    private BizException retiredQuarterlyFreeze() {
+        return new BizException(410, "Quarterly report freeze is permanently retired", 410, null);
     }
 }

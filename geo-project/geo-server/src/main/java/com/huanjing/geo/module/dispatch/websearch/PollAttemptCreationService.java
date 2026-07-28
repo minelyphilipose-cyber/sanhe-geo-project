@@ -11,6 +11,7 @@ import com.huanjing.geo.module.dispatch.websearch.enums.CitationConfidence;
 import com.huanjing.geo.module.dispatch.websearch.enums.RetryChainStatus;
 import com.huanjing.geo.module.dispatch.websearch.enums.SearchStatus;
 import com.huanjing.geo.module.dispatch.websearch.enums.TriggerType;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceGuardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +27,7 @@ public class PollAttemptCreationService {
     private final PollResultMapper pollResultMapper;
     private final PollInvocationAttemptMapper attemptMapper;
     private final AttemptDeadlinePolicy deadlinePolicy;
+    private final PollRetentionSliceGuardService retentionSliceGuardService;
 
     @Transactional
     public PollInvocationAttempt create(PollInvocationAttempt draft,
@@ -38,6 +40,11 @@ public class PollAttemptCreationService {
         Objects.requireNonNull(draft.getPollResultId(), "draft.pollResultId");
         TriggerType triggerType = parseTriggerType(draft.getTriggerType());
 
+        PollResult identity = pollResultMapper.selectById(draft.getPollResultId());
+        if (identity == null || identity.getDeletedAt() != null) {
+            throw new BizException(404, "Poll result not found: " + draft.getPollResultId());
+        }
+        retentionSliceGuardService.lockAndRequireWritable(identity);
         PollResult result = pollResultMapper.selectByIdForUpdate(draft.getPollResultId());
         if (result == null || result.getDeletedAt() != null) {
             throw new BizException(404, "Poll result not found: " + draft.getPollResultId());

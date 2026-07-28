@@ -34,8 +34,34 @@ public class ArticleBodyProvider {
         if (version == null) {
             throw new BizException(404, "Article version not found");
         }
+        return getArticleBody(version);
+    }
+
+    public ArticleBody getLatestArticleBody(Long articleId) {
+        if (articleId == null) {
+            throw new BizException(400, "articleId is required");
+        }
+        ArticleDraftVersion version = articleDraftVersionMapper.selectOne(
+                new LambdaQueryWrapper<ArticleDraftVersion>()
+                        .eq(ArticleDraftVersion::getArticleId, articleId)
+                        .orderByDesc(ArticleDraftVersion::getVersionNo)
+                        .last("LIMIT 1"));
+        if (version == null) {
+            throw new BizException(404, "Article version not found");
+        }
+        return getArticleBody(version);
+    }
+
+    public ArticleBody getArticleBody(ArticleDraftVersion version) {
+        if (version == null) {
+            throw new BizException(400, "article version is required");
+        }
+        Long versionId = version.getId();
         if (StringUtils.hasText(version.getContentMarkdown())) {
             return new ArticleBody(versionId, version.getContentMarkdown(), "db", sha256Hex(version.getContentMarkdown()));
+        }
+        if (versionId == null) {
+            throw new BizException(400, "article version id is required for archived body");
         }
         if (!StringUtils.hasText(version.getContentObjectKey())) {
             throw new BizException(404, "Article body unavailable: no DB body or archive object key");
@@ -48,6 +74,9 @@ public class ArticleBodyProvider {
         }
         String checksum = sha256Hex(bytes);
         if (!StringUtils.hasText(version.getContentChecksum())) {
+            if (version.getContentPurgedAt() != null) {
+                throw new BizException(500, "Article body archive checksum is missing");
+            }
             log.warn("Article archive checksum is empty, versionId={}, objectKey={}", versionId, version.getContentObjectKey());
         }
         if (StringUtils.hasText(version.getContentChecksum())
@@ -55,6 +84,12 @@ public class ArticleBodyProvider {
             throw new BizException(500, "Article body archive checksum mismatch");
         }
         return new ArticleBody(versionId, new String(bytes, StandardCharsets.UTF_8), "object_storage", checksum);
+    }
+
+    public ArticleDraftVersion hydrateContent(ArticleDraftVersion version) {
+        ArticleBody body = getArticleBody(version);
+        version.setContentMarkdown(body.markdown());
+        return version;
     }
 
     private String sha256Hex(String value) {

@@ -33,7 +33,9 @@ public class DispatchScheduler {
             }
             dispatchPlannerService.scanAndPlan(LocalDate.now());
             dispatchTaskService.enqueueRecoveryTasks();
-            dispatchTaskService.cleanupHistory();
+            if (dispatchTaskService.isHistoryCleanupEnabled()) {
+                dispatchTaskService.cleanupHistory();
+            }
         } catch (Exception ex) {
             log.error("Dispatch daily scan failed", ex);
             dispatchAlertService.createAlert(

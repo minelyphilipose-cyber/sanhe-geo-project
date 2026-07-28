@@ -236,6 +236,28 @@ geo:
   scheduling:
     pool-size: ${GEO_SCHEDULING_POOL_SIZE:8}
     await-termination-seconds: ${GEO_SCHEDULING_AWAIT_TERMINATION_SECONDS:30}
+  retention:
+    scheduler:
+      enabled: ${GEO_RETENTION_SCHEDULER_ENABLED:false}
+      execute-enabled: ${GEO_RETENTION_SCHEDULER_EXECUTE_ENABLED:false}
+      cron: "${GEO_RETENTION_SCHEDULER_CRON:0 30 3 * * *}"
+      limit-per-domain: ${GEO_RETENTION_LIMIT_PER_DOMAIN:100}
+      max-batches-per-run: ${GEO_RETENTION_MAX_BATCHES_PER_RUN:20}
+      poll-hot-retention-days: ${GEO_RETENTION_POLL_HOT_RETENTION_DAYS:120}
+      article-retention-days: ${GEO_RETENTION_ARTICLE_RETENTION_DAYS:90}
+      article-archive-grace-hours: ${GEO_RETENTION_ARTICLE_ARCHIVE_GRACE_HOURS:24}
+      operator-user-id: ${GEO_RETENTION_OPERATOR_USER_ID:0}
+      lock-key: ${GEO_RETENTION_LOCK_KEY:geo:retention:scheduler:lock}
+      lock-ttl-seconds: ${GEO_RETENTION_LOCK_TTL_SECONDS:7200}
+    article-archive:
+      execute-enabled: ${GEO_RETENTION_ARTICLE_ARCHIVE_EXECUTE_ENABLED:false}
+    article-purge:
+      execute-enabled: ${GEO_RETENTION_ARTICLE_PURGE_EXECUTE_ENABLED:false}
+    poll-results:
+      execute-enabled: ${GEO_RETENTION_POLL_RESULTS_EXECUTE_ENABLED:false}
+    report-freeze:
+      enabled: ${GEO_RETENTION_REPORT_FREEZE_ENABLED:false}
+      cron: "${GEO_RETENTION_REPORT_FREEZE_CRON:0 40 2 * * *}"
   storage:
     provider: ${GEO_STORAGE_PROVIDER:minio}
     read-fallback-to-minio: ${GEO_STORAGE_READ_FALLBACK_TO_MINIO:false}
@@ -400,6 +422,7 @@ geo:
     task-timeout-minutes: 60
     recover-batch-size: 500
     task-retention-days: 90
+    task-cleanup-enabled: ${GEO_DISPATCH_TASK_CLEANUP_ENABLED:false}
     model-connect-timeout-ms: 10000
     model-request-timeout-ms: 180000
     question-poll-request-timeout-cap-ms: ${DISPATCH_QUESTION_POLL_REQUEST_TIMEOUT_CAP_MS:120000}

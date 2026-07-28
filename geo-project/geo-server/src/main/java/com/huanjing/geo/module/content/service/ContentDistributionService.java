@@ -104,6 +104,7 @@ public class ContentDistributionService {
 
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
+    private final ArticleBodyProvider articleBodyProvider;
     private final DistributionTaskMapper distributionTaskMapper;
     private final ArticlePublishRecordMapper articlePublishRecordMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
@@ -2145,16 +2146,11 @@ public class ContentDistributionService {
     }
 
     private String requireLatestContent(Long articleId) {
-        ArticleDraftVersion latest = articleDraftVersionMapper.selectOne(
-                new LambdaQueryWrapper<ArticleDraftVersion>()
-                        .eq(ArticleDraftVersion::getArticleId, articleId)
-                        .orderByDesc(ArticleDraftVersion::getVersionNo)
-                        .last("LIMIT 1")
-        );
-        if (latest == null || !StringUtils.hasText(latest.getContentMarkdown())) {
+        String content = articleBodyProvider.getLatestArticleBody(articleId).markdown();
+        if (!StringUtils.hasText(content)) {
             throw new BizException(400, "Article content is empty");
         }
-        return latest.getContentMarkdown();
+        return content;
     }
 
     private PackagePublishConfig requirePackagePublishConfig(String packageType) {

@@ -4,6 +4,7 @@ import com.huanjing.geo.module.dispatch.entity.PollInvocationAttempt;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollInvocationAttemptMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceGuardService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -25,6 +26,8 @@ class PollResultProjectionServiceTest {
     private PollInvocationAttemptMapper attemptMapper;
     @Mock
     private PollResultMapper pollResultMapper;
+    @Mock
+    private PollRetentionSliceGuardService retentionSliceGuardService;
     @InjectMocks
     private PollResultProjectionService service;
 
@@ -78,6 +81,8 @@ class PollResultProjectionServiceTest {
     }
 
     private void stubLocks(PollInvocationAttempt attempt, PollResult result) {
+        when(attemptMapper.selectById(attempt.getId())).thenReturn(attempt);
+        when(pollResultMapper.selectById(result.getId())).thenReturn(result);
         when(attemptMapper.selectByIdForUpdate(attempt.getId())).thenReturn(attempt);
         when(pollResultMapper.selectByIdForUpdate(result.getId())).thenReturn(result);
         when(attemptMapper.markFinalized(any(), any())).thenReturn(1);

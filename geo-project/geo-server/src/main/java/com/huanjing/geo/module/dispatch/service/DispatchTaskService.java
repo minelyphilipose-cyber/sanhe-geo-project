@@ -585,6 +585,10 @@ public class DispatchTaskService {
         );
     }
 
+    public boolean isHistoryCleanupEnabled() {
+        return dispatchProperties.isTaskCleanupEnabled();
+    }
+
     public void reclaimTimedOutRunningTasks() {
         dispatchTaskStateService.reclaimTimedOutRunningTasks(dispatchProperties.getRecoverBatchSize());
     }

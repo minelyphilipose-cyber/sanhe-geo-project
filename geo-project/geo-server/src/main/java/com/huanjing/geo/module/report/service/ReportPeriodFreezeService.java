@@ -24,7 +24,6 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,7 +31,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.StringJoiner;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -48,7 +46,6 @@ public class ReportPeriodFreezeService {
     private static final String FIELD_SEPARATOR = "\u001F";
     private static final String RECORD_SEPARATOR = "\u001E";
     private static final Duration GUARD_TTL = Duration.ofMinutes(30);
-    private static final List<String> POLL_DETAIL_REPORT_TYPES = List.of(REPORT_TYPE_QUARTERLY);
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -56,77 +53,19 @@ public class ReportPeriodFreezeService {
     private final PlatformTransactionManager transactionManager;
 
     public ReportPeriodFreezeResponse freezeQuarter(Long projectId, String periodKey, boolean forceRegenerate) {
-        if (projectId == null) {
-            throw new BizException(400, "projectId is required");
-        }
-        QuarterPeriod period = parseQuarter(periodKey);
-        if (!isPollPeriodClosed(projectId, period.start(), period.end())) {
-            return skipped(projectId, REPORT_TYPE_QUARTERLY, period, "period_not_closed");
-        }
-
-        String owner = UUID.randomUUID().toString();
-        GuardResult guard = acquireGuard(projectId, REPORT_TYPE_QUARTERLY, period.key(), owner);
-        if (!guard.acquired()) {
-            return skipped(projectId, REPORT_TYPE_QUARTERLY, period, "freeze_guard_busy");
-        }
-
-        try {
-            return freezeUnderGuard(projectId, REPORT_TYPE_QUARTERLY, period, forceRegenerate, owner);
-        } finally {
-            releaseGuard(projectId, REPORT_TYPE_QUARTERLY, period.key(), owner);
-        }
+        throw retired();
     }
 
     public List<String> missingPollDetailFreezeTypes(Long projectId, LocalDate batchDate) {
-        List<String> missing = new ArrayList<>();
-        for (String reportType : POLL_DETAIL_REPORT_TYPES) {
-            QuarterPeriod period = quarterOf(batchDate);
-            Integer count = jdbcTemplate.queryForObject("""
-                    SELECT COUNT(1)
-                      FROM report_period_freeze
-                     WHERE project_id = ?
-                       AND report_type = ?
-                       AND period_key = ?
-                       AND status = 'FROZEN'
-                    """, Integer.class, projectId, reportType, period.key());
-            if (count == null || count == 0) {
-                missing.add(reportType + ":" + period.key());
-            }
-        }
-        return missing;
+        return List.of();
     }
 
     public int freezePreviousQuarterCandidates(int limit) {
-        QuarterPeriod previous = previousQuarter(LocalDate.now());
-        List<Long> projectIds = jdbcTemplate.query("""
-                SELECT DISTINCT pr.project_id
-                  FROM poll_results pr
-                 WHERE pr.batch_date >= ?
-                   AND pr.batch_date <= ?
-                   AND NOT EXISTS (
-                         SELECT 1
-                           FROM report_period_freeze f
-                          WHERE f.project_id = pr.project_id
-                            AND f.report_type = 'quarterly'
-                            AND f.period_key = ?
-                            AND f.status = 'FROZEN'
-                       )
-                 ORDER BY project_id ASC
-                 LIMIT ?
-                """, (rs, rowNum) -> rs.getLong("project_id"),
-                Date.valueOf(previous.start()), Date.valueOf(previous.end()), previous.key(), Math.max(1, limit));
-        int frozen = 0;
-        for (Long projectId : projectIds) {
-            try {
-                ReportPeriodFreezeResponse response = freezeQuarter(projectId, previous.key(), false);
-                if (STATUS_FROZEN.equals(response.getStatus())) {
-                    frozen++;
-                }
-            } catch (Exception ex) {
-                log.warn("Quarterly report freeze failed, projectId={}, periodKey={}", projectId, previous.key(), ex);
-            }
-        }
-        return frozen;
+        throw retired();
+    }
+
+    private BizException retired() {
+        return new BizException(410, "Quarterly report freeze is permanently retired", 410, null);
     }
 
     private ReportPeriodFreezeResponse freezeUnderGuard(Long projectId,

@@ -26,6 +26,7 @@ public class DispatchProperties {
     private int taskTimeoutMinutes = 60;
     private int recoverBatchSize = 500;
     private int taskRetentionDays = 90;
+    private boolean taskCleanupEnabled = false;
     private int modelConnectTimeoutMs = 10000;
     private int modelRequestTimeoutMs = 45000;
     private int questionPollRequestTimeoutCapMs = 120000;

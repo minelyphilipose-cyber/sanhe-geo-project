@@ -6,6 +6,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.dispatch.dto.PollSummaryBackfillRequest;
 import com.huanjing.geo.module.dispatch.dto.PollSummaryBackfillResponse;
 import com.huanjing.geo.module.dispatch.dto.PollSummaryBackfillSliceVO;
+import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardEntityJudgeService;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,7 @@ public class PollSummaryBackfillService {
 
     private final JdbcTemplate jdbcTemplate;
     private final PollSummaryRecomputeService pollSummaryRecomputeService;
+    private final MobileDashboardEntityJudgeService mobileDashboardEntityJudgeService;
     private final CurrentUserService currentUserService;
     private final ObjectMapper objectMapper;
 
@@ -166,6 +168,10 @@ public class PollSummaryBackfillService {
         try {
             PollSummaryRecomputeService.RecomputeResult result = pollSummaryRecomputeService.recomputeSlice(
                     candidate.projectId(), candidate.batchDate(), candidate.questionTier());
+            if (!result.skipped()) {
+                mobileDashboardEntityJudgeService.recomputeSummarySlice(
+                        candidate.projectId(), candidate.batchDate(), candidate.questionTier());
+            }
             slice.setSkipped(result.skipped());
             slice.setSkipReason(result.skipReason());
             slice.setSourceRowCount((long) result.sourceRowCount());

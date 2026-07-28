@@ -117,6 +117,10 @@ class ContentArticleServiceTest {
                 mock(MarkdownImageReferenceValidator.class),
                 mock(WechatArticleRenderService.class),
                 articleImagePublicUrlRewriter,
+                new ArticleBodyProvider(
+                        articleDraftVersionMapper,
+                        mock(com.huanjing.geo.common.storage.ObjectStorageService.class)
+                ),
                 autoImageInsertionService,
                 coverSelectionService,
                 brandAccessService,

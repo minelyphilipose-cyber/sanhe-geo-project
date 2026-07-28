@@ -19,6 +19,7 @@ import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.service.ArticleImagePublicUrlRewriter;
+import com.huanjing.geo.module.content.service.ArticleBodyProvider;
 import com.huanjing.geo.module.content.service.SelfMediaPublishMaterialSelectionService;
 import com.huanjing.geo.module.content.service.SelfMediaScheduleCapabilityService;
 import com.huanjing.geo.module.content.service.adapter.AutoSelfMediaAdapter;
@@ -55,6 +56,7 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
     private final DistributionTaskMapper distributionTaskMapper;
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
+    private final ArticleBodyProvider articleBodyProvider;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final ProjectMapper projectMapper;
     private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
@@ -498,14 +500,11 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
     }
 
     private String requireLatestContent(Long articleId) {
-        ArticleDraftVersion latest = articleDraftVersionMapper.selectOne(new LambdaQueryWrapper<ArticleDraftVersion>()
-                .eq(ArticleDraftVersion::getArticleId, articleId)
-                .orderByDesc(ArticleDraftVersion::getVersionNo)
-                .last("LIMIT 1"));
-        if (latest == null || !StringUtils.hasText(latest.getContentMarkdown())) {
+        String content = articleBodyProvider.getLatestArticleBody(articleId).markdown();
+        if (!StringUtils.hasText(content)) {
             throw new BizException(400, "Article content is empty");
         }
-        return latest.getContentMarkdown();
+        return content;
     }
 
     private String diagnostics(String event,

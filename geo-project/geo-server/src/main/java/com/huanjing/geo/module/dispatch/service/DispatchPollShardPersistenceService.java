@@ -7,6 +7,7 @@ import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceGuardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -29,10 +30,12 @@ public class DispatchPollShardPersistenceService {
     private final PollBatchShardMapper pollBatchShardMapper;
     private final PollBatchShardItemMapper pollBatchShardItemMapper;
     private final PollResultMapper pollResultMapper;
+    private final PollRetentionSliceGuardService retentionSliceGuardService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PollResult ensurePollResult(PollResult result) {
         normalizeRequiredIdentity(result);
+        retentionSliceGuardService.lockAndRequireWritable(result);
         PollResult existing = findPollResult(result);
         if (existing != null) {
             return existing;
@@ -62,6 +65,7 @@ public class DispatchPollShardPersistenceService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PollResult upsertPollResultAndMarkItem(PollResult result, PollBatchShardItem item) {
         normalizeRequiredIdentity(result);
+        retentionSliceGuardService.lockAndRequireWritable(result);
         PollResult existing = findPollResult(result);
         if (existing == null) {
             pollResultMapper.insert(result);

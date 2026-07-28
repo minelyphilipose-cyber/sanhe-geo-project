@@ -119,6 +119,10 @@ class ContentDistributionServiceTest {
         contentDistributionService = new ContentDistributionService(
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                new ArticleBodyProvider(
+                        articleDraftVersionMapper,
+                        mock(com.huanjing.geo.common.storage.ObjectStorageService.class)
+                ),
                 distributionTaskMapper,
                 articlePublishRecordMapper,
                 selfMediaAccountMapper,

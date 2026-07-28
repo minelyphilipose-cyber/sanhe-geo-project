@@ -1,13 +1,14 @@
 package com.huanjing.geo.module.retention.schedule;
 
 import com.huanjing.geo.module.content.dto.ArticleArchiveDryRunRequest;
+import com.huanjing.geo.module.content.dto.ArticleArchiveDryRunResponse;
+import com.huanjing.geo.module.content.dto.ArticleBodyPurgeRequest;
+import com.huanjing.geo.module.content.dto.ArticleBodyPurgeResponse;
+import com.huanjing.geo.module.content.service.ArticleBodyPurgeService;
 import com.huanjing.geo.module.content.service.ArticleRetentionDryRunService;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunRequest;
-import com.huanjing.geo.module.presale.dto.DataRetentionSlimDryRunRequest;
+import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunResponse;
 import com.huanjing.geo.module.retention.config.DataRetentionProperties;
-import com.huanjing.geo.module.retention.dto.ObjectStorageRetentionDryRunRequest;
-import com.huanjing.geo.module.retention.service.DataRetentionSlimDryRunService;
-import com.huanjing.geo.module.retention.service.ObjectStorageRetentionDryRunService;
 import com.huanjing.geo.module.retention.service.PollRetentionDryRunService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,45 +23,104 @@ import org.springframework.stereotype.Component;
 public class DataRetentionScheduler {
 
     private final DataRetentionProperties properties;
-    private final DataRetentionSlimDryRunService slimDryRunService;
     private final ArticleRetentionDryRunService articleRetentionDryRunService;
+    private final ArticleBodyPurgeService articleBodyPurgeService;
     private final PollRetentionDryRunService pollRetentionDryRunService;
-    private final ObjectStorageRetentionDryRunService objectStorageRetentionDryRunService;
+    private final DataRetentionSchedulerLock schedulerLock;
 
     @Scheduled(cron = "${geo.retention.scheduler.cron:0 30 3 * * *}", zone = "${geo.dispatch.timezone:Asia/Shanghai}")
     public void runDryRunSuite() {
+        DataRetentionSchedulerLock.Lease lease = schedulerLock.tryAcquire();
+        if (lease == null) {
+            log.info("Skip data retention schedule because another instance holds the lock");
+            return;
+        }
+        try (lease) {
+            runPriorityRetention(lease);
+        }
+    }
+
+    private void runPriorityRetention(DataRetentionSchedulerLock.Lease lease) {
         DataRetentionProperties.Scheduler scheduler = properties.getScheduler();
         int limit = Math.max(1, scheduler.getLimitPerDomain());
-        run("slim_payload", () -> {
-            DataRetentionSlimDryRunRequest request = new DataRetentionSlimDryRunRequest();
-            request.setDomain("all");
-            request.setLimitPerDomain(limit);
-            slimDryRunService.dryRun(request);
-        });
-        run("article_body_archive", () -> {
+        int maxBatches = Math.max(1, scheduler.getMaxBatchesPerRun());
+        boolean execute = scheduler.isExecuteEnabled();
+        run("article_body_archive", () -> runArticleArchive(limit, maxBatches, execute, lease));
+        run("article_body_purge", () -> runArticlePurge(limit, maxBatches, execute, lease));
+        run("poll_results", () -> runPollPurge(Math.min(limit, 20), maxBatches, execute, lease));
+    }
+
+    private void runArticleArchive(int limit,
+                                   int maxBatches,
+                                   boolean execute,
+                                   DataRetentionSchedulerLock.Lease lease) {
+        Long cursor = null;
+        for (int batch = 0; batch < maxBatches; batch++) {
+            lease.ensureHeld();
             ArticleArchiveDryRunRequest request = new ArticleArchiveDryRunRequest();
             request.setLimit(limit);
-            articleRetentionDryRunService.dryRunArchive(request);
-        });
-        run("poll_results", () -> {
-            PollRetentionDryRunRequest request = new PollRetentionDryRunRequest();
+            request.setMinPublishedAgeDays(properties.getScheduler().getArticleRetentionDays());
+            request.setCursorVersionId(cursor);
+            request.setReason("scheduled article body archive");
+            ArticleArchiveDryRunResponse response =
+                    articleRetentionDryRunService.runScheduled(request, !execute);
+            if (!Boolean.TRUE.equals(response.getHasMore()) || response.getNextCursorVersionId() == null) {
+                break;
+            }
+            cursor = response.getNextCursorVersionId();
+        }
+    }
+
+    private void runArticlePurge(int limit,
+                                 int maxBatches,
+                                 boolean execute,
+                                 DataRetentionSchedulerLock.Lease lease) {
+        Long cursor = null;
+        for (int batch = 0; batch < maxBatches; batch++) {
+            lease.ensureHeld();
+            ArticleBodyPurgeRequest request = new ArticleBodyPurgeRequest();
             request.setLimit(limit);
-            request.setHotRetentionDays(scheduler.getPollHotRetentionDays());
-            pollRetentionDryRunService.dryRun(request);
-        });
-        run("object_storage_orphan", () -> {
-            ObjectStorageRetentionDryRunRequest request = new ObjectStorageRetentionDryRunRequest();
-            request.setLimitPerPrefix(limit);
-            request.setSafetyAgeHours(scheduler.getObjectSafetyAgeHours());
-            objectStorageRetentionDryRunService.dryRun(request);
-        });
+            request.setRetentionDays(properties.getScheduler().getArticleRetentionDays());
+            request.setArchiveGraceHours(properties.getScheduler().getArticleArchiveGraceHours());
+            request.setCursorVersionId(cursor);
+            request.setReason("scheduled article body retention");
+            ArticleBodyPurgeResponse response = articleBodyPurgeService.runScheduled(request, !execute);
+            if (!Boolean.TRUE.equals(response.getHasMore()) || response.getNextCursorVersionId() == null) {
+                break;
+            }
+            cursor = response.getNextCursorVersionId();
+        }
+    }
+
+    private void runPollPurge(int limit,
+                              int maxBatches,
+                              boolean execute,
+                              DataRetentionSchedulerLock.Lease lease) {
+        PollRetentionDryRunRequest request = new PollRetentionDryRunRequest();
+        request.setLimit(limit);
+        request.setHotRetentionDays(properties.getScheduler().getPollHotRetentionDays());
+        request.setReason("scheduled poll detail retention");
+        for (int batch = 0; batch < maxBatches; batch++) {
+            lease.ensureHeld();
+            PollRetentionDryRunResponse response = pollRetentionDryRunService.runScheduled(
+                    request, !execute, properties.getScheduler().getOperatorUserId());
+            if (!Boolean.TRUE.equals(response.getHasMore())
+                    || response.getNextCursorBatchDate() == null
+                    || response.getNextCursorProjectId() == null
+                    || response.getNextCursorQuestionTier() == null) {
+                break;
+            }
+            request.setCursorBatchDate(response.getNextCursorBatchDate());
+            request.setCursorProjectId(response.getNextCursorProjectId());
+            request.setCursorQuestionTier(response.getNextCursorQuestionTier());
+        }
     }
 
     private void run(String domain, Runnable runnable) {
         try {
             runnable.run();
         } catch (Exception ex) {
-            log.warn("Data retention dry-run domain failed, domain={}, error={}", domain, ex.getMessage(), ex);
+            log.warn("Data retention scheduled domain failed, domain={}, error={}", domain, ex.getMessage(), ex);
         }
     }
 }

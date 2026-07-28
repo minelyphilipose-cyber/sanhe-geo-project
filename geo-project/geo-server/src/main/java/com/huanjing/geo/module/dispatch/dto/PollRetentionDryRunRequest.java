@@ -16,4 +16,5 @@ public class PollRetentionDryRunRequest {
     private Integer hotRetentionDays;
     private Integer stuckBatchSealDays;
     private Integer limit;
+    private String reason;
 }

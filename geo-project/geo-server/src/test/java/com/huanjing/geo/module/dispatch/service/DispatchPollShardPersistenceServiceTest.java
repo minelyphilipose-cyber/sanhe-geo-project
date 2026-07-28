@@ -2,11 +2,13 @@ package com.huanjing.geo.module.dispatch.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.dispatch.entity.PollBatchShardItem;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceGuardService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -15,8 +17,11 @@ import org.mockito.ArgumentCaptor;
 import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +47,7 @@ class DispatchPollShardPersistenceServiceTest {
 
         fixture.service.ensurePollResult(result);
 
+        verify(fixture.retentionSliceGuardService).lockAndRequireWritable(result);
         ArgumentCaptor<PollResult> captor = ArgumentCaptor.forClass(PollResult.class);
         verify(fixture.resultMapper).insert(captor.capture());
         assertEquals("doubao_web", captor.getValue().getChannelCode());
@@ -69,6 +75,20 @@ class DispatchPollShardPersistenceServiceTest {
         verify(fixture.itemMapper).updateById(item);
     }
 
+    @Test
+    void rejectsPendingResultWriteAfterRetentionSliceWasPurged() {
+        Fixture fixture = new Fixture();
+        PollResult result = result();
+        doThrow(new BizException(409, "Poll retention slice was already purged"))
+                .when(fixture.retentionSliceGuardService)
+                .lockAndRequireWritable(result);
+
+        BizException error = assertThrows(BizException.class, () -> fixture.service.ensurePollResult(result));
+
+        assertEquals(409, error.getCode());
+        verify(fixture.resultMapper, never()).insert(any());
+    }
+
     private static PollResult result() {
         PollResult result = new PollResult();
         result.setProjectId(100L);
@@ -86,7 +106,14 @@ class DispatchPollShardPersistenceServiceTest {
         private final PollBatchShardMapper shardMapper = mock(PollBatchShardMapper.class);
         private final PollBatchShardItemMapper itemMapper = mock(PollBatchShardItemMapper.class);
         private final PollResultMapper resultMapper = mock(PollResultMapper.class);
+        private final PollRetentionSliceGuardService retentionSliceGuardService =
+                mock(PollRetentionSliceGuardService.class);
         private final DispatchPollShardPersistenceService service =
-                new DispatchPollShardPersistenceService(shardMapper, itemMapper, resultMapper);
+                new DispatchPollShardPersistenceService(
+                        shardMapper,
+                        itemMapper,
+                        resultMapper,
+                        retentionSliceGuardService
+                );
     }
 }

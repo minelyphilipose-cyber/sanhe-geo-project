@@ -20,6 +20,7 @@ import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.entity.ArticlePlatformRender;
 import com.huanjing.geo.module.content.entity.PlatformRenderTemplateVersion;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
+import com.huanjing.geo.module.content.service.ArticleBodyProvider;
 import com.huanjing.geo.module.content.mapper.ArticlePlatformRenderMapper;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.customer.service.BrandProfileService;
@@ -52,6 +53,7 @@ public class WechatArticleRenderService {
 
     private final ArticlePlatformRenderMapper articleRenderMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
+    private final ArticleBodyProvider articleBodyProvider;
     private final ArticleMarkdownBlockParser blockParser;
     private final WechatRenderTemplateService templateService;
     private final WechatHtmlSanitizer htmlSanitizer;
@@ -780,14 +782,11 @@ public class WechatArticleRenderService {
     }
 
     private String latestContent(Long articleId) {
-        ArticleDraftVersion latest = articleDraftVersionMapper.selectOne(new LambdaQueryWrapper<ArticleDraftVersion>()
-                .eq(ArticleDraftVersion::getArticleId, articleId)
-                .orderByDesc(ArticleDraftVersion::getVersionNo)
-                .last("LIMIT 1"));
-        if (latest == null || !StringUtils.hasText(latest.getContentMarkdown())) {
+        String content = articleBodyProvider.getLatestArticleBody(articleId).markdown();
+        if (!StringUtils.hasText(content)) {
             throw new BizException(400, "Article content is empty");
         }
-        return latest.getContentMarkdown();
+        return content;
     }
 
     private String toJson(Object value) {

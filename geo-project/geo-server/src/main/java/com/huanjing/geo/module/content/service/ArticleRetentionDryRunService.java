@@ -34,8 +34,13 @@ public class ArticleRetentionDryRunService {
 
     private static final int DEFAULT_LIMIT = 100;
     private static final int MAX_LIMIT = 1_000;
-    private static final int DEFAULT_MIN_PUBLISHED_AGE_DAYS = 30;
+    private static final int DEFAULT_MIN_PUBLISHED_AGE_DAYS = 90;
     private static final String CONTENT_TYPE_MARKDOWN = "text/markdown; charset=utf-8";
+    private static final String TERMINAL_DISTRIBUTION_STATUS_SQL =
+            "'submitted','confirmed','published','failed','cancelled'";
+    private static final String ACTIVE_SELF_MEDIA_STATUS_SQL =
+            "'pending','filling','filled_verified','scheduling','scheduled','publish_due',"
+                    + "'checking_publish_result','published_url_pending','publish_unknown','cancel_pending_platform'";
 
     private final JdbcTemplate jdbcTemplate;
     private final CurrentUserService currentUserService;
@@ -44,15 +49,28 @@ public class ArticleRetentionDryRunService {
     private final DataRetentionProperties retentionProperties;
 
     public ArticleArchiveDryRunResponse dryRunArchive(ArticleArchiveDryRunRequest request) {
+        currentUserService.ensurePermission("dispatch.task.release");
         request.setDryRun(true);
-        return archive(request);
+        return runArchive(request);
     }
 
     public ArticleArchiveDryRunResponse archive(ArticleArchiveDryRunRequest request) {
         currentUserService.ensurePermission("dispatch.task.release");
+        return runArchive(request);
+    }
+
+    public ArticleArchiveDryRunResponse runScheduled(ArticleArchiveDryRunRequest request, boolean dryRun) {
+        request.setDryRun(dryRun);
+        return runArchive(request);
+    }
+
+    private ArticleArchiveDryRunResponse runArchive(ArticleArchiveDryRunRequest request) {
         boolean dryRun = request.getDryRun() == null || Boolean.TRUE.equals(request.getDryRun());
         if (!dryRun && !retentionProperties.getArticleArchive().isExecuteEnabled()) {
             throw new BizException(403, "Article archive execute is disabled by geo.retention.article-archive.execute-enabled");
+        }
+        if (!dryRun && !StringUtils.hasText(request.getReason())) {
+            throw new BizException(400, "reason is required for article archive");
         }
         LocalDate startDate = request.getPublishedStartDate();
         LocalDate endDate = request.getPublishedEndDate();
@@ -60,32 +78,52 @@ public class ArticleRetentionDryRunService {
             throw new BizException(400, "publishedEndDate must be greater than or equal to publishedStartDate");
         }
         int limit = normalizeLimit(request.getLimit());
-        int minAgeDays = normalizeMinAge(request.getMinPublishedAgeDays());
+        int requestedMinAgeDays = normalizeMinAge(request.getMinPublishedAgeDays());
+        boolean simulationOnly = dryRun && requestedMinAgeDays < DEFAULT_MIN_PUBLISHED_AGE_DAYS;
+        int minAgeDays = dryRun
+                ? requestedMinAgeDays
+                : Math.max(requestedMinAgeDays, DEFAULT_MIN_PUBLISHED_AGE_DAYS);
         ArticleArchiveDryRunResponse response = new ArticleArchiveDryRunResponse();
         response.setDryRun(dryRun);
+        response.setSimulationOnly(simulationOnly);
         response.setProjectId(request.getProjectId());
         response.setPublishedStartDate(startDate);
         response.setPublishedEndDate(endDate);
         response.setMinPublishedAgeDays(minAgeDays);
         response.setLimit(limit);
+        response.setReason(normalizeReason(request.getReason()));
 
         Map<String, Object> startMetrics = new LinkedHashMap<>();
         startMetrics.put("projectId", request.getProjectId());
+        startMetrics.put("simulationOnly", simulationOnly);
         startMetrics.put("limit", limit);
         startMetrics.put("minPublishedAgeDays", minAgeDays);
+        if (response.getReason() != null) {
+            startMetrics.put("reason", response.getReason());
+        }
         Long runId = auditService.startRun("article_body_archive", dryRun ? "dry_run" : "execute", startDate, endDate, startMetrics);
         response.setRetentionRunId(runId);
         try {
-            List<ArticleArchiveCandidate> candidates = loadCandidates(request.getProjectId(), startDate, endDate, minAgeDays, limit);
+            List<ArticleArchiveCandidate> loaded = loadCandidates(
+                    request.getProjectId(), startDate, endDate, minAgeDays,
+                    request.getCursorVersionId(), limit + 1);
+            boolean hasMore = loaded.size() > limit;
+            List<ArticleArchiveCandidate> candidates = hasMore ? loaded.subList(0, limit) : loaded;
+            response.setHasMore(hasMore);
+            if (!candidates.isEmpty()) {
+                response.setNextCursorVersionId(candidates.get(candidates.size() - 1).item().getVersionId());
+            }
             response.setItems(candidates.stream().map(ArticleArchiveCandidate::item).toList());
             summarize(response);
             if (!dryRun) {
                 executeArchive(candidates, response);
             }
-            auditService.finishRun(runId, "succeeded", response.getCandidateCount(),
+            String runStatus = response.getFailedCount() > 0 ? "failed" : "succeeded";
+            auditService.finishRun(runId, runStatus, response.getCandidateCount(),
                     dryRun ? response.getEligibleCount() : response.getArchivedCount(),
                     dryRun ? response.getBlockedCount() : response.getSkippedCount() + response.getBlockedCount(),
-                    response.getBlockedCount() + response.getFailedCount(), metrics(response), null);
+                    response.getBlockedCount() + response.getFailedCount(), metrics(response),
+                    response.getFailedCount() > 0 ? "One or more article archives failed" : null);
             return response;
         } catch (Exception ex) {
             auditService.finishRun(runId, "failed", response.getCandidateCount(),
@@ -100,6 +138,7 @@ public class ArticleRetentionDryRunService {
                                                          LocalDate startDate,
                                                          LocalDate endDate,
                                                          int minAgeDays,
+                                                         Long cursorVersionId,
                                                          int limit) {
         StringBuilder sql = new StringBuilder("""
                 SELECT a.id AS article_id,
@@ -114,12 +153,24 @@ public class ArticleRetentionDryRunService {
                        v.content_checksum,
                        v.content_archived_at,
                        v.content_purged_at,
-                       COALESCE(pr.publish_record_count, 0) AS publish_record_count
+                       v.created_at AS version_created_at,
+                       COALESCE(pr.publish_record_count, 0) AS publish_record_count,
+                       (
+                         SELECT COUNT(*)
+                           FROM distribution_tasks dt
+                          WHERE dt.article_id = a.id
+                            AND dt.status NOT IN (%s)
+                       ) AS active_distribution_task_count,
+                       (
+                         SELECT COUNT(*)
+                           FROM self_media_publish_schedule sm
+                          WHERE sm.article_id = a.id
+                            AND sm.status IN (%s)
+                       ) AS active_self_media_schedule_count
                   FROM article_draft a
                   JOIN article_draft_version v
                     ON v.article_id = a.id
-                   AND v.version_no = a.current_version_no
-                  JOIN (
+                  LEFT JOIN (
                         SELECT article_id,
                                COUNT(*) AS publish_record_count,
                                MAX(published_at) AS max_published_at,
@@ -128,13 +179,23 @@ public class ArticleRetentionDryRunService {
                          WHERE publish_status IN (%s)
                          GROUP BY article_id
                   ) pr ON pr.article_id = a.id
-                 WHERE COALESCE(a.status, '') <> 'deleted'
-                   AND v.content_object_key IS NULL
+                 WHERE v.content_object_key IS NULL
                    AND v.content_archived_at IS NULL
                    AND v.content_purged_at IS NULL
                    AND NULLIF(TRIM(v.content_markdown), '') IS NOT NULL
+                   AND (
+                        ((v.version_no <> a.current_version_no OR COALESCE(a.status, '') = 'deleted')
+                         AND v.created_at <= ?)
+                        OR
+                        (v.version_no = a.current_version_no
+                         AND COALESCE(a.status, '') <> 'deleted'
+                         AND COALESCE(a.published_at, pr.max_published_at, pr.max_created_at) <= ?)
+                   )
                 """);
         List<Object> args = new ArrayList<>();
+        LocalDateTime hotCutoff = LocalDateTime.now().minusDays(minAgeDays);
+        args.add(Timestamp.valueOf(hotCutoff));
+        args.add(Timestamp.valueOf(hotCutoff));
         if (projectId != null) {
             sql.append("   AND a.project_id = ?\n");
             args.add(projectId);
@@ -147,13 +208,19 @@ public class ArticleRetentionDryRunService {
             sql.append("   AND COALESCE(a.published_at, pr.max_published_at, pr.max_created_at) < ?\n");
             args.add(Timestamp.valueOf(endDate.plusDays(1).atStartOfDay()));
         }
+        if (cursorVersionId != null) {
+            sql.append("   AND v.id > ?\n");
+            args.add(cursorVersionId);
+        }
         sql.append("""
-                 ORDER BY effective_published_at ASC, a.id ASC
+                 ORDER BY v.id ASC
                  LIMIT ?
                 """);
-        sql = new StringBuilder(sql.toString().formatted(ArticlePublishRecordStatusPolicy.ARCHIVE_DELIVERED_STATUS_SQL));
+        sql = new StringBuilder(sql.toString().formatted(
+                TERMINAL_DISTRIBUTION_STATUS_SQL,
+                ACTIVE_SELF_MEDIA_STATUS_SQL,
+                ArticlePublishRecordStatusPolicy.ARCHIVE_DELIVERED_STATUS_SQL));
         args.add(limit);
-        LocalDateTime hotCutoff = LocalDateTime.now().minusDays(minAgeDays);
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> {
             String body = rs.getString("content_markdown");
             byte[] bodyBytes = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
@@ -161,30 +228,39 @@ public class ArticleRetentionDryRunService {
             Timestamp publishedAtTs = rs.getTimestamp("effective_published_at");
             LocalDateTime publishedAt = publishedAtTs == null ? null : publishedAtTs.toLocalDateTime();
             int publishRecordCount = rs.getInt("publish_record_count");
+            int activeDistributionTaskCount = rs.getInt("active_distribution_task_count");
+            int activeSelfMediaScheduleCount = rs.getInt("active_self_media_schedule_count");
             List<String> blocked = new ArrayList<>();
-            if (publishRecordCount <= 0) {
-                blocked.add("article_publish_record_missing");
-            }
-            if (publishedAt == null) {
-                blocked.add("published_time_missing");
-            } else if (publishedAt.isAfter(hotCutoff)) {
-                blocked.add("hot_retention_window_not_elapsed");
-            }
             Integer currentVersionNo = rs.getObject("current_version_no", Integer.class);
             Integer versionNo = rs.getObject("version_no", Integer.class);
-            if (currentVersionNo == null || versionNo == null || !currentVersionNo.equals(versionNo)) {
-                blocked.add("not_current_final_version");
+            boolean currentVersion = currentVersionNo != null && currentVersionNo.equals(versionNo);
+            if (currentVersion && !"deleted".equalsIgnoreCase(rs.getString("article_status"))) {
+                if (publishRecordCount <= 0) {
+                    blocked.add("article_publish_record_missing");
+                }
+                if (publishedAt == null) {
+                    blocked.add("published_time_missing");
+                }
+                if (activeDistributionTaskCount > 0) {
+                    blocked.add("active_distribution_task");
+                }
+                if (activeSelfMediaScheduleCount > 0) {
+                    blocked.add("active_self_media_schedule");
+                }
             }
             ArticleArchiveDryRunItemVO item = new ArticleArchiveDryRunItemVO();
             item.setArticleId(rs.getLong("article_id"));
             item.setVersionId(rs.getLong("version_id"));
             item.setProjectId(rs.getLong("project_id"));
             item.setVersionNo(versionNo);
+            item.setCurrentVersion(currentVersion);
             item.setArticleStatus(rs.getString("article_status"));
             item.setPublishedAt(publishedAt);
             item.setContentArchivedAt(toLocalDateTime(rs.getTimestamp("content_archived_at")));
             item.setContentPurgedAt(toLocalDateTime(rs.getTimestamp("content_purged_at")));
             item.setPublishRecordCount(publishRecordCount);
+            item.setActiveDistributionTaskCount(activeDistributionTaskCount);
+            item.setActiveSelfMediaScheduleCount(activeSelfMediaScheduleCount);
             item.setContentBytes((long) bodyBytes.length);
             item.setContentChecksum(checksum);
             item.setPlannedObjectKey(plannedObjectKey(item.getProjectId(), item.getArticleId(), item.getVersionNo()));
@@ -195,6 +271,7 @@ public class ArticleRetentionDryRunService {
             item.setMetrics(Map.of(
                     "existingObjectKey", nullToEmpty(rs.getString("content_object_key")),
                     "existingChecksum", nullToEmpty(rs.getString("content_checksum")),
+                    "versionCreatedAt", rs.getTimestamp("version_created_at").toLocalDateTime(),
                     "minPublishedAgeDays", minAgeDays
             ));
             return new ArticleArchiveCandidate(item, body, bodyBytes, rs.getString("content_object_key"), rs.getString("content_checksum"));
@@ -261,16 +338,8 @@ public class ArticleRetentionDryRunService {
                         SELECT 1
                           FROM article_draft a
                          WHERE a.id = article_draft_version.article_id
-                           AND a.current_version_no = article_draft_version.version_no
-                           AND COALESCE(a.status, '') <> 'deleted'
                    )
-                   AND EXISTS (
-                        SELECT 1
-                          FROM article_publish_record pr
-                         WHERE pr.article_id = article_draft_version.article_id
-                           AND pr.publish_status IN (%s)
-                   )
-                """.formatted(ArticlePublishRecordStatusPolicy.ARCHIVE_DELIVERED_STATUS_SQL),
+                """,
                 objectKey, item.getContentChecksum(), item.getVersionId(), candidate.body());
         if (updated == 1) {
             item.setContentArchivedAt(LocalDateTime.now());
@@ -338,7 +407,13 @@ public class ArticleRetentionDryRunService {
     private Map<String, Object> metrics(ArticleArchiveDryRunResponse response) {
         Map<String, Object> metrics = new LinkedHashMap<>();
         metrics.put("projectId", response.getProjectId());
+        metrics.put("simulationOnly", response.getSimulationOnly());
+        if (response.getReason() != null) {
+            metrics.put("reason", response.getReason());
+        }
         metrics.put("limit", response.getLimit());
+        metrics.put("hasMore", response.getHasMore());
+        metrics.put("nextCursorVersionId", response.getNextCursorVersionId());
         metrics.put("minPublishedAgeDays", response.getMinPublishedAgeDays());
         metrics.put("candidateCount", response.getCandidateCount());
         metrics.put("eligibleCount", response.getEligibleCount());
@@ -367,6 +442,10 @@ public class ArticleRetentionDryRunService {
             return DEFAULT_MIN_PUBLISHED_AGE_DAYS;
         }
         return Math.max(0, minPublishedAgeDays);
+    }
+
+    private String normalizeReason(String reason) {
+        return StringUtils.hasText(reason) ? reason.trim() : null;
     }
 
     private LocalDateTime toLocalDateTime(Timestamp timestamp) {

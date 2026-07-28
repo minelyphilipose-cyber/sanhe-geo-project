@@ -461,14 +461,7 @@ public class ProjectDashboardSnapshotService {
     private List<ProjectDashboardSnapshot> buildWordFreqSnapshots(Long projectId, LocalDateTime refreshedAt) {
         Map<String, Long> frequencyByText = new LinkedHashMap<>();
 
-        QueryWrapper<PollResult> keywordWrapper = new QueryWrapper<>();
-        keywordWrapper.select("keyword_text_snapshot AS keywordText", "COUNT(*) AS hitCount")
-                .eq("project_id", projectId)
-                .eq("is_hit", 1)
-                .isNotNull("keyword_text_snapshot")
-                .ne("keyword_text_snapshot", "")
-                .groupBy("keyword_text_snapshot");
-        for (Map<String, Object> row : pollResultMapper.selectMaps(keywordWrapper)) {
+        for (Map<String, Object> row : pollResultMapper.selectKeywordFrequencySummary(projectId)) {
             String keywordText = stringValue(row.get("keywordText")).trim();
             if (!keywordText.isEmpty()) {
                 frequencyByText.merge(keywordText, longValue(row.get("hitCount")), Long::sum);

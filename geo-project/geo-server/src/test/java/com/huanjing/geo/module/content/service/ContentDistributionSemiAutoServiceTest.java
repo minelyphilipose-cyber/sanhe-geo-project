@@ -111,6 +111,10 @@ class ContentDistributionSemiAutoServiceTest {
         return new ContentDistributionService(
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                new ArticleBodyProvider(
+                        articleDraftVersionMapper,
+                        mock(com.huanjing.geo.common.storage.ObjectStorageService.class)
+                ),
                 distributionTaskMapper,
                 mock(ArticlePublishRecordMapper.class),
                 mock(SelfMediaAccountMapper.class),

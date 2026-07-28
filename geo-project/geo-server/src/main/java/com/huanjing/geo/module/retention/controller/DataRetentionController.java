@@ -3,6 +3,9 @@ package com.huanjing.geo.module.retention.controller;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.dto.ArticleArchiveDryRunRequest;
 import com.huanjing.geo.module.content.dto.ArticleArchiveDryRunResponse;
+import com.huanjing.geo.module.content.dto.ArticleBodyPurgeRequest;
+import com.huanjing.geo.module.content.dto.ArticleBodyPurgeResponse;
+import com.huanjing.geo.module.content.service.ArticleBodyPurgeService;
 import com.huanjing.geo.module.content.service.ArticleRetentionDryRunService;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunRequest;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunResponse;
@@ -34,6 +37,7 @@ public class DataRetentionController {
 
     private final DataRetentionSlimDryRunService dataRetentionSlimDryRunService;
     private final ArticleRetentionDryRunService articleRetentionDryRunService;
+    private final ArticleBodyPurgeService articleBodyPurgeService;
     private final PollRetentionDryRunService pollRetentionDryRunService;
     private final ObjectStorageRetentionDryRunService objectStorageRetentionDryRunService;
     private final ObjectStorageMigrationService objectStorageMigrationService;
@@ -54,9 +58,27 @@ public class DataRetentionController {
         return R.ok(articleRetentionDryRunService.archive(request == null ? new ArticleArchiveDryRunRequest() : request));
     }
 
+    @PostMapping("/articles/purge/dry-run")
+    public R<ArticleBodyPurgeResponse> articlePurgeDryRun(@RequestBody ArticleBodyPurgeRequest request) {
+        return R.ok(articleBodyPurgeService.dryRun(
+                request == null ? new ArticleBodyPurgeRequest() : request));
+    }
+
+    @PostMapping("/articles/purge")
+    public R<ArticleBodyPurgeResponse> articlePurge(@RequestBody ArticleBodyPurgeRequest request) {
+        return R.ok(articleBodyPurgeService.purge(
+                request == null ? new ArticleBodyPurgeRequest() : request));
+    }
+
     @PostMapping("/poll-results/dry-run")
     public R<PollRetentionDryRunResponse> pollResultsDryRun(@RequestBody PollRetentionDryRunRequest request) {
         return R.ok(pollRetentionDryRunService.dryRun(request == null ? new PollRetentionDryRunRequest() : request));
+    }
+
+    @PostMapping("/poll-results")
+    public R<PollRetentionDryRunResponse> pollResultsPurge(@RequestBody PollRetentionDryRunRequest request) {
+        return R.ok(pollRetentionDryRunService.purge(
+                request == null ? new PollRetentionDryRunRequest() : request));
     }
 
     @PostMapping("/object-storage/orphans/dry-run")

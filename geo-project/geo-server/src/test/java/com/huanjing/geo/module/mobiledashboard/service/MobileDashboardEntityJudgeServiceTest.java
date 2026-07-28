@@ -10,23 +10,30 @@ import com.huanjing.geo.common.llm.router.LlmRouteResult;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceGuardService;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceWriteService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class MobileDashboardEntityJudgeServiceTest {
@@ -40,6 +47,42 @@ class MobileDashboardEntityJudgeServiceTest {
         assertThat(service.coverageReady(new MobileDashboardEntityJudgeService.JudgeCoverage(0, 0, 0, 0))).isFalse();
         assertThat(service.coverageReady(new MobileDashboardEntityJudgeService.JudgeCoverage(100, 79, 20, 5))).isFalse();
         assertThat(service.coverageReady(new MobileDashboardEntityJudgeService.JudgeCoverage(100, 80, 20, 5))).isTrue();
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void entitySummaryChecksumChangesWhenRecommendationChangesForSameJudgeId() throws Exception {
+        String notRecommended = recomputedEntitySummaryChecksum(false);
+        String recommended = recomputedEntitySummaryChecksum(true);
+
+        assertThat(notRecommended).isNotEqualTo(recommended);
+    }
+
+    @Test
+    void recomputeSummarySliceCannotOverwritePurgedSlice() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        PollRetentionSliceGuardService guard = mock(PollRetentionSliceGuardService.class);
+        LocalDate batchDate = LocalDate.of(2026, 7, 16);
+        doThrow(new com.huanjing.geo.common.exception.BizException(
+                409, "Poll retention slice was already purged"))
+                .when(guard).lockAndRequireWritable(1L, batchDate, "A");
+        MobileDashboardEntityJudgeService service = new MobileDashboardEntityJudgeService(
+                jdbcTemplate,
+                objectMapper,
+                mock(com.huanjing.geo.common.llm.LlmCallFacade.class),
+                mock(AiPlatformConfigMapper.class),
+                mock(ProjectCompetitorConfigService.class),
+                new MobileEntityMentionMatcher(),
+                mock(CurrentUserService.class),
+                new MobileEntityJudgeRuntimeConfig(),
+                new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class)),
+                new PollRetentionSliceWriteService(guard)
+        );
+
+        assertThatThrownBy(() -> service.recomputeSummarySlice(1L, batchDate, "A"))
+                .isInstanceOf(com.huanjing.geo.common.exception.BizException.class)
+                .hasMessageContaining("already purged");
+        verifyNoInteractions(jdbcTemplate);
     }
 
     @Test
@@ -232,7 +275,8 @@ class MobileDashboardEntityJudgeServiceTest {
                 new MobileEntityMentionMatcher(),
                 mock(CurrentUserService.class),
                 new MobileEntityJudgeRuntimeConfig(),
-                new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class))
+                new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class)),
+                retentionSliceWriteService()
         );
 
         Method method = MobileDashboardEntityJudgeService.class.getDeclaredMethod("judgeOne", pollCandidateClass());
@@ -270,7 +314,8 @@ class MobileDashboardEntityJudgeServiceTest {
                 new MobileEntityMentionMatcher(),
                 mock(CurrentUserService.class),
                 new MobileEntityJudgeRuntimeConfig(),
-                new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class))
+                new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class)),
+                retentionSliceWriteService()
         );
 
         Method method = MobileDashboardEntityJudgeService.class.getDeclaredMethod("judgeOne", pollCandidateClass());
@@ -294,6 +339,36 @@ class MobileDashboardEntityJudgeServiceTest {
                 new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class)));
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private String recomputedEntitySummaryChecksum(boolean recommended) throws Exception {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        ResultSet source = mock(ResultSet.class);
+        when(jdbcTemplate.queryForObject(anyString(), any(Class.class), any(Object[].class))).thenReturn(1);
+        when(source.getLong("id")).thenReturn(88L);
+        when(source.getString("platform_code")).thenReturn("doubao");
+        when(source.getString("entity_type")).thenReturn("focus_brand");
+        when(source.getLong("entity_ref_id")).thenReturn(0L);
+        when(source.getInt("entity_config_version")).thenReturn(1);
+        when(source.getBoolean("recommended")).thenReturn(recommended);
+        when(source.getBoolean("first_recommend")).thenReturn(false);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class))).thenAnswer(invocation -> {
+            RowMapper mapper = invocation.getArgument(1);
+            return List.of(mapper.mapRow(source, 0));
+        });
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        service(jdbcTemplate).recomputeDaily(
+                1L, LocalDate.of(2026, 7, 16), "A", "doubao");
+
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate, org.mockito.Mockito.atLeastOnce()).update(anyString(), args.capture());
+        return args.getAllValues().stream()
+                .filter(values -> values.length == 13)
+                .map(values -> (String) values[12])
+                .findFirst()
+                .orElseThrow();
+    }
+
     private MobileDashboardEntityJudgeService service(JdbcTemplate jdbcTemplate,
                                                       MobileDashboardAiPlatformCatalog catalog) {
         return new MobileDashboardEntityJudgeService(
@@ -305,8 +380,13 @@ class MobileDashboardEntityJudgeServiceTest {
                 new MobileEntityMentionMatcher(),
                 mock(CurrentUserService.class),
                 new MobileEntityJudgeRuntimeConfig(),
-                catalog
+                catalog,
+                retentionSliceWriteService()
         );
+    }
+
+    private PollRetentionSliceWriteService retentionSliceWriteService() {
+        return new PollRetentionSliceWriteService(mock(PollRetentionSliceGuardService.class));
     }
 
     private MobileDashboardAiPlatformCatalog visibleCatalog(String... platformCodes) {

@@ -81,6 +81,10 @@ public class MobileDashboardAiPlatformCatalog {
     }
 
     public String canonicalSql(String expression) {
+        return canonicalSqlExpression(expression);
+    }
+
+    public static String canonicalSqlExpression(String expression) {
         return """
                 CASE
                     WHEN %1$s IN ('doubao', 'doubao_web') THEN 'doubao'

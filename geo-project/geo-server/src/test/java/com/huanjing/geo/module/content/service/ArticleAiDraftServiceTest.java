@@ -455,7 +455,9 @@ class ArticleAiDraftServiceTest {
                 mock(BatchArticleGenerationTaskMapper.class), mock(ArticlePromptTemplateMapper.class),
                 mock(SelfMediaPublishScheduleMapper.class), mock(BrandMapper.class), projectMapper, mock(SysDictItemMapper.class), currentUserService,
                 mock(MarkdownImageReferenceValidator.class), mock(com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService.class),
-                mock(ArticleImagePublicUrlRewriter.class), mock(ArticleAutoImageInsertionService.class),
+                mock(ArticleImagePublicUrlRewriter.class),
+                new ArticleBodyProvider(versionMapper, mock(com.huanjing.geo.common.storage.ObjectStorageService.class)),
+                mock(ArticleAutoImageInsertionService.class),
                 mock(ArticleCoverSelectionService.class),
                 brandAccessService, mock(AuditService.class));
     }

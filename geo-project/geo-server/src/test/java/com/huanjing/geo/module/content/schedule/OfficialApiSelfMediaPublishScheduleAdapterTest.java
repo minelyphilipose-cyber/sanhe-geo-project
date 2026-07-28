@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.storage.ObjectStorageService;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
@@ -16,6 +17,7 @@ import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.service.ArticleImagePublicUrlRewriter;
+import com.huanjing.geo.module.content.service.ArticleBodyProvider;
 import com.huanjing.geo.module.content.service.SelfMediaPublishMaterialSelectionService;
 import com.huanjing.geo.module.content.service.SelfMediaScheduleCapabilityService;
 import com.huanjing.geo.module.content.service.adapter.AutoSelfMediaAdapter;
@@ -56,6 +58,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
     private DistributionTaskMapper distributionTaskMapper;
     private ArticleDraftMapper articleDraftMapper;
     private ArticleDraftVersionMapper articleDraftVersionMapper;
+    private ArticleBodyProvider articleBodyProvider;
     private SelfMediaAccountMapper selfMediaAccountMapper;
     private ProjectMapper projectMapper;
     private ArticleImagePublicUrlRewriter imagePublicUrlRewriter;
@@ -85,6 +88,10 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
         distributionTaskMapper = mock(DistributionTaskMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
+        articleBodyProvider = new ArticleBodyProvider(
+                articleDraftVersionMapper,
+                mock(ObjectStorageService.class)
+        );
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
         projectMapper = mock(ProjectMapper.class);
         imagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
@@ -97,6 +104,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
                 distributionTaskMapper,
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                articleBodyProvider,
                 selfMediaAccountMapper,
                 projectMapper,
                 imagePublicUrlRewriter,
@@ -165,6 +173,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
                 distributionTaskMapper,
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                articleBodyProvider,
                 selfMediaAccountMapper,
                 projectMapper,
                 imagePublicUrlRewriter,
@@ -194,6 +203,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
                 distributionTaskMapper,
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                articleBodyProvider,
                 selfMediaAccountMapper,
                 projectMapper,
                 imagePublicUrlRewriter,
@@ -223,6 +233,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
                 distributionTaskMapper,
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                articleBodyProvider,
                 selfMediaAccountMapper,
                 projectMapper,
                 imagePublicUrlRewriter,
@@ -270,6 +281,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
                 distributionTaskMapper,
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                articleBodyProvider,
                 selfMediaAccountMapper,
                 projectMapper,
                 imagePublicUrlRewriter,
@@ -322,6 +334,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
                 distributionTaskMapper,
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                articleBodyProvider,
                 selfMediaAccountMapper,
                 projectMapper,
                 imagePublicUrlRewriter,
@@ -361,6 +374,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
                 distributionTaskMapper,
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                articleBodyProvider,
                 selfMediaAccountMapper,
                 projectMapper,
                 imagePublicUrlRewriter,
@@ -397,6 +411,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
                 distributionTaskMapper,
                 articleDraftMapper,
                 articleDraftVersionMapper,
+                articleBodyProvider,
                 selfMediaAccountMapper,
                 projectMapper,
                 imagePublicUrlRewriter,
