@@ -25,6 +25,7 @@
       "originalUrl": "javascript:alert(1)",
       "normalizedUrl": null,
       "domain": null,
+      "media": null,
       "snippet": null,
       "publishTime": null,
       "brandMatchStrength": "NONE",

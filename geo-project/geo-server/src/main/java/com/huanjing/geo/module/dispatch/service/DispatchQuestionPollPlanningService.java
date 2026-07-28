@@ -1,6 +1,10 @@
 package com.huanjing.geo.module.dispatch.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.entity.PollBatch;
@@ -55,6 +59,7 @@ public class DispatchQuestionPollPlanningService {
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+    private final ObjectMapper objectMapper;
     private final DispatchProperties dispatchProperties;
     private final ObjectProvider<DispatchTaskService> dispatchTaskServiceProvider;
 
@@ -77,7 +82,7 @@ public class DispatchQuestionPollPlanningService {
                     questionTier, project.getId());
             return existing;
         }
-        List<AiPlatformConfig> platforms = resolveQuestionPollPlatformCandidates();
+        List<AiPlatformConfig> platforms = resolveQuestionPollPlatformCandidates(questionTier);
         if (platforms.isEmpty()) {
             log.info("Skip question poll planning because no question-poll platform configured, projectId={}", project.getId());
             return existing;
@@ -113,6 +118,16 @@ public class DispatchQuestionPollPlanningService {
                                                Long createdBy,
                                                String clientRequestId,
                                                String requestFingerprint) {
+        List<String> unsupportedPlatforms = platforms.stream()
+                .filter(platform -> !supportsQuestionTier(platform, questionTier))
+                .map(AiPlatformConfig::getPlatformCode)
+                .filter(StringUtils::hasText)
+                .toList();
+        if (!unsupportedPlatforms.isEmpty()) {
+            throw new BizException(400,
+                    "平台不支持 " + questionTier + " 类问题轮询: " + String.join(", ", unsupportedPlatforms),
+                    400, null);
+        }
         List<PollKeywordCandidate> allKeywords = loadProjectPollKeywords(project.getId(), questionTier);
         if (allKeywords.isEmpty()) {
             throw new com.huanjing.geo.common.exception.BizException(
@@ -332,14 +347,43 @@ public class DispatchQuestionPollPlanningService {
         );
     }
 
-    private List<AiPlatformConfig> resolveQuestionPollPlatformCandidates() {
+    private List<AiPlatformConfig> resolveQuestionPollPlatformCandidates(String questionTier) {
         return aiPlatformConfigMapper.selectList(
                 new LambdaQueryWrapper<AiPlatformConfig>()
                         .eq(AiPlatformConfig::getEnabled, true)
                         .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
                         .eq(AiPlatformConfig::getUsageScene, "QUESTION_POLL_WEB")
                         .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId)
-        );
+        ).stream()
+                .filter(platform -> supportsQuestionTier(platform, questionTier))
+                .toList();
+    }
+
+    boolean supportsQuestionTier(AiPlatformConfig platform, String questionTier) {
+        if (platform == null || !StringUtils.hasText(platform.getProviderConfigJson())) {
+            return true;
+        }
+        try {
+            JsonNode configuredTiers = objectMapper.readTree(platform.getProviderConfigJson())
+                    .path("questionTiers");
+            if (configuredTiers.isMissingNode() || configuredTiers.isNull()) {
+                return true;
+            }
+            if (!configuredTiers.isArray() || configuredTiers.isEmpty()) {
+                return false;
+            }
+            for (JsonNode configuredTier : configuredTiers) {
+                if (configuredTier.isTextual()
+                        && configuredTier.asText().equalsIgnoreCase(questionTier)) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (JsonProcessingException ex) {
+            log.warn("Skip question-poll platform with invalid provider config, platformCode={}, reason={}",
+                    platform.getPlatformCode(), ex.getOriginalMessage());
+            return false;
+        }
     }
 
     private int resolveTierPollLimit(Project project, String questionTier) {

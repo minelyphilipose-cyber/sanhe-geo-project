@@ -45,7 +45,7 @@ class ModelDiagnosticEvaluatorTest {
     void triggeredSearchWithValidSourceButNoConfirmedCitationIsWarning() {
         WebSearchSource source = new WebSearchSource(
                 1, 1, "query", "title", "https://example.com/a", "https://example.com/a",
-                "example.com", "snippet", null, BrandMatchStrength.NONE, List.of());
+                "example.com", null, "snippet", null, BrandMatchStrength.NONE, List.of());
         WebSearchCitation probable = new WebSearchCitation(
                 1, 1, null, null, "citation", CitationConfidence.PROBABLE, "INCOMPLETE");
 

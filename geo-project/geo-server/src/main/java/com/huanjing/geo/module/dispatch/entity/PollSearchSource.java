@@ -21,6 +21,7 @@ public class PollSearchSource {
     private String originalUrl;
     private String normalizedUrl;
     private String domain;
+    private String media;
     private String snippet;
     private LocalDateTime publishTime;
     private Boolean brandMatched;

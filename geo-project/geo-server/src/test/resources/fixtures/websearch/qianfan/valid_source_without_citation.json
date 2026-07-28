@@ -1,0 +1,27 @@
+{
+  "id": "qianfan_without_citation",
+  "model": "ernie-4.5-turbo-32k",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "有联网来源，但回答未显式引用。"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "search_results": [
+    {
+      "index": 1,
+      "url": "https://news.example.com/no-citation",
+      "title": "有效来源",
+      "content": "有效摘要"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 8,
+    "completion_tokens": 4,
+    "total_tokens": 12
+  }
+}

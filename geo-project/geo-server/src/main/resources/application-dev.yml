@@ -89,7 +89,7 @@ geo:
       share-image-url: https://www.huanjingaigeo.com/favicon.png
     entity-judge:
       enabled: true
-      platform-codes: deepseek,doubao,qwen
+      platform-codes: deepseek,doubao,qwen,wenxin
       max-projects-per-run: 20
       per-project-limit: 10
       worker-ms: 60000

@@ -1,0 +1,27 @@
+{
+  "id": "qianfan_invalid_source",
+  "model": "ernie-4.5-turbo-32k",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "无效来源^[1]^"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "search_results": [
+    {
+      "index": 1,
+      "url": "javascript:alert(1)",
+      "title": "无效来源",
+      "content": "不可用来源"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 8,
+    "completion_tokens": 4,
+    "total_tokens": 12
+  }
+}

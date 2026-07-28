@@ -16,7 +16,7 @@ public class MobileEntityJudgeRuntimeConfig {
     private int maxProjectsPerRun = 20;
     private int perProjectLimit = 10;
     private long workerMs = 60_000L;
-    private String platformCodes = "deepseek,doubao,qwen";
+    private String platformCodes = "deepseek,doubao,qwen,wenxin";
 
     public Set<String> platformCodeSet() {
         return LlmPlatformCodeFilters.parseCodes(platformCodes);

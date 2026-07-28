@@ -66,16 +66,26 @@ class MobileDashboardEntityJudgeServiceTest {
                      expected_count, success_count, recommended_count, first_recommend_count)
                 VALUES
                     (1, DATE '2026-06-20', 'A', 'doubao', 'focus_brand', 0, ?, 10, 8, 3, 1),
-                    (1, DATE '2026-06-20', 'B', 'doubao', 'focus_brand', 0, ?, 99, 99, 99, 99)
-                """, MobileDashboardEntityJudgeService.PROMPT_VERSION, MobileDashboardEntityJudgeService.PROMPT_VERSION);
+                    (1, DATE '2026-06-20', 'B', 'doubao', 'focus_brand', 0, ?, 99, 99, 99, 99),
+                    (1, DATE '2026-06-20', 'A', 'wenxin', 'focus_brand', 0, ?, 100, 90, 80, 70)
+                """, MobileDashboardEntityJudgeService.PROMPT_VERSION,
+                MobileDashboardEntityJudgeService.PROMPT_VERSION,
+                MobileDashboardEntityJudgeService.PROMPT_VERSION);
 
         MobileDashboardEntityJudgeService.JudgeCoverage coverage = service(jdbcTemplate)
                 .focusCoverage(1L, LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30));
+        MobileDashboardEntityJudgeService.JudgeCoverage visibleCoverage =
+                service(jdbcTemplate, visibleCatalog("doubao", "wenxin"))
+                        .focusCoverage(1L, LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30));
 
         assertThat(coverage.expectedCount()).isEqualTo(10);
         assertThat(coverage.successCount()).isEqualTo(8);
         assertThat(coverage.recommendedCount()).isEqualTo(3);
         assertThat(coverage.firstRecommendCount()).isEqualTo(1);
+        assertThat(visibleCoverage.expectedCount()).isEqualTo(110);
+        assertThat(visibleCoverage.successCount()).isEqualTo(98);
+        assertThat(visibleCoverage.recommendedCount()).isEqualTo(83);
+        assertThat(visibleCoverage.firstRecommendCount()).isEqualTo(71);
     }
 
     @Test
@@ -221,7 +231,8 @@ class MobileDashboardEntityJudgeServiceTest {
                 competitors,
                 new MobileEntityMentionMatcher(),
                 mock(CurrentUserService.class),
-                new MobileEntityJudgeRuntimeConfig()
+                new MobileEntityJudgeRuntimeConfig(),
+                new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class))
         );
 
         Method method = MobileDashboardEntityJudgeService.class.getDeclaredMethod("judgeOne", pollCandidateClass());
@@ -258,7 +269,8 @@ class MobileDashboardEntityJudgeServiceTest {
                 competitors,
                 new MobileEntityMentionMatcher(),
                 mock(CurrentUserService.class),
-                new MobileEntityJudgeRuntimeConfig()
+                new MobileEntityJudgeRuntimeConfig(),
+                new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class))
         );
 
         Method method = MobileDashboardEntityJudgeService.class.getDeclaredMethod("judgeOne", pollCandidateClass());
@@ -278,6 +290,12 @@ class MobileDashboardEntityJudgeServiceTest {
     }
 
     private MobileDashboardEntityJudgeService service(JdbcTemplate jdbcTemplate) {
+        return service(jdbcTemplate,
+                new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class)));
+    }
+
+    private MobileDashboardEntityJudgeService service(JdbcTemplate jdbcTemplate,
+                                                      MobileDashboardAiPlatformCatalog catalog) {
         return new MobileDashboardEntityJudgeService(
                 jdbcTemplate,
                 objectMapper,
@@ -286,8 +304,27 @@ class MobileDashboardEntityJudgeServiceTest {
                 mock(ProjectCompetitorConfigService.class),
                 new MobileEntityMentionMatcher(),
                 mock(CurrentUserService.class),
-                new MobileEntityJudgeRuntimeConfig()
+                new MobileEntityJudgeRuntimeConfig(),
+                catalog
         );
+    }
+
+    private MobileDashboardAiPlatformCatalog visibleCatalog(String... platformCodes) {
+        AiPlatformConfigMapper mapper = mock(AiPlatformConfigMapper.class);
+        List<AiPlatformConfig> rows = java.util.Arrays.stream(platformCodes)
+                .map(code -> {
+                    AiPlatformConfig row = new AiPlatformConfig();
+                    row.setPlatformCode(code);
+                    row.setChannelCode(code);
+                    row.setUsageScene("QUESTION_POLL_WEB");
+                    row.setEnabledForMobileDashboard(true);
+                    return row;
+                })
+                .toList();
+        when(mapper.selectList(any())).thenReturn(rows);
+        MobileDashboardAiPlatformCatalog catalog = new MobileDashboardAiPlatformCatalog(mapper);
+        catalog.refresh();
+        return catalog;
     }
 
     private JdbcTemplate jdbcTemplate() {

@@ -25,6 +25,7 @@
       "originalUrl": "not-a-url",
       "normalizedUrl": null,
       "domain": null,
+      "media": null,
       "snippet": null,
       "publishTime": null,
       "brandMatchStrength": "NONE",

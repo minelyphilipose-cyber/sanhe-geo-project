@@ -168,6 +168,7 @@ public class VolcengineResponsesWebSearchCodec extends AbstractJsonWebSearchCode
                 eventIndex, sourceIndex + 1, null, title, url,
                 validSource ? url : null,
                 validSource ? WebSearchCodecSupport.domain(url) : null,
+                null,
                 annotation.path("snippet").asText(null), null,
                 BrandMatchStrength.NONE, List.of()
         ));

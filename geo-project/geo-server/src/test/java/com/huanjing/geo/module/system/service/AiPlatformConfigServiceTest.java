@@ -3,6 +3,7 @@ package com.huanjing.geo.module.system.service;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigCreateRequest;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigUpdateRequest;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardAiPlatformCatalog;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -31,6 +32,8 @@ class AiPlatformConfigServiceTest {
     private ActivityLogService activityLogService;
     @Mock
     private PlatformCredentialService platformCredentialService;
+    @Mock
+    private MobileDashboardAiPlatformCatalog mobileDashboardAiPlatformCatalog;
 
     @InjectMocks
     private AiPlatformConfigService aiPlatformConfigService;
@@ -118,6 +121,35 @@ class AiPlatformConfigServiceTest {
                 () -> aiPlatformConfigService.create(req));
 
         assertEquals(400, error.getCode());
+    }
+
+    @Test
+    void mobileDashboardVisibilityRequiresWebSearchUsageScene() {
+        when(currentUserService.requireCurrentUser()).thenReturn(operator());
+        AiPlatformConfigCreateRequest req = webSearchCreateRequest();
+        req.setUsageScene("STANDARD_CHAT");
+        req.setIntegrationType("OPENAI_CHAT");
+        req.setEnabledForMobileDashboard(true);
+
+        BizException error = assertThrows(BizException.class,
+                () -> aiPlatformConfigService.create(req));
+
+        assertEquals(400, error.getCode());
+    }
+
+    @Test
+    void storesIndependentMobileDashboardVisibilityForWebSearchProfile() {
+        when(currentUserService.requireCurrentUser()).thenReturn(operator());
+        AiPlatformConfigCreateRequest req = webSearchCreateRequest();
+        req.setPrimaryKeyRef("env://QIANFAN_API_KEY");
+        req.setEnabledForMobileDashboard(true);
+
+        aiPlatformConfigService.create(req);
+
+        ArgumentCaptor<AiPlatformConfig> captor = ArgumentCaptor.forClass(AiPlatformConfig.class);
+        verify(aiPlatformConfigMapper).insert(captor.capture());
+        assertTrue(captor.getValue().getEnabledForMobileDashboard());
+        verify(mobileDashboardAiPlatformCatalog).refresh();
     }
 
     @Test

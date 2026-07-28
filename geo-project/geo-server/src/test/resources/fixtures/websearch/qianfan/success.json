@@ -1,0 +1,35 @@
+{
+  "id": "qianfan_success",
+  "model": "ernie-4.5-turbo-32k",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "热点^[1][2]^"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "search_results": [
+    {
+      "index": 1,
+      "url": "https://news.example.com/wenxin",
+      "title": "热点新闻",
+      "media": "示例新闻",
+      "publish_date": "2026-07-27",
+      "content": "热点摘要"
+    },
+    {
+      "index": 2,
+      "url": "https://example.org/second",
+      "title": "第二条新闻",
+      "content": "第二条摘要"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 6,
+    "total_tokens": 18
+  }
+}

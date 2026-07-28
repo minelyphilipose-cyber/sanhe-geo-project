@@ -25,6 +25,7 @@
       "originalUrl": "https://news.example.com/tencent",
       "normalizedUrl": "https://news.example.com/tencent",
       "domain": "news.example.com",
+      "media": null,
       "snippet": null,
       "publishTime": null,
       "brandMatchStrength": "NONE",

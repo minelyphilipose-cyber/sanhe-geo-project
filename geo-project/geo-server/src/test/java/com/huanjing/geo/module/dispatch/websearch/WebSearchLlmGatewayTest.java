@@ -39,6 +39,17 @@ class WebSearchLlmGatewayTest {
                 () -> gateway.execute(request(IntegrationType.VOLCENGINE_RESPONSES_WEB)));
     }
 
+    @Test
+    void discoversAndRoutesToQianfanErnieChatWebAdapter() {
+        FakeAdapter wenxin = new FakeAdapter(IntegrationType.QIANFAN_ERNIE_CHAT_WEB, "ernie");
+        WebSearchLlmGateway gateway = new WebSearchLlmGateway(List.of(wenxin));
+
+        WebSearchResponse response = gateway.execute(request(IntegrationType.QIANFAN_ERNIE_CHAT_WEB));
+
+        assertEquals("ernie", response.answer());
+        assertEquals(1, wenxin.callCount);
+    }
+
     private WebSearchRequest request(IntegrationType integrationType) {
         WebSearchPlatformProfile profile = new WebSearchPlatformProfile(
                 1L, "test_web", "test", "provider", integrationType,

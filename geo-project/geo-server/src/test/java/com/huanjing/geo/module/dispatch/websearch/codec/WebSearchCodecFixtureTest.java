@@ -2,6 +2,7 @@ package com.huanjing.geo.module.dispatch.websearch.codec;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
@@ -12,7 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class WebSearchCodecFixtureTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper()
+            .findAndRegisterModules()
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     @Test
     void volcengineCodecMatchesCompleteGoldenRequestAndResponses() throws Exception {
@@ -44,6 +47,26 @@ class WebSearchCodecFixtureTest {
         assertGoldenRequest(codec, request, "tokenhub");
         assertGoldenFixtures(codec, request, "tokenhub",
                 List.of("success", "not_confirmed", "empty", "invalid_source"));
+    }
+
+    @Test
+    void qianfanErnieCodecMatchesCompleteGoldenRequestAndResponses() throws Exception {
+        WebSearchCodec codec = new QianfanErnieChatWebSearchCodec(objectMapper);
+        WebSearchCodecRequest request = request("{}");
+
+        assertGoldenRequest(codec, request, "qianfan");
+        assertGoldenFixtures(codec, request, "qianfan",
+                List.of("success", "not_confirmed", "empty", "invalid_source",
+                        "valid_source_without_citation", "triggered_without_trace"));
+    }
+
+    @Test
+    void qianfanErnieBoundsSearchAndReferenceCounts() {
+        WebSearchCodec codec = new QianfanErnieChatWebSearchCodec(objectMapper);
+        JsonNode body = codec.encode(request("{\"searchNumber\":100,\"referenceNumber\":99}"));
+
+        assertEquals(28, body.path("web_search").path("search_number").asInt());
+        assertEquals(28, body.path("web_search").path("reference_number").asInt());
     }
 
     @Test

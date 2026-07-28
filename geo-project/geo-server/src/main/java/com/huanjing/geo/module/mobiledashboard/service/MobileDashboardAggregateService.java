@@ -55,7 +55,6 @@ public class MobileDashboardAggregateService {
                 JSON_UNQUOTE(JSON_EXTRACT(pr.detail_json, '$.raw_response'))
             )
             """;
-    private static final List<String> AI_PLATFORM_CODES = List.of("doubao", "deepseek", "tongyi");
     private static final Set<String> MEASURABLE_INDEX_CHANNELS = Set.of(
             "official_site", "agent_site", "brand_geo_site", "agent_official_site",
             "forum", "forum_site", "industry_site", "authority_media",
@@ -78,6 +77,7 @@ public class MobileDashboardAggregateService {
 
     private final JdbcTemplate jdbcTemplate;
     private final MobileDashboardEntityJudgeService entityJudgeService;
+    private final MobileDashboardAiPlatformCatalog aiPlatformCatalog;
 
     public MobileDashboardAggregateVO.Home home(Long projectId, LocalDate startDate, LocalDate endDate) {
         DateRange range = normalizeRange(startDate, endDate, LocalDate.now().minusDays(13), LocalDate.now());
@@ -121,7 +121,7 @@ public class MobileDashboardAggregateService {
         overview.setFirstRecommendCount(judgeCountMetric(focusJudge));
         vo.setOverview(overview);
         vo.setMeasurement(toMeasurementMeta(mention, focusJudge));
-        vo.setPlatformFilters(new ArrayList<>(AI_PLATFORM_CODES));
+        vo.setPlatformFilters(new ArrayList<>(aiPlatformCatalog.scope().canonicalCodes()));
         vo.setQuestionList(loadLatestQuestionMonitorList(projectId, platformCode, focusJudge, page, size));
         vo.setScenePerformance(loadLatestSceneCoverage(projectId, platformCode));
         MobileDashboardAggregateVO.QuestionCoverageProgress progress = new MobileDashboardAggregateVO.QuestionCoverageProgress();
@@ -2297,14 +2297,7 @@ public class MobileDashboardAggregateService {
 
     private String normalizeAiPlatformCode(String code) {
         String value = normalize(code);
-        return switch (value) {
-            case "qwen", "qwen_web" -> "tongyi";
-            case "ernie" -> "wenxin";
-            case "hunyuan", "tencent_search_web" -> "yuanbao";
-            case "deepseek_ark_web" -> "deepseek";
-            case "doubao_web" -> "doubao";
-            default -> value;
-        };
+        return "ernie".equals(value) ? "wenxin" : aiPlatformCatalog.canonicalCode(value);
     }
 
     private String normalizeContentChannelCode(String code) {
@@ -2343,8 +2336,7 @@ public class MobileDashboardAggregateService {
     }
 
     private int aiPlatformOrder(String code) {
-        int index = AI_PLATFORM_CODES.indexOf(normalizeAiPlatformCode(code));
-        return index < 0 ? AI_PLATFORM_CODES.size() : index;
+        return aiPlatformCatalog.order(code);
     }
 
     private int metricValue(MobileDashboardMetricVO<Integer> metric) {
@@ -2352,14 +2344,10 @@ public class MobileDashboardAggregateService {
     }
 
     private String aliasSql(String normalizedCode) {
-        return switch (normalizedCode) {
-            case "doubao" -> "'doubao','doubao_web'";
-            case "deepseek" -> "'deepseek','deepseek_ark_web'";
-            case "tongyi" -> "'tongyi','qwen','qwen_web'";
-            case "wenxin" -> "'wenxin','ernie'";
-            case "yuanbao" -> "'yuanbao','hunyuan','tencent_search_web'";
-            default -> "'" + normalizedCode.replace("'", "''") + "'";
-        };
+        if ("wenxin".equals(normalizedCode)) {
+            return "'wenxin','ernie'";
+        }
+        return aiPlatformCatalog.aliasSql(normalizedCode);
     }
 
     private String quoted(Collection<String> values) {
@@ -2367,19 +2355,11 @@ public class MobileDashboardAggregateService {
     }
 
     private String supportedAiPlatformAliasSql() {
-        return "'doubao','doubao_web','deepseek','deepseek_ark_web','tongyi','qwen','qwen_web'";
+        return aiPlatformCatalog.scope().aliasSql();
     }
 
     private String aiPlatformSqlCase(String expression) {
-        return """
-                CASE
-                    WHEN %1$s IN ('doubao', 'doubao_web') THEN 'doubao'
-                    WHEN %1$s IN ('deepseek', 'deepseek_ark_web') THEN 'deepseek'
-                    WHEN %1$s IN ('tongyi', 'qwen', 'qwen_web') THEN 'tongyi'
-                    WHEN %1$s IN ('yuanbao', 'hunyuan', 'tencent_search_web') THEN 'yuanbao'
-                    ELSE NULL
-                END
-                """.formatted(expression);
+        return aiPlatformCatalog.canonicalSql(expression);
     }
 
     private record DateRange(LocalDate start, LocalDate end) {

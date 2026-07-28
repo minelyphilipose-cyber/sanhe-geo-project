@@ -23,6 +23,7 @@ const builtinLogos: Record<string, string> = {
   qwen: qwenLogo,
   wenxin: wenxinLogo,
   ernie: wenxinLogo,
+  wenxin_web: wenxinLogo,
   yuanbao: yuanbaoLogo,
   hunyuan: yuanbaoLogo,
 }

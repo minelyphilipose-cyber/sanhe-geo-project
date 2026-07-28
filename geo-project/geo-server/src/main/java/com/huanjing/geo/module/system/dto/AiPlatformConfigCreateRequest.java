@@ -42,6 +42,7 @@ public class AiPlatformConfigCreateRequest {
     private Boolean enabledForArticle;
     private Boolean enabledForGeoQuestion;
     private Boolean enabledForQuestionPoll;
+    private Boolean enabledForMobileDashboard;
     private Integer maxRetry;
     private Integer timeoutMs;
     private Integer rateLimitQps;

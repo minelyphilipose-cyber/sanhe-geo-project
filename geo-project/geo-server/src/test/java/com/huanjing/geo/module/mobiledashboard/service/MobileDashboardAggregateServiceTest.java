@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.mobiledashboard.service;
 
 import com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardAggregateVO;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -15,6 +17,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -26,7 +29,8 @@ public class MobileDashboardAggregateServiceTest {
         MobileDashboardEntityJudgeService.JudgeCoverage coverage =
                 new MobileDashboardEntityJudgeService.JudgeCoverage(10, 8, 4, 2);
         when(judgeService.coverageReady(coverage)).thenReturn(true);
-        MobileDashboardAggregateService service = new MobileDashboardAggregateService(mock(JdbcTemplate.class), judgeService);
+        MobileDashboardAggregateService service = new MobileDashboardAggregateService(
+                mock(JdbcTemplate.class), judgeService, testAiPlatformCatalog());
 
         @SuppressWarnings("unchecked")
         com.huanjing.geo.module.mobiledashboard.dto.MobileDashboardMetricVO<Integer> metric =
@@ -57,6 +61,38 @@ public class MobileDashboardAggregateServiceTest {
         assertThat(recordValue(aggregate, "completed")).isEqualTo(2L);
         assertThat(recordValue(aggregate, "mentions")).isEqualTo(1L);
         assertThat(recordValue(aggregate, "coveredPlatformCount")).isEqualTo(1L);
+    }
+
+    @Test
+    void wenxinDataIsExcludedUntilMobileDashboardVisibilityIsEnabled() throws Exception {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createPollResultsTable(jdbcTemplate);
+        jdbcTemplate.update("""
+                INSERT INTO poll_results
+                    (id, project_id, keyword_result_id, platform_code, channel_code, batch_date, question_tier,
+                     status, effective_hit, search_triggered, updated_at)
+                VALUES
+                    (1, 1, 1001, 'doubao_web', 'doubao', DATE '2026-06-10', 'A',
+                     'completed', 1, 1, TIMESTAMP '2026-06-10 09:00:00'),
+                    (2, 1, 1001, 'wenxin_web', 'wenxin', DATE '2026-06-10', 'A',
+                     'completed', 0, 1, TIMESTAMP '2026-06-10 09:01:00')
+                """);
+
+        Object hiddenAggregate = invoke(newService(jdbcTemplate), "loadMentionAggregate",
+                1L, dateRange(LocalDate.of(2026, 6, 10), LocalDate.of(2026, 6, 10)), null);
+        Object hiddenFilteredAggregate = invoke(newService(jdbcTemplate), "loadMentionAggregate",
+                1L, dateRange(LocalDate.of(2026, 6, 10), LocalDate.of(2026, 6, 10)), "wenxin");
+
+        MobileDashboardAiPlatformCatalog visibleCatalog =
+                testAiPlatformCatalog("doubao_web", "wenxin_web");
+        Object visibleAggregate = invoke(newService(jdbcTemplate, visibleCatalog), "loadMentionAggregate",
+                1L, dateRange(LocalDate.of(2026, 6, 10), LocalDate.of(2026, 6, 10)), null);
+
+        assertThat(recordValue(hiddenAggregate, "requested")).isEqualTo(1L);
+        assertThat(recordValue(hiddenAggregate, "mentions")).isEqualTo(1L);
+        assertThat(recordValue(hiddenFilteredAggregate, "requested")).isZero();
+        assertThat(recordValue(visibleAggregate, "requested")).isEqualTo(2L);
+        assertThat(recordValue(visibleAggregate, "mentions")).isEqualTo(1L);
     }
 
     @Test
@@ -1013,7 +1049,35 @@ public class MobileDashboardAggregateServiceTest {
     }
 
     private static MobileDashboardAggregateService newService(JdbcTemplate jdbcTemplate) {
-        return new MobileDashboardAggregateService(jdbcTemplate, mock(MobileDashboardEntityJudgeService.class));
+        return newService(jdbcTemplate, testAiPlatformCatalog());
+    }
+
+    private static MobileDashboardAggregateService newService(JdbcTemplate jdbcTemplate,
+                                                              MobileDashboardAiPlatformCatalog catalog) {
+        return new MobileDashboardAggregateService(
+                jdbcTemplate, mock(MobileDashboardEntityJudgeService.class), catalog);
+    }
+
+    private static MobileDashboardAiPlatformCatalog testAiPlatformCatalog() {
+        return new MobileDashboardAiPlatformCatalog(mock(AiPlatformConfigMapper.class));
+    }
+
+    private static MobileDashboardAiPlatformCatalog testAiPlatformCatalog(String... visiblePlatformCodes) {
+        AiPlatformConfigMapper mapper = mock(AiPlatformConfigMapper.class);
+        List<AiPlatformConfig> rows = java.util.Arrays.stream(visiblePlatformCodes)
+                .map(code -> {
+                    AiPlatformConfig row = new AiPlatformConfig();
+                    row.setPlatformCode(code);
+                    row.setChannelCode(code.replace("_web", ""));
+                    row.setUsageScene("QUESTION_POLL_WEB");
+                    row.setEnabledForMobileDashboard(true);
+                    return row;
+                })
+                .toList();
+        when(mapper.selectList(any())).thenReturn(rows);
+        MobileDashboardAiPlatformCatalog catalog = new MobileDashboardAiPlatformCatalog(mapper);
+        catalog.refresh();
+        return catalog;
     }
 
     private static JdbcTemplate jdbcTemplate() {

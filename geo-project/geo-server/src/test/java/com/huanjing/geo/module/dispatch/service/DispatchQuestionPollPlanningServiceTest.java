@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.dispatch.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
@@ -35,6 +36,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
@@ -70,6 +73,7 @@ class DispatchQuestionPollPlanningServiceTest {
                 mock(ProjectKeywordGroupRelMapper.class),
                 mock(KeywordGroupResultMapper.class),
                 mock(AiPlatformConfigMapper.class),
+                new ObjectMapper(),
                 properties,
                 mock(ObjectProvider.class)
         );
@@ -97,6 +101,19 @@ class DispatchQuestionPollPlanningServiceTest {
         assertEquals(8, service.resolveDailyTakeCount(200, 50, "A"));
         assertEquals(5, service.resolveDailyTakeCount(30, 50, "A"));
         assertEquals(50, service.resolveDailyTakeCount(50, 0, "B"));
+    }
+
+    @Test
+    void providerQuestionTierScopeKeepsWenxinOutOfTierBAndTierC() {
+        DispatchQuestionPollPlanningService service = service(new DispatchProperties());
+        AiPlatformConfig wenxin = platform(5L, "wenxin_web");
+        wenxin.setProviderConfigJson("{\"questionTiers\":[\"A\"]}");
+        AiPlatformConfig legacy = platform(6L, "doubao_web");
+
+        assertTrue(service.supportsQuestionTier(wenxin, "A"));
+        assertFalse(service.supportsQuestionTier(wenxin, "B"));
+        assertFalse(service.supportsQuestionTier(wenxin, "C"));
+        assertTrue(service.supportsQuestionTier(legacy, "B"));
     }
 
     @Test
@@ -165,11 +182,14 @@ class DispatchQuestionPollPlanningServiceTest {
                 keyword(4L, "q4"),
                 keyword(5L, "q5")
         ));
+        AiPlatformConfig wenxin = platform(5L, "wenxin_web");
+        wenxin.setProviderConfigJson("{\"questionTiers\":[\"A\"]}");
         when(platformMapper.selectList(any())).thenReturn(List.of(
                 platform(1L, "deepseek"),
                 platform(2L, "hunyuan"),
                 platform(3L, "doubao"),
-                platform(4L, "qwen")
+                platform(4L, "qwen"),
+                wenxin
         ));
         ProjectPollRotation rotation = new ProjectPollRotation();
         rotation.setProjectId(1L);
@@ -185,6 +205,7 @@ class DispatchQuestionPollPlanningServiceTest {
                 relMapper,
                 resultMapper,
                 platformMapper,
+                new ObjectMapper(),
                 properties,
                 provider
         );
@@ -209,6 +230,7 @@ class DispatchQuestionPollPlanningServiceTest {
         assertEquals(keywordIdsByPlatform.get("deepseek"), keywordIdsByPlatform.get("hunyuan"));
         assertEquals(keywordIdsByPlatform.get("deepseek"), keywordIdsByPlatform.get("doubao"));
         assertEquals(keywordIdsByPlatform.get("deepseek"), keywordIdsByPlatform.get("qwen"));
+        assertEquals(keywordIdsByPlatform.get("deepseek"), keywordIdsByPlatform.get("wenxin_web"));
         assertEquals(3, rotation.getRotationOffset());
         verify(taskService).enqueueQuestionPollShardTasksWithStagger(any());
     }
@@ -279,6 +301,7 @@ class DispatchQuestionPollPlanningServiceTest {
                 relMapper,
                 resultMapper,
                 platformMapper,
+                new ObjectMapper(),
                 properties,
                 provider
         );
@@ -319,6 +342,7 @@ class DispatchQuestionPollPlanningServiceTest {
                 mock(ProjectKeywordGroupRelMapper.class),
                 mock(KeywordGroupResultMapper.class),
                 mock(AiPlatformConfigMapper.class),
+                new ObjectMapper(),
                 properties,
                 mock(ObjectProvider.class)
         );

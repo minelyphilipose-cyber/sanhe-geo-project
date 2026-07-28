@@ -451,6 +451,9 @@ export interface CompanyPackageBinding {
 export interface PlatformConfig {
   id: number
   platformCode: string
+  channelCode?: string | null
+  usageScene?: string | null
+  integrationType?: string | null
   platformName: string
   providerName: string
   priorityLevel: PlatformPriority
@@ -467,6 +470,9 @@ export interface PlatformConfig {
 export interface AIPlatformConfigItem {
   id: number
   platformCode: string
+  channelCode?: string | null
+  usageScene?: string | null
+  integrationType?: string | null
   platformName: string
   platformHomeUrl?: string | null
   platformLogoUrl?: string | null
@@ -492,6 +498,7 @@ export interface AIPlatformConfigItem {
   enabledForArticle?: boolean
   enabledForGeoQuestion?: boolean
   enabledForQuestionPoll?: boolean
+  enabledForMobileDashboard?: boolean
   maxRetry?: number | null
   timeoutMs?: number | null
   rateLimitQps?: number | null

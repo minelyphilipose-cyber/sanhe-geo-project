@@ -8,6 +8,7 @@ import com.huanjing.geo.module.dispatch.websearch.enums.SearchStatus;
 import com.huanjing.geo.module.dispatch.websearch.codec.DashScopeNativeWebSearchCodec;
 import com.huanjing.geo.module.dispatch.websearch.codec.TencentTokenHubResponsesWebSearchCodec;
 import com.huanjing.geo.module.dispatch.websearch.codec.VolcengineResponsesWebSearchCodec;
+import com.huanjing.geo.module.dispatch.websearch.codec.QianfanErnieChatWebSearchCodec;
 import com.huanjing.geo.module.dispatch.websearch.model.WebSearchPlatformProfile;
 import com.huanjing.geo.module.dispatch.websearch.model.WebSearchRequest;
 import com.huanjing.geo.module.dispatch.websearch.model.WebSearchResponse;
@@ -97,6 +98,35 @@ class WebSearchAdapterFixtureTest {
         assertFixture(adapter, "tokenhub/invalid_source.json", SearchStatus.NO_VALID_SOURCE, CitationConfidence.NONE);
     }
 
+    @Test
+    void qianfanErnieBuildsNonStreamingBuiltInWebSearchRequest() {
+        QianfanErnieChatWebSearchAdapter adapter = qianfanAdapter();
+
+        JsonNode body = adapter.buildRequest(request(IntegrationType.QIANFAN_ERNIE_CHAT_WEB, "{}"));
+
+        assertFalse(body.path("stream").asBoolean(true));
+        JsonNode webSearch = body.path("web_search");
+        assertTrue(webSearch.path("enable").asBoolean());
+        assertTrue(webSearch.path("enable_trace").asBoolean());
+        assertFalse(webSearch.has("enable_status"));
+        assertTrue(webSearch.path("enable_citation").asBoolean());
+        assertEquals("auto", webSearch.path("search_mode").asText());
+        assertEquals(10, webSearch.path("search_number").asInt());
+        assertEquals(5, webSearch.path("reference_number").asInt());
+    }
+
+    @Test
+    void qianfanErnieClassifiesFrozenSearchBoundaries() throws Exception {
+        QianfanErnieChatWebSearchAdapter adapter = qianfanAdapter();
+
+        assertFixture(adapter, "qianfan/success.json", SearchStatus.TRIGGERED, CitationConfidence.CONFIRMED);
+        assertFixture(adapter, "qianfan/not_confirmed.json", SearchStatus.NOT_CONFIRMED, null);
+        assertFixture(adapter, "qianfan/empty.json", SearchStatus.EMPTY, null);
+        assertFixture(adapter, "qianfan/invalid_source.json", SearchStatus.NO_VALID_SOURCE, CitationConfidence.NONE);
+        assertFixture(adapter, "qianfan/valid_source_without_citation.json", SearchStatus.TRIGGERED, null);
+        assertFixture(adapter, "qianfan/triggered_without_trace.json", SearchStatus.NO_VALID_SOURCE, null);
+    }
+
     private void assertFixture(AbstractJsonWebSearchAdapter adapter,
                                String fixture,
                                SearchStatus expectedStatus,
@@ -144,5 +174,10 @@ class WebSearchAdapterFixtureTest {
     private TencentTokenHubResponsesWebSearchAdapter tokenHubAdapter() {
         return new TencentTokenHubResponsesWebSearchAdapter(
                 objectMapper, callExecutor, new TencentTokenHubResponsesWebSearchCodec(objectMapper));
+    }
+
+    private QianfanErnieChatWebSearchAdapter qianfanAdapter() {
+        return new QianfanErnieChatWebSearchAdapter(
+                objectMapper, callExecutor, new QianfanErnieChatWebSearchCodec(objectMapper));
     }
 }

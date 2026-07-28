@@ -1,0 +1,20 @@
+{
+  "id": "qianfan_empty",
+  "model": "ernie-4.5-turbo-32k",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "未搜索到有效结果"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "search_results": [],
+  "usage": {
+    "prompt_tokens": 8,
+    "completion_tokens": 4,
+    "total_tokens": 12
+  }
+}

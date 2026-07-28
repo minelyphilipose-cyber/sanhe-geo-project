@@ -1,0 +1,22 @@
+{
+  "model": "fixture-model",
+  "stream": false,
+  "messages": [
+    {
+      "role": "system",
+      "content": "必须引用联网来源。"
+    },
+    {
+      "role": "user",
+      "content": "今天有什么热点新闻"
+    }
+  ],
+  "web_search": {
+    "enable": true,
+    "enable_trace": true,
+    "enable_citation": true,
+    "search_mode": "auto",
+    "search_number": 10,
+    "reference_number": 5
+  }
+}

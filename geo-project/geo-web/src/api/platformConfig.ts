@@ -13,6 +13,9 @@ export function getPlatformConfigPage(params: {
 
 export function createPlatformConfig(data: {
   platformCode: string
+  channelCode?: string
+  usageScene?: string
+  integrationType?: string
   platformName: string
   platformHomeUrl?: string
   platformLogoUrl?: string
@@ -36,6 +39,7 @@ export function createPlatformConfig(data: {
   enabledForArticle?: boolean
   enabledForGeoQuestion?: boolean
   enabledForQuestionPoll?: boolean
+  enabledForMobileDashboard?: boolean
   maxRetry?: number
   timeoutMs?: number
   rateLimitQps?: number
@@ -48,6 +52,9 @@ export function createPlatformConfig(data: {
 
 export function updatePlatformConfig(id: number, data: {
   platformCode: string
+  channelCode?: string
+  usageScene?: string
+  integrationType?: string
   platformName: string
   platformHomeUrl?: string
   platformLogoUrl?: string
@@ -73,6 +80,7 @@ export function updatePlatformConfig(id: number, data: {
   enabledForArticle?: boolean
   enabledForGeoQuestion?: boolean
   enabledForQuestionPoll?: boolean
+  enabledForMobileDashboard?: boolean
   maxRetry?: number
   timeoutMs?: number
   rateLimitQps?: number

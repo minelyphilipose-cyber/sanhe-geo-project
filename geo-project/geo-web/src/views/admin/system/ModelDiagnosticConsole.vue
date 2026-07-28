@@ -569,7 +569,13 @@ function citationMapping(citation: Record<string, unknown>, run: DiagnosticRunVi
   return `${position} → ${source ? sourceTitle(source, occurrence) : '未匹配来源'}`
 }
 function channelLabel(value: string) {
-  return ({ deepseek: 'DeepSeek', doubao: '豆包', qwen: '通义千问', yuanbao: '腾讯元宝' } as Record<string, string>)[value.toLowerCase()] || value
+  return ({
+    deepseek: 'DeepSeek',
+    doubao: '豆包',
+    qwen: '通义千问',
+    wenxin: '文心一言',
+    yuanbao: '腾讯元宝',
+  } as Record<string, string>)[value.toLowerCase()] || value
 }
 function platformOptionKey(item: DiagnosticPlatformOption) { return `${item.platformConfigId}:${item.modelTier}` }
 function modelTierLabel(value: DiagnosticModelTier) { return value === 'LOW' ? '低性能模型' : '主模型' }

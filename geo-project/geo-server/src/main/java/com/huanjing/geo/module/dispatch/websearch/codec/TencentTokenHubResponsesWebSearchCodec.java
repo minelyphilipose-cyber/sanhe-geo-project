@@ -150,6 +150,7 @@ public class TencentTokenHubResponsesWebSearchCodec extends AbstractJsonWebSearc
                 eventIndex, index == null ? sourceIndex + 1 : index, null,
                 annotation.path("title").asText(null), url,
                 validSource ? url : null, validSource ? WebSearchCodecSupport.domain(url) : null,
+                null,
                 annotation.path("snippet").asText(null), null,
                 BrandMatchStrength.NONE, List.of()
         ));

@@ -1,0 +1,27 @@
+{
+  "providerRequestId": "qianfan_empty",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "ernie-4.5-turbo-32k",
+  "answer": "未搜索到有效结果",
+  "searchStatus": "EMPTY",
+  "generationSkipped": false,
+  "searchEvidence": [
+    {
+      "eventIndex": 1,
+      "evidenceType": "search_results",
+      "query": null,
+      "attributes": {
+        "resultCount": 0,
+        "searchTokens": 0
+      }
+    }
+  ],
+  "sources": [],
+  "citations": [],
+  "usage": {
+    "prompt_tokens": 8,
+    "completion_tokens": 4,
+    "total_tokens": 12
+  },
+  "finishReason": "stop"
+}

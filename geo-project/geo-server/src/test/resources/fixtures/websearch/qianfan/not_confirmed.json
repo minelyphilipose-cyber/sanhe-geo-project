@@ -1,0 +1,19 @@
+{
+  "id": "qianfan_not_confirmed",
+  "model": "ernie-4.5-turbo-32k",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "模型未触发联网搜索"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 8,
+    "completion_tokens": 4,
+    "total_tokens": 12
+  }
+}

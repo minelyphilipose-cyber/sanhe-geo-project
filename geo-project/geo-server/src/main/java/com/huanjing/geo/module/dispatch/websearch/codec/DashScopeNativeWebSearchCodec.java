@@ -117,6 +117,7 @@ public class DashScopeNativeWebSearchCodec extends AbstractJsonWebSearchCodec {
             sources.add(new WebSearchSource(
                     1, rank, item.path("query").asText(null), item.path("title").asText(null), url,
                     validUrl ? url : null, validUrl ? WebSearchCodecSupport.domain(url) : null,
+                    null,
                     item.path("snippet").asText(item.path("text").asText(null)), null,
                     BrandMatchStrength.NONE, List.of()
             ));

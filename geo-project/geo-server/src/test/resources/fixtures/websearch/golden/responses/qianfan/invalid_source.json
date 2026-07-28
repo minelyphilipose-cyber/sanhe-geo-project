@@ -1,18 +1,18 @@
 {
-  "providerRequestId": "tokenhub_invalid",
+  "providerRequestId": "qianfan_invalid_source",
   "requestedModelId": "fixture-model",
-  "responseModelId": "fixture-model",
-  "answer": "\u7ED3\u679C[1]",
+  "responseModelId": "ernie-4.5-turbo-32k",
+  "answer": "无效来源^[1]^",
   "searchStatus": "NO_VALID_SOURCE",
   "generationSkipped": false,
   "searchEvidence": [
     {
       "eventIndex": 1,
-      "evidenceType": "web_search_call",
+      "evidenceType": "search_results",
       "query": null,
       "attributes": {
-        "id": "ws_t_invalid",
-        "action": "search"
+        "resultCount": 1,
+        "searchTokens": 0
       }
     }
   ],
@@ -21,12 +21,12 @@
       "searchEventIndex": 1,
       "rank": 1,
       "query": null,
-      "title": "\u975E\u6CD5\u6765\u6E90",
-      "originalUrl": "file:///etc/passwd",
+      "title": "无效来源",
+      "originalUrl": "javascript:alert(1)",
       "normalizedUrl": null,
       "domain": null,
       "media": null,
-      "snippet": null,
+      "snippet": "不可用来源",
       "publishTime": null,
       "brandMatchStrength": "NONE",
       "matchedKeywords": []
@@ -36,17 +36,17 @@
     {
       "citationIndex": 1,
       "sourceOccurrenceIndex": 0,
-      "answerStart": 2,
-      "answerEnd": 5,
-      "citationText": "[1]",
+      "answerStart": 4,
+      "answerEnd": 9,
+      "citationText": "^[1]^",
       "confidence": "NONE",
-      "validationStatus": "INCOMPLETE_PROVIDER_METADATA"
+      "validationStatus": "SOURCE_INDEX_NOT_FOUND"
     }
   ],
   "usage": {
-    "tool_usage": {
-      "web_search_call": 1
-    }
+    "prompt_tokens": 8,
+    "completion_tokens": 4,
+    "total_tokens": 12
   },
-  "finishReason": "completed"
+  "finishReason": "stop"
 }

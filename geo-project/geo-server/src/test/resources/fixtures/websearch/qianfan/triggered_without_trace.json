@@ -1,0 +1,22 @@
+{
+  "id": "qianfan_triggered_without_trace",
+  "model": "ernie-4.5-turbo-32k",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "搜索已触发，但没有可公开返回的溯源信息。"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 108,
+    "prompt_tokens_details": {
+      "search_tokens": 100
+    },
+    "completion_tokens": 12,
+    "total_tokens": 120
+  }
+}

@@ -8,6 +8,7 @@ export const aiPlatformLabels: Record<string, string> = {
   qwen: '通义千问',
   wenxin: '文心一言',
   ernie: '文心一言',
+  wenxin_web: '文心一言',
   yuanbao: '元宝',
   hunyuan: '元宝'
 }

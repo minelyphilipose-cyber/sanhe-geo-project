@@ -25,6 +25,7 @@
       "originalUrl": "https://news.example.com/qwen",
       "normalizedUrl": "https://news.example.com/qwen",
       "domain": "news.example.com",
+      "media": null,
       "snippet": "\u6458\u8981",
       "publishTime": null,
       "brandMatchStrength": "NONE",

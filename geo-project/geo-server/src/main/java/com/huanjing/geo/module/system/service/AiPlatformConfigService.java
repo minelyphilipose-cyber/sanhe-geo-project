@@ -9,6 +9,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.image.CompressedImage;
 import com.huanjing.geo.common.image.ImageCompressionService;
 import com.huanjing.geo.common.storage.MinioStorageService;
+import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardAiPlatformCatalog;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigCreateRequest;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigUpdateRequest;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
@@ -18,6 +19,8 @@ import com.huanjing.geo.module.dispatch.websearch.enums.IntegrationType;
 import com.huanjing.geo.module.dispatch.websearch.enums.UsageScene;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -49,6 +52,7 @@ public class AiPlatformConfigService {
     private final MinioStorageService minioStorageService;
     private final ImageCompressionService imageCompressionService;
     private final ObjectMapper objectMapper;
+    private final MobileDashboardAiPlatformCatalog mobileDashboardAiPlatformCatalog;
 
     public Page<AiPlatformConfig> page(long current, long size, String keyword, String priorityLevel, Boolean enabled) {
         currentUserService.ensureUserManageOperator();
@@ -95,6 +99,7 @@ public class AiPlatformConfigService {
                 req.getPresaleEvaluateEnabled(),
                 req.getEnabledForGeoQuestion(),
                 req.getEnabledForQuestionPoll(),
+                req.getEnabledForMobileDashboard(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -118,6 +123,7 @@ public class AiPlatformConfigService {
                 snapshot(entity),
                 null
         );
+        refreshMobileDashboardCatalogAfterCommit();
         return entity;
     }
 
@@ -161,6 +167,7 @@ public class AiPlatformConfigService {
                 req.getPresaleEvaluateEnabled(),
                 req.getEnabledForGeoQuestion(),
                 req.getEnabledForQuestionPoll(),
+                req.getEnabledForMobileDashboard(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -185,6 +192,7 @@ public class AiPlatformConfigService {
                 snapshot(entity),
                 null
         );
+        refreshMobileDashboardCatalogAfterCommit();
         return entity;
     }
 
@@ -263,6 +271,7 @@ public class AiPlatformConfigService {
                 null,
                 null
         );
+        refreshMobileDashboardCatalogAfterCommit();
     }
 
     private AiPlatformConfig requireById(Long id) {
@@ -295,6 +304,7 @@ public class AiPlatformConfigService {
             Boolean presaleEvaluateEnabled,
             Boolean enabledForGeoQuestion,
             Boolean enabledForQuestionPoll,
+            Boolean enabledForMobileDashboard,
             Boolean degraded,
             String degradedReason
     ) {
@@ -356,6 +366,10 @@ public class AiPlatformConfigService {
         }
         if (Boolean.TRUE.equals(enabledForQuestionPoll) && !Boolean.TRUE.equals(enabled)) {
             throw new BizException(400, "platform must be enabled when enabling question poll");
+        }
+        if (Boolean.TRUE.equals(enabledForMobileDashboard) && scene != UsageScene.QUESTION_POLL_WEB) {
+            throw new BizException(400,
+                    "mobile dashboard visibility requires usage_scene=QUESTION_POLL_WEB");
         }
         if (Boolean.TRUE.equals(degraded) && !StringUtils.hasText(degradedReason)) {
             throw new BizException(400, "degraded_reason is required when degraded=true");
@@ -515,6 +529,7 @@ public class AiPlatformConfigService {
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : false);
         entity.setEnabledForGeoQuestion(Boolean.TRUE.equals(req.getEnabledForGeoQuestion()));
         entity.setEnabledForQuestionPoll(Boolean.TRUE.equals(req.getEnabledForQuestionPoll()));
+        entity.setEnabledForMobileDashboard(Boolean.TRUE.equals(req.getEnabledForMobileDashboard()));
         entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : 2);
         entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : 60000);
         entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : 3);
@@ -567,6 +582,8 @@ public class AiPlatformConfigService {
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : entity.getEnabledForArticle());
         entity.setEnabledForGeoQuestion(req.getEnabledForGeoQuestion() != null ? req.getEnabledForGeoQuestion() : entity.getEnabledForGeoQuestion());
         entity.setEnabledForQuestionPoll(req.getEnabledForQuestionPoll() != null ? req.getEnabledForQuestionPoll() : entity.getEnabledForQuestionPoll());
+        entity.setEnabledForMobileDashboard(req.getEnabledForMobileDashboard() != null
+                ? req.getEnabledForMobileDashboard() : entity.getEnabledForMobileDashboard());
         entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : entity.getMaxRetry());
         entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : entity.getTimeoutMs());
         entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : entity.getRateLimitQps());
@@ -604,6 +621,7 @@ public class AiPlatformConfigService {
         snapshot.put("enabledForArticle", entity.getEnabledForArticle());
         snapshot.put("enabledForGeoQuestion", entity.getEnabledForGeoQuestion());
         snapshot.put("enabledForQuestionPoll", entity.getEnabledForQuestionPoll());
+        snapshot.put("enabledForMobileDashboard", entity.getEnabledForMobileDashboard());
         snapshot.put("maxRetry", entity.getMaxRetry());
         snapshot.put("timeoutMs", entity.getTimeoutMs());
         snapshot.put("rateLimitQps", entity.getRateLimitQps());
@@ -611,6 +629,19 @@ public class AiPlatformConfigService {
         snapshot.put("degradedReason", entity.getDegradedReason());
         snapshot.put("currentHealthStatus", entity.getCurrentHealthStatus());
         return snapshot;
+    }
+
+    private void refreshMobileDashboardCatalogAfterCommit() {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            mobileDashboardAiPlatformCatalog.refresh();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                mobileDashboardAiPlatformCatalog.refresh();
+            }
+        });
     }
 
     private void validateLogoFile(MultipartFile file) {

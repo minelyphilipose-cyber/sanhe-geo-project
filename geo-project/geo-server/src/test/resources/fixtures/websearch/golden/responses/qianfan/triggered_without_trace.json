@@ -1,0 +1,30 @@
+{
+  "providerRequestId": "qianfan_triggered_without_trace",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "ernie-4.5-turbo-32k",
+  "answer": "搜索已触发，但没有可公开返回的溯源信息。",
+  "searchStatus": "NO_VALID_SOURCE",
+  "generationSkipped": false,
+  "searchEvidence": [
+    {
+      "eventIndex": 1,
+      "evidenceType": "search_results",
+      "query": null,
+      "attributes": {
+        "resultCount": 0,
+        "searchTokens": 100
+      }
+    }
+  ],
+  "sources": [],
+  "citations": [],
+  "usage": {
+    "prompt_tokens": 108,
+    "prompt_tokens_details": {
+      "search_tokens": 100
+    },
+    "completion_tokens": 12,
+    "total_tokens": 120
+  },
+  "finishReason": "stop"
+}

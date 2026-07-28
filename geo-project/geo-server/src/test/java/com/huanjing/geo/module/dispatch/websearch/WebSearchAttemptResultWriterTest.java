@@ -63,6 +63,9 @@ class WebSearchAttemptResultWriterTest {
         verify(citationMapper).insert(citation.capture());
         assertEquals(CitationConfidence.CONFIRMED.name(), citation.getValue().getConfidence());
         assertEquals("VALID_BRAND_STRONG", citation.getValue().getValidationStatus());
+        ArgumentCaptor<PollSearchSource> source = ArgumentCaptor.forClass(PollSearchSource.class);
+        verify(sourceMapper).insert(source.capture());
+        assertEquals("示例媒体", source.getValue().getMedia());
     }
 
     @Test
@@ -87,7 +90,7 @@ class WebSearchAttemptResultWriterTest {
     private WebSearchResponse response(String answer, String sourceTitle) {
         WebSearchSource source = new WebSearchSource(
                 1, 1, "问题", sourceTitle, "https://example.com/source",
-                "https://example.com/source", "example.com", "摘要", null,
+                "https://example.com/source", "example.com", "示例媒体", "摘要", null,
                 BrandMatchStrength.NONE, List.of());
         WebSearchCitation citation = new WebSearchCitation(
                 1, 0, answer.length() - 3, answer.length(), "[1]",

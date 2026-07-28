@@ -9,5 +9,8 @@ describe('mobile dashboard AI platform visibility', () => {
     expect(isMobileDashboardAiPlatformVisible('doubao')).toBe(true)
     expect(isMobileDashboardAiPlatformVisible('deepseek')).toBe(true)
     expect(isMobileDashboardAiPlatformVisible('tongyi')).toBe(true)
+    expect(isMobileDashboardAiPlatformVisible('wenxin')).toBe(true)
+    expect(isMobileDashboardAiPlatformVisible('ernie')).toBe(true)
+    expect(isMobileDashboardAiPlatformVisible('wenxin_web')).toBe(true)
   })
 })

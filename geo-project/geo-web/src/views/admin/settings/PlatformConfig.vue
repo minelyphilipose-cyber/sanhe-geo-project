@@ -118,6 +118,7 @@
                 <span class="capability-tag" :class="scope.row.presaleEvaluateEnabled ? 'is-success' : 'is-muted'">评估</span>
                 <span class="capability-tag" :class="scope.row.enabledForArticle ? 'is-success' : 'is-muted'">文章</span>
                 <span class="capability-tag" :class="scope.row.enabledForQuestionPoll ? 'is-success' : 'is-muted'">跑批</span>
+                <span class="capability-tag" :class="scope.row.enabledForMobileDashboard ? 'is-success' : 'is-muted'">看板</span>
               </div>
             </template>
           </el-table-column>
@@ -305,7 +306,7 @@
           <div class="business-section-head">
             <span class="business-section-icon" aria-hidden="true"><span /><span /><span /></span>
             <strong>业务能力</strong>
-            <small>总开关决定该平台是否参与任何业务链路</small>
+            <small>总开关控制新任务，历史数据展示由独立开关控制</small>
             <i />
           </div>
 
@@ -315,8 +316,8 @@
                 <span class="master-power-icon" aria-hidden="true" />
                 <div>
                   <strong title="模型总启用状态">模型总启用状态</strong>
-                  <span title="关闭后，该平台不会参与售前、拓词、文章、跑批等任何任务">
-                    关闭后，该平台不会参与售前、拓词、文章、跑批等任何任务
+                  <span title="关闭后不再创建新任务，已采集历史数据是否展示由手机看板开关单独控制">
+                    关闭后不再创建新任务，历史数据展示由手机看板开关单独控制
                   </span>
                 </div>
               </div>
@@ -464,6 +465,37 @@
             </div>
           </div>
 
+          <div class="capability-group">
+            <div class="capability-group-head">
+              <span class="capability-group-strip is-report" />
+              <strong>客户手机看板</strong>
+              <small>与后台采集解耦，验收通过后再人工放开</small>
+            </div>
+            <div class="capability-card-grid is-single">
+              <div class="child-capability-card" :class="{ 'is-master-off': !isQuestionPollWebProfile }">
+                <div class="child-capability-info">
+                  <strong title="手机看板展示">手机看板展示</strong>
+                  <span title="关闭时该平台不进入客户看板的任何分子、分母、趋势和明细">
+                    关闭时不进入客户看板统计、筛选及问题明细
+                  </span>
+                </div>
+                <div class="switch-control">
+                  <span class="switch-status" :class="{ 'is-off': !form.enabledForMobileDashboard }">
+                    {{ form.enabledForMobileDashboard ? '展示' : '隐藏' }}
+                  </span>
+                  <el-switch
+                    :model-value="form.enabledForMobileDashboard"
+                    :disabled="!isQuestionPollWebProfile"
+                    @update:model-value="handleMobileDashboardVisibilityChange"
+                  />
+                </div>
+              </div>
+            </div>
+            <div v-if="!isQuestionPollWebProfile" class="constraint-hint">
+              仅 QUESTION_POLL_WEB 联网轮询配置可进入手机数据看板。
+            </div>
+          </div>
+
           <div class="degrade-panel">
             <div class="degrade-panel-head">
               <div>
@@ -574,6 +606,7 @@ const builtinPlatformLogos: Record<string, string> = {
   tongyi: qwenLogo,
   通义千问: qwenLogo,
   wenxin: wenxinLogo,
+  wenxin_web: wenxinLogo,
   文心一言: wenxinLogo,
   mimo: xiaomiMimoLogo,
   xiaomimimo: xiaomiMimoLogo,
@@ -589,6 +622,7 @@ const existingApiKeyConfigured = ref(false)
 
 const form = reactive({
   platformCode: '',
+  usageScene: 'STANDARD_CHAT',
   platformName: '',
   platformHomeUrl: '',
   platformLogoUrl: '',
@@ -611,6 +645,7 @@ const form = reactive({
   enabledForArticle: true,
   enabledForGeoQuestion: true,
   enabledForQuestionPoll: false,
+  enabledForMobileDashboard: false,
   presaleEvaluateEnabled: true,
   degraded: false,
   degradedReason: '',
@@ -626,6 +661,7 @@ const formPlatformLogoSrc = computed(() => platformLogoSrc({
 const apiKeyPlaceholder = computed(() => mode.value === 'edit' && existingApiKeyConfigured.value
   ? '已配置页面密钥；留空表示不更换'
   : '输入平台密钥（加密保存）')
+const isQuestionPollWebProfile = computed(() => form.usageScene === 'QUESTION_POLL_WEB')
 
 const rules: FormRules = {
   platformCode: [
@@ -690,6 +726,7 @@ watch(
 
 function resetForm() {
   form.platformCode = ''
+  form.usageScene = 'STANDARD_CHAT'
   form.platformName = ''
   form.platformHomeUrl = ''
   form.platformLogoUrl = ''
@@ -712,6 +749,7 @@ function resetForm() {
   form.enabledForArticle = true
   form.enabledForGeoQuestion = true
   form.enabledForQuestionPoll = false
+  form.enabledForMobileDashboard = false
   form.presaleEvaluateEnabled = true
   form.degraded = false
   form.degradedReason = ''
@@ -807,6 +845,7 @@ function openEdit(row: AIPlatformConfigItem) {
   editingId.value = row.id
   existingApiKeyConfigured.value = !!row.apiKeyConfigured
   form.platformCode = row.platformCode
+  form.usageScene = row.usageScene || 'STANDARD_CHAT'
   form.platformName = row.platformName
   form.platformHomeUrl = row.platformHomeUrl || ''
   form.platformLogoUrl = normalizeObjectStorageUrl(row.platformLogoUrl) || row.platformLogoUrl || ''
@@ -829,6 +868,8 @@ function openEdit(row: AIPlatformConfigItem) {
   form.enabledForArticle = !!row.enabledForArticle
   form.enabledForGeoQuestion = !!row.enabledForGeoQuestion
   form.enabledForQuestionPoll = !!row.enabledForQuestionPoll
+  form.enabledForMobileDashboard = row.usageScene === 'QUESTION_POLL_WEB'
+    && !!row.enabledForMobileDashboard
   form.presaleEvaluateEnabled = !!row.presaleEvaluateEnabled
   form.degraded = row.degraded
   form.degradedReason = row.degradedReason || ''
@@ -850,6 +891,7 @@ async function submit() {
     )
     const payload = {
       platformCode: form.platformCode.trim(),
+      usageScene: form.usageScene,
       platformName: form.platformName.trim(),
       platformHomeUrl: form.platformHomeUrl.trim() || undefined,
       platformLogoUrl: normalizeObjectStorageUrl(form.platformLogoUrl) || undefined,
@@ -873,6 +915,7 @@ async function submit() {
       enabledForArticle: form.enabledForArticle,
       enabledForGeoQuestion: form.enabledForGeoQuestion,
       enabledForQuestionPoll: form.enabledForQuestionPoll,
+      enabledForMobileDashboard: form.enabledForMobileDashboard,
       presaleEvaluateEnabled: form.presaleEvaluateEnabled,
       degraded: form.degraded,
       degradedReason: form.degraded ? form.degradedReason.trim() : undefined,
@@ -888,6 +931,31 @@ async function submit() {
     await load()
   } finally {
     saving.value = false
+  }
+}
+
+async function handleMobileDashboardVisibilityChange(visible: boolean) {
+  if (!visible) {
+    form.enabledForMobileDashboard = false
+    return
+  }
+  if (!isQuestionPollWebProfile.value) {
+    form.enabledForMobileDashboard = false
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '开启后，该平台已采集的数据会立即进入客户手机看板的统计、趋势、筛选和问题明细。请确认已完成一个完整轮询周期及数据验收。',
+      '确认放开手机看板展示',
+      {
+        type: 'warning',
+        confirmButtonText: '确认放开',
+        cancelButtonText: '继续隐藏',
+      },
+    )
+    form.enabledForMobileDashboard = true
+  } catch {
+    form.enabledForMobileDashboard = false
   }
 }
 

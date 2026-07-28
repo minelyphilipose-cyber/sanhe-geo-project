@@ -1,0 +1,17 @@
+{
+  "providerRequestId": "qianfan_not_confirmed",
+  "requestedModelId": "fixture-model",
+  "responseModelId": "ernie-4.5-turbo-32k",
+  "answer": "模型未触发联网搜索",
+  "searchStatus": "NOT_CONFIRMED",
+  "generationSkipped": false,
+  "searchEvidence": [],
+  "sources": [],
+  "citations": [],
+  "usage": {
+    "prompt_tokens": 8,
+    "completion_tokens": 4,
+    "total_tokens": 12
+  },
+  "finishReason": "stop"
+}

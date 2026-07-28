@@ -114,6 +114,7 @@ public class WebSearchAttemptResultWriter {
             entity.setOriginalUrl(source.originalUrl());
             entity.setNormalizedUrl(source.normalizedUrl());
             entity.setDomain(source.domain());
+            entity.setMedia(source.media());
             entity.setSnippet(source.snippet());
             entity.setPublishTime(source.publishTime());
             entity.setBrandMatched(!matched.isEmpty());
