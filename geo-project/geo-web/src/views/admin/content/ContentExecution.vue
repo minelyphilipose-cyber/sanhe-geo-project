@@ -109,7 +109,7 @@
       <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
         <span class="admin-metric-label">已发布</span>
         <strong class="admin-metric-value">{{ publishedCount }}</strong>
-        <span class="admin-metric-hint">本页可见</span>
+        <span class="admin-metric-hint">发布凭证全局</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
         <span class="admin-metric-label">可分发</span>
@@ -601,6 +601,7 @@ import type { ArticleDetailResponse, ArticleDraft } from '@/types'
 import {
   deleteContentArticle,
   getContentArticleDetail,
+  getContentArticleStats,
   getContentArticles,
 } from '@/api/content'
 import { getProjectDetail } from '@/api/project'
@@ -656,7 +657,7 @@ const query = reactive({
   generationMode: '' as '' | 'batch' | 'single',
   createdRange: [] as string[],
 })
-const publishedCount = computed(() => rows.value.filter((row) => row.status === 'published').length)
+const publishedCount = ref(0)
 const distributableCount = computed(() => rows.value.filter((row) => canDistribute(row.status)).length)
 const showAdvancedFilters = ref(false)
 const blockedCount = computed(() => rows.value.filter((row) =>
@@ -1107,20 +1108,27 @@ async function deleteArticle(row: ArticleDraft) {
 async function load() {
   loading.value = true
   try {
-    const { data } = await getContentArticles({
-      current: page.current,
-      size: page.size,
-      projectName: query.projectName.trim() || undefined,
-      status: query.status || undefined,
-      articleType: query.articleType || undefined,
-      articleTypeCode: query.articleTypeCode || undefined,
-      ...parseChannelKey(query.channelKey),
-      generationMode: query.generationMode || undefined,
-      createdStartDate: query.createdRange[0] || undefined,
-      createdEndDate: query.createdRange[1] || undefined,
-    })
+    const [articleResponse, statsResponse] = await Promise.all([
+      getContentArticles({
+        current: page.current,
+        size: page.size,
+        projectName: query.projectName.trim() || undefined,
+        status: query.status || undefined,
+        articleType: query.articleType || undefined,
+        articleTypeCode: query.articleTypeCode || undefined,
+        ...parseChannelKey(query.channelKey),
+        generationMode: query.generationMode || undefined,
+        createdStartDate: query.createdRange[0] || undefined,
+        createdEndDate: query.createdRange[1] || undefined,
+      }),
+      getContentArticleStats().catch(() => null),
+    ])
+    const { data } = articleResponse
     rows.value = data.data.records || []
     page.total = data.data.total || 0
+    if (statsResponse) {
+      publishedCount.value = statsResponse.data.data.publishedCount || 0
+    }
   } catch {
     rows.value = []
     page.total = 0

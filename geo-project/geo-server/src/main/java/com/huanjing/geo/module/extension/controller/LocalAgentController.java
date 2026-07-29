@@ -341,7 +341,7 @@ public class LocalAgentController {
             @RequestBody(required = false) JsonNode body,
             HttpServletRequest request) {
         LocalAgentSession session = verifySignedRequest(request);
-        scheduleService.markClaimedPublishFailed(
+        scheduleService.markClaimedLocalAgentPublishCheckFailed(
                 session.getOperatorId(),
                 session.getId(),
                 jsonInteger(body, "claimAttempt"),

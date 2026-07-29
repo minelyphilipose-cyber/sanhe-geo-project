@@ -90,6 +90,10 @@ public class ProjectSelfMediaScheduleService {
     private static final String ERROR_CAPACITY_INSUFFICIENT = "SELF_MEDIA_SCHEDULE_CAPACITY_INSUFFICIENT";
     private static final String ERROR_COMPRESS_NOT_SUPPORTED = "SELF_MEDIA_SCHEDULE_COMPRESS_NOT_SUPPORTED";
     private static final String ERROR_DECISION_REASON_REQUIRED = "SELF_MEDIA_SCHEDULE_DECISION_REASON_REQUIRED";
+    private static final String ERROR_PUBLISH_RESULT_CHECK_RESCHEDULE_FORBIDDEN =
+            "PUBLISH_RESULT_CHECK_RESCHEDULE_FORBIDDEN";
+    private static final String ERROR_PUBLISH_RESULT_CHECK_IGNORE_FORBIDDEN =
+            "PUBLISH_RESULT_CHECK_IGNORE_FORBIDDEN";
     private static final String STRATEGY_STRICT_CURRENT_MONTH = "strict_current_month";
     private static final String STRATEGY_CARRY_OVER = "carry_over";
     private static final String STRATEGY_COMPRESSED_CURRENT_MONTH = "compressed_current_month";
@@ -310,6 +314,7 @@ public class ProjectSelfMediaScheduleService {
         return getBatchDetail(project.getId(), targetMonth);
     }
 
+    @Transactional
     public ProjectSelfMediaScheduleBatchDetailVO rescheduleAbnormalScheduleItemsToNextMonth(Long projectId, String targetMonth) {
         Project project = requireProject(projectId);
         requireProjectOperate(project);
@@ -326,6 +331,11 @@ public class ProjectSelfMediaScheduleService {
         if (candidates.isEmpty()) {
             throw new BizException(ERROR_CODE, "当前批次没有可改期的异常排期");
         }
+        rejectPublishResultCheckBatchAction(
+                candidates,
+                ERROR_PUBLISH_RESULT_CHECK_RESCHEDULE_FORBIDDEN,
+                "发布结果未知的排期不得改期到下月，请先重新校验发布结果"
+        );
         YearMonth nextMonth = parseTargetMonth(targetMonth).plusMonths(1);
         List<GeneratedSchedulePlan> reschedulePlans = candidates.stream()
                 .map(item -> new GeneratedSchedulePlan(
@@ -348,10 +358,15 @@ public class ProjectSelfMediaScheduleService {
         int changed = 0;
         for (int i = 0; i < candidates.size(); i++) {
             ProjectSelfMediaScheduleBatchDetailVO.Item item = candidates.get(i);
-            SelfMediaPublishSchedule row = selfMediaPublishScheduleMapper.selectById(item.getScheduleId());
+            SelfMediaPublishSchedule row = selfMediaPublishScheduleMapper.selectByIdForUpdate(item.getScheduleId());
             if (row == null || !isRetryableScheduleStatus(row.getStatus())) {
                 continue;
             }
+            rejectPublishResultCheckBatchAction(
+                    row,
+                    ERROR_PUBLISH_RESULT_CHECK_RESCHEDULE_FORBIDDEN,
+                    "发布结果未知的排期不得改期到下月，请先重新校验发布结果"
+            );
             BusinessCalendarService.PublishSlot slot = slots.get(i);
             String strategy = resolveItemStrategy(firstText(row.getScheduleStrategy(), payload == null ? null : payload.scheduleStrategy()), row.getPlatform());
             row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
@@ -373,6 +388,7 @@ public class ProjectSelfMediaScheduleService {
         return getBatchDetail(project.getId(), targetMonth);
     }
 
+    @Transactional
     public ProjectSelfMediaScheduleBatchDetailVO ignoreAbnormalScheduleItems(Long projectId, String targetMonth) {
         Project project = requireProject(projectId);
         requireProjectOperate(project);
@@ -381,16 +397,26 @@ public class ProjectSelfMediaScheduleService {
         if (detail == null || detail.getItems() == null || detail.getItems().isEmpty()) {
             throw new BizException(ERROR_CODE, "自动排期批次不存在或没有可处理明细");
         }
+        List<ProjectSelfMediaScheduleBatchDetailVO.Item> candidates = detail.getItems().stream()
+                .filter(item -> item.getScheduleId() != null && isRetryableScheduleStatus(item.getScheduleStatus()))
+                .toList();
+        rejectPublishResultCheckBatchAction(
+                candidates,
+                ERROR_PUBLISH_RESULT_CHECK_IGNORE_FORBIDDEN,
+                "发布结果未知的排期不得批量忽略，请先重新校验发布结果"
+        );
         LocalDateTime now = LocalDateTime.now(clock);
         int ignored = 0;
-        for (ProjectSelfMediaScheduleBatchDetailVO.Item item : detail.getItems()) {
-            if (item.getScheduleId() == null || !isRetryableScheduleStatus(item.getScheduleStatus())) {
-                continue;
-            }
-            SelfMediaPublishSchedule row = selfMediaPublishScheduleMapper.selectById(item.getScheduleId());
+        for (ProjectSelfMediaScheduleBatchDetailVO.Item item : candidates) {
+            SelfMediaPublishSchedule row = selfMediaPublishScheduleMapper.selectByIdForUpdate(item.getScheduleId());
             if (row == null || !isRetryableScheduleStatus(row.getStatus())) {
                 continue;
             }
+            rejectPublishResultCheckBatchAction(
+                    row,
+                    ERROR_PUBLISH_RESULT_CHECK_IGNORE_FORBIDDEN,
+                    "发布结果未知的排期不得批量忽略，请先重新校验发布结果"
+            );
             row.setStatus(SelfMediaPublishScheduleConstants.STATUS_CANCELLED);
             row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
             row.setLockedUntil(null);
@@ -2032,6 +2058,26 @@ public class ProjectSelfMediaScheduleService {
                 || SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED.equals(normalized);
     }
 
+    private boolean isPublishResultCheckQueue(String queueKind) {
+        return SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK.equals(normalizeText(queueKind));
+    }
+
+    private void rejectPublishResultCheckBatchAction(List<ProjectSelfMediaScheduleBatchDetailVO.Item> items,
+                                                     String errorCode,
+                                                     String message) {
+        if (items != null && items.stream().anyMatch(item -> isPublishResultCheckQueue(item.getQueueKind()))) {
+            throw new BizException(ERROR_CODE, errorCode + ": " + message);
+        }
+    }
+
+    private void rejectPublishResultCheckBatchAction(SelfMediaPublishSchedule row,
+                                                     String errorCode,
+                                                     String message) {
+        if (row != null && isPublishResultCheckQueue(row.getQueueKind())) {
+            throw new BizException(ERROR_CODE, errorCode + ": " + message);
+        }
+    }
+
     private boolean isManualRequiredMarkableScheduleStatus(String status) {
         String normalized = normalizeText(status);
         return SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED.equals(normalized)
@@ -2567,13 +2613,18 @@ public class ProjectSelfMediaScheduleService {
             actions.add("重新处理");
             item.setOperatorActionHint("文章已生成但还没有安排发布时间，可点击重新处理补上排期。");
         } else if (isRetryableScheduleStatus(scheduleStatus)) {
-            actions.add("重新处理");
-            actions.add("改期到下月");
-            actions.add("忽略");
-            if (isManualRequiredMarkableScheduleStatus(scheduleStatus)) {
-                actions.add("转人工");
+            if (schedule != null && isPublishResultCheckQueue(schedule.getQueueKind())) {
+                actions.add("重新校验");
+                item.setOperatorActionHint("发布结果尚未确认，只能重新校验；为避免重复发布，不能改期或忽略。");
+            } else {
+                actions.add("重新处理");
+                actions.add("改期到下月");
+                actions.add("忽略");
+                if (isManualRequiredMarkableScheduleStatus(scheduleStatus)) {
+                    actions.add("转人工");
+                }
+                item.setOperatorActionHint("这条内容处理异常，可重新处理；如果本月时间不足，建议改期到下月。");
             }
-            item.setOperatorActionHint("这条内容处理异常，可重新处理；如果本月时间不足，建议改期到下月。");
         } else if (SelfMediaPublishScheduleConstants.STATUS_PENDING.equals(scheduleStatus)) {
             item.setOperatorActionHint("已安排好，等待系统到时间后处理。");
         } else if (SelfMediaPublishScheduleConstants.STATUS_SCHEDULED.equals(scheduleStatus)
@@ -2633,13 +2684,16 @@ public class ProjectSelfMediaScheduleService {
                     && item.getArticleId() != null
                     && !"rejected".equals(normalizeText(item.getScheduleStatus()));
             boolean retryableSchedule = item.getScheduleId() != null && isRetryableScheduleStatus(item.getScheduleStatus());
+            boolean publishResultCheck = retryableSchedule && isPublishResultCheckQueue(item.getQueueKind());
             if (generationFailed || rejected || generatedWithoutSchedule) {
                 retryFailed++;
             }
             if (retryableSchedule) {
                 retryAbnormal++;
-                reschedule++;
-                ignore++;
+                if (!publishResultCheck) {
+                    reschedule++;
+                    ignore++;
+                }
             }
             if (item.getScheduleId() != null && isManualRequiredMarkableScheduleStatus(item.getScheduleStatus())) {
                 manual++;

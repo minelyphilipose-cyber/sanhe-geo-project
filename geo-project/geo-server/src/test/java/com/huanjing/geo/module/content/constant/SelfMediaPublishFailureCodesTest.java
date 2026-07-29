@@ -44,4 +44,20 @@ class SelfMediaPublishFailureCodesTest {
         assertFalse(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("PAGE_LOAD_TIMEOUT"));
         assertFalse(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("COVER_UPLOAD_TIMEOUT"));
     }
+
+    @Test
+    void localAgentPublishCheckTerminalWhitelistIsExact() {
+        assertTrue(SelfMediaPublishFailureCodes.isLocalAgentPublishCheckTerminalFailure(
+                SelfMediaPublishFailureCodes.BAIJIAHAO_REVIEW_REJECTED));
+        assertTrue(SelfMediaPublishFailureCodes.isLocalAgentPublishCheckTerminalFailure(
+                SelfMediaPublishFailureCodes.BAIJIAHAO_WORK_WITHDRAWN));
+        assertFalse(SelfMediaPublishFailureCodes.isLocalAgentPublishCheckTerminalFailure(
+                "OFFICIAL_API_REVIEW_REJECTED"));
+        assertFalse(SelfMediaPublishFailureCodes.isLocalAgentPublishCheckTerminalFailure(
+                "PUBLISH_RESULT_CHECK_HELPER_FAILED"));
+        assertEquals("本地回查环境异常",
+                SelfMediaPublishFailureCodes.label("PUBLISH_RESULT_CHECK_HELPER_FAILED"));
+        assertEquals("重新校验",
+                SelfMediaPublishFailureCodes.actionLabel("PUBLISH_RESULT_CHECK_HELPER_FAILED"));
+    }
 }

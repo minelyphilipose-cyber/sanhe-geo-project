@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "geo.retention")
 public class DataRetentionProperties {
     private Scheduler scheduler = new Scheduler();
+    private WebsitePublishedCleanup websitePublishedCleanup = new WebsitePublishedCleanup();
     private ArticleArchive articleArchive = new ArticleArchive();
     private ArticlePurge articlePurge = new ArticlePurge();
     private PollResults pollResults = new PollResults();
@@ -22,13 +23,19 @@ public class DataRetentionProperties {
         private String cron = "0 30 3 * * *";
         private int limitPerDomain = 100;
         private int maxBatchesPerRun = 20;
-        private int pollHotRetentionDays = 120;
+        private int pollHotRetentionDays = 14;
+        private int websitePublishedRetentionHours = 24;
         private int articleRetentionDays = 90;
         private int articleArchiveGraceHours = 24;
         private int objectSafetyAgeHours = 24;
         private long operatorUserId = 0L;
         private String lockKey = "geo:retention:scheduler:lock";
         private long lockTtlSeconds = 7200L;
+    }
+
+    @Data
+    public static class WebsitePublishedCleanup {
+        private boolean executeEnabled = false;
     }
 
     @Data

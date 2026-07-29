@@ -994,6 +994,7 @@ class ProjectSelfMediaScheduleServiceTest {
         SelfMediaPublishSchedule schedule = new SelfMediaPublishSchedule();
         schedule.setId(88L);
         schedule.setStatus("manual_required");
+        schedule.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
         schedule.setPlannedPublishAt(LocalDateTime.of(2026, 6, 1, 9, 10));
         when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
                 .thenReturn(schedule);
@@ -1004,7 +1005,132 @@ class ProjectSelfMediaScheduleServiceTest {
         ProjectSelfMediaScheduleBatchDetailVO detail = service.retryAbnormalScheduleItems(7L, "2026-06");
 
         assertEquals(2, detail.getItems().size());
+        assertEquals(List.of("重新校验"), detail.getItems().get(0).getAllowedActions());
         verify(scheduleService).retryNow(88L);
+    }
+
+    @Test
+    void rescheduleAbnormalScheduleItemsRejectsPublishResultCheckQueue() {
+        ProjectSelfMediaScheduleBatch batch = processingBatchWithTwoGenerationPlans();
+        batch.setStatus("partial_failed");
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
+        SelfMediaPublishSchedule schedule = new SelfMediaPublishSchedule();
+        schedule.setId(88L);
+        schedule.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        schedule.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        schedule.setFailureCode("PUBLISH_RESULT_CHECK_HELPER_FAILED");
+        schedule.setDiagnosticsJson("{\"published\":\"unknown\"}");
+        schedule.setPlannedPublishAt(LocalDateTime.of(2026, 6, 1, 9, 10));
+        when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
+                .thenReturn(schedule);
+
+        BizException error = assertThrows(
+                BizException.class,
+                () -> service.rescheduleAbnormalScheduleItemsToNextMonth(7L, "2026-06")
+        );
+
+        assertTrue(error.getMessage().contains("PUBLISH_RESULT_CHECK_RESCHEDULE_FORBIDDEN"));
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED, schedule.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, schedule.getQueueKind());
+        assertEquals("PUBLISH_RESULT_CHECK_HELPER_FAILED", schedule.getFailureCode());
+        assertEquals("{\"published\":\"unknown\"}", schedule.getDiagnosticsJson());
+        verify(selfMediaPublishScheduleMapper, never()).updateById(any());
+    }
+
+    @Test
+    void ignoreAbnormalScheduleItemsRejectsPublishResultCheckQueue() {
+        ProjectSelfMediaScheduleBatch batch = processingBatchWithTwoGenerationPlans();
+        batch.setStatus("partial_failed");
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
+        SelfMediaPublishSchedule schedule = new SelfMediaPublishSchedule();
+        schedule.setId(88L);
+        schedule.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        schedule.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        schedule.setFailureCode("PUBLISH_RESULT_CHECK_HELPER_FAILED");
+        schedule.setDiagnosticsJson("{\"published\":\"unknown\"}");
+        schedule.setPlannedPublishAt(LocalDateTime.of(2026, 6, 1, 9, 10));
+        when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
+                .thenReturn(schedule);
+
+        BizException error = assertThrows(
+                BizException.class,
+                () -> service.ignoreAbnormalScheduleItems(7L, "2026-06")
+        );
+
+        assertTrue(error.getMessage().contains("PUBLISH_RESULT_CHECK_IGNORE_FORBIDDEN"));
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED, schedule.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, schedule.getQueueKind());
+        assertEquals("PUBLISH_RESULT_CHECK_HELPER_FAILED", schedule.getFailureCode());
+        assertEquals("{\"published\":\"unknown\"}", schedule.getDiagnosticsJson());
+        verify(selfMediaPublishScheduleMapper, never()).updateById(any());
+    }
+
+    @Test
+    void rescheduleAbnormalScheduleItemsRechecksQueueUnderLock() {
+        ProjectSelfMediaScheduleBatch batch = processingBatchWithTwoGenerationPlans();
+        batch.setStatus("partial_failed");
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
+        SelfMediaPublishSchedule detailSnapshot = new SelfMediaPublishSchedule();
+        detailSnapshot.setId(88L);
+        detailSnapshot.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        detailSnapshot.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        detailSnapshot.setPlannedPublishAt(LocalDateTime.of(2026, 6, 1, 9, 10));
+        when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
+                .thenReturn(detailSnapshot);
+        SelfMediaPublishSchedule locked = new SelfMediaPublishSchedule();
+        locked.setId(88L);
+        locked.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        locked.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        locked.setFailureCode("PUBLISH_RESULT_CHECK_HELPER_FAILED");
+        locked.setDiagnosticsJson("{\"published\":\"unknown\"}");
+        when(selfMediaPublishScheduleMapper.selectByIdForUpdate(88L)).thenReturn(locked);
+
+        BizException error = assertThrows(
+                BizException.class,
+                () -> service.rescheduleAbnormalScheduleItemsToNextMonth(7L, "2026-06")
+        );
+
+        assertTrue(error.getMessage().contains("PUBLISH_RESULT_CHECK_RESCHEDULE_FORBIDDEN"));
+        verify(selfMediaPublishScheduleMapper).selectByIdForUpdate(88L);
+        verify(selfMediaPublishScheduleMapper, never()).updateById(any());
+    }
+
+    @Test
+    void ignoreAbnormalScheduleItemsRechecksQueueUnderLock() {
+        ProjectSelfMediaScheduleBatch batch = processingBatchWithTwoGenerationPlans();
+        batch.setStatus("partial_failed");
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(generationTaskMapper.selectById(55L)).thenReturn(generationTask(55L, 66L));
+        SelfMediaPublishSchedule detailSnapshot = new SelfMediaPublishSchedule();
+        detailSnapshot.setId(88L);
+        detailSnapshot.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        detailSnapshot.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        detailSnapshot.setPlannedPublishAt(LocalDateTime.of(2026, 6, 1, 9, 10));
+        when(selfMediaPublishScheduleMapper.selectLatestByArticleAccountAndPlatform(66L, 20L, "toutiao"))
+                .thenReturn(detailSnapshot);
+        SelfMediaPublishSchedule locked = new SelfMediaPublishSchedule();
+        locked.setId(88L);
+        locked.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        locked.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        locked.setFailureCode("PUBLISH_RESULT_CHECK_HELPER_FAILED");
+        locked.setDiagnosticsJson("{\"published\":\"unknown\"}");
+        when(selfMediaPublishScheduleMapper.selectByIdForUpdate(88L)).thenReturn(locked);
+
+        BizException error = assertThrows(
+                BizException.class,
+                () -> service.ignoreAbnormalScheduleItems(7L, "2026-06")
+        );
+
+        assertTrue(error.getMessage().contains("PUBLISH_RESULT_CHECK_IGNORE_FORBIDDEN"));
+        verify(selfMediaPublishScheduleMapper).selectByIdForUpdate(88L);
+        verify(selfMediaPublishScheduleMapper, never()).updateById(any());
     }
 
     @Test

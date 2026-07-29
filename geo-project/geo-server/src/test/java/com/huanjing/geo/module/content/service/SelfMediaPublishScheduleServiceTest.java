@@ -54,6 +54,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -1360,6 +1361,113 @@ class SelfMediaPublishScheduleServiceTest {
         verify(scheduleMapper).updateById(row);
         verify(companyChannelQuotaService).refundSelfMediaSchedule(119L);
         verify(environmentLockService).release(119L);
+    }
+
+    @Test
+    void markClaimedLocalAgentPublishCheckFailedNormalizesInfrastructureFailureAndIsIdempotent() {
+        SelfMediaPublishSchedule row = localAgentPublishCheckSchedule(120L, 2, 4);
+        when(scheduleMapper.selectByIdForUpdate(120L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO first = service.markClaimedLocalAgentPublishCheckFailed(
+                99L,
+                51L,
+                2,
+                120L,
+                "PUBLISH_RESULT_CHECK_HELPER_FAILED",
+                "Network.enable timed out",
+                "{\"source\":\"helper\"}"
+        );
+        SelfMediaPublishScheduleVO repeated = service.markClaimedLocalAgentPublishCheckFailed(
+                99L,
+                51L,
+                2,
+                120L,
+                "PUBLISH_RESULT_CHECK_HELPER_FAILED",
+                "Network.enable timed out",
+                "{\"source\":\"helper\"}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, first.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, repeated.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, first.getQueueKind());
+        assertEquals("PUBLISH_RESULT_CHECK_HELPER_FAILED", first.getFailureCode());
+        assertEquals("Network.enable timed out", first.getFailureMessage());
+        assertTrue(first.getDiagnosticsJson().contains("\"normalizedCategory\":\"infrastructure\""));
+        assertTrue(first.getDiagnosticsJson().contains("\"normalizedStatus\":\"publish_unknown\""));
+        assertTrue(first.getNextAttemptAt().isAfter(LocalDateTime.now()));
+        verify(scheduleMapper, times(1)).updateById(row);
+        verify(environmentLockService, times(1)).release(120L);
+        verify(companyChannelQuotaService, never()).refundSelfMediaSchedule(120L);
+    }
+
+    @Test
+    void markClaimedLocalAgentPublishCheckFailedMovesExhaustedInfrastructureFailureToManualRequired() {
+        SelfMediaPublishSchedule row = localAgentPublishCheckSchedule(121L, 4, 4);
+        when(scheduleMapper.selectByIdForUpdate(121L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedLocalAgentPublishCheckFailed(
+                99L,
+                51L,
+                4,
+                121L,
+                "PUBLISH_CHECK_PAGE_TIMEOUT",
+                "作品管理页回查超时",
+                "{\"page\":\"works\"}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals("PUBLISH_CHECK_PAGE_TIMEOUT", response.getFailureCode());
+        assertNull(response.getNextAttemptAt());
+        assertTrue(response.getDiagnosticsJson().contains("\"normalizedStatus\":\"manual_required\""));
+        verify(environmentLockService).release(121L);
+        verify(companyChannelQuotaService, never()).refundSelfMediaSchedule(121L);
+    }
+
+    @Test
+    void markClaimedLocalAgentPublishCheckFailedKeepsExactPlatformTerminalFailure() {
+        SelfMediaPublishSchedule row = localAgentPublishCheckSchedule(122L, 2, 4);
+        when(scheduleMapper.selectByIdForUpdate(122L)).thenReturn(row);
+        when(scheduleMapper.selectById(122L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedLocalAgentPublishCheckFailed(
+                99L,
+                51L,
+                2,
+                122L,
+                "BAIJIAHAO_REVIEW_REJECTED",
+                "平台审核未通过",
+                "{\"status\":\"rejected\"}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED, response.getStatus());
+        assertEquals("BAIJIAHAO_REVIEW_REJECTED", response.getFailureCode());
+        verify(companyChannelQuotaService).refundSelfMediaSchedule(122L);
+        verify(environmentLockService).release(122L);
+    }
+
+    @Test
+    void disabledInfrastructureFailurePolicyFailsSafeToManualRequired() {
+        ReflectionTestUtils.setField(service, "infrastructureFailurePolicyEnabled", false);
+        SelfMediaPublishSchedule row = localAgentPublishCheckSchedule(123L, 1, 4);
+        when(scheduleMapper.selectByIdForUpdate(123L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedLocalAgentPublishCheckFailed(
+                99L,
+                51L,
+                1,
+                123L,
+                "UNRECOGNIZED_HELPER_ERROR",
+                "unexpected helper failure",
+                "not-json"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED, response.getStatus());
+        assertEquals("UNRECOGNIZED_HELPER_ERROR", response.getFailureCode());
+        assertNull(response.getNextAttemptAt());
+        assertTrue(response.getDiagnosticsJson().contains("\"normalizedCategory\":\"unknown_safe\""));
+        assertTrue(response.getDiagnosticsJson().contains("\"invalidDiagnostics\":true"));
+        verify(companyChannelQuotaService, never()).refundSelfMediaSchedule(123L);
     }
 
     @Test
@@ -3499,6 +3607,18 @@ class SelfMediaPublishScheduleServiceTest {
         row.setBrowserEnvironmentId(15L);
         row.setPlatform("toutiao");
         row.setStatus(status);
+        return row;
+    }
+
+    private SelfMediaPublishSchedule localAgentPublishCheckSchedule(Long id, int attemptCount, int maxAttempts) {
+        SelfMediaPublishSchedule row = scheduleWithStatus(
+                SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        row.setId(id);
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        row.setRuntimeWorkerId("99");
+        row.setAttemptCount(attemptCount);
+        row.setMaxAttempts(maxAttempts);
+        row.setLockedUntil(LocalDateTime.now().plusMinutes(5));
         return row;
     }
 

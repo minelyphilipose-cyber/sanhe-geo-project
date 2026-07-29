@@ -243,12 +243,15 @@ geo:
       cron: "${GEO_RETENTION_SCHEDULER_CRON:0 30 3 * * *}"
       limit-per-domain: ${GEO_RETENTION_LIMIT_PER_DOMAIN:100}
       max-batches-per-run: ${GEO_RETENTION_MAX_BATCHES_PER_RUN:20}
-      poll-hot-retention-days: ${GEO_RETENTION_POLL_HOT_RETENTION_DAYS:120}
+      poll-hot-retention-days: ${GEO_RETENTION_POLL_HOT_RETENTION_DAYS:14}
+      website-published-retention-hours: ${GEO_RETENTION_WEBSITE_PUBLISHED_RETENTION_HOURS:24}
       article-retention-days: ${GEO_RETENTION_ARTICLE_RETENTION_DAYS:90}
       article-archive-grace-hours: ${GEO_RETENTION_ARTICLE_ARCHIVE_GRACE_HOURS:24}
       operator-user-id: ${GEO_RETENTION_OPERATOR_USER_ID:0}
       lock-key: ${GEO_RETENTION_LOCK_KEY:geo:retention:scheduler:lock}
       lock-ttl-seconds: ${GEO_RETENTION_LOCK_TTL_SECONDS:7200}
+    website-published-cleanup:
+      execute-enabled: ${GEO_RETENTION_WEBSITE_PUBLISHED_CLEANUP_EXECUTE_ENABLED:false}
     article-archive:
       execute-enabled: ${GEO_RETENTION_ARTICLE_ARCHIVE_EXECUTE_ENABLED:false}
     article-purge:

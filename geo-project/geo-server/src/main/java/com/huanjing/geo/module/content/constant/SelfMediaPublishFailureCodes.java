@@ -9,8 +9,32 @@ import java.util.regex.Pattern;
 
 public final class SelfMediaPublishFailureCodes {
     public static final String BAIJIAHAO_PLATFORM_RATE_LIMITED = "BAIJIAHAO_PLATFORM_RATE_LIMITED";
+    public static final String BAIJIAHAO_REVIEW_REJECTED = "BAIJIAHAO_REVIEW_REJECTED";
+    public static final String BAIJIAHAO_WORK_WITHDRAWN = "BAIJIAHAO_WORK_WITHDRAWN";
 
     private static final Pattern EXPLICIT_CODE_PATTERN = Pattern.compile("^([A-Z0-9_]{3,80})[：:]");
+
+    private static final Set<String> LOCAL_AGENT_PUBLISH_CHECK_TERMINAL_CODES = Set.of(
+            BAIJIAHAO_REVIEW_REJECTED,
+            BAIJIAHAO_WORK_WITHDRAWN
+    );
+
+    private static final Set<String> LOCAL_AGENT_PUBLISH_CHECK_INFRASTRUCTURE_CODES = Set.of(
+            "PUBLISH_RESULT_CHECK_HELPER_FAILED",
+            "PUBLISH_RESULT_CHECK_FAILED",
+            "PUBLISH_CHECK_FAILED",
+            "PUBLISH_CHECK_PAGE_TIMEOUT",
+            "LOCAL_HELPER_CLAIM_TIMEOUT",
+            "LOCAL_AGENT_HEARTBEAT_TIMEOUT",
+            "PAGE_LOAD_TIMEOUT",
+            "LOCAL_HELPER_TEMPORARY_ERROR",
+            "ADSPOWER_CDP_TIMEOUT",
+            "ADSPOWER_SESSION_STALE",
+            "ADSPOWER_BROWSER_UNRESPONSIVE",
+            "ADSPOWER_API_UNAVAILABLE",
+            "BROWSER_ENVIRONMENT_QUARANTINED",
+            "EXTENSION_INJECTION_TRANSIENT"
+    );
 
     private static final Set<String> SCHEDULE_EXECUTION_RETRYABLE_CODES = Set.of(
             "PAGE_LOAD_TIMEOUT",
@@ -101,6 +125,7 @@ public final class SelfMediaPublishFailureCodes {
             entry("PUBLISH_RESULT_NOT_MATCHED_RETRYING", "发布结果暂未匹配，等待复查", true, "等待下一次自动回查。"),
             entry("PUBLISH_RESULT_RECHECK_REQUESTED", "操作员已请求重新校验发布结果", true, "已重新放回发布结果回查队列，等待本地助手领取。", "OPEN_DIAGNOSTICS", "查看诊断", "diagnostics"),
             entry("PUBLISH_RESULT_CHECK_ATTEMPT_LIMIT_EXCEEDED", "发布结果复查已达最大次数", false, "打开平台作品管理页确认状态后人工确认发布或失败。", "OPEN_DIAGNOSTICS", "查看诊断", "diagnostics"),
+            entry("PUBLISH_RESULT_CHECK_HELPER_FAILED", "本地回查环境异常", true, "检查本地助手和浏览器环境后重新校验发布结果，不要重新发布。", "RETRY_NOW", "重新校验", "api"),
             entry("PUBLISH_RESULT_CHECK_FAILED", "发布结果校验失败", true, "检查本地助手和平台作品管理页后重新校验。"),
             entry("PUBLISH_CHECK_FAILED", "发布结果校验失败", true, "检查本地助手和平台作品管理页后重新校验。"),
             entry("PUBLISH_CHECK_PAGE_TIMEOUT", "发布结果页面回查超时", true, "检查本地助手和平台作品管理页后重新校验。", "RETRY_NOW", "重新校验", "api"),
@@ -130,8 +155,8 @@ public final class SelfMediaPublishFailureCodes {
             entry("BAIJIAHAO_SCHEDULE_OPTION_NOT_FOUND", "百家号定时时间选项未找到", true, "等待自动重试；若持续失败，记录当前三个时间控件值用于定位。"),
             entry(BAIJIAHAO_PLATFORM_RATE_LIMITED, "百家号平台频控/点击过快", true, "平台提示点击过快，等待频控窗口后自动重试。"),
             entry("BAIJIAHAO_PUBLISH_NOT_CONFIRMED", "百家号发布成功状态未确认", true, "等待自动复查；也可打开作品管理页人工确认。"),
-            entry("BAIJIAHAO_REVIEW_REJECTED", "百家号审核未通过", false, "打开百家号作品管理页查看审核原因。"),
-            entry("BAIJIAHAO_WORK_WITHDRAWN", "百家号作品已撤回或删除", false, "确认作品是否被平台撤回、删除或人工撤销。"),
+            entry(BAIJIAHAO_REVIEW_REJECTED, "百家号审核未通过", false, "打开百家号作品管理页查看审核原因。"),
+            entry(BAIJIAHAO_WORK_WITHDRAWN, "百家号作品已撤回或删除", false, "确认作品是否被平台撤回、删除或人工撤销。"),
             entry("BAIJIAHAO_FILL_FAILED", "百家号页面填充失败", false, "查看扩展诊断信息后修复页面适配或人工处理。")
     );
 
@@ -153,6 +178,16 @@ public final class SelfMediaPublishFailureCodes {
     public static boolean isPostSubmissionVerificationFailure(String code) {
         return StringUtils.hasText(code)
                 && POST_SUBMISSION_VERIFICATION_CODES.contains(code.trim().toUpperCase());
+    }
+
+    public static boolean isLocalAgentPublishCheckTerminalFailure(String code) {
+        return StringUtils.hasText(code)
+                && LOCAL_AGENT_PUBLISH_CHECK_TERMINAL_CODES.contains(code.trim().toUpperCase());
+    }
+
+    public static boolean isLocalAgentPublishCheckInfrastructureFailure(String code) {
+        return StringUtils.hasText(code)
+                && LOCAL_AGENT_PUBLISH_CHECK_INFRASTRUCTURE_CODES.contains(code.trim().toUpperCase());
     }
 
     public static Boolean retryable(String code) {

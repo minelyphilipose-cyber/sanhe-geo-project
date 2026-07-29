@@ -10,6 +10,7 @@ import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunRequest;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunResponse;
 import com.huanjing.geo.module.retention.config.DataRetentionProperties;
 import com.huanjing.geo.module.retention.service.PollRetentionDryRunService;
+import com.huanjing.geo.module.retention.service.WebsitePublishedContentCleanupService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Component;
 public class DataRetentionScheduler {
 
     private final DataRetentionProperties properties;
+    private final WebsitePublishedContentCleanupService websitePublishedContentCleanupService;
     private final ArticleRetentionDryRunService articleRetentionDryRunService;
     private final ArticleBodyPurgeService articleBodyPurgeService;
     private final PollRetentionDryRunService pollRetentionDryRunService;
@@ -45,9 +47,33 @@ public class DataRetentionScheduler {
         int limit = Math.max(1, scheduler.getLimitPerDomain());
         int maxBatches = Math.max(1, scheduler.getMaxBatchesPerRun());
         boolean execute = scheduler.isExecuteEnabled();
+        run("website_published_content",
+                () -> runWebsitePublishedCleanup(limit, maxBatches, execute, lease));
         run("article_body_archive", () -> runArticleArchive(limit, maxBatches, execute, lease));
         run("article_body_purge", () -> runArticlePurge(limit, maxBatches, execute, lease));
         run("poll_results", () -> runPollPurge(Math.min(limit, 20), maxBatches, execute, lease));
+    }
+
+    private void runWebsitePublishedCleanup(int limit,
+                                            int maxBatches,
+                                            boolean execute,
+                                            DataRetentionSchedulerLock.Lease lease) {
+        Long cursor = null;
+        for (int batch = 0; batch < maxBatches; batch++) {
+            lease.ensureHeld();
+            WebsitePublishedContentCleanupService.CleanupBatchResult response =
+                    websitePublishedContentCleanupService.runScheduled(
+                            properties.getScheduler().getWebsitePublishedRetentionHours(),
+                            limit,
+                            cursor,
+                            !execute,
+                            "scheduled website published hot-data cleanup"
+                    );
+            if (!response.hasMore() || response.nextCursorArticleId() == null) {
+                break;
+            }
+            cursor = response.nextCursorArticleId();
+        }
     }
 
     private void runArticleArchive(int limit,

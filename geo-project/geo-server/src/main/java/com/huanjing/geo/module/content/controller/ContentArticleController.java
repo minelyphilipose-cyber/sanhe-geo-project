@@ -6,6 +6,7 @@ import com.huanjing.geo.module.content.dto.ArticleAiDraftPreviewRequest;
 import com.huanjing.geo.module.content.dto.ArticleAiDraftPreviewResponse;
 import com.huanjing.geo.module.content.dto.ArticleAiDraftRequest;
 import com.huanjing.geo.module.content.dto.ArticleAiDraftResponse;
+import com.huanjing.geo.module.content.dto.ArticleExecutionStatsResponse;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
@@ -29,6 +30,7 @@ import com.huanjing.geo.module.content.service.ArticleGenerationReadinessService
 import com.huanjing.geo.module.content.service.ArticleSelfMediaCookieStatusService;
 import com.huanjing.geo.module.content.service.BatchArticleGenerationService;
 import com.huanjing.geo.module.content.service.ContentArticleService;
+import com.huanjing.geo.module.content.service.ContentArticleStatsService;
 import com.huanjing.geo.module.content.service.ManualArticleImportService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -48,6 +50,7 @@ import java.util.concurrent.ExecutionException;
 public class ContentArticleController {
 
     private final ContentArticleService contentArticleService;
+    private final ContentArticleStatsService contentArticleStatsService;
     private final ArticleAiDraftService articleAiDraftService;
     private final ArticleSelfMediaCookieStatusService selfMediaCookieStatusService;
     private final BatchArticleGenerationService batchArticleGenerationService;
@@ -75,6 +78,11 @@ public class ContentArticleController {
         return R.ok(contentArticleService.page(articleId, projectName, status, articleType, articleTypeCode,
                 channelGroupCode, channelSubCode, generationMode, complianceStatus, publishReviewStatus,
                 medicalIndustryCode, medicalChannelTier, specialIndustryOnly, createdStartDate, createdEndDate, current, size));
+    }
+
+    @GetMapping("/stats")
+    public R<ArticleExecutionStatsResponse> stats() {
+        return R.ok(contentArticleStatsService.loadGlobalStats());
     }
 
     @PostMapping("/manual")

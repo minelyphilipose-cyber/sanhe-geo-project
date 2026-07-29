@@ -81,7 +81,7 @@ class RetentionExecutionFloorTest {
         assertEquals(90, archive.getMinPublishedAgeDays());
         assertEquals(90, purge.getRetentionDays());
         assertEquals(24, purge.getArchiveGraceHours());
-        assertEquals(120, poll.getHotRetentionDays());
+        assertEquals(14, poll.getHotRetentionDays());
         assertFalse(archive.getSimulationOnly());
         assertFalse(purge.getSimulationOnly());
         assertFalse(poll.getSimulationOnly());

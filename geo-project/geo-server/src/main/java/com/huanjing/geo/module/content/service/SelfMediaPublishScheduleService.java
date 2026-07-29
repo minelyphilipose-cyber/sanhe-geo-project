@@ -63,6 +63,7 @@ import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -241,6 +242,8 @@ public class SelfMediaPublishScheduleService {
     SelfMediaClaimGateService claimGateService;
     @Autowired(required = false)
     SelfMediaGateDiagnosticsWriter gateDiagnosticsWriter;
+    @Value("${geo.self-media-schedule.infrastructure-failure-policy-enabled:true}")
+    private boolean infrastructureFailurePolicyEnabled = true;
 
     @Transactional
     public SelfMediaPublishScheduleCreateResponse createSchedules(SelfMediaPublishScheduleCreateRequest request,
@@ -2945,25 +2948,136 @@ public class SelfMediaPublishScheduleService {
     }
 
     @Transactional
-    public SelfMediaPublishScheduleVO markClaimedPublishFailed(Long operatorId,
-                                                               Long localAgentSessionId,
-                                                               Integer claimAttempt,
-                                                               Long id,
-                                                               String failureCode,
-                                                               String failureMessage,
-                                                               String diagnosticsJson) {
+    public SelfMediaPublishScheduleVO markClaimedLocalAgentPublishCheckFailed(Long operatorId,
+                                                                              Long localAgentSessionId,
+                                                                              Integer claimAttempt,
+                                                                              Long id,
+                                                                              String failureCode,
+                                                                              String failureMessage,
+                                                                              String diagnosticsJson) {
         SelfMediaPublishSchedule row = requireOwnedLocalAgentClaimForUpdate(
                 operatorId, localAgentSessionId, claimAttempt, id,
                 Set.of(
                         SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT,
-                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN,
+                        SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED
                 ),
                 true
         );
-        if (SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED.equals(normalize(row.getStatus()))) {
+        if (!SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(normalize(row.getStatus()))) {
             return SelfMediaPublishScheduleVO.from(row);
         }
-        return markClaimedPublishFailed(id, failureCode, failureMessage, diagnosticsJson);
+        if (SelfMediaPublishFailureCodes.isLocalAgentPublishCheckTerminalFailure(failureCode)) {
+            return markClaimedPublishFailed(id, failureCode, failureMessage, diagnosticsJson);
+        }
+        return markClaimedLocalAgentPublishCheckInfrastructureUnknown(
+                row,
+                operatorId,
+                failureCode,
+                failureMessage,
+                diagnosticsJson
+        );
+    }
+
+    private SelfMediaPublishScheduleVO markClaimedLocalAgentPublishCheckInfrastructureUnknown(
+            SelfMediaPublishSchedule row,
+            Long operatorId,
+            String failureCode,
+            String failureMessage,
+            String diagnosticsJson) {
+        int maxAttempts = effectivePublishCheckMaxAttempts(row);
+        LocalDateTime nextAttemptAt = infrastructureFailurePolicyEnabled
+                && supportsAutomaticPublishResultCheck(row.getPlatform())
+                ? nextPublishCheckRetryAt(row, maxAttempts)
+                : null;
+        boolean retryable = nextAttemptAt != null;
+        String normalizedFailureCode = trimFailureCode(
+                failureCode,
+                "PUBLISH_RESULT_CHECK_HELPER_FAILED"
+        );
+
+        row.setStatus(retryable
+                ? SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
+                : SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        row.setMaxAttempts(maxAttempts);
+        row.setNextAttemptAt(nextAttemptAt);
+        row.setLockedUntil(null);
+        row.setFailureCode(normalizedFailureCode);
+        row.setFailureMessage(trimFailureMessage(firstText(
+                failureMessage,
+                retryable
+                        ? "本地回查环境异常，等待重新校验发布结果"
+                        : "发布结果未知，自动回查已暂停，需要人工重新校验"
+        )));
+        row.setDiagnosticsJson(localAgentPublishCheckFailureDiagnostics(
+                diagnosticsJson,
+                normalizedFailureCode,
+                failureMessage,
+                retryable ? "publish_unknown" : "manual_required"
+        ));
+        applyRuntimeStage(
+                row,
+                retryable ? "publish_check_infrastructure_unknown" : "publish_check_infrastructure_manual",
+                retryable ? "本地回查环境异常，等待重新校验" : "本地回查环境异常，已暂停自动处理"
+        );
+        touch(row, operatorId);
+        scheduleMapper.updateById(row);
+        environmentLockService.release(row.getId());
+        reconcileAlerts(row);
+        return SelfMediaPublishScheduleVO.from(row);
+    }
+
+    private String localAgentPublishCheckFailureDiagnostics(String diagnosticsJson,
+                                                            String failureCode,
+                                                            String failureMessage,
+                                                            String normalizedStatus) {
+        ObjectNode root = objectMapper.createObjectNode();
+        if (StringUtils.hasText(diagnosticsJson)) {
+            try {
+                JsonNode parsed = objectMapper.readTree(diagnosticsJson);
+                if (parsed instanceof ObjectNode objectNode) {
+                    root = objectNode.deepCopy();
+                } else {
+                    root.put("rawDiagnostics", truncate(diagnosticsJson.trim(), 12_000));
+                }
+            } catch (JsonProcessingException ignored) {
+                root.put("invalidDiagnostics", true);
+                root.put("rawDiagnostics", truncate(diagnosticsJson.trim(), 12_000));
+            }
+        }
+
+        ObjectNode normalization = objectMapper.createObjectNode();
+        normalization.put("sourceEndpoint", "publish-checks/failed");
+        normalization.put("originalFailureCode", failureCode);
+        normalization.put("originalFailureMessage", trimFailureMessage(failureMessage));
+        normalization.put("normalizedCategory", localAgentPublishCheckFailureCategory(failureCode, failureMessage));
+        normalization.put("normalizedStatus", normalizedStatus);
+        normalization.put("normalizedAt", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        root.set("failureNormalization", normalization);
+        try {
+            return objectMapper.writeValueAsString(root);
+        } catch (JsonProcessingException ignored) {
+            return validDiagnosticsJson(diagnosticsJson);
+        }
+    }
+
+    private String localAgentPublishCheckFailureCategory(String failureCode, String failureMessage) {
+        if (SelfMediaPublishFailureCodes.isLocalAgentPublishCheckInfrastructureFailure(failureCode)) {
+            return "infrastructure";
+        }
+        String message = normalize(failureMessage);
+        if (message.contains("network.enable timed out")
+                || message.contains("browser has disconnected")
+                || message.contains("websocket closed")
+                || message.contains("econnreset")
+                || message.contains("econnrefused")
+                || message.contains("protocol error")
+                || message.contains("socket hang up")) {
+            return "infrastructure";
+        }
+        return "unknown_safe";
     }
 
     @Transactional

@@ -2,16 +2,17 @@
 
 ## 1. 本轮范围
 
-本轮只处理两个增长最快的领域：
+本轮处理三个增长较快的领域：
 
 1. 问题轮询明细；
-2. 文章正文大字段。
+2. 通用文章正文大字段；
+3. Agent 官网、行业资讯站、平台网站发布成功后的正文和分发 payload。
 
 不处理：
 
 - 基线报告；
 - MinIO 下线或对象删除；
-- 售前、分发 payload 等低优先级清理；
+- 售前等低优先级 payload 清理；
 - `OPTIMIZE TABLE`、表重建或历史磁盘文件收缩。
 
 目标是控制后续数据增长。历史磁盘空间是否立即归还给操作系统不在本轮目标内。
@@ -23,6 +24,7 @@
 ```env
 GEO_RETENTION_SCHEDULER_ENABLED=false
 GEO_RETENTION_SCHEDULER_EXECUTE_ENABLED=false
+GEO_RETENTION_WEBSITE_PUBLISHED_CLEANUP_EXECUTE_ENABLED=false
 GEO_RETENTION_ARTICLE_ARCHIVE_EXECUTE_ENABLED=false
 GEO_RETENTION_ARTICLE_PURGE_EXECUTE_ENABLED=false
 GEO_RETENTION_POLL_RESULTS_EXECUTE_ENABLED=false
@@ -34,7 +36,10 @@ GEO_DISPATCH_TASK_CLEANUP_ENABLED=false
 
 ## 3. 数据库变更
 
-Flyway 迁移：`V329__priority_data_retention_safety.sql`。
+Flyway 迁移：
+
+- `V329__priority_data_retention_safety.sql`；
+- `V330__website_published_content_cleanup_index.sql`。
 
 变更内容：
 
@@ -43,12 +48,14 @@ Flyway 迁移：`V329__priority_data_retention_safety.sql`。
 - 为已存在的 freeze 表增加兼容字段 `snapshot_schema_version`，但退休季度报表不再消费该字段；
 - `poll_batches`、`poll_results`、`poll_daily_stats` 对 `dispatch_task` 的外键改为 `ON DELETE SET NULL`；
 - dispatch 历史任务自动清理默认关闭，防止旧级联关系意外删除业务数据。
+- 增加官网类发布终态清理候选索引。
 
 部署后检查：
 
 ```sql
 SHOW COLUMNS FROM article_draft_version LIKE 'content_markdown';
 SHOW INDEX FROM article_draft_version WHERE Key_name = 'idx_article_version_retention';
+SHOW INDEX FROM article_publish_record WHERE Key_name = 'idx_article_publish_website_cleanup';
 SELECT table_name, constraint_name, delete_rule
 FROM information_schema.referential_constraints
 WHERE constraint_schema = DATABASE()
@@ -71,9 +78,83 @@ V329 不得首次直接在生产库验证。上线前必须先在生产克隆库
 
 ## 4. 文章正文处理
 
-文章处理分两步，不能合并。
+官网类发布终态清理与通用 90 天 COS 归档链路相互独立。官网类满足严格终态门控后直接释放热数据；
+其他文章仍执行先归档、后置空的两步流程。
 
-### 4.1 第一步：归档正文到 COS
+### 4.1 官网类发布终态驱动清理
+
+仅处理以下目标：
+
+- `brand_geo_site`（Agent 官网）；
+- `industry_site`（行业资讯站）；
+- `forum_site`（平台网站）。
+
+必须同时满足：
+
+- `article_publish_record.publish_status = distributed`；
+- `url_quality = public_url` 且 `published_url` 是 HTTP(S) 公网链接；
+- 最后一次符合条件的发布时间已超过至少 24 小时的热窗口；请求值和调度配置低于 24
+  小时都会被后端强制提升到 24 小时；
+- 文章当前状态为 `distributed` 或 `published`；`deleted` 只允许用于并发或历史残留的幂等补清理，
+  `approved`、`unpublished` 等状态禁止清理；
+- 所有官网类成功凭证的 `published_url` 都必须通过 URI 校验：scheme 为 `http/https` 且 host 非空；
+- 没有活动分发任务；
+- 没有待执行、失败待处理或结果不确定的自媒体排期；只有 `published_confirmed`、`cancelled`
+  不阻止官网类清理；
+- 清理事务内锁定文章、发布凭证、分发任务和自媒体排期后再次复核。
+
+清理动作：
+
+- 置空该文章全部版本的 `content_markdown`，写入 `content_purged_at`；
+- 只置空与成功官网类发布凭证绑定的 `request_payload`、`fill_payload`、`response_payload`；
+- 置空发布凭证中的大体积 `raw_response`，长期保留项目、文章、渠道、状态、时间、URL 和幂等来源；
+- 将 `article_draft.status` 置为 `deleted`，保留轻量主记录和所有发布凭证。
+
+先只读盘点：
+
+```http
+POST /api/data-retention/articles/website-published/dry-run
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "retentionHours": 24,
+  "limit": 10
+}
+```
+
+首次执行前临时开启：
+
+```env
+GEO_RETENTION_WEBSITE_PUBLISHED_CLEANUP_EXECUTE_ENABLED=true
+```
+
+首次只执行 1 篇：
+
+```http
+POST /api/data-retention/articles/website-published/cleanup
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "retentionHours": 24,
+  "limit": 1,
+  "reason": "production canary website published hot-data cleanup"
+}
+```
+
+核对 `article_publish_record` 及公开链接仍存在、移动看板发布统计不变、正文和成功任务 payload
+已经置空，并按 `nextCursorArticleId` 分页。验证结束后立即关闭独立执行开关。
+
+H2 MySQL 兼容模式测试只用于验证 SQL 形状和数据变更，不作为锁语义证明。首次开启真实清理前，
+必须在生产克隆 MySQL 上并发演练以下竞态：
+
+- 清理锁定文章后并发创建新的分发任务；
+- 清理复核前并发写入新的发布凭证；
+- 清理复核前并发创建自媒体排期；
+- 验证 `FOR UPDATE`、外键检查、锁等待及事务回滚行为符合预期。
+
+### 4.2 第一步：归档其他文章正文到 COS
 
 只读盘点：
 
@@ -120,7 +201,7 @@ Content-Type: application/json
 
 按 `nextCursorVersionId` 继续分页，直到 `hasMore=false`。
 
-### 4.2 第二步：置空数据库正文
+### 4.3 第二步：置空其他文章数据库正文
 
 正文置空要求：
 
@@ -210,7 +291,7 @@ Content-Type: application/json
 
 切片只有同时满足以下条件才允许删除：
 
-- 超过 120 天热数据窗口；
+- 超过 14 天热数据窗口；
 - 没有非终态 `poll_batches`；
 - 没有非终态 invocation attempt；
 - 删除时按结果 ID 排除仍供实时看板使用的最后一条已完成“问题 × 渠道”结果；
@@ -255,7 +336,7 @@ Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "hotRetentionDays": 120,
+  "hotRetentionDays": 14,
   "limit": 10
 }
 ```
@@ -274,7 +355,7 @@ Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "hotRetentionDays": 120,
+  "hotRetentionDays": 14,
   "limit": 1,
   "reason": "production canary poll detail purge"
 }
@@ -314,6 +395,7 @@ GEO_RETENTION_SCHEDULER_EXECUTE_ENABLED=false
 ```env
 GEO_RETENTION_SCHEDULER_ENABLED=true
 GEO_RETENTION_SCHEDULER_EXECUTE_ENABLED=true
+GEO_RETENTION_WEBSITE_PUBLISHED_CLEANUP_EXECUTE_ENABLED=false
 GEO_RETENTION_ARTICLE_ARCHIVE_EXECUTE_ENABLED=true
 GEO_RETENTION_ARTICLE_PURGE_EXECUTE_ENABLED=true
 GEO_RETENTION_POLL_RESULTS_EXECUTE_ENABLED=false
@@ -328,6 +410,7 @@ dry-run 和 execute 均最多扫描 `max-batches-per-run` 批。
 
 - 发现异常时，先关闭所有 execute 开关并重新部署容器；
 - 不删除 COS 归档对象；
+- 官网类终态清理默认不生成 COS 正文归档，置空后只能依赖数据库备份或目标站点恢复；
 - 文章正文已置空后，可继续通过 COS 回源，不能仅通过关闭开关恢复数据库正文；
 - 如确需恢复正文，应按 `content_object_key` 读取 COS，经 checksum 校验后再回填；
 - 轮询明细物理删除不可从 summary 反向恢复，只能依赖数据库备份；
@@ -337,18 +420,21 @@ dry-run 和 execute 均最多扫描 `max-batches-per-run` 批。
 ## 8. 推荐生产顺序
 
 1. 部署代码，保持所有新开关为 `false`；
-2. 确认 V329 执行成功；
-3. 文章归档 dry-run；
-4. 文章归档小批 execute；
-5. 至少观察 24 小时；
-6. 文章置空 limit=1；
-7. 验证所有正文读取和分发路径；
-8. 文章置空小批放量；
-9. 确认旧季度 freeze 定时任务保持关闭；
-10. 重算待清理切片汇总，使其具备当前内容级 checksum；
-11. 轮询清理 dry-run；
-12. 轮询清理 limit=1；
-13. 验证看板和审计；
-14. 轮询清理小批放量；
-15. 关闭 execute 开关；
-16. 稳定运行一段时间后，再单独评估定时 execute。
+2. 确认 V329、V330 执行成功；
+3. 官网类终态清理 dry-run；
+4. 官网类终态清理 limit=1，核对发布凭证、公开链接和移动看板统计；
+5. 官网类终态清理小批放量并关闭独立 execute 开关；
+6. 其他文章归档 dry-run；
+7. 其他文章归档小批 execute；
+8. 至少观察 24 小时；
+9. 其他文章置空 limit=1；
+10. 验证所有正文读取和分发路径；
+11. 其他文章置空小批放量；
+12. 确认旧季度 freeze 定时任务保持关闭；
+13. 重算待清理切片汇总，使其具备当前内容级 checksum；
+14. 轮询清理 dry-run；
+15. 轮询清理 limit=1；
+16. 验证看板和审计；
+17. 轮询清理小批放量；
+18. 关闭 execute 开关；
+19. 稳定运行一段时间后，再单独评估定时 execute。

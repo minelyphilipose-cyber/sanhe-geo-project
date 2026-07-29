@@ -33,7 +33,7 @@ import java.util.Map;
 public class PollRetentionDryRunService {
 
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
-    private static final int DEFAULT_HOT_RETENTION_DAYS = 120;
+    private static final int DEFAULT_HOT_RETENTION_DAYS = 14;
     private static final int DEFAULT_STUCK_BATCH_SEAL_DAYS = 7;
     private static final int DEFAULT_LIMIT = 100;
     private static final int MAX_LIMIT = 1_000;

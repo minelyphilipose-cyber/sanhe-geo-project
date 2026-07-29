@@ -17,11 +17,13 @@ import com.huanjing.geo.module.retention.dto.ObjectStorageRetentionDryRunRequest
 import com.huanjing.geo.module.retention.dto.ObjectStorageRetentionDryRunResponse;
 import com.huanjing.geo.module.retention.dto.ObjectStorageMigrationRequest;
 import com.huanjing.geo.module.retention.dto.ObjectStorageMigrationResponse;
+import com.huanjing.geo.module.retention.dto.WebsitePublishedCleanupRequest;
 import com.huanjing.geo.module.retention.service.ContentUrlRewriteService;
 import com.huanjing.geo.module.retention.service.ObjectStorageMigrationService;
 import com.huanjing.geo.module.retention.service.ObjectStorageRetentionDryRunService;
 import com.huanjing.geo.module.retention.service.PollRetentionDryRunService;
 import com.huanjing.geo.module.retention.service.DataRetentionSlimDryRunService;
+import com.huanjing.geo.module.retention.service.WebsitePublishedContentCleanupService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -38,6 +40,7 @@ public class DataRetentionController {
     private final DataRetentionSlimDryRunService dataRetentionSlimDryRunService;
     private final ArticleRetentionDryRunService articleRetentionDryRunService;
     private final ArticleBodyPurgeService articleBodyPurgeService;
+    private final WebsitePublishedContentCleanupService websitePublishedContentCleanupService;
     private final PollRetentionDryRunService pollRetentionDryRunService;
     private final ObjectStorageRetentionDryRunService objectStorageRetentionDryRunService;
     private final ObjectStorageMigrationService objectStorageMigrationService;
@@ -68,6 +71,20 @@ public class DataRetentionController {
     public R<ArticleBodyPurgeResponse> articlePurge(@RequestBody ArticleBodyPurgeRequest request) {
         return R.ok(articleBodyPurgeService.purge(
                 request == null ? new ArticleBodyPurgeRequest() : request));
+    }
+
+    @PostMapping("/articles/website-published/dry-run")
+    public R<WebsitePublishedContentCleanupService.CleanupBatchResult> websitePublishedDryRun(
+            @RequestBody WebsitePublishedCleanupRequest request) {
+        return R.ok(websitePublishedContentCleanupService.dryRun(
+                request == null ? new WebsitePublishedCleanupRequest() : request));
+    }
+
+    @PostMapping("/articles/website-published/cleanup")
+    public R<WebsitePublishedContentCleanupService.CleanupBatchResult> websitePublishedCleanup(
+            @RequestBody WebsitePublishedCleanupRequest request) {
+        return R.ok(websitePublishedContentCleanupService.cleanup(
+                request == null ? new WebsitePublishedCleanupRequest() : request));
     }
 
     @PostMapping("/poll-results/dry-run")

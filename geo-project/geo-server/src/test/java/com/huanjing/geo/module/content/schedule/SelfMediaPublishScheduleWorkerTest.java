@@ -15,6 +15,8 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -57,6 +59,68 @@ class SelfMediaPublishScheduleWorkerTest {
         assertTrue(processed);
         verify(service).markClaimedPublishedConfirmed(10L, "https://example.test/post/10", "{\"ok\":true}");
         verify(service, never()).claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION), eq(30), eq(apiPlatforms));
+    }
+
+    @Test
+    void runOnceKeepsOfficialApiReviewRejectedAsPublishFailed() {
+        SelfMediaPublishScheduleService service = mock(SelfMediaPublishScheduleService.class);
+        SelfMediaPlatformScheduleAdapterRouter router = mock(SelfMediaPlatformScheduleAdapterRouter.class);
+        SelfMediaPublishScheduleAdapter adapter = mock(SelfMediaPublishScheduleAdapter.class);
+        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, router, List.of(adapter));
+        Set<String> apiPlatforms = Set.of("wechat_mp");
+        SelfMediaPublishScheduleVO publishCheck = schedule(11L, "wechat_mp");
+        when(router.platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API)).thenReturn(apiPlatforms);
+        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK), eq(30), eq(apiPlatforms)))
+                .thenReturn(publishCheck);
+        when(adapter.supports("wechat_mp")).thenReturn(true);
+        when(adapter.checkPublishResult(publishCheck)).thenReturn(PublishCheckResult.failed(
+                "OFFICIAL_API_REVIEW_REJECTED",
+                "官方 API 回查确认审核未通过",
+                "{\"reviewStatus\":\"rejected\"}"
+        ));
+
+        boolean processed = worker.runOnce();
+
+        assertTrue(processed);
+        verify(service).markClaimedPublishFailed(
+                11L,
+                "OFFICIAL_API_REVIEW_REJECTED",
+                "官方 API 回查确认审核未通过",
+                "{\"reviewStatus\":\"rejected\"}"
+        );
+        verify(service, never()).markClaimedLocalAgentPublishCheckFailed(
+                anyLong(), anyLong(), anyInt(), anyLong(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void runOnceKeepsOfficialApiWorkOfflineAsPublishFailed() {
+        SelfMediaPublishScheduleService service = mock(SelfMediaPublishScheduleService.class);
+        SelfMediaPlatformScheduleAdapterRouter router = mock(SelfMediaPlatformScheduleAdapterRouter.class);
+        SelfMediaPublishScheduleAdapter adapter = mock(SelfMediaPublishScheduleAdapter.class);
+        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, router, List.of(adapter));
+        Set<String> apiPlatforms = Set.of("wechat_mp");
+        SelfMediaPublishScheduleVO publishCheck = schedule(12L, "wechat_mp");
+        when(router.platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API)).thenReturn(apiPlatforms);
+        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK), eq(30), eq(apiPlatforms)))
+                .thenReturn(publishCheck);
+        when(adapter.supports("wechat_mp")).thenReturn(true);
+        when(adapter.checkPublishResult(publishCheck)).thenReturn(PublishCheckResult.failed(
+                "OFFICIAL_API_WORK_OFFLINE",
+                "官方 API 回查确认作品已下线",
+                "{\"reviewStatus\":\"offline\"}"
+        ));
+
+        boolean processed = worker.runOnce();
+
+        assertTrue(processed);
+        verify(service).markClaimedPublishFailed(
+                12L,
+                "OFFICIAL_API_WORK_OFFLINE",
+                "官方 API 回查确认作品已下线",
+                "{\"reviewStatus\":\"offline\"}"
+        );
+        verify(service, never()).markClaimedLocalAgentPublishCheckFailed(
+                anyLong(), anyLong(), anyInt(), anyLong(), anyString(), anyString(), anyString());
     }
 
     @Test

@@ -47,6 +47,14 @@ export function getContentArticles(params: {
   return request.get<R<PageResult<ArticleDraft>>>('/content/articles', { params })
 }
 
+export interface ContentArticleStats {
+  publishedCount: number
+}
+
+export function getContentArticleStats() {
+  return request.get<R<ContentArticleStats>>('/content/articles/stats')
+}
+
 export function getSpecialIndustryArticles(params: {
   articleId?: number
   projectName?: string
