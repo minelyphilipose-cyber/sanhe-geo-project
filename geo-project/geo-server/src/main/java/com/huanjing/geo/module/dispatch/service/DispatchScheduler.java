@@ -34,7 +34,7 @@ public class DispatchScheduler {
             dispatchPlannerService.scanAndPlan(LocalDate.now());
             dispatchTaskService.enqueueRecoveryTasks();
             if (dispatchTaskService.isHistoryCleanupEnabled()) {
-                dispatchTaskService.cleanupHistory();
+                cleanupHistory();
             }
         } catch (Exception ex) {
             log.error("Dispatch daily scan failed", ex);
@@ -50,6 +50,32 @@ public class DispatchScheduler {
         } finally {
             dispatchQueueService.releaseScanLock(lockValue);
         }
+    }
+
+    private void cleanupHistory() {
+        try {
+            dispatchTaskService.cleanupHistory();
+        } catch (Exception ex) {
+            log.error("Dispatch task history cleanup failed", ex);
+            dispatchAlertService.createOrRefreshAlert(
+                    null,
+                    null,
+                    "dispatch_task_history_cleanup_failed",
+                    DispatchAlertSeverity.ERROR,
+                    "Dispatch task history cleanup failed",
+                    summarizeError(ex),
+                    0,
+                    null
+            );
+        }
+    }
+
+    private String summarizeError(Exception ex) {
+        String message = ex.getMessage();
+        if (message == null || message.isBlank()) {
+            return ex.getClass().getSimpleName();
+        }
+        return message.length() <= 1_800 ? message : message.substring(0, 1_800);
     }
 
     @Scheduled(fixedDelayString = "${geo.dispatch.retry-check-ms:30000}")

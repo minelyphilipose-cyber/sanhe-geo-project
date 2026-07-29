@@ -572,17 +572,11 @@ public class DispatchTaskService {
         );
     }
 
-    public void cleanupHistory() {
+    public int cleanupHistory() {
         LocalDateTime deadline = LocalDateTime.now().minusDays(dispatchProperties.getTaskRetentionDays());
-        dispatchTaskMapper.delete(
-                new LambdaQueryWrapper<DispatchTask>()
-                        .in(DispatchTask::getStatus, List.of(
-                                DispatchTaskStatus.COMPLETED.value(),
-                                DispatchTaskStatus.FAILED.value(),
-                                DispatchTaskStatus.DEAD_LETTER.value(),
-                                DispatchTaskStatus.CANCELLED.value()))
-                        .le(DispatchTask::getUpdatedAt, deadline)
-        );
+        int deleted = dispatchTaskMapper.deleteUnreferencedTerminalBefore(deadline);
+        log.info("Dispatch task history cleanup completed, deadline={}, deleted={}", deadline, deleted);
+        return deleted;
     }
 
     public boolean isHistoryCleanupEnabled() {

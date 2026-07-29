@@ -12,6 +12,7 @@ import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import org.apache.ibatis.annotations.Delete;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -94,6 +95,40 @@ class DispatchTaskServiceReleaseTest {
         );
 
         assertEquals(3600, delaySeconds);
+    }
+
+    @Test
+    void cleanupHistoryUsesReferenceSafeDelete() {
+        DispatchProperties properties = new DispatchProperties();
+        properties.setTaskRetentionDays(90);
+        service = newService(properties);
+        when(dispatchTaskMapper.deleteUnreferencedTerminalBefore(
+                org.mockito.ArgumentMatchers.any(LocalDateTime.class))).thenReturn(4);
+
+        LocalDateTime earliestExpectedDeadline = LocalDateTime.now().minusDays(90).minusSeconds(1);
+        int deleted = service.cleanupHistory();
+        LocalDateTime latestExpectedDeadline = LocalDateTime.now().minusDays(90).plusSeconds(1);
+
+        assertEquals(4, deleted);
+        ArgumentCaptor<LocalDateTime> deadline = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(dispatchTaskMapper).deleteUnreferencedTerminalBefore(deadline.capture());
+        assertTrue(!deadline.getValue().isBefore(earliestExpectedDeadline));
+        assertTrue(!deadline.getValue().isAfter(latestExpectedDeadline));
+    }
+
+    @Test
+    void cleanupSqlPreservesTasksReferencedByBusinessEvidence() throws Exception {
+        Method method = DispatchTaskMapper.class.getMethod(
+                "deleteUnreferencedTerminalBefore",
+                LocalDateTime.class
+        );
+        Delete annotation = method.getAnnotation(Delete.class);
+        String sql = String.join(" ", annotation.value());
+
+        assertTrue(sql.contains("article_batch.dispatch_task_id = dispatch_task.id"));
+        assertTrue(sql.contains("presale_diagnosis_batches.dispatch_task_id = dispatch_task.id"));
+        assertTrue(sql.contains("dispatch_alert.task_id = dispatch_task.id"));
+        assertTrue(sql.contains("'completed', 'failed', 'dead_letter', 'cancelled'"));
     }
 
     @Test

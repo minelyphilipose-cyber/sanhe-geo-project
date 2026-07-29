@@ -3,6 +3,7 @@ package com.huanjing.geo.module.dispatch.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.huanjing.geo.module.dispatch.dto.DispatchDueTimeBucketRow;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -14,6 +15,28 @@ import java.util.List;
 
 @Mapper
 public interface DispatchTaskMapper extends BaseMapper<DispatchTask> {
+
+    @Delete("""
+            DELETE FROM dispatch_task
+            WHERE status IN ('completed', 'failed', 'dead_letter', 'cancelled')
+              AND updated_at <= #{deadline}
+              AND NOT EXISTS (
+                  SELECT 1
+                    FROM article_batch
+                   WHERE article_batch.dispatch_task_id = dispatch_task.id
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                    FROM presale_diagnosis_batches
+                   WHERE presale_diagnosis_batches.dispatch_task_id = dispatch_task.id
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                    FROM dispatch_alert
+                   WHERE dispatch_alert.task_id = dispatch_task.id
+              )
+            """)
+    int deleteUnreferencedTerminalBefore(@Param("deadline") LocalDateTime deadline);
 
     @Select("""
             SELECT *
