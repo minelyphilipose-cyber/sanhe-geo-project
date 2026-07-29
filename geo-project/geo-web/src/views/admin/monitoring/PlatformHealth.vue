@@ -7,6 +7,14 @@
         <div class="admin-page-subtitle">集中观察平台额度、异常次数与降级状态，辅助判断调度链路健康度。</div>
       </div>
       <div class="admin-page-actions platform-header-actions">
+        <el-button
+          v-if="canRunManualVerification"
+          type="primary"
+          plain
+          @click="goQuestionPollVerification"
+        >
+          手工验链
+        </el-button>
         <span class="refresh-state" :class="{ 'is-active': autoRefresh }">
           <span class="refresh-dot" />
           {{ autoRefresh ? '自动刷新中' : '手动刷新' }}
@@ -204,9 +212,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { getDispatchPlatforms, getHunyuanCapacity, getLlmPoolSnapshot, type DispatchRangeParams } from '@/api/dispatch'
+import { useUserStore } from '@/stores/user'
 import type { DispatchPlatformHealthItem, HunyuanCapacity, LlmPoolSnapshot } from '@/types'
 
 const router = useRouter()
+const userStore = useUserStore()
 const loading = ref(false)
 const autoRefresh = ref(true)
 let timer: number | null = null
@@ -225,6 +235,9 @@ const p1Count = computed(() => platforms.value.filter((x) => x.priorityLevel ===
 const p2Count = computed(() => platforms.value.filter((x) => x.priorityLevel === 'P2').length)
 const degradedCount = computed(() => platforms.value.filter((x) => x.degraded).length)
 const nearLimitCount = computed(() => platforms.value.filter((x) => !x.degraded && platformPercent(x) >= 80).length)
+const canRunManualVerification = computed(() =>
+  userStore.hasPermission('dispatch.question_poll.manual'),
+)
 const llmPoolPercent = computed(() => {
   const limit = llmPool.value?.globalConcurrency || 0
   if (limit <= 0) return 0
@@ -394,6 +407,10 @@ function percentText(value?: number | null) {
 
 function goAlertCenter() {
   router.push({ path: '/admin/alerts', query: { tab: 'system' } })
+}
+
+function goQuestionPollVerification() {
+  router.push({ name: 'QuestionPollVerification' })
 }
 
 function startTimer() {

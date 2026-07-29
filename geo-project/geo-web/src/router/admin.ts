@@ -325,7 +325,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'monitoring/question-poll-verification',
       name: 'QuestionPollVerification',
       component: () => import('@/views/admin/monitoring/QuestionPollVerification.vue'),
-      meta: { title: '轮询链路验证', icon: 'VideoPlay', permissions: ['dispatch.question_poll.manual'] },
+      meta: { title: '轮询链路验证', hidden: true, permissions: ['dispatch.question_poll.manual'] },
     },
     {
       path: 'reports/:id',
