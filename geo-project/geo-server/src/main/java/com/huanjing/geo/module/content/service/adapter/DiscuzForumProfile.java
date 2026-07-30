@@ -21,7 +21,15 @@ public class DiscuzForumProfile {
     private Integer connectTimeoutMs = 5000;
     private Integer requestTimeoutMs = 30000;
     private Boolean rememberLogin = true;
-    private String successUrlRegex = "(thread|forum)\\-\\d+";
+    private String successUrlRegex = "thread-\\d+-\\d+-\\d+\\.html";
+    private Integer successRedirectWaitMs = 10000;
+    private String canonicalSelector = "link[rel=canonical]";
+    private String publishedTitleSelector = "#thread_subject";
+    private String publishedContentSelector = "[id^=\"postmessage_\"]";
+    private String moderationSelector = "h1.ts + .xg1";
+    private String moderationPendingText = "审核中";
+    private String moderationPolicy = "none";
+    private Integer moderationGraceHours = 24;
     private List<Board> boards = List.of();
 
     public URI baseUri() {
@@ -102,6 +110,14 @@ public class DiscuzForumProfile {
         copy.setRequestTimeoutMs(requestTimeoutMs);
         copy.setRememberLogin(rememberLogin);
         copy.setSuccessUrlRegex(successUrlRegex);
+        copy.setSuccessRedirectWaitMs(successRedirectWaitMs);
+        copy.setCanonicalSelector(canonicalSelector);
+        copy.setPublishedTitleSelector(publishedTitleSelector);
+        copy.setPublishedContentSelector(publishedContentSelector);
+        copy.setModerationSelector(moderationSelector);
+        copy.setModerationPendingText(moderationPendingText);
+        copy.setModerationPolicy(moderationPolicy);
+        copy.setModerationGraceHours(moderationGraceHours);
         copy.setBoards(boards);
         return copy;
     }

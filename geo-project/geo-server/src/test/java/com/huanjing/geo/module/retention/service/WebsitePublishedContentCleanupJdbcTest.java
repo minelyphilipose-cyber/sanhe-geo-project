@@ -43,35 +43,38 @@ class WebsitePublishedContentCleanupJdbcTest {
 
     @Test
     void cleansOnlyCommittedPublicWebsiteSuccessWithoutActiveWork() {
-        insertArticle(101L, "distributed", "https://agent.example/articles/101", "public_url");
-        insertArticle(102L, "distributed", "https://industry.example/articles/102", "public_url");
+        insertArticle(101L, "distributed", "https://agent.example/articles/101", "verified_public_url");
+        insertArticle(102L, "distributed", "https://industry.example/articles/102", "verified_public_url");
         jdbcTemplate.update("""
                 INSERT INTO distribution_tasks
                     (id, article_id, target_kind, status, request_payload, fill_payload, response_payload)
                 VALUES (1002, 102, 'mp_account', 'submitted', '{}', '{}', '{}')
                 """);
         insertArticle(103L, "distributed", "https://forum.example/manage/103", "manage_url");
-        insertArticle(104L, "distributed", "https://forum.example/articles/104", "public_url");
+        insertArticle(104L, "distributed", "https://forum.example/articles/104", "pending_review_url");
         jdbcTemplate.update("""
                 INSERT INTO self_media_publish_schedule (id, article_id, status)
                 VALUES (2004, 104, 'publish_unknown')
                 """);
-        insertArticle(105L, "approved", "https://agent.example/articles/105", "public_url");
-        insertArticle(106L, "unpublished", "https://agent.example/articles/106", "public_url");
-        insertArticle(107L, "distributed", "https://", "public_url");
-        insertArticle(108L, "distributed", "https://agent.example/articles/108", "public_url");
+        insertArticle(105L, "approved", "https://agent.example/articles/105", "verified_public_url");
+        insertArticle(106L, "unpublished", "https://agent.example/articles/106", "verified_public_url");
+        insertArticle(107L, "distributed", "https://", "verified_public_url");
+        insertArticle(108L, "distributed", "https://agent.example/articles/108", "verified_public_url");
         jdbcTemplate.update("""
                 UPDATE article_publish_record
                    SET published_at = DATEADD('HOUR', -1, CURRENT_TIMESTAMP)
                  WHERE article_id = 108
                 """);
-        insertArticle(109L, "deleted", "https://agent.example/articles/109", "public_url");
-        insertArticle(110L, "deleted", "https://agent.example/articles/110", "public_url");
+        insertArticle(109L, "deleted", "https://agent.example/articles/109", "verified_public_url");
+        insertArticle(110L, "deleted", "https://agent.example/articles/110", "verified_public_url");
         jdbcTemplate.update("""
                 UPDATE article_draft_version
                    SET content_purged_at = DATEADD('DAY', -1, CURRENT_TIMESTAMP)
                  WHERE article_id = 110
                 """);
+        insertArticle(111L, "distributed", "https://agent.example/articles/111", "public_url");
+        insertArticle(112L, "distributed", "https://forum.example/thread-shared", "verified_public_url");
+        insertArticle(113L, "distributed", "https://forum.example/thread-shared", "verified_public_url");
 
         WebsitePublishedContentCleanupService.CleanupBatchResult dryRun =
                 service.runScheduled(0, 100, null, true, "jdbc dry run");
@@ -118,6 +121,12 @@ class WebsitePublishedContentCleanupJdbcTest {
                 "SELECT status FROM article_draft WHERE id = 107", String.class));
         assertEquals("distributed", jdbcTemplate.queryForObject(
                 "SELECT status FROM article_draft WHERE id = 108", String.class));
+        assertEquals("distributed", jdbcTemplate.queryForObject(
+                "SELECT status FROM article_draft WHERE id = 111", String.class));
+        assertEquals("distributed", jdbcTemplate.queryForObject(
+                "SELECT status FROM article_draft WHERE id = 112", String.class));
+        assertEquals("distributed", jdbcTemplate.queryForObject(
+                "SELECT status FROM article_draft WHERE id = 113", String.class));
         assertEquals("deleted", jdbcTemplate.queryForObject(
                 "SELECT status FROM article_draft WHERE id = 109", String.class));
         assertEquals(1, jdbcTemplate.queryForObject("""

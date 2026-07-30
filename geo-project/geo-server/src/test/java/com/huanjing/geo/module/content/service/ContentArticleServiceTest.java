@@ -17,10 +17,12 @@ import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
+import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
 import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
@@ -64,6 +66,7 @@ class ContentArticleServiceTest {
 
     private ArticleDraftMapper articleDraftMapper;
     private ArticleDraftVersionMapper articleDraftVersionMapper;
+    private ArticlePublishRecordMapper articlePublishRecordMapper;
     private BatchArticleGenerationTaskMapper batchArticleGenerationTaskMapper;
     private SelfMediaPublishScheduleMapper selfMediaPublishScheduleMapper;
     private ProjectMapper projectMapper;
@@ -78,11 +81,13 @@ class ContentArticleServiceTest {
     void setUp() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraft.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraftVersion.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticlePublishRecord.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), BatchArticleGenerationTask.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Project.class);
 
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
+        articlePublishRecordMapper = mock(ArticlePublishRecordMapper.class);
         batchArticleGenerationTaskMapper = mock(BatchArticleGenerationTaskMapper.class);
         selfMediaPublishScheduleMapper = mock(SelfMediaPublishScheduleMapper.class);
         brandAccessService = mock(BrandAccessService.class);
@@ -107,6 +112,7 @@ class ContentArticleServiceTest {
                 articleDraftVersionMapper,
                 mock(ArticleReviewLogMapper.class),
                 mock(ArticlePublishLogMapper.class),
+                articlePublishRecordMapper,
                 batchArticleGenerationTaskMapper,
                 mock(ArticlePromptTemplateMapper.class),
                 selfMediaPublishScheduleMapper,
@@ -126,6 +132,38 @@ class ContentArticleServiceTest {
                 brandAccessService,
                 auditService
         );
+    }
+
+    @Test
+    void detailReturnsSafePublishRecordSummary() {
+        ArticleDraft article = new ArticleDraft();
+        article.setId(1L);
+        article.setProjectId(10L);
+        article.setTitle("Published article");
+        article.setStatus("distributed");
+        ArticlePublishRecord record = new ArticlePublishRecord();
+        record.setId(88L);
+        record.setArticleId(1L);
+        record.setTargetKind("forum_site");
+        record.setTargetChannel("forum_site");
+        record.setPublishStatus("distributed");
+        record.setPublishedUrl("https://bbs.ahv.cc/thread-18861-1-1.html");
+        record.setUrlQuality("pending_review_url");
+        record.setRawResponse("{\"sensitive\":\"must-not-be-returned\"}");
+        record.setPublishedAt(java.time.LocalDateTime.of(2026, 7, 30, 9, 30));
+        when(articleDraftMapper.selectById(1L)).thenReturn(article);
+        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of());
+        when(articlePublishRecordMapper.selectList(any())).thenReturn(List.of(record));
+
+        Map<String, Object> detail = service.detail(1L);
+
+        @SuppressWarnings("unchecked")
+        List<com.huanjing.geo.module.content.dto.ArticlePublishRecordVO> records =
+                (List<com.huanjing.geo.module.content.dto.ArticlePublishRecordVO>) detail.get("publishRecords");
+        assertEquals(1, records.size());
+        assertEquals("pending_review_url", records.get(0).urlQuality());
+        assertEquals("https://bbs.ahv.cc/thread-18861-1-1.html", records.get(0).publishedUrl());
+        assertFalse(records.get(0).toString().contains("sensitive"));
     }
 
     @Test

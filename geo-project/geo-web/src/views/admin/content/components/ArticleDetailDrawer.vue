@@ -81,6 +81,48 @@
         </div>
       </div>
 
+      <div v-if="detailData.publishRecords?.length" class="detail-section-panel">
+        <h4 class="detail-title">发布记录</h4>
+        <el-table :data="detailData.publishRecords" border>
+          <el-table-column label="渠道" min-width="130">
+            <template #default="scope">{{ publishChannelLabel(scope.row.targetChannel, scope.row.targetKind) }}</template>
+          </el-table-column>
+          <el-table-column label="发布状态" width="110">
+            <template #default="scope">
+              <el-tag size="small" :type="publishStatusTag(scope.row.publishStatus)">
+                {{ publishStatusLabel(scope.row.publishStatus) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="链接证据" width="130">
+            <template #default="scope">
+              <el-tag size="small" :type="urlQualityTag(scope.row.urlQuality)" effect="light">
+                {{ urlQualityLabel(scope.row.urlQuality) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="发布时间" width="180">
+            <template #default="scope">{{ formatDateTime(scope.row.publishedAt || scope.row.verifiedAt) }}</template>
+          </el-table-column>
+          <el-table-column label="发布链接" min-width="280">
+            <template #default="scope">
+              <el-link
+                v-if="isHttpUrl(scope.row.publishedUrl)"
+                class="publish-record-link"
+                type="primary"
+                :href="scope.row.publishedUrl"
+                target="_blank"
+                rel="noreferrer"
+                :underline="false"
+              >
+                {{ publishedUrlLabel(scope.row.publishedUrl) }}
+              </el-link>
+              <span v-else class="publish-record-empty">-</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
       <div v-if="detailData.batchGenerationTask" class="detail-section-panel">
         <div class="detail-header trace-header">
           <h4 class="detail-title">批量生成追溯</h4>
@@ -322,6 +364,82 @@ function batchComplianceIssues(task?: BatchArticleGenerationTaskDetail | null): 
   }
   return []
 }
+
+function publishChannelLabel(channel?: string | null, kind?: string | null) {
+  const value = channel || kind || ''
+  const labels: Record<string, string> = {
+    official_site: 'Agent 官网',
+    brand_geo_site: 'Agent 官网',
+    industry_site: '行业资讯站',
+    forum: '论坛',
+    forum_site: '论坛',
+    wechat: '微信公众号',
+    wechat_mp: '微信公众号',
+    douyin: '抖音',
+    xiaohongshu: '小红书',
+    toutiao: '头条号',
+    baijiahao: '百家号',
+    zhihu: '知乎',
+  }
+  return labels[value] || value || '-'
+}
+
+function publishStatusLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    distributed: '已分发',
+    published: '已发布',
+    published_confirmed: '已确认发布',
+    published_url_pending: '待补链接',
+    offline: '已下线',
+  }
+  return value ? (labels[value] || value) : '-'
+}
+
+function publishStatusTag(value?: string | null): TagType {
+  if (['distributed', 'published', 'published_confirmed'].includes(value || '')) return 'success'
+  if (value === 'published_url_pending') return 'warning'
+  return 'info'
+}
+
+function urlQualityLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    verified_public_url: '已验证',
+    pending_review_url: '审核中',
+    public_url: '历史待核验',
+    ambiguous_url: '证据冲突',
+    unverified_public_url: '未核验',
+    manage_url: '管理地址',
+    missing: '链接缺失',
+  }
+  return value ? (labels[value] || value) : '未分类'
+}
+
+function urlQualityTag(value?: string | null): TagType {
+  if (value === 'verified_public_url') return 'success'
+  if (value === 'pending_review_url' || value === 'public_url') return 'warning'
+  if (value === 'ambiguous_url' || value === 'unverified_public_url') return 'danger'
+  return 'info'
+}
+
+function isHttpUrl(value?: string | null) {
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname)
+  } catch {
+    return false
+  }
+}
+
+function publishedUrlLabel(value?: string | null) {
+  if (!value) return '-'
+  try {
+    const url = new URL(value)
+    return `${url.hostname}${url.pathname}${url.search}`
+  } catch {
+    return value
+  }
+}
 </script>
 
 <style scoped>
@@ -472,6 +590,18 @@ function batchComplianceIssues(task?: BatchArticleGenerationTaskDetail | null): 
 
 .detail-section-panel > .el-table {
   border-top: 1px solid #e2e8f0;
+}
+
+.publish-record-link {
+  display: inline-flex;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-record-empty {
+  color: #94a3b8;
 }
 
 .detail-preview-panel {

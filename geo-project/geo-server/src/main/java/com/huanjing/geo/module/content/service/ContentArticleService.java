@@ -15,6 +15,7 @@ import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
+import com.huanjing.geo.module.content.dto.ArticlePublishRecordVO;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
@@ -59,6 +60,7 @@ public class ContentArticleService {
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final ArticleReviewLogMapper articleReviewLogMapper;
     private final ArticlePublishLogMapper articlePublishLogMapper;
+    private final ArticlePublishRecordMapper articlePublishRecordMapper;
     private final BatchArticleGenerationTaskMapper batchArticleGenerationTaskMapper;
     private final ArticlePromptTemplateMapper articlePromptTemplateMapper;
     private final SelfMediaPublishScheduleMapper selfMediaPublishScheduleMapper;
@@ -422,6 +424,12 @@ public class ContentArticleService {
                         .eq(ArticlePublishLog::getArticleId, articleId)
                         .orderByDesc(ArticlePublishLog::getCreatedAt)
         );
+        List<ArticlePublishRecordVO> publishRecords = articlePublishRecordMapper.selectList(
+                new LambdaQueryWrapper<ArticlePublishRecord>()
+                        .eq(ArticlePublishRecord::getArticleId, articleId)
+                        .orderByDesc(ArticlePublishRecord::getPublishedAt)
+                        .orderByDesc(ArticlePublishRecord::getId)
+        ).stream().map(ArticlePublishRecordVO::from).toList();
         versions.forEach(articleBodyProvider::hydrateContent);
         BatchArticleGenerationTask batchGenerationTask = batchArticleGenerationTaskMapper.selectOne(
                 new LambdaQueryWrapper<BatchArticleGenerationTask>()
@@ -438,6 +446,7 @@ public class ContentArticleService {
         result.put("versions", versions);
         result.put("reviewLogs", reviewLogs);
         result.put("publishLogs", publishLogs);
+        result.put("publishRecords", publishRecords);
         return result;
     }
 

@@ -193,6 +193,28 @@ class ContentDistributionServiceTest {
     }
 
     @Test
+    void forumPublishEvidenceMapsToCleanupQualityWithoutTrustingHistoricalRecords() {
+        DistributionTask task = new DistributionTask();
+        task.setTargetKind(DistributionTargetKind.FORUM_SITE);
+        task.setPublishedUrl("https://bbs.ahv.cc/thread-18861-1-1.html");
+        SubmitResult verified = SubmitResult.success(200, null, null, task.getPublishedUrl());
+        verified.setPublicEvidenceStatus("verified");
+        SubmitResult pending = SubmitResult.success(200, null, null, task.getPublishedUrl());
+        pending.setPublicEvidenceStatus("pending_review");
+        SubmitResult ambiguous = SubmitResult.success(200, null, null, task.getPublishedUrl());
+        ambiguous.setPublicEvidenceStatus("ambiguous");
+
+        assertEquals("verified_public_url",
+                ReflectionTestUtils.invokeMethod(contentDistributionService, "urlQuality", task, verified));
+        assertEquals("pending_review_url",
+                ReflectionTestUtils.invokeMethod(contentDistributionService, "urlQuality", task, pending));
+        assertEquals("ambiguous_url",
+                ReflectionTestUtils.invokeMethod(contentDistributionService, "urlQuality", task, ambiguous));
+        assertEquals("public_url",
+                ReflectionTestUtils.invokeMethod(contentDistributionService, "urlQuality", task, null));
+    }
+
+    @Test
     void distributeTo_brandOfficialSite_success_writesSubmittedAndQuotaIncreased() {
         givenCommonData();
         officialCmsSiteAdapter.result = SubmitResult.success(201, "{}", "{\"id\":\"pa-1\"}", "https://site/article", "pa-1");
@@ -733,7 +755,7 @@ class ContentDistributionServiceTest {
         assertEquals(300L, record.getSourceId());
         assertEquals(targetChannel, record.getTargetChannel());
         assertEquals("https://site/article", record.getPublishedUrl());
-        assertEquals("public_url", record.getUrlQuality());
+        assertEquals("verified_public_url", record.getUrlQuality());
         assertEquals("distribution_tasks.published_url", record.getUrlSource());
         assertEquals("distributed", record.getPublishStatus());
         assertNotNull(record.getVerifiedAt());

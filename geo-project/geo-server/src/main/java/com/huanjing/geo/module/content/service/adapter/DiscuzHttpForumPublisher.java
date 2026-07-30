@@ -87,7 +87,7 @@ public class DiscuzHttpForumPublisher {
                     form = session.loadPostForm(profile);
                     response = session.post(profile.postSubmitUri(), formBody(form, payload.title(), bbcode));
                 }
-                return toSubmitResult(profile, payload, requestPayload, response, started);
+                return toSubmitResult(profile, payload, requestPayload, response, session, started);
             }
         } catch (BizException ex) {
             String failureKind = ex.getCode() == 401 ? FailureKind.AUTH_EXPIRED : FailureKind.VALIDATION;
@@ -140,43 +140,85 @@ public class DiscuzHttpForumPublisher {
                 throw new BizException(401, "平台网站登录 Cookie 已失效或发帖页被 WAF 拦截，请重新登录后更新该平台网站账号 Cookie");
             }
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> result = (Map<String, Object>) page.evaluate("""
-                    async ({submitUrl, title, message}) => {
-                      const formhash = document.querySelector('input[name=formhash]')?.value || '';
-                      const posttime = document.querySelector('input[name=posttime]')?.value || Math.floor(Date.now() / 1000).toString();
-                      const wysiwyg = document.querySelector('input[name=wysiwyg]')?.value || '1';
-                      const params = new URLSearchParams();
-                      params.set('formhash', formhash);
-                      params.set('posttime', posttime);
-                      params.set('wysiwyg', wysiwyg);
-                      params.set('subject', title);
-                      params.set('message', message);
-                      params.set('topicsubmit', 'true');
-                      params.set('save', '');
-                      const response = await fetch(submitUrl, {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: {
-                          'Content-Type': 'application/x-www-form-urlencoded',
-                          'X-Requested-With': 'XMLHttpRequest'
-                        },
-                        body: params.toString()
-                      });
-                      return { status: response.status, url: response.url, body: await response.text() };
+            page.evaluate("""
+                    ({submitUrl, title, message}) => {
+                      const form = document.querySelector('form#postform');
+                      if (!form) {
+                        throw new Error('Discuz post form is missing');
+                      }
+                      const setValue = (name, value, tagName = 'input') => {
+                        let field = form.querySelector(`[name="${name}"]`);
+                        if (!field) {
+                          field = document.createElement(tagName);
+                          field.name = name;
+                          form.appendChild(field);
+                        }
+                        field.value = value;
+                      };
+                      setValue('subject', title);
+                      setValue('message', message, 'textarea');
+                      setValue('topicsubmit', 'true');
+                      setValue('save', '');
+                      form.action = submitUrl;
+                      form.method = 'post';
+                      form.submit();
                     }
                     """, Map.of(
                     "submitUrl", profile.postSubmitUri().toString(),
                     "title", payload.title(),
                     "message", bbcode
             ));
-            BrowserSubmitResponse response = new BrowserSubmitResponse(
-                    ((Number) result.getOrDefault("status", 0)).intValue(),
-                    String.valueOf(result.getOrDefault("url", profile.postSubmitUri().toString())),
-                    String.valueOf(result.getOrDefault("body", ""))
-            );
+            BrowserSubmitResponse response = waitForBrowserPublishResult(page, profile, payload);
             return toSubmitResult(profile, payload, requestPayload, response, started);
         }
+    }
+
+    private BrowserSubmitResponse waitForBrowserPublishResult(Page page,
+                                                              DiscuzForumProfile profile,
+                                                              ForumPublishPayload payload) {
+        long waitMs = successRedirectWaitMs(profile);
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMs);
+        String lastHtml = "";
+        boolean successMessageSeen = false;
+        while (System.nanoTime() < deadline) {
+            try {
+                lastHtml = page.content();
+                DiscuzPublishedPageVerifier.Verification verification =
+                        DiscuzPublishedPageVerifier.verify(
+                                profile.baseUri(),
+                                page.url(),
+                                lastHtml,
+                                payload.title(),
+                                profile.getCanonicalSelector(),
+                                profile.getPublishedTitleSelector(),
+                                profile.getPublishedContentSelector(),
+                                profile.getModerationSelector(),
+                                profile.getModerationPendingText(),
+                                profile.getModerationPolicy(),
+                                profile.getModerationGraceHours()
+                        );
+                if (DiscuzPublishedPageVerifier.EVIDENCE_VERIFIED.equals(verification.evidenceStatus())
+                        || DiscuzPublishedPageVerifier.EVIDENCE_PENDING_REVIEW.equals(verification.evidenceStatus())) {
+                    return new BrowserSubmitResponse(200, page.url(), lastHtml, true, verification);
+                }
+                successMessageSeen = successMessageSeen
+                        || containsSuccessMessage(lastHtml)
+                        || DiscuzPublishedPageVerifier.isThreadDetailUrl(profile.baseUri(), page.url());
+            } catch (PlaywrightException ex) {
+                log.debug("discuz result page is navigating articleId={} url={} error={}",
+                        payload.articleId(), safePageUrl(page), safeMessage(ex));
+            }
+            page.waitForTimeout(250);
+        }
+        DiscuzPublishedPageVerifier.Verification unverified =
+                DiscuzPublishedPageVerifier.Verification.unverified("thread_detail_redirect_timeout");
+        return new BrowserSubmitResponse(
+                successMessageSeen ? 200 : 504,
+                safePageUrl(page),
+                lastHtml,
+                successMessageSeen,
+                unverified
+        );
     }
 
     private void openPostPage(Page page, DiscuzForumProfile profile, Long articleId, int timeoutMs) {
@@ -295,18 +337,33 @@ public class DiscuzHttpForumPublisher {
                                         ForumPublishPayload payload,
                                         String requestPayload,
                                         HttpResponse<String> response,
+                                        Session session,
                                         long started) throws Exception {
-        String publishedUrl = resolvePublishedUrl(profile, response);
+        String publishedUrl = resolveExplicitPublishedUrl(profile, response);
         boolean success = isSuccessfulPost(response, publishedUrl);
+        DiscuzPublishedPageVerifier.Verification verification =
+                verifyHttpPublishedPage(profile, payload, session, publishedUrl);
         Map<String, Object> responseBody = new LinkedHashMap<>();
         responseBody.put("statusCode", response.statusCode());
-        responseBody.put("location", firstHeader(response, "location"));
-        responseBody.put("publishedUrl", publishedUrl == null ? "" : publishedUrl);
+        responseBody.put("location", safeHeaderValue(firstHeader(response, "location")));
+        responseBody.put("publishedUrl", valueOrEmpty(verification.publishedUrl()));
+        responseBody.put("platformArticleId", valueOrEmpty(verification.platformArticleId()));
+        responseBody.put("evidenceStatus", verification.evidenceStatus());
+        responseBody.put("evidenceReason", valueOrEmpty(verification.evidenceReason()));
         responseBody.put("elapsedMs", (System.nanoTime() - started) / 1_000_000);
         responseBody.put("bodyPreview", preview(response.body()));
         String responseJson = objectMapper.writeValueAsString(responseBody);
         if (success) {
-            return SubmitResult.success(response.statusCode(), requestPayload, responseJson, publishedUrl, platformArticleId(publishedUrl));
+            SubmitResult result = SubmitResult.success(
+                    response.statusCode(),
+                    requestPayload,
+                    responseJson,
+                    verification.publishedUrl(),
+                    verification.platformArticleId()
+            );
+            applyEvidence(result, verification);
+            logPublishResult(payload, profile, response.statusCode(), verification, started);
+            return result;
         }
         return SubmitResult.failure(response.statusCode(), requestPayload, responseJson,
                 "discuz publish did not return a success redirect or success message",
@@ -318,17 +375,31 @@ public class DiscuzHttpForumPublisher {
                                         String requestPayload,
                                         BrowserSubmitResponse response,
                                         long started) throws Exception {
-        String publishedUrl = resolvePublishedUrl(profile, response);
-        boolean success = isSuccessfulPost(response, publishedUrl);
+        DiscuzPublishedPageVerifier.Verification verification = response.verification();
+        boolean success = response.successMessageSeen()
+                || DiscuzPublishedPageVerifier.EVIDENCE_VERIFIED.equals(verification.evidenceStatus())
+                || DiscuzPublishedPageVerifier.EVIDENCE_PENDING_REVIEW.equals(verification.evidenceStatus());
         Map<String, Object> responseBody = new LinkedHashMap<>();
         responseBody.put("statusCode", response.statusCode());
         responseBody.put("location", "");
-        responseBody.put("publishedUrl", publishedUrl == null ? "" : publishedUrl);
+        responseBody.put("publishedUrl", valueOrEmpty(verification.publishedUrl()));
+        responseBody.put("platformArticleId", valueOrEmpty(verification.platformArticleId()));
+        responseBody.put("evidenceStatus", verification.evidenceStatus());
+        responseBody.put("evidenceReason", valueOrEmpty(verification.evidenceReason()));
         responseBody.put("elapsedMs", (System.nanoTime() - started) / 1_000_000);
         responseBody.put("bodyPreview", preview(response.body()));
         String responseJson = objectMapper.writeValueAsString(responseBody);
         if (success) {
-            return SubmitResult.success(response.statusCode(), requestPayload, responseJson, publishedUrl, platformArticleId(publishedUrl));
+            SubmitResult result = SubmitResult.success(
+                    response.statusCode(),
+                    requestPayload,
+                    responseJson,
+                    verification.publishedUrl(),
+                    verification.platformArticleId()
+            );
+            applyEvidence(result, verification);
+            logPublishResult(payload, profile, response.statusCode(), verification, started);
+            return result;
         }
         return SubmitResult.failure(response.statusCode(), requestPayload, responseJson,
                 "discuz publish did not return a success redirect or success message",
@@ -336,67 +407,136 @@ public class DiscuzHttpForumPublisher {
     }
 
     private boolean isSuccessfulPost(HttpResponse<String> response, String publishedUrl) {
-        if (response.statusCode() >= 300 && response.statusCode() < 400 && StringUtils.hasText(firstHeader(response, "location"))) {
-            return true;
-        }
         if (StringUtils.hasText(publishedUrl)) {
             return true;
         }
-        String body = response.body();
-        return body != null && (body.contains("succeedmessage") || body.contains("发布成功") || body.contains("<root><![CDATA[0]]></root>"));
+        return containsSuccessMessage(response.body());
     }
 
-    private boolean isSuccessfulPost(BrowserSubmitResponse response, String publishedUrl) {
-        if (StringUtils.hasText(publishedUrl)) {
-            return true;
-        }
-        String body = response.body();
-        return response.statusCode() >= 200 && response.statusCode() < 300
-                && body != null
-                && (body.contains("succeedmessage") || body.contains("发布成功") || body.contains("<root><![CDATA[0]]></root>"));
-    }
-
-    private String resolvePublishedUrl(DiscuzForumProfile profile, HttpResponse<String> response) {
+    private String resolveExplicitPublishedUrl(DiscuzForumProfile profile, HttpResponse<String> response) {
         String location = firstHeader(response, "location");
-        if (StringUtils.hasText(location)) {
+        if (DiscuzPublishedPageVerifier.isThreadDetailUrl(profile.baseUri(), location)) {
             return profile.baseUri().resolve(location).toString();
         }
         String body = response.body();
         if (!StringUtils.hasText(body)) {
             return null;
         }
-        Matcher hrefMatcher = Pattern.compile("href=[\"']([^\"']*(?:thread|forum)-\\d+[^\"']*)[\"']", Pattern.CASE_INSENSITIVE)
-                .matcher(body);
-        if (hrefMatcher.find()) {
-            return profile.baseUri().resolve(hrefMatcher.group(1)).toString();
-        }
-        if (StringUtils.hasText(profile.getSuccessUrlRegex())) {
-            Matcher matcher = Pattern.compile(profile.getSuccessUrlRegex(), Pattern.CASE_INSENSITIVE).matcher(body);
-            if (matcher.find()) {
-                return profile.baseUri().resolve(matcher.group()).toString();
+        String decoded = body.replace("&amp;", "&");
+        List<Pattern> redirectPatterns = List.of(
+                Pattern.compile("(?:window\\.)?location(?:\\.href)?\\s*=\\s*[\"']([^\"']+)[\"']",
+                        Pattern.CASE_INSENSITIVE),
+                Pattern.compile("(?:window\\.)?location\\.replace\\(\\s*[\"']([^\"']+)[\"']\\s*\\)",
+                        Pattern.CASE_INSENSITIVE),
+                Pattern.compile("url\\s*=\\s*[\"']?([^\"';>\\s]+)", Pattern.CASE_INSENSITIVE)
+        );
+        for (Pattern pattern : redirectPatterns) {
+            Matcher matcher = pattern.matcher(decoded);
+            while (matcher.find()) {
+                String candidate = matcher.group(1);
+                if (DiscuzPublishedPageVerifier.isThreadDetailUrl(profile.baseUri(), candidate)) {
+                    return profile.baseUri().resolve(candidate).toString();
+                }
             }
         }
         return null;
     }
 
-    private String resolvePublishedUrl(DiscuzForumProfile profile, BrowserSubmitResponse response) {
-        String body = response.body();
-        if (StringUtils.hasText(body)) {
-            Matcher hrefMatcher = Pattern.compile("href=[\"']([^\"']*(?:thread|forum)-\\d+[^\"']*)[\"']", Pattern.CASE_INSENSITIVE)
-                    .matcher(body);
-            if (hrefMatcher.find()) {
-                return profile.baseUri().resolve(hrefMatcher.group(1)).toString();
-            }
-            if (StringUtils.hasText(profile.getSuccessUrlRegex())) {
-                Matcher matcher = Pattern.compile(profile.getSuccessUrlRegex(), Pattern.CASE_INSENSITIVE).matcher(body);
-                if (matcher.find()) {
-                    return profile.baseUri().resolve(matcher.group()).toString();
-                }
-            }
+    private DiscuzPublishedPageVerifier.Verification verifyHttpPublishedPage(
+            DiscuzForumProfile profile,
+            ForumPublishPayload payload,
+            Session session,
+            String publishedUrl) {
+        if (!StringUtils.hasText(publishedUrl)) {
+            return DiscuzPublishedPageVerifier.Verification.unverified(
+                    "explicit_thread_redirect_missing");
         }
-        return StringUtils.hasText(response.url()) && Pattern.compile("(?:thread|forum)-\\d+", Pattern.CASE_INSENSITIVE).matcher(response.url()).find()
-                ? response.url()
-                : null;
+        try {
+            HttpResponse<String> detail = session.get(URI.create(publishedUrl));
+            if (detail.statusCode() < 200 || detail.statusCode() >= 300) {
+                return DiscuzPublishedPageVerifier.Verification.unverified(
+                        publishedUrl, null, null, "thread_detail_http_" + detail.statusCode());
+            }
+            return DiscuzPublishedPageVerifier.verify(
+                    profile.baseUri(),
+                    publishedUrl,
+                    detail.body(),
+                    payload.title(),
+                    profile.getCanonicalSelector(),
+                    profile.getPublishedTitleSelector(),
+                    profile.getPublishedContentSelector(),
+                    profile.getModerationSelector(),
+                    profile.getModerationPendingText(),
+                    profile.getModerationPolicy(),
+                    profile.getModerationGraceHours()
+            );
+        } catch (Exception ex) {
+            log.warn("discuz detail verification failed articleId={} host={} path={} error={}",
+                    payload.articleId(), safeHost(publishedUrl), safePath(publishedUrl), safeMessage(ex));
+            return DiscuzPublishedPageVerifier.Verification.unverified(
+                    publishedUrl, null, null, "thread_detail_request_failed");
+        }
+    }
+
+    private void applyEvidence(SubmitResult result,
+                               DiscuzPublishedPageVerifier.Verification verification) {
+        result.setPublicEvidenceStatus(verification.evidenceStatus());
+        result.setPublicEvidenceReason(verification.evidenceReason());
+        result.setPublishedTitle(verification.publishedTitle());
+    }
+
+    private void logPublishResult(ForumPublishPayload payload,
+                                  DiscuzForumProfile profile,
+                                  int statusCode,
+                                  DiscuzPublishedPageVerifier.Verification verification,
+                                  long started) {
+        log.info("discuz publish result articleId={} host={} submitPath={} statusCode={} "
+                        + "publishedPath={} platformArticleId={} evidenceStatus={} evidenceReason={} elapsedMs={}",
+                payload.articleId(),
+                profile.baseUri().getHost(),
+                profile.postSubmitUri().getPath(),
+                statusCode,
+                safePath(verification.publishedUrl()),
+                valueOrEmpty(verification.platformArticleId()),
+                verification.evidenceStatus(),
+                valueOrEmpty(verification.evidenceReason()),
+                (System.nanoTime() - started) / 1_000_000);
+    }
+
+    private boolean containsSuccessMessage(String body) {
+        return body != null && (body.contains("succeedmessage")
+                || body.contains("发布成功")
+                || body.contains("您的主题已发布")
+                || body.contains("新主题需要审核")
+                || body.contains("<root><![CDATA[0]]></root>"));
+    }
+
+    private String safeHeaderValue(String value) {
+        return StringUtils.hasText(value) ? safePath(value) : "";
+    }
+
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String safeHost(String value) {
+        try {
+            return StringUtils.hasText(value) ? URI.create(value).getHost() : "";
+        } catch (IllegalArgumentException ex) {
+            return "";
+        }
+    }
+
+    private String safePath(String value) {
+        try {
+            if (!StringUtils.hasText(value)) {
+                return "";
+            }
+            URI uri = URI.create(value);
+            return StringUtils.hasText(uri.getPath()) ? uri.getPath() : "";
+        } catch (IllegalArgumentException ex) {
+            return "";
+        }
     }
 
     private String formBody(DiscuzPostForm form, String title, String bbcode) {
@@ -440,14 +580,6 @@ public class DiscuzHttpForumPublisher {
         }
     }
 
-    private String platformArticleId(String publishedUrl) {
-        if (!StringUtils.hasText(publishedUrl)) {
-            return null;
-        }
-        Matcher matcher = Pattern.compile("(?:thread-|tid=)(\\d+)").matcher(publishedUrl);
-        return matcher.find() ? matcher.group(1) : null;
-    }
-
     private boolean isLoginPage(String body) {
         return body != null && body.contains("name=\"password\"") && body.contains("mod=logging");
     }
@@ -487,7 +619,11 @@ public class DiscuzHttpForumPublisher {
     private record DiscuzPostForm(String formhash, String posttime, String wysiwyg) {
     }
 
-    private record BrowserSubmitResponse(int statusCode, String url, String body) {
+    private record BrowserSubmitResponse(int statusCode,
+                                         String url,
+                                         String body,
+                                         boolean successMessageSeen,
+                                         DiscuzPublishedPageVerifier.Verification verification) {
     }
 
     private class Session {
@@ -630,6 +766,11 @@ public class DiscuzHttpForumPublisher {
     private int requestTimeoutMs(DiscuzForumProfile profile) {
         Integer value = profile.getRequestTimeoutMs();
         return value == null || value < 1000 ? 30000 : Math.min(value, 120000);
+    }
+
+    private int successRedirectWaitMs(DiscuzForumProfile profile) {
+        Integer value = profile.getSuccessRedirectWaitMs();
+        return value == null || value < 1000 ? 10000 : Math.min(value, 30000);
     }
 
     private String valueOf(Element root, String selector) {

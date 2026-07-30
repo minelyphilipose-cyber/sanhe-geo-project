@@ -64,7 +64,7 @@ public class MobileDashboardAggregateService {
     private static final String SELF_INDEX_CHANNEL_SQL = "'official_site','agent_site','brand_geo_site','agent_official_site','forum','forum_site','industry_site','authority_media'";
     private static final String PUBLIC_CONTENT_PUBLISH_URL_SQL = """
             CASE
-              WHEN url_quality = 'public_url'
+              WHEN url_quality IN ('public_url', 'verified_public_url')
                AND NULLIF(TRIM(published_url), '') IS NOT NULL
                AND LOWER(TRIM(published_url)) NOT LIKE '%%/preview%%'
                AND LOWER(TRIM(published_url)) NOT LIKE '%%/edit%%'

@@ -41,11 +41,9 @@ public class WebsitePublishedContentCleanupService {
             "'confirmed','published','failed','cancelled'";
     private static final String NON_BLOCKING_SELF_MEDIA_STATUS_SQL =
             "'published_confirmed','cancelled'";
-    private static final String WEBSITE_SUCCESS_RECORD_SQL = """
-            r.target_kind IN (%s)
-            AND r.publish_status = 'distributed'
-            AND r.url_quality = 'public_url'
-            """.formatted(WEBSITE_TARGET_KIND_SQL);
+    private static final String WEBSITE_EVIDENCE_QUALITY_SQL =
+            "'verified_public_url','pending_review_url'";
+    private static final String WEBSITE_SUCCESS_RECORD_SQL = trustedWebsiteRecordSql("r");
 
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
@@ -458,7 +456,7 @@ public class WebsitePublishedContentCleanupService {
                  WHERE article_publish_record.article_id = ?
                    AND article_publish_record.raw_response IS NOT NULL
                    AND %s
-                """.formatted(WEBSITE_SUCCESS_RECORD_SQL.replace("r.", "article_publish_record.")), articleId);
+                """.formatted(websiteEvidenceRecordSql("article_publish_record")), articleId);
         int articleRows = jdbcTemplate.update("""
                 UPDATE article_draft
                    SET status = 'deleted',
@@ -514,10 +512,18 @@ public class WebsitePublishedContentCleanupService {
                                AND submitted_r.article_id = %1$s.article_id
                                AND submitted_r.target_kind IN (%3$s)
                                AND submitted_r.publish_status = 'distributed'
-                               AND submitted_r.url_quality = 'public_url'
+                               AND submitted_r.url_quality IN (%4$s)
                                AND (
                                     LOWER(TRIM(submitted_r.published_url)) LIKE 'http://%%'
                                     OR LOWER(TRIM(submitted_r.published_url)) LIKE 'https://%%'
+                               )
+                               AND NOT EXISTS (
+                                   SELECT 1
+                                     FROM article_publish_record duplicate_r
+                                    WHERE duplicate_r.article_id <> submitted_r.article_id
+                                      AND NULLIF(TRIM(duplicate_r.published_url), '') IS NOT NULL
+                                      AND LOWER(TRIM(duplicate_r.published_url))
+                                          = LOWER(TRIM(submitted_r.published_url))
                                )
                         )
                     )
@@ -525,8 +531,31 @@ public class WebsitePublishedContentCleanupService {
                 """.formatted(
                 taskAlias,
                 UNAMBIGUOUS_TERMINAL_DISTRIBUTION_STATUS_SQL,
-                WEBSITE_TARGET_KIND_SQL
+                WEBSITE_TARGET_KIND_SQL,
+                WEBSITE_EVIDENCE_QUALITY_SQL
         );
+    }
+
+    private static String websiteEvidenceRecordSql(String alias) {
+        return """
+                %1$s.target_kind IN (%2$s)
+                AND %1$s.publish_status = 'distributed'
+                AND %1$s.url_quality IN (%3$s)
+                """.formatted(alias, WEBSITE_TARGET_KIND_SQL, WEBSITE_EVIDENCE_QUALITY_SQL);
+    }
+
+    private static String trustedWebsiteRecordSql(String alias) {
+        return """
+                %1$s
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM article_publish_record duplicate_r
+                     WHERE duplicate_r.article_id <> %2$s.article_id
+                       AND NULLIF(TRIM(duplicate_r.published_url), '') IS NOT NULL
+                       AND LOWER(TRIM(duplicate_r.published_url))
+                           = LOWER(TRIM(%2$s.published_url))
+                )
+                """.formatted(websiteEvidenceRecordSql(alias), alias);
     }
 
     private static String eligibleArticleStatusPredicate(String articleAlias) {

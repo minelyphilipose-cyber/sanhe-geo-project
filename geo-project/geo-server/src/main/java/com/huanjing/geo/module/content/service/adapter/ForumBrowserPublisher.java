@@ -98,13 +98,91 @@ public class ForumBrowserPublisher {
             clickRequired(page, profile.getSelectors().getSubmit(), "submit");
             waitNetworkIdle(page, timeoutMs);
 
-            String publishedUrl = resolvePublishedUrl(page, profile);
-            String responseBody = objectMapper.writeValueAsString(Map.of(
-                    "currentUrl", page.url(),
-                    "publishedUrl", publishedUrl == null ? "" : publishedUrl,
-                    "elapsedMs", (System.nanoTime() - started) / 1_000_000
-            ));
-            return SubmitResult.success(200, requestPayload, responseBody, publishedUrl, platformArticleId(publishedUrl));
+            String fallbackUrl = resolvePublishedUrl(page, profile);
+            DiscuzPublishedPageVerifier.Verification verification = verifyPublishedPage(
+                    page, profile, payload, fallbackUrl);
+            String publishedUrl = StringUtils.hasText(verification.publishedUrl())
+                    ? verification.publishedUrl()
+                    : fallbackUrl;
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("currentUrl", page.url());
+            response.put("publishedUrl", publishedUrl == null ? "" : publishedUrl);
+            response.put("platformArticleId", valueOrEmpty(verification.platformArticleId()));
+            response.put("evidenceStatus", verification.evidenceStatus());
+            response.put("evidenceReason", valueOrEmpty(verification.evidenceReason()));
+            response.put("elapsedMs", (System.nanoTime() - started) / 1_000_000);
+            SubmitResult result = SubmitResult.success(
+                    200,
+                    requestPayload,
+                    objectMapper.writeValueAsString(response),
+                    publishedUrl,
+                    StringUtils.hasText(verification.platformArticleId())
+                            ? verification.platformArticleId()
+                            : platformArticleId(publishedUrl)
+            );
+            result.setPublicEvidenceStatus(verification.evidenceStatus());
+            result.setPublicEvidenceReason(verification.evidenceReason());
+            result.setPublishedTitle(verification.publishedTitle());
+            log.info("forum browser publish result articleId={} host={} publishedPath={} "
+                            + "evidenceStatus={} evidenceReason={} elapsedMs={}",
+                    payload.articleId(),
+                    safeHost(profile.getPostUrl()),
+                    safePath(publishedUrl),
+                    verification.evidenceStatus(),
+                    valueOrEmpty(verification.evidenceReason()),
+                    (System.nanoTime() - started) / 1_000_000);
+            return result;
+        }
+    }
+
+    private DiscuzPublishedPageVerifier.Verification verifyPublishedPage(
+            Page page,
+            ForumPublishProfile profile,
+            ForumPublishPayload payload,
+            String fallbackUrl) {
+        if (!StringUtils.hasText(profile.getCanonicalSelector())
+                || !StringUtils.hasText(profile.getPublishedTitleSelector())
+                || !StringUtils.hasText(profile.getPublishedContentSelector())) {
+            return DiscuzPublishedPageVerifier.Verification.unverified(
+                    fallbackUrl, null, null, "published_page_verification_not_configured");
+        }
+        try {
+            return DiscuzPublishedPageVerifier.verify(
+                    URI.create(profile.getPostUrl()).resolve("/"),
+                    page.url(),
+                    page.content(),
+                    payload.title(),
+                    profile.getCanonicalSelector(),
+                    profile.getPublishedTitleSelector(),
+                    profile.getPublishedContentSelector(),
+                    profile.getModerationSelector(),
+                    profile.getModerationPendingText(),
+                    profile.getModerationPolicy(),
+                    profile.getModerationGraceHours()
+            );
+        } catch (RuntimeException ex) {
+            return DiscuzPublishedPageVerifier.Verification.unverified(
+                    fallbackUrl, null, null, "published_page_verification_failed");
+        }
+    }
+
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String safeHost(String value) {
+        try {
+            return StringUtils.hasText(value) ? URI.create(value).getHost() : "";
+        } catch (IllegalArgumentException ex) {
+            return "";
+        }
+    }
+
+    private String safePath(String value) {
+        try {
+            return StringUtils.hasText(value) ? URI.create(value).getPath() : "";
+        } catch (IllegalArgumentException ex) {
+            return "";
         }
     }
 

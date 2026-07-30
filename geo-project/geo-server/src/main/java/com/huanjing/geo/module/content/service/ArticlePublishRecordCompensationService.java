@@ -245,7 +245,18 @@ public class ArticlePublishRecordCompensationService {
                     target_kind = VALUES(target_kind),
                     target_channel = VALUES(target_channel),
                     published_url = VALUES(published_url),
-                    url_quality = VALUES(url_quality),
+                    url_quality = CASE
+                        WHEN article_publish_record.url_quality IN (
+                            'verified_public_url',
+                            'pending_review_url',
+                            'ambiguous_url',
+                            'unverified_public_url'
+                        )
+                        AND LOWER(TRIM(article_publish_record.published_url))
+                            = LOWER(TRIM(VALUES(published_url)))
+                        THEN article_publish_record.url_quality
+                        ELSE VALUES(url_quality)
+                    END,
                     url_source = VALUES(url_source),
                     platform_article_id = VALUES(platform_article_id),
                     platform_publish_id = VALUES(platform_publish_id),

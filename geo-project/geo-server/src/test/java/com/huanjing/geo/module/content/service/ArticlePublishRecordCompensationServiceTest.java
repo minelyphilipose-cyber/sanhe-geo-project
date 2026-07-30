@@ -124,6 +124,43 @@ class ArticlePublishRecordCompensationServiceTest {
                 .containsEntry("platform_publish_id", "2247483717");
     }
 
+    @Test
+    void backfillPublishedTasksDoesNotDowngradeExplicitForumEvidence() {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        createTables(jdbcTemplate);
+        jdbcTemplate.update("""
+                INSERT INTO distribution_tasks
+                    (id, article_id, project_id, target_kind, integration_method, published_url,
+                     status, finished_at, created_at)
+                VALUES
+                    (7, 107, 201, 'forum_site', 'discuz_http',
+                     'https://bbs.ahv.cc/thread-18861-1-1.html',
+                     'submitted', TIMESTAMP '2026-07-30 10:00:00',
+                     TIMESTAMP '2026-07-30 09:00:00')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO article_publish_record
+                    (article_id, distribution_task_id, project_id, source_type, source_id,
+                     target_kind, target_channel, published_url, url_quality, publish_status)
+                VALUES
+                    (107, 7, 201, 'distribution_task', 7,
+                     'forum_site', 'forum_site',
+                     'https://bbs.ahv.cc/thread-18861-1-1.html',
+                     'pending_review_url', 'distributed')
+                """);
+        ArticlePublishRecordCompensationService service =
+                new ArticlePublishRecordCompensationService(jdbcTemplate, currentUserService());
+
+        service.backfillPublishedTasks(100, false);
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT url_quality
+                  FROM article_publish_record
+                 WHERE source_type = 'distribution_task'
+                   AND source_id = 7
+                """, String.class)).isEqualTo("pending_review_url");
+    }
+
     private static Map<String, Object> row(JdbcTemplate jdbcTemplate, Long sourceId) {
         return jdbcTemplate.queryForMap("""
                 SELECT target_channel, publish_status

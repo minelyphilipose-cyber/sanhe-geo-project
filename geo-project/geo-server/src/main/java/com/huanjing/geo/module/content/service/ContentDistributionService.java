@@ -59,6 +59,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URI;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -586,7 +587,7 @@ public class ContentDistributionService {
         finalizeAttemptForBrandOfficialSite(task.getId(), submitResult);
         finalizeArticleStatus(article, submitResult);
         if (submitResult.isSuccess()) {
-            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()));
+            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()), submitResult);
             companyChannelQuotaService.confirmDistribution(task.getId());
         } else {
             companyChannelQuotaService.refundDistribution(task.getId());
@@ -644,7 +645,7 @@ public class ContentDistributionService {
         finalizeAttemptForBrandGeoSite(task.getId(), submitResult);
         finalizeArticleStatus(article, submitResult);
         if (submitResult.isSuccess()) {
-            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()));
+            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()), submitResult);
             companyChannelQuotaService.confirmDistribution(task.getId());
         } else {
             companyChannelQuotaService.refundDistribution(task.getId());
@@ -907,7 +908,7 @@ public class ContentDistributionService {
         finalizeAttemptForIndustrySite(task.getId(), submitResult);
         finalizeArticleStatusForDraft(article, submitResult);
         if (submitResult.isSuccess()) {
-            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()));
+            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()), submitResult);
             companyChannelQuotaService.confirmDistribution(task.getId());
         } else {
             companyChannelQuotaService.refundDistribution(task.getId());
@@ -954,7 +955,9 @@ public class ContentDistributionService {
         finalizeAttemptForForumSite(task.getId(), submitResult);
         finalizeArticleStatusForDraft(article, submitResult);
         if (submitResult.isSuccess()) {
-            recordOwnedSourcePublish(article, distributionTaskMapper.selectById(task.getId()));
+            DistributionTask completedTask = distributionTaskMapper.selectById(task.getId());
+            recordOwnedSourcePublish(article, completedTask, submitResult);
+            alertUntrustedForumEvidence(article, completedTask, site, submitResult);
             companyChannelQuotaService.confirmDistribution(task.getId());
         } else {
             companyChannelQuotaService.refundDistribution(task.getId());
@@ -1513,10 +1516,12 @@ public class ContentDistributionService {
         if (task == null || !Set.of("submitted", "confirmed", "published").contains(task.getStatus())) {
             return;
         }
-        recordOwnedSourcePublish(article, task);
+        recordOwnedSourcePublish(article, task, null);
     }
 
-    private void recordOwnedSourcePublish(ArticleDraft article, DistributionTask task) {
+    private void recordOwnedSourcePublish(ArticleDraft article,
+                                          DistributionTask task,
+                                          SubmitResult submitResult) {
         if (article == null || task == null || task.getId() == null || !isOwnedSourceTarget(task.getTargetKind())) {
             return;
         }
@@ -1530,11 +1535,12 @@ public class ContentDistributionService {
         record.setTargetKind(task.getTargetKind());
         record.setTargetChannel(ownedSourceChannel(task));
         record.setPublishedUrl(blankToNull(task.getPublishedUrl()));
-        record.setUrlQuality(urlQuality(task.getPublishedUrl()));
+        record.setUrlQuality(urlQuality(task, submitResult));
         record.setUrlSource(urlSource(task));
         record.setPlatformArticleId(blankToNull(task.getPlatformArticleId()));
         record.setPlatformPublishId(blankToNull(task.getPlatformPublishId()));
         record.setPublishStatus("distributed");
+        record.setTitle(blankToNull(article.getTitle()));
         record.setPublishedAt(verifiedAt);
         record.setVerifiedAt(verifiedAt);
         try {
@@ -1545,6 +1551,18 @@ public class ContentDistributionService {
     }
 
     private void refreshOwnedSourcePublishRecord(ArticlePublishRecord record) {
+        ArticlePublishRecord existing = articlePublishRecordMapper.selectOne(
+                new LambdaQueryWrapper<ArticlePublishRecord>()
+                        .eq(ArticlePublishRecord::getSourceType, record.getSourceType())
+                        .eq(ArticlePublishRecord::getSourceId, record.getSourceId())
+                        .last("LIMIT 1")
+        );
+        if ("public_url".equals(record.getUrlQuality())
+                && existing != null
+                && isEvidenceQuality(existing.getUrlQuality())
+                && sameUrl(existing.getPublishedUrl(), record.getPublishedUrl())) {
+            record.setUrlQuality(existing.getUrlQuality());
+        }
         articlePublishRecordMapper.update(null, new LambdaUpdateWrapper<ArticlePublishRecord>()
                 .eq(ArticlePublishRecord::getSourceType, record.getSourceType())
                 .eq(ArticlePublishRecord::getSourceId, record.getSourceId())
@@ -1559,6 +1577,7 @@ public class ContentDistributionService {
                 .set(ArticlePublishRecord::getPlatformArticleId, record.getPlatformArticleId())
                 .set(ArticlePublishRecord::getPlatformPublishId, record.getPlatformPublishId())
                 .set(ArticlePublishRecord::getPublishStatus, record.getPublishStatus())
+                .set(ArticlePublishRecord::getTitle, record.getTitle())
                 .set(ArticlePublishRecord::getPublishedAt, record.getPublishedAt())
                 .set(ArticlePublishRecord::getVerifiedAt, record.getVerifiedAt()));
     }
@@ -1587,14 +1606,77 @@ public class ContentDistributionService {
         return task.getTargetKind();
     }
 
-    private String urlQuality(String publishedUrl) {
-        String url = blankToNull(publishedUrl);
+    private String urlQuality(DistributionTask task, SubmitResult submitResult) {
+        String url = blankToNull(task.getPublishedUrl());
         if (url == null) {
             return "missing";
         }
-        return url.toLowerCase(Locale.ROOT).startsWith("http://") || url.toLowerCase(Locale.ROOT).startsWith("https://")
-                ? "public_url"
-                : "manage_url";
+        if (!isHttpUrl(url)) {
+            return "manage_url";
+        }
+        if (!DistributionTargetKind.FORUM_SITE.equals(task.getTargetKind())) {
+            return submitResult == null ? "public_url" : "verified_public_url";
+        }
+        if (submitResult == null) {
+            return "public_url";
+        }
+        return switch (String.valueOf(submitResult.getPublicEvidenceStatus())) {
+            case "verified" -> "verified_public_url";
+            case "pending_review" -> "pending_review_url";
+            case "ambiguous" -> "ambiguous_url";
+            default -> "unverified_public_url";
+        };
+    }
+
+    private boolean isHttpUrl(String value) {
+        try {
+            URI uri = URI.create(value.trim());
+            return ("http".equalsIgnoreCase(uri.getScheme())
+                    || "https".equalsIgnoreCase(uri.getScheme()))
+                    && StringUtils.hasText(uri.getHost());
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private boolean sameUrl(String left, String right) {
+        return StringUtils.hasText(left)
+                && StringUtils.hasText(right)
+                && left.trim().equalsIgnoreCase(right.trim());
+    }
+
+    private boolean isEvidenceQuality(String value) {
+        return Set.of(
+                "verified_public_url",
+                "pending_review_url",
+                "ambiguous_url",
+                "unverified_public_url"
+        ).contains(value);
+    }
+
+    private void alertUntrustedForumEvidence(ArticleDraft article,
+                                             DistributionTask task,
+                                             PublishSite site,
+                                             SubmitResult submitResult) {
+        if (submitResult == null
+                || Set.of("verified", "pending_review").contains(
+                        String.valueOf(submitResult.getPublicEvidenceStatus()))) {
+            return;
+        }
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("projectId", article.getProjectId());
+        context.put("articleId", article.getId());
+        context.put("taskId", task == null ? null : task.getId());
+        context.put("siteId", site == null ? null : site.getId());
+        context.put("evidenceStatus", String.valueOf(submitResult.getPublicEvidenceStatus()));
+        context.put("evidenceReason", blankToNull(submitResult.getPublicEvidenceReason()));
+        systemAlertService.createAlert(
+                "forum_publish_evidence_untrusted",
+                "warn",
+                "content_distribution",
+                "论坛发布已完成，但未取得可信主题详情页证据",
+                context
+        );
     }
 
     private String urlSource(DistributionTask task) {

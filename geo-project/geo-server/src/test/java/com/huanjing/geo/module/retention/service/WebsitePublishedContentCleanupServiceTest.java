@@ -75,7 +75,8 @@ class WebsitePublishedContentCleanupServiceTest {
         String sql = sqlCaptor.getValue();
         assertTrue(sql.contains("'brand_geo_site','industry_site','forum_site'"));
         assertTrue(sql.contains("r.publish_status = 'distributed'"));
-        assertTrue(sql.contains("r.url_quality = 'public_url'"));
+        assertTrue(sql.contains("r.url_quality IN ('verified_public_url','pending_review_url')"));
+        assertTrue(sql.contains("duplicate_r.article_id <> r.article_id"));
         assertTrue(sql.contains("a.status IN ('distributed', 'published')"));
         assertTrue(sql.contains("a.status = 'deleted'"));
         assertTrue(sql.contains("purged_v.content_purged_at IS NOT NULL"));

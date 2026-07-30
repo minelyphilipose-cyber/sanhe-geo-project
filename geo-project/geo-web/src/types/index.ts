@@ -1346,6 +1346,19 @@ export interface ArticleDetailResponse {
   versions: ArticleDraftVersion[]
   reviewLogs: ArticleReviewLog[]
   publishLogs: ArticlePublishLog[]
+  publishRecords: ArticlePublishRecordDetail[]
+}
+
+export interface ArticlePublishRecordDetail {
+  id: number
+  targetKind?: string | null
+  targetChannel?: string | null
+  publishStatus?: string | null
+  publishedUrl?: string | null
+  urlQuality?: string | null
+  title?: string | null
+  publishedAt?: string | null
+  verifiedAt?: string | null
 }
 
 export interface SelfMediaCookieStatusAccount {

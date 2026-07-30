@@ -16,6 +16,13 @@ public class ForumPublishProfile {
     private List<String> blockedResourceTypes = List.of("image", "media", "font");
     private String contentMode = "html";
     private String publishedUrlRegex;
+    private String canonicalSelector;
+    private String publishedTitleSelector;
+    private String publishedContentSelector = "[id^=\"postmessage_\"]";
+    private String moderationSelector;
+    private String moderationPendingText = "审核中";
+    private String moderationPolicy = "none";
+    private Integer moderationGraceHours = 24;
     private Selectors selectors = new Selectors();
 
     @Data

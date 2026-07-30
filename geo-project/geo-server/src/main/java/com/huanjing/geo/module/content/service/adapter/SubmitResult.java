@@ -18,6 +18,9 @@ public class SubmitResult {
     private String failureKind;
     private String operationStage;
     private boolean retryable;
+    private String publicEvidenceStatus;
+    private String publicEvidenceReason;
+    private String publishedTitle;
 
     public static SubmitResult success(Integer statusCode, String requestPayload, String responseBody, String publishedUrl) {
         SubmitResult result = new SubmitResult();
