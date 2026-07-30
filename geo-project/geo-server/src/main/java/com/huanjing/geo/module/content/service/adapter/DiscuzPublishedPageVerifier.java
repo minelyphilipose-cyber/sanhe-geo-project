@@ -7,6 +7,7 @@ import org.springframework.util.StringUtils;
 
 import java.net.URI;
 import java.text.Normalizer;
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,6 +24,12 @@ final class DiscuzPublishedPageVerifier {
     private static final Pattern STATIC_THREAD_PATH =
             Pattern.compile("(?:^|/)thread-(\\d+)-\\d+-\\d+\\.html$", Pattern.CASE_INSENSITIVE);
     private static final Pattern QUERY_THREAD_ID = Pattern.compile("(?:^|&)tid=(\\d+)(?:&|$)");
+    private static final List<Pattern> SUCCESS_REDIRECT_PATTERNS = List.of(
+            Pattern.compile("(?:window\\.)?location(?:\\.href)?\\s*=\\s*[\"']([^\"']+)[\"']",
+                    Pattern.CASE_INSENSITIVE),
+            Pattern.compile("(?:window\\.)?location\\.replace\\(\\s*[\"']([^\"']+)[\"']\\s*\\)",
+                    Pattern.CASE_INSENSITIVE)
+    );
 
     private DiscuzPublishedPageVerifier() {
     }
@@ -105,6 +112,73 @@ final class DiscuzPublishedPageVerifier {
         } catch (IllegalArgumentException ex) {
             return false;
         }
+    }
+
+    static String extractSuccessThreadDetailUrl(URI baseUri, String html) {
+        if (baseUri == null || !StringUtils.hasText(html)) {
+            return null;
+        }
+        Document document = Jsoup.parse(html, baseUri.toString());
+        for (Element link : document.select(
+                "#messagetext a[href], .alert_info a[href], .alert_right a[href]")) {
+            String candidate = normalizedThreadDetailUrl(baseUri, link.attr("href"));
+            if (StringUtils.hasText(candidate)) {
+                return candidate;
+            }
+        }
+        for (Element meta : document.select("meta[http-equiv][content]")) {
+            if (!"refresh".equalsIgnoreCase(meta.attr("http-equiv"))) {
+                continue;
+            }
+            String content = meta.attr("content");
+            int urlIndex = content.toLowerCase(Locale.ROOT).indexOf("url=");
+            if (urlIndex >= 0) {
+                String candidate = normalizedThreadDetailUrl(
+                        baseUri, stripWrappingQuotes(content.substring(urlIndex + 4).trim()));
+                if (StringUtils.hasText(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+        for (Element script : document.select("script")) {
+            String source = script.data();
+            for (Pattern pattern : SUCCESS_REDIRECT_PATTERNS) {
+                Matcher matcher = pattern.matcher(source);
+                while (matcher.find()) {
+                    String candidate = normalizedThreadDetailUrl(baseUri, matcher.group(1));
+                    if (StringUtils.hasText(candidate)) {
+                        return candidate;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String normalizedThreadDetailUrl(URI baseUri, String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String decoded = value.trim().replace("&amp;", "&");
+        try {
+            URI resolved = baseUri.resolve(decoded);
+            return sameOrigin(baseUri, resolved) && StringUtils.hasText(threadId(resolved))
+                    ? resolved.toString()
+                    : null;
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private static String stripWrappingQuotes(String value) {
+        if (!StringUtils.hasText(value) || value.length() < 2) {
+            return value;
+        }
+        char first = value.charAt(0);
+        char last = value.charAt(value.length() - 1);
+        return (first == '"' && last == '"') || (first == '\'' && last == '\'')
+                ? value.substring(1, value.length() - 1)
+                : value;
     }
 
     private static String threadId(URI uri) {

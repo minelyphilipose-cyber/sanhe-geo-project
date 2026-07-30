@@ -108,6 +108,60 @@ class DiscuzPublishedPageVerifierTest {
     }
 
     @Test
+    void extractsAnhuiThreadFromModerationSuccessMessage() {
+        String html = """
+                <html>
+                  <body>
+                    <a href="https://bbs.ahv.cc/thread-99999-1-1.html">页面导航中的其他帖子</a>
+                    <div id="messagetext" class="alert_right">
+                      <p>新主题需要审核，您的帖子通过审核后才能显示</p>
+                      <p><a href="thread-18861-1-1.html">如果没有自动跳转，请点击此链接</a></p>
+                    </div>
+                  </body>
+                </html>
+                """;
+
+        assertThat(DiscuzPublishedPageVerifier.extractSuccessThreadDetailUrl(
+                URI.create("https://bbs.ahv.cc/"), html))
+                .isEqualTo("https://bbs.ahv.cc/thread-18861-1-1.html");
+    }
+
+    @Test
+    void extractsSameOriginThreadFromSuccessRedirectScriptOnly() {
+        String html = """
+                <html>
+                  <body>
+                    <div id="messagetext" class="alert_right">发布成功</div>
+                    <script>
+                      setTimeout("window.location.href ='forum.php?mod=viewthread&amp;tid=18861'", 5000);
+                    </script>
+                  </body>
+                </html>
+                """;
+
+        assertThat(DiscuzPublishedPageVerifier.extractSuccessThreadDetailUrl(
+                URI.create("https://bbs.ahv.cc/"), html))
+                .isEqualTo("https://bbs.ahv.cc/forum.php?mod=viewthread&tid=18861");
+    }
+
+    @Test
+    void ignoresThreadLinksOutsideSuccessEvidenceAndAcrossOrigins() {
+        String html = """
+                <html>
+                  <body>
+                    <a href="thread-99999-1-1.html">页面导航中的其他帖子</a>
+                    <div id="messagetext" class="alert_right">
+                      <a href="https://example.com/thread-18861-1-1.html">异常跳转</a>
+                    </div>
+                  </body>
+                </html>
+                """;
+
+        assertThat(DiscuzPublishedPageVerifier.extractSuccessThreadDetailUrl(
+                URI.create("https://bbs.ahv.cc/"), html)).isNull();
+    }
+
+    @Test
     void rejectsBoardUrlTitleMismatchAndCrossOriginCanonical() {
         String boardHtml = html("https://bbs.ahv.cc/forum-124-1.html", TITLE);
         String wrongTitleHtml = html("https://bbs.ahv.cc/thread-18861-1-1.html", "另一篇文章");

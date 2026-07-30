@@ -180,9 +180,15 @@ public class DiscuzHttpForumPublisher {
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMs);
         String lastHtml = "";
         boolean successMessageSeen = false;
+        String candidateThreadUrl = null;
+        boolean candidateNavigationAttempted = false;
+        DiscuzPublishedPageVerifier.Verification lastUnverifiedThread = null;
         while (System.nanoTime() < deadline) {
             try {
                 lastHtml = page.content();
+                successMessageSeen = successMessageSeen
+                        || containsSuccessMessage(lastHtml)
+                        || DiscuzPublishedPageVerifier.isThreadDetailUrl(profile.baseUri(), page.url());
                 DiscuzPublishedPageVerifier.Verification verification =
                         DiscuzPublishedPageVerifier.verify(
                                 profile.baseUri(),
@@ -201,17 +207,36 @@ public class DiscuzHttpForumPublisher {
                         || DiscuzPublishedPageVerifier.EVIDENCE_PENDING_REVIEW.equals(verification.evidenceStatus())) {
                     return new BrowserSubmitResponse(200, page.url(), lastHtml, true, verification);
                 }
-                successMessageSeen = successMessageSeen
-                        || containsSuccessMessage(lastHtml)
-                        || DiscuzPublishedPageVerifier.isThreadDetailUrl(profile.baseUri(), page.url());
+                if (DiscuzPublishedPageVerifier.EVIDENCE_UNVERIFIED.equals(verification.evidenceStatus())
+                        && StringUtils.hasText(verification.publishedUrl())) {
+                    lastUnverifiedThread = verification;
+                }
+                if (successMessageSeen && !StringUtils.hasText(candidateThreadUrl)) {
+                    candidateThreadUrl = DiscuzPublishedPageVerifier.extractSuccessThreadDetailUrl(
+                            profile.baseUri(), lastHtml);
+                }
+                if (StringUtils.hasText(candidateThreadUrl)
+                        && !candidateNavigationAttempted
+                        && !candidateThreadUrl.equalsIgnoreCase(page.url())) {
+                    candidateNavigationAttempted = true;
+                    navigateToThreadCandidate(page, candidateThreadUrl, deadline, payload.articleId());
+                    continue;
+                }
             } catch (PlaywrightException ex) {
                 log.debug("discuz result page is navigating articleId={} url={} error={}",
                         payload.articleId(), safePageUrl(page), safeMessage(ex));
             }
             page.waitForTimeout(250);
         }
-        DiscuzPublishedPageVerifier.Verification unverified =
-                DiscuzPublishedPageVerifier.Verification.unverified("thread_detail_redirect_timeout");
+        DiscuzPublishedPageVerifier.Verification unverified = lastUnverifiedThread;
+        if (unverified == null && StringUtils.hasText(candidateThreadUrl)) {
+            unverified = DiscuzPublishedPageVerifier.Verification.unverified(
+                    candidateThreadUrl, null, null, "thread_detail_verification_timeout");
+        }
+        if (unverified == null) {
+            unverified = DiscuzPublishedPageVerifier.Verification.unverified(
+                    "thread_detail_redirect_timeout");
+        }
         return new BrowserSubmitResponse(
                 successMessageSeen ? 200 : 504,
                 safePageUrl(page),
@@ -219,6 +244,24 @@ public class DiscuzHttpForumPublisher {
                 successMessageSeen,
                 unverified
         );
+    }
+
+    private void navigateToThreadCandidate(Page page,
+                                           String candidateThreadUrl,
+                                           long deadline,
+                                           Long articleId) {
+        long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+        if (remainingMs < 500) {
+            return;
+        }
+        try {
+            page.navigate(candidateThreadUrl, new Page.NavigateOptions()
+                    .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
+                    .setTimeout((double) Math.max(500, remainingMs)));
+        } catch (PlaywrightException ex) {
+            log.debug("discuz success page thread navigation failed articleId={} path={} error={}",
+                    articleId, safePath(candidateThreadUrl), safeMessage(ex));
+        }
     }
 
     private void openPostPage(Page page, DiscuzForumProfile profile, Long articleId, int timeoutMs) {
