@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -181,10 +182,19 @@ public class PackagePlanService {
                 req.getTargetWindowDays()
         );
         PackagePlan plan = requireById(id);
-        ensurePackagePlanMutable(plan.getId(), "Package plan already bound to customer, create a new package instead");
-        ensurePackagePlanDraft(plan);
         String audienceType = normalizeAudienceType(req.getAudienceType());
         validatePartnerPackageFields(audienceType, req.getPartnerPoints());
+        List<PackageChannelQuotaConfigRequest> channelQuotaConfigs = normalizeChannelQuotaInput(req.getChannelQuotaConfigs());
+        validateChannelQuotaConfigs(channelQuotaConfigs);
+        if (companyPackageBindingService.hasBindingsForPackagePlan(plan.getId())) {
+            validateBoundPackageExpansion(
+                    plan,
+                    req,
+                    audienceType,
+                    findChannelQuotaConfigs(plan.getId()),
+                    channelQuotaConfigs
+            );
+        }
         plan.setPackageName(req.getPackageName().trim());
         plan.setAudienceType(audienceType);
         plan.setStandardPrice(req.getStandardPrice());
@@ -208,7 +218,7 @@ public class PackagePlanService {
         plan.setSortOrder(req.getSortOrder());
         plan.setRemark(req.getRemark());
         packagePlanMapper.updateById(plan);
-        saveChannelQuotaConfigs(plan.getId(), req.getChannelQuotaConfigs());
+        replaceChannelQuotaConfigs(plan.getId(), channelQuotaConfigs);
         attachChannelQuotaConfigs(List.of(plan));
         return plan;
     }
@@ -258,9 +268,12 @@ public class PackagePlanService {
     public List<PackageChannelQuotaConfig> saveChannelQuotaConfigsByPlanId(Long packagePlanId, List<PackageChannelQuotaConfigRequest> configs) {
         currentUserService.ensurePermission("user.manage");
         PackagePlan plan = requireById(packagePlanId);
-        ensurePackagePlanMutable(plan.getId(), "Package plan already bound to customer, create a new package instead");
-        ensurePackagePlanDraft(plan);
-        saveChannelQuotaConfigs(plan.getId(), configs);
+        List<PackageChannelQuotaConfigRequest> normalizedConfigs = normalizeChannelQuotaInput(configs);
+        validateChannelQuotaConfigs(normalizedConfigs);
+        if (companyPackageBindingService.hasBindingsForPackagePlan(plan.getId())) {
+            validateBoundChannelQuotaExpansion(findChannelQuotaConfigs(plan.getId()), normalizedConfigs);
+        }
+        replaceChannelQuotaConfigs(plan.getId(), normalizedConfigs);
         return findChannelQuotaConfigs(plan.getId());
     }
 
@@ -303,12 +316,6 @@ public class PackagePlanService {
     private void ensurePackagePlanMutable(Long packagePlanId, String message) {
         if (companyPackageBindingService.hasBindingsForPackagePlan(packagePlanId)) {
             throw new BizException(400, message);
-        }
-    }
-
-    private void ensurePackagePlanDraft(PackagePlan plan) {
-        if (plan == null || !STATUS_DRAFT.equals(plan.getPackageStatus())) {
-            throw new BizException(400, "Only draft package plan can be edited, create a new package instead");
         }
     }
 
@@ -370,7 +377,10 @@ public class PackagePlanService {
     private void saveChannelQuotaConfigs(Long packagePlanId, List<PackageChannelQuotaConfigRequest> configs) {
         List<PackageChannelQuotaConfigRequest> normalizedInput = normalizeChannelQuotaInput(configs);
         validateChannelQuotaConfigs(normalizedInput);
+        replaceChannelQuotaConfigs(packagePlanId, normalizedInput);
+    }
 
+    private void replaceChannelQuotaConfigs(Long packagePlanId, List<PackageChannelQuotaConfigRequest> normalizedInput) {
         packageChannelQuotaConfigMapper.delete(
                 new LambdaQueryWrapper<PackageChannelQuotaConfig>()
                         .eq(PackageChannelQuotaConfig::getPackagePlanId, packagePlanId)
@@ -385,6 +395,109 @@ public class PackagePlanService {
             entity.setEnabled(req.getEnabled());
             packageChannelQuotaConfigMapper.insert(entity);
         }
+    }
+
+    private void validateBoundPackageExpansion(
+            PackagePlan plan,
+            PackagePlanUpdateRequest req,
+            String audienceType,
+            List<PackageChannelQuotaConfig> currentChannelQuotas,
+            List<PackageChannelQuotaConfigRequest> nextChannelQuotas
+    ) {
+        String currentAudienceType = normalizeAudienceType(plan.getAudienceType());
+        if (!Objects.equals(currentAudienceType, audienceType)) {
+            throw boundPackageReduction("适用对象不可从 " + currentAudienceType + " 修改为 " + audienceType);
+        }
+
+        requireNotDecreased("服务月数", plan.getServiceMonths(), req.getServiceMonths());
+        requireNotDecreased("拓词问题总数", plan.getKeywordGroupLimit(), req.getKeywordGroupLimit());
+        requireNotDecreased("A 档问题数", plan.getKeywordGroupLimitA(), req.getKeywordGroupLimitA());
+        requireNotDecreased("B 档问题数", plan.getKeywordGroupLimitB(), req.getKeywordGroupLimitB());
+        requireNotDecreased("C 档问题数", plan.getKeywordGroupLimitC(), req.getKeywordGroupLimitC());
+        requireIntensityNotDecreased("月报深度", plan.getMonthlyReportDepth(), req.getMonthlyReportDepth());
+        requireIntensityNotDecreased("季报深度", plan.getQuarterlyReportDepth(), req.getQuarterlyReportDepth());
+        requireIntensityNotDecreased("顾问服务强度", plan.getConsultantIntensity(), req.getConsultantIntensity());
+        requireIntensityNotDecreased("竞品洞察深度", plan.getCompetitorInsightDepth(), req.getCompetitorInsightDepth());
+        requireIntensityNotDecreased("媒体分发强度", plan.getMediaDistributionIntensity(), req.getMediaDistributionIntensity());
+        requireIntensityNotDecreased("承诺目标强度", plan.getCommitmentTargetIntensity(), req.getCommitmentTargetIntensity());
+
+        String currentMetricType = normalizeText(plan.getTargetMetricType());
+        String nextMetricType = normalizeText(req.getTargetMetricType());
+        if (currentMetricType != null && !Objects.equals(currentMetricType, nextMetricType)) {
+            throw boundPackageReduction("量化目标类型不可修改");
+        }
+        if (plan.getTargetMetricValue() != null
+                && req.getTargetMetricValue().compareTo(plan.getTargetMetricValue()) < 0) {
+            throw boundPackageReduction("量化目标值只能提高，不能从 "
+                    + plan.getTargetMetricValue() + " 调整为 " + req.getTargetMetricValue());
+        }
+        if (plan.getTargetWindowDays() != null && req.getTargetWindowDays() > plan.getTargetWindowDays()) {
+            throw boundPackageReduction("目标周期只能缩短，不能从 "
+                    + plan.getTargetWindowDays() + " 天调整为 " + req.getTargetWindowDays() + " 天");
+        }
+
+        validateBoundChannelQuotaExpansion(currentChannelQuotas, nextChannelQuotas);
+    }
+
+    private void validateBoundChannelQuotaExpansion(
+            List<PackageChannelQuotaConfig> currentConfigs,
+            List<PackageChannelQuotaConfigRequest> nextConfigs
+    ) {
+        Map<String, PackageChannelQuotaConfigRequest> nextByChannel = nextConfigs.stream()
+                .collect(Collectors.toMap(
+                        cfg -> normalizeChannel(cfg.getChannelCode()),
+                        cfg -> cfg,
+                        (left, right) -> right,
+                        LinkedHashMap::new
+                ));
+        for (PackageChannelQuotaConfig current : currentConfigs == null ? List.<PackageChannelQuotaConfig>of() : currentConfigs) {
+            if (current == null || !Boolean.TRUE.equals(current.getEnabled())) {
+                continue;
+            }
+            String channel = normalizeChannel(current.getChannelCode());
+            PackageChannelQuotaConfigRequest next = nextByChannel.get(channel);
+            if (next == null || !Boolean.TRUE.equals(next.getEnabled())) {
+                throw boundPackageReduction("已启用渠道 " + channel + " 不可删除或停用");
+            }
+            String currentPeriod = normalizePeriod(current.getPeriodType());
+            String nextPeriod = normalizePeriod(next.getPeriodType());
+            if (!Objects.equals(currentPeriod, nextPeriod)) {
+                throw boundPackageReduction("已启用渠道 " + channel + " 的额度周期不可从 "
+                        + currentPeriod + " 修改为 " + nextPeriod);
+            }
+            if (current.getQuotaLimit() != null && next.getQuotaLimit() < current.getQuotaLimit()) {
+                throw boundPackageReduction("渠道 " + channel + " 的额度只能增加，不能从 "
+                        + current.getQuotaLimit() + " 调整为 " + next.getQuotaLimit());
+            }
+        }
+    }
+
+    private void requireNotDecreased(String fieldLabel, Integer current, Integer next) {
+        if (current != null && next < current) {
+            throw boundPackageReduction(fieldLabel + "只能增加，不能从 " + current + " 调整为 " + next);
+        }
+    }
+
+    private void requireIntensityNotDecreased(String fieldLabel, String current, String next) {
+        String normalizedCurrent = normalizeText(current);
+        if (normalizedCurrent == null) {
+            return;
+        }
+        if (intensityRank(next) < intensityRank(normalizedCurrent)) {
+            throw boundPackageReduction(fieldLabel + "只能提高，不能从 " + normalizedCurrent + " 调整为 " + next.trim());
+        }
+    }
+
+    private int intensityRank(String level) {
+        return Integer.parseInt(level.trim().substring(1));
+    }
+
+    private String normalizeText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private BizException boundPackageReduction(String detail) {
+        return new BizException(400, "套餐已绑定客户，只允许扩大权益：" + detail);
     }
 
     private List<PackageChannelQuotaConfigRequest> normalizeChannelQuotaInput(List<PackageChannelQuotaConfigRequest> configs) {

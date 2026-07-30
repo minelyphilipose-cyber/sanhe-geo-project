@@ -437,7 +437,7 @@ const userStore = useUserStore()
 const brandId = computed(() => Number(route.params.id))
 const hasValidId = computed(() => Number.isFinite(brandId.value) && brandId.value > 0)
 const canUploadMaterial = computed(() => userStore.hasPermission('brand.material.upload'))
-const canDeleteMaterial = computed(() => userStore.hasPermission('brand.material.delete'))
+const canDeleteMaterial = computed(() => userStore.hasPermission('brand.update'))
 
 // ────────── 状态 ──────────
 type BrandMaterialExt = BrandMaterial & {
@@ -998,7 +998,7 @@ async function confirmDeleteFolder(folder: BrandImageFolder) {
   }
 }
 
-// ────────── 预览/下载（blob 方案，带 JWT） ──────────
+// ────────── 预览/下载 ──────────
 async function previewMaterial(row: BrandMaterialExt) {
   if (!isPreviewableType(row.fileType)) {
     ElMessage.warning('该类型文件不支持预览，请直接下载')

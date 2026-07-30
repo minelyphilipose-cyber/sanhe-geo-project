@@ -133,6 +133,9 @@ public class BrandProfileService {
         if (!StringUtils.hasText(material.getObjectKey())) {
             throw new BizException(400, "Material object key is empty");
         }
+        if ("brand_image".equals(material.getCategory())) {
+            return publicUrlService.buildPublicStreamUrl(material);
+        }
         return minioStorageService.buildPresignedDownloadUrl(material.getObjectKey(), 600);
     }
 
@@ -231,7 +234,6 @@ public class BrandProfileService {
     @Transactional
     public void deleteMaterial(Long brandId, Long materialId) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("brand.material.delete");
         requireAccessibleBrand(brandId, false);
         BrandMaterial material = brandMaterialMapper.selectById(materialId);
         if (material == null || !brandId.equals(material.getBrandId())) {

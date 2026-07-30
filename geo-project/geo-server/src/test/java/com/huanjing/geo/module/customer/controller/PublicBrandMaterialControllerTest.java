@@ -4,6 +4,7 @@ import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.service.BrandMaterialPublicUrlService;
 import com.huanjing.geo.module.customer.service.BrandProfileService;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 
@@ -31,6 +32,8 @@ class PublicBrandMaterialControllerTest {
         ResponseEntity<byte[]> response = controller.stream(10L, "sig");
 
         assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_LENGTH)).isEqualTo(String.valueOf(bytes.length));
+        assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION)).isEqualTo("inline");
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.IMAGE_JPEG);
         assertThat(response.getBody()).isEqualTo(bytes);
     }
 }

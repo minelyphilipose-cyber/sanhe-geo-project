@@ -79,37 +79,95 @@ class PackagePlanServiceTest {
     }
 
     @Test
-    void saveChannelQuotaConfigsRejectsBoundPackagePlan() {
+    void saveChannelQuotaConfigsRejectsQuotaDecreaseForBoundPackagePlan() {
         when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
+        when(channelQuotaConfigMapper.selectList(any()))
+                .thenReturn(List.of(quota("official_site", "month", 2, true)));
 
         BizException ex = assertThrows(BizException.class,
                 () -> service.saveChannelQuotaConfigsByPlanId(3L, List.of(request("official_site", "month", 1))));
 
-        assertEquals("Package plan already bound to customer, create a new package instead", ex.getMessage());
+        assertEquals("套餐已绑定客户，只允许扩大权益：渠道 official_site 的额度只能增加，不能从 2 调整为 1", ex.getMessage());
     }
 
     @Test
-    void saveChannelQuotaConfigsRejectsActivePackagePlanEvenWhenUnbound() {
+    void saveChannelQuotaConfigsAllowsActivePackagePlanWhenUnbound() {
         PackagePlan active = plan();
         active.setPackageStatus(PackagePlanService.STATUS_ACTIVE);
         when(packagePlanMapper.selectById(3L)).thenReturn(active);
 
-        BizException ex = assertThrows(BizException.class,
-                () -> service.saveChannelQuotaConfigsByPlanId(3L, List.of(request("official_site", "month", 1))));
+        service.saveChannelQuotaConfigsByPlanId(3L, List.of(request("official_site", "month", 1)));
 
-        assertEquals("Only draft package plan can be edited, create a new package instead", ex.getMessage());
+        verify(channelQuotaConfigMapper).delete(any());
     }
 
     @Test
-    void updateRejectsActivePackagePlanEvenWhenUnbound() {
+    void updateAllowsActivePackagePlanWhenUnbound() {
         PackagePlan active = plan();
         active.setPackageStatus(PackagePlanService.STATUS_ACTIVE);
         when(packagePlanMapper.selectById(3L)).thenReturn(active);
 
-        BizException ex = assertThrows(BizException.class, () -> service.update(3L, updateRequest()));
+        PackagePlanUpdateRequest request = updateRequest();
+        request.setServiceMonths(6);
+        request.setKeywordGroupLimit(5);
+        request.setKeywordGroupLimitA(5);
 
-        assertEquals("Only draft package plan can be edited, create a new package instead", ex.getMessage());
+        service.update(3L, request);
+
+        verify(packagePlanMapper).updateById(active);
+        assertEquals(6, active.getServiceMonths());
+        assertEquals(5, active.getKeywordGroupLimit());
+    }
+
+    @Test
+    void updateAllowsBoundPackagePlanWhenBenefitsExpand() {
+        PackagePlan active = plan();
+        active.setPackageStatus(PackagePlanService.STATUS_ACTIVE);
+        when(packagePlanMapper.selectById(3L)).thenReturn(active);
+        when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
+        when(channelQuotaConfigMapper.selectList(any()))
+                .thenReturn(List.of(quota("official_site", "month", 1, true)));
+        PackagePlanUpdateRequest request = updateRequest();
+        request.setServiceMonths(18);
+        request.setKeywordGroupLimit(15);
+        request.setKeywordGroupLimitA(15);
+        request.setChannelQuotaConfigs(List.of(
+                request("official_site", "month", 2),
+                request("self_media:wechat", "week", 1)
+        ));
+
+        service.update(3L, request);
+
+        verify(packagePlanMapper).updateById(active);
+        assertEquals(18, active.getServiceMonths());
+        verify(bindingService, never()).syncActiveBindingsForPackagePlan(3L);
+    }
+
+    @Test
+    void updateRejectsBoundPackagePlanWhenQuestionBenefitDecreases() {
+        when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
+        PackagePlanUpdateRequest request = updateRequest();
+        request.setKeywordGroupLimit(9);
+        request.setKeywordGroupLimitA(9);
+
+        BizException ex = assertThrows(BizException.class, () -> service.update(3L, request));
+
+        assertEquals("套餐已绑定客户，只允许扩大权益：拓词问题总数只能增加，不能从 10 调整为 9", ex.getMessage());
         verify(packagePlanMapper, never()).updateById(any());
+    }
+
+    @Test
+    void saveChannelQuotaConfigsRejectsDisablingBoundChannel() {
+        when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
+        when(channelQuotaConfigMapper.selectList(any()))
+                .thenReturn(List.of(quota("self_media:wechat", "week", 1, true)));
+        PackageChannelQuotaConfigRequest disabled = request("self_media:wechat", "week", 1);
+        disabled.setEnabled(false);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> service.saveChannelQuotaConfigsByPlanId(3L, List.of(disabled)));
+
+        assertEquals("套餐已绑定客户，只允许扩大权益：已启用渠道 self_media:wechat 不可删除或停用", ex.getMessage());
     }
 
     @Test
@@ -140,7 +198,23 @@ class PackagePlanServiceTest {
         plan.setId(3L);
         plan.setPackageType("trial");
         plan.setPackageName("Trial");
+        plan.setAudienceType(PackagePlanService.AUDIENCE_INTERNAL);
         plan.setPackageStatus(PackagePlanService.STATUS_DRAFT);
+        plan.setStandardPrice(new BigDecimal("1000.00"));
+        plan.setServiceMonths(12);
+        plan.setKeywordGroupLimit(10);
+        plan.setKeywordGroupLimitA(10);
+        plan.setKeywordGroupLimitB(0);
+        plan.setKeywordGroupLimitC(0);
+        plan.setMonthlyReportDepth("L1");
+        plan.setQuarterlyReportDepth("L1");
+        plan.setConsultantIntensity("L1");
+        plan.setCompetitorInsightDepth("L1");
+        plan.setMediaDistributionIntensity("L1");
+        plan.setCommitmentTargetIntensity("L1");
+        plan.setTargetMetricType("visibility_rate");
+        plan.setTargetMetricValue(new BigDecimal("0.05"));
+        plan.setTargetWindowDays(90);
         return plan;
     }
 
@@ -151,6 +225,16 @@ class PackagePlanServiceTest {
         req.setQuotaLimit(quotaLimit);
         req.setEnabled(true);
         return req;
+    }
+
+    private PackageChannelQuotaConfig quota(String channelCode, String periodType, int quotaLimit, boolean enabled) {
+        PackageChannelQuotaConfig quota = new PackageChannelQuotaConfig();
+        quota.setPackagePlanId(3L);
+        quota.setChannelCode(channelCode);
+        quota.setPeriodType(periodType);
+        quota.setQuotaLimit(quotaLimit);
+        quota.setEnabled(enabled);
+        return quota;
     }
 
     private PackagePlanUpdateRequest updateRequest() {

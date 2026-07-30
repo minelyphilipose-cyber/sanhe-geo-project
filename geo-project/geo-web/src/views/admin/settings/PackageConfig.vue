@@ -105,7 +105,7 @@
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openEdit(scope.row)">{{ canEditPackage(scope.row) ? '编辑' : '查看' }}</el-button>
+              <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
               <el-button link :type="scope.row.packageStatus === 'active' ? 'warning' : 'success'" @click="toggleStatus(scope.row)">
                 {{ statusActionLabel(scope.row) }}
               </el-button>
@@ -128,7 +128,15 @@
     </el-card>
 
     <el-dialog v-model="formVisible" :title="formMode === 'create' ? '新增套餐' : '编辑套餐'" width="960px" class="admin-editor-dialog package-editor-dialog">
-      <el-form ref="formRef" :model="form" :rules="rules" :disabled="!formEditable" label-position="top" class="package-config-form">
+      <el-alert
+        v-if="formMode === 'edit'"
+        class="package-edit-rule"
+        type="info"
+        show-icon
+        :closable="false"
+        title="未绑定客户的套餐可任意修改；已绑定客户的套餐只允许增加权益，历史客户继续使用绑定时的套餐快照。"
+      />
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="package-config-form">
         <section class="form-section">
           <div class="form-section-head">
             <div>
@@ -341,7 +349,7 @@
 
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button v-if="formEditable" type="primary" :loading="saving" @click="submit">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -368,7 +376,6 @@ const formVisible = ref(false)
 const formRef = ref<FormInstance>()
 const formMode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
-const editingPackageStatus = ref<'draft' | 'active' | 'inactive' | string>('draft')
 const page = reactive({ current: 1, size: 20, total: 0 })
 const query = reactive({
   keyword: '',
@@ -444,7 +451,6 @@ const baseChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((
 const selfMediaChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => isSelfMediaQuotaChannel(item.channelCode)))
 const partnerVisibleChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => isPartnerVisibleQuotaChannel(item.channelCode)))
 const partnerHiddenChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => !isPartnerVisibleQuotaChannel(item.channelCode)))
-const formEditable = computed(() => formMode.value === 'create' || editingPackageStatus.value === 'draft')
 
 function defaultChannelQuotas(): PackageChannelQuotaConfig[] {
   return DISTRIBUTION_CHANNELS.map((item) => ({
@@ -507,10 +513,6 @@ function packageInitial(value?: string | null) {
 
 function audienceLabel(value?: string | null) {
   return value === 'partner' ? '合伙人' : '总部直营'
-}
-
-function canEditPackage(row: PackagePlan) {
-  return row.packageStatus === 'draft'
 }
 
 function packageStatusLabel(row: PackagePlan) {
@@ -581,7 +583,6 @@ function onPageChange(v: number) {
 function openCreate() {
   formMode.value = 'create'
   editingId.value = null
-  editingPackageStatus.value = 'draft'
   resetForm()
   formVisible.value = true
 }
@@ -589,7 +590,6 @@ function openCreate() {
 function openEdit(row: PackagePlan) {
   formMode.value = 'edit'
   editingId.value = row.id
-  editingPackageStatus.value = row.packageStatus || (row.enabled ? 'active' : 'inactive')
   form.packageType = row.packageType
   form.packageName = row.packageName
   form.audienceType = row.audienceType === 'partner' ? 'partner' : 'internal'
@@ -786,6 +786,10 @@ onMounted(load)
 
 .package-editor-dialog :deep(.el-dialog__body) {
   background: #f8fafc;
+}
+
+.package-edit-rule {
+  margin-bottom: 14px;
 }
 
 .package-config-form {
