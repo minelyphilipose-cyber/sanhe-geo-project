@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.customer.service;
 
+import cn.hutool.json.JSONUtil;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaLedger;
 import com.huanjing.geo.module.content.entity.DistributionTask;
@@ -305,6 +306,51 @@ class CompanyPackageBindingServiceTest {
     }
 
     @Test
+    void refreshActiveBindingAppliesLatestPlanSnapshotAndCurrentQuotaLimits() {
+        CompanyPackageBinding binding = activeBinding();
+        binding.setPackagePlanId(3L);
+        PackagePlan plan = enabledPlan();
+        plan.setPackageName("Expanded");
+        plan.setServiceMonths(6);
+        plan.setKeywordGroupLimit(200);
+        plan.setMonthlyReportDepth("L3");
+        plan.setTargetMetricType("visibility");
+        plan.setTargetMetricValue(new BigDecimal("90"));
+        plan.setTargetWindowDays(60);
+        PackageChannelQuotaConfig monthlyQuota = quota("official_site", 20);
+        PackageChannelQuotaConfig totalQuota = totalQuota("authority_media", 50);
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+        when(packagePlanMapper.selectById(3L)).thenReturn(plan);
+        when(channelQuotaConfigMapper.selectList(any())).thenReturn(List.of(monthlyQuota, totalQuota));
+
+        CompanyPackageBinding refreshed = service.refreshActiveBinding(7L);
+
+        assertEquals("Expanded", refreshed.getPackageName());
+        assertEquals(6, refreshed.getServiceMonths());
+        assertEquals(200, refreshed.getKeywordGroupLimit());
+        assertEquals("L3", JSONUtil.parseObj(refreshed.getPackageSnapshotJson()).getStr("monthlyReportDepth"));
+        assertEquals("visibility", JSONUtil.parseObj(refreshed.getPackageSnapshotJson()).getStr("targetMetricType"));
+        assertEquals(60, JSONUtil.parseObj(refreshed.getPackageSnapshotJson()).getInt("targetWindowDays"));
+        verify(bindingMapper).updateById(binding);
+        verify(quotaUsageMapper).insertIgnore(eq(7L), eq("official_site"), eq("month"), any(), eq(20));
+        verify(quotaUsageMapper).updateQuotaLimit(eq(7L), eq("official_site"), eq("month"), any(), eq(20));
+        verify(quotaUsageMapper).insertIgnore(7L, "authority_media", "total", "TOTAL", 50);
+        verify(quotaUsageMapper).updateQuotaLimit(7L, "authority_media", "total", "TOTAL", 50);
+    }
+
+    @Test
+    void refreshActiveBindingRejectsMissingSourcePackage() {
+        CompanyPackageBinding binding = activeBinding();
+        binding.setPackagePlanId(3L);
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+
+        BizException ex = assertThrows(BizException.class, () -> service.refreshActiveBinding(7L));
+
+        assertEquals("Package plan not found", ex.getMessage());
+        verify(bindingMapper, never()).updateById(any());
+    }
+
+    @Test
     void partnerStaffCanReadAssignedCustomerPackageBinding() {
         SysUser staff = partnerStaffUser(20L);
         Company company = company(7L, 9L);
@@ -342,6 +388,21 @@ class CompanyPackageBindingServiceTest {
         BizException ex = assertThrows(BizException.class, () -> service.bind(7L, 3L));
 
         assertEquals("Only partner owner can manage customer package", ex.getMessage());
+    }
+
+    @Test
+    void partnerStaffCannotRefreshCustomerPackage() {
+        SysUser staff = partnerStaffUser(20L);
+        Company company = company(7L, 9L);
+        company.setPartnerStaffOwnerId(20L);
+        when(currentUserService.requireCurrentUser()).thenReturn(staff);
+        when(currentUserService.isPartnerUser(staff)).thenReturn(true);
+        when(companyMapper.selectById(7L)).thenReturn(company);
+
+        BizException ex = assertThrows(BizException.class, () -> service.refreshActiveBinding(7L));
+
+        assertEquals("Only partner owner can manage customer package", ex.getMessage());
+        verify(packagePlanMapper, never()).selectById(any());
     }
 
     private CompanyPackageBinding activeBinding() {

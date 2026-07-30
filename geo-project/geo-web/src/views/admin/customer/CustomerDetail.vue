@@ -58,7 +58,10 @@
           <span>客户套餐</span>
           <div v-if="canManagePackageBinding" class="space-x-2">
             <el-button v-if="!activePackageBinding" type="primary" @click="openPackageBind">绑定套餐</el-button>
-            <el-button v-else type="danger" plain @click="confirmUnbindPackage">解绑套餐</el-button>
+            <template v-else>
+              <el-button :loading="packageSubmitting" @click="confirmRefreshPackage">更新套餐</el-button>
+              <el-button type="danger" plain :disabled="packageSubmitting" @click="confirmUnbindPackage">解绑套餐</el-button>
+            </template>
           </div>
         </div>
       </template>
@@ -554,6 +557,7 @@ import {
   getCompanyKeywordGroupQuota,
   getDeliveryOwnerOptions,
   getSalesOwnerOptions,
+  refreshCompanyPackage,
   transferCompanyOwner,
   unbindCompanyPackage,
   updateBrand,
@@ -1077,6 +1081,33 @@ async function submitPackageBind() {
     await Promise.all([loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
   } catch (err) {
     ElMessage.error(errorMessage(err, '绑定套餐失败'))
+  } finally {
+    packageSubmitting.value = false
+  }
+}
+
+async function confirmRefreshPackage() {
+  if (!activePackageBinding.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认将套餐「${activePackageBinding.value.packageName}」的最新配置更新到该客户？已使用额度不会重置。`,
+      '更新套餐',
+      {
+        type: 'warning',
+        confirmButtonText: '确认更新',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+  packageSubmitting.value = true
+  try {
+    await refreshCompanyPackage(companyId)
+    ElMessage.success('客户套餐信息已更新')
+    await Promise.all([loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '更新套餐失败'))
   } finally {
     packageSubmitting.value = false
   }

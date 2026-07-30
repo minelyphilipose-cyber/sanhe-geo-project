@@ -172,6 +172,11 @@ public class CompanyController {
         return R.ok(partnerResponseSanitizer.companyPackageBinding(companyPackageBindingService.bind(id, req.getPackagePlanId())));
     }
 
+    @PostMapping("/{id}/package-binding/refresh")
+    public R<?> refreshPackageBinding(@PathVariable Long id) {
+        return R.ok(partnerResponseSanitizer.companyPackageBinding(companyPackageBindingService.refreshActiveBinding(id)));
+    }
+
     @DeleteMapping("/{id}/package-binding")
     public R<Void> unbindPackage(@PathVariable Long id) {
         companyPackageBindingService.unbind(id);

@@ -112,8 +112,26 @@ public class CompanyPackageBindingService {
 
     @Transactional
     public void syncActiveBindingsForPackagePlan(Long packagePlanId) {
-        // Package plans are immutable after customer binding in partner phase 1.
-        // Kept as a no-op for legacy callers that still invoke sync after package edits.
+        // Package edits must not silently change customer snapshots.
+        // Kept as a no-op for legacy callers; customers opt in through refreshActiveBinding.
+    }
+
+    @Transactional
+    public CompanyPackageBinding refreshActiveBinding(Long companyId) {
+        ensurePackageBindingAccess(companyId, true);
+        lockCompany(companyId);
+        CompanyPackageBinding binding = requireActiveBinding(companyId);
+        PackagePlan plan = packagePlanMapper.selectById(binding.getPackagePlanId());
+        if (plan == null || plan.getDeletedAt() != null) {
+            throw new BizException(404, "Package plan not found");
+        }
+        List<PackageChannelQuotaConfig> channelQuotas = activeChannelQuotas(plan.getId());
+        validateActiveProjectAllocationsAgainstPackage(companyId, channelQuotas);
+        validateActiveProjectKeywordAllocationsAgainstPackage(companyId, plan);
+        applyPlanSnapshot(binding, plan, channelQuotas);
+        bindingMapper.updateById(binding);
+        syncCurrentUsageQuotaLimits(binding, channelQuotas);
+        return binding;
     }
 
     @Transactional
@@ -448,6 +466,15 @@ public class CompanyPackageBindingService {
         snapshot.put("keywordGroupLimitA", plan.getKeywordGroupLimitA());
         snapshot.put("keywordGroupLimitB", plan.getKeywordGroupLimitB());
         snapshot.put("keywordGroupLimitC", plan.getKeywordGroupLimitC());
+        snapshot.put("monthlyReportDepth", plan.getMonthlyReportDepth());
+        snapshot.put("quarterlyReportDepth", plan.getQuarterlyReportDepth());
+        snapshot.put("consultantIntensity", plan.getConsultantIntensity());
+        snapshot.put("competitorInsightDepth", plan.getCompetitorInsightDepth());
+        snapshot.put("mediaDistributionIntensity", plan.getMediaDistributionIntensity());
+        snapshot.put("commitmentTargetIntensity", plan.getCommitmentTargetIntensity());
+        snapshot.put("targetMetricType", plan.getTargetMetricType());
+        snapshot.put("targetMetricValue", plan.getTargetMetricValue());
+        snapshot.put("targetWindowDays", plan.getTargetWindowDays());
         snapshot.put("channelQuotaSnapshot", partnerVisible ? partnerVisibleChannelSnapshot(channelQuotas) : toSnapshot(channelQuotas));
         if (!partnerVisible) {
             snapshot.put("partnerVisibleConfigJson", plan.getPartnerVisibleConfigJson());

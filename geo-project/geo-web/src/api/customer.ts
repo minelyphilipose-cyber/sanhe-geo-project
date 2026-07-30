@@ -167,6 +167,10 @@ export function bindCompanyPackage(id: number, packagePlanId: number) {
   return request.post<R<CompanyPackageBinding>>(`/companies/${id}/package-binding`, { packagePlanId })
 }
 
+export function refreshCompanyPackage(id: number) {
+  return request.post<R<CompanyPackageBinding>>(`/companies/${id}/package-binding/refresh`)
+}
+
 export function unbindCompanyPackage(id: number) {
   return request.delete<R<void>>(`/companies/${id}/package-binding`)
 }
