@@ -152,14 +152,14 @@
             <div class="brand-section-bar"><span />业务介绍与内容约束<i /></div>
             <div class="brand-form-grid">
               <el-form-item class="is-wide" label="业务介绍">
-                <el-input v-model="infoForm.businessIntro" type="textarea" :rows="3" />
+                <el-input v-model="infoForm.businessIntro" type="textarea" :rows="3" maxlength="1000" show-word-limit />
               </el-form-item>
               <el-form-item class="is-wide" label="品牌资质描述">
-                <el-input v-model="infoForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
+                <el-input v-model="infoForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
                 <div class="brand-field-help">仅填写可公开引用、可核验的资质与背书信息。</div>
               </el-form-item>
               <el-form-item class="is-wide" label="品牌案例描述">
-                <el-input v-model="infoForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
+                <el-input v-model="infoForm.brandCaseDescription" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="caseDescriptionPlaceholder" />
                 <div class="brand-field-help">客户名称不可公开时，可使用行业或区域客户描述。</div>
               </el-form-item>
               <el-form-item class="is-wide" label="禁用词">

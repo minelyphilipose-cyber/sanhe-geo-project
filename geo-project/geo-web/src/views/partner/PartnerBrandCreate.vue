@@ -95,13 +95,13 @@
           </div>
           <div class="partner-section-grid">
             <el-form-item class="is-full" label="业务介绍">
-              <el-input v-model="form.businessIntro" type="textarea" :rows="4" placeholder="简要说明品牌业务、服务范围、目标客户与经营特点" />
+              <el-input v-model="form.businessIntro" type="textarea" :rows="4" maxlength="1000" show-word-limit placeholder="简要说明品牌业务、服务范围、目标客户与经营特点" />
             </el-form-item>
             <el-form-item class="is-full" label="品牌资质描述">
-              <el-input v-model="form.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit placeholder="填写真实可核验的资质、荣誉、认证、专利或平台背书" />
+              <el-input v-model="form.brandQualificationDescription" type="textarea" :rows="3" maxlength="1000" show-word-limit placeholder="填写真实可核验的资质、荣誉、认证、专利或平台背书" />
             </el-form-item>
             <el-form-item class="is-full" label="品牌案例描述">
-              <el-input v-model="form.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit placeholder="填写可公开引用的客户案例、项目背景、交付结果或合作情况" />
+              <el-input v-model="form.brandCaseDescription" type="textarea" :rows="3" maxlength="1000" show-word-limit placeholder="填写可公开引用的客户案例、项目背景、交付结果或合作情况" />
             </el-form-item>
           </div>
         </section>

@@ -449,12 +449,12 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item class="is-full" label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" maxlength="1000" show-word-limit /></el-form-item>
         <el-form-item class="is-full" label="品牌资质描述">
-          <el-input v-model="brandForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
+          <el-input v-model="brandForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
         </el-form-item>
         <el-form-item class="is-full" label="品牌案例描述">
-          <el-input v-model="brandForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
+          <el-input v-model="brandForm.brandCaseDescription" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="caseDescriptionPlaceholder" />
         </el-form-item>
       </el-form>
       <template #footer>

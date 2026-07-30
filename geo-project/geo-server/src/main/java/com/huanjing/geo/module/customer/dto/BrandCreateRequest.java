@@ -44,11 +44,13 @@ public class BrandCreateRequest {
     @Size(max = 64)
     private String selfMediaPublishLocationName;
     private String wechat;
+    @Size(max = 1000)
     private String description;
+    @Size(max = 1000)
     private String businessIntro;
-    @Size(max = 300)
+    @Size(max = 1000)
     private String brandQualificationDescription;
-    @Size(max = 300)
+    @Size(max = 1000)
     private String brandCaseDescription;
     @Size(max = 500)
     private String medicalLicense;
