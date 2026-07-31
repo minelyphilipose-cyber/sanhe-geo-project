@@ -1091,6 +1091,35 @@
         }
       }
     }
+
+    const titleCandidates = Array.from(document.querySelectorAll?.([
+      '.css-t5fqv4',
+      '[role="dialog"] *',
+      '[aria-modal="true"] *',
+      '[class*="Modal-content"] *',
+    ].join(',')) || [])
+      .filter((element) => isVisibleWithDeps(element, deps))
+      .filter((element) => normalizeDomText(element.textContent || '', deps) === '发布成功')
+    for (const title of titleCandidates) {
+      let root = title.parentElement
+      for (let depth = 0; root && depth < 10; depth += 1, root = root.parentElement) {
+        if (root === document.body || root === document.documentElement) break
+        const text = normalizeDomText(root.textContent || '', deps)
+        const creationMatch = text.match(/感谢你的第(\d+)篇创作[！!]?/)
+        const hasShareSections = text.includes('转发到想法') && text.includes('更多分享')
+        if (!creationMatch && !hasShareSections) continue
+        return {
+          detected: true,
+          title: '发布成功',
+          creationCount: creationMatch ? Number(creationMatch[1]) : null,
+          confirmationText: creationMatch?.[0] || '',
+          closeButtonPresent: false,
+          forwardToIdeaPresent: text.includes('转发到想法'),
+          moreSharePresent: text.includes('更多分享'),
+          signature: 'title+creation_or_share',
+        }
+      }
+    }
     return null
   }
 

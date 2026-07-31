@@ -103,6 +103,35 @@ test('matches the Zhihu publish-success modal by stable semantic signals', () =>
   )
 })
 
+test('matches the observed Zhihu success title even when the close button is not yet detectable', () => {
+  const body = visibleElement()
+  const modal = append(body, visibleElement('发布成功 感谢你的第 52 篇创作！ 转发到想法 更多分享'))
+  const title = append(modal, visibleElement('发布成功'))
+  const document = {
+    body,
+    documentElement: visibleElement(),
+    querySelectorAll: (selector) => selector.includes('.css-t5fqv4') ? [title] : [],
+  }
+  const platform = loadPlatform({
+    document,
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+  })
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(platform.detectPublishSuccessModal({ isVisibleElement: () => true }))),
+    {
+      detected: true,
+      title: '发布成功',
+      creationCount: 52,
+      confirmationText: '感谢你的第52篇创作！',
+      closeButtonPresent: false,
+      forwardToIdeaPresent: true,
+      moreSharePresent: true,
+      signature: 'title+creation_or_share',
+    },
+  )
+})
+
 test('does not treat unrelated page text as the Zhihu publish-success modal', () => {
   const body = visibleElement('发布成功')
   const document = {

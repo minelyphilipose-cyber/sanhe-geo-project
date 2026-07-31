@@ -2222,6 +2222,34 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
             }
           }
         }
+
+        const titleCandidates = Array.from(document.querySelectorAll([
+          '.css-t5fqv4',
+          '[role="dialog"] *',
+          '[aria-modal="true"] *',
+          '[class*="Modal-content"] *',
+        ].join(',')))
+          .filter(isVisible)
+          .filter((element) => normalize(element.textContent || '') === '发布成功')
+        for (const title of titleCandidates) {
+          let root = title.parentElement
+          for (let depth = 0; root && depth < 10; depth += 1, root = root.parentElement) {
+            if (root === document.body || root === document.documentElement) break
+            const modalText = normalize(root.textContent || '')
+            const creationMatch = modalText.match(/感谢你的第(\d+)篇创作[！!]?/)
+            const hasShareSections = modalText.includes('转发到想法') && modalText.includes('更多分享')
+            if (!creationMatch && !hasShareSections) continue
+            return {
+              detected: true,
+              title: '发布成功',
+              creationCount: creationMatch ? Number(creationMatch[1]) : null,
+              closeButtonPresent: false,
+              forwardToIdeaPresent: modalText.includes('转发到想法'),
+              moreSharePresent: modalText.includes('更多分享'),
+              signature: 'title+creation_or_share',
+            }
+          }
+        }
         return null
       }
       const collectIdentity = () => {
