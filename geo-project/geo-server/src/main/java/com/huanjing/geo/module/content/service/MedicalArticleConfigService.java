@@ -497,6 +497,7 @@ public class MedicalArticleConfigService {
                 null,
                 null,
                 null,
+                null,
                 null
         );
         MedicalArticleComplianceChecker.CheckResult result = complianceChecker.check(new MedicalArticleComplianceChecker.CheckInput(

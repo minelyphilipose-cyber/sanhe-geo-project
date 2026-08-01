@@ -146,15 +146,20 @@ class MedicalArticleGenerationServiceTest {
         when(channelStyleMapper.selectOne(any())).thenReturn(style());
         BatchArticleGenerateRequest.TopicConfig topicConfig = topicConfig(null);
         topicConfig.setTopic("阜阳祛斑医院推荐");
+        Brand brand = oralBrand();
+        brand.setDiagnosisScope("口腔科、医学影像科");
+        brand.setPractitionerInfoPublic("王医生，已公开医师执业信息");
 
         MedicalArticleGenerationService.MedicalPromptContext context = service.resolveContextV2(
-                project(), oralBrand(), "self_media", "wechat", topicConfig
+                project(), brand, "self_media", "wechat", topicConfig
         ).orElseThrow();
 
         assertThat(context.topicAngleId()).isNull();
         assertThat(context.topicAngle()).isNull();
         assertThat(context.structureSkeleton()).isNull();
         assertThat(context.focus()).isNull();
+        assertThat(context.diagnosisScope()).isEqualTo("口腔科、医学影像科");
+        assertThat(context.practitionerInfoPublic()).isEqualTo("王医生，已公开医师执业信息");
         verify(topicAngleMapper, never()).selectList(any());
         verify(topicAngleMapper, never()).selectById(any());
     }
@@ -218,7 +223,7 @@ class MedicalArticleGenerationServiceTest {
                 MedicalArticleConstants.INDUSTRY_ORAL, MedicalArticleConstants.TIER_EDUCATION,
                 null, null, null, null, null, null,
                 "不得使用一次见效、绝对安全、永久有效等表达", 2, false,
-                "保持科普口吻", false, null, null, null, null
+                "保持科普口吻", false, null, null, null, null, null
         );
         BatchArticlePromptBuilder.PromptBuildResult prompt = new BatchArticlePromptBuilder.PromptBuildResult(
                 "system", "围绕阜阳祛斑医院推荐写作", null, null, "{}", "{}"
@@ -244,7 +249,8 @@ class MedicalArticleGenerationServiceTest {
                 null, null, null, null, null, null,
                 null, 2, false,
                 "首段直接给风险边界，正文围绕公开资质展开", false,
-                "项目资质引用", "医疗机构执业许可", "医疗美容科", "审查编号"
+                "项目资质引用", "医疗机构执业许可", "医疗美容科",
+                "王医生，已公开医师执业信息", "审查编号"
         );
         BatchArticlePromptBuilder.PromptBuildResult prompt = new BatchArticlePromptBuilder.PromptBuildResult(
                 "system", "主题：医美项目收费通常由哪些部分构成", null, null, "{}", "{}"
@@ -258,16 +264,19 @@ class MedicalArticleGenerationServiceTest {
                 .contains("只在能够直接解释当前主题时按需引用")
                 .contains("即使需要引用资质，也只摘取与当前论点直接相关的一项或一句")
                 .contains("可选主体资质（不得整段复制）：医疗机构执业许可")
+                .contains("可选服务/业务范围（仅按主题需要引用）：医疗美容科")
+                .contains("可选执业/服务人员公开信息（仅按主题需要引用）：王医生，已公开医师执业信息")
                 .contains("未列入正文材料的后台审计字段不得写入文章")
-                .doesNotContain("医疗美容科")
                 .doesNotContain("医疗广告审查证明")
                 .doesNotContain("审查编号")
                 .doesNotContain("首段直接给风险边界，正文围绕公开资质展开");
 
         assertThat(result.promptSnapshot()).contains("\"medicalAdReviewNo\":\"审查编号\"");
         assertThat(result.promptSnapshot()).contains("\"diagnosisScope\":\"医疗美容科\"");
+        assertThat(result.promptSnapshot()).contains("\"practitionerInfoPublic\":\"王医生，已公开医师执业信息\"");
         assertThat(result.inputSnapshot()).contains("\"medicalAdReviewNo\":\"审查编号\"");
         assertThat(result.inputSnapshot()).contains("\"diagnosisScope\":\"医疗美容科\"");
+        assertThat(result.inputSnapshot()).contains("\"practitionerInfoPublic\":\"王医生，已公开医师执业信息\"");
     }
 
     private Project project() {

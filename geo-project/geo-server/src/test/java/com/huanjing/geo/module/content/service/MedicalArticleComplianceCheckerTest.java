@@ -658,6 +658,7 @@ class MedicalArticleComplianceCheckerTest {
                         "qualification",
                         "license",
                         "scope",
+                        null,
                         null
                 );
         return new MedicalArticleComplianceChecker.CheckInput(

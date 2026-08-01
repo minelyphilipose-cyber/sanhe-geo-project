@@ -337,7 +337,7 @@ class ArticleGenerationPromptContextFactoryTest {
         MedicalArticleGenerationService.MedicalPromptContext medicalContext = new MedicalArticleGenerationService.MedicalPromptContext(
                 "medical_beauty", "education", null, null, 55L, "吸脂填充风险怎么判断",
                 null, "risk", "kernel", 2, false, "style", false,
-                null, null, null, null
+                null, null, null, null, null
         );
         when(medicalArticleGenerationService.resolveContextV2(any(), any(), any(), any(), any()))
                 .thenReturn(Optional.of(medicalContext));

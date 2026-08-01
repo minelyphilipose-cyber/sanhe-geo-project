@@ -122,6 +122,7 @@ public class MedicalArticleGenerationService {
                 offering == null ? null : trimToNull(offering.getQualificationRef()),
                 qualificationSnapshot(brand, industryCode),
                 scopeSnapshot(brand, industryCode),
+                trimToNull(brand.getPractitionerInfoPublic()),
                 trimToNull(brand.getMedicalAdReviewNo())
         ));
     }
@@ -183,6 +184,7 @@ public class MedicalArticleGenerationService {
                 offering == null ? null : trimToNull(offering.getQualificationRef()),
                 qualificationSnapshot(brand, industryCode),
                 scopeSnapshot(brand, industryCode),
+                trimToNull(brand.getPractitionerInfoPublic()),
                 trimToNull(brand.getMedicalAdReviewNo())
         ));
     }
@@ -205,6 +207,7 @@ public class MedicalArticleGenerationService {
                 - 项目/服务资质引用：%s
                 - 主体资质信息：%s
                 - 服务/业务范围：%s
+                - 执业/服务人员可公示信息：%s
                 - 审查/备案编号：%s
                 """.formatted(
                 specialIndustryService.industryLabel(context.industryCode()),
@@ -216,6 +219,7 @@ public class MedicalArticleGenerationService {
                 StringUtils.hasText(context.qualificationRef()) ? context.qualificationRef() : "未提供",
                 StringUtils.hasText(context.medicalLicense()) ? context.medicalLicense() : "未提供",
                 StringUtils.hasText(context.diagnosisScope()) ? context.diagnosisScope() : "未提供",
+                StringUtils.hasText(context.practitionerInfoPublic()) ? context.practitionerInfoPublic() : "未提供",
                 StringUtils.hasText(context.medicalAdReviewNo()) ? context.medicalAdReviewNo() : "未提供"
         ).trim();
 
@@ -254,6 +258,8 @@ public class MedicalArticleGenerationService {
         appendFact(facts, "本篇关注方向", context.focus());
         appendFact(facts, "可选项目或服务资质（仅摘取主题所需部分）", context.qualificationRef());
         appendFact(facts, "可选主体资质（不得整段复制）", context.medicalLicense());
+        appendFact(facts, "可选服务/业务范围（仅按主题需要引用）", context.diagnosisScope());
+        appendFact(facts, "可选执业/服务人员公开信息（仅按主题需要引用）", context.practitionerInfoPublic());
 
         StringBuilder specialRules = new StringBuilder("# 特殊行业内容边界\n")
                 .append("以下规则只约束表达方式，不得改变用户主题。标题必须直接回应原主题，不得为了体现行业规则主动加入与主题无关的审核术语或风险标签。\n")
@@ -523,6 +529,7 @@ public class MedicalArticleGenerationService {
             map.put("diffFocus", context.focus());
             map.put("medicalLicense", context.medicalLicense());
             map.put("diagnosisScope", context.diagnosisScope());
+            map.put("practitionerInfoPublic", context.practitionerInfoPublic());
             map.put("medicalAdReviewNo", context.medicalAdReviewNo());
             map.put("medicalBrandExposureLimit", context.brandExposureLimit());
             return objectMapper.writeValueAsString(map);
@@ -545,6 +552,7 @@ public class MedicalArticleGenerationService {
             map.put("focus", context.focus());
             map.put("medicalLicense", context.medicalLicense());
             map.put("diagnosisScope", context.diagnosisScope());
+            map.put("practitionerInfoPublic", context.practitionerInfoPublic());
             map.put("medicalAdReviewNo", context.medicalAdReviewNo());
             map.put("medicalBrandExposureLimit", context.brandExposureLimit());
             return objectMapper.writeValueAsString(map);
@@ -586,6 +594,7 @@ public class MedicalArticleGenerationService {
                                        String qualificationRef,
                                        String medicalLicense,
                                        String diagnosisScope,
+                                       String practitionerInfoPublic,
                                        String medicalAdReviewNo) {
     }
 }

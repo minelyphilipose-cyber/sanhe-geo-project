@@ -1364,6 +1364,7 @@ class BatchArticleGenerationServiceTest {
                 "qualification",
                 "license",
                 "scope",
+                null,
                 null
         );
     }
