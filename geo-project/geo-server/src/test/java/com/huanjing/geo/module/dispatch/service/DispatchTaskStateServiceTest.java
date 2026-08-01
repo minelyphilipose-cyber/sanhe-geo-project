@@ -6,9 +6,12 @@ import com.huanjing.geo.module.dispatch.enums.DispatchTaskStatus;
 import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -86,6 +89,24 @@ class DispatchTaskStateServiceTest {
 
         verify(pollShardPersistenceService, never()).markShardFailed(any(), any());
         verify(pollAggregationService, never()).tryAggregateBatch(any());
+    }
+
+    @Test
+    void markCancelledClearsRetryAndTimeoutState() {
+        DispatchTask task = runningTask(44L, "{\"mode\":\"monthly\"}");
+        task.setNextRetryAt(LocalDateTime.now().plusMinutes(1));
+        task.setTimeoutAt(LocalDateTime.now().plusMinutes(5));
+        when(dispatchTaskMapper.selectById(44L)).thenReturn(task);
+
+        service.markCancelled(44L, "retired");
+
+        ArgumentCaptor<DispatchTask> captor = ArgumentCaptor.forClass(DispatchTask.class);
+        verify(dispatchTaskMapper).updateById(captor.capture());
+        assertEquals(DispatchTaskStatus.CANCELLED.value(), captor.getValue().getStatus());
+        assertEquals("retired", captor.getValue().getLastError());
+        assertNull(captor.getValue().getNextRetryAt());
+        assertNull(captor.getValue().getTimeoutAt());
+        verify(dispatchQueueService).clearQueueMark(44L);
     }
 
     private static DispatchTask runningTask(Long id, String payloadJson) {

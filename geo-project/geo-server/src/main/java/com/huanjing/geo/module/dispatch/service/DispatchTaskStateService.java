@@ -66,6 +66,22 @@ public class DispatchTaskStateService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markCancelled(Long taskId, String reason) {
+        DispatchTask task = dispatchTaskMapper.selectById(taskId);
+        if (task == null) {
+            dispatchQueueService.clearQueueMark(taskId);
+            return;
+        }
+        task.setStatus(DispatchTaskStatus.CANCELLED.value());
+        task.setFinishedAt(LocalDateTime.now());
+        task.setNextRetryAt(null);
+        task.setTimeoutAt(null);
+        task.setLastError(reason);
+        dispatchTaskMapper.updateById(task);
+        dispatchQueueService.clearQueueMark(taskId);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markRetryPending(Long taskId,
                                  int nextRetryCount,
                                  LocalDateTime nextRetryAt,

@@ -50,8 +50,6 @@ public class DispatchPlannerService {
         for (Project project : projects) {
             planQuestionPoll(project, today);
             planContentGeneration(project, today);
-            planMonthly(project, today);
-            planQuarterly(project, today);
         }
     }
 
@@ -136,40 +134,6 @@ public class DispatchPlannerService {
             return true;
         }
         return DispatchScheduleCalculator.isBiDailyDue(project.getActivatedAt().toLocalDate(), today);
-    }
-
-    private void planMonthly(Project project, LocalDate today) {
-        if (today.getDayOfMonth() != 1) {
-            return;
-        }
-        LocalDate monthStart = today.minusMonths(1).withDayOfMonth(1);
-        LocalDate monthEnd = today.minusDays(1);
-        dispatchTaskService.createTaskAndEnqueue(
-                project.getId(),
-                DispatchTaskType.MONTHLY_REPORT,
-                monthStart,
-                monthEnd,
-                LocalDateTime.now(),
-                Map.of("mode", "monthly")
-        );
-    }
-
-    private void planQuarterly(Project project, LocalDate today) {
-        if (!(today.getMonthValue() == 1 || today.getMonthValue() == 4 || today.getMonthValue() == 7 || today.getMonthValue() == 10)
-                || today.getDayOfMonth() != 1) {
-            return;
-        }
-
-        LocalDate quarterEnd = today.minusDays(1);
-        LocalDate quarterStart = quarterEnd.minusMonths(2).withDayOfMonth(1);
-        dispatchTaskService.createTaskAndEnqueue(
-                project.getId(),
-                DispatchTaskType.QUARTERLY_REPORT,
-                quarterStart,
-                quarterEnd,
-                LocalDateTime.now(),
-                Map.of("mode", "quarterly")
-        );
     }
 
 }

@@ -36,6 +36,8 @@ import java.util.concurrent.ThreadLocalRandom;
 @RequiredArgsConstructor
 public class DispatchTaskService {
 
+    private static final String RETIRED_REPORT_REASON = "monthly and quarterly report tasks are retired by product policy";
+
     private final DispatchTaskMapper dispatchTaskMapper;
     private final DispatchQueueService dispatchQueueService;
     private final DispatchExecutionService dispatchExecutionService;
@@ -109,6 +111,9 @@ public class DispatchTaskService {
                                     String targetChannel,
                                     Integer generationSlotNo,
                                     boolean enqueue) {
+        if (DispatchTaskType.isRetiredReport(taskType.name())) {
+            throw new BizException(410, RETIRED_REPORT_REASON);
+        }
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new BizException(400, "dispatch task idempotency_key is required");
         }
@@ -414,6 +419,10 @@ public class DispatchTaskService {
                 || DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus())
                 || DispatchTaskStatus.CANCELLED.value().equals(task.getStatus())) {
             dispatchQueueService.clearQueueMark(taskId);
+            return;
+        }
+        if (DispatchTaskType.isRetiredReport(task.getTaskType())) {
+            dispatchTaskStateService.markCancelled(taskId, RETIRED_REPORT_REASON);
             return;
         }
 

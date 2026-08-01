@@ -3,7 +3,9 @@ package com.huanjing.geo.module.dispatch.enums;
 import java.util.Arrays;
 
 public enum DispatchTaskType {
+    @Deprecated
     QUARTERLY_REPORT(0, true),
+    @Deprecated
     MONTHLY_REPORT(1, true),
     BRAND_STATEMENT_GENERATION(1, true),
     BIWEEKLY_REPORT(2, true),
@@ -41,5 +43,10 @@ public enum DispatchTaskType {
 
     public static boolean isQuestionPoll(String value) {
         return "QUESTION_POLL".equalsIgnoreCase(value) || "BI_DAILY_POLL".equalsIgnoreCase(value);
+    }
+
+    public static boolean isRetiredReport(String value) {
+        return MONTHLY_REPORT.name().equalsIgnoreCase(value)
+                || QUARTERLY_REPORT.name().equalsIgnoreCase(value);
     }
 }

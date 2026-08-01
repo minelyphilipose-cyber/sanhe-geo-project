@@ -76,6 +76,40 @@ class DispatchTaskServiceReleaseTest {
     }
 
     @Test
+    void processTaskCancelsRetiredReportWithoutExecutingIt() {
+        DispatchTask task = new DispatchTask();
+        task.setId(22L);
+        task.setProjectId(100L);
+        task.setTaskType(DispatchTaskType.MONTHLY_REPORT.name());
+        task.setStatus(DispatchTaskStatus.RETRY_PENDING.value());
+        when(dispatchTaskMapper.selectById(22L)).thenReturn(task);
+
+        service.processTask(22L);
+
+        verify(dispatchTaskStateService).markCancelled(
+                22L,
+                "monthly and quarterly report tasks are retired by product policy"
+        );
+        verify(dispatchTaskStateService, never()).markRunning(eq(22L), anyInt());
+        verify(dispatchExecutionService, never()).execute(task);
+    }
+
+    @Test
+    void createTaskRejectsRetiredQuarterlyReport() {
+        BizException exception = assertThrows(BizException.class, () -> service.createTaskAndEnqueue(
+                100L,
+                DispatchTaskType.QUARTERLY_REPORT,
+                java.time.LocalDate.of(2026, 4, 1),
+                java.time.LocalDate.of(2026, 6, 30),
+                LocalDateTime.now(),
+                java.util.Map.of("mode", "quarterly")
+        ));
+
+        assertEquals(410, exception.getCode());
+        verify(dispatchTaskMapper, never()).insert(org.mockito.ArgumentMatchers.any(DispatchTask.class));
+    }
+
+    @Test
     void retryAfterDelayIsNotClampedByFallbackMax() throws Exception {
         DispatchProperties properties = new DispatchProperties();
         properties.setResourceBusyRetryAfterEnabled(true);

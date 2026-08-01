@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -159,6 +160,16 @@ class DispatchPlannerServiceContentGenerationTest {
         verify(allocationService, never()).contentGenerationAllocations(anyLong());
         verify(questionPollPlanningService, never())
                 .planProjectTierPoll(any(), any(), any(), any(), any(Integer.class));
+    }
+
+    @Test
+    void firstDayOfMonthDoesNotPlanRetiredReports() {
+        Project project = activeProject(LocalDate.of(2026, 5, 1));
+        when(projectMapper.selectList(any())).thenReturn(List.of(project));
+
+        service.scanAndPlan(LocalDate.of(2026, 8, 1));
+
+        verifyNoInteractions(dispatchTaskService);
     }
 
     private static Project activeProject(LocalDate activatedDate) {
