@@ -897,6 +897,7 @@ function toForumTarget(site: PublishSite): TargetConfig {
     autoPublish: enabled && (site.integrationMethod === 'forum_playwright' || site.integrationMethod === 'discuz_http'),
     executor: site.integrationMethod || '',
     drawerType: site.siteCode || normalizeSiteCode(site),
+    source: 'publish_site',
     publishSite: site,
     fields: [
       { label: '接入方式', value: integrationMethodLabel(site.integrationMethod) },
