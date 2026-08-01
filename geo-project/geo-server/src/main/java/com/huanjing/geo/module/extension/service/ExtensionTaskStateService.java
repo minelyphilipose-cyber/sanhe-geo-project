@@ -45,6 +45,7 @@ public class ExtensionTaskStateService {
 
     private static final String STATUS_TOKEN_ISSUED = "token_issued";
     private static final String STATUS_FILLED = "filled";
+    private static final String STATUS_SUBMITTED = "submitted";
     private static final String STATUS_PUBLISHED = "published";
     private static final String STATUS_FAILED = "failed";
     private static final String ARTICLE_STATUS_APPROVED = "approved";
@@ -194,13 +195,16 @@ public class ExtensionTaskStateService {
         LocalDateTime now = now();
         String errorMessage = extractFailureMessage(request);
         String failureKind = extractFailureCode(request, errorMessage);
-        int affected = taskMapper.markSemiAutoFailed(taskId, failureKind, errorMessage, now);
+        boolean postSubmissionVerificationFailure = SelfMediaPublishFailureCodes
+                .isPostSubmissionVerificationFailure(failureKind);
+        int affected = postSubmissionVerificationFailure
+                ? taskMapper.markSemiAutoPublishVerificationPending(
+                        taskId, failureKind, errorMessage, now)
+                : taskMapper.markSemiAutoFailed(taskId, failureKind, errorMessage, now);
         if (affected != 1) {
             auditDenied("SEMI_AUTO_TASK_FILL_FAILED", context, operatorId, extensionSessionId, "STALE_STATE");
             throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
         }
-        boolean postSubmissionVerificationFailure = SelfMediaPublishFailureCodes
-                .isPostSubmissionVerificationFailure(failureKind);
         if (!postSubmissionVerificationFailure) {
             restoreArticleApproved(context.task());
             companyChannelQuotaService.refundDistribution(taskId);
@@ -217,7 +221,10 @@ public class ExtensionTaskStateService {
         );
         auditSuccess("SEMI_AUTO_TASK_FILL_FAILED", context, operatorId, extensionSessionId,
                 detail("failedAt", now, "failureKind", failureKind, "errorMessage", errorMessage));
-        return new ExtensionTaskStateResponse(taskId, STATUS_FAILED);
+        return new ExtensionTaskStateResponse(
+                taskId,
+                postSubmissionVerificationFailure ? STATUS_SUBMITTED : STATUS_FAILED
+        );
     }
 
     @Transactional

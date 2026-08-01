@@ -28,6 +28,11 @@ public class LocalAgentRuntimeStatus {
     private Integer capacity;
     private String supportedPlatformsJson;
     private String capabilitiesJson;
+    private String runtimeState;
+    private String resourceMetricsJson;
+    private LocalDateTime lastCleanupAt;
+    private String helperBootId;
+    private Long policyVersion;
     private String lastErrorCode;
     private String lastErrorMessage;
     private LocalDateTime lastSeenAt;

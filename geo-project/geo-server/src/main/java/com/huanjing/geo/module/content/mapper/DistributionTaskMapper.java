@@ -94,6 +94,26 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
             @Param("failedAt") LocalDateTime failedAt
     );
 
+    @Update("""
+            UPDATE distribution_tasks
+            SET status = 'submitted',
+                review_status = 'unknown',
+                submitted_at = COALESCE(submitted_at, #{submittedAt}),
+                failure_kind = #{failureKind},
+                error_message = #{errorMessage},
+                finished_at = NULL,
+                locked_until = NULL
+            WHERE id = #{taskId}
+              AND status IN ('token_issued', 'filling', 'filled')
+              AND dispatch_mode = 'SEMI_AUTO'
+            """)
+    int markSemiAutoPublishVerificationPending(
+            @Param("taskId") Long taskId,
+            @Param("failureKind") String failureKind,
+            @Param("errorMessage") String errorMessage,
+            @Param("submittedAt") LocalDateTime submittedAt
+    );
+
     @Select("""
             SELECT id, article_id, project_id, self_media_account_id, status, dispatch_mode, operator_id,
                    fill_token_issued_at, filled_at, last_heartbeat_at

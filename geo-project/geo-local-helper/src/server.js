@@ -1,12 +1,14 @@
 import http from 'node:http'
 import { Worker } from 'node:worker_threads'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import crypto from 'node:crypto'
 import { stringifyBoundedDiagnostics } from './diagnostics-json.js'
-import { describeUploadPageCandidates, selectUploadTargetPage } from './browser-target.js'
+import { describeUploadPageCandidates, puppeteerPageTargetId, selectUploadTargetPage } from './browser-target.js'
 import {
   evaluateBaijiahaoPublishSignals,
   evaluateDouyinPublishSignals,
@@ -16,6 +18,18 @@ import {
   preferScheduleClaimBlock,
   schedulePollBlockLogDecision,
 } from './schedule-poll-observability.js'
+import {
+  BrowserResourceRegistry,
+  browserWsBrowserId,
+  observedBrowserSessionEpoch,
+} from './browser-resource-registry.js'
+import { ExclusiveOperationTracker } from './exclusive-operation-tracker.js'
+import {
+  BrowserRuntimeErrorCounter,
+  HelperTaskThroughputCounter,
+  buildFailedBrowserObservationMetrics,
+  summarizeBrowserProcessMetrics,
+} from './browser-observation-metrics.js'
 
 const CONFIG_PATH = new URL('../config.local.json', import.meta.url)
 const EXAMPLE_CONFIG_PATH = new URL('../config.example.json', import.meta.url)
@@ -29,6 +43,8 @@ const NONCES_PATH = new URL('nonces.json', RUNTIME_DIR)
 const SETTINGS_PATH = new URL('settings.json', RUNTIME_DIR)
 const MACHINE_ID_PATH = new URL('machine-id', RUNTIME_DIR)
 const TEMP_FILES_DIR = new URL('temp-files/', RUNTIME_DIR)
+const BROWSER_RESOURCES_PATH = new URL('browser-resources.json', RUNTIME_DIR)
+const BROWSER_RESOURCE_AUDIT_PATH = new URL('browser-resource-audit.jsonl', RUNTIME_DIR)
 const tasksById = new Map()
 const extensionBindIntentsByHash = new Map()
 const CLAIM_TIMEOUT_MS = 30_000
@@ -43,6 +59,7 @@ const BACKEND_FETCH_TIMEOUT_MS = 20_000
 const RESPONSE_JSON_TIMEOUT_MS = 10_000
 const SCHEDULE_POLL_STEP_TIMEOUT_MS = 180_000
 const BAIJIAHAO_PUBLISH_CHECK_STEP_TIMEOUT_MS = 120_000
+const DOUYIN_IMAGE_UPLOAD_COMPLETE_TIMEOUT_MS = 180_000
 const SCHEDULE_HEARTBEAT_INTERVAL_MS = 20_000
 const PUBLISH_CHECK_TASK_ID_OFFSET = 900_000_000_000
 const PUPPETEER_DISCONNECT_TIMEOUT_MS = 2_000
@@ -67,6 +84,7 @@ const SCHEDULE_POLL_BLOCK_LOG_INTERVAL_MS = 5 * 60 * 1000
 const EXTENSION_BIND_INTENT_TTL_MS = 2 * 60 * 1000
 const ADSPOWER_BROWSER_SESSION_CACHE_MS = 2 * 60 * 1000
 const ADSPOWER_RATE_LIMIT_RETRY_DELAYS_MS = [800, 1600, 2400]
+const BROWSER_OBSERVATION_INTERVAL_MS = 60_000
 const GEO_ENV_EXTENSION_NAME = 'GEO 自媒体助手'
 const DEFAULT_ALLOWED_WEB_ORIGINS = [
   'https://www.huanjingaigeo.com',
@@ -79,9 +97,23 @@ const DEFAULT_PROFILE_LABELS = {
 }
 const EXIT_CODE_PORT_IN_USE = 2
 const STARTED_AT = new Date().toISOString()
+const HELPER_BOOT_ID = crypto.randomUUID()
+const execFileAsync = promisify(execFile)
 const nonceCache = new Map()
 const adspowerBrowserSessions = new Map()
 const adspowerBrowserStartInFlight = new Map()
+const observedBrowserEnvironments = new Map()
+const browserObservationInFlight = new ExclusiveOperationTracker()
+const browserProcessCpuSamples = new Map()
+const browserRuntimeErrorCounter = new BrowserRuntimeErrorCounter()
+const helperTaskThroughputCounter = new HelperTaskThroughputCounter()
+const throughputTerminalTasks = new WeakSet()
+const browserResourceRegistry = new BrowserResourceRegistry({
+  registryPath: BROWSER_RESOURCES_PATH,
+  auditPath: BROWSER_RESOURCE_AUDIT_PATH,
+  runtimeDir: RUNTIME_DIR,
+  helperBootId: HELPER_BOOT_ID,
+})
 let nonceFlushTimer = null
 let runtimeSession = null
 let runtimeSettings = { activeProfile: '', adspower: {} }
@@ -100,6 +132,7 @@ let machineIdCache = null
 let localAgentRuntimeStatusInFlight = false
 let lastLocalAgentRuntimeStatus = null
 let lastAdspowerApiStatus = { ok: false, checkedAt: null, error: null }
+let lastBrowserObservationStatus = null
 
 process.on('uncaughtException', (error) => {
   console.error('GEO local helper uncaught exception:', error?.stack || error?.message || error)
@@ -375,6 +408,435 @@ async function connectPuppeteer(puppeteer, wsEndpoint, config = {}) {
   })
 }
 
+function browserObservationEnabled(config = {}) {
+  return config.browserObservationEnabled === true
+}
+
+function targetIdOf(target) {
+  return target?._targetId || target?._targetInfo?.targetId || null
+}
+
+function browserResourceType(target) {
+  const type = String(target?.type?.() || '').trim().toLowerCase()
+  if (type === 'page') return 'observed_tab'
+  if (type === 'background_page') return 'extension_background_page'
+  if (type === 'service_worker') return 'service_worker'
+  if (type === 'shared_worker') return 'shared_worker'
+  return type ? `target_${type}` : 'unknown_target'
+}
+
+function rememberObservedBrowserEnvironment(context = {}, data = null) {
+  const providerProfileId = String(context.providerProfileId || '').trim()
+  const wsEndpoint = data?.ws?.puppeteer || context.wsEndpoint || ''
+  if (!providerProfileId || !wsEndpoint) return null
+  const previous = observedBrowserEnvironments.get(providerProfileId) || {}
+  const browserId = browserWsBrowserId(wsEndpoint)
+  const sessionEpoch = observedBrowserSessionEpoch(HELPER_BOOT_ID, wsEndpoint)
+  const next = {
+    ...previous,
+    browserEnvironmentId: Number(context.browserEnvironmentId) || previous.browserEnvironmentId || null,
+    environmentKey: context.environmentKey || previous.environmentKey || null,
+    providerProfileId,
+    browserWsBrowserId: browserId,
+    browserSessionEpoch: sessionEpoch,
+    platform: context.platform || previous.platform || null,
+    ownerType: context.ownerType || previous.ownerType || 'unknown',
+    lastTaskActivityAt: context.lastTaskActivityAt || previous.lastTaskActivityAt || null,
+    wsEndpoint,
+    lastRememberedAt: nowIso(),
+  }
+  if (previous.browserSessionEpoch && previous.browserSessionEpoch !== sessionEpoch) {
+    next.consecutiveCdpFailures = 0
+    next.metrics = null
+    browserProcessCpuSamples.delete(providerProfileId)
+  }
+  observedBrowserEnvironments.set(providerProfileId, next)
+  return next
+}
+
+function browserResourceContext(environmentContext = {}, resourceContext = {}) {
+  return {
+    providerProfileId: environmentContext.providerProfileId,
+    browserSessionEpoch: environmentContext.browserSessionEpoch,
+    browserWsBrowserId: environmentContext.browserWsBrowserId,
+    browserEnvironmentId: environmentContext.browserEnvironmentId,
+    environmentKey: environmentContext.environmentKey,
+    platform: resourceContext.platform || environmentContext.platform || null,
+    taskId: resourceContext.taskId || null,
+    scheduleId: resourceContext.scheduleId || null,
+    claimAttempt: resourceContext.claimAttempt || null,
+    ownership: resourceContext.ownership || 'unknown',
+    resourceOrigin: resourceContext.resourceOrigin || 'unknown',
+    resourceType: resourceContext.resourceType || 'observed_tab',
+    backendReportState: resourceContext.backendReportState || 'unknown',
+    irreversibleBoundary: resourceContext.irreversibleBoundary || 'no_mutation',
+    lastTaskActivityAt: resourceContext.lastTaskActivityAt || environmentContext.lastTaskActivityAt || null,
+  }
+}
+
+async function registerCreatedBrowserPage(environmentContext, page, resourceContext = {}) {
+  if (!environmentContext?.providerProfileId || !environmentContext.browserSessionEpoch || !page) return null
+  const target = page.target()
+  const targetId = targetIdOf(target)
+  if (!targetId) return null
+  const context = browserResourceContext(environmentContext, resourceContext)
+  return browserResourceRegistry.registerResource({
+    ...context,
+    targetId,
+    parentTargetId: targetIdOf(target?.opener?.()),
+    pageUrl: page.url(),
+    lifecycleState: 'active',
+    openedAt: nowIso(),
+    lastObservedAt: nowIso(),
+  })
+}
+
+async function updateObservedBrowserPage(environmentContext, page, changes = {}) {
+  if (!environmentContext?.providerProfileId || !environmentContext.browserSessionEpoch || !page) return null
+  const targetId = targetIdOf(page.target())
+  if (!targetId) return null
+  return browserResourceRegistry.updateResource({
+    providerProfileId: environmentContext.providerProfileId,
+    browserSessionEpoch: environmentContext.browserSessionEpoch,
+    targetId,
+  }, {
+    pageUrl: page.url(),
+    ...changes,
+  })
+}
+
+async function markObservedBrowserPageClosed(environmentContext, page, reason) {
+  if (!environmentContext?.providerProfileId || !environmentContext.browserSessionEpoch || !page) return null
+  const targetId = targetIdOf(page.target())
+  if (!targetId) return null
+  return browserResourceRegistry.markResourceClosed({
+    providerProfileId: environmentContext.providerProfileId,
+    browserSessionEpoch: environmentContext.browserSessionEpoch,
+    targetId,
+  }, reason)
+}
+
+function environmentTaskVolume(providerProfileId) {
+  const tasks = listTasks().filter(
+    (task) => String(task.providerProfileId || '').trim() === providerProfileId,
+  )
+  return {
+    retainedTaskCount: tasks.length,
+    activeTaskCount: tasks.filter(
+      (task) => task.status === 'pending' || task.status === 'claimed',
+    ).length,
+    throughputSinceHelperBoot: helperTaskThroughputCounter.snapshot(providerProfileId),
+  }
+}
+
+function recordTaskTerminalThroughput(task, status, providerProfileId = null) {
+  if (task && typeof task === 'object') {
+    if (throughputTerminalTasks.has(task)) return
+    throughputTerminalTasks.add(task)
+  }
+  helperTaskThroughputCounter.increment(
+    status === 'failed' ? 'failedTotal' : 'completedTotal',
+    task?.providerProfileId || providerProfileId,
+  )
+}
+
+async function collectWindowsBrowserProcessRows(processIds) {
+  if (process.platform !== 'win32') return null
+  const ids = [...new Set(processIds)]
+    .map(Number)
+    .filter((value) => Number.isInteger(value) && value > 0)
+  if (!ids.length) return []
+  const script = [
+    `$ids = @(${ids.join(',')})`,
+    '$rows = @(Get-Process -Id $ids -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, CPU, WorkingSet64, HandleCount)',
+    'ConvertTo-Json -Compress -InputObject $rows',
+  ].join('; ')
+  const { stdout } = await execFileAsync('powershell.exe', [
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    script,
+  ], {
+    encoding: 'utf8',
+    timeout: 5_000,
+    windowsHide: true,
+    maxBuffer: 512 * 1024,
+  })
+  const parsed = JSON.parse(String(stdout || '[]').replace(/^\uFEFF/, '') || '[]')
+  return Array.isArray(parsed) ? parsed : [parsed]
+}
+
+async function collectBrowserProcessMetrics(providerProfileId, cdpSession) {
+  const processStartedAt = Date.now()
+  if (!cdpSession) {
+    return { status: 'unavailable', reason: 'missing_browser_cdp_session' }
+  }
+  try {
+    const response = await cdpSession.send('SystemInfo.getProcessInfo')
+    const processInfo = Array.isArray(response?.processInfo) ? response.processInfo : []
+    if (process.platform !== 'win32') {
+      return {
+        status: 'unsupported',
+        platform: process.platform,
+        processCount: processInfo.length,
+        collectionLatencyMs: Date.now() - processStartedAt,
+      }
+    }
+    const processRows = await collectWindowsBrowserProcessRows(
+      processInfo.map((item) => item.id),
+    )
+    const previousSample = browserProcessCpuSamples.get(providerProfileId) || null
+    const summarized = summarizeBrowserProcessMetrics({
+      processInfo,
+      processRows,
+      previousSample,
+      observedAtMs: Date.now(),
+    })
+    if (summarized.status === 'ok') {
+      browserProcessCpuSamples.set(providerProfileId, summarized.sample)
+    }
+    const { sample, ...reported } = summarized
+    return {
+      ...reported,
+      platform: process.platform,
+      collectionLatencyMs: Date.now() - processStartedAt,
+    }
+  } catch (error) {
+    browserRuntimeErrorCounter.record(error, providerProfileId)
+    return {
+      status: 'unavailable',
+      platform: process.platform,
+      reason: String(error?.message || error || '').slice(0, 300),
+      collectionLatencyMs: Date.now() - processStartedAt,
+    }
+  }
+}
+
+function environmentMetricsFromObservation(context, targets, probe, observedAt) {
+  const snapshot = browserResourceRegistry.snapshot()
+  const activeResources = snapshot.resources.filter((resource) => (
+    resource.providerProfileId === context.providerProfileId
+      && resource.browserSessionEpoch === context.browserSessionEpoch
+      && !['closed', 'create_failed', 'stale', 'target_missing'].includes(resource.lifecycleState)
+  ))
+  const ownershipCount = (ownership) => activeResources
+    .filter((resource) => resource.ownership === ownership).length
+  const protectedTargetCount = activeResources.filter((resource) => (
+    resource.manualHoldRequired === true
+      || resource.ownership === 'operator'
+      || resource.lifecycleState === 'manual_hold_required'
+  )).length
+  const lastTaskActivityMs = Date.parse(context.lastTaskActivityAt || '')
+  return {
+    browserEnvironmentId: context.browserEnvironmentId || null,
+    environmentKey: context.environmentKey || null,
+    providerProfileId: context.providerProfileId,
+    browserSessionEpoch: context.browserSessionEpoch,
+    ownerType: context.ownerType || 'unknown',
+    totalTargetCount: targets.length,
+    managedTargetCount: ownershipCount('automation'),
+    operatorTargetCount: ownershipCount('operator'),
+    unknownTargetCount: ownershipCount('unknown'),
+    protectedTargetCount,
+    lastTaskActivityAt: context.lastTaskActivityAt || null,
+    idleSeconds: Number.isFinite(lastTaskActivityMs)
+      ? Math.max(0, Math.floor((Date.now() - lastTaskActivityMs) / 1_000))
+      : null,
+    cdpProbeLatencyMs: Math.max(0, Math.round(probe.totalLatencyMs)),
+    cdpStepLatencyMs: probe.stepLatencyMs,
+    browserPageCount: probe.browserPageCount,
+    browserVersion: probe.browserVersion,
+    processMetrics: probe.processMetrics,
+    errorCounts: browserRuntimeErrorCounter.snapshot(context.providerProfileId),
+    taskVolume: environmentTaskVolume(context.providerProfileId),
+    helperUptimeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(STARTED_AT)) / 1_000)),
+    circuitState: 'not_implemented',
+    consecutiveCdpFailures: 0,
+    lastCleanupAt: null,
+    lastCleanupResult: 'observation_only',
+    observationStatus: 'ok',
+    lastSuccessfulObservedAt: observedAt,
+    observedAt,
+  }
+}
+
+async function observeAdspowerBrowserSession(config, context, data = null) {
+  if (!browserObservationEnabled(config)) return null
+  const environmentContext = rememberObservedBrowserEnvironment(context, data)
+  if (!environmentContext?.wsEndpoint || !environmentContext.browserSessionEpoch) return null
+  const startedAt = Date.now()
+  let browser
+  let cdpSession
+  try {
+    const { default: puppeteer } = await import('puppeteer-core')
+    const connectStartedAt = Date.now()
+    browser = await connectPuppeteer(puppeteer, environmentContext.wsEndpoint, config)
+    const connectLatencyMs = Date.now() - connectStartedAt
+    cdpSession = await browser.target().createCDPSession()
+    const getVersionStartedAt = Date.now()
+    const version = await cdpSession.send('Browser.getVersion')
+    const getVersionLatencyMs = Date.now() - getVersionStartedAt
+    const pagesStartedAt = Date.now()
+    const pages = await browser.pages()
+    const pagesLatencyMs = Date.now() - pagesStartedAt
+    const targets = browser.targets().map((target) => ({
+      targetId: targetIdOf(target),
+      parentTargetId: targetIdOf(target.opener?.()),
+      resourceType: browserResourceType(target),
+      pageUrl: target.url(),
+      ownership: 'unknown',
+      resourceOrigin: 'startup_discovered',
+    })).filter((target) => target.targetId)
+    const cdpProbeLatencyMs = connectLatencyMs + getVersionLatencyMs + pagesLatencyMs
+    const processMetrics = await collectBrowserProcessMetrics(
+      environmentContext.providerProfileId,
+      cdpSession,
+    )
+    const observedAt = nowIso()
+    await browserResourceRegistry.reconcileEnvironment({
+      ...environmentContext,
+      targets,
+      observedAt,
+    })
+    const latest = observedBrowserEnvironments.get(environmentContext.providerProfileId) || environmentContext
+    latest.consecutiveCdpFailures = 0
+    latest.lastObservationError = null
+    latest.metrics = environmentMetricsFromObservation(latest, targets, {
+      totalLatencyMs: cdpProbeLatencyMs,
+      stepLatencyMs: {
+        connectMs: connectLatencyMs,
+        browserGetVersionMs: getVersionLatencyMs,
+        browserPagesMs: pagesLatencyMs,
+      },
+      browserPageCount: pages.length,
+      browserVersion: {
+        product: String(version?.product || '').slice(0, 128) || null,
+        protocolVersion: String(version?.protocolVersion || '').slice(0, 32) || null,
+      },
+      processMetrics,
+    }, observedAt)
+    observedBrowserEnvironments.set(environmentContext.providerProfileId, latest)
+    lastBrowserObservationStatus = {
+      at: observedAt,
+      ok: true,
+      providerProfileId: environmentContext.providerProfileId,
+      targetCount: targets.length,
+      latencyMs: latest.metrics.cdpProbeLatencyMs,
+    }
+    return latest.metrics
+  } catch (error) {
+    browserRuntimeErrorCounter.record(error, environmentContext.providerProfileId)
+    const latest = observedBrowserEnvironments.get(environmentContext.providerProfileId) || environmentContext
+    latest.consecutiveCdpFailures = Number(latest.consecutiveCdpFailures || 0) + 1
+    latest.lastObservationError = String(error?.message || error || '').slice(0, 500)
+    latest.metrics = buildFailedBrowserObservationMetrics({
+      context: latest,
+      previousMetrics: latest.metrics,
+      failedProbeDurationMs: Date.now() - startedAt,
+      consecutiveCdpFailures: latest.consecutiveCdpFailures,
+      errorCounts: browserRuntimeErrorCounter.snapshot(latest.providerProfileId),
+      taskVolume: environmentTaskVolume(latest.providerProfileId),
+      helperUptimeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(STARTED_AT)) / 1_000)),
+      observationError: latest.lastObservationError,
+      observedAt: nowIso(),
+    })
+    observedBrowserEnvironments.set(environmentContext.providerProfileId, latest)
+    lastBrowserObservationStatus = {
+      at: nowIso(),
+      ok: false,
+      providerProfileId: environmentContext.providerProfileId,
+      error: latest.lastObservationError,
+    }
+    throw error
+  } finally {
+    await cdpSession?.detach().catch(() => null)
+    await safePuppeteerDisconnect(browser)
+  }
+}
+
+function scheduleBrowserObservation(config, context, data = null) {
+  if (!browserObservationEnabled(config)) return
+  const environmentContext = rememberObservedBrowserEnvironment(context, data)
+  const profileId = environmentContext?.providerProfileId
+  if (!profileId || browserObservationInFlight.has(profileId)) return
+  browserObservationInFlight
+    .start(profileId, () => observeAdspowerBrowserSession(config, environmentContext))
+    .catch(() => null)
+}
+
+async function refreshBrowserResourceObservations(config) {
+  if (!browserObservationEnabled(config)) return []
+  const operations = []
+  const configuredInterval = Number(
+    config.browserObservationIntervalMs || BROWSER_OBSERVATION_INTERVAL_MS,
+  )
+  const minimumIntervalMs = Number.isFinite(configuredInterval)
+    ? Math.max(30_000, configuredInterval)
+    : BROWSER_OBSERVATION_INTERVAL_MS
+  for (const context of observedBrowserEnvironments.values()) {
+    const lastObservedAt = Date.parse(context.metrics?.observedAt || '')
+    const alreadyRunning = browserObservationInFlight.has(context.providerProfileId)
+    if (!alreadyRunning
+      && Number.isFinite(lastObservedAt)
+      && Date.now() - lastObservedAt < minimumIntervalMs) {
+      continue
+    }
+    if (!alreadyRunning) {
+      browserObservationInFlight.start(
+        context.providerProfileId,
+        () => observeAdspowerBrowserSession(config, context),
+      ).catch(() => null)
+    }
+    const wait = browserObservationInFlight.wait(
+      context.providerProfileId,
+      20_000,
+      `browser observation ${context.providerProfileId}`,
+    ).catch(() => null)
+    operations.push(wait)
+  }
+  await Promise.all(operations)
+  return Array.from(observedBrowserEnvironments.values())
+    .map((context) => context.metrics)
+    .filter(Boolean)
+}
+
+function browserResourceMetrics() {
+  const snapshot = browserResourceRegistry.snapshot()
+  const environments = Array.from(observedBrowserEnvironments.values())
+    .map((context) => context.metrics)
+    .filter(Boolean)
+  return {
+    schemaVersion: 1,
+    helperBootId: HELPER_BOOT_ID,
+    cumulativeScope: 'helper_boot',
+    observationOnly: true,
+    environments,
+    summary: {
+      managedEnvironmentCount: environments.length,
+      totalManagedTabCount: environments.reduce(
+        (total, item) => total + Number(item.managedTargetCount || 0),
+        0,
+      ),
+      totalObservedTargetCount: environments.reduce(
+        (total, item) => total + Number(item.totalTargetCount || 0),
+        0,
+      ),
+      cleanupClosedTabsTotal: 0,
+      cleanupStoppedEnvironmentsTotal: 0,
+      globalCircuitState: 'not_implemented',
+      registryRevision: snapshot.registryRevision,
+      registryHealth: snapshot.registryHealth?.status || 'unknown',
+      helperUptimeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(STARTED_AT)) / 1_000)),
+      retainedRuntimeTaskCount: listTasks().length,
+      activeRuntimeTaskCount: activeRuntimeTaskCount(),
+      errorCounts: browserRuntimeErrorCounter.snapshot(),
+      inFlightObservationCount: browserObservationInFlight.size(),
+      taskThroughputSinceHelperBoot: helperTaskThroughputCounter.snapshot(),
+    },
+  }
+}
+
 function previewSecret(value) {
   const text = String(value || '')
   if (!text) return ''
@@ -494,7 +956,11 @@ async function reportLocalAgentRuntimeStatus(config, options = {}) {
     if (options.probeAdspower !== false) {
       await probeAdspowerApi(config)
     }
+    if (browserObservationEnabled(config)) {
+      refreshBrowserResourceObservations(config).catch(() => null)
+    }
     const packageInfo = await readPackageInfo()
+    const lifecycleMetrics = browserResourceMetrics()
     const body = JSON.stringify({
       machineId: await getMachineId(),
       activeProfile: config.activeProfile || runtimeSettings.activeProfile || DEFAULT_PROFILE_KEY,
@@ -510,9 +976,22 @@ async function reportLocalAgentRuntimeStatus(config, options = {}) {
         adspowerLaunch: true,
         claim: true,
         publishCheck: true,
+        douyinImageText: true,
         extensionStatusProbe: true,
         buildRevision: packageInfo.buildRevision || null,
+        browserLifecycle: {
+          version: 2,
+          observation: browserObservationEnabled(config),
+          tabCleanup: false,
+          environmentStopLease: false,
+          cleanupPlans: false,
+        },
       },
+      runtimeState: browserObservationEnabled(config) ? 'observing' : 'legacy',
+      resourceMetrics: lifecycleMetrics,
+      lastCleanupAt: null,
+      helperBootId: HELPER_BOOT_ID,
+      policyVersion: null,
       lastErrorCode: options.lastErrorCode || null,
       lastErrorMessage: options.lastErrorMessage || lastAdspowerApiStatus.error || null,
     })
@@ -551,6 +1030,30 @@ async function loadRuntimeTasks() {
     }
   } catch {
     // Fresh PoC helper startup has no task file.
+  }
+}
+
+function restoreObservedBrowserEnvironmentsFromTasks() {
+  for (const task of tasksById.values()) {
+    const providerProfileId = String(task.providerProfileId || '').trim()
+    const wsEndpoint = task.adspower?.puppeteerWs
+    if (!providerProfileId || !wsEndpoint) continue
+    const activityAt = task.lastStageAt
+      || task.completedAt
+      || task.failedAt
+      || task.claimedAt
+      || task.createdAt
+      || null
+    rememberObservedBrowserEnvironment({
+      browserEnvironmentId: task.schedule?.browserEnvironmentId
+        || task.backendTask?.browserEnvironmentId
+        || null,
+      environmentKey: task.environmentKey,
+      providerProfileId,
+      platform: task.platform,
+      ownerType: 'unknown',
+      lastTaskActivityAt: activityAt,
+    }, { ws: { puppeteer: wsEndpoint } })
   }
 }
 
@@ -1411,14 +1914,30 @@ async function signedTrustedBackendRequest(config, path, init = {}) {
   })
 }
 
-async function openUrlWithPuppeteer(config, wsEndpoint, targetUrl) {
+async function openUrlWithPuppeteer(config, wsEndpoint, targetUrl, resourceContext = {}) {
   if (!wsEndpoint || !targetUrl) return { opened: false, reason: 'missing_ws_or_url' }
 
   const { default: puppeteer } = await import('puppeteer-core')
   const browser = await connectPuppeteer(puppeteer, wsEndpoint, config)
+  const environmentContext = browserObservationEnabled(config)
+    ? rememberObservedBrowserEnvironment(resourceContext, { ws: { puppeteer: wsEndpoint } })
+    : null
+  let page
   try {
-    const page = await browser.newPage()
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) })
+    page = await browser.newPage()
+    await registerCreatedBrowserPage(environmentContext, page, resourceContext).catch(() => null)
+    try {
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) })
+    } catch (error) {
+      await updateObservedBrowserPage(environmentContext, page, {
+        lifecycleState: 'navigation_failed',
+      }).catch(() => null)
+      throw error
+    }
+    await updateObservedBrowserPage(environmentContext, page, {
+      lifecycleState: 'active',
+      lastTaskActivityAt: resourceContext.lastTaskActivityAt || nowIso(),
+    }).catch(() => null)
     await page.bringToFront().catch(() => null)
     const target = page.target()
     return { opened: true, url: targetUrl, pageUrl: page.url(), targetId: target?._targetId || null }
@@ -1566,9 +2085,26 @@ async function handleLaunch(req, res, config) {
   )
   const data = await startAdspowerBrowser(config, environment.providerProfileId)
   const task = normalizeLaunchTask(body, environment, data)
+  const observationContext = {
+    browserEnvironmentId: body.browserEnvironmentId || body.backendTask?.browserEnvironmentId,
+    environmentKey: environment.environmentKey,
+    providerProfileId: environment.providerProfileId,
+    platform: task.platform,
+    ownerType: body.taskId ? 'unknown' : 'operator',
+    lastTaskActivityAt: task.createdAt,
+  }
+  scheduleBrowserObservation(config, observationContext, data)
   upsertTask(task)
   await saveRuntimeTasks()
-  task.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url)
+  task.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url, {
+    ...observationContext,
+    taskId: task.taskId,
+    scheduleId: body.backendTask?.scheduleId || body.backendTask?.platformOptions?.scheduleId,
+    ownership: 'automation',
+    resourceOrigin: 'schedule_execution',
+    resourceType: 'editor_tab',
+    backendReportState: 'pending',
+  })
   upsertTask(task)
   await saveRuntimeTasks()
   sendJson(req, res, config, 200, { ok: true, task })
@@ -1593,6 +2129,9 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
   if (isReusableActiveTask(existing) && claimAttemptOfTask(existing) === claimedAttempt) {
     return { ok: true, claimed: true, reused: true, task: existing, schedule: claim.schedule }
   }
+  const claimedProviderProfileId = claim.launch.providerProfileId || claim.task.providerProfileId
+  helperTaskThroughputCounter.increment('claimedTotal', claimedProviderProfileId)
+  helperTaskThroughputCounter.increment('executionClaimedTotal', claimedProviderProfileId)
   let runtimeTask = null
   try {
     const environment = normalizeProviderEnvironment(
@@ -1602,6 +2141,15 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
       claim.launch.environmentName,
     )
     let data = await startAdspowerBrowser(config, environment.providerProfileId)
+    const observationContext = {
+      browserEnvironmentId: claim.launch.browserEnvironmentId || claim.schedule?.browserEnvironmentId,
+      environmentKey: environment.environmentKey,
+      providerProfileId: environment.providerProfileId,
+      platform: claim.launch.platform || claim.task.platform,
+      ownerType: 'unknown',
+      lastTaskActivityAt: nowIso(),
+    }
+    scheduleBrowserObservation(config, observationContext, data)
     runtimeTask = normalizeLaunchTask({
       taskId,
       platform: claim.launch.platform || claim.task.platform,
@@ -1621,20 +2169,49 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
     upsertTask(runtimeTask)
     await saveRuntimeTasks()
     try {
-      runtimeTask.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, runtimeTask.url)
+      runtimeTask.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, runtimeTask.url, {
+        ...observationContext,
+        taskId,
+        scheduleId: claim.schedule?.id,
+        claimAttempt: claimedAttempt,
+        ownership: 'automation',
+        resourceOrigin: 'schedule_execution',
+        resourceType: 'editor_tab',
+        backendReportState: 'pending',
+      })
     } catch (error) {
+      browserRuntimeErrorCounter.record(error, environment.providerProfileId)
       if (!isStaleAdspowerBrowserSessionError(error)) throw error
       data = await startAdspowerBrowser(config, environment.providerProfileId, { forceRefresh: true })
+      rememberObservedBrowserEnvironment(observationContext, data)
+      scheduleBrowserObservation(config, observationContext, data)
       runtimeTask.adspower = {
         puppeteerWs: data?.ws?.puppeteer || null,
         selenium: data?.ws?.selenium || null,
       }
-      runtimeTask.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, runtimeTask.url)
+      runtimeTask.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, runtimeTask.url, {
+        ...observationContext,
+        taskId,
+        scheduleId: claim.schedule?.id,
+        claimAttempt: claimedAttempt,
+        ownership: 'automation',
+        resourceOrigin: 'schedule_execution',
+        resourceType: 'editor_tab',
+        backendReportState: 'pending',
+      })
     }
+    helperTaskThroughputCounter.increment(
+      'executionStartedTotal',
+      runtimeTask.providerProfileId || claimedProviderProfileId,
+    )
     upsertTask(runtimeTask)
     await saveRuntimeTasks()
     return { ok: true, claimed: true, task: runtimeTask, schedule: claim.schedule }
   } catch (error) {
+    browserRuntimeErrorCounter.record(
+      error,
+      runtimeTask?.providerProfileId || claimedProviderProfileId,
+    )
     const failedAt = nowIso()
     const failureDetails = {
       code: 'LOCAL_HELPER_LAUNCH_FAILED',
@@ -1652,6 +2229,7 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
     failureTask.lastError = failureDetails
     failureTask.claimedAt = null
     failureTask.claimOwner = null
+    recordTaskTerminalThroughput(failureTask, 'failed', claimedProviderProfileId)
     failureTask.backendFailureReportedAt = null
     failureTask.backendFailureReportAttempts = Number(failureTask.backendFailureReportAttempts || 0) + 1
     if (runtimeTask) {
@@ -1702,6 +2280,9 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
   }
   const scheduleId = Number(claim.launch.scheduleId || claim.schedule.id)
   const claimAttempt = Number(claim.schedule.attemptCount || 0) || null
+  const claimedProviderProfileId = claim.launch.providerProfileId || claim.schedule.providerProfileId
+  helperTaskThroughputCounter.increment('claimedTotal', claimedProviderProfileId)
+  helperTaskThroughputCounter.increment('publishCheckClaimedTotal', claimedProviderProfileId)
   let runtimeTask = null
   let result
   try {
@@ -1718,6 +2299,15 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     upsertTask(runtimeTask)
     await saveRuntimeTasks()
     const data = await startAdspowerBrowser(config, environment.providerProfileId)
+    const observationContext = {
+      browserEnvironmentId: claim.launch.browserEnvironmentId || claim.schedule.browserEnvironmentId,
+      environmentKey: environment.environmentKey,
+      providerProfileId: environment.providerProfileId,
+      platform: claim.launch.platform || claim.schedule.platform,
+      ownerType: 'unknown',
+      lastTaskActivityAt: nowIso(),
+    }
+    scheduleBrowserObservation(config, observationContext, data)
     runtimeTask.adspower = {
       puppeteerWs: data?.ws?.puppeteer || null,
       selenium: data?.ws?.selenium || null,
@@ -1740,8 +2330,27 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
         schedule: checkSchedule,
       },
     )
+    helperTaskThroughputCounter.increment(
+      'publishCheckStartedTotal',
+      runtimeTask.providerProfileId || claimedProviderProfileId,
+    )
     result = await withTimeout(
-      checkPublishResultInAdspowerPage(config, data?.ws?.puppeteer, checkUrl, checkSchedule),
+      checkPublishResultInAdspowerPage(
+        config,
+        data?.ws?.puppeteer,
+        checkUrl,
+        checkSchedule,
+        {
+          ...observationContext,
+          taskId: runtimeTask.taskId,
+          scheduleId,
+          claimAttempt,
+          ownership: 'automation',
+          resourceOrigin: 'publish_result_check',
+          resourceType: 'publish_check_tab',
+          backendReportState: 'pending',
+        },
+      ),
       publishCheckPageTimeoutMs(config, checkSchedule.platform || claim.launch.platform),
       `publish check page ${claim.launch.platform || claim.schedule.platform}`,
     )
@@ -1750,6 +2359,10 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     upsertTask(runtimeTask)
     await saveRuntimeTasks()
   } catch (error) {
+    browserRuntimeErrorCounter.record(
+      error,
+      runtimeTask?.providerProfileId || claimedProviderProfileId,
+    )
     if (isPublishCheckEnvironmentConfigError(error)) {
       const configResult = {
         found: false,
@@ -1770,7 +2383,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
       if (runtimeTask && !runtimeTask.backendUnknownReportLastError) {
         runtimeTask.backendUnknownReportedAt = nowIso()
       }
-      markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', configResult)
+      markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', configResult, claimedProviderProfileId)
       await saveRuntimeTasks().catch(() => null)
       return { ok: true, claimed: true, scheduleId, outcome: 'unknown', result: configResult }
     }
@@ -1794,7 +2407,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
       if (runtimeTask && !runtimeTask.backendUnknownReportLastError) {
         runtimeTask.backendUnknownReportedAt = nowIso()
       }
-      markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', timeoutResult)
+      markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', timeoutResult, claimedProviderProfileId)
       await saveRuntimeTasks().catch(() => null)
       return { ok: true, claimed: true, scheduleId, outcome: 'unknown', result: timeoutResult }
     }
@@ -1805,7 +2418,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     await reportPublishCheckFailed(config, scheduleId, claimAttempt, failureResult).catch((reportError) => {
       console.error('Failed to report publish check helper failure:', formatBackendError(reportError))
     })
-    markPublishCheckRuntimeTaskFinished(runtimeTask, 'failed', failureResult)
+    markPublishCheckRuntimeTaskFinished(runtimeTask, 'failed', failureResult, claimedProviderProfileId)
     await saveRuntimeTasks().catch(() => null)
     throw error
   }
@@ -1814,7 +2427,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     upsertTask(runtimeTask)
     await saveRuntimeTasks()
     await reportPublishCheckFailed(config, scheduleId, claimAttempt, result)
-    markPublishCheckRuntimeTaskFinished(runtimeTask, 'failed', result)
+    markPublishCheckRuntimeTaskFinished(runtimeTask, 'failed', result, claimedProviderProfileId)
     await saveRuntimeTasks().catch(() => null)
     return { ok: true, claimed: true, scheduleId, outcome: 'failed', result }
   }
@@ -1835,11 +2448,11 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
       runtimeTask.backendSuccessReportAttempts = Number(runtimeTask.backendSuccessReportAttempts || 0) + 1
       runtimeTask.backendSuccessReportLastError = formatBackendError(error)
       terminateTaskForScheduleClaimError(runtimeTask, error)
-      markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result)
+      markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result, claimedProviderProfileId)
       await saveRuntimeTasks().catch(() => null)
       return { ok: true, claimed: true, scheduleId, outcome: 'published_report_pending', result }
     }
-    markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result)
+    markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result, claimedProviderProfileId)
     await saveRuntimeTasks().catch(() => null)
     return { ok: true, claimed: true, scheduleId, outcome: 'published', result }
   }
@@ -1858,11 +2471,11 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     runtimeTask.backendUnknownReportAttempts = Number(runtimeTask.backendUnknownReportAttempts || 0) + 1
     runtimeTask.backendUnknownReportLastError = formatBackendError(error)
     terminateTaskForScheduleClaimError(runtimeTask, error)
-    markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result)
+    markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result, claimedProviderProfileId)
     await saveRuntimeTasks().catch(() => null)
     return { ok: true, claimed: true, scheduleId, outcome: 'unknown_report_pending', result }
   }
-  markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result)
+  markPublishCheckRuntimeTaskFinished(runtimeTask, 'completed', result, claimedProviderProfileId)
   await saveRuntimeTasks().catch(() => null)
   return { ok: true, claimed: true, scheduleId, outcome: 'unknown', result }
 }
@@ -1950,7 +2563,8 @@ function compactPublishCheckRuntimeResult(result) {
   }
 }
 
-function markPublishCheckRuntimeTaskFinished(task, status, result) {
+function markPublishCheckRuntimeTaskFinished(task, status, result, providerProfileId = null) {
+  recordTaskTerminalThroughput(task, status, providerProfileId)
   if (!task) return
   task.status = status
   markPublishCheckRuntimeTaskStage(task, status === 'failed' ? 'failed' : 'completed')
@@ -1968,12 +2582,21 @@ function markPublishCheckRuntimeTaskFinished(task, status, result) {
   task.lastResult = compactPublishCheckRuntimeResult(result)
 }
 
-async function checkPublishResultInAdspowerPage(config, wsEndpoint, targetUrl, schedule) {
+async function checkPublishResultInAdspowerPage(
+  config,
+  wsEndpoint,
+  targetUrl,
+  schedule,
+  resourceContext = {},
+) {
   if (!wsEndpoint || !targetUrl) {
     throw new Error('publish result check requires active AdsPower browser and works list url')
   }
   const { default: puppeteer } = await import('puppeteer-core')
   const browser = await connectPuppeteer(puppeteer, wsEndpoint, config)
+  const environmentContext = browserObservationEnabled(config)
+    ? rememberObservedBrowserEnvironment(resourceContext, { ws: { puppeteer: wsEndpoint } })
+    : null
   try {
     let effectiveTargetUrl = targetUrl
     const platform = String(schedule?.platform || '').trim().toLowerCase()
@@ -1988,8 +2611,15 @@ async function checkPublishResultInAdspowerPage(config, wsEndpoint, targetUrl, s
     }
     const checkPage = await reuseOrCreatePublishCheckPage(browser, platform, effectiveTargetUrl)
     const { page } = checkPage
+    if (checkPage.created) {
+      await registerCreatedBrowserPage(environmentContext, page, resourceContext).catch(() => null)
+    }
     try {
       await page.goto(effectiveTargetUrl, { waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) })
+      await updateObservedBrowserPage(environmentContext, page, {
+        lifecycleState: 'active',
+        lastTaskActivityAt: resourceContext.lastTaskActivityAt || nowIso(),
+      }).catch(() => null)
       await waitForPublishCheckPageReady(page, platform)
       await delay(1_000)
       const deadline = Date.now() + publishCheckEvaluateTimeoutMs(platform)
@@ -2023,6 +2653,13 @@ async function checkPublishResultInAdspowerPage(config, wsEndpoint, targetUrl, s
     } finally {
       if (checkPage.created && !page.isClosed()) {
         await page.close().catch(() => null)
+        if (page.isClosed()) {
+          await markObservedBrowserPageClosed(
+            environmentContext,
+            page,
+            'existing_publish_check_cleanup',
+          ).catch(() => null)
+        }
       }
     }
   } finally {
@@ -2484,6 +3121,9 @@ async function evaluateDouyinPublishResult(page, schedule) {
   const target = {
     title: schedule?.publishCheckTitle || '',
     platformScheduledAt: schedule?.platformScheduledAt || schedule?.plannedPublishAt || '',
+    contentKind: schedule?.contentKind || '',
+    expectedImageCount: Number(schedule?.expectedImageCount || 0),
+    taskStartedAt: schedule?.lastAttemptAt || schedule?.updatedAt || schedule?.snapshotCreatedAt || '',
   }
   const structuredPageState = await page.evaluate(() => {
     const contentNodes = Array.from(document.querySelectorAll('[class*="video-card-content-"]'))
@@ -2538,6 +3178,16 @@ async function evaluateDouyinPublishResult(page, schedule) {
     const title = normalizeTitle(input.title)
     const titleProbe = title.length > 24 ? title.slice(0, 24) : title
     const expectedScheduleVariants = scheduleVariants(input.platformScheduledAt)
+    const imageText = String(input.contentKind || '') === 'image_text'
+    const expectedImageCount = Number(input.expectedImageCount || 0)
+    const taskStartedAtMs = Date.parse(String(input.taskStartedAt || ''))
+    const recordDateTimeMs = (text) => {
+      const match = String(text || '').match(
+        /(\d{4})\s*(?:年|[-/])\s*(\d{1,2})\s*(?:月|[-/])\s*(\d{1,2})\s*(?:日)?\s+(\d{1,2}):(\d{1,2})/,
+      )
+      if (!match) return Number.NaN
+      return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5])).getTime()
+    }
     const isVisible = (el) => {
       const rect = el?.getBoundingClientRect?.()
       const style = el ? getComputedStyle(el) : null
@@ -2562,7 +3212,17 @@ async function evaluateDouyinPublishResult(page, schedule) {
         && item.rect.height >= 60
         && item.rect.height <= 460)
       .filter((item) => titleProbe && item.titleText.includes(titleProbe))
+      .filter((item) => !imageText || expectedImageCount <= 0
+        || new RegExp(`${expectedImageCount}\\s*张`).test(item.text))
       .filter((item) => {
+        if (!imageText || !Number.isFinite(taskStartedAtMs)) return true
+        const recordAtMs = recordDateTimeMs(item.text)
+        return Number.isFinite(recordAtMs)
+          && recordAtMs >= taskStartedAtMs - 15 * 60 * 1000
+          && recordAtMs <= Date.now() + 10 * 60 * 1000
+      })
+      .filter((item) => {
+        if (imageText) return true
         if (!expectedScheduleVariants.length) return true
         return expectedScheduleVariants.some((value) => value && item.compactText.includes(normalizeCompact(value)))
           || /已发布|审核中|发布成功/.test(item.text)
@@ -2615,6 +3275,7 @@ async function evaluateDouyinPublishResult(page, schedule) {
       if (/已发布|发布成功/.test(statusText)) return 'published'
       if (/审核中/.test(statusText)) return 'reviewing'
       if (/定时发布中/.test(statusText)) return 'scheduled'
+      if (/未通过/.test(statusText)) return 'rejected'
       return ''
     })()
     const publishedLink = record.links.find((link) => /\/video\/|\/note\/|modal_id=|item_id=/.test(link.href)) || record.links[0]
@@ -2629,6 +3290,9 @@ async function evaluateDouyinPublishResult(page, schedule) {
     })()
     return {
       found: ['published', 'reviewing'].includes(pageStatusCode),
+      failed: pageStatusCode === 'rejected',
+      failureCode: pageStatusCode === 'rejected' ? 'DOUYIN_REVIEW_REJECTED' : undefined,
+      failureMessage: pageStatusCode === 'rejected' ? '抖音作品未通过审核' : undefined,
       pendingScheduled: pageStatusCode === 'scheduled',
       reason: pageStatusCode === 'scheduled' ? 'platform schedule time not due' : '',
       hasTitle: true,
@@ -3411,7 +4075,7 @@ async function handleSchedulePollOnce(req, res, config) {
 function defaultPublishUrlForPlatform(platform) {
   const normalized = String(platform || '').trim().toLowerCase()
   if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
-  if (normalized === 'douyin') return 'https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page'
+  if (normalized === 'douyin') return 'https://creator.douyin.com/creator-micro/content/upload?default-tab=3'
   if (normalized === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
   if (normalized === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish?from=tab_switch&target=article'
   if (normalized === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1'
@@ -3492,7 +4156,22 @@ async function handleOpenEnvironment(req, res, config) {
     body.environmentName,
   )
   const data = await startAdspowerBrowser(config, environment.providerProfileId)
-  const openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url)
+  const observationContext = {
+    browserEnvironmentId: body.browserEnvironmentId,
+    environmentKey: environment.environmentKey,
+    providerProfileId: environment.providerProfileId,
+    platform: body.platform,
+    ownerType: 'operator',
+    lastTaskActivityAt: null,
+  }
+  scheduleBrowserObservation(config, observationContext, data)
+  const openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url, {
+    ...observationContext,
+    ownership: 'operator',
+    resourceOrigin: 'operator_open',
+    resourceType: 'operator_tab',
+    backendReportState: 'not_applicable',
+  })
   const extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer).catch((error) => ({
     installed: false,
     detected: false,
@@ -3523,6 +4202,15 @@ async function handleAdspowerExtensionStatus(req, res, config) {
     body.environmentName,
   )
   let data = await startAdspowerBrowser(config, environment.providerProfileId)
+  const observationContext = {
+    browserEnvironmentId: body.browserEnvironmentId,
+    environmentKey: environment.environmentKey,
+    providerProfileId: environment.providerProfileId,
+    platform: body.platform,
+    ownerType: 'operator',
+    lastTaskActivityAt: null,
+  }
+  scheduleBrowserObservation(config, observationContext, data)
   let extensionStatus
   try {
     extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer)
@@ -3532,6 +4220,8 @@ async function handleAdspowerExtensionStatus(req, res, config) {
     // AdsPower assigns a dynamic DevTools port whenever a browser session starts.
     // Refresh its start response once instead of reconnecting to a cached, closed port.
     data = await startAdspowerBrowser(config, environment.providerProfileId, { forceRefresh: true })
+    rememberObservedBrowserEnvironment(observationContext, data)
+    scheduleBrowserObservation(config, observationContext, data)
     try {
       extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer)
     } catch (retryError) {
@@ -3546,6 +4236,23 @@ async function handleAdspowerExtensionStatus(req, res, config) {
     environmentName: environment.name || environment.environmentKey,
     providerProfileId: environment.providerProfileId,
     extensionStatus,
+  })
+}
+
+async function handleManagedBrowserResources(req, res, config) {
+  await requireHelperAccess(req, config)
+  if (browserObservationEnabled(config)) {
+    await refreshBrowserResourceObservations(config)
+  }
+  sendJson(req, res, config, 200, {
+    ok: true,
+    observationOnly: true,
+    executionCapabilities: {
+      tabCleanup: false,
+      environmentStop: false,
+    },
+    metrics: browserResourceMetrics(),
+    registry: browserResourceRegistry.snapshot(),
   })
 }
 
@@ -3668,9 +4375,26 @@ async function handleCreateAndLaunch(req, res, config) {
   }, environment, data)
   task.backendTask = createdTask
   task.selfMediaAccount = selfMediaAccount
+  const observationContext = {
+    browserEnvironmentId: createdTask.browserEnvironmentId || body.browserEnvironmentId,
+    environmentKey: environment.environmentKey,
+    providerProfileId: environment.providerProfileId,
+    platform: task.platform,
+    ownerType: 'unknown',
+    lastTaskActivityAt: task.createdAt,
+  }
+  scheduleBrowserObservation(config, observationContext, data)
   upsertTask(task)
   await saveRuntimeTasks()
-  task.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url)
+  task.openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url, {
+    ...observationContext,
+    taskId,
+    scheduleId: createdTask.scheduleId || createdTask.platformOptions?.scheduleId,
+    ownership: 'automation',
+    resourceOrigin: 'schedule_execution',
+    resourceType: 'editor_tab',
+    backendReportState: 'pending',
+  })
   upsertTask(task)
   await saveRuntimeTasks()
   sendJson(req, res, config, 200, { ok: true, createdTask, task })
@@ -3837,6 +4561,7 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     task.failedAt = nowIso()
     task.failureCode = classifyFailureStatus(body.error)
     task.lastError = body.error || null
+    browserRuntimeErrorCounter.record(body.error, task.providerProfileId)
     task.backendFailureReportedAt = null
     task.backendFailureReportLastError = null
     task.backendFailureReportAttempts = Number(task.backendFailureReportAttempts || 0)
@@ -3858,6 +4583,7 @@ async function handleTaskComplete(req, res, config, taskId, status) {
       if (!terminated) console.error('Failed to report schedule execution failure:', task.backendFailureReportLastError)
     })
   }
+  recordTaskTerminalThroughput(task, status)
   await saveRuntimeTasks()
   await reportLocalAgentRuntimeStatus(config, {
     reason: `task_${status}`,
@@ -4005,6 +4731,239 @@ async function handleUploadImageToPage(req, res, config) {
   const image = await downloadImageToTempFile(config, body.url, 0, body.backendBase)
   const upload = await uploadImageFileToAdsPowerPage(config, body, image.filePath)
   sendJson(req, res, config, 200, { ok: true, image, upload })
+}
+
+async function handleUploadImagesToPage(req, res, config) {
+  const body = await readJson(req)
+  await requireHelperAccess(req, config)
+  const urls = Array.isArray(body.urls) ? body.urls.map((value) => String(value || '').trim()).filter(Boolean) : []
+  if (body.uploadTarget !== 'douyin_image_text_images') {
+    throw new Error(`douyin image-text upload target is not allowed: ${body.uploadTarget || '-'}`)
+  }
+  if (urls.length < 4 || urls.length > 6) {
+    throw new Error(`douyin image-text requires 4-6 images, received ${urls.length}`)
+  }
+  const taskId = Number(body.taskId)
+  const task = Number.isFinite(taskId) && taskId > 0 ? tasksById.get(taskId) : null
+  if (!task
+      || isTerminalStatus(task.status)
+      || task.platform !== 'douyin'
+      || task.environmentKey !== String(body.environmentKey || '').trim()) {
+    throw new Error('douyin image-text upload task does not match the active helper task')
+  }
+  const images = []
+  try {
+    for (const url of urls) {
+      const image = await downloadImageToTempFile(config, url, 0, body.backendBase, 50 * 1024 * 1024)
+      if (!['image/jpeg', 'image/png', 'image/webp'].some((type) => image.contentType.toLowerCase().startsWith(type))) {
+        throw new Error(`douyin image-text image type is not supported: ${image.contentType}`)
+      }
+      await verifyDownloadedImageSignature(image)
+      images.push(image)
+    }
+    const upload = await uploadDouyinImageTextFilesToAdsPowerPage(
+      config,
+      body,
+      images.map((image) => image.filePath),
+    )
+    sendJson(req, res, config, 200, {
+      ok: true,
+      images: images.map(({ filePath: ignored, ...image }) => image),
+      upload,
+    })
+  } finally {
+    await Promise.all(images.map((image) => fs.unlink(image.filePath).catch(() => {})))
+  }
+}
+
+async function uploadDouyinImageTextFilesToAdsPowerPage(config, body, filePaths) {
+  const task = tasksById.get(Number(body.taskId))
+  if (!task?.adspower?.puppeteerWs) {
+    throw new Error(`no active AdsPower puppeteer session for taskId=${body.taskId || '-'}`)
+  }
+  const { default: puppeteer } = await import('puppeteer-core')
+  const browser = await connectPuppeteer(puppeteer, task.adspower.puppeteerWs, config)
+  try {
+    const pages = await browser.pages()
+    const page = selectUploadTargetPage(pages, {
+      platform: 'douyin',
+      targetPageUrl: body.targetPageUrl || '',
+      browserTargetId: body.browserTargetId || '',
+    })
+    if (!page) {
+      throw new Error(`AdsPower browser has no unambiguous Douyin upload page for taskId=${body.taskId}`)
+    }
+    if (!body.browserTargetId || puppeteerPageTargetId(page) !== String(body.browserTargetId)) {
+      throw new Error(`douyin image-text browser target mismatch for taskId=${body.taskId}`)
+    }
+    const currentUrl = page.url()
+    if (!currentUrl.includes('/creator-micro/content/upload')) {
+      throw new Error(`douyin image-text upload is only allowed on upload page: ${currentUrl}`)
+    }
+    await page.bringToFront().catch(() => {})
+    const unpublishedDraft = await readDouyinUnpublishedDraftState(page)
+    if (unpublishedDraft.blocked) {
+      throw new Error(
+        'DOUYIN_UNPUBLISHED_DRAFT_BLOCKED：检测到抖音账号存在上次未发布图文；'
+        + '请在当前浏览器环境中人工选择“继续编辑”或“放弃”后，再点击立即重试；'
+        + `continue=${unpublishedDraft.hasContinue ? 'yes' : 'no'}；`
+        + `giveUp=${unpublishedDraft.hasGiveUp ? 'yes' : 'no'}；`
+        + `url=${unpublishedDraft.href || currentUrl}`,
+      )
+    }
+    const inputs = await page.$$('input[type="file"]')
+    const targets = await chooseDouyinImageTextInputs(inputs)
+    if (targets.length !== 1) {
+      throw new Error(`douyin image-text multiple image input not found; inputCount=${inputs.length}`)
+    }
+    const target = targets[0]
+    await target.uploadFile(...filePaths)
+    const state = await readAndDispatchFileInputState(target)
+    if (state.filesLength !== filePaths.length) {
+      throw new Error(`douyin image-text file input count mismatch: expected=${filePaths.length}, actual=${state.filesLength}`)
+    }
+    const completion = await waitForDouyinImageTextUploadCompleted(page, filePaths.length)
+    return {
+      pageUrl: page.url(),
+      fileInputCount: inputs.length,
+      inputState: state,
+      expectedImageCount: filePaths.length,
+      completion,
+    }
+  } finally {
+    await browser.disconnect()
+  }
+}
+
+async function readDouyinUnpublishedDraftState(page) {
+  return page.evaluate(() => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim()
+    const isVisible = (element) => {
+      if (!(element instanceof HTMLElement)) return false
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0
+        && rect.height > 0
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number.parseFloat(style.opacity || '1') > 0.01
+    }
+    const prompt = Array.from(document.querySelectorAll('div, span, p'))
+      .filter(isVisible)
+      .find((element) => normalize(element.textContent)
+        === '你还有上次未发布的图文，是否继续编辑？')
+    if (!prompt) {
+      return {
+        blocked: false,
+        href: location.href,
+        hasContinue: false,
+        hasGiveUp: false,
+      }
+    }
+    const visibleActions = Array.from(document.querySelectorAll('button, a, span, div'))
+      .filter(isVisible)
+      .map((element) => normalize(element.textContent))
+    return {
+      blocked: true,
+      href: location.href,
+      hasContinue: visibleActions.includes('继续编辑'),
+      hasGiveUp: visibleActions.includes('放弃'),
+    }
+  })
+}
+
+async function waitForDouyinImageTextUploadCompleted(page, expectedImageCount) {
+  let resultHandle
+  try {
+    resultHandle = await page.waitForFunction((expected) => {
+      const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim()
+      const text = normalize(document.body?.innerText || document.body?.textContent || '')
+      const failed = /图片上传失败|上传失败|重新上传失败/.test(text)
+      if (failed) {
+        return {
+          complete: false,
+          failed: true,
+          href: location.href,
+          text: text.slice(0, 500),
+        }
+      }
+      const explicit = text.match(/已添加\s*(\d+)\s*张图片/)
+      const explicitCount = explicit ? Number(explicit[1]) : 0
+      let thumbnailCount = 0
+      const editImageLabel = Array.from(document.querySelectorAll('span, div'))
+        .find((item) => normalize(item.textContent || '') === '编辑图片')
+      let section = editImageLabel?.parentElement || null
+      while (section && section !== document.body && thumbnailCount === 0) {
+        thumbnailCount = Array.from(section.querySelectorAll('[class*="img-"], [draggable="true"]'))
+          .filter((item) => {
+            const style = getComputedStyle(item)
+            const rect = item.getBoundingClientRect()
+            return rect.width >= 24
+              && rect.height >= 24
+              && style.display !== 'none'
+              && style.visibility !== 'hidden'
+              && /url\(/i.test(style.backgroundImage || '')
+          })
+          .length
+        section = section.parentElement
+      }
+      const pending = /取消上传|正在上传|上传中/.test(text)
+      const confirmedCount = explicitCount || thumbnailCount
+      if (confirmedCount !== expected || pending) return false
+      return {
+        complete: true,
+        failed: false,
+        href: location.href,
+        confirmedCount,
+        explicitCount,
+        thumbnailCount,
+      }
+    }, {
+      polling: 300,
+      timeout: DOUYIN_IMAGE_UPLOAD_COMPLETE_TIMEOUT_MS,
+    }, expectedImageCount)
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      href: location.href,
+      text: String(document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 600),
+    })).catch(() => ({ href: page.url(), text: '' }))
+    throw new Error(
+      `DOUYIN_IMAGE_UPLOAD_TIMEOUT：抖音详情页未确认${expectedImageCount}张图片上传完成；`
+      + `url=${state.href || page.url()}；page=${state.text || '-'}；cause=${error.message}`,
+    )
+  }
+  try {
+    const completion = await resultHandle.jsonValue()
+    if (completion?.failed) {
+      throw new Error(
+        `DOUYIN_IMAGE_UPLOAD_FAILED：抖音页面报告图片上传失败；`
+        + `url=${completion.href || page.url()}；page=${completion.text || '-'}`,
+      )
+    }
+    return completion
+  } finally {
+    await resultHandle.dispose().catch(() => {})
+  }
+}
+
+async function chooseDouyinImageTextInputs(inputs) {
+  const candidates = []
+  for (const input of inputs) {
+    const meta = await input.evaluate((el) => {
+      const accept = String(el.getAttribute('accept') || '').toLowerCase()
+      const descriptor = `${accept} ${el.id || ''} ${el.name || ''} ${String(el.className || '')}`.toLowerCase()
+      return {
+        accept,
+        descriptor,
+        multiple: Boolean(el.multiple),
+      }
+    }).catch(() => ({}))
+    if (!meta.multiple) continue
+    if (!/(image|jpg|jpeg|png|webp)/.test(`${meta.accept || ''} ${meta.descriptor || ''}`)) continue
+    if (isVideoFileInputDescriptor(meta.accept, meta.descriptor)) continue
+    candidates.push(input)
+  }
+  return candidates.slice(0, 1)
 }
 
 async function uploadImageFileToAdsPowerPage(config, body, filePath) {
@@ -4627,7 +5586,7 @@ function resolveTaskWithPuppeteerWs(body) {
   return candidates[candidates.length - 1] || null
 }
 
-async function downloadImageToTempFile(config, urlValue, depth = 0, backendBase = '') {
+async function downloadImageToTempFile(config, urlValue, depth = 0, backendBase = '', maxBytes = 20 * 1024 * 1024) {
   const url = new URL(String(urlValue || '').trim())
   if (!['http:', 'https:'].includes(url.protocol)) {
     const error = new Error('image url only supports http/https')
@@ -4642,12 +5601,12 @@ async function downloadImageToTempFile(config, urlValue, depth = 0, backendBase 
   if (!contentType.startsWith('image/')) {
     const bodyText = await response.text().catch(() => '')
     const nestedUrl = extractImageUrlFromJsonText(bodyText) || rewritePublicMaterialUrlToTrustedBackend(config, url.href, backendBase)
-    if (nestedUrl && depth < 3) return downloadImageToTempFile(config, nestedUrl, depth + 1, backendBase)
+    if (nestedUrl && depth < 3) return downloadImageToTempFile(config, nestedUrl, depth + 1, backendBase, maxBytes)
     throw new Error(`image content-type is not supported: ${contentType}; url=${url.href}; body=${bodyText.slice(0, 240) || '-'}`)
   }
   const buffer = Buffer.from(await response.arrayBuffer())
-  if (buffer.byteLength > 20 * 1024 * 1024) {
-    throw new Error('image exceeds 20MB')
+  if (buffer.byteLength > maxBytes) {
+    throw new Error(`image exceeds ${Math.round(maxBytes / 1024 / 1024)}MB`)
   }
   await fs.mkdir(TEMP_FILES_DIR, { recursive: true })
   const ext = imageExtension(contentType)
@@ -4660,6 +5619,27 @@ async function downloadImageToTempFile(config, urlValue, depth = 0, backendBase 
     contentType,
     size: buffer.byteLength,
     sourceUrl: url.href,
+  }
+}
+
+async function verifyDownloadedImageSignature(image) {
+  const buffer = await fs.readFile(image.filePath)
+  if (!buffer.length) {
+    throw new Error('douyin image-text image is empty')
+  }
+  const type = String(image.contentType || '').toLowerCase().split(';', 1)[0]
+  const valid = type === 'image/jpeg'
+    ? buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
+    : type === 'image/png'
+      ? buffer.length >= 8
+        && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      : type === 'image/webp'
+        ? buffer.length >= 12
+          && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+          && buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+        : false
+  if (!valid) {
+    throw new Error(`douyin image-text image signature does not match MIME: ${type || '-'}`)
   }
 }
 
@@ -4791,6 +5771,13 @@ async function route(req, res, config) {
         last: lastLocalAgentRuntimeStatus,
         adspowerApi: lastAdspowerApiStatus,
       },
+      browserLifecycle: {
+        helperBootId: HELPER_BOOT_ID,
+        observationEnabled: browserObservationEnabled(config),
+        executionEnabled: false,
+        lastObservation: lastBrowserObservationStatus,
+        metrics: browserResourceMetrics(),
+      },
       config: {
         host: config.host,
         port: config.port,
@@ -4810,6 +5797,9 @@ async function route(req, res, config) {
   }
   if (req.method === 'GET' && url.pathname === '/v1/adspower/profiles') return handleAdspowerProfiles(req, res, config, url)
   if (req.method === 'POST' && url.pathname === '/v1/adspower/extension-status') return handleAdspowerExtensionStatus(req, res, config)
+  if (req.method === 'GET' && url.pathname === '/v1/adspower/managed-resources') {
+    return handleManagedBrowserResources(req, res, config)
+  }
   if (req.method === 'POST' && url.pathname === '/v1/extension/bind-intents') return handleCreateExtensionBindIntent(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/extension/bind-intents/consume') return handleConsumeExtensionBindIntent(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/c2/pairing-code') return handlePairingCode(req, res, config)
@@ -4832,6 +5822,7 @@ async function route(req, res, config) {
   if (req.method === 'GET' && url.pathname === '/v1/extension/tasks/next') return handleNextTask(req, res, config, url)
   if (req.method === 'POST' && url.pathname === '/v1/extension/files/download-image') return handleDownloadImageFile(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/extension/files/upload-image-to-page') return handleUploadImageToPage(req, res, config)
+  if (req.method === 'POST' && url.pathname === '/v1/extension/files/upload-images-to-page') return handleUploadImagesToPage(req, res, config)
 
   const completeMatch = url.pathname.match(/^\/v1\/extension\/tasks\/(\d+)\/complete$/)
   if (req.method === 'POST' && completeMatch) return handleTaskComplete(req, res, config, completeMatch[1], 'completed')
@@ -4848,11 +5839,14 @@ async function route(req, res, config) {
 await loadRuntimeSettings()
 const config = await loadConfig()
 runtimeSettings.activeProfile = config.activeProfile
+await browserResourceRegistry.load()
 await loadRuntimeTasks()
+restoreObservedBrowserEnvironmentsFromTasks()
 await loadRuntimeSession(config.activeProfile)
 await loadRuntimeNonces()
 const server = http.createServer((req, res) => {
   route(req, res, config).catch((error) => {
+    browserRuntimeErrorCounter.record(error)
     const statusCode = error.statusCode || 500
     sendJson(req, res, config, statusCode, {
       ok: false,
@@ -4915,6 +5909,7 @@ function startSchedulePoller(config) {
         }).catch(() => null)
       })
       .catch((error) => {
+        browserRuntimeErrorCounter.record(error)
         lastSchedulePollStatus = {
           at: nowIso(),
           ok: false,

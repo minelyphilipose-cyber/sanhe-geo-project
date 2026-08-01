@@ -447,7 +447,7 @@ public class LocalAgentController {
             return "https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1";
         }
         if ("douyin".equalsIgnoreCase(platform)) {
-            return "https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page";
+            return "https://creator.douyin.com/creator-micro/content/upload?default-tab=3";
         }
         if (StringUtils.hasText(platform)) {
             try {

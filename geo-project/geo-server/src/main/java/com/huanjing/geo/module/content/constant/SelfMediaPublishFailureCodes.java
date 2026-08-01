@@ -11,12 +11,14 @@ public final class SelfMediaPublishFailureCodes {
     public static final String BAIJIAHAO_PLATFORM_RATE_LIMITED = "BAIJIAHAO_PLATFORM_RATE_LIMITED";
     public static final String BAIJIAHAO_REVIEW_REJECTED = "BAIJIAHAO_REVIEW_REJECTED";
     public static final String BAIJIAHAO_WORK_WITHDRAWN = "BAIJIAHAO_WORK_WITHDRAWN";
+    public static final String DOUYIN_REVIEW_REJECTED = "DOUYIN_REVIEW_REJECTED";
 
     private static final Pattern EXPLICIT_CODE_PATTERN = Pattern.compile("^([A-Z0-9_]{3,80})[：:]");
 
     private static final Set<String> LOCAL_AGENT_PUBLISH_CHECK_TERMINAL_CODES = Set.of(
             BAIJIAHAO_REVIEW_REJECTED,
-            BAIJIAHAO_WORK_WITHDRAWN
+            BAIJIAHAO_WORK_WITHDRAWN,
+            DOUYIN_REVIEW_REJECTED
     );
 
     private static final Set<String> LOCAL_AGENT_PUBLISH_CHECK_INFRASTRUCTURE_CODES = Set.of(
@@ -97,6 +99,7 @@ public final class SelfMediaPublishFailureCodes {
             entry("PLATFORM_TAB_GONE", "平台页面已关闭", true, "平台标签页在填充前被关闭，系统将重新打开页面后重试。", "RETRY_NOW", "立即重试", "api"),
             entry("PLATFORM_TAB_REDIRECTED", "平台页面发生跳转", true, "平台编辑页跳转到非目标页面，系统将重新打开编辑页后重试。", "RETRY_NOW", "立即重试", "api"),
             entry("EXTENSION_HOST_PERMISSION_DENIED", "扩展无法访问平台页面", false, "确认 AdsPower 环境已加载最新生产扩展包后重新打开环境。", "OPEN_DIAGNOSTICS", "查看诊断", "diagnostics"),
+            entry("DOUYIN_UNPUBLISHED_DRAFT_BLOCKED", "抖音存在未完成图文草稿", false, "打开绑定浏览器环境，在抖音上传页人工选择“继续编辑”或“放弃”，处理后再点击立即重试。", "OPEN_DIAGNOSTICS", "查看处理说明", "diagnostics"),
             entry("DOUYIN_PUBLISH_NOT_CONFIRMED", "抖音发布结果暂未确认", true, "扩展仅继续回查抖音作品列表，不会重新打开编辑页或再次填充。", "RETRY_NOW", "重新校验", "api"),
             entry("TOUTIAO_PUBLISH_NOT_CONFIRMED", "头条发布结果暂未确认", true, "扩展已自动打开头条作品管理页继续校验；若平台数据尚未出现，系统会自动重试。", "RETRY_NOW", "重新校验", "api"),
             entry("XIAOHONGSHU_PUBLISH_NOT_CONFIRMED", "小红书发布结果暂未确认", true, "扩展已自动打开笔记管理页继续校验，避免重复提交。", "RETRY_NOW", "重新校验", "api"),
@@ -129,6 +132,7 @@ public final class SelfMediaPublishFailureCodes {
             entry("PUBLISH_RESULT_CHECK_FAILED", "发布结果校验失败", true, "检查本地助手和平台作品管理页后重新校验。"),
             entry("PUBLISH_CHECK_FAILED", "发布结果校验失败", true, "检查本地助手和平台作品管理页后重新校验。"),
             entry("PUBLISH_CHECK_PAGE_TIMEOUT", "发布结果页面回查超时", true, "检查本地助手和平台作品管理页后重新校验。", "RETRY_NOW", "重新校验", "api"),
+            entry(DOUYIN_REVIEW_REJECTED, "抖音作品审核未通过", false, "打开抖音作品管理页查看平台审核原因。"),
             entry("LOCAL_HELPER_CLAIM_TIMEOUT", "本地助手处理超时", true, "确认本地助手运行状态，系统会自动释放锁；可重新校验。", "RETRY_NOW", "重新校验", "api"),
             entry("EXTENSION_CLAIM_TIMEOUT", "浏览器扩展领取超时", true, "确认对应 AdsPower 实例中的扩展已启用，系统已释放锁并自动重试。", "RETRY_NOW", "重新校验", "api"),
             entry("MANUAL_RETRY_REQUESTED", "操作员已请求立即重试", true, "已重新放回自动处理队列，等待本地助手领取。"),

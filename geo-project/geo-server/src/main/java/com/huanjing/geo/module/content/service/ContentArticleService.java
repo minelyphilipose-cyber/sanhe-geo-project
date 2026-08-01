@@ -13,7 +13,6 @@ import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
-import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticlePublishRecordVO;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
@@ -63,7 +62,6 @@ public class ContentArticleService {
     private final ArticlePublishRecordMapper articlePublishRecordMapper;
     private final BatchArticleGenerationTaskMapper batchArticleGenerationTaskMapper;
     private final ArticlePromptTemplateMapper articlePromptTemplateMapper;
-    private final SelfMediaPublishScheduleMapper selfMediaPublishScheduleMapper;
     private final BrandMapper brandMapper;
     private final ProjectMapper projectMapper;
     private final SysDictItemMapper sysDictItemMapper;
@@ -183,51 +181,9 @@ public class ContentArticleService {
         applyMedicalComplianceFilter(wrapper, complianceStatus, publishReviewStatus, medicalIndustryCode, medicalChannelTier, specialIndustryOnly);
         applyCreatedDateFilter(wrapper, createdStartDate, createdEndDate);
         Page<ArticleDraft> pageData = articleDraftMapper.selectPage(new Page<>(current, size), wrapper);
-        syncSelfMediaScheduleArticleStatuses(pageData.getRecords());
         fillProjectNames(pageData.getRecords());
         fillGenerationMetadata(pageData.getRecords());
         return pageData;
-    }
-
-    private void syncSelfMediaScheduleArticleStatuses(List<ArticleDraft> articles) {
-        if (articles == null || articles.isEmpty()) {
-            return;
-        }
-        List<Long> articleIds = articles.stream()
-                .map(ArticleDraft::getId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-        if (articleIds.isEmpty()) {
-            return;
-        }
-        List<Long> selectedActiveArticleIds = selfMediaPublishScheduleMapper.selectActiveArticleIds(
-                articleIds,
-                new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
-        );
-        Set<Long> activeArticleIds = selectedActiveArticleIds == null ? Set.of() : new HashSet<>(selectedActiveArticleIds);
-        if (activeArticleIds.isEmpty()) {
-            return;
-        }
-        List<Long> changedArticleIds = new ArrayList<>();
-        for (ArticleDraft article : articles) {
-            if (article == null || article.getId() == null || !activeArticleIds.contains(article.getId())) {
-                continue;
-            }
-            String status = article.getStatus();
-            if (!"approved".equals(status) && !"unpublished".equals(status)) {
-                continue;
-            }
-            article.setStatus("distributing");
-            changedArticleIds.add(article.getId());
-        }
-        if (changedArticleIds.isEmpty()) {
-            return;
-        }
-        articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
-                .in(ArticleDraft::getId, changedArticleIds)
-                .in(ArticleDraft::getStatus, List.of("approved", "unpublished"))
-                .set(ArticleDraft::getStatus, "distributing"));
     }
 
     private void applyArticleTypeCodeFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String articleTypeCode) {

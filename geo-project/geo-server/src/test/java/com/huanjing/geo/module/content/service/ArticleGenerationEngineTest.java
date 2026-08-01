@@ -39,7 +39,7 @@ class ArticleGenerationEngineTest {
         when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean())).thenAnswer(invocation -> invocation.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any(), anyBoolean())).thenAnswer(invocation -> invocation.getArgument(0));
         LlmInvokeResult invokeResult = new LlmInvokeResult(
-                "# 这是一个为了验证自媒体平台标题长度限制而特意生成的超长文章标题\n\ncontent",
+                "# 这是一个为了验证自媒体平台标题长度限制而特意生成的超长文章标题\n\n第一句。第二句。第三句。",
                 10,
                 20,
                 100L,
@@ -93,7 +93,8 @@ class ArticleGenerationEngineTest {
                 List.of(),
                 28,
                 ArticleGenerationTemperatures.V2_STANDARD,
-                measurementContext
+                measurementContext,
+                8
         ));
 
         assertEquals("qwen", generated.model().platformCode());
@@ -102,7 +103,7 @@ class ArticleGenerationEngineTest {
         assertThat(generated.content()).startsWith("# " + generated.title());
         assertThat(generated.quality().issues())
                 .extracting(BatchArticleQualityChecker.Issue::type)
-                .contains("title_truncated");
+                .contains("title_truncated", "content_truncated");
         verify(modelResolver, never()).resolve(any(), any(), any(), anyBoolean());
         ArgumentCaptor<LlmCallRequest> requestCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
         verify(llmCallFacade).execute(requestCaptor.capture());

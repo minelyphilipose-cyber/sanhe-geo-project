@@ -55,6 +55,7 @@ public class SelfMediaPublishSchedule {
     private String failureCode;
     private String failureMessage;
     private String diagnosticsJson;
+    private String publishPayloadJson;
     private String runtimeStage;
     private LocalDateTime runtimeStageAt;
     private String runtimeStageMessage;

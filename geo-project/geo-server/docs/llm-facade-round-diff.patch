@@ -1,0 +1,3522 @@
+﻿diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmHttpClient.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmHttpClient.java
+index e8688354..c2d94ab9 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmHttpClient.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmHttpClient.java
+@@ -3,7 +3,7 @@ package com.huanjing.geo.common.llm;
+ import java.util.Map;
+ 
+ /**
+- * Replaceable HTTP abstraction for LLM unit tests.
++ * Single transport abstraction for OpenAI-compatible chat completions requests.
+  */
+ public interface LlmHttpClient {
+ 
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/DefaultLlmPlatformSelectionStrategy.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/DefaultLlmPlatformSelectionStrategy.java
+index 97c8e3e5..d314a163 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/DefaultLlmPlatformSelectionStrategy.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/DefaultLlmPlatformSelectionStrategy.java
+@@ -1,6 +1,7 @@
+ package com.huanjing.geo.common.llm.router;
+ 
+ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
++import com.huanjing.geo.common.llm.LlmRoutingStrategy;
+ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+ import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+ import com.huanjing.geo.module.system.service.PlatformCredentialService;
+@@ -22,9 +23,16 @@ public class DefaultLlmPlatformSelectionStrategy implements LlmPlatformSelection
+         List<AiPlatformConfig> configs = request.platformConfigs().isEmpty()
+                 ? loadByFeature(request.feature())
+                 : request.platformConfigs();
++        if (request.routingStrategy() == LlmRoutingStrategy.PINNED && configs.size() != 1) {
++            throw new IllegalArgumentException("PINNED LLM routing requires exactly one platform config");
++        }
+         List<LlmPlatformCandidate> candidates = new ArrayList<>();
+         for (AiPlatformConfig config : rotate(configs, request.cursor())) {
+             addPrimary(candidates, config);
++            if (request.routingStrategy() == LlmRoutingStrategy.PINNED
++                    || request.routingStrategy() == LlmRoutingStrategy.CANDIDATE_LIST) {
++                continue;
++            }
+             addBackupKey(candidates, config);
+             addBackupProvider(candidates, config);
+         }
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmPlatformRouter.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmPlatformRouter.java
+index 47aebbcc..1979834d 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmPlatformRouter.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmPlatformRouter.java
+@@ -8,7 +8,7 @@ import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
+ import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
+ import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
+ import com.huanjing.geo.module.dispatch.service.AiPlatformHealthMonitorService;
+-import com.huanjing.geo.module.dispatch.service.PlatformRateLimiterService;
++import com.huanjing.geo.common.llm.limiter.PlatformRateLimiterService;
+ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+@@ -41,18 +41,21 @@ public class LlmPlatformRouter {
+         Exception lastError = null;
+ 
+         for (LlmPlatformCandidate candidate : candidates) {
++            String breakerKey = breakerKey(request, candidate.platformCode());
+             if (Thread.currentThread().isInterrupted()) {
+                 Thread.currentThread().interrupt();
+                 throw new LlmRouteException(LlmRouteFailureKind.INTERRUPTED, "Interrupted during LLM routing",
+                         requestCount, lastError);
+             }
+-            if (!circuitBreakerService.allowRequest(candidate.platformCode())) {
++            if (!circuitBreakerService.allowRequest(breakerKey)) {
+                 circuitOpen++;
+                 platformHealthMonitorService.recordCircuitOpen(candidate.platformCode(), request.feature());
+                 continue;
+             }
+             requestCount++;
+-            try (LlmExecutionPermit ignored = executionGateway.acquire(request.feature(), candidate.platformConfig())) {
++            try (LlmExecutionPermit ignored = request.waitForPermit()
++                    ? executionGateway.acquireBlocking(request.feature(), candidate.platformConfig())
++                    : executionGateway.acquire(request.feature(), candidate.platformConfig())) {
+                 AiPlatformConfig config = candidate.platformConfig();
+                 if (!platformRateLimiterService.tryAcquire(config, request.tokenCost())) {
+                     rateLimited++;
+@@ -61,7 +64,7 @@ public class LlmPlatformRouter {
+                     continue;
+                 }
+                 LlmInvokeResult result = llmInvoker.invoke(request.userPrompt(), buildModelConfig(request, candidate));
+-                circuitBreakerService.recordSuccess(candidate.platformCode());
++                circuitBreakerService.recordSuccess(breakerKey);
+                 return new LlmRouteResult(
+                         candidate.platformCode(),
+                         candidate.platformName(),
+@@ -81,7 +84,7 @@ public class LlmPlatformRouter {
+                         request.feature(), candidate.platformCode(), candidate.channel());
+             } catch (LlmInvokeException ex) {
+                 lastError = ex;
+-                circuitBreakerService.recordFailure(candidate.platformCode());
++                circuitBreakerService.recordFailure(breakerKey);
+                 log.warn("LLM candidate failed, feature={}, platform={}, channel={}, reason={}",
+                         request.feature(), candidate.platformCode(), candidate.channel(), ex.getMessage());
+             }
+@@ -121,6 +124,13 @@ public class LlmPlatformRouter {
+         );
+     }
+ 
++    private String breakerKey(LlmRouteRequest request, String platformCode) {
++        if (LlmFeature.BASELINE.equals(request.feature())) {
++            return request.feature() + ":" + platformCode;
++        }
++        return platformCode;
++    }
++
+     private LlmRouteFailureKind resolveFailureKind(int total, int rateLimited, int circuitOpen, int permitBusy) {
+         if (rateLimited == total) {
+             return LlmRouteFailureKind.ALL_RATE_LIMITED;
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmRouteRequest.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmRouteRequest.java
+index e09ff9f3..389ba89e 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmRouteRequest.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmRouteRequest.java
+@@ -1,5 +1,6 @@
+ package com.huanjing.geo.common.llm.router;
+ 
++import com.huanjing.geo.common.llm.LlmRoutingStrategy;
+ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+ 
+ import java.util.List;
+@@ -16,7 +17,46 @@ public record LlmRouteRequest(String feature,
+                               boolean normalizeJsonOutput,
+                               int tokenCost,
+                               int cursor,
+-                              List<AiPlatformConfig> platformConfigs) {
++                              List<AiPlatformConfig> platformConfigs,
++                              boolean waitForPermit,
++                              LlmRoutingStrategy routingStrategy) {
++
++    public LlmRouteRequest(String feature,
++                           String systemPrompt,
++                           String userPrompt,
++                           Double temperature,
++                           Integer connectTimeoutMs,
++                           Integer requestTimeoutMs,
++                           Integer requestTimeoutMaxMs,
++                           Integer maxRetry,
++                           Integer maxTokens,
++                           boolean normalizeJsonOutput,
++                           int tokenCost,
++                           int cursor,
++                           List<AiPlatformConfig> platformConfigs,
++                           boolean waitForPermit) {
++        this(feature, systemPrompt, userPrompt, temperature, connectTimeoutMs, requestTimeoutMs, requestTimeoutMaxMs,
++                maxRetry, maxTokens, normalizeJsonOutput, tokenCost, cursor, platformConfigs, waitForPermit,
++                LlmRoutingStrategy.FAILOVER);
++    }
++
++    public LlmRouteRequest(String feature,
++                           String systemPrompt,
++                           String userPrompt,
++                           Double temperature,
++                           Integer connectTimeoutMs,
++                           Integer requestTimeoutMs,
++                           Integer requestTimeoutMaxMs,
++                           Integer maxRetry,
++                           Integer maxTokens,
++                           boolean normalizeJsonOutput,
++                           int tokenCost,
++                           int cursor,
++                           List<AiPlatformConfig> platformConfigs) {
++        this(feature, systemPrompt, userPrompt, temperature, connectTimeoutMs, requestTimeoutMs, requestTimeoutMaxMs,
++                maxRetry, maxTokens, normalizeJsonOutput, tokenCost, cursor, platformConfigs, false,
++                LlmRoutingStrategy.FAILOVER);
++    }
+ 
+     public LlmRouteRequest {
+         feature = feature == null || feature.isBlank() ? LlmFeature.GENERIC : feature.trim();
+@@ -24,5 +64,6 @@ public record LlmRouteRequest(String feature,
+         tokenCost = Math.max(tokenCost, 1);
+         cursor = Math.max(cursor, 0);
+         platformConfigs = platformConfigs == null ? List.of() : List.copyOf(platformConfigs);
++        routingStrategy = routingStrategy == null ? LlmRoutingStrategy.FAILOVER : routingStrategy;
+     }
+ }
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/ArticleGenerationEngine.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/ArticleGenerationEngine.java
+index f305f05a..f31871d1 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/ArticleGenerationEngine.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/ArticleGenerationEngine.java
+@@ -1,12 +1,13 @@
+ package com.huanjing.geo.module.content.service;
+ 
+ import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
++import com.huanjing.geo.common.llm.LlmCallResult;
+ import com.huanjing.geo.common.llm.LlmInvokeException;
+ import com.huanjing.geo.common.llm.LlmInvokeResult;
+-import com.huanjing.geo.common.llm.LlmInvoker;
+ import com.huanjing.geo.common.llm.LlmModelConfig;
+ import com.huanjing.geo.common.llm.router.LlmFeature;
+-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
+ import com.huanjing.geo.common.llm.router.LlmRouteException;
+ import com.huanjing.geo.common.llm.router.LlmRouteRequest;
+ import com.huanjing.geo.common.llm.router.LlmRouteResult;
+@@ -26,9 +27,8 @@ public class ArticleGenerationEngine {
+     private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
+     private static final double ARTICLE_TEMPERATURE = 0.4D;
+ 
+-    private final LlmInvoker llmInvoker;
++    private final LlmCallFacade llmCallFacade;
+     private final ArticleModelResolver modelResolver;
+-    private final LlmPlatformRouter llmPlatformRouter;
+     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
+     private final ArticleAiDraftPromptFilter promptFilter;
+     private final BatchArticleQualityChecker qualityChecker;
+@@ -68,10 +68,10 @@ public class ArticleGenerationEngine {
+                     input.systemPrompt(),
+                     input.longForm()
+             );
+-            return new GenerationCall(model, llmInvoker.invoke(outboundPrompt, model.config()));
++            return new GenerationCall(model, llmCallFacade.execute(LlmCallRequest.direct(outboundPrompt, model.config())).invokeResult());
+         }
+         try {
+-            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
++            LlmCallResult callResult = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
+                     LlmFeature.ARTICLE,
+                     input.systemPrompt(),
+                     outboundPrompt,
+@@ -85,7 +85,8 @@ public class ArticleGenerationEngine {
+                     1,
+                     0,
+                     List.of()
+-            ));
++            )));
++            LlmRouteResult routed = callResult.routeResult();
+             return new GenerationCall(
+                     new ArticleModelResolver.ModelSelection(routed.platformCode(), routed.modelId(), null),
+                     routed.invokeResult()
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/BatchArticleGenerationService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/BatchArticleGenerationService.java
+index 557ecd39..b95ae357 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/BatchArticleGenerationService.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/BatchArticleGenerationService.java
+@@ -5,9 +5,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+ import com.fasterxml.jackson.core.JsonProcessingException;
+ import com.fasterxml.jackson.databind.ObjectMapper;
+ import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
+ import com.huanjing.geo.common.llm.LlmInvokeException;
+ import com.huanjing.geo.common.llm.LlmInvokeResult;
+-import com.huanjing.geo.common.llm.LlmInvoker;
+ import com.huanjing.geo.module.content.ContentErrorCodes;
+ import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
+ import com.huanjing.geo.module.content.constant.ArticleTypes;
+@@ -131,7 +132,7 @@ public class BatchArticleGenerationService {
+     private final CurrentUserService currentUserService;
+     private final BrandAccessService brandAccessService;
+     private final PlatformCredentialService platformCredentialService;
+-    private final LlmInvoker llmInvoker;
++    private final LlmCallFacade llmCallFacade;
+     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
+     private final ArticleAiDraftPromptFilter promptFilter;
+     private final ArticleGenerationEngine articleGenerationEngine;
+@@ -174,7 +175,7 @@ public class BatchArticleGenerationService {
+                                          CurrentUserService currentUserService,
+                                          BrandAccessService brandAccessService,
+                                          PlatformCredentialService platformCredentialService,
+-                                         LlmInvoker llmInvoker,
++                                         LlmCallFacade llmCallFacade,
+                                          MarkdownImageReferenceValidator markdownImageReferenceValidator,
+                                          ArticleAiDraftPromptFilter promptFilter,
+                                          ArticleGenerationEngine articleGenerationEngine,
+@@ -210,7 +211,7 @@ public class BatchArticleGenerationService {
+         this.currentUserService = currentUserService;
+         this.brandAccessService = brandAccessService;
+         this.platformCredentialService = platformCredentialService;
+-        this.llmInvoker = llmInvoker;
++        this.llmCallFacade = llmCallFacade;
+         this.markdownImageReferenceValidator = markdownImageReferenceValidator;
+         this.promptFilter = promptFilter;
+         this.articleGenerationEngine = articleGenerationEngine;
+@@ -854,6 +855,7 @@ public class BatchArticleGenerationService {
+             draft.setChannelSubCode(task.getChannelSubCode());
+             draft.setAgentSiteModule(task.getAgentSiteModule());
+             draft.setArticleTypeCode(task.getArticleTypeCode());
++            draft.setCategory(resolveIndustrySiteCategory(task));
+             draft.setPromptTemplateId(task.getPromptTemplateId());
+             draft.setPromptTemplateVersionId(task.getPromptTemplateVersionId());
+             draft.setPerspectiveCode(TemplatePerspectiveCodes.normalize(task.getPerspectiveCode()));
+@@ -863,8 +865,10 @@ public class BatchArticleGenerationService {
+             draft.setTopicAsQuestion(task.getTopicAsQuestion());
+             draft.setTitle(title);
+             applyMedicalDraftFields(draft, medicalContext, complianceStatus);
++            String coverImageUrl = null;
+             if (ArticlePromptChannels.SELF_MEDIA.equals(task.getChannelGroupCode())) {
+-                draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(coverBrandId(project, task)));
++                coverImageUrl = coverSelectionService.selectRandomCoverUrl(coverBrandId(project, task));
++                draft.setCoverImageUrl(coverImageUrl);
+             }
+             draft.setStatus("approved");
+             draft.setCurrentVersionNo(1);
+@@ -877,7 +881,8 @@ public class BatchArticleGenerationService {
+             version.setArticleId(draft.getId());
+             version.setVersionNo(1);
+             version.setTitle(title);
+-            version.setContentMarkdown(autoImageInsertionService.insertForChannel(project, task.getChannelGroupCode(), content));
++            version.setContentMarkdown(autoImageInsertionService.insertForChannel(project, task.getChannelGroupCode(),
++                    task.getChannelSubCode(), content, coverImageUrl));
+             version.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), result));
+             version.setInputSnapshot(prompt.inputSnapshot());
+             version.setModelPlatformCode(model.platformCode());
+@@ -904,6 +909,34 @@ public class BatchArticleGenerationService {
+         return project == null ? null : project.getBrandId();
+     }
+ 
++    private String resolveIndustrySiteCategory(BatchArticleGenerationTask task) {
++        if (task == null || !ArticlePromptChannels.INDUSTRY_SITE.equals(task.getChannelGroupCode())) {
++            return null;
++        }
++        String contentAngle = task.getContentAngle();
++        if (StringUtils.hasText(contentAngle)) {
++            String angle = contentAngle.trim();
++            if (angle.contains("地域")) {
++                return "region";
++            }
++            if (angle.contains("选择") || angle.contains("避坑") || angle.contains("清单") || angle.contains("决策")) {
++                return "guide";
++            }
++            if (angle.contains("流程") || angle.contains("服务")) {
++                return "service";
++            }
++        }
++        String articleType = task.getArticleType();
++        if (StringUtils.hasText(articleType)) {
++            return switch (articleType.trim().toLowerCase(Locale.ROOT)) {
++                case "buying_guide", "pitfall_guide", "stage_advice", "faq" -> "guide";
++                case "scenario_content" -> "service";
++                default -> "industry";
++            };
++        }
++        return "industry";
++    }
++
+     private Long persistDiscardedArticle(Project project,
+                                          BatchArticleGenerationTask task,
+                                          ArticleGenerationEngine.GeneratedArticle generated,
+@@ -924,6 +957,7 @@ public class BatchArticleGenerationService {
+             draft.setChannelSubCode(task.getChannelSubCode());
+             draft.setAgentSiteModule(task.getAgentSiteModule());
+             draft.setArticleTypeCode(task.getArticleTypeCode());
++            draft.setCategory(resolveIndustrySiteCategory(task));
+             draft.setPromptTemplateId(task.getPromptTemplateId());
+             draft.setPromptTemplateVersionId(task.getPromptTemplateVersionId());
+             draft.setPerspectiveCode(TemplatePerspectiveCodes.normalize(task.getPerspectiveCode()));
+@@ -1440,7 +1474,8 @@ public class BatchArticleGenerationService {
+         }
+         try {
+             ArticleModelResolver.ModelSelection model = resolveModel(SMART_TEMPLATE_MATCH_SYSTEM_PROMPT);
+-            LlmInvokeResult result = llmInvoker.invoke(buildSmartTemplateMatchPrompt(units), model.config());
++            String prompt = buildSmartTemplateMatchPrompt(units);
++            LlmInvokeResult result = llmCallFacade.execute(LlmCallRequest.direct(prompt, model.config())).invokeResult();
+             Map<String, SmartTemplateSelection> selections = parseSmartTemplateMatchResult(result.responseText(), units);
+             if (!selections.isEmpty()) {
+                 return selections;
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/BrandOfferingPromptSelector.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/BrandOfferingPromptSelector.java
+index a791d297..dccb0567 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/BrandOfferingPromptSelector.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/content/service/BrandOfferingPromptSelector.java
+@@ -4,7 +4,8 @@ import cn.hutool.json.JSONUtil;
+ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+ import com.fasterxml.jackson.databind.JsonNode;
+ import com.fasterxml.jackson.databind.ObjectMapper;
+-import com.huanjing.geo.common.llm.LlmInvoker;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
+ import com.huanjing.geo.module.customer.entity.BrandOffering;
+ import com.huanjing.geo.module.customer.mapper.BrandOfferingMapper;
+ import lombok.RequiredArgsConstructor;
+@@ -32,7 +33,7 @@ public class BrandOfferingPromptSelector {
+ 
+     private final BrandOfferingMapper offeringMapper;
+     private final ArticleModelResolver modelResolver;
+-    private final LlmInvoker llmInvoker;
++    private final LlmCallFacade llmCallFacade;
+     private final ObjectMapper objectMapper;
+ 
+     public SelectionResult select(Long brandId,
+@@ -71,7 +72,7 @@ public class BrandOfferingPromptSelector {
+         try {
+             ArticleModelResolver.ModelSelection model = modelResolver.resolve(null, null, SELECT_SYSTEM_PROMPT, false);
+             String prompt = buildSelectionPrompt(candidates, topic, topicAsQuestion, articleType, contentStyle);
+-            String response = llmInvoker.invoke(prompt, model.config()).responseText();
++            String response = llmCallFacade.execute(LlmCallRequest.direct(prompt, model.config())).invokeResult().responseText();
+             JsonNode root = objectMapper.readTree(extractJson(response));
+             JsonNode ids = root.get("selectedIds");
+             if (ids == null || !ids.isArray()) {
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/DispatchExecutionService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/DispatchExecutionService.java
+index 479d1885..39ec113b 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/DispatchExecutionService.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/DispatchExecutionService.java
+@@ -4,14 +4,15 @@ import cn.hutool.json.JSONUtil;
+ import cn.hutool.json.JSONObject;
+ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+ import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
++import com.huanjing.geo.common.llm.LlmCallResult;
+ import com.huanjing.geo.common.llm.LlmModelConfig;
+ import com.huanjing.geo.common.llm.router.LlmFeature;
+ import com.huanjing.geo.common.llm.router.LlmRouteException;
+ import com.huanjing.geo.common.llm.router.LlmRouteFailureKind;
+ import com.huanjing.geo.common.llm.router.LlmRouteRequest;
+ import com.huanjing.geo.common.llm.router.LlmRouteResult;
+-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
+-import com.huanjing.geo.common.util.HttpClientUtil;
+ import com.huanjing.geo.common.util.QuotaPeriodResolver;
+ import com.huanjing.geo.module.content.entity.ArticleBatch;
+ import com.huanjing.geo.module.content.entity.ArticleGenerationLog;
+@@ -89,9 +90,7 @@ public class DispatchExecutionService {
+ 
+     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+     private final PlatformCredentialService platformCredentialService;
+-    private final PlatformRateLimiterService platformRateLimiterService;
+-    private final PlatformConcurrencyLimiterService platformConcurrencyLimiterService;
+-    private final LlmPlatformRouter llmPlatformRouter;
++    private final LlmCallFacade llmCallFacade;
+     private final ProjectMapper projectMapper;
+     private final PackageContentConfigMapper packageContentConfigMapper;
+     private final ArticleBatchMapper articleBatchMapper;
+@@ -536,7 +535,7 @@ public class DispatchExecutionService {
+                                                             String userPrompt,
+                                                             int cursor) {
+         try {
+-            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
++            LlmRouteResult routed = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
+                     LlmFeature.ARTICLE,
+                     systemPrompt,
+                     userPrompt,
+@@ -550,7 +549,7 @@ public class DispatchExecutionService {
+                     1000,
+                     cursor,
+                     platformConfigs
+-            ));
++            ))).routeResult();
+             task.setPlatformCode(routed.platformCode());
+             task.setCurrentChannel(routed.channel());
+             log.info("Content generation task {} executed by platform={}, model={}, channel={}",
+@@ -567,6 +566,8 @@ public class DispatchExecutionService {
+                 throw new DispatchResourceBusyException(ex.getMessage(), ex);
+             }
+             return InvocationResult.failure(ex.failureKind().name(), ex.getMessage(), ex.requestCount(), ex);
++        } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
++            return InvocationResult.failure("ALL_FAILED", ex.getMessage(), 0, ex);
+         }
+     }
+ 
+@@ -575,7 +576,7 @@ public class DispatchExecutionService {
+                                                         String questionText,
+                                                         int requestTimeoutMs) {
+         try {
+-            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
++            LlmRouteResult routed = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
+                     LlmFeature.MONITORING,
+                     "You are a GEO (Generative Engine Optimization) monitoring assistant.",
+                     questionText,
+@@ -589,7 +590,7 @@ public class DispatchExecutionService {
+                     1000,
+                     0,
+                     List.of(platform)
+-            ));
++            ))).routeResult();
+             task.setPlatformCode(routed.platformCode());
+             task.setCurrentChannel(routed.channel());
+             log.info("BI_DAILY_POLL task {} executed by platform={}, model={}, channel={}",
+@@ -606,6 +607,8 @@ public class DispatchExecutionService {
+                 throw new DispatchResourceBusyException(ex.getMessage(), ex);
+             }
+             return InvocationResult.failure(ex.failureKind().name(), ex.getMessage(), ex.requestCount(), ex);
++        } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
++            return InvocationResult.failure("ALL_FAILED", ex.getMessage(), 0, ex);
+         }
+     }
+ 
+@@ -1096,7 +1099,7 @@ public class DispatchExecutionService {
+             return JudgeInfo.failed("ANSWER_EMPTY", "大模型回答为空");
+         }
+         try {
+-            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
++            LlmRouteResult routed = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
+                     LlmFeature.MONITORING,
+                     effectiveHitJudgeSystemPrompt(),
+                     buildEffectiveHitJudgeUserPrompt(brand, judgeBrandNames, siteDomains, phones, contactTerms, questionText, responseText),
+@@ -1110,11 +1113,14 @@ public class DispatchExecutionService {
+                     300,
+                     0,
+                     List.of()
+-            ));
++            ))).routeResult();
+             return parseJudgeInfo(routed.responseText(), routed.platformCode() + "/" + routed.modelId());
+         } catch (LlmRouteException ex) {
+             log.warn("Effective hit judge failed, question={}, reason={}", redactSensitive(questionText), ex.getMessage());
+             return JudgeInfo.failed(ex.failureKind().name(), ex.getMessage());
++        } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
++            log.warn("Effective hit judge failed, question={}, reason={}", redactSensitive(questionText), ex.getMessage());
++            return JudgeInfo.failed("ALL_FAILED", ex.getMessage());
+         } catch (RuntimeException ex) {
+             log.warn("Effective hit judge parse failed, question={}", redactSensitive(questionText), ex);
+             return JudgeInfo.failed("JUDGE_PARSE_FAILED", ex.getMessage());
+@@ -1674,17 +1680,9 @@ public class DispatchExecutionService {
+         if (!StringUtils.hasText(apiUrl) || !StringUtils.hasText(modelId) || !StringUtils.hasText(apiKey)) {
+             throw new BizException(500, "Invalid platform invocation params");
+         }
+-        boolean pass = platformRateLimiterService.tryAcquire(config, 1000);
+-        if (!pass) {
+-            throw new BizException(429, "Platform limited: " + platformCode);
+-        }
+-
+         long started = System.currentTimeMillis();
+-        String response;
+-        try (PlatformConcurrencyLimiterService.Permit ignored = platformConcurrencyLimiterService.acquire(config)) {
+-            String prompt = buildPrompt(task, questionText);
+-            response = invokeModelApi(apiUrl, modelId, apiKey, prompt);
+-        }
++        String prompt = buildPrompt(task, questionText);
++        String response = invokeModelApi(config, platformCode, channel, apiUrl, modelId, apiKey, prompt, requestCount);
+         long durationMs = Math.max(1L, System.currentTimeMillis() - started);
+         log.info("Dispatch task {} executed by platform={}, model={}, channel={}, questionPresent={}",
+                 task.getId(), platformCode, modelId, channel, StringUtils.hasText(questionText));
+@@ -1704,16 +1702,9 @@ public class DispatchExecutionService {
+         if (!StringUtils.hasText(apiUrl) || !StringUtils.hasText(modelId) || !StringUtils.hasText(apiKey)) {
+             throw new BizException(500, "Invalid platform invocation params");
+         }
+-        boolean pass = platformRateLimiterService.tryAcquire(config, 1000);
+-        if (!pass) {
+-            throw new BizException(429, "Platform limited: " + platformCode);
+-        }
+-
+         long started = System.currentTimeMillis();
+-        String response;
+-        try (PlatformConcurrencyLimiterService.Permit ignored = platformConcurrencyLimiterService.acquire(config)) {
+-            response = invokeModelApi(apiUrl, modelId, apiKey, systemPrompt, userPrompt);
+-        }
++        String response = invokeModelApi(config, platformCode, channel, apiUrl, modelId, apiKey,
++                systemPrompt, userPrompt, requestCount);
+         long durationMs = Math.max(1L, System.currentTimeMillis() - started);
+         log.info("Content generation task {} executed by platform={}, model={}, channel={}",
+                 task.getId(), platformCode, modelId, channel);
+@@ -1727,55 +1718,60 @@ public class DispatchExecutionService {
+         return "Please execute task " + task.getTaskType() + " for project " + task.getProjectId();
+     }
+ 
+-    private String invokeModelApi(String apiUrl, String modelId, String apiKey, String prompt) {
+-        return invokeModelApi(apiUrl, modelId, apiKey, "You are a GEO (Generative Engine Optimization) monitoring assistant.", prompt, 0D);
++    private String invokeModelApi(AiPlatformConfig config,
++                                  String platformCode,
++                                  String channel,
++                                  String apiUrl,
++                                  String modelId,
++                                  String apiKey,
++                                  String prompt,
++                                  int requestCount) {
++        return invokeModelApi(config, platformCode, channel, apiUrl, modelId, apiKey,
++                "You are a GEO (Generative Engine Optimization) monitoring assistant.", prompt, 0D, requestCount);
+     }
+ 
+-    private String invokeModelApi(String apiUrl, String modelId, String apiKey, String systemPrompt, String userPrompt) {
+-        return invokeModelApi(apiUrl, modelId, apiKey, systemPrompt, userPrompt, 0.7D);
++    private String invokeModelApi(AiPlatformConfig config,
++                                  String platformCode,
++                                  String channel,
++                                  String apiUrl,
++                                  String modelId,
++                                  String apiKey,
++                                  String systemPrompt,
++                                  String userPrompt,
++                                  int requestCount) {
++        return invokeModelApi(config, platformCode, channel, apiUrl, modelId, apiKey,
++                systemPrompt, userPrompt, 0.7D, requestCount);
+     }
+ 
+-    private String invokeModelApi(String apiUrl,
++    private String invokeModelApi(AiPlatformConfig config,
++                                  String platformCode,
++                                  String channel,
++                                  String apiUrl,
+                                   String modelId,
+                                   String apiKey,
+                                   String systemPrompt,
+                                   String userPrompt,
+-                                  double temperature) {
+-        String targetUrl = apiUrl.trim();
+-        if (!targetUrl.endsWith("/chat/completions")) {
+-            targetUrl = targetUrl.endsWith("/") ? targetUrl + "chat/completions" : targetUrl + "/chat/completions";
+-        }
+-
+-        Map<String, Object> payload = new LinkedHashMap<>();
+-        payload.put("model", modelId);
+-        payload.put("temperature", temperature);
+-        List<Map<String, String>> messages = new ArrayList<>();
+-        if (StringUtils.hasText(systemPrompt)) {
+-            messages.add(Map.of("role", "system", "content", systemPrompt));
+-        }
+-        messages.add(Map.of("role", "user", "content", userPrompt));
+-        payload.put("messages", messages);
+-
+-        String requestJson = JSONUtil.toJsonStr(payload);
+-        Map<String, String> headers = new LinkedHashMap<>();
+-        headers.put("Content-Type", "application/json");
+-        headers.put("Authorization", "Bearer " + apiKey);
+-        headers.put("api-key", apiKey);
+-        headers.put("x-api-key", apiKey);
+-
++                                  double temperature,
++                                  int requestCount) {
+         try {
+-            HttpClientUtil.HttpResult response = HttpClientUtil.postJson(
+-                    targetUrl,
+-                    headers,
+-                    requestJson,
++            LlmCallResult result = llmCallFacade.execute(LlmCallRequest.legacy(
++                    config,
++                    platformCode,
++                    config.getPlatformName(),
++                    channel,
++                    apiUrl,
++                    modelId,
++                    apiKey,
++                    systemPrompt,
++                    userPrompt,
++                    temperature,
++                    1000,
+                     dispatchProperties.getModelConnectTimeoutMs(),
+-                    dispatchProperties.getModelRequestTimeoutMs()
+-            );
+-            int code = response.statusCode();
+-            String body = response.body();
+-            if (code < 200 || code >= 300) {
+-                throw new BizException(code, "Model API HTTP " + code + ": " + safeSnippet(body));
+-            }
++                    dispatchProperties.getModelRequestTimeoutMs(),
++                    LlmFeature.GENERIC,
++                    requestCount
++            ));
++            String body = result.rawResponseText();
+             String text = extractResponseText(body);
+             if (!StringUtils.hasText(text)) {
+                 throw new BizException(502, "Model API empty response text");
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/DispatchMonitorService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/DispatchMonitorService.java
+index 60d9d722..a1f265d4 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/DispatchMonitorService.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/DispatchMonitorService.java
+@@ -25,7 +25,7 @@ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+ import com.huanjing.geo.module.system.entity.SysUser;
+ import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+ import com.huanjing.geo.module.system.service.CurrentUserService;
+-import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
++import com.huanjing.geo.common.llm.LlmCapacityView;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.stereotype.Service;
+ import org.springframework.util.StringUtils;
+@@ -56,7 +56,7 @@ public class DispatchMonitorService {
+     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+     private final AiPlatformHealthEventMapper aiPlatformHealthEventMapper;
+     private final DispatchAlertService dispatchAlertService;
+-    private final LlmExecutionGateway llmExecutionGateway;
++    private final LlmCapacityView llmCapacityView;
+     private final InternalScopeService internalScopeService;
+ 
+     public DispatchDashboardVO dashboard(String rangeType, LocalDate startDate, LocalDate endDate, Long projectId) {
+@@ -237,7 +237,7 @@ public class DispatchMonitorService {
+             vo.setRpmLimit(p.getRpmLimit());
+             vo.setTpmLimit(p.getTpmLimit());
+             vo.setConcurrencyLimit(p.getConcurrencyLimit());
+-            vo.setActivePermitCount(llmExecutionGateway.activePlatformCount(p.getPlatformCode()));
++            vo.setActivePermitCount(llmCapacityView.activePlatformCount(p.getPlatformCode()));
+             vo.setDegraded(p.getDegraded());
+             vo.setDegradedReason(p.getDegradedReason());
+             vo.setCurrentHealthStatus(p.getCurrentHealthStatus());
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/PlatformConcurrencyLimiterService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/PlatformConcurrencyLimiterService.java
+deleted file mode 100644
+index 52814eaa..00000000
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/PlatformConcurrencyLimiterService.java
++++ /dev/null
+@@ -1,92 +0,0 @@
+-package com.huanjing.geo.module.dispatch.service;
+-
+-import com.huanjing.geo.common.exception.BizException;
+-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+-import org.springframework.stereotype.Service;
+-import org.springframework.util.StringUtils;
+-
+-import java.util.concurrent.ConcurrentHashMap;
+-import java.util.concurrent.ConcurrentMap;
+-import java.util.concurrent.locks.Condition;
+-import java.util.concurrent.locks.ReentrantLock;
+-
+-@Service
+-public class PlatformConcurrencyLimiterService {
+-
+-    private final ConcurrentMap<String, Slot> slots = new ConcurrentHashMap<>();
+-
+-    public Permit acquire(AiPlatformConfig config) {
+-        if (config == null || !StringUtils.hasText(config.getPlatformCode())) {
+-            throw new BizException(500, "Platform code is required for concurrency limit");
+-        }
+-        String platformCode = config.getPlatformCode().trim();
+-        int limit = config.getConcurrencyLimit() == null || config.getConcurrencyLimit() <= 0
+-                ? 1
+-                : config.getConcurrencyLimit();
+-        Slot slot = slots.computeIfAbsent(platformCode, k -> new Slot());
+-        slot.acquire(limit);
+-        return new Permit(platformCode, slot);
+-    }
+-
+-    public static final class Permit implements AutoCloseable {
+-        private final String platformCode;
+-        private final Slot slot;
+-        private boolean released;
+-
+-        private Permit(String platformCode, Slot slot) {
+-            this.platformCode = platformCode;
+-            this.slot = slot;
+-        }
+-
+-        public String platformCode() {
+-            return platformCode;
+-        }
+-
+-        @Override
+-        public void close() {
+-            if (released) {
+-                return;
+-            }
+-            released = true;
+-            slot.release();
+-        }
+-    }
+-
+-    private static final class Slot {
+-        private final ReentrantLock lock = new ReentrantLock(true);
+-        private final Condition available = lock.newCondition();
+-        private int limit = 1;
+-        private int active = 0;
+-
+-        void acquire(int requestedLimit) {
+-            lock.lock();
+-            try {
+-                limit = Math.max(requestedLimit, 1);
+-                while (active >= limit) {
+-                    try {
+-                        available.await();
+-                    } catch (InterruptedException ex) {
+-                        Thread.currentThread().interrupt();
+-                        throw new BizException(500, "Interrupted while waiting for platform concurrency slot");
+-                    }
+-                    limit = Math.max(requestedLimit, 1);
+-                }
+-                active++;
+-            } finally {
+-                lock.unlock();
+-            }
+-        }
+-
+-        void release() {
+-            lock.lock();
+-            try {
+-                if (active > 0) {
+-                    active--;
+-                }
+-                available.signal();
+-            } finally {
+-                lock.unlock();
+-            }
+-        }
+-    }
+-}
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/PlatformRateLimiterService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/PlatformRateLimiterService.java
+deleted file mode 100644
+index ff5b1b8b..00000000
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/dispatch/service/PlatformRateLimiterService.java
++++ /dev/null
+@@ -1,52 +0,0 @@
+-package com.huanjing.geo.module.dispatch.service;
+-
+-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+-import lombok.RequiredArgsConstructor;
+-import org.springframework.data.redis.core.StringRedisTemplate;
+-import org.springframework.data.redis.core.script.DefaultRedisScript;
+-import org.springframework.stereotype.Service;
+-
+-import java.time.LocalDateTime;
+-import java.time.format.DateTimeFormatter;
+-
+-@Service
+-@RequiredArgsConstructor
+-public class PlatformRateLimiterService {
+-
+-    private static final DateTimeFormatter KEY_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
+-    private static final DefaultRedisScript<Long> LIMIT_SCRIPT = new DefaultRedisScript<>(
+-            "local rpm=tonumber(redis.call('GET', KEYS[1]) or '0') " +
+-                    "local tpm=tonumber(redis.call('GET', KEYS[2]) or '0') " +
+-                    "local rpmLimit=tonumber(ARGV[1]) " +
+-                    "local tpmLimit=tonumber(ARGV[2]) " +
+-                    "local tokenCost=tonumber(ARGV[3]) " +
+-                    "if rpm + 1 > rpmLimit then return 0 end " +
+-                    "if tpm + tokenCost > tpmLimit then return 0 end " +
+-                    "redis.call('INCRBY', KEYS[1], 1) " +
+-                    "redis.call('INCRBY', KEYS[2], tokenCost) " +
+-                    "redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4])) " +
+-                    "redis.call('EXPIRE', KEYS[2], tonumber(ARGV[4])) " +
+-                    "return 1",
+-            Long.class
+-    );
+-
+-    private final StringRedisTemplate redisTemplate;
+-
+-    public boolean tryAcquire(AiPlatformConfig config, int tokenCost) {
+-        int rpmLimit = config.getRpmLimit() == null || config.getRpmLimit() <= 0 ? 60 : config.getRpmLimit();
+-        int tpmLimit = config.getTpmLimit() == null || config.getTpmLimit() <= 0 ? 60000 : config.getTpmLimit();
+-        String minute = LocalDateTime.now().format(KEY_FMT);
+-        String rpmKey = "geo:dispatch:limiter:rpm:" + config.getPlatformCode() + ":" + minute;
+-        String tpmKey = "geo:dispatch:limiter:tpm:" + config.getPlatformCode() + ":" + minute;
+-
+-        Long result = redisTemplate.execute(
+-                LIMIT_SCRIPT,
+-                java.util.List.of(rpmKey, tpmKey),
+-                String.valueOf(rpmLimit),
+-                String.valueOf(tpmLimit),
+-                String.valueOf(Math.max(tokenCost, 1)),
+-                "120"
+-        );
+-        return result != null && result > 0;
+-    }
+-}
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/geoquestion/service/GeoQuestionService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/geoquestion/service/GeoQuestionService.java
+index c3e5a69d..b53e46fb 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/geoquestion/service/GeoQuestionService.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/geoquestion/service/GeoQuestionService.java
+@@ -7,8 +7,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
+ import com.fasterxml.jackson.core.type.TypeReference;
+ import com.fasterxml.jackson.databind.ObjectMapper;
+ import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
+ import com.huanjing.geo.common.llm.LlmInvokeResult;
+-import com.huanjing.geo.common.llm.LlmInvoker;
+ import com.huanjing.geo.common.llm.LlmModelConfig;
+ import com.huanjing.geo.common.llm.LlmProperties;
+ import com.huanjing.geo.module.content.service.SpecialIndustryReadinessService;
+@@ -89,7 +90,7 @@ public class GeoQuestionService {
+     private final CompanyService companyService;
+     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+     private final PlatformCredentialService platformCredentialService;
+-    private final LlmInvoker llmInvoker;
++    private final LlmCallFacade llmCallFacade;
+     private final LlmProperties llmProperties;
+     private final GeoQuestionWorkorderMapper workorderMapper;
+     private final GeoQuestionProfileDraftMapper draftMapper;
+@@ -1085,7 +1086,7 @@ public class GeoQuestionService {
+                 defaultText(batch.getPromptSnapshot(), "")
+         );
+         try {
+-            LlmInvokeResult result = llmInvoker.invoke(prompt, new LlmModelConfig(
++            LlmInvokeResult result = llmCallFacade.execute(LlmCallRequest.direct(prompt, new LlmModelConfig(
+                     config.getPlatformCode(),
+                     config.getPlatformName(),
+                     modelId,
+@@ -1103,7 +1104,7 @@ public class GeoQuestionService {
+                     QUESTION_GENERATION_TIMEOUT_MS,
+                     "geo_question",
+                     config.getConcurrencyLimit()
+-            ));
++            ))).invokeResult();
+             GenerationContext context = generationContext(batch);
+             List<GeneratedQuestionSpec> specs = filterGeneratedQuestions(parseGeneratedQuestions(result.responseText(), batch), batch, context, List.of());
+             if (specs.isEmpty()) {
+@@ -1182,7 +1183,7 @@ public class GeoQuestionService {
+                                                String apiKey,
+                                                GeoQuestionBatch batch,
+                                                String prompt) throws Exception {
+-        return llmInvoker.invoke(prompt, new LlmModelConfig(
++        return llmCallFacade.execute(LlmCallRequest.direct(prompt, new LlmModelConfig(
+                 config.getPlatformCode(),
+                 config.getPlatformName(),
+                 modelId,
+@@ -1200,7 +1201,7 @@ public class GeoQuestionService {
+                 QUESTION_GENERATION_TIMEOUT_MS,
+                 "geo_question",
+                 config.getConcurrencyLimit()
+-        ));
++        ))).invokeResult();
+     }
+ 
+     private void saveLlmResponse(Long batchId, String responseText, LlmInvokeResult result) {
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/PresaleEvaluationModelRouter.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/PresaleEvaluationModelRouter.java
+index b6524c1a..ecc6b8f9 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/PresaleEvaluationModelRouter.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/PresaleEvaluationModelRouter.java
+@@ -1,10 +1,9 @@
+ package com.huanjing.geo.module.presale.generate;
+ 
+-import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
++import com.huanjing.geo.common.llm.LlmCapacityView;
+ import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
+ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+ import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+-import org.springframework.beans.factory.ObjectProvider;
+ import org.springframework.stereotype.Component;
+ import org.springframework.util.StringUtils;
+ 
+@@ -21,12 +20,12 @@ public class PresaleEvaluationModelRouter {
+     );
+ 
+     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+-    private final LlmExecutionGateway executionGateway;
++    private final LlmCapacityView llmCapacityView;
+ 
+     public PresaleEvaluationModelRouter(AiPlatformConfigMapper aiPlatformConfigMapper,
+-                                        ObjectProvider<LlmExecutionGateway> executionGatewayProvider) {
++                                        LlmCapacityView llmCapacityView) {
+         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
+-        this.executionGateway = executionGatewayProvider.getIfAvailable();
++        this.llmCapacityView = llmCapacityView;
+     }
+ 
+     public List<PlatformCallContext> routeContexts(PlatformCallContext source) {
+@@ -42,6 +41,10 @@ public class PresaleEvaluationModelRouter {
+                 .findFirst();
+     }
+ 
++    public List<AiPlatformConfig> routePlatforms() {
++        return evaluationPlatforms();
++    }
++
+     private PlatformCallContext toContext(PlatformCallContext source, String platformCode) {
+         return new PlatformCallContext(
+                 source.versionId(),
+@@ -78,7 +81,7 @@ public class PresaleEvaluationModelRouter {
+         int limit = platform.getConcurrencyLimit() == null || platform.getConcurrencyLimit() <= 0
+                 ? 1
+                 : platform.getConcurrencyLimit();
+-        Long active = executionGateway == null ? 0L : executionGateway.activePlatformCount(platform.getPlatformCode());
++        Long active = llmCapacityView.activePlatformCount(platform.getPlatformCode());
+         return (active == null ? 0D : active.doubleValue()) / limit;
+     }
+ 
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/llm/DefaultPresaleLlmHttpClient.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/llm/DefaultPresaleLlmHttpClient.java
+index 641bb768..b66b3580 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/llm/DefaultPresaleLlmHttpClient.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/llm/DefaultPresaleLlmHttpClient.java
+@@ -1,22 +1,25 @@
+ package com.huanjing.geo.module.presale.generate.llm;
+ 
+-import com.huanjing.geo.common.util.HttpClientUtil;
++import com.huanjing.geo.common.llm.LlmHttpClient;
++import lombok.RequiredArgsConstructor;
+ import org.springframework.stereotype.Component;
+ 
+ import java.util.Map;
+ 
+ @Component
++@RequiredArgsConstructor
+ public class DefaultPresaleLlmHttpClient implements PresaleLlmHttpClient {
++    private final LlmHttpClient llmHttpClient;
++
+     @Override
+     public HttpResponse postJson(String url,
+                                  Map<String, String> headers,
+                                  String body,
+                                  int connectTimeoutMs,
+                                  int requestTimeoutMs) throws Exception {
+-        HttpClientUtil.HttpResult response = HttpClientUtil.postJson(
++        LlmHttpClient.HttpResponse response = llmHttpClient.postJson(
+                 url, headers, body, connectTimeoutMs, requestTimeoutMs
+         );
+         return new HttpResponse(response.statusCode(), response.body());
+     }
+ }
+-
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/llm/OpenAiCompatiblePresaleLlmInvoker.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/llm/OpenAiCompatiblePresaleLlmInvoker.java
+index fa59c834..62c4ed7a 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/llm/OpenAiCompatiblePresaleLlmInvoker.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/generate/llm/OpenAiCompatiblePresaleLlmInvoker.java
+@@ -2,6 +2,8 @@ package com.huanjing.geo.module.presale.generate.llm;
+ 
+ import com.fasterxml.jackson.databind.JsonNode;
+ import com.fasterxml.jackson.databind.ObjectMapper;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
+ import com.huanjing.geo.common.llm.LlmInvokeResult;
+ import com.huanjing.geo.common.llm.LlmInvoker;
+ import com.huanjing.geo.common.llm.LlmModelConfig;
+@@ -27,7 +29,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
+ 
+     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+     private final PlatformCredentialService platformCredentialService;
+-    private final LlmInvoker llmInvoker;
++    private final LlmCallFacade llmCallFacade;
++    private final LlmInvoker testLlmInvoker;
+     private final LlmProperties llmProperties;
+     private final ObjectMapper objectMapper;
+ 
+@@ -37,18 +40,19 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
+     @Autowired
+     public OpenAiCompatiblePresaleLlmInvoker(AiPlatformConfigMapper aiPlatformConfigMapper,
+                                              PlatformCredentialService platformCredentialService,
+-                                             LlmInvoker llmInvoker,
++                                             LlmCallFacade llmCallFacade,
+                                              LlmProperties llmProperties,
+                                              ObjectMapper objectMapper) {
+         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
+         this.platformCredentialService = platformCredentialService;
+-        this.llmInvoker = llmInvoker;
++        this.llmCallFacade = llmCallFacade;
++        this.testLlmInvoker = null;
+         this.llmProperties = llmProperties;
+         this.objectMapper = objectMapper;
+     }
+ 
+     /**
+-     * @deprecated 仅供 presale 现有测试兼容，新代码使用主构造器（依赖 LlmInvoker bean）。
++     * @deprecated 仅供 presale 现有测试兼容，新代码使用主构造器（依赖 LlmCallFacade bean）。
+      *             计划在 Sprint 3 迁移 presale 测试后删除。
+      */
+     @Deprecated
+@@ -56,21 +60,20 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
+                                       PlatformCredentialService platformCredentialService,
+                                       PresaleLlmHttpClient httpClient,
+                                       ObjectMapper objectMapper) {
+-        this(
+-                aiPlatformConfigMapper,
+-                platformCredentialService,
+-                new com.huanjing.geo.common.llm.OpenAiCompatibleLlmInvoker(
+-                        (url, headers, body, connectTimeoutMs, requestTimeoutMs) -> {
+-                            PresaleLlmHttpClient.HttpResponse response = httpClient.postJson(
+-                                    url, headers, body, connectTimeoutMs, requestTimeoutMs);
+-                            return new com.huanjing.geo.common.llm.LlmHttpClient.HttpResponse(
+-                                    response.statusCode(), response.body());
+-                        },
+-                        objectMapper
+-                ),
+-                new LlmProperties(),
++        this.aiPlatformConfigMapper = aiPlatformConfigMapper;
++        this.platformCredentialService = platformCredentialService;
++        this.llmCallFacade = null;
++        this.testLlmInvoker = new com.huanjing.geo.common.llm.OpenAiCompatibleLlmInvoker(
++                (url, headers, body, connectTimeoutMs, requestTimeoutMs) -> {
++                    PresaleLlmHttpClient.HttpResponse response = httpClient.postJson(
++                            url, headers, body, connectTimeoutMs, requestTimeoutMs);
++                    return new com.huanjing.geo.common.llm.LlmHttpClient.HttpResponse(
++                            response.statusCode(), response.body());
++                },
+                 objectMapper
+         );
++        this.llmProperties = new LlmProperties();
++        this.objectMapper = objectMapper;
+     }
+ 
+     @Override
+@@ -173,7 +176,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
+         }
+ 
+         try {
+-            LlmInvokeResult result = llmInvoker.invoke(userPrompt, new LlmModelConfig(
++            LlmModelConfig modelConfig = new LlmModelConfig(
+                     config.getPlatformCode(),
+                     config.getPlatformName(),
+                     modelId,
+@@ -191,7 +194,10 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
+                     LlmModelConfig.MAX_REQUEST_TIMEOUT_MS,
+                     feature,
+                     config.getConcurrencyLimit()
+-            ));
++            );
++            LlmInvokeResult result = llmCallFacade == null
++                    ? testLlmInvoker.invoke(userPrompt, modelConfig)
++                    : llmCallFacade.execute(LlmCallRequest.direct(userPrompt, modelConfig)).invokeResult();
+             return new LlmCallResult(
+                     result.responseText(),
+                     result.promptTokens(),
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/service/PresaleLlmPromptQuestionService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/service/PresaleLlmPromptQuestionService.java
+index db2fd906..30a80e46 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/service/PresaleLlmPromptQuestionService.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/presale/service/PresaleLlmPromptQuestionService.java
+@@ -4,8 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+ import com.fasterxml.jackson.databind.JsonNode;
+ import com.fasterxml.jackson.databind.ObjectMapper;
+ import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
+ import com.huanjing.geo.common.llm.LlmInvokeResult;
+-import com.huanjing.geo.common.llm.LlmInvoker;
+ import com.huanjing.geo.common.llm.LlmModelConfig;
+ import com.huanjing.geo.common.llm.LlmProperties;
+ import com.huanjing.geo.module.presale.dto.PresalePromptCategoryCode;
+@@ -41,7 +42,7 @@ public class PresaleLlmPromptQuestionService {
+ 
+     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+     private final PlatformCredentialService platformCredentialService;
+-    private final LlmInvoker llmInvoker;
++    private final LlmCallFacade llmCallFacade;
+     private final LlmProperties llmProperties;
+     private final ObjectMapper objectMapper;
+     private final CurrentUserService currentUserService;
+@@ -237,7 +238,7 @@ public class PresaleLlmPromptQuestionService {
+         }
+ 
+         try {
+-            LlmInvokeResult response = llmInvoker.invoke(userPrompt, new LlmModelConfig(
++            LlmInvokeResult response = llmCallFacade.execute(LlmCallRequest.direct(userPrompt, new LlmModelConfig(
+                 config.getPlatformCode(),
+                 config.getPlatformName(),
+                 modelId,
+@@ -252,7 +253,7 @@ public class PresaleLlmPromptQuestionService {
+                 Math.max(1, config.getRateLimitQps() == null ? 1 : config.getRateLimitQps()),
+                 null,
+                 false
+-            ));
++            ))).invokeResult();
+             return response.responseText();
+         } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
+             throw new LlmQuestionProviderException(
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineReportPollService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineReportPollService.java
+index 354624bd..8579bf80 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineReportPollService.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineReportPollService.java
+@@ -4,12 +4,14 @@ import cn.hutool.json.JSONUtil;
+ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+ import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
++import com.huanjing.geo.common.llm.LlmCallResult;
+ import com.huanjing.geo.common.llm.LlmModelConfig;
+ import com.huanjing.geo.common.llm.router.LlmFeature;
+ import com.huanjing.geo.common.llm.router.LlmRouteException;
+ import com.huanjing.geo.common.llm.router.LlmRouteRequest;
+ import com.huanjing.geo.common.llm.router.LlmRouteResult;
+-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
+ import com.huanjing.geo.module.customer.entity.Company;
+ import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+ import com.huanjing.geo.module.project.dto.BaselinePollBatchVO;
+@@ -56,7 +58,7 @@ public class BaselineReportPollService {
+     private final KeywordGroupResultMapper keywordGroupResultMapper;
+     private final BaselineReportPollBatchMapper batchMapper;
+     private final BaselineReportPollResultMapper resultMapper;
+-    private final LlmPlatformRouter llmPlatformRouter;
++    private final LlmCallFacade llmCallFacade;
+ 
+     public BaselinePollOptionsVO options(Long projectId) {
+         requireReadableActiveProject(projectId);
+@@ -157,7 +159,7 @@ public class BaselineReportPollService {
+         result.setPlatformCode(platform.getPlatformCode());
+         result.setPlatformName(platform.getPlatformName());
+         try {
+-            LlmRouteResult routeResult = llmPlatformRouter.invoke(new LlmRouteRequest(
++            LlmCallResult callResult = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
+                     LlmFeature.GENERIC,
+                     "You are a GEO (Generative Engine Optimization) baseline report polling assistant. Answer the user's question directly.",
+                     question.getKeywordText(),
+@@ -171,7 +173,8 @@ public class BaselineReportPollService {
+                     1,
+                     0,
+                     List.of(platform)
+-            ));
++            )));
++            LlmRouteResult routeResult = callResult.routeResult();
+             result.setStatus("completed");
+             result.setRequestCount(routeResult.requestCount());
+             result.setResponseTimeMs(routeResult.durationMs());
+@@ -230,10 +233,12 @@ public class BaselineReportPollService {
+     private List<AiPlatformConfig> loadProjectPlatforms(Long projectId) {
+         return aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
+                         .eq(AiPlatformConfig::getEnabled, true)
++                        .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
+                         .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId))
+                 .stream()
+                 .filter(platform -> StringUtils.hasText(platform.getApiUrl()))
+-                .filter(platform -> StringUtils.hasText(platform.getModelId()))
++                .filter(platform -> StringUtils.hasText(platform.getLowModelId()))
++                .peek(platform -> platform.setModelId(platform.getLowModelId().trim()))
+                 .toList();
+     }
+ 
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/KeywordLlmQuestionService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/KeywordLlmQuestionService.java
+index 6cbea5ff..bee1a4ff 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/KeywordLlmQuestionService.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/KeywordLlmQuestionService.java
+@@ -4,8 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+ import com.fasterxml.jackson.core.type.TypeReference;
+ import com.fasterxml.jackson.databind.ObjectMapper;
+ import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
+ import com.huanjing.geo.common.llm.LlmInvokeResult;
+-import com.huanjing.geo.common.llm.LlmInvoker;
+ import com.huanjing.geo.common.llm.LlmModelConfig;
+ import com.huanjing.geo.common.llm.LlmProperties;
+ import com.huanjing.geo.module.customer.entity.Company;
+@@ -52,7 +53,7 @@ public class KeywordLlmQuestionService {
+     private final ProjectMapper projectMapper;
+     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+     private final PlatformCredentialService platformCredentialService;
+-    private final LlmInvoker llmInvoker;
++    private final LlmCallFacade llmCallFacade;
+     private final LlmProperties llmProperties;
+     private final ObjectMapper objectMapper;
+     private final StringRedisTemplate redisTemplate;
+@@ -173,7 +174,8 @@ public class KeywordLlmQuestionService {
+             throw new IllegalStateException("Missing API key");
+         }
+ 
+-        LlmInvokeResult response = llmInvoker.invoke(renderPrompt(seed, targetCount), new LlmModelConfig(
++        String prompt = renderPrompt(seed, targetCount);
++        LlmInvokeResult response = llmCallFacade.execute(LlmCallRequest.direct(prompt, new LlmModelConfig(
+                 config.getPlatformCode(),
+                 config.getPlatformName(),
+                 modelId,
+@@ -188,7 +190,7 @@ public class KeywordLlmQuestionService {
+                 Math.max(1, config.getRateLimitQps() == null ? 1 : config.getRateLimitQps()),
+                 null,
+                 false
+-        ));
++        ))).invokeResult();
+         return normalizeQuestions(response.responseText());
+     }
+ 
+diff --git a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/ArticleAiDraftServiceTest.java b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/ArticleAiDraftServiceTest.java
+index 91c72857..df6fc281 100644
+--- a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/ArticleAiDraftServiceTest.java
++++ b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/ArticleAiDraftServiceTest.java
+@@ -92,11 +92,22 @@ class ArticleAiDraftServiceTest {
+         when(offeringPromptSelector.select(any(), any(), any(), any(), any()))
+                 .thenReturn(new BrandOfferingPromptSelector.SelectionResult(
+                         List.<BrandOfferingPromptSelector.SelectedOffering>of()));
++        LlmCallFacade llmCallFacade = mock(LlmCallFacade.class);
++        try {
++            when(llmCallFacade.execute(any(LlmCallRequest.class))).thenAnswer(invocation -> {
++                LlmCallRequest request = invocation.getArgument(0);
++                if (request.routeRequest() != null) {
++                    return LlmCallResult.routed(llmPlatformRouter.invoke(request.routeRequest()));
++                }
++                return LlmCallResult.direct(llmInvoker.invoke(request.prompt(), request.modelConfig()));
++            });
++        } catch (Exception ex) {
++            throw new IllegalStateException(ex);
++        }
+         ArticleModelResolver modelResolver = new ArticleModelResolver(configMapper, credentialService);
+         ArticleGenerationEngine generationEngine = new ArticleGenerationEngine(
+-                llmInvoker,
++                llmCallFacade,
+                 modelResolver,
+-                llmPlatformRouter,
+                 mock(MarkdownImageReferenceValidator.class),
+                 promptFilter,
+                 mock(BatchArticleQualityChecker.class)
+@@ -113,10 +124,18 @@ class ArticleAiDraftServiceTest {
+                 currentUserService, brandAccessService, promptBuilder, promptContextFactory,
+                 offeringPromptSelector, generationEngine, mock(MedicalArticleComplianceChecker.class),
+                 mock(SpecialIndustryComplianceAlertService.class),
+-                mock(ArticleCoverSelectionService.class), rateLimiter, auditService,
++                mock(ArticleCoverSelectionService.class), passThroughAutoImageInsertionService(), rateLimiter, auditService,
+                 objectMapper, txManager(), Runnable::run);
+     }
+ 
++    private ArticleAutoImageInsertionService passThroughAutoImageInsertionService() {
++        ArticleAutoImageInsertionService service = mock(ArticleAutoImageInsertionService.class);
++        when(service.insertForChannel(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
++        when(service.insertForChannel(any(), any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(3));
++        when(service.insertForTargetChannel(any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
++        return service;
++    }
++
+     @Test
+     void generateCreatesApprovedAiDraft() throws Exception {
+         mockInsertId();
+diff --git a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/ArticleGenerationEngineTest.java b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/ArticleGenerationEngineTest.java
+index 02e5ee0a..3da96f4c 100644
+--- a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/ArticleGenerationEngineTest.java
++++ b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/ArticleGenerationEngineTest.java
+@@ -1,10 +1,11 @@
+ package com.huanjing.geo.module.content.service;
+ 
+ import com.huanjing.geo.common.llm.LlmCallStatus;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
++import com.huanjing.geo.common.llm.LlmCallResult;
+ import com.huanjing.geo.common.llm.LlmInvokeResult;
+-import com.huanjing.geo.common.llm.LlmInvoker;
+ import com.huanjing.geo.common.llm.router.LlmFeature;
+-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
+ import com.huanjing.geo.common.llm.router.LlmRouteRequest;
+ import com.huanjing.geo.common.llm.router.LlmRouteResult;
+ import com.huanjing.geo.module.customer.entity.Brand;
+@@ -27,9 +28,8 @@ class ArticleGenerationEngineTest {
+ 
+     @Test
+     void generateUsesRouterWhenNoModelSpecified() throws Exception {
+-        LlmInvoker llmInvoker = mock(LlmInvoker.class);
++        LlmCallFacade llmCallFacade = mock(LlmCallFacade.class);
+         ArticleModelResolver modelResolver = mock(ArticleModelResolver.class);
+-        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
+         ArticleAiDraftPromptFilter promptFilter = mock(ArticleAiDraftPromptFilter.class);
+         BatchArticleQualityChecker qualityChecker = mock(BatchArticleQualityChecker.class);
+         when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean())).thenAnswer(invocation -> invocation.getArgument(0));
+@@ -46,7 +46,7 @@ class ArticleGenerationEngineTest {
+                 "qwen-plus",
+                 "通义千问 Plus"
+         );
+-        when(router.invoke(any())).thenReturn(new LlmRouteResult(
++        when(llmCallFacade.execute(any())).thenReturn(LlmCallResult.routed(new LlmRouteResult(
+                 "qwen",
+                 "通义千问",
+                 "primary",
+@@ -56,12 +56,11 @@ class ArticleGenerationEngineTest {
+                 invokeResult.durationMs(),
+                 2,
+                 invokeResult
+-        ));
++        )));
+ 
+         ArticleGenerationEngine engine = new ArticleGenerationEngine(
+-                llmInvoker,
++                llmCallFacade,
+                 modelResolver,
+-                router,
+                 mock(MarkdownImageReferenceValidator.class),
+                 promptFilter,
+                 qualityChecker
+@@ -84,10 +83,10 @@ class ArticleGenerationEngineTest {
+         assertEquals("qwen-plus", generated.model().modelId());
+         assertThat(generated.content()).contains("Routed title");
+         verify(modelResolver, never()).resolve(any(), any(), any(), anyBoolean());
+-        verify(llmInvoker, never()).invoke(any(), any());
+-        ArgumentCaptor<LlmRouteRequest> requestCaptor = ArgumentCaptor.forClass(LlmRouteRequest.class);
+-        verify(router).invoke(requestCaptor.capture());
+-        assertEquals(LlmFeature.ARTICLE, requestCaptor.getValue().feature());
+-        assertEquals(0, requestCaptor.getValue().maxRetry());
++        ArgumentCaptor<LlmCallRequest> requestCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
++        verify(llmCallFacade).execute(requestCaptor.capture());
++        LlmRouteRequest routeRequest = requestCaptor.getValue().routeRequest();
++        assertEquals(LlmFeature.ARTICLE, routeRequest.feature());
++        assertEquals(0, routeRequest.maxRetry());
+     }
+ }
+diff --git a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/BatchArticleGenerationServiceTest.java b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/BatchArticleGenerationServiceTest.java
+index c40a377e..7c357367 100644
+--- a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/BatchArticleGenerationServiceTest.java
++++ b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/content/service/BatchArticleGenerationServiceTest.java
+@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
+ import com.huanjing.geo.common.exception.BizException;
+ import com.huanjing.geo.common.llm.LlmCallStatus;
+ import com.huanjing.geo.common.llm.LlmInvokeResult;
+-import com.huanjing.geo.common.llm.LlmInvoker;
++import com.huanjing.geo.common.llm.LlmCallFacade;
+ import com.huanjing.geo.module.content.ContentErrorCodes;
+ import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
+ import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
+@@ -131,7 +131,7 @@ class BatchArticleGenerationServiceTest {
+                 currentUserService,
+                 brandAccessService,
+                 mock(PlatformCredentialService.class),
+-                mock(LlmInvoker.class),
++                mock(LlmCallFacade.class),
+                 mock(MarkdownImageReferenceValidator.class),
+                 mock(ArticleAiDraftPromptFilter.class),
+                 articleGenerationEngine,
+@@ -887,6 +887,8 @@ class BatchArticleGenerationServiceTest {
+     private ArticleAutoImageInsertionService passThroughAutoImageInsertionService() {
+         ArticleAutoImageInsertionService service = mock(ArticleAutoImageInsertionService.class);
+         when(service.insertForChannel(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
++        when(service.insertForChannel(any(), any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(3));
++        when(service.insertForTargetChannel(any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
+         return service;
+     }
+ 
+diff --git a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/dispatch/service/DispatchExecutionServicePlatformCandidateTest.java b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/dispatch/service/DispatchExecutionServicePlatformCandidateTest.java
+index d81dcdca..066a148a 100644
+--- a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/dispatch/service/DispatchExecutionServicePlatformCandidateTest.java
++++ b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/dispatch/service/DispatchExecutionServicePlatformCandidateTest.java
+@@ -18,7 +18,7 @@ import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
+ import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
+ import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
+ import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
+-import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
++import com.huanjing.geo.common.llm.LlmCallFacade;
+ import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
+ import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
+ import com.huanjing.geo.module.project.mapper.ProjectMapper;
+@@ -166,9 +166,7 @@ class DispatchExecutionServicePlatformCandidateTest {
+         return new DispatchExecutionService(
+                 platformMapper,
+                 mock(PlatformCredentialService.class),
+-                mock(PlatformRateLimiterService.class),
+-                mock(PlatformConcurrencyLimiterService.class),
+-                mock(LlmPlatformRouter.class),
++                mock(LlmCallFacade.class),
+                 mock(ProjectMapper.class),
+                 mock(PackageContentConfigMapper.class),
+                 mock(ArticleBatchMapper.class),
+diff --git a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/presale/service/PresaleLlmPromptQuestionServiceTest.java b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/presale/service/PresaleLlmPromptQuestionServiceTest.java
+index b625b09f..8f77249b 100644
+--- a/geo-project/geo-server/src/test/java/com/huanjing/geo/module/presale/service/PresaleLlmPromptQuestionServiceTest.java
++++ b/geo-project/geo-server/src/test/java/com/huanjing/geo/module/presale/service/PresaleLlmPromptQuestionServiceTest.java
+@@ -3,9 +3,11 @@ package com.huanjing.geo.module.presale.service;
+ import com.baomidou.mybatisplus.core.conditions.Wrapper;
+ import com.fasterxml.jackson.databind.ObjectMapper;
+ import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
++import com.huanjing.geo.common.llm.LlmCallResult;
+ import com.huanjing.geo.common.llm.LlmCallStatus;
+ import com.huanjing.geo.common.llm.LlmInvokeResult;
+-import com.huanjing.geo.common.llm.LlmInvoker;
+ import com.huanjing.geo.common.llm.LlmModelConfig;
+ import com.huanjing.geo.common.llm.LlmProperties;
+ import com.huanjing.geo.module.presale.dto.PresalePromptCategoryCode;
+@@ -44,7 +46,7 @@ class PresaleLlmPromptQuestionServiceTest {
+     @Mock
+     private PlatformCredentialService platformCredentialService;
+     @Mock
+-    private LlmInvoker llmInvoker;
++    private LlmCallFacade llmCallFacade;
+     @Mock
+     private CurrentUserService currentUserService;
+     @Mock
+@@ -57,7 +59,7 @@ class PresaleLlmPromptQuestionServiceTest {
+         service = new PresaleLlmPromptQuestionService(
+                 aiPlatformConfigMapper,
+                 platformCredentialService,
+-                llmInvoker,
++                llmCallFacade,
+                 new LlmProperties(),
+                 new ObjectMapper(),
+                 currentUserService,
+@@ -76,22 +78,22 @@ class PresaleLlmPromptQuestionServiceTest {
+         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(first, second));
+         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
+         when(platformCredentialService.resolveApiKey("bbb", null, "key-bbb")).thenReturn("key-bbb");
+-        when(llmInvoker.invoke(anyString(), any(LlmModelConfig.class)))
++        when(llmCallFacade.execute(any(LlmCallRequest.class)))
+                 .thenThrow(new com.huanjing.geo.common.llm.LlmInvokeException("HTTP 402: insufficient balance"))
+-                .thenReturn(successResult("bbb"));
++                .thenReturn(LlmCallResult.direct(successResult("bbb")));
+ 
+         LlmPromptQuestionGenerateVO result = service.generate(request());
+ 
+         assertEquals(5, result.getGeneratedTotal());
+         assertEquals(0, result.getMissingTotal());
+-        ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
+-        verify(llmInvoker, org.mockito.Mockito.times(2)).invoke(anyString(), configCaptor.capture());
++        ArgumentCaptor<LlmCallRequest> configCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
++        verify(llmCallFacade, org.mockito.Mockito.times(2)).execute(configCaptor.capture());
+         assertEquals(List.of("http://first.example/v1", "http://second.example/v1"),
+-                configCaptor.getAllValues().stream().map(LlmModelConfig::apiUrl).toList());
++                configCaptor.getAllValues().stream().map(LlmCallRequest::modelConfig).map(LlmModelConfig::apiUrl).toList());
+         assertEquals(List.of("low-model-aaa", "low-model-bbb"),
+-                configCaptor.getAllValues().stream().map(LlmModelConfig::modelId).toList());
++                configCaptor.getAllValues().stream().map(LlmCallRequest::modelConfig).map(LlmModelConfig::modelId).toList());
+         assertEquals(List.of(30_000, 30_000),
+-                configCaptor.getAllValues().stream().map(LlmModelConfig::requestTimeoutMs).toList());
++                configCaptor.getAllValues().stream().map(LlmCallRequest::modelConfig).map(LlmModelConfig::requestTimeoutMs).toList());
+     }
+ 
+     @Test
+@@ -99,7 +101,7 @@ class PresaleLlmPromptQuestionServiceTest {
+         AiPlatformConfig first = platform("aaa", "http://first.example/v1");
+         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(first));
+         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
+-        when(llmInvoker.invoke(anyString(), any(LlmModelConfig.class)))
++        when(llmCallFacade.execute(any(LlmCallRequest.class)))
+                 .thenThrow(new com.huanjing.geo.common.llm.LlmInvokeException("HTTP 402: insufficient balance"));
+ 
+         BizException ex = assertThrows(BizException.class, () -> service.generate(request()));
+@@ -112,8 +114,8 @@ class PresaleLlmPromptQuestionServiceTest {
+         AiPlatformConfig platform = platform("aaa", "http://first.example/v1");
+         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(platform));
+         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
+-        when(llmInvoker.invoke(anyString(), any(LlmModelConfig.class)))
+-                .thenReturn(result("""
++        when(llmCallFacade.execute(any(LlmCallRequest.class)))
++                .thenReturn(LlmCallResult.direct(result("""
+                         [
+                           {"categoryCode":"PROBLEM","promptContent":"广州诗帝尼门窗有限公司售后靠不靠谱?"},
+                           {"categoryCode":"PROBLEM","promptContent":"广州装修选门窗时售后和安装怎么避坑?"},
+@@ -122,7 +124,7 @@ class PresaleLlmPromptQuestionServiceTest {
+                           {"categoryCode":"COGNITIVE","promptContent":"诗帝尼门窗质量口碑如何?"},
+                           {"categoryCode":"COGNITIVE","promptContent":"诗帝尼在门窗行业知名度如何?"}
+                         ]
+-                        """, "aaa"));
++                        """, "aaa")));
+ 
+         LlmPromptQuestionGenerateVO result = service.generate(problemRequest());
+ 
+@@ -133,9 +135,9 @@ class PresaleLlmPromptQuestionServiceTest {
+         assertTrue(result.getQuestions().stream()
+                 .anyMatch(q -> q.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
+                         && q.getPromptContent().equals("广州装修选门窗时售后和安装怎么避坑?")));
+-        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+-        verify(llmInvoker).invoke(promptCaptor.capture(), any(LlmModelConfig.class));
+-        assertTrue(promptCaptor.getValue().contains("PROBLEM 问题型禁止直接提及基础信息中的品牌名称"));
++        ArgumentCaptor<LlmCallRequest> promptCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
++        verify(llmCallFacade).execute(promptCaptor.capture());
++        assertTrue(promptCaptor.getValue().prompt().contains("PROBLEM 问题型禁止直接提及基础信息中的品牌名称"));
+     }
+ 
+     private static LlmPromptQuestionGenerateRequest request() {
+
+diff --git a/geo-project/geo-server/docs/llm-call-facade-inventory.md b/geo-project/geo-server/docs/llm-call-facade-inventory.md
+new file mode 100644
+index 00000000..d0d4f448
+--- /dev/null
++++ b/geo-project/geo-server/docs/llm-call-facade-inventory.md
+@@ -0,0 +1,28 @@
++# LLM Call Facade Inventory
++
++This inventory records the call-site mapping used by the v4 behavior-preserving LLM facade migration.
++
++| Call site | Business flow | Previous access | Previous routing | Previous wait | Error handling | Transaction | Target tuple |
++|---|---|---|---|---|---|---|---|
++| `DispatchExecutionService.invokeWithFallback` | brand statement / legacy dispatch fallback | custom HTTP + legacy limiter | legacy dispatch primary/backup | blocking on legacy concurrency limiter | `InvocationResult.failure` via `BizException` mapping | no | `LEGACY_LIMITER` / `BLOCKING` / `LEGACY_DISPATCH_ROUTING` |
++| `DispatchExecutionService.invokeArticleContentWithRouter` | article generation dispatch | router | failover | fast fail | `LlmRouteException` to `InvocationResult` / resource busy | no | `GATEWAY` / fast fail / `FAILOVER` |
++| `DispatchExecutionService.invokeMonitoringWithRouter` | BI daily poll shard | router | failover | fast fail | `LlmRouteException` to `InvocationResult` / resource busy | no | `GATEWAY` / fast fail / `FAILOVER` |
++| `DispatchExecutionService.judgeEffectiveHitIfNeeded` | monitoring effective hit judge | router | failover | fast fail | judge fallback | no | `GATEWAY` / fast fail / `FAILOVER` |
++| `BaselineObservationCollectionWorker.collectOne` | baseline sampling | router | pinned-effective before migration | blocking | observation failure row | no | `GATEWAY` / blocking / strict `PINNED` |
++| `BaselineSemanticJudgeService.invokeJudge` | baseline semantic judge | router | candidate failover | blocking | rule fallback | no | `GATEWAY` / blocking / `FAILOVER` |
++| `BaselineReportPollService.pollOne` | baseline report polling | router | failover | fast fail | failed poll row | no | `GATEWAY` / fast fail / `FAILOVER` |
++| `ArticleGenerationEngine.invokeModel` | article generation | direct invoker or router | pinned direct / failover | blocking for direct, fast fail for router | `LlmInvokeException` / `LlmRouteException` wrapping | no | `GATEWAY` / existing wait / existing routing |
++| `KeywordLlmQuestionService.invokeOnce` | keyword question generation | direct invoker | pinned direct | blocking | coded `BizException` fallback | no | `GATEWAY` / blocking / `PINNED` |
++| `GeoQuestionService.invokeQuestionModel` | GEO question generation | direct invoker | pinned direct | blocking | `BizException` wrapping | async worker | `GATEWAY` / blocking / `PINNED` |
++| `GeoQuestionService.regenerateQuestion` | GEO question regeneration | direct invoker | pinned direct | blocking | `BizException` wrapping | no | `GATEWAY` / blocking / `PINNED` |
++| `PresaleLlmPromptQuestionService.invokePlatform` | presale prompt question generation | direct invoker | manual candidate loop | blocking | provider exception / quota handling | no | `GATEWAY` / blocking / `PINNED` per candidate |
++| `OpenAiCompatiblePresaleLlmInvoker.invokeWithRetry` | presale report generation adapter | module-local adapter to direct invoker | presale-selected platform | blocking | presale `LlmInvokeException` translation | no | `GATEWAY` / blocking / `PINNED` |
++| `BrandOfferingPromptSelector.selectWithModel` | article offering selection | direct invoker | pinned direct | blocking | local fallback | no | `GATEWAY` / blocking / `PINNED` |
++| `BatchArticleGenerationService.selectSmartTemplates` | batch article template matching | direct invoker | pinned direct | blocking | weighted fallback | no | `GATEWAY` / blocking / `PINNED` |
++
++## Bypass Summary
++
++- LLM chat-completions custom HTTP under `module/**` has been removed from production call paths.
++- The former level-1 dark traffic path is now routed through `LlmCallFacade` with `LEGACY_LIMITER`, preserving legacy dispatch limiter behavior and avoiding gateway permit behavior changes.
++- `PresaleLlmInvoker` remains a module-local business adapter, but its production implementation now uses `LlmCallFacade`.
++- Capacity reads in module code should go through `LlmCapacityView`, not `LlmExecutionGateway` directly.
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallFacade.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallFacade.java
+new file mode 100644
+index 00000000..faf6bfeb
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallFacade.java
+@@ -0,0 +1,145 @@
++package com.huanjing.geo.common.llm;
++
++import com.fasterxml.jackson.databind.ObjectMapper;
++import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.limiter.PlatformConcurrencyLimiterService;
++import com.huanjing.geo.common.llm.limiter.PlatformRateLimiterService;
++import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
++import com.huanjing.geo.common.llm.router.LlmRouteResult;
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Service;
++import org.springframework.util.StringUtils;
++
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.atomic.AtomicLong;
++
++@Service
++@RequiredArgsConstructor
++public class LlmCallFacade {
++    private final LlmPlatformRouter platformRouter;
++    private final LlmInvoker llmInvoker;
++    private final PlatformRateLimiterService platformRateLimiterService;
++    private final PlatformConcurrencyLimiterService platformConcurrencyLimiterService;
++    private final LlmHttpClient llmHttpClient;
++    private final ObjectMapper objectMapper;
++    private final ConcurrentHashMap<String, AtomicLong> counters = new ConcurrentHashMap<>();
++
++    public LlmCallResult execute(LlmCallRequest request) throws LlmInvokeException {
++        incrementCounter(request);
++        return switch (request.governanceStack()) {
++            case GATEWAY -> executeGateway(request);
++            case LEGACY_LIMITER -> executeLegacyLimiter(request);
++            case NO_PERMIT_LEGACY -> executeLegacyHttp(request);
++        };
++    }
++
++    public Map<String, Long> debugCounters() {
++        Map<String, Long> snapshot = new LinkedHashMap<>();
++        counters.forEach((key, value) -> snapshot.put(key, value.get()));
++        return snapshot;
++    }
++
++    private LlmCallResult executeGateway(LlmCallRequest request) throws LlmInvokeException {
++        if (request.routeRequest() != null) {
++            LlmRouteResult routed = platformRouter.invoke(request.routeRequest());
++            return LlmCallResult.routed(routed);
++        }
++        if (request.modelConfig() == null) {
++            throw new IllegalArgumentException("modelConfig is required for direct LLM call");
++        }
++        return LlmCallResult.direct(llmInvoker.invoke(request.prompt(), request.modelConfig()));
++    }
++
++    private LlmCallResult executeLegacyLimiter(LlmCallRequest request) {
++        if (request.legacyPlatformConfig() == null) {
++            throw new IllegalArgumentException("legacyPlatformConfig is required for legacy limiter calls");
++        }
++        if (!platformRateLimiterService.tryAcquire(request.legacyPlatformConfig(), request.legacyTokenCost())) {
++            throw new BizException(429, "Platform limited: " + request.legacyPlatformCode());
++        }
++        try (PlatformConcurrencyLimiterService.Permit ignored =
++                     platformConcurrencyLimiterService.acquire(request.legacyPlatformConfig())) {
++            return executeLegacyHttp(request);
++        }
++    }
++
++    private LlmCallResult executeLegacyHttp(LlmCallRequest request) {
++        long started = System.currentTimeMillis();
++        try {
++            LlmHttpClient.HttpResponse response = llmHttpClient.postJson(
++                    normalizeChatCompletionsUrl(request.legacyApiUrl()),
++                    legacyHeaders(request.legacyApiKey()),
++                    legacyPayload(request),
++                    request.legacyConnectTimeoutMs(),
++                    request.legacyRequestTimeoutMs()
++            );
++            if (response.statusCode() < 200 || response.statusCode() >= 300) {
++                throw new BizException(response.statusCode(),
++                        "Model API HTTP " + response.statusCode() + ": " + safeSnippet(response.body()));
++            }
++            return LlmCallResult.raw(
++                    response.body(),
++                    request.legacyPlatformCode(),
++                    request.legacyPlatformName(),
++                    request.legacyChannel(),
++                    request.legacyModelId(),
++                    Math.max(1L, System.currentTimeMillis() - started),
++                    request.requestCount()
++            );
++        } catch (BizException ex) {
++            throw ex;
++        } catch (Exception ex) {
++            throw new BizException(500, "Model API invoke failed: " + ex.getMessage());
++        }
++    }
++
++    private Map<String, String> legacyHeaders(String apiKey) {
++        Map<String, String> headers = new LinkedHashMap<>();
++        headers.put("Content-Type", "application/json");
++        headers.put("Authorization", "Bearer " + apiKey);
++        headers.put("api-key", apiKey);
++        headers.put("x-api-key", apiKey);
++        return headers;
++    }
++
++    private String legacyPayload(LlmCallRequest request) throws Exception {
++        Map<String, Object> payload = new LinkedHashMap<>();
++        payload.put("model", request.legacyModelId());
++        payload.put("temperature", request.legacyTemperature());
++        List<Map<String, String>> messages = new ArrayList<>();
++        if (StringUtils.hasText(request.legacySystemPrompt())) {
++            messages.add(Map.of("role", "system", "content", request.legacySystemPrompt()));
++        }
++        messages.add(Map.of("role", "user", "content", request.legacyUserPrompt()));
++        payload.put("messages", messages);
++        return objectMapper.writeValueAsString(payload);
++    }
++
++    private String normalizeChatCompletionsUrl(String apiUrl) {
++        String trimmed = apiUrl.trim();
++        if (trimmed.endsWith("/chat/completions")) {
++            return trimmed;
++        }
++        if (trimmed.endsWith("/")) {
++            return trimmed + "chat/completions";
++        }
++        return trimmed + "/chat/completions";
++    }
++
++    private String safeSnippet(String text) {
++        if (!StringUtils.hasText(text)) {
++            return "";
++        }
++        String trimmed = text.trim();
++        return trimmed.length() <= 300 ? trimmed : trimmed.substring(0, 300);
++    }
++
++    private void incrementCounter(LlmCallRequest request) {
++        String key = request.feature() + "|" + request.routingStrategy() + "|" + request.governanceStack();
++        counters.computeIfAbsent(key, ignored -> new AtomicLong()).incrementAndGet();
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallRequest.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallRequest.java
+new file mode 100644
+index 00000000..ca1139f6
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallRequest.java
+@@ -0,0 +1,129 @@
++package com.huanjing.geo.common.llm;
++
++import com.huanjing.geo.common.llm.router.LlmRouteRequest;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import org.springframework.util.StringUtils;
++
++public record LlmCallRequest(LlmGovernanceStack governanceStack,
++                             LlmRoutingStrategy routingStrategy,
++                             LlmWaitSemantics waitSemantics,
++                             String feature,
++                             String prompt,
++                             LlmModelConfig modelConfig,
++                             LlmRouteRequest routeRequest,
++                             AiPlatformConfig legacyPlatformConfig,
++                             String legacyPlatformCode,
++                             String legacyPlatformName,
++                             String legacyChannel,
++                             String legacyApiUrl,
++                             String legacyModelId,
++                             String legacyApiKey,
++                             String legacySystemPrompt,
++                             String legacyUserPrompt,
++                             double legacyTemperature,
++                             int legacyTokenCost,
++                             int legacyConnectTimeoutMs,
++                             int legacyRequestTimeoutMs,
++                             int requestCount) {
++
++    public static LlmCallRequest direct(String prompt, LlmModelConfig modelConfig) {
++        return new LlmCallRequest(
++                LlmGovernanceStack.GATEWAY,
++                LlmRoutingStrategy.PINNED,
++                modelConfig != null && modelConfig.useExecutionGateway() ? LlmWaitSemantics.BLOCKING : LlmWaitSemantics.FAST_FAIL,
++                modelConfig == null ? null : modelConfig.feature(),
++                prompt,
++                modelConfig,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                0D,
++                1,
++                0,
++                0,
++                1
++        );
++    }
++
++    public static LlmCallRequest routed(LlmRouteRequest routeRequest) {
++        return new LlmCallRequest(
++                LlmGovernanceStack.GATEWAY,
++                routeRequest == null ? LlmRoutingStrategy.FAILOVER : routeRequest.routingStrategy(),
++                routeRequest != null && routeRequest.waitForPermit() ? LlmWaitSemantics.BLOCKING : LlmWaitSemantics.FAST_FAIL,
++                routeRequest == null ? null : routeRequest.feature(),
++                null,
++                null,
++                routeRequest,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                0D,
++                1,
++                0,
++                0,
++                1
++        );
++    }
++
++    public static LlmCallRequest legacy(AiPlatformConfig platformConfig,
++                                        String platformCode,
++                                        String platformName,
++                                        String channel,
++                                        String apiUrl,
++                                        String modelId,
++                                        String apiKey,
++                                        String systemPrompt,
++                                        String userPrompt,
++                                        double temperature,
++                                        int tokenCost,
++                                        int connectTimeoutMs,
++                                        int requestTimeoutMs,
++                                        String feature,
++                                        int requestCount) {
++        return new LlmCallRequest(
++                LlmGovernanceStack.LEGACY_LIMITER,
++                LlmRoutingStrategy.LEGACY_DISPATCH_ROUTING,
++                LlmWaitSemantics.BLOCKING,
++                feature,
++                null,
++                null,
++                null,
++                platformConfig,
++                platformCode,
++                platformName,
++                channel,
++                apiUrl,
++                modelId,
++                apiKey,
++                systemPrompt,
++                userPrompt,
++                temperature,
++                tokenCost,
++                connectTimeoutMs,
++                requestTimeoutMs,
++                Math.max(requestCount, 1)
++        );
++    }
++
++    public LlmCallRequest {
++        governanceStack = governanceStack == null ? LlmGovernanceStack.GATEWAY : governanceStack;
++        routingStrategy = routingStrategy == null ? LlmRoutingStrategy.FAILOVER : routingStrategy;
++        waitSemantics = waitSemantics == null ? LlmWaitSemantics.CUSTOM : waitSemantics;
++        feature = StringUtils.hasText(feature) ? feature.trim() : "generic";
++        legacyTokenCost = Math.max(legacyTokenCost, 1);
++        requestCount = Math.max(requestCount, 1);
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallResult.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallResult.java
+new file mode 100644
+index 00000000..b0152bf1
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallResult.java
+@@ -0,0 +1,66 @@
++package com.huanjing.geo.common.llm;
++
++import com.huanjing.geo.common.llm.router.LlmRouteResult;
++
++public record LlmCallResult(LlmInvokeResult invokeResult,
++                            LlmRouteResult routeResult,
++                            String rawResponseText,
++                            String platformCode,
++                            String platformName,
++                            String channel,
++                            String modelId,
++                            String modelName,
++                            long durationMs,
++                            int requestCount) {
++
++    public static LlmCallResult direct(LlmInvokeResult result) {
++        return new LlmCallResult(
++                result,
++                null,
++                result.responseText(),
++                result.platformCode(),
++                result.platformName(),
++                null,
++                result.modelId(),
++                result.modelName(),
++                result.durationMs() == null ? 0L : result.durationMs(),
++                1
++        );
++    }
++
++    public static LlmCallResult routed(LlmRouteResult result) {
++        return new LlmCallResult(
++                result.invokeResult(),
++                result,
++                result.responseText(),
++                result.platformCode(),
++                result.platformName(),
++                result.channel(),
++                result.modelId(),
++                result.modelName(),
++                result.durationMs(),
++                result.requestCount()
++        );
++    }
++
++    public static LlmCallResult raw(String responseText,
++                                    String platformCode,
++                                    String platformName,
++                                    String channel,
++                                    String modelId,
++                                    long durationMs,
++                                    int requestCount) {
++        return new LlmCallResult(
++                null,
++                null,
++                responseText,
++                platformCode,
++                platformName,
++                channel,
++                modelId,
++                null,
++                durationMs,
++                requestCount
++        );
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCapacityView.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCapacityView.java
+new file mode 100644
+index 00000000..be21123f
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCapacityView.java
+@@ -0,0 +1,15 @@
++package com.huanjing.geo.common.llm;
++
++import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Service;
++
++@Service
++@RequiredArgsConstructor
++public class LlmCapacityView {
++    private final LlmExecutionGateway executionGateway;
++
++    public Long activePlatformCount(String platformCode) {
++        return executionGateway.activePlatformCount(platformCode);
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmGovernanceStack.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmGovernanceStack.java
+new file mode 100644
+index 00000000..3043cdb6
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmGovernanceStack.java
+@@ -0,0 +1,7 @@
++package com.huanjing.geo.common.llm;
++
++public enum LlmGovernanceStack {
++    GATEWAY,
++    LEGACY_LIMITER,
++    NO_PERMIT_LEGACY
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmRoutingStrategy.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmRoutingStrategy.java
+new file mode 100644
+index 00000000..5dcc295c
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmRoutingStrategy.java
+@@ -0,0 +1,8 @@
++package com.huanjing.geo.common.llm;
++
++public enum LlmRoutingStrategy {
++    FAILOVER,
++    PINNED,
++    CANDIDATE_LIST,
++    LEGACY_DISPATCH_ROUTING
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmWaitSemantics.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmWaitSemantics.java
+new file mode 100644
+index 00000000..2fbf7773
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmWaitSemantics.java
+@@ -0,0 +1,7 @@
++package com.huanjing.geo.common.llm;
++
++public enum LlmWaitSemantics {
++    FAST_FAIL,
++    BLOCKING,
++    CUSTOM
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/limiter/PlatformRateLimiterService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/limiter/PlatformRateLimiterService.java
+new file mode 100644
+index 00000000..a83006b6
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/limiter/PlatformRateLimiterService.java
+@@ -0,0 +1,52 @@
++package com.huanjing.geo.common.llm.limiter;
++
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import lombok.RequiredArgsConstructor;
++import org.springframework.data.redis.core.StringRedisTemplate;
++import org.springframework.data.redis.core.script.DefaultRedisScript;
++import org.springframework.stereotype.Service;
++
++import java.time.LocalDateTime;
++import java.time.format.DateTimeFormatter;
++
++@Service
++@RequiredArgsConstructor
++public class PlatformRateLimiterService {
++
++    private static final DateTimeFormatter KEY_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
++    private static final DefaultRedisScript<Long> LIMIT_SCRIPT = new DefaultRedisScript<>(
++            "local rpm=tonumber(redis.call('GET', KEYS[1]) or '0') " +
++                    "local tpm=tonumber(redis.call('GET', KEYS[2]) or '0') " +
++                    "local rpmLimit=tonumber(ARGV[1]) " +
++                    "local tpmLimit=tonumber(ARGV[2]) " +
++                    "local tokenCost=tonumber(ARGV[3]) " +
++                    "if rpm + 1 > rpmLimit then return 0 end " +
++                    "if tpm + tokenCost > tpmLimit then return 0 end " +
++                    "redis.call('INCRBY', KEYS[1], 1) " +
++                    "redis.call('INCRBY', KEYS[2], tokenCost) " +
++                    "redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4])) " +
++                    "redis.call('EXPIRE', KEYS[2], tonumber(ARGV[4])) " +
++                    "return 1",
++            Long.class
++    );
++
++    private final StringRedisTemplate redisTemplate;
++
++    public boolean tryAcquire(AiPlatformConfig config, int tokenCost) {
++        int rpmLimit = config.getRpmLimit() == null || config.getRpmLimit() <= 0 ? 60 : config.getRpmLimit();
++        int tpmLimit = config.getTpmLimit() == null || config.getTpmLimit() <= 0 ? 60000 : config.getTpmLimit();
++        String minute = LocalDateTime.now().format(KEY_FMT);
++        String rpmKey = "geo:dispatch:limiter:rpm:" + config.getPlatformCode() + ":" + minute;
++        String tpmKey = "geo:dispatch:limiter:tpm:" + config.getPlatformCode() + ":" + minute;
++
++        Long result = redisTemplate.execute(
++                LIMIT_SCRIPT,
++                java.util.List.of(rpmKey, tpmKey),
++                String.valueOf(rpmLimit),
++                String.valueOf(tpmLimit),
++                String.valueOf(Math.max(tokenCost, 1)),
++                "120"
++        );
++        return result != null && result > 0;
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/limiter/PlatformConcurrencyLimiterService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/limiter/PlatformConcurrencyLimiterService.java
+new file mode 100644
+index 00000000..6b82fe7d
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/limiter/PlatformConcurrencyLimiterService.java
+@@ -0,0 +1,92 @@
++package com.huanjing.geo.common.llm.limiter;
++
++import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import org.springframework.stereotype.Service;
++import org.springframework.util.StringUtils;
++
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.ConcurrentMap;
++import java.util.concurrent.locks.Condition;
++import java.util.concurrent.locks.ReentrantLock;
++
++@Service
++public class PlatformConcurrencyLimiterService {
++
++    private final ConcurrentMap<String, Slot> slots = new ConcurrentHashMap<>();
++
++    public Permit acquire(AiPlatformConfig config) {
++        if (config == null || !StringUtils.hasText(config.getPlatformCode())) {
++            throw new BizException(500, "Platform code is required for concurrency limit");
++        }
++        String platformCode = config.getPlatformCode().trim();
++        int limit = config.getConcurrencyLimit() == null || config.getConcurrencyLimit() <= 0
++                ? 1
++                : config.getConcurrencyLimit();
++        Slot slot = slots.computeIfAbsent(platformCode, k -> new Slot());
++        slot.acquire(limit);
++        return new Permit(platformCode, slot);
++    }
++
++    public static final class Permit implements AutoCloseable {
++        private final String platformCode;
++        private final Slot slot;
++        private boolean released;
++
++        private Permit(String platformCode, Slot slot) {
++            this.platformCode = platformCode;
++            this.slot = slot;
++        }
++
++        public String platformCode() {
++            return platformCode;
++        }
++
++        @Override
++        public void close() {
++            if (released) {
++                return;
++            }
++            released = true;
++            slot.release();
++        }
++    }
++
++    private static final class Slot {
++        private final ReentrantLock lock = new ReentrantLock(true);
++        private final Condition available = lock.newCondition();
++        private int limit = 1;
++        private int active = 0;
++
++        void acquire(int requestedLimit) {
++            lock.lock();
++            try {
++                limit = Math.max(requestedLimit, 1);
++                while (active >= limit) {
++                    try {
++                        available.await();
++                    } catch (InterruptedException ex) {
++                        Thread.currentThread().interrupt();
++                        throw new BizException(500, "Interrupted while waiting for platform concurrency slot");
++                    }
++                    limit = Math.max(requestedLimit, 1);
++                }
++                active++;
++            } finally {
++                lock.unlock();
++            }
++        }
++
++        void release() {
++            lock.lock();
++            try {
++                if (active > 0) {
++                    active--;
++                }
++                available.signal();
++            } finally {
++                lock.unlock();
++            }
++        }
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineObservationCollectionWorker.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineObservationCollectionWorker.java
+new file mode 100644
+index 00000000..8422c079
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineObservationCollectionWorker.java
+@@ -0,0 +1,773 @@
++package com.huanjing.geo.module.project.service;
++
++import cn.hutool.json.JSONUtil;
++import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
++import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
++import com.huanjing.geo.common.llm.LlmCallResult;
++import com.huanjing.geo.common.llm.LlmModelConfig;
++import com.huanjing.geo.common.llm.LlmRoutingStrategy;
++import com.huanjing.geo.common.llm.pool.LlmPoolProperties;
++import com.huanjing.geo.common.llm.router.LlmFeature;
++import com.huanjing.geo.common.llm.router.LlmRouteException;
++import com.huanjing.geo.common.llm.router.LlmRouteFailureKind;
++import com.huanjing.geo.common.llm.router.LlmRouteRequest;
++import com.huanjing.geo.common.llm.router.LlmRouteResult;
++import com.huanjing.geo.common.llm.limiter.PlatformConcurrencyLimiterService;
++import com.huanjing.geo.module.project.entity.BaselineCollectionTask;
++import com.huanjing.geo.module.project.entity.BaselineCompetitorMention;
++import com.huanjing.geo.module.project.entity.BaselineCompetitorSource;
++import com.huanjing.geo.module.project.entity.BaselineHighlightSpan;
++import com.huanjing.geo.module.project.entity.BaselineObservation;
++import com.huanjing.geo.module.project.entity.BaselineObservationScore;
++import com.huanjing.geo.module.project.entity.BaselineQuestionSnapshot;
++import com.huanjing.geo.module.project.entity.BaselineSnapshot;
++import com.huanjing.geo.module.project.entity.Project;
++import com.huanjing.geo.module.project.mapper.BaselineCollectionTaskMapper;
++import com.huanjing.geo.module.project.mapper.BaselineCompetitorMentionMapper;
++import com.huanjing.geo.module.project.mapper.BaselineCompetitorSourceMapper;
++import com.huanjing.geo.module.project.mapper.BaselineHighlightSpanMapper;
++import com.huanjing.geo.module.project.mapper.BaselineObservationMapper;
++import com.huanjing.geo.module.project.mapper.BaselineObservationScoreMapper;
++import com.huanjing.geo.module.project.mapper.BaselineQuestionSnapshotMapper;
++import com.huanjing.geo.module.project.mapper.BaselineSnapshotMapper;
++import com.huanjing.geo.module.project.mapper.ProjectMapper;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.dao.DuplicateKeyException;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.support.TransactionTemplate;
++import org.springframework.util.StringUtils;
++
++import java.time.LocalDateTime;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.CompletionException;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.Executor;
++import java.util.concurrent.ExecutionException;
++import java.util.concurrent.Semaphore;
++import java.util.concurrent.ThreadLocalRandom;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.TimeoutException;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.stream.Collectors;
++
++@Slf4j
++@Service
++@RequiredArgsConstructor
++public class BaselineObservationCollectionWorker {
++    private static final String SCORE_ALGORITHM_VERSION = BaselineCanonicalVersionPolicy.SCORE_ALGORITHM_VERSION;
++    private static final String HIGHLIGHT_ALGORITHM_VERSION = BaselineCanonicalVersionPolicy.HIGHLIGHT_ALGORITHM_VERSION;
++    private static final String COMPETITOR_NORMALIZATION_VERSION = BaselineCanonicalVersionPolicy.COMPETITOR_NORMALIZATION_VERSION;
++    private static final long RUNNING_STALE_MINUTES = 30;
++    private static final Object QUEUE_LOCK = new Object();
++    private static final long RATE_LIMIT_BACKOFF_MS = 10_000L;
++    private static final long UNKNOWN_BACKOFF_MS = 2_000L;
++
++    private final BaselineCollectionTaskMapper baselineCollectionTaskMapper;
++    private final BaselineSnapshotMapper baselineSnapshotMapper;
++    private final BaselineQuestionSnapshotMapper baselineQuestionSnapshotMapper;
++    private final BaselineObservationMapper baselineObservationMapper;
++    private final BaselineObservationScoreMapper baselineObservationScoreMapper;
++    private final BaselineHighlightSpanMapper baselineHighlightSpanMapper;
++    private final BaselineCompetitorSourceMapper baselineCompetitorSourceMapper;
++    private final BaselineCompetitorMentionMapper baselineCompetitorMentionMapper;
++    private final ProjectMapper projectMapper;
++    private final AiPlatformConfigMapper aiPlatformConfigMapper;
++    private final LlmCallFacade llmCallFacade;
++    private final LlmPoolProperties llmPoolProperties;
++    private final TransactionTemplate transactionTemplate;
++    private final PlatformConcurrencyLimiterService platformConcurrencyLimiterService;
++    private final BaselineSemanticJudgeService baselineSemanticJudgeService;
++    @Autowired
++    @Qualifier("taskExecutor")
++    private Executor taskExecutor;
++    @Autowired
++    @Qualifier("baselineCollectionSampleExecutor")
++    private Executor baselineCollectionSampleExecutor;
++
++    @Value("${baseline.collection.db-write-max-concurrency:6}")
++    private int dbWriteMaxConcurrency;
++
++    @Value("${baseline.collection.transient-retry-max-attempts:2}")
++    private int transientRetryMaxAttempts;
++
++    @Value("${baseline.collection.transient-retry-initial-backoff-ms:800}")
++    private long transientRetryInitialBackoffMs;
++
++    @Value("${baseline.collection.transient-retry-max-backoff-ms:5000}")
++    private long transientRetryMaxBackoffMs;
++
++    @Value("${baseline.collection.model-connect-timeout-ms:10000}")
++    private int modelConnectTimeoutMs;
++
++    @Value("${baseline.collection.model-request-timeout-ms:45000}")
++    private int modelRequestTimeoutMs;
++
++    @Value("${baseline.collection.max-concurrent-baselines:1}")
++    private int maxConcurrentBaselines;
++
++    private volatile Semaphore dbWriteSemaphore;
++    private final ConcurrentHashMap<String, PlatformBackoffState> platformBackoffStates = new ConcurrentHashMap<>();
++
++    public void runTask(Long taskId) {
++        AtomicBoolean claimed = new AtomicBoolean(false);
++        synchronized (QUEUE_LOCK) {
++            transactionTemplate.executeWithoutResult(status -> {
++                BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++                if (task == null
++                        || BaselineObservationCollectionService.TASK_STATUS_COMPLETED.equals(task.getStatus())
++                        || BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus())) {
++                    return;
++                }
++                LocalDateTime now = LocalDateTime.now();
++                LocalDateTime staleBefore = now.minusMinutes(RUNNING_STALE_MINUTES);
++                if (isFreshRunning(task, staleBefore)) {
++                    return;
++                }
++                if (BaselineObservationCollectionService.TASK_STATUS_PENDING.equals(task.getStatus())
++                        && baselineCollectionTaskMapper.countRunning() >= normalizedMaxConcurrentBaselines()) {
++                    return;
++                }
++                BaselineCollectionTask update = new BaselineCollectionTask();
++                update.setStatus(BaselineObservationCollectionService.TASK_STATUS_RUNNING);
++                update.setStartedAt(task.getStartedAt() == null ? now : task.getStartedAt());
++                update.setUpdatedAt(now);
++                update.setErrorMessage(null);
++                int updated = baselineCollectionTaskMapper.update(update, new LambdaUpdateWrapper<BaselineCollectionTask>()
++                        .eq(BaselineCollectionTask::getId, taskId)
++                        .ne(BaselineCollectionTask::getStatus, BaselineObservationCollectionService.TASK_STATUS_COMPLETED)
++                        .ne(BaselineCollectionTask::getStatus, BaselineObservationCollectionService.TASK_STATUS_CANCELED)
++                        .and(wrapper -> wrapper
++                                .ne(BaselineCollectionTask::getStatus, BaselineObservationCollectionService.TASK_STATUS_RUNNING)
++                                .or()
++                                .isNull(BaselineCollectionTask::getUpdatedAt)
++                                .or()
++                                .le(BaselineCollectionTask::getUpdatedAt, staleBefore)));
++                claimed.set(updated > 0);
++            });
++        }
++        if (!claimed.get()) {
++            return;
++        }
++
++        try {
++            processTask(taskId);
++            if (!isCanceled(taskId)) {
++                finishTask(taskId);
++            }
++        } catch (Exception ex) {
++            failTask(taskId, ex);
++            log.warn("Baseline collection task failed, taskId={}", taskId, ex);
++        } finally {
++            dispatchPending();
++        }
++    }
++
++    public void dispatchPending() {
++        int available;
++        synchronized (QUEUE_LOCK) {
++            available = Math.max(0, normalizedMaxConcurrentBaselines() - baselineCollectionTaskMapper.countRunning());
++        }
++        if (available <= 0) {
++            return;
++        }
++        List<BaselineCollectionTask> pendingTasks = baselineCollectionTaskMapper.selectPending(available);
++        for (BaselineCollectionTask pendingTask : pendingTasks) {
++            taskExecutor.execute(() -> runTask(pendingTask.getId()));
++        }
++    }
++
++    private void processTask(Long taskId) {
++        BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++        BaselineSnapshot snapshot = baselineSnapshotMapper.selectById(task.getBaselineId());
++        Project project = projectMapper.selectById(task.getProjectId());
++        List<BaselineQuestionSnapshot> questions = baselineQuestionSnapshotMapper.selectList(
++                new LambdaQueryWrapper<BaselineQuestionSnapshot>()
++                        .eq(BaselineQuestionSnapshot::getBaselineId, task.getBaselineId())
++                        .orderByAsc(BaselineQuestionSnapshot::getSortOrder, BaselineQuestionSnapshot::getId));
++        List<AiPlatformConfig> platforms = loadPlatforms(task);
++        List<String> aliases = parseAliases(project.getProjectAliases());
++        List<BaselineObservationScoringRules.CompetitorName> competitors = loadCompetitors(task.getBaselineId());
++        List<CompletableFuture<Void>> futures = new ArrayList<>();
++        for (BaselineQuestionSnapshot question : questions) {
++            for (AiPlatformConfig platform : platforms) {
++                for (int sampleSeq = 1; sampleSeq <= task.getSamplePerCell(); sampleSeq++) {
++                    if (isCanceled(taskId)) {
++                        return;
++                    }
++                    if (observationExists(task.getBaselineId(), question.getId(), platform.getPlatformCode(), sampleSeq)) {
++                        continue;
++                    }
++                    int currentSampleSeq = sampleSeq;
++                    futures.add(CompletableFuture.runAsync(() -> collectAndPersistSample(
++                            taskId,
++                            snapshot,
++                            question,
++                            platform,
++                            project,
++                            aliases,
++                            competitors,
++                            currentSampleSeq
++                    ), baselineCollectionSampleExecutor));
++                }
++            }
++        }
++        waitForSamples(taskId, futures);
++    }
++
++    private void collectAndPersistSample(Long taskId,
++                                         BaselineSnapshot snapshot,
++                                         BaselineQuestionSnapshot question,
++                                         AiPlatformConfig platform,
++                                         Project project,
++                                         List<String> aliases,
++                                         List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                         int sampleSeq) {
++        if (isCanceled(taskId)
++                || observationExists(snapshot.getId(), question.getId(), platform.getPlatformCode(), sampleSeq)) {
++            return;
++        }
++        awaitPlatformBackoff(platform.getPlatformCode());
++        try (PlatformConcurrencyLimiterService.Permit ignored = platformConcurrencyLimiterService.acquire(platform)) {
++            if (isCanceled(taskId)) {
++                return;
++            }
++            BaselineObservation observation = collectOneWithRetry(snapshot, question, platform, sampleSeq);
++            if (isCanceled(taskId)) {
++                return;
++            }
++            BaselineSemanticJudgeResult judgeResult = null;
++            if ("SUCCESS".equals(observation.getCallStatus())) {
++                judgeResult = baselineSemanticJudgeService.judge(
++                        question,
++                        project,
++                        aliases,
++                        competitors,
++                        platform,
++                        observation.getRawResponseText()
++                );
++            }
++            persistObservation(taskId, snapshot, question, project, aliases, competitors, observation, judgeResult);
++        }
++    }
++
++    private void waitForSamples(Long taskId, List<CompletableFuture<Void>> futures) {
++        if (futures.isEmpty()) {
++            return;
++        }
++        CompletableFuture<Void> all = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
++        try {
++            while (!all.isDone()) {
++                if (isCanceled(taskId)) {
++                    futures.forEach(future -> future.cancel(true));
++                    return;
++                }
++                try {
++                    all.get(1, TimeUnit.SECONDS);
++                } catch (TimeoutException ignored) {
++                    // Poll cancellation state without blocking indefinitely.
++                }
++            }
++            all.get();
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            futures.forEach(future -> future.cancel(true));
++            throw new IllegalStateException("Interrupted while waiting for baseline samples", ex);
++        } catch (ExecutionException | CompletionException ex) {
++            Throwable cause = ex.getCause() == null ? ex : ex.getCause();
++            if (cause instanceof RuntimeException runtimeException) {
++                throw runtimeException;
++            }
++            throw new IllegalStateException(cause);
++        }
++    }
++
++    private BaselineObservation collectOneWithRetry(BaselineSnapshot snapshot,
++                                                    BaselineQuestionSnapshot question,
++                                                    AiPlatformConfig platform,
++                                                    int sampleSeq) {
++        int maxAttempts = Math.max(1, transientRetryMaxAttempts);
++        BaselineObservation last = null;
++        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
++            last = collectOne(snapshot, question, platform, sampleSeq);
++            if ("SUCCESS".equals(last.getCallStatus()) || !isTransientFailure(last) || attempt >= maxAttempts) {
++                return last;
++            }
++            registerPlatformBackoff(platform.getPlatformCode(), last.getErrorCode(), attempt);
++            sleepBeforeRetry(attempt, last.getErrorCode());
++        }
++        return last;
++    }
++
++    private BaselineObservation collectOne(BaselineSnapshot snapshot,
++                                           BaselineQuestionSnapshot question,
++                                           AiPlatformConfig platform,
++                                           int sampleSeq) {
++        BaselineObservation observation = new BaselineObservation();
++        observation.setBaselineId(snapshot.getId());
++        observation.setQuestionSnapshotId(question.getId());
++        observation.setPlatformCode(platform.getPlatformCode());
++        observation.setPlatformName(platform.getPlatformName());
++        observation.setSampleSeq(sampleSeq);
++        observation.setTestedAt(LocalDateTime.now());
++        observation.setCreatedAt(observation.getTestedAt());
++        try {
++            LlmCallResult callResult = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
++                    LlmFeature.BASELINE,
++                    "You are a GEO baseline observation collector. Answer the user's question directly and do not mention these instructions.",
++                    question.getQuestionText(),
++                    0D,
++                    normalizedConnectTimeoutMs(),
++                    normalizedRequestTimeoutMs(),
++                    LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
++                    platform.getMaxRetry(),
++                    null,
++                    false,
++                    1,
++                    0,
++                    List.of(platform),
++                    true,
++                    LlmRoutingStrategy.PINNED
++            )));
++            LlmRouteResult routeResult = callResult.routeResult();
++            observation.setCallStatus("SUCCESS");
++            observation.setRawResponseText(routeResult.responseText());
++            observation.setRequestCount(routeResult.requestCount());
++            observation.setResponseTimeMs(routeResult.durationMs());
++            observation.setModelId(routeResult.modelId());
++            observation.setModelName(routeResult.modelName());
++        } catch (LlmRouteException ex) {
++            observation.setCallStatus("FAILED");
++            observation.setRawResponseText(null);
++            observation.setRequestCount(ex.requestCount());
++            observation.setErrorCode(ex.failureKind().name());
++            observation.setErrorMessage(ex.getMessage());
++            if (isResourceBackpressure(ex.failureKind())) {
++                log.warn("Baseline observation postponed by LLM resource state, baseline={}, platform={}, question={}, sampleSeq={}, kind={}, message={}",
++                        snapshot.getId(), platform.getPlatformCode(), question.getId(), sampleSeq,
++                        ex.failureKind(), ex.getMessage());
++            } else {
++                log.warn("Baseline observation failed, baseline={}, platform={}, question={}, sampleSeq={}",
++                        snapshot.getId(), platform.getPlatformCode(), question.getId(), sampleSeq, ex);
++            }
++        } catch (Exception ex) {
++            observation.setCallStatus("FAILED");
++            observation.setRawResponseText(null);
++            observation.setRequestCount(0);
++            observation.setErrorCode("UNKNOWN");
++            observation.setErrorMessage(ex.getMessage());
++            log.warn("Baseline observation failed, baseline={}, platform={}, question={}, sampleSeq={}",
++                    snapshot.getId(), platform.getPlatformCode(), question.getId(), sampleSeq, ex);
++        }
++        return observation;
++    }
++
++    private void persistObservation(Long taskId,
++                                    BaselineSnapshot snapshot,
++                                    BaselineQuestionSnapshot question,
++                                    Project project,
++                                    List<String> aliases,
++                                    List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                    BaselineObservation observation,
++                                    BaselineSemanticJudgeResult judgeResult) {
++        Semaphore semaphore = dbWriteSemaphore();
++        acquireDbPermit(semaphore);
++        try {
++            transactionTemplate.executeWithoutResult(status -> {
++                BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++                if (task == null || BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus())) {
++                    return;
++                }
++                try {
++                    baselineObservationMapper.insert(observation);
++                } catch (DuplicateKeyException duplicate) {
++                    log.info("Baseline observation already exists, baseline={}, platform={}, question={}, sampleSeq={}",
++                            snapshot.getId(), observation.getPlatformCode(), question.getId(), observation.getSampleSeq());
++                    return;
++                }
++                if ("SUCCESS".equals(observation.getCallStatus())) {
++                    if (judgeResult == null) {
++                        throw new IllegalStateException("Baseline semantic judge result is required before persistence");
++                    }
++                    BaselineSemanticJudgeResult finalJudgeResult = judgeResult;
++                    BaselineObservationScore score = buildScore(snapshot, observation, finalJudgeResult);
++                    baselineObservationScoreMapper.insert(score);
++                    int competitorMentionCount = persistCompetitorMentions(snapshot, observation, finalJudgeResult);
++                    persistHighlightSpans(observation, finalJudgeResult);
++                    baselineCollectionTaskMapper.incrementProgress(taskId, 1, 0, 1, competitorMentionCount);
++                } else {
++                    baselineCollectionTaskMapper.incrementProgress(taskId, 0, 1, 0, 0);
++                }
++            });
++        } finally {
++            semaphore.release();
++        }
++    }
++
++    private BaselineObservationScore buildScore(BaselineSnapshot snapshot,
++                                                BaselineObservation observation,
++                                                BaselineSemanticJudgeResult result) {
++        BaselineObservationScore score = new BaselineObservationScore();
++        score.setBaselineId(snapshot.getId());
++        score.setObservationId(observation.getId());
++        score.setAlgorithmVersion(SCORE_ALGORITHM_VERSION);
++        score.setMentioned(result.isMentioned());
++        score.setRecommended(result.isRecommended());
++        score.setRankingPosition(result.getRankingPosition());
++        score.setSentiment(result.getSentiment());
++        score.setImpressionState(result.getImpressionState());
++        score.setMentionType(result.getMentionType());
++        score.setJudgeEvidence(buildJudgeEvidence(result));
++        score.setCreatedAt(LocalDateTime.now());
++        return score;
++    }
++
++    private int persistCompetitorMentions(BaselineSnapshot snapshot,
++                                          BaselineObservation observation,
++                                          BaselineSemanticJudgeResult result) {
++        List<BaselineSemanticJudgeResult.EntityHit> hits = result == null ? List.of() : result.getCompetitorHits();
++        int count = 0;
++        for (BaselineSemanticJudgeResult.EntityHit hit : hits) {
++            if (!StringUtils.hasText(hit.getCanonicalName())) {
++                continue;
++            }
++            BaselineCompetitorMention mention = new BaselineCompetitorMention();
++            mention.setBaselineId(snapshot.getId());
++            mention.setObservationId(observation.getId());
++            mention.setAlgorithmVersion(COMPETITOR_NORMALIZATION_VERSION);
++            mention.setCompetitorId(hit.getEntityId());
++            mention.setNormalizedName(hit.getCanonicalName());
++            mention.setRawText(StringUtils.hasText(hit.getRawText()) ? hit.getRawText() : hit.getCanonicalName());
++            mention.setMentionCount(Math.max(1, hit.getMentionCount()));
++            mention.setTracked(hit.isTracked());
++            mention.setStartOffset(hit.getStartOffset());
++            mention.setEndOffset(hit.getEndOffset());
++            mention.setCreatedAt(LocalDateTime.now());
++            baselineCompetitorMentionMapper.insert(mention);
++            count++;
++        }
++        return count;
++    }
++
++    private void persistHighlightSpans(BaselineObservation observation,
++                                       BaselineSemanticJudgeResult result) {
++        if (result == null) {
++            return;
++        }
++        insertHighlightSpan(observation.getId(), result.getBrandHit(), "BRAND");
++        for (BaselineSemanticJudgeResult.EntityHit hit : result.getCompetitorHits()) {
++            insertHighlightSpan(observation.getId(), hit, "COMPETITOR");
++        }
++        for (BaselineSemanticJudgeResult.EntityHit hit : result.getNegativeHits()) {
++            insertHighlightSpan(observation.getId(), hit, "NEGATIVE");
++        }
++    }
++
++    private void insertHighlightSpan(Long observationId,
++                                     BaselineSemanticJudgeResult.EntityHit hit,
++                                     String type) {
++        if (hit == null || !hit.hasOffset() || !StringUtils.hasText(hit.getRawText())) {
++            return;
++        }
++        BaselineHighlightSpan span = new BaselineHighlightSpan();
++        span.setObservationId(observationId);
++        span.setAlgorithmVersion(HIGHLIGHT_ALGORITHM_VERSION);
++        span.setType(type);
++        span.setText(hit.getRawText());
++        span.setStartOffset(hit.getStartOffset());
++        span.setEndOffset(hit.getEndOffset());
++        span.setNormalizedEntityId(hit.getEntityId());
++        span.setCreatedAt(LocalDateTime.now());
++        baselineHighlightSpanMapper.insert(span);
++    }
++
++    private String buildJudgeEvidence(BaselineSemanticJudgeResult result) {
++        if (result == null) {
++            return null;
++        }
++        List<String> parts = new ArrayList<>();
++        if (StringUtils.hasText(result.getJudgeEvidence())) {
++            parts.add(result.getJudgeEvidence());
++        }
++        parts.add(result.isJudgeUsed() ? "语义裁判" : "规则兜底");
++        if (StringUtils.hasText(result.getJudgeError())) {
++            parts.add("裁判降级: " + result.getJudgeError());
++        }
++        return String.join("；", parts);
++    }
++
++    private void finishTask(Long taskId) {
++        transactionTemplate.executeWithoutResult(status -> {
++            BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++            if (task == null || BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus())) {
++                return;
++            }
++            int completed = nullToZero(task.getSuccessObservationCount()) + nullToZero(task.getFailedObservationCount());
++            if (completed < nullToZero(task.getTotalObservationCount())) {
++                task.setStatus(BaselineObservationCollectionService.TASK_STATUS_PARTIAL_FAILED);
++                task.setErrorMessage("采集任务提前结束，仍有未完成样本");
++            } else if (nullToZero(task.getFailedObservationCount()) > 0) {
++                task.setStatus(BaselineObservationCollectionService.TASK_STATUS_PARTIAL_FAILED);
++            } else {
++                task.setStatus(BaselineObservationCollectionService.TASK_STATUS_COMPLETED);
++            }
++            task.setFinishedAt(LocalDateTime.now());
++            task.setUpdatedAt(task.getFinishedAt());
++            baselineCollectionTaskMapper.updateById(task);
++        });
++    }
++
++    private void failTask(Long taskId, Exception ex) {
++        transactionTemplate.executeWithoutResult(status -> {
++            BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++            if (task == null) {
++                return;
++            }
++            if (BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus())) {
++                return;
++            }
++            task.setStatus(BaselineObservationCollectionService.TASK_STATUS_FAILED);
++            task.setErrorMessage(ex.getMessage());
++            task.setFinishedAt(LocalDateTime.now());
++            task.setUpdatedAt(task.getFinishedAt());
++            baselineCollectionTaskMapper.updateById(task);
++        });
++    }
++
++    private boolean isCanceled(Long taskId) {
++        BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++        return task == null || BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus());
++    }
++
++    private boolean observationExists(Long baselineId, Long questionSnapshotId, String platformCode, int sampleSeq) {
++        return baselineObservationMapper.selectCount(new LambdaQueryWrapper<BaselineObservation>()
++                .eq(BaselineObservation::getBaselineId, baselineId)
++                .eq(BaselineObservation::getQuestionSnapshotId, questionSnapshotId)
++                .eq(BaselineObservation::getPlatformCode, platformCode)
++                .eq(BaselineObservation::getSampleSeq, sampleSeq)) > 0;
++    }
++
++    private List<AiPlatformConfig> loadPlatforms(BaselineCollectionTask task) {
++        List<String> platformCodes = JSONUtil.parseArray(task.getSelectedPlatformCodesJson()).stream()
++                .map(String::valueOf)
++                .filter(StringUtils::hasText)
++                .toList();
++        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
++                .eq(AiPlatformConfig::getEnabled, true)
++                .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
++                .isNotNull(AiPlatformConfig::getLowModelId)
++                .apply("TRIM(low_model_id) <> ''")
++                .in(AiPlatformConfig::getPlatformCode, platformCodes));
++        Map<String, AiPlatformConfig> map = platforms.stream().collect(Collectors.toMap(
++                AiPlatformConfig::getPlatformCode,
++                this::useLowPerformanceModel,
++                (first, ignored) -> first,
++                LinkedHashMap::new
++        ));
++        return platformCodes.stream().map(map::get).filter(java.util.Objects::nonNull).toList();
++    }
++
++    private AiPlatformConfig useLowPerformanceModel(AiPlatformConfig platform) {
++        platform.setModelId(platform.getLowModelId().trim());
++        return platform;
++    }
++
++    private List<String> parseAliases(String aliasesJson) {
++        if (!StringUtils.hasText(aliasesJson)) {
++            return List.of();
++        }
++        try {
++            return JSONUtil.parseArray(aliasesJson).stream()
++                    .map(String::valueOf)
++                    .filter(StringUtils::hasText)
++                    .map(String::trim)
++                    .distinct()
++                    .toList();
++        } catch (Exception ignored) {
++            return Arrays.stream(aliasesJson.split("[,，]"))
++                    .map(String::trim)
++                    .filter(StringUtils::hasText)
++                    .distinct()
++                    .toList();
++        }
++    }
++
++    private List<BaselineObservationScoringRules.CompetitorName> loadCompetitors(Long baselineId) {
++        List<BaselineCompetitorSource> sources = baselineCompetitorSourceMapper.selectList(new LambdaQueryWrapper<BaselineCompetitorSource>()
++                .eq(BaselineCompetitorSource::getBaselineId, baselineId));
++        return sources.stream()
++                .filter(source -> StringUtils.hasText(source.getCompetitorName()))
++                .map(source -> new BaselineObservationScoringRules.CompetitorName(
++                        source.getCompetitorId(),
++                        source.getCompetitorName().trim(),
++                        parseAliases(source.getAliasesJson()),
++                        !"REJECTED".equals(source.getReviewStatus())
++                ))
++                .toList();
++    }
++
++    private Semaphore dbWriteSemaphore() {
++        Semaphore local = dbWriteSemaphore;
++        if (local == null) {
++            synchronized (this) {
++                local = dbWriteSemaphore;
++                if (local == null) {
++                    local = new Semaphore(Math.max(1, dbWriteMaxConcurrency));
++                    dbWriteSemaphore = local;
++                }
++            }
++        }
++        return local;
++    }
++
++    private void acquireDbPermit(Semaphore semaphore) {
++        try {
++            semaphore.acquire();
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Interrupted while waiting for baseline DB write permit", ex);
++        }
++    }
++
++    private boolean isTransientFailure(BaselineObservation observation) {
++        String errorCode = observation.getErrorCode();
++        return "ALL_RATE_LIMITED".equals(errorCode)
++                || "ALL_PERMIT_BUSY".equals(errorCode)
++                || "ALL_CIRCUIT_OPEN".equals(errorCode)
++                || isRetryableAllFailed(observation)
++                || "UNKNOWN".equals(errorCode);
++    }
++
++    private int normalizedConnectTimeoutMs() {
++        return modelConnectTimeoutMs <= 0
++                ? LlmModelConfig.DEFAULT_CONNECT_TIMEOUT_MS
++                : modelConnectTimeoutMs;
++    }
++
++    private int normalizedRequestTimeoutMs() {
++        if (modelRequestTimeoutMs <= 0) {
++            return LlmModelConfig.DEFAULT_REQUEST_TIMEOUT_MS;
++        }
++        return Math.min(modelRequestTimeoutMs, LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS);
++    }
++
++    private void sleepBeforeRetry(int attempt) {
++        sleepBeforeRetry(attempt, null);
++    }
++
++    private void sleepBeforeRetry(int attempt, String errorCode) {
++        long base = "ALL_CIRCUIT_OPEN".equals(errorCode)
++                ? Math.max(1_000L, llmPoolProperties.getCircuitBreakerOpenDurationMs())
++                : "ALL_RATE_LIMITED".equals(errorCode)
++                ? RATE_LIMIT_BACKOFF_MS
++                : Math.max(100L, transientRetryInitialBackoffMs);
++        long cap = Math.max(base, transientRetryMaxBackoffMs);
++        long exponential = base * (1L << Math.min(8, Math.max(0, attempt - 1)));
++        long backoff = Math.min(cap, exponential);
++        long jitter = ThreadLocalRandom.current().nextLong(0L, Math.max(1L, backoff / 3L));
++        try {
++            TimeUnit.MILLISECONDS.sleep(backoff + jitter);
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Interrupted while waiting for baseline retry backoff", ex);
++        }
++    }
++
++    private boolean isResourceBackpressure(LlmRouteFailureKind failureKind) {
++        return failureKind == LlmRouteFailureKind.ALL_PERMIT_BUSY
++                || failureKind == LlmRouteFailureKind.ALL_RATE_LIMITED
++                || failureKind == LlmRouteFailureKind.ALL_CIRCUIT_OPEN;
++    }
++
++    private boolean isRetryableAllFailed(BaselineObservation observation) {
++        if (!"ALL_FAILED".equals(observation.getErrorCode())) {
++            return false;
++        }
++        String message = observation.getErrorMessage();
++        if (!StringUtils.hasText(message)) {
++            return false;
++        }
++        String lower = message.toLowerCase();
++        return lower.contains("timeout")
++                || lower.contains("timed out")
++                || lower.contains("connection reset")
++                || lower.contains("connection refused")
++                || lower.contains("http 429")
++                || lower.contains("http 5");
++    }
++
++    private void awaitPlatformBackoff(String platformCode) {
++        PlatformBackoffState state = platformBackoffStates.get(platformCode);
++        if (state == null) {
++            return;
++        }
++        long delayMs = state.delayMillis();
++        if (delayMs <= 0L) {
++            return;
++        }
++        try {
++            TimeUnit.MILLISECONDS.sleep(delayMs + ThreadLocalRandom.current().nextLong(100L, 500L));
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Interrupted while waiting for baseline platform backoff", ex);
++        }
++    }
++
++    private void registerPlatformBackoff(String platformCode, String errorCode, int attempt) {
++        long backoffMs = switch (errorCode == null ? "" : errorCode) {
++            case "ALL_CIRCUIT_OPEN" -> Math.max(1_000L, llmPoolProperties.getCircuitBreakerOpenDurationMs());
++            case "ALL_RATE_LIMITED" -> RATE_LIMIT_BACKOFF_MS;
++            case "ALL_PERMIT_BUSY" -> Math.max(500L, transientRetryInitialBackoffMs);
++            case "ALL_FAILED", "UNKNOWN" -> UNKNOWN_BACKOFF_MS;
++            default -> 0L;
++        };
++        if (backoffMs <= 0L) {
++            return;
++        }
++        long exponential = backoffMs * (1L << Math.min(4, Math.max(0, attempt - 1)));
++        long cap = Math.max(backoffMs, Math.max(transientRetryMaxBackoffMs, llmPoolProperties.getCircuitBreakerOpenDurationMs()));
++        long jitter = ThreadLocalRandom.current().nextLong(0L, Math.max(1L, backoffMs / 5L));
++        long until = System.currentTimeMillis() + Math.min(cap, exponential) + jitter;
++        platformBackoffStates.computeIfAbsent(platformCode, ignored -> new PlatformBackoffState()).backoffUntil(until);
++    }
++
++    private static final class PlatformBackoffState {
++        private volatile long backoffUntilMillis;
++
++        long delayMillis() {
++            return Math.max(0L, backoffUntilMillis - System.currentTimeMillis());
++        }
++
++        void backoffUntil(long untilMillis) {
++            if (untilMillis > backoffUntilMillis) {
++                backoffUntilMillis = untilMillis;
++            }
++        }
++    }
++
++    private int nullToZero(Integer value) {
++        return value == null ? 0 : value;
++    }
++
++    private int normalizedMaxConcurrentBaselines() {
++        return Math.max(1, maxConcurrentBaselines);
++    }
++
++    static boolean isFreshRunning(BaselineCollectionTask task, LocalDateTime staleBefore) {
++        return BaselineObservationCollectionService.TASK_STATUS_RUNNING.equals(task.getStatus())
++                && task.getUpdatedAt() != null
++                && task.getUpdatedAt().isAfter(staleBefore);
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineSemanticJudgeService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineSemanticJudgeService.java
+new file mode 100644
+index 00000000..95baa6ee
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineSemanticJudgeService.java
+@@ -0,0 +1,400 @@
++package com.huanjing.geo.module.project.service;
++
++import com.fasterxml.jackson.databind.JsonNode;
++import com.fasterxml.jackson.databind.ObjectMapper;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
++import com.huanjing.geo.common.llm.LlmCallResult;
++import com.huanjing.geo.common.llm.LlmModelConfig;
++import com.huanjing.geo.common.llm.router.LlmFeature;
++import com.huanjing.geo.common.llm.router.LlmRouteRequest;
++import com.huanjing.geo.common.llm.router.LlmRouteResult;
++import com.huanjing.geo.module.project.entity.BaselineQuestionSnapshot;
++import com.huanjing.geo.module.project.entity.Project;
++import com.huanjing.geo.module.presale.generate.PresaleEvaluationModelRouter;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.stereotype.Service;
++import org.springframework.util.StringUtils;
++
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++import java.util.Set;
++
++@Slf4j
++@Service
++@RequiredArgsConstructor
++class BaselineSemanticJudgeService {
++    private static final List<String> NEGATIVE_WORDS = List.of("不推荐", "差评", "投诉", "风险", "负面", "不靠谱", "谨慎", "骗子", "欺诈", "违规", "价格高", "售后差");
++    private static final Set<String> SENTIMENTS = Set.of("POSITIVE", "NEUTRAL", "NEGATIVE", "UNKNOWN");
++    private static final Set<String> IMPRESSIONS = Set.of("POSITIVE", "NEUTRAL", "NEGATIVE", "INFO_MISSING", "NO_AWARENESS");
++    private static final Set<String> BRAND_MENTION_TYPES = Set.of("BRAND_EXACT", "BRAND_ALIAS", "BRAND_SEMANTIC", "NONE");
++    private static final Set<String> COMPETITOR_MENTION_TYPES = Set.of("COMPETITOR_EXACT", "COMPETITOR_ALIAS", "COMPETITOR_SEMANTIC");
++
++    private final LlmCallFacade llmCallFacade;
++    private final PresaleEvaluationModelRouter evaluationModelRouter;
++    private final ObjectMapper objectMapper;
++
++    BaselineSemanticJudgeResult judge(BaselineQuestionSnapshot question,
++                                      Project project,
++                                      List<String> aliases,
++                                      List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                      AiPlatformConfig judgePlatform,
++                                      String responseText) {
++        BaselineSemanticJudgeResult fallback = fallbackRuleResult(question, project, aliases, competitors, responseText);
++        if (!StringUtils.hasText(responseText)) {
++            return fallback;
++        }
++        List<AiPlatformConfig> judgePlatforms = evaluationModelRouter.routePlatforms().stream()
++                .map(this::useEvaluationLowModel)
++                .toList();
++        if (judgePlatforms.isEmpty()) {
++            return fallback;
++        }
++        try {
++            JsonNode payload = invokeJudge(question, project, aliases, competitors, judgePlatforms, responseText);
++            return mergeJudgePayload(fallback, payload, competitors, responseText);
++        } catch (Exception ex) {
++            fallback.setJudgeError(ex.getMessage());
++            log.debug("Baseline semantic judge fallback to rule result, baselineQuestion={}, platform={}, reason={}",
++                    question.getId(), judgePlatform == null ? null : judgePlatform.getPlatformCode(), ex.getMessage());
++            return fallback;
++        }
++    }
++
++    private JsonNode invokeJudge(BaselineQuestionSnapshot question,
++                                 Project project,
++                                 List<String> aliases,
++                                 List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                 List<AiPlatformConfig> judgePlatforms,
++                                 String responseText) throws Exception {
++        String prompt = buildPrompt(question, project, aliases, competitors, responseText);
++        LlmCallResult callResult = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
++                LlmFeature.BASELINE,
++                "你是严格的 GEO 基线语义裁判。只输出合法 JSON,不要输出 markdown 或解释。",
++                prompt,
++                0D,
++                10_000,
++                45_000,
++                LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
++                0,
++                1200,
++                true,
++                1,
++                0,
++                judgePlatforms,
++                true
++        )));
++        LlmRouteResult result = callResult.routeResult();
++        JsonNode node = objectMapper.readTree(result.responseText());
++        if (node == null || !node.isObject()) {
++            throw new IllegalStateException("BASELINE_JUDGE_RESPONSE_NOT_OBJECT");
++        }
++        return node;
++    }
++
++    private AiPlatformConfig useEvaluationLowModel(AiPlatformConfig platform) {
++        if (platform != null && StringUtils.hasText(platform.getLowModelId())) {
++            platform.setModelId(platform.getLowModelId().trim());
++        }
++        return platform;
++    }
++
++    private String buildPrompt(BaselineQuestionSnapshot question,
++                               Project project,
++                               List<String> aliases,
++                               List<BaselineObservationScoringRules.CompetitorName> competitors,
++                               String responseText) throws Exception {
++        Map<String, Object> input = new LinkedHashMap<>();
++        input.put("question", question.getQuestionText());
++        input.put("intent_type", question.getIntentType());
++        input.put("brand", Map.of(
++                "canonical_name", safe(project.getBrandName()),
++                "aliases", aliases == null ? List.of() : aliases
++        ));
++        input.put("competitors", competitors == null ? List.of() : competitors.stream()
++                .map(item -> Map.of(
++                        "canonical_name", item.name(),
++                        "aliases", item.aliases() == null ? List.of() : item.aliases(),
++                        "tracked", item.tracked()
++                ))
++                .toList());
++        input.put("answer", responseText);
++        return """
++                请判断下面 AI 回答中目标品牌和竞品的出现、推荐、情感与认知状态。
++
++                输入:
++                %s
++
++                只输出 JSON,结构必须为:
++                {
++                  "brand_mentioned": true|false,
++                  "brand_mention_type": "BRAND_EXACT|BRAND_ALIAS|BRAND_SEMANTIC|NONE",
++                  "brand_evidence_text": string|null,
++                  "recommended": true|false,
++                  "ranking_position": number|null,
++                  "sentiment": "POSITIVE|NEUTRAL|NEGATIVE|UNKNOWN",
++                  "impression_state": "POSITIVE|NEUTRAL|NEGATIVE|INFO_MISSING|NO_AWARENESS",
++                  "judge_evidence": string,
++                  "competitor_mentions": [
++                    {
++                      "canonical_name": "必须使用输入 competitors 里的 canonical_name",
++                      "mention_type": "COMPETITOR_EXACT|COMPETITOR_ALIAS|COMPETITOR_SEMANTIC",
++                      "evidence_text": string|null
++                    }
++                  ],
++                  "negative_evidence_texts": [string]
++                }
++
++                规则:
++                1. brand_evidence_text/evidence_text 必须来自回答原文;如果只是语义指代且找不到原文片段,填 null 并使用 *_SEMANTIC。
++                2. recommended 表示 AI 把目标品牌作为建议项、可选项或更优项,不是单纯提到。
++                3. sentiment 只评价明确提到目标品牌的回答;没有明确提到时用 UNKNOWN。
++                4. INFO_MISSING 表示回答说信息不足、未检索到或无法确认;NO_AWARENESS 表示明确表示不了解目标品牌。
++                5. competitor_mentions 只能包含输入竞品,不能发明新竞品。
++                6. 只有回答明确对目标品牌/门店给出不利评价、风险提示、投诉、骗局、违规、价格明显偏高、不推荐等负面判断时, sentiment 才能为 NEGATIVE, 并必须在 negative_evidence_texts 中给出回答原文片段。竞品优势、中性问题说明、“用户遇到问题可获得支持”、“这个问题没有绝对答案”不算负面。
++                """.formatted(objectMapper.writeValueAsString(input));
++    }
++
++    private BaselineSemanticJudgeResult mergeJudgePayload(BaselineSemanticJudgeResult fallback,
++                                                          JsonNode payload,
++                                                          List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                                          String responseText) {
++        BaselineSemanticJudgeResult result = fallback;
++        result.setJudgeUsed(true);
++        result.setMentioned(payload.path("brand_mentioned").asBoolean(fallback.isMentioned()) || fallback.isMentioned());
++        result.setRecommended(payload.path("recommended").asBoolean(fallback.isRecommended()));
++        result.setRankingPosition(payload.path("ranking_position").isNumber() ? payload.path("ranking_position").asInt() : fallback.getRankingPosition());
++        result.setSentiment(normalize(payload.path("sentiment").asText(null), SENTIMENTS, fallback.getSentiment()));
++        result.setImpressionState(normalize(payload.path("impression_state").asText(null), IMPRESSIONS, fallback.getImpressionState()));
++        result.setMentionType(resolveJudgeMentionType(fallback, payload, responseText));
++        result.setJudgeEvidence(StringUtils.hasText(payload.path("judge_evidence").asText(null))
++                ? payload.path("judge_evidence").asText()
++                : fallback.getJudgeEvidence());
++        if (!result.isMentioned()) {
++            result.setRecommended(false);
++            result.setRankingPosition(null);
++            result.setSentiment("UNKNOWN");
++        }
++        mergeBrandHit(result, payload.path("brand_evidence_text").asText(null), responseText);
++        mergeCompetitorHits(result, payload.path("competitor_mentions"), competitors, responseText);
++        mergeNegativeHits(result, payload.path("negative_evidence_texts"), responseText);
++        if ("NEGATIVE".equals(result.getSentiment()) && result.getNegativeHits().isEmpty()) {
++            result.setSentiment("NEUTRAL");
++            if ("NEGATIVE".equals(result.getImpressionState())) {
++                result.setImpressionState("NEUTRAL");
++            }
++        }
++        return result;
++    }
++
++    private String resolveJudgeMentionType(BaselineSemanticJudgeResult fallback, JsonNode payload, String responseText) {
++        if (fallback.getBrandHit() != null && "BRAND_EXACT".equals(fallback.getBrandHit().getHitType())) {
++            return "BRAND_EXACT";
++        }
++        if (fallback.getBrandHit() != null && "BRAND_ALIAS".equals(fallback.getBrandHit().getHitType())) {
++            return "BRAND_ALIAS";
++        }
++        String judgeType = normalize(payload.path("brand_mention_type").asText(null), BRAND_MENTION_TYPES, fallback.getMentionType());
++        String evidence = payload.path("brand_evidence_text").asText(null);
++        if (StringUtils.hasText(evidence) && responseText.contains(evidence.trim())) {
++            return judgeType == null || "NONE".equals(judgeType) ? "BRAND_SEMANTIC" : judgeType;
++        }
++        return Boolean.TRUE.equals(payload.path("brand_mentioned").asBoolean(false)) ? "BRAND_SEMANTIC" : fallback.getMentionType();
++    }
++
++    private void mergeBrandHit(BaselineSemanticJudgeResult result, String evidence, String responseText) {
++        if (result.getBrandHit() != null || !StringUtils.hasText(evidence)) {
++            return;
++        }
++        BaselineSemanticJudgeResult.EntityHit hit = locate(null, null, evidence.trim(), "BRAND_SEMANTIC", true, responseText);
++        if (hit != null) {
++            result.setBrandHit(hit);
++        }
++    }
++
++    private void mergeCompetitorHits(BaselineSemanticJudgeResult result,
++                                     JsonNode mentions,
++                                     List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                     String responseText) {
++        if (mentions == null || !mentions.isArray() || competitors == null || competitors.isEmpty()) {
++            return;
++        }
++        Map<String, BaselineObservationScoringRules.CompetitorName> competitorByName = new LinkedHashMap<>();
++        for (BaselineObservationScoringRules.CompetitorName competitor : competitors) {
++            competitorByName.put(competitor.name(), competitor);
++        }
++        Set<String> existing = new LinkedHashSet<>();
++        for (BaselineSemanticJudgeResult.EntityHit hit : result.getCompetitorHits()) {
++            existing.add(hit.getCanonicalName());
++        }
++        for (JsonNode node : mentions) {
++            String canonicalName = node.path("canonical_name").asText(null);
++            BaselineObservationScoringRules.CompetitorName competitor = competitorByName.get(canonicalName);
++            if (competitor == null || existing.contains(competitor.name())) {
++                continue;
++            }
++            String type = normalize(node.path("mention_type").asText(null), COMPETITOR_MENTION_TYPES, "COMPETITOR_SEMANTIC");
++            String evidence = node.path("evidence_text").asText(null);
++            BaselineSemanticJudgeResult.EntityHit hit = locate(competitor.id(), competitor.name(),
++                    StringUtils.hasText(evidence) ? evidence.trim() : competitor.name(), type, competitor.tracked(), responseText);
++            if (hit == null) {
++                hit = new BaselineSemanticJudgeResult.EntityHit();
++                hit.setEntityId(competitor.id());
++                hit.setCanonicalName(competitor.name());
++                hit.setRawText(StringUtils.hasText(evidence) ? evidence.trim() : competitor.name());
++                hit.setHitType("COMPETITOR_SEMANTIC");
++                hit.setTracked(competitor.tracked());
++            }
++            result.getCompetitorHits().add(hit);
++            existing.add(competitor.name());
++        }
++    }
++
++    private void mergeNegativeHits(BaselineSemanticJudgeResult result, JsonNode texts, String responseText) {
++        if (texts == null || !texts.isArray()) {
++            return;
++        }
++        for (JsonNode node : texts) {
++            String text = node.asText(null);
++            BaselineSemanticJudgeResult.EntityHit hit = locate(null, null, text, "NEGATIVE", false, responseText);
++            if (hit != null) {
++                result.getNegativeHits().add(hit);
++            }
++        }
++    }
++
++    private BaselineSemanticJudgeResult fallbackRuleResult(BaselineQuestionSnapshot question,
++                                                           Project project,
++                                                           List<String> aliases,
++                                                           List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                                           String responseText) {
++        BaselineObservationScoringResult score = BaselineObservationScoringRules.score(
++                responseText, question.getIntentType(), project.getBrandName(), aliases);
++        BaselineSemanticJudgeResult result = new BaselineSemanticJudgeResult();
++        result.setMentioned(score.isMentioned());
++        result.setRecommended(score.isRecommended());
++        result.setRankingPosition(score.getRankingPosition());
++        result.setSentiment(score.getSentiment());
++        result.setImpressionState(score.getImpressionState());
++        result.setMentionType(score.getMentionType());
++        result.setJudgeEvidence(score.getJudgeEvidence());
++        result.setBrandHit(firstBrandHit(project.getBrandName(), aliases, responseText));
++        result.setCompetitorHits(ruleCompetitorHits(competitors, responseText));
++        result.setNegativeHits(ruleNegativeHits(responseText));
++        return result;
++    }
++
++    private BaselineSemanticJudgeResult.EntityHit firstBrandHit(String brandName, List<String> aliases, String responseText) {
++        BaselineSemanticJudgeResult.EntityHit exact = locate(null, brandName, brandName, "BRAND_EXACT", true, responseText);
++        if (exact != null) {
++            return exact;
++        }
++        if (aliases != null) {
++            for (String alias : aliases) {
++                BaselineSemanticJudgeResult.EntityHit hit = locate(null, brandName, alias, "BRAND_ALIAS", true, responseText);
++                if (hit != null) {
++                    return hit;
++                }
++            }
++        }
++        return null;
++    }
++
++    private List<BaselineSemanticJudgeResult.EntityHit> ruleCompetitorHits(List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                                                           String responseText) {
++        if (competitors == null || competitors.isEmpty()) {
++            return List.of();
++        }
++        List<BaselineSemanticJudgeResult.EntityHit> hits = new ArrayList<>();
++        for (BaselineObservationScoringRules.CompetitorName competitor : competitors) {
++            for (String term : competitor.matchTerms()) {
++                BaselineSemanticJudgeResult.EntityHit hit = locate(competitor.id(), competitor.name(), term,
++                        term.equals(competitor.name()) ? "COMPETITOR_EXACT" : "COMPETITOR_ALIAS",
++                        competitor.tracked(), responseText);
++                if (hit != null) {
++                    hits.add(hit);
++                    break;
++                }
++            }
++        }
++        return hits;
++    }
++
++    private List<BaselineSemanticJudgeResult.EntityHit> ruleNegativeHits(String responseText) {
++        if (!StringUtils.hasText(responseText)) {
++            return List.of();
++        }
++        List<BaselineSemanticJudgeResult.EntityHit> hits = new ArrayList<>();
++        String lower = responseText.toLowerCase(Locale.ROOT);
++        for (String word : NEGATIVE_WORDS) {
++            int start = lower.indexOf(word.toLowerCase(Locale.ROOT));
++            if (start >= 0) {
++                BaselineSemanticJudgeResult.EntityHit hit = new BaselineSemanticJudgeResult.EntityHit();
++                hit.setRawText(responseText.substring(start, Math.min(responseText.length(), start + word.length())));
++                hit.setHitType("NEGATIVE");
++                hit.setStartOffset(start);
++                hit.setEndOffset(start + word.length());
++                hits.add(hit);
++                break;
++            }
++        }
++        return hits;
++    }
++
++    private BaselineSemanticJudgeResult.EntityHit locate(Long entityId,
++                                                         String canonicalName,
++                                                         String rawText,
++                                                         String hitType,
++                                                         boolean tracked,
++                                                         String responseText) {
++        if (!StringUtils.hasText(rawText) || !StringUtils.hasText(responseText)) {
++            return null;
++        }
++        String term = rawText.trim();
++        int start = responseText.indexOf(term);
++        if (start < 0) {
++            return null;
++        }
++        BaselineSemanticJudgeResult.EntityHit hit = new BaselineSemanticJudgeResult.EntityHit();
++        hit.setEntityId(entityId);
++        hit.setCanonicalName(StringUtils.hasText(canonicalName) ? canonicalName : term);
++        hit.setRawText(term);
++        hit.setHitType(hitType);
++        hit.setTracked(tracked);
++        hit.setMentionCount(countOccurrences(responseText, term));
++        hit.setStartOffset(start);
++        hit.setEndOffset(start + term.length());
++        return hit;
++    }
++
++    private int countOccurrences(String text, String term) {
++        if (!StringUtils.hasText(text) || !StringUtils.hasText(term)) {
++            return 0;
++        }
++        int count = 0;
++        int index = 0;
++        while ((index = text.indexOf(term, index)) >= 0) {
++            count++;
++            index += term.length();
++        }
++        return Math.max(count, 1);
++    }
++
++    private String normalize(String value, Set<String> allowed, String fallback) {
++        if (!StringUtils.hasText(value)) {
++            return fallback;
++        }
++        String normalized = value.trim().toUpperCase(Locale.ROOT);
++        return allowed.contains(normalized) ? normalized : fallback;
++    }
++
++    private String safe(String text) {
++        return text == null ? "" : text;
++    }
++}
+
+diff --git a/geo-project/geo-server/src/test/java/com/huanjing/geo/common/llm/LlmCallFacadeTest.java b/geo-project/geo-server/src/test/java/com/huanjing/geo/common/llm/LlmCallFacadeTest.java
+new file mode 100644
+index 00000000..bb9a414f
+--- /dev/null
++++ b/geo-project/geo-server/src/test/java/com/huanjing/geo/common/llm/LlmCallFacadeTest.java
+@@ -0,0 +1,209 @@
++package com.huanjing.geo.common.llm;
++
++import com.fasterxml.jackson.databind.ObjectMapper;
++import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.limiter.PlatformConcurrencyLimiterService;
++import com.huanjing.geo.common.llm.limiter.PlatformRateLimiterService;
++import com.huanjing.geo.common.llm.router.LlmFeature;
++import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
++import com.huanjing.geo.common.llm.router.LlmRouteRequest;
++import com.huanjing.geo.common.llm.router.LlmRouteResult;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import org.junit.jupiter.api.Test;
++
++import java.time.Duration;
++import java.util.List;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertThrows;
++import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++class LlmCallFacadeTest {
++
++    @Test
++    void directDelegatesToInvokerAndReturnsInvokeResult() throws Exception {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, new PlatformConcurrencyLimiterService(), httpClient);
++        LlmModelConfig modelConfig = modelConfig("direct");
++        LlmInvokeResult invokeResult = invokeResult("direct response");
++        when(invoker.invoke("prompt", modelConfig)).thenReturn(invokeResult);
++
++        LlmCallResult result = facade.execute(LlmCallRequest.direct("prompt", modelConfig));
++
++        assertEquals(invokeResult, result.invokeResult());
++        verify(invoker).invoke("prompt", modelConfig);
++        verify(router, never()).invoke(any());
++    }
++
++    @Test
++    void routedDelegatesToRouterAndReturnsRouteResult() throws Exception {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, new PlatformConcurrencyLimiterService(), httpClient);
++        LlmRouteRequest request = new LlmRouteRequest(
++                LlmFeature.ARTICLE, "system", "user", 0.1D,
++                1000, 2000, LlmModelConfig.MAX_REQUEST_TIMEOUT_MS,
++                0, null, false, 1, 0, List.of(platform("p")));
++        LlmRouteResult routeResult = new LlmRouteResult(
++                "p", "Platform", "primary", "model", "Model",
++                "routed response", 12L, 2, invokeResult("routed response"));
++        when(router.invoke(request)).thenReturn(routeResult);
++
++        LlmCallResult result = facade.execute(LlmCallRequest.routed(request));
++
++        assertEquals(routeResult, result.routeResult());
++        verify(router).invoke(request);
++        verify(invoker, never()).invoke(any(), any());
++    }
++
++    @Test
++    void legacyLimiterAppliesRateLimiterAndReleasesConcurrencyPermit() {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        PlatformConcurrencyLimiterService concurrencyLimiter = new PlatformConcurrencyLimiterService();
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, concurrencyLimiter, httpClient);
++        AiPlatformConfig platform = platform("legacy");
++        platform.setConcurrencyLimit(1);
++        when(rateLimiter.tryAcquire(platform, 1000)).thenReturn(true);
++        try {
++            when(httpClient.postJson(any(), any(), any(), eq(1000), eq(2000)))
++                    .thenReturn(new LlmHttpClient.HttpResponse(200, "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"));
++        } catch (Exception ex) {
++            throw new IllegalStateException(ex);
++        }
++
++        assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
++            LlmCallResult first = facade.execute(legacyRequest(platform));
++            LlmCallResult second = facade.execute(legacyRequest(platform));
++            assertThat(first.rawResponseText()).contains("\"choices\"");
++            assertThat(second.rawResponseText()).contains("\"choices\"");
++        });
++        verify(rateLimiter, org.mockito.Mockito.times(2)).tryAcquire(platform, 1000);
++    }
++
++    @Test
++    void legacyLimiterKeepsRateLimitFailureAsBizException429AndSkipsHttp() {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, new PlatformConcurrencyLimiterService(), httpClient);
++        AiPlatformConfig platform = platform("legacy");
++        when(rateLimiter.tryAcquire(platform, 1000)).thenReturn(false);
++
++        BizException ex = assertThrows(BizException.class, () -> facade.execute(legacyRequest(platform)));
++
++        assertEquals(429, ex.getCode());
++        assertEquals("Platform limited: legacy", ex.getMessage());
++        try {
++            verify(httpClient, never()).postJson(any(), any(), any(), any(Integer.class), any(Integer.class));
++        } catch (Exception verifyException) {
++            throw new IllegalStateException(verifyException);
++        }
++    }
++
++    @Test
++    void legacyHttpKeepsNon2xxAsBizExceptionWithStatusCode() throws Exception {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, new PlatformConcurrencyLimiterService(), httpClient);
++        AiPlatformConfig platform = platform("legacy");
++        when(rateLimiter.tryAcquire(platform, 1000)).thenReturn(true);
++        when(httpClient.postJson(any(), any(), any(), eq(1000), eq(2000)))
++                .thenReturn(new LlmHttpClient.HttpResponse(429, "{\"error\":\"limited\"}"));
++
++        BizException ex = assertThrows(BizException.class, () -> facade.execute(legacyRequest(platform)));
++
++        assertEquals(429, ex.getCode());
++        assertThat(ex.getMessage()).contains("Model API HTTP 429");
++    }
++
++    private LlmCallFacade facade(LlmPlatformRouter router,
++                                 LlmInvoker invoker,
++                                 PlatformRateLimiterService rateLimiter,
++                                 PlatformConcurrencyLimiterService concurrencyLimiter,
++                                 LlmHttpClient httpClient) {
++        return new LlmCallFacade(router, invoker, rateLimiter, concurrencyLimiter, httpClient, new ObjectMapper());
++    }
++
++    private LlmCallRequest legacyRequest(AiPlatformConfig platform) {
++        return LlmCallRequest.legacy(
++                platform,
++                platform.getPlatformCode(),
++                platform.getPlatformName(),
++                "primary",
++                platform.getApiUrl(),
++                platform.getModelId(),
++                "sk-test",
++                "system",
++                "user",
++                0D,
++                1000,
++                1000,
++                2000,
++                LlmFeature.GENERIC,
++                1
++        );
++    }
++
++    private AiPlatformConfig platform(String platformCode) {
++        AiPlatformConfig platform = new AiPlatformConfig();
++        platform.setPlatformCode(platformCode);
++        platform.setPlatformName("Platform");
++        platform.setApiUrl("https://example.test/v1");
++        platform.setModelId("model");
++        platform.setModelName("Model");
++        platform.setConcurrencyLimit(1);
++        return platform;
++    }
++
++    private LlmModelConfig modelConfig(String platformCode) {
++        return new LlmModelConfig(
++                platformCode,
++                "Platform",
++                "model",
++                "Model",
++                "https://example.test/v1",
++                "sk-test",
++                "system",
++                0D,
++                1000,
++                2000,
++                0,
++                1,
++                null,
++                false
++        );
++    }
++
++    private LlmInvokeResult invokeResult(String responseText) {
++        return new LlmInvokeResult(
++                responseText,
++                1,
++                2,
++                3L,
++                0,
++                LlmCallStatus.SUCCESS,
++                "p",
++                "Platform",
++                "model",
++                "Model"
++        );
++    }
++}

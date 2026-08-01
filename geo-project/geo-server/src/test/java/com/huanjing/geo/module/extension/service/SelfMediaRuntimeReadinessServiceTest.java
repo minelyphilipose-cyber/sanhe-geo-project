@@ -81,4 +81,79 @@ class SelfMediaRuntimeReadinessServiceTest {
         assertTrue(result.blockedReasons().contains(SelfMediaRuntimeReadinessService.HELPER_VERSION_TOO_LOW));
         assertTrue(result.blockedReasons().contains(SelfMediaRuntimeReadinessService.HELPER_CAPABILITY_UNSUPPORTED));
     }
+
+    @Test
+    void douyinImageTextRequiresExplicitCapabilityFromBothRuntimes() {
+        ExtensionRuntimeStatusMapper extensionMapper = mock(ExtensionRuntimeStatusMapper.class);
+        LocalAgentRuntimeStatusMapper helperMapper = mock(LocalAgentRuntimeStatusMapper.class);
+        SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(
+                10L, 99L, null, 20L, "douyin", "douyinImageText", "douyinImageText");
+        ExtensionRuntimeStatus extension = new ExtensionRuntimeStatus();
+        extension.setLoginStatus("verified");
+        extension.setExtensionVersion("0.2.0");
+        extension.setCapabilitiesJson("{\"fill\":true}");
+        extension.setLastSeenAt(LocalDateTime.now());
+        LocalAgentRuntimeStatus helper = new LocalAgentRuntimeStatus();
+        helper.setAdspowerApiOk(true);
+        helper.setRunningTaskCount(0);
+        helper.setCapacity(1);
+        helper.setHelperVersion("0.2.0");
+        helper.setCapabilitiesJson("{\"claim\":true}");
+        helper.setLastSeenAt(LocalDateTime.now());
+        SelfMediaRuntimeReadinessService service = new SelfMediaRuntimeReadinessService(
+                extensionMapper, helperMapper, properties, new ObjectMapper());
+
+        RuntimeReadinessResult oldRuntimeResult = service.evaluate(query, extension, helper);
+
+        assertFalse(oldRuntimeResult.ready());
+        assertTrue(oldRuntimeResult.blockedReasons().contains(
+                SelfMediaRuntimeReadinessService.EXTENSION_CAPABILITY_UNSUPPORTED));
+        assertTrue(oldRuntimeResult.blockedReasons().contains(
+                SelfMediaRuntimeReadinessService.HELPER_CAPABILITY_UNSUPPORTED));
+
+        extension.setCapabilitiesJson("{\"fill\":true,\"douyinImageText\":true}");
+        helper.setCapabilitiesJson("{\"claim\":true,\"douyinImageText\":true}");
+
+        assertTrue(service.evaluate(query, extension, helper).ready());
+    }
+
+    @Test
+    void douyinImageTextAppliesPlatformSpecificMinimumVersions() {
+        ExtensionRuntimeStatusMapper extensionMapper = mock(ExtensionRuntimeStatusMapper.class);
+        LocalAgentRuntimeStatusMapper helperMapper = mock(LocalAgentRuntimeStatusMapper.class);
+        SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
+        SelfMediaRuntimeProperties.GateRule douyinRule = new SelfMediaRuntimeProperties.GateRule();
+        douyinRule.setMinExtensionVersion("0.2.0");
+        douyinRule.setMinHelperVersion("0.2.0");
+        properties.getGate().getPlatforms().put("douyin", douyinRule);
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(
+                10L, 99L, null, 20L, "douyin", "douyinImageText", "douyinImageText");
+        ExtensionRuntimeStatus extension = new ExtensionRuntimeStatus();
+        extension.setLoginStatus("verified");
+        extension.setExtensionVersion("0.1.9");
+        extension.setCapabilitiesJson("{\"douyinImageText\":true}");
+        extension.setLastSeenAt(LocalDateTime.now());
+        LocalAgentRuntimeStatus helper = new LocalAgentRuntimeStatus();
+        helper.setAdspowerApiOk(true);
+        helper.setRunningTaskCount(0);
+        helper.setCapacity(1);
+        helper.setHelperVersion("0.1.9");
+        helper.setCapabilitiesJson("{\"douyinImageText\":true}");
+        helper.setLastSeenAt(LocalDateTime.now());
+        SelfMediaRuntimeReadinessService service = new SelfMediaRuntimeReadinessService(
+                extensionMapper, helperMapper, properties, new ObjectMapper());
+
+        RuntimeReadinessResult oldRuntimeResult = service.evaluate(query, extension, helper);
+
+        assertFalse(oldRuntimeResult.ready());
+        assertTrue(oldRuntimeResult.blockedReasons().contains(
+                SelfMediaRuntimeReadinessService.EXTENSION_VERSION_TOO_LOW));
+        assertTrue(oldRuntimeResult.blockedReasons().contains(
+                SelfMediaRuntimeReadinessService.HELPER_VERSION_TOO_LOW));
+
+        extension.setExtensionVersion("0.2.0");
+        helper.setHelperVersion("0.2.0");
+        assertTrue(service.evaluate(query, extension, helper).ready());
+    }
 }

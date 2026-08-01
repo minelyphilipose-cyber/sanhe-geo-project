@@ -81,6 +81,36 @@ test('local helper requires environmentKey for extension task claims and complet
   )
 })
 
+test('Douyin image-text helper keeps temporary files until the detail page confirms every image', () => {
+  const server = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.match(
+    server,
+    /await target\.uploadFile\(\.\.\.filePaths\)[\s\S]+await waitForDouyinImageTextUploadCompleted\(page, filePaths\.length\)/,
+    'setting the file input is not upload completion; the helper must wait for the Douyin detail page',
+  )
+  assert.match(
+    server,
+    /async function handleUploadImagesToPage[\s\S]+const upload = await uploadDouyinImageTextFilesToAdsPowerPage[\s\S]+sendJson[\s\S]+finally \{[\s\S]+fs\.unlink/,
+    'temporary files must remain readable until the page-level upload wait has completed',
+  )
+  assert.match(
+    server,
+    /已添加\\s\*\(\\d\+\)\\s\*张图片[\s\S]+confirmedCount !== expected \|\| pending/,
+    'a 6/6 progress counter alone must not be treated as confirmed image content',
+  )
+  assert.match(
+    server,
+    /readDouyinUnpublishedDraftState\(page\)[\s\S]+DOUYIN_UNPUBLISHED_DRAFT_BLOCKED/,
+    'a previous unpublished draft must stop the upload without choosing continue or discard',
+  )
+  assert.doesNotMatch(
+    server,
+    /unpublishedDraft[\s\S]{0,500}\.(click|evaluateHandle)/,
+    'the helper must not make a destructive choice for a previous unpublished draft',
+  )
+})
+
 test('local helper releases unclaimed schedules and reports every occupied schedule slot', () => {
   const server = readProjectFile('geo-local-helper/src/server.js')
 
@@ -267,9 +297,11 @@ test('helper emergency build revision targets the deployed extension', () => {
   const contentScript = readProjectFile('geo-env-extension/content-script.js')
 
   assert.equal(manifest.version, helperPackage.version)
-  assert.equal(manifest.version, '0.1.11')
-  assert.equal(helperPackage.buildRevision, '20260716.2')
-  assert.match(manifest.version_name, /0\.1\.11-claim-safety-20260717\.1/)
+  assert.equal(manifest.version, '0.2.0')
+  assert.match(
+    manifest.version_name,
+    new RegExp(`${helperPackage.version.replaceAll('.', '\\.')}.+${helperPackage.buildRevision.replaceAll('.', '\\.')}`),
+  )
   assert.match(contentScript, new RegExp(`GEO_ENV_CONTENT_SCRIPT_VERSION = '${helperPackage.version.replaceAll('.', '\\.')}'`))
   assert.match(serviceWorker, /EXTENSION_HELPER_BUILD_MISMATCH/)
 })
@@ -310,8 +342,18 @@ test('scheduled browser platforms recover channel-close through result pages wit
   assert.match(serviceWorker, /TOUTIAO_MANAGE_URL = 'https:\/\/mp\.toutiao\.com\/profile_v4\/graphic\/articles'/)
   assert.match(
     serviceWorker,
-    /recoverToutiaoScheduleAfterWorksListTimeout[\s\S]+isToutiaoWorksManageUrl\(current\.url\)[\s\S]+reloadPlatformWorksList/,
+    /recoverToutiaoScheduleAfterWorksListTimeout[\s\S]+isToutiaoWorksManageUrl\(current\.url\)[\s\S]+refreshAndInspectPlatformWorksList\([\s\S]+inspectToutiaoWorksListTab/,
     'toutiao recovery must preserve the actual redirected works page and refresh it before matching',
+  )
+  assert.match(
+    serviceWorker,
+    /recoverDouyinPublishAfterMessageChannelClosed[\s\S]+isDouyinWorksManageUrl\(current\.url\)[\s\S]+refreshAndInspectPlatformWorksList\([\s\S]+inspectDouyinManageTab/,
+    'douyin recovery must refresh the actual redirected works page before matching',
+  )
+  assert.match(
+    serviceWorker,
+    /async function refreshAndInspectPlatformWorksList[\s\S]+await reloadPlatformWorksList\(tabId,[\s\S]+latest = await inspector\(tabId, context, refreshAttempt\)/,
+    'browser platforms must share one refresh-before-inspection helper',
   )
   assert.match(serviceWorker, /XIAOHONGSHU_MANAGE_URL = 'https:\/\/creator\.xiaohongshu\.com\/new\/note-manager'/)
   assert.match(serviceWorker, /BAIJIAHAO_MANAGE_URL = 'https:\/\/baijiahao\.baidu\.com\/builder\/rc\/content'/)
@@ -563,10 +605,15 @@ test('douyin article head upload never falls back to every image input', () => {
     /function findDouyinSubmitButton[\s\S]+querySelectorAll\('button'\)[\s\S]+=== '发布'/,
     'douyin must click the exact final publish button instead of a publish-labelled container',
   )
+  assert.doesNotMatch(
+    serviceWorker,
+    /if \(isManagePage && explicitSuccess\)/,
+    'douyin success toast is auxiliary and must not confirm a publish without a matching work record',
+  )
   assert.match(
     serviceWorker,
-    /isManagePage && explicitSuccess[\s\S]+pageStatus: '发布成功'/,
-    'douyin navigation recovery must accept the explicit success notice while the manage list is still loading',
+    /expectedImageCount[\s\S]+new RegExp\(`\$\{expectedImageCount\}\\\\s\*张`\)/,
+    'douyin image-text recovery must match the expected image badge count',
   )
   assert.match(
     serviceWorker,
@@ -583,6 +630,11 @@ test('douyin article head upload never falls back to every image input', () => {
     /selectUploadTargetPage\(pages,[\s\S]+browserTargetId: body\.browserTargetId \|\| ''/,
     'the local helper must select the upload page by browser target id',
   )
+  assert.match(helper, /uploadTarget !== 'douyin_image_text_images'/)
+  assert.match(helper, /puppeteerPageTargetId\(page\) !== String\(body\.browserTargetId\)/)
+  assert.match(helper, /verifyDownloadedImageSignature\(image\)/)
+  assert.match(helper, /buffer\.subarray\(8, 12\)\.toString\('ascii'\) === 'WEBP'/)
+  assert.match(helper, /douyinImageText:\s*true/)
   assert.match(
     contentScript,
     /\['toutiao', 'baijiahao', 'douyin'\]\.includes\(platform\)[\s\S]+querySelectorAll\('img'\)[\s\S]+platform !== 'douyin' && !isUnsupportedPlatformImageUrl\(src\)/,
@@ -618,4 +670,14 @@ test('publish checks let an explicit published status override the expected sche
   assert.match(publishCheck, /const found = hasTitle && hasPublishedNearTitle/)
   assert.match(server, /const found = hasTitle && hasLocation && hasPublishedSignal/)
   assert.doesNotMatch(server, /const found = hasTitle && hasLocation && !isBeforeScheduledAt && hasPublishedSignal/)
+})
+
+test('handled publish-check timeouts are counted against the claimed browser environment', () => {
+  const server = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.match(
+    server,
+    /catch \(error\) \{\s*browserRuntimeErrorCounter\.record\(\s*error,\s*runtimeTask\?\.providerProfileId \|\| claimedProviderProfileId,\s*\)[\s\S]+if \(isPublishCheckTimeoutError\(error\)\)/,
+    'publish-check errors must be attributed before timeout is converted to an unknown result',
+  )
 })

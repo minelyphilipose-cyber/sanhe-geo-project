@@ -1,0 +1,3381 @@
+﻿diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/GeoApplication.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/GeoApplication.java
+index 3dd53519..5d7eec3d 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/GeoApplication.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/GeoApplication.java
+@@ -11,7 +11,8 @@ import org.springframework.scheduling.annotation.EnableAsync;
+         "com.huanjing.geo.module.*.mapper",
+         "com.huanjing.geo.module.presale.persist.mapper",
+         "com.huanjing.geo.module.presale.export.persist.mapper",
+-        "com.huanjing.geo.module.presale.ruleengine.persist"
++        "com.huanjing.geo.module.presale.ruleengine.persist",
++        "com.huanjing.geo.common.llm.measurement"
+ })
+ @EnableAsync
+ @EnableScheduling
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/config/AsyncExecutorConfig.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/config/AsyncExecutorConfig.java
+index 1968f0bb..be854fd6 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/config/AsyncExecutorConfig.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/config/AsyncExecutorConfig.java
+@@ -67,6 +67,27 @@ public class AsyncExecutorConfig {
+     @Value("${article.ai-draft.threadpool.await-termination-seconds:30}")
+     private int articleAiDraftAwaitTerminationSeconds;
+ 
++    @Value("${baseline.collection.sample-executor.core-pool-size:12}")
++    private int baselineCollectionSampleCorePoolSize;
++
++    @Value("${baseline.collection.sample-executor.max-pool-size:18}")
++    private int baselineCollectionSampleMaxPoolSize;
++
++    @Value("${baseline.collection.sample-executor.queue-capacity:512}")
++    private int baselineCollectionSampleQueueCapacity;
++
++    @Value("${baseline.collection.sample-executor.await-termination-seconds:30}")
++    private int baselineCollectionSampleAwaitTerminationSeconds;
++
++    @Value("${geo.llm.measurement.executor.core-pool-size:1}")
++    private int llmMeasurementCorePoolSize;
++
++    @Value("${geo.llm.measurement.executor.max-pool-size:2}")
++    private int llmMeasurementMaxPoolSize;
++
++    @Value("${geo.llm.measurement.executor.queue-capacity:1000}")
++    private int llmMeasurementQueueCapacity;
++
+     @Bean("taskExecutor")
+     public Executor taskExecutor() {
+         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+@@ -162,6 +183,36 @@ public class AsyncExecutorConfig {
+         return executor;
+     }
+ 
++    @Bean("baselineCollectionSampleExecutor")
++    public Executor baselineCollectionSampleExecutor() {
++        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
++        executor.setCorePoolSize(Math.max(1, baselineCollectionSampleCorePoolSize));
++        executor.setMaxPoolSize(Math.max(baselineCollectionSampleCorePoolSize, baselineCollectionSampleMaxPoolSize));
++        executor.setQueueCapacity(Math.max(1, baselineCollectionSampleQueueCapacity));
++        executor.setKeepAliveSeconds(60);
++        executor.setThreadNamePrefix("baseline-sample-");
++        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
++        executor.setWaitForTasksToCompleteOnShutdown(true);
++        executor.setAwaitTerminationSeconds(Math.max(1, baselineCollectionSampleAwaitTerminationSeconds));
++        executor.initialize();
++        return executor;
++    }
++
++    @Bean("llmMeasurementExecutor")
++    public Executor llmMeasurementExecutor() {
++        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
++        executor.setCorePoolSize(Math.max(1, llmMeasurementCorePoolSize));
++        executor.setMaxPoolSize(Math.max(llmMeasurementCorePoolSize, llmMeasurementMaxPoolSize));
++        executor.setQueueCapacity(Math.max(1, llmMeasurementQueueCapacity));
++        executor.setKeepAliveSeconds(60);
++        executor.setThreadNamePrefix("llm-measurement-");
++        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.DiscardPolicy());
++        executor.setWaitForTasksToCompleteOnShutdown(true);
++        executor.setAwaitTerminationSeconds(10);
++        executor.initialize();
++        return executor;
++    }
++
+     @Bean("wechatCallbackExecutor")
+     public Executor wechatCallbackExecutor() {
+         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/DefaultLlmHttpClient.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/DefaultLlmHttpClient.java
+index 3da9f3ae..b0d964f4 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/DefaultLlmHttpClient.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/DefaultLlmHttpClient.java
+@@ -16,6 +16,6 @@ public class DefaultLlmHttpClient implements LlmHttpClient {
+         HttpClientUtil.HttpResult response = HttpClientUtil.postJson(
+                 url, headers, body, connectTimeoutMs, requestTimeoutMs
+         );
+-        return new HttpResponse(response.statusCode(), response.body());
++        return new HttpResponse(response.statusCode(), response.body(), response.headers());
+     }
+ }
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmHttpClient.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmHttpClient.java
+index e8688354..42e8ddc4 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmHttpClient.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmHttpClient.java
+@@ -1,9 +1,12 @@
+ package com.huanjing.geo.common.llm;
+ 
+ import java.util.Map;
++import java.util.List;
++import java.util.Collections;
++import java.util.LinkedHashMap;
+ 
+ /**
+- * Replaceable HTTP abstraction for LLM unit tests.
++ * Single transport abstraction for OpenAI-compatible chat completions requests.
+  */
+ public interface LlmHttpClient {
+ 
+@@ -13,6 +16,17 @@ public interface LlmHttpClient {
+                           int connectTimeoutMs,
+                           int requestTimeoutMs) throws Exception;
+ 
+-    record HttpResponse(int statusCode, String body) {
++    record HttpResponse(int statusCode, String body, Map<String, List<String>> headers) {
++        public HttpResponse(int statusCode, String body) {
++            this(statusCode, body, Collections.emptyMap());
++        }
++
++        public HttpResponse {
++            if (headers == null) {
++                headers = Collections.emptyMap();
++            } else {
++                headers = Collections.unmodifiableMap(new LinkedHashMap<>(headers));
++            }
++        }
+     }
+ }
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/OpenAiCompatibleLlmInvoker.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/OpenAiCompatibleLlmInvoker.java
+index 1f4ea8fe..3ded1be5 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/OpenAiCompatibleLlmInvoker.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/OpenAiCompatibleLlmInvoker.java
+@@ -2,6 +2,9 @@ package com.huanjing.geo.common.llm;
+ 
+ import com.fasterxml.jackson.databind.JsonNode;
+ import com.fasterxml.jackson.databind.ObjectMapper;
++import com.huanjing.geo.common.llm.measurement.LlmErrorCategory;
++import com.huanjing.geo.common.llm.measurement.LlmHttpErrorException;
++import com.huanjing.geo.common.llm.measurement.RetryAfterParser;
+ import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
+ import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
+ import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
+@@ -123,7 +126,13 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
+                 modelConfig.requestTimeoutMs()
+         );
+         if (response.statusCode() < 200 || response.statusCode() >= 300) {
+-            throw new LlmInvokeException("HTTP " + response.statusCode() + ": " + safeSnippet(response.body()));
++            throw new LlmHttpErrorException(
++                    response.statusCode(),
++                    "HTTP " + response.statusCode() + ": " + safeSnippet(response.body()),
++                    extractProviderErrorCode(response.body()),
++                    RetryAfterParser.parse(response.headers()),
++                    classifyHttpStatus(response.statusCode())
++            );
+         }
+         InvocationResponse invocation = extractResponse(response.body());
+         if (!StringUtils.hasText(invocation.text())) {
+@@ -237,6 +246,37 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
+         return trimmed.length() <= 300 ? trimmed : trimmed.substring(0, 300);
+     }
+ 
++    private LlmErrorCategory classifyHttpStatus(int statusCode) {
++        if (statusCode == 429) {
++            return LlmErrorCategory.PLATFORM_429;
++        }
++        if (statusCode >= 500) {
++            return LlmErrorCategory.HTTP_5XX;
++        }
++        return LlmErrorCategory.INVOKE_FAILED;
++    }
++
++    private String extractProviderErrorCode(String body) {
++        if (!StringUtils.hasText(body)) {
++            return null;
++        }
++        try {
++            JsonNode root = objectMapper.readTree(body);
++            JsonNode error = root.path("error");
++            JsonNode code = error.path("code");
++            if (code.isTextual()) {
++                return code.asText();
++            }
++            JsonNode type = error.path("type");
++            if (type.isTextual()) {
++                return type.asText();
++            }
++        } catch (Exception ignored) {
++            return null;
++        }
++        return null;
++    }
++
+     private void throttle(String platformCode, int qps) throws LlmInvokeException {
+         long minIntervalMs = Math.max(1L, 1000L / qps);
+         PlatformThrottleState state = throttleStates.computeIfAbsent(platformCode, k -> new PlatformThrottleState());
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/pool/LlmExecutionGateway.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/pool/LlmExecutionGateway.java
+index 6c7c0112..8b86e912 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/pool/LlmExecutionGateway.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/pool/LlmExecutionGateway.java
+@@ -25,6 +25,7 @@ public class LlmExecutionGateway {
+     private final LeaseRenewalService renewalService;
+     private final LlmGatewayMetrics metrics;
+     private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
++    private final java.util.concurrent.atomic.AtomicLong blockingWaiters = new java.util.concurrent.atomic.AtomicLong();
+     private final String instanceId = resolveInstanceId();
+ 
+     public LlmExecutionPermit acquire(String feature, AiPlatformConfig platformConfig) {
+@@ -102,6 +103,15 @@ public class LlmExecutionGateway {
+     }
+ 
+     public LlmExecutionPermit acquireBlocking(String feature, AiPlatformConfig platformConfig) {
++        blockingWaiters.incrementAndGet();
++        try {
++            return acquireBlockingInternal(feature, platformConfig);
++        } finally {
++            blockingWaiters.decrementAndGet();
++        }
++    }
++
++    private LlmExecutionPermit acquireBlockingInternal(String feature, AiPlatformConfig platformConfig) {
+         long waitTimeoutMs = Math.max(0L, properties.getPermitWaitTimeoutMs());
+         long retryIntervalMs = Math.max(10L, properties.getPermitRetryIntervalMs());
+         long deadline = System.currentTimeMillis() + waitTimeoutMs;
+@@ -165,6 +175,10 @@ public class LlmExecutionGateway {
+         return counts;
+     }
+ 
++    public Long activeWaiterCount() {
++        return blockingWaiters.get();
++    }
++
+     @PreDestroy
+     public void shutdown() {
+         shuttingDown.set(true);
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmPlatformRouter.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmPlatformRouter.java
+index 47aebbcc..c42c2097 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmPlatformRouter.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmPlatformRouter.java
+@@ -7,8 +7,12 @@ import com.huanjing.geo.common.llm.LlmModelConfig;
+ import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
+ import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
+ import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
++import com.huanjing.geo.common.llm.measurement.LlmCapacitySignal;
++import com.huanjing.geo.common.llm.measurement.LlmErrorCategory;
++import com.huanjing.geo.common.llm.measurement.LlmMeasurementCollector;
++import com.huanjing.geo.common.llm.measurement.LlmStructuredException;
+ import com.huanjing.geo.module.dispatch.service.AiPlatformHealthMonitorService;
+-import com.huanjing.geo.module.dispatch.service.PlatformRateLimiterService;
++import com.huanjing.geo.common.llm.limiter.PlatformRateLimiterService;
+ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+@@ -26,6 +30,7 @@ public class LlmPlatformRouter {
+     private final LlmInvoker llmInvoker;
+     private final LlmExecutionGateway executionGateway;
+     private final AiPlatformHealthMonitorService platformHealthMonitorService;
++    private final LlmMeasurementCollector measurementCollector;
+ 
+     public LlmRouteResult invoke(LlmRouteRequest request) {
+         List<LlmPlatformCandidate> candidates = selectionStrategy.selectCandidates(request);
+@@ -41,27 +46,32 @@ public class LlmPlatformRouter {
+         Exception lastError = null;
+ 
+         for (LlmPlatformCandidate candidate : candidates) {
++            String breakerKey = breakerKey(request, candidate.platformCode());
+             if (Thread.currentThread().isInterrupted()) {
+                 Thread.currentThread().interrupt();
+                 throw new LlmRouteException(LlmRouteFailureKind.INTERRUPTED, "Interrupted during LLM routing",
+                         requestCount, lastError);
+             }
+-            if (!circuitBreakerService.allowRequest(candidate.platformCode())) {
++            if (!circuitBreakerService.allowRequest(breakerKey)) {
+                 circuitOpen++;
+                 platformHealthMonitorService.recordCircuitOpen(candidate.platformCode(), request.feature());
+                 continue;
+             }
+             requestCount++;
+-            try (LlmExecutionPermit ignored = executionGateway.acquire(request.feature(), candidate.platformConfig())) {
++            try (LlmExecutionPermit ignored = request.waitForPermit()
++                    ? executionGateway.acquireBlocking(request.feature(), candidate.platformConfig())
++                    : executionGateway.acquire(request.feature(), candidate.platformConfig())) {
++                recordCapacitySignal(request, candidate, null);
+                 AiPlatformConfig config = candidate.platformConfig();
+                 if (!platformRateLimiterService.tryAcquire(config, request.tokenCost())) {
+                     rateLimited++;
+                     requestCount--;
+                     platformHealthMonitorService.recordRateLimited(candidate.platformCode(), request.feature());
++                    recordCapacitySignal(request, candidate, LlmErrorCategory.INTERNAL_RATE_LIMITED);
+                     continue;
+                 }
+                 LlmInvokeResult result = llmInvoker.invoke(request.userPrompt(), buildModelConfig(request, candidate));
+-                circuitBreakerService.recordSuccess(candidate.platformCode());
++                circuitBreakerService.recordSuccess(breakerKey);
+                 return new LlmRouteResult(
+                         candidate.platformCode(),
+                         candidate.platformName(),
+@@ -77,11 +87,13 @@ public class LlmPlatformRouter {
+                 permitBusy++;
+                 lastError = ex;
+                 platformHealthMonitorService.recordPermitBusy(candidate.platformCode(), request.feature());
++                recordCapacitySignal(request, candidate, LlmErrorCategory.PERMIT_BUSY);
+                 log.debug("LLM permit busy, feature={}, platform={}, channel={}",
+                         request.feature(), candidate.platformCode(), candidate.channel());
+             } catch (LlmInvokeException ex) {
+                 lastError = ex;
+-                circuitBreakerService.recordFailure(candidate.platformCode());
++                recordStructuredInvokeFailure(request, candidate, ex);
++                circuitBreakerService.recordFailure(breakerKey);
+                 log.warn("LLM candidate failed, feature={}, platform={}, channel={}, reason={}",
+                         request.feature(), candidate.platformCode(), candidate.channel(), ex.getMessage());
+             }
+@@ -121,6 +133,13 @@ public class LlmPlatformRouter {
+         );
+     }
+ 
++    private String breakerKey(LlmRouteRequest request, String platformCode) {
++        if (LlmFeature.BASELINE.equals(request.feature())) {
++            return request.feature() + ":" + platformCode;
++        }
++        return platformCode;
++    }
++
+     private LlmRouteFailureKind resolveFailureKind(int total, int rateLimited, int circuitOpen, int permitBusy) {
+         if (rateLimited == total) {
+             return LlmRouteFailureKind.ALL_RATE_LIMITED;
+@@ -142,4 +161,61 @@ public class LlmPlatformRouter {
+         }
+         return LlmRouteFailureKind.ALL_FAILED;
+     }
++
++    private void recordStructuredInvokeFailure(LlmRouteRequest request,
++                                               LlmPlatformCandidate candidate,
++                                               LlmInvokeException ex) {
++        LlmStructuredException structured = findStructured(ex);
++        if (structured != null && structured.errorCategory() != null) {
++            recordCapacitySignal(request, candidate, structured.errorCategory());
++            return;
++        }
++        if (isTimeout(ex)) {
++            recordCapacitySignal(request, candidate, LlmErrorCategory.TIMEOUT);
++        }
++    }
++
++    private LlmStructuredException findStructured(Throwable ex) {
++        Throwable current = ex;
++        while (current != null) {
++            if (current instanceof LlmStructuredException structured) {
++                return structured;
++            }
++            current = current.getCause();
++        }
++        return null;
++    }
++
++    private boolean isTimeout(Throwable ex) {
++        Throwable current = ex;
++        while (current != null) {
++            String message = current.getMessage();
++            if (message != null && message.toLowerCase().contains("timed out")) {
++                return true;
++            }
++            current = current.getCause();
++        }
++        return false;
++    }
++
++    private void recordCapacitySignal(LlmRouteRequest request,
++                                      LlmPlatformCandidate candidate,
++                                      LlmErrorCategory category) {
++        measurementCollector.recordCapacitySignal(new LlmCapacitySignal(
++                request.measurementContext(),
++                request.feature(),
++                candidate.platformCode(),
++                com.huanjing.geo.common.llm.LlmGovernanceStack.GATEWAY,
++                category,
++                safe(executionGateway.activeGlobalCount()),
++                safe(executionGateway.activeFeatureCount(request.feature())),
++                safe(executionGateway.activePlatformCount(candidate.platformCode())),
++                safe(executionGateway.activeWaiterCount()),
++                0L
++        ));
++    }
++
++    private long safe(Long value) {
++        return value == null ? 0L : value;
++    }
+ }
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmRouteRequest.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmRouteRequest.java
+index e09ff9f3..81046cdf 100644
+--- a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmRouteRequest.java
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/router/LlmRouteRequest.java
+@@ -1,5 +1,7 @@
+ package com.huanjing.geo.common.llm.router;
+ 
++import com.huanjing.geo.common.llm.LlmRoutingStrategy;
++import com.huanjing.geo.common.llm.measurement.LlmCallMeasurementContext;
+ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+ 
+ import java.util.List;
+@@ -16,7 +18,88 @@ public record LlmRouteRequest(String feature,
+                               boolean normalizeJsonOutput,
+                               int tokenCost,
+                               int cursor,
+-                              List<AiPlatformConfig> platformConfigs) {
++                              List<AiPlatformConfig> platformConfigs,
++                              boolean waitForPermit,
++                              LlmRoutingStrategy routingStrategy,
++                              LlmCallMeasurementContext measurementContext) {
++
++    public LlmRouteRequest(String feature,
++                           String systemPrompt,
++                           String userPrompt,
++                           Double temperature,
++                           Integer connectTimeoutMs,
++                           Integer requestTimeoutMs,
++                           Integer requestTimeoutMaxMs,
++                           Integer maxRetry,
++                           Integer maxTokens,
++                           boolean normalizeJsonOutput,
++                           int tokenCost,
++                           int cursor,
++                           List<AiPlatformConfig> platformConfigs,
++                           boolean waitForPermit) {
++        this(feature, systemPrompt, userPrompt, temperature, connectTimeoutMs, requestTimeoutMs, requestTimeoutMaxMs,
++                maxRetry, maxTokens, normalizeJsonOutput, tokenCost, cursor, platformConfigs, waitForPermit,
++                LlmRoutingStrategy.FAILOVER, LlmCallMeasurementContext.empty());
++    }
++
++    public LlmRouteRequest(String feature,
++                           String systemPrompt,
++                           String userPrompt,
++                           Double temperature,
++                           Integer connectTimeoutMs,
++                           Integer requestTimeoutMs,
++                           Integer requestTimeoutMaxMs,
++                           Integer maxRetry,
++                           Integer maxTokens,
++                           boolean normalizeJsonOutput,
++                           int tokenCost,
++                           int cursor,
++                           List<AiPlatformConfig> platformConfigs) {
++        this(feature, systemPrompt, userPrompt, temperature, connectTimeoutMs, requestTimeoutMs, requestTimeoutMaxMs,
++                maxRetry, maxTokens, normalizeJsonOutput, tokenCost, cursor, platformConfigs, false,
++                LlmRoutingStrategy.FAILOVER, LlmCallMeasurementContext.empty());
++    }
++
++    public LlmRouteRequest(String feature,
++                           String systemPrompt,
++                           String userPrompt,
++                           Double temperature,
++                           Integer connectTimeoutMs,
++                           Integer requestTimeoutMs,
++                           Integer requestTimeoutMaxMs,
++                           Integer maxRetry,
++                           Integer maxTokens,
++                           boolean normalizeJsonOutput,
++                           int tokenCost,
++                           int cursor,
++                           List<AiPlatformConfig> platformConfigs,
++                           boolean waitForPermit,
++                           LlmRoutingStrategy routingStrategy) {
++        this(feature, systemPrompt, userPrompt, temperature, connectTimeoutMs, requestTimeoutMs, requestTimeoutMaxMs,
++                maxRetry, maxTokens, normalizeJsonOutput, tokenCost, cursor, platformConfigs, waitForPermit,
++                routingStrategy, LlmCallMeasurementContext.empty());
++    }
++
++    public LlmRouteRequest withMeasurementContext(LlmCallMeasurementContext context) {
++        return new LlmRouteRequest(
++                feature,
++                systemPrompt,
++                userPrompt,
++                temperature,
++                connectTimeoutMs,
++                requestTimeoutMs,
++                requestTimeoutMaxMs,
++                maxRetry,
++                maxTokens,
++                normalizeJsonOutput,
++                tokenCost,
++                cursor,
++                platformConfigs,
++                waitForPermit,
++                routingStrategy,
++                context
++        );
++    }
+ 
+     public LlmRouteRequest {
+         feature = feature == null || feature.isBlank() ? LlmFeature.GENERIC : feature.trim();
+@@ -24,5 +107,7 @@ public record LlmRouteRequest(String feature,
+         tokenCost = Math.max(tokenCost, 1);
+         cursor = Math.max(cursor, 0);
+         platformConfigs = platformConfigs == null ? List.of() : List.copyOf(platformConfigs);
++        routingStrategy = routingStrategy == null ? LlmRoutingStrategy.FAILOVER : routingStrategy;
++        measurementContext = measurementContext == null ? LlmCallMeasurementContext.empty() : measurementContext;
+     }
+ }
+
+diff --git a/geo-project/geo-server/docs/llm-facade-measurement-spec.md b/geo-project/geo-server/docs/llm-facade-measurement-spec.md
+new file mode 100644
+index 00000000..7705e000
+--- /dev/null
++++ b/geo-project/geo-server/docs/llm-facade-measurement-spec.md
+@@ -0,0 +1,243 @@
++# 门面统一测量埋点改造 Spec（v1）
++
++> 收口期（`LlmCallFacade` 统一入口）已签收。本期在统一入口之上建立只读测量体系，为后续 permit 策略、平台配额、成本预算和缓存复用提供可信数据。
++
++## 0. 定位与硬约束
++
++测量期只负责观测，不改变调用控制流；所有新增观测写入必须异步、批量、可丢弃，失败不得影响主调用。`ai_platform_health_event` 保留平台健康事件语义，调用级明细和分钟级容量指标另建观测表，避免健康状态、成本/重叠度、容量诊断混表。
++
++硬约束：
++
++1. **只读、不改控制流**：测量只做捕获、记录、暴露。不得用 `Retry-After`、permit 占用率、队列深度等测量信号改变退避、路由、时序、permit 等待或失败切换。
++2. **埋点失败不影响主调用**：测量逻辑全程吞异常。一次观测写入失败不得导致 LLM 调用失败。
++3. **不拖垮被测路径**：主调用线程只做内存级累加、采样、轻量事件投递；持久化走异步/批量旁路。
++4. **存储分层**：健康事件流、调用级明细、分钟容量指标物理隔离。
++5. **事件所有权清晰**：现有 health monitor 事件先保持现状，新增测量事件不能造成 success/failure/rate_limited/permit_busy 等健康事件双写。
++
++与 permit 策略期的交接红线：本期只产出可信测量仪和夜批读数。买 key、放宽 permit、需求侧削减、用 `Retry-After` 做退避、平台 cooldown 都不在本期。
++
++## 1. 测量边界
++
++`LlmCallFacade` 是调用观测根上下文，不是所有原始信号的唯一发生点。测量事件应在源头产生，并继承 facade 上下文：
++
++- `LlmCallFacade`：生成/承接 `run_id`、feature、governance stack、routing strategy、wait semantics、scope、customer/project 等上下文；负责总调用计数和观测事件投递边界。
++- `LlmHttpClient`：产生 HTTP status、headers、body snippet、传输耗时等源头信号。
++- `OpenAiCompatibleLlmInvoker`：产生 direct 调用的模型、token、HTTP 异常结构化信号和重试尝试信息。
++- `LlmPlatformRouter`：产生候选切换、internal rate limited、permit busy、circuit open、request count、failure kind 等路由信号。
++- `LlmExecutionGateway`：产生 permit acquire wait、permit scope、active count、waiter count 等容量信号。
++- `LEGACY_LIMITER`：产生 legacy rate limiter 命中、legacy concurrency permit wait、legacy HTTP 调用信号。
++
++关键调整：结构化 429 不能靠 facade 从异常字符串猜。当前 `LlmHttpClient.HttpResponse` 只有 `statusCode/body`，本期必须扩展 HTTP 响应结构，至少带 headers，才能可靠解析 `Retry-After`。
++
++## 2. 存储分层
++
++| 层 | 表 | 职责 | 写入方式 | 可采样 |
++|---|---|---|---|---|
++| 健康事件流 | `ai_platform_health_event`（现有，必要时扩字段） | 平台健康事件语义（含结构化错误） | 保持现有 health monitor 语义；是否异步化单独评审 | 否 |
++| 调用级明细 | `llm_call_observation`（待评审名） | 每次调用的观测：feature/platform/model/routing/wait/hash/scope/duration/token | 新增异步批量写入 | 是 |
++| 分钟容量指标 | `llm_capacity_minute_metric`（待评审名） | 按 `run_id + minute + platform + feature` 聚合容量读数 | 内存聚合后批量刷新 | 否 |
++
++红线：
++
++- `ai_platform_health_event` 不承载 prompt hash、scope、customer/project、成本明细等调用分析字段。
++- 调用明细表不更新 `ai_platform_config.current_health_status`。
++- 诊断查询主查分钟容量指标，不扫调用明细表。
++
++## 3. 结构化错误捕获
++
++目标是可信地区分：
++
++- `permit_busy`：内部 permit 池满。
++- `internal_rate_limited`：我方 RPM/TPM 或 legacy rate limiter 先拦，非平台真 429。
++- `platform_429`：平台 HTTP 层真实限流。
++- `http_5xx`：平台或网关 5xx。
++- `timeout`：连接/读取/请求超时。
++- `config_error`：配置缺失、URL/API key/model 等本地配置错误。
++- `business_non_retryable`：业务不可重试错误。
++
++结构化字段：
++
++- `http_status_code`
++- `provider_error_code`
++- `retry_after_ms`
++- `error_category`
++- `governance_stack`
++- `routing_strategy`
++- `wait_semantics`
++- `request_count`
++- `failure_kind`
++
++`Retry-After` 解析规则：
++
++- 支持 delta-seconds，转为毫秒。
++- 支持 HTTP-date，按当前时间差转为毫秒，负数按 0 处理。
++- 解析失败记 null，不猜默认值。
++- 本期只记录，不喂给退避、cooldown 或重试。
++
++实现前置：
++
++- 扩展 `LlmHttpClient.HttpResponse`，新增 headers 访问能力。
++- 让 HTTP 非 2xx 异常携带结构化元数据，避免 direct/routed 路径只剩 `LlmInvokeException("HTTP 429: ...")`。
++- 保持现有异常类型和对调用方的行为不变；结构化元数据只服务测量。
++
++## 4. 健康事件所有权
++
++当前已有写入：
++
++- `OpenAiCompatibleLlmInvoker` 记录 success/failure。
++- `LlmPlatformRouter` 记录 rate_limited/permit_busy/circuit_open。
++- `AiPlatformHealthMonitorService` 同步 insert `ai_platform_health_event`，并同步更新 `ai_platform_config.current_health_status / last_failure_at`。
++
++本期原则：
++
++- 不在 facade 额外重复写同类 health event，避免健康看板双计数。
++- 新增 `llm_call_observation` 和 `llm_capacity_minute_metric` 的写入由 measurement collector 负责。
++- `ai_platform_health_event` 是否异步化不与本期测量强绑定；如要改，必须单独评审实时性影响。
++
++## 5. 容量占用采样
++
++分钟指标维度：
++
++- `run_id`
++- `bucket_minute`
++- `platform_code`
++- `feature`
++- `governance_stack`
++
++核心指标：
++
++- global/feature/platform permit active 峰值与均值。
++- `permit_busy_count`
++- `permit_waiter_peak`（新增 LLM 层等待者计数，非任务队列深度）
++- `internal_rate_limited_count`
++- `platform_429_count`
++- `http_5xx_count`
++- `timeout_count`
++- `legacy_rate_limited_count`
++- `legacy_concurrency_waiter_peak`
++
++队列深度口径：
++
++- `permit_waiter_count` 属于 LLM 层，可在 gateway/legacy limiter 中新增轻量内存计数。
++- `task_queue_depth` 属于任务容量层，本期只预留字段或接已有任务队列指标，不要求 facade 生成。
++
++硬约束：
++
++- 按 run / 按分钟分桶，不做日均判断。
++- 诊断看峰值分钟、饱和持续时长、排空时间，不只看 `permit_busy` 次数。
++
++## 6. `run_id` 与上下文传播
++
++`run_id` 是容量诊断能否按夜批窗口读数的前提。
++
++建议：
++
++- `LlmCallRequest` 显式携带 `runId`、`customerId`、`projectId`、`scope`、`promptHash` 等可选观测字段。
++- 批处理入口创建 run 时生成 `run_id` 并向下传递。
++- MDC/ThreadLocal 只作为兼容补充，不作为唯一来源，避免异步/线程池场景丢上下文。
++
++落地顺序：
++
++1. 先扩展 request 的可选观测上下文字段，默认 null。
++2. 基线采集、问题轮询、文章生成等夜批入口逐步填充。
++3. facade 对缺失 run_id 的调用仍记录，但归入 `run_id = null` 或 `ad_hoc`，不影响主调用。
++
++## 7. Duration 分段
++
++统一拆成三段：
++
++- `wait_ms`：等待 permit、legacy concurrency permit、内部限流节流等容量等待时间。
++- `http_ms`：HTTP transport 纯耗时。
++- `total_ms`：从进入 facade 到返回/抛出异常的总耗时。
++
++实现要求：
++
++- legacy path 可在 facade/legacy limiter/http client 分段得到。
++- direct/routed path 需要 gateway、invoker、http client 共同产生分段事件；不能只靠 facade 猜。
++- 旧 `duration_ms` 继续保持调用方现有语义，新增分段字段只进入观测表，避免行为变更。
++
++## 8. 重叠度埋点
++
++本期只埋点，不做缓存复用。
++
++字段：
++
++- `normalized_prompt_hash`
++- `platform_code`
++- `model_id`
++- `feature`
++- `scope`
++- `customer_id`
++- `project_id`
++- `run_id`
++- `created_at`
++
++scope 规则：
++
++- scope 必须在问题/模板定义层声明，不从渲染后的 prompt 启发式推断。
++- 取值：`GLOBAL` / `INDUSTRY` / `CUSTOMER` / `PROJECT` / `BASELINE_RUN`。
++- 默认最严：未声明按 `PROJECT` 或 `CUSTOMER`，只有显式声明才能升为 `INDUSTRY`/`GLOBAL`。
++- 基线采集使用 `BASELINE_RUN`，不计入跨项目复用统计，不得用于去重刻意的 N 次重复采样。
++
++`normalized_prompt_hash` 规则待评审：
++
++- 只存 hash，不存 prompt 原文。
++- 基础归一化包括空白规整、大小写统一、稳定 JSON 序列化。
++- 时间戳、随机 id 等易变片段的剥离规则必须白名单化，避免过度合并不同 prompt。
++
++## 9. 成本埋点
++
++本期只记录 token/成本测量字段，不做账本、预算、告警或超预算策略。
++
++字段：
++
++- `prompt_tokens`
++- `completion_tokens`
++- `total_tokens`
++- `estimated_cost`
++- `currency`
++- `customer_id`
++- `project_id`
++- `feature`
++- `platform_code`
++- `model_id`
++
++成本估算规则可先为空或按配置表提供；预算管控另列一期。
++
++## 10. 诊断口径
++
++跑一到两个夜批后，按 `run_id + 峰值分钟` 读取 `llm_capacity_minute_metric`：
++
++| 观测 | 下一期倾向决策 |
++|---|---|
++| `permit_busy` 高、`platform_429` 不高 | 放宽 permit / feature 配额，或批处理改短等释放 worker |
++| `platform_429` 高且集中某平台 | 要平台配额/key，或做平台 cooldown + 错峰 |
++| `internal_rate_limited` 高 | 检查我方 RPM/TPM 是否过保守 |
++| 成本高但无 429/permit busy | 需求侧削减 / 缓存复用 / 预算管控 |
++
++本期只产出数字，不做策略决策。
++
++占用率来源说明：
++
++- run 桶：来自每次 routed 调用成功拿到 permit 后的实时容量信号，带业务 `run_id`，用于分析单次夜批窗口内的占用峰值。
++- `ad_hoc` 桶：来自定时容量采样器，独立于具体调用，覆盖调用间隙的全局 active/waiter 曲线。
++- 诊断时需要按 minute 同时读取 run 桶和 `ad_hoc` 桶，避免只按 run_id 过滤时漏掉定时采样器的全局曲线。
++
++## 11. 落地顺序
++
++1. 扩展 HTTP 响应与结构化异常元数据，确保 `Retry-After` 可被源头捕获。
++2. 增加测量上下文模型，扩展 `LlmCallRequest` 可选观测字段。
++3. 建 measurement collector：内存投递、异步批量、失败吞掉。
++4. 建 `llm_call_observation`。
++5. 建 `llm_capacity_minute_metric` 与分钟聚合器。
++6. 在 facade、http client、invoker、router、gateway/legacy limiter 接入只读测量事件。
++7. 夜批入口逐步传入 `run_id` / customer / project / scope / prompt hash。
++8. 跑夜批并按 run/峰值分钟出诊断读数。
++
++## 12. 明确不在本期范围
++
++- 用 `Retry-After` 或占用率改变退避、路由、时序。
++- permit 策略变更。
++- 缓存复用或跨租户复用。
++- 成本账本、预算、超预算策略、告警。
++- 任务容量层和分布式熔断。
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallFacade.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallFacade.java
+new file mode 100644
+index 00000000..79aa9475
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallFacade.java
+@@ -0,0 +1,401 @@
++package com.huanjing.geo.common.llm;
++
++import com.fasterxml.jackson.databind.ObjectMapper;
++import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.limiter.PlatformConcurrencyLimiterService;
++import com.huanjing.geo.common.llm.limiter.PlatformRateLimiterService;
++import com.huanjing.geo.common.llm.measurement.LlmErrorCategory;
++import com.huanjing.geo.common.llm.measurement.LlmHttpErrorException;
++import com.huanjing.geo.common.llm.measurement.LlmMeasurementCollector;
++import com.huanjing.geo.common.llm.measurement.LlmMeasurementEvent;
++import com.huanjing.geo.common.llm.measurement.LlmStructuredException;
++import com.huanjing.geo.common.llm.measurement.RetryAfterParser;
++import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
++import com.huanjing.geo.common.llm.router.LlmRouteException;
++import com.huanjing.geo.common.llm.router.LlmRouteResult;
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Service;
++import org.springframework.util.StringUtils;
++
++import java.net.http.HttpTimeoutException;
++import java.time.LocalDateTime;
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.atomic.AtomicLong;
++
++@Service
++@RequiredArgsConstructor
++public class LlmCallFacade {
++    private final LlmPlatformRouter platformRouter;
++    private final LlmInvoker llmInvoker;
++    private final PlatformRateLimiterService platformRateLimiterService;
++    private final PlatformConcurrencyLimiterService platformConcurrencyLimiterService;
++    private final LlmHttpClient llmHttpClient;
++    private final ObjectMapper objectMapper;
++    private final LlmMeasurementCollector measurementCollector;
++    private final ConcurrentHashMap<String, AtomicLong> counters = new ConcurrentHashMap<>();
++
++    public LlmCallResult execute(LlmCallRequest request) throws LlmInvokeException {
++        long started = System.currentTimeMillis();
++        incrementCounter(request);
++        try {
++            LlmCallResult result = switch (request.governanceStack()) {
++                case GATEWAY -> executeGateway(request);
++                case LEGACY_LIMITER -> executeLegacyLimiter(request);
++                case NO_PERMIT_LEGACY -> executeLegacyHttp(request);
++            };
++            safeRecordSuccess(request, result, elapsed(started));
++            return result;
++        } catch (RuntimeException | LlmInvokeException ex) {
++            safeRecordFailure(request, ex, elapsed(started));
++            throw ex;
++        }
++    }
++
++    public Map<String, Long> debugCounters() {
++        Map<String, Long> snapshot = new LinkedHashMap<>();
++        counters.forEach((key, value) -> snapshot.put(key, value.get()));
++        return snapshot;
++    }
++
++    private LlmCallResult executeGateway(LlmCallRequest request) throws LlmInvokeException {
++        if (request.routeRequest() != null) {
++            LlmRouteResult routed = platformRouter.invoke(request.routeRequest().withMeasurementContext(request.measurementContext()));
++            return LlmCallResult.routed(routed);
++        }
++        if (request.modelConfig() == null) {
++            throw new IllegalArgumentException("modelConfig is required for direct LLM call");
++        }
++        return LlmCallResult.direct(llmInvoker.invoke(request.prompt(), request.modelConfig()));
++    }
++
++    private LlmCallResult executeLegacyLimiter(LlmCallRequest request) {
++        if (request.legacyPlatformConfig() == null) {
++            throw new IllegalArgumentException("legacyPlatformConfig is required for legacy limiter calls");
++        }
++        if (!platformRateLimiterService.tryAcquire(request.legacyPlatformConfig(), request.legacyTokenCost())) {
++            throw new BizException(429, "Platform limited: " + request.legacyPlatformCode());
++        }
++        try (PlatformConcurrencyLimiterService.Permit ignored =
++                     platformConcurrencyLimiterService.acquire(request.legacyPlatformConfig())) {
++            return executeLegacyHttp(request);
++        }
++    }
++
++    private LlmCallResult executeLegacyHttp(LlmCallRequest request) {
++        long started = System.currentTimeMillis();
++        try {
++            LlmHttpClient.HttpResponse response = llmHttpClient.postJson(
++                    normalizeChatCompletionsUrl(request.legacyApiUrl()),
++                    legacyHeaders(request.legacyApiKey()),
++                    legacyPayload(request),
++                    request.legacyConnectTimeoutMs(),
++                    request.legacyRequestTimeoutMs()
++            );
++            if (response.statusCode() < 200 || response.statusCode() >= 300) {
++                throw new LlmHttpErrorException(
++                        response.statusCode(),
++                        "Model API HTTP " + response.statusCode() + ": " + safeSnippet(response.body()),
++                        extractProviderErrorCode(response.body()),
++                        RetryAfterParser.parse(response.headers()),
++                        classifyHttpStatus(response.statusCode())
++                );
++            }
++            return LlmCallResult.raw(
++                    response.body(),
++                    request.legacyPlatformCode(),
++                    request.legacyPlatformName(),
++                    request.legacyChannel(),
++                    request.legacyModelId(),
++                    Math.max(1L, System.currentTimeMillis() - started),
++                    request.requestCount()
++            );
++        } catch (BizException ex) {
++            throw ex;
++        } catch (LlmHttpErrorException ex) {
++            throw new BizException(ex.httpStatusCode() == null ? 500 : ex.httpStatusCode(), ex.getMessage(), ex);
++        } catch (Exception ex) {
++            throw new BizException(500, "Model API invoke failed: " + ex.getMessage());
++        }
++    }
++
++    private Map<String, String> legacyHeaders(String apiKey) {
++        Map<String, String> headers = new LinkedHashMap<>();
++        headers.put("Content-Type", "application/json");
++        headers.put("Authorization", "Bearer " + apiKey);
++        headers.put("api-key", apiKey);
++        headers.put("x-api-key", apiKey);
++        return headers;
++    }
++
++    private String legacyPayload(LlmCallRequest request) throws Exception {
++        Map<String, Object> payload = new LinkedHashMap<>();
++        payload.put("model", request.legacyModelId());
++        payload.put("temperature", request.legacyTemperature());
++        List<Map<String, String>> messages = new ArrayList<>();
++        if (StringUtils.hasText(request.legacySystemPrompt())) {
++            messages.add(Map.of("role", "system", "content", request.legacySystemPrompt()));
++        }
++        messages.add(Map.of("role", "user", "content", request.legacyUserPrompt()));
++        payload.put("messages", messages);
++        return objectMapper.writeValueAsString(payload);
++    }
++
++    private String normalizeChatCompletionsUrl(String apiUrl) {
++        String trimmed = apiUrl.trim();
++        if (trimmed.endsWith("/chat/completions")) {
++            return trimmed;
++        }
++        if (trimmed.endsWith("/")) {
++            return trimmed + "chat/completions";
++        }
++        return trimmed + "/chat/completions";
++    }
++
++    private String safeSnippet(String text) {
++        if (!StringUtils.hasText(text)) {
++            return "";
++        }
++        String trimmed = text.trim();
++        return trimmed.length() <= 300 ? trimmed : trimmed.substring(0, 300);
++    }
++
++    private void incrementCounter(LlmCallRequest request) {
++        String key = request.feature() + "|" + request.routingStrategy() + "|" + request.governanceStack();
++        counters.computeIfAbsent(key, ignored -> new AtomicLong()).incrementAndGet();
++    }
++
++    private void safeRecordSuccess(LlmCallRequest request, LlmCallResult result, long totalMs) {
++        try {
++            recordSuccess(request, result, totalMs);
++        } catch (Exception ignored) {
++            // Measurement must never change LLM call control flow.
++        }
++    }
++
++    private void safeRecordFailure(LlmCallRequest request, Throwable ex, long totalMs) {
++        try {
++            recordFailure(request, ex, totalMs);
++        } catch (Exception ignored) {
++            // Measurement must never change LLM call control flow.
++        }
++    }
++
++    private void recordSuccess(LlmCallRequest request, LlmCallResult result, long totalMs) {
++        measurementCollector.recordObservation(new LlmMeasurementEvent(
++                request.measurementContext(),
++                request.feature(),
++                result.platformCode(),
++                result.platformName(),
++                result.modelId(),
++                result.modelName(),
++                request.governanceStack(),
++                request.routingStrategy(),
++                request.waitSemantics(),
++                "success",
++                null,
++                null,
++                null,
++                null,
++                null,
++                result.requestCount(),
++                null,
++                request.governanceStack() == LlmGovernanceStack.LEGACY_LIMITER ? result.durationMs() : null,
++                totalMs,
++                result.invokeResult() == null ? null : result.invokeResult().promptTokens(),
++                result.invokeResult() == null ? null : result.invokeResult().completionTokens(),
++                LocalDateTime.now()
++        ));
++        recordLegacyWaiters(request, null);
++    }
++
++    private void recordFailure(LlmCallRequest request, Throwable ex, long totalMs) {
++        StructuredFailure failure = structuredFailure(ex);
++        measurementCollector.recordObservation(new LlmMeasurementEvent(
++                request.measurementContext(),
++                request.feature(),
++                platformCode(request),
++                platformName(request),
++                modelId(request),
++                modelName(request),
++                request.governanceStack(),
++                request.routingStrategy(),
++                request.waitSemantics(),
++                "failure",
++                failure.errorCategory(),
++                failure.httpStatusCode(),
++                failure.providerErrorCode(),
++                failure.retryAfterMs(),
++                failure.failureKind(),
++                failure.requestCount() == null ? request.requestCount() : failure.requestCount(),
++                null,
++                null,
++                totalMs,
++                null,
++                null,
++                LocalDateTime.now()
++        ));
++        recordLegacyWaiters(request, failure.errorCategory());
++    }
++
++    private void recordLegacyWaiters(LlmCallRequest request, LlmErrorCategory category) {
++        if (request.governanceStack() != LlmGovernanceStack.LEGACY_LIMITER) {
++            return;
++        }
++        measurementCollector.recordCapacitySignal(new com.huanjing.geo.common.llm.measurement.LlmCapacitySignal(
++                request.measurementContext(),
++                request.feature(),
++                request.legacyPlatformCode(),
++                request.governanceStack(),
++                category,
++                0L,
++                0L,
++                0L,
++                0L,
++                platformConcurrencyLimiterService.waiterCount(request.legacyPlatformCode())
++        ));
++    }
++
++    private StructuredFailure structuredFailure(Throwable ex) {
++        LlmStructuredException structured = findStructured(ex);
++        LlmRouteException routeException = findRouteException(ex);
++        if (structured != null) {
++            return new StructuredFailure(
++                    structured.httpStatusCode(),
++                    structured.providerErrorCode(),
++                    structured.retryAfterMs(),
++                    structured.errorCategory(),
++                    routeException == null ? null : routeException.failureKind().name(),
++                    routeException == null ? null : routeException.requestCount()
++            );
++        }
++        if (routeException != null) {
++            LlmErrorCategory category = switch (routeException.failureKind()) {
++                case ALL_PERMIT_BUSY -> LlmErrorCategory.PERMIT_BUSY;
++                case ALL_RATE_LIMITED -> LlmErrorCategory.INTERNAL_RATE_LIMITED;
++                case NO_CANDIDATE -> LlmErrorCategory.CONFIG_ERROR;
++                default -> LlmErrorCategory.INVOKE_FAILED;
++            };
++            return new StructuredFailure(null, null, null, category,
++                    routeException.failureKind().name(), routeException.requestCount());
++        }
++        if (ex instanceof BizException bizException && bizException.getCode() == 429) {
++            return new StructuredFailure(429, null, null, LlmErrorCategory.INTERNAL_RATE_LIMITED, null, null);
++        }
++        if (containsTimeout(ex)) {
++            return new StructuredFailure(null, null, null, LlmErrorCategory.TIMEOUT, null, null);
++        }
++        if (ex instanceof IllegalArgumentException) {
++            return new StructuredFailure(null, null, null, LlmErrorCategory.CONFIG_ERROR, null, null);
++        }
++        return new StructuredFailure(null, null, null, LlmErrorCategory.INVOKE_FAILED, null, null);
++    }
++
++    private LlmStructuredException findStructured(Throwable ex) {
++        Throwable current = ex;
++        while (current != null) {
++            if (current instanceof LlmStructuredException structured) {
++                return structured;
++            }
++            current = current.getCause();
++        }
++        return null;
++    }
++
++    private LlmRouteException findRouteException(Throwable ex) {
++        Throwable current = ex;
++        while (current != null) {
++            if (current instanceof LlmRouteException routeException) {
++                return routeException;
++            }
++            current = current.getCause();
++        }
++        return null;
++    }
++
++    private boolean containsTimeout(Throwable ex) {
++        Throwable current = ex;
++        while (current != null) {
++            if (current instanceof HttpTimeoutException || current instanceof java.util.concurrent.TimeoutException) {
++                return true;
++            }
++            String message = current.getMessage();
++            if (message != null && message.toLowerCase().contains("timed out")) {
++                return true;
++            }
++            current = current.getCause();
++        }
++        return false;
++    }
++
++    private long elapsed(long started) {
++        return Math.max(1L, System.currentTimeMillis() - started);
++    }
++
++    private LlmErrorCategory classifyHttpStatus(int statusCode) {
++        if (statusCode == 429) {
++            return LlmErrorCategory.PLATFORM_429;
++        }
++        if (statusCode >= 500) {
++            return LlmErrorCategory.HTTP_5XX;
++        }
++        return LlmErrorCategory.INVOKE_FAILED;
++    }
++
++    private String extractProviderErrorCode(String body) {
++        if (!StringUtils.hasText(body)) {
++            return null;
++        }
++        try {
++            var root = objectMapper.readTree(body);
++            var error = root.path("error");
++            var code = error.path("code");
++            if (code.isTextual()) {
++                return code.asText();
++            }
++            var type = error.path("type");
++            if (type.isTextual()) {
++                return type.asText();
++            }
++        } catch (Exception ignored) {
++            return null;
++        }
++        return null;
++    }
++
++    private String platformCode(LlmCallRequest request) {
++        if (request.modelConfig() != null) {
++            return request.modelConfig().platformCode();
++        }
++        return request.legacyPlatformCode();
++    }
++
++    private String platformName(LlmCallRequest request) {
++        if (request.modelConfig() != null) {
++            return request.modelConfig().platformName();
++        }
++        return request.legacyPlatformName();
++    }
++
++    private String modelId(LlmCallRequest request) {
++        if (request.modelConfig() != null) {
++            return request.modelConfig().modelId();
++        }
++        return request.legacyModelId();
++    }
++
++    private String modelName(LlmCallRequest request) {
++        return request.modelConfig() == null ? null : request.modelConfig().modelName();
++    }
++
++    private record StructuredFailure(Integer httpStatusCode,
++                                     String providerErrorCode,
++                                     Long retryAfterMs,
++                                     LlmErrorCategory errorCategory,
++                                     String failureKind,
++                                     Integer requestCount) {
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallRequest.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallRequest.java
+new file mode 100644
+index 00000000..ec413bd9
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCallRequest.java
+@@ -0,0 +1,162 @@
++package com.huanjing.geo.common.llm;
++
++import com.huanjing.geo.common.llm.router.LlmRouteRequest;
++import com.huanjing.geo.common.llm.measurement.LlmCallMeasurementContext;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import org.springframework.util.StringUtils;
++
++public record LlmCallRequest(LlmGovernanceStack governanceStack,
++                             LlmRoutingStrategy routingStrategy,
++                             LlmWaitSemantics waitSemantics,
++                             String feature,
++                             String prompt,
++                             LlmModelConfig modelConfig,
++                             LlmRouteRequest routeRequest,
++                             AiPlatformConfig legacyPlatformConfig,
++                             String legacyPlatformCode,
++                             String legacyPlatformName,
++                             String legacyChannel,
++                             String legacyApiUrl,
++                             String legacyModelId,
++                             String legacyApiKey,
++                             String legacySystemPrompt,
++                             String legacyUserPrompt,
++                             double legacyTemperature,
++                             int legacyTokenCost,
++                             int legacyConnectTimeoutMs,
++                             int legacyRequestTimeoutMs,
++                             int requestCount,
++                             LlmCallMeasurementContext measurementContext) {
++
++    public static LlmCallRequest direct(String prompt, LlmModelConfig modelConfig) {
++        return new LlmCallRequest(
++                LlmGovernanceStack.GATEWAY,
++                LlmRoutingStrategy.PINNED,
++                modelConfig != null && modelConfig.useExecutionGateway() ? LlmWaitSemantics.BLOCKING : LlmWaitSemantics.FAST_FAIL,
++                modelConfig == null ? null : modelConfig.feature(),
++                prompt,
++                modelConfig,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                0D,
++                1,
++                0,
++                0,
++                1,
++                LlmCallMeasurementContext.empty()
++        );
++    }
++
++    public static LlmCallRequest routed(LlmRouteRequest routeRequest) {
++        return new LlmCallRequest(
++                LlmGovernanceStack.GATEWAY,
++                routeRequest == null ? LlmRoutingStrategy.FAILOVER : routeRequest.routingStrategy(),
++                routeRequest != null && routeRequest.waitForPermit() ? LlmWaitSemantics.BLOCKING : LlmWaitSemantics.FAST_FAIL,
++                routeRequest == null ? null : routeRequest.feature(),
++                null,
++                null,
++                routeRequest,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                null,
++                0D,
++                1,
++                0,
++                0,
++                1,
++                LlmCallMeasurementContext.empty()
++        );
++    }
++
++    public static LlmCallRequest legacy(AiPlatformConfig platformConfig,
++                                        String platformCode,
++                                        String platformName,
++                                        String channel,
++                                        String apiUrl,
++                                        String modelId,
++                                        String apiKey,
++                                        String systemPrompt,
++                                        String userPrompt,
++                                        double temperature,
++                                        int tokenCost,
++                                        int connectTimeoutMs,
++                                        int requestTimeoutMs,
++                                        String feature,
++                                        int requestCount) {
++        return new LlmCallRequest(
++                LlmGovernanceStack.LEGACY_LIMITER,
++                LlmRoutingStrategy.LEGACY_DISPATCH_ROUTING,
++                LlmWaitSemantics.BLOCKING,
++                feature,
++                null,
++                null,
++                null,
++                platformConfig,
++                platformCode,
++                platformName,
++                channel,
++                apiUrl,
++                modelId,
++                apiKey,
++                systemPrompt,
++                userPrompt,
++                temperature,
++                tokenCost,
++                connectTimeoutMs,
++                requestTimeoutMs,
++                Math.max(requestCount, 1),
++                LlmCallMeasurementContext.empty()
++        );
++    }
++
++    public LlmCallRequest withMeasurementContext(LlmCallMeasurementContext context) {
++        return new LlmCallRequest(
++                governanceStack,
++                routingStrategy,
++                waitSemantics,
++                feature,
++                prompt,
++                modelConfig,
++                routeRequest,
++                legacyPlatformConfig,
++                legacyPlatformCode,
++                legacyPlatformName,
++                legacyChannel,
++                legacyApiUrl,
++                legacyModelId,
++                legacyApiKey,
++                legacySystemPrompt,
++                legacyUserPrompt,
++                legacyTemperature,
++                legacyTokenCost,
++                legacyConnectTimeoutMs,
++                legacyRequestTimeoutMs,
++                requestCount,
++                context
++        );
++    }
++
++    public LlmCallRequest {
++        governanceStack = governanceStack == null ? LlmGovernanceStack.GATEWAY : governanceStack;
++        routingStrategy = routingStrategy == null ? LlmRoutingStrategy.FAILOVER : routingStrategy;
++        waitSemantics = waitSemantics == null ? LlmWaitSemantics.CUSTOM : waitSemantics;
++        feature = StringUtils.hasText(feature) ? feature.trim() : "generic";
++        legacyTokenCost = Math.max(legacyTokenCost, 1);
++        requestCount = Math.max(requestCount, 1);
++        measurementContext = measurementContext == null ? LlmCallMeasurementContext.empty() : measurementContext;
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCapacityView.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCapacityView.java
+new file mode 100644
+index 00000000..38f4e5b6
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/LlmCapacityView.java
+@@ -0,0 +1,27 @@
++package com.huanjing.geo.common.llm;
++
++import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Service;
++
++@Service
++@RequiredArgsConstructor
++public class LlmCapacityView {
++    private final LlmExecutionGateway executionGateway;
++
++    public Long activePlatformCount(String platformCode) {
++        return executionGateway.activePlatformCount(platformCode);
++    }
++
++    public Long activeGlobalCount() {
++        return executionGateway.activeGlobalCount();
++    }
++
++    public Long activeFeatureCount(String feature) {
++        return executionGateway.activeFeatureCount(feature);
++    }
++
++    public Long activeWaiterCount() {
++        return executionGateway.activeWaiterCount();
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/limiter/PlatformConcurrencyLimiterService.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/limiter/PlatformConcurrencyLimiterService.java
+new file mode 100644
+index 00000000..4c746e99
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/limiter/PlatformConcurrencyLimiterService.java
+@@ -0,0 +1,113 @@
++package com.huanjing.geo.common.llm.limiter;
++
++import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import org.springframework.stereotype.Service;
++import org.springframework.util.StringUtils;
++
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.ConcurrentMap;
++import java.util.concurrent.locks.Condition;
++import java.util.concurrent.locks.ReentrantLock;
++
++@Service
++public class PlatformConcurrencyLimiterService {
++
++    private final ConcurrentMap<String, Slot> slots = new ConcurrentHashMap<>();
++
++    public Permit acquire(AiPlatformConfig config) {
++        if (config == null || !StringUtils.hasText(config.getPlatformCode())) {
++            throw new BizException(500, "Platform code is required for concurrency limit");
++        }
++        String platformCode = config.getPlatformCode().trim();
++        int limit = config.getConcurrencyLimit() == null || config.getConcurrencyLimit() <= 0
++                ? 1
++                : config.getConcurrencyLimit();
++        Slot slot = slots.computeIfAbsent(platformCode, k -> new Slot());
++        slot.acquire(limit);
++        return new Permit(platformCode, slot);
++    }
++
++    public long waiterCount(String platformCode) {
++        if (!StringUtils.hasText(platformCode)) {
++            return 0L;
++        }
++        Slot slot = slots.get(platformCode.trim());
++        return slot == null ? 0L : slot.waiters();
++    }
++
++    public static final class Permit implements AutoCloseable {
++        private final String platformCode;
++        private final Slot slot;
++        private boolean released;
++
++        private Permit(String platformCode, Slot slot) {
++            this.platformCode = platformCode;
++            this.slot = slot;
++        }
++
++        public String platformCode() {
++            return platformCode;
++        }
++
++        @Override
++        public void close() {
++            if (released) {
++                return;
++            }
++            released = true;
++            slot.release();
++        }
++    }
++
++    private static final class Slot {
++        private final ReentrantLock lock = new ReentrantLock(true);
++        private final Condition available = lock.newCondition();
++        private int limit = 1;
++        private int active = 0;
++        private int waiters = 0;
++
++        void acquire(int requestedLimit) {
++            lock.lock();
++            try {
++                limit = Math.max(requestedLimit, 1);
++                while (active >= limit) {
++                    waiters++;
++                    try {
++                        available.await();
++                    } catch (InterruptedException ex) {
++                        Thread.currentThread().interrupt();
++                        throw new BizException(500, "Interrupted while waiting for platform concurrency slot");
++                    } finally {
++                        waiters = Math.max(0, waiters - 1);
++                    }
++                    limit = Math.max(requestedLimit, 1);
++                }
++                active++;
++            } finally {
++                lock.unlock();
++            }
++        }
++
++        void release() {
++            lock.lock();
++            try {
++                if (active > 0) {
++                    active--;
++                }
++                available.signal();
++            } finally {
++                lock.unlock();
++            }
++        }
++
++        long waiters() {
++            lock.lock();
++            try {
++                return waiters;
++            } finally {
++                lock.unlock();
++            }
++        }
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCallMeasurementContext.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCallMeasurementContext.java
+new file mode 100644
+index 00000000..2a0c522a
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCallMeasurementContext.java
+@@ -0,0 +1,24 @@
++package com.huanjing.geo.common.llm.measurement;
++
++public record LlmCallMeasurementContext(String runId,
++                                        Long customerId,
++                                        Long projectId,
++                                        LlmObservationScope scope,
++                                        String normalizedPromptHash) {
++
++    public static LlmCallMeasurementContext empty() {
++        return new LlmCallMeasurementContext(null, null, null, null, null);
++    }
++
++    public LlmCallMeasurementContext {
++        runId = trimToNull(runId);
++        normalizedPromptHash = trimToNull(normalizedPromptHash);
++    }
++
++    private static String trimToNull(String value) {
++        if (value == null || value.isBlank()) {
++            return null;
++        }
++        return value.trim();
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCallObservation.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCallObservation.java
+new file mode 100644
+index 00000000..3c667751
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCallObservation.java
+@@ -0,0 +1,45 @@
++package com.huanjing.geo.common.llm.measurement;
++
++import com.baomidou.mybatisplus.annotation.IdType;
++import com.baomidou.mybatisplus.annotation.TableId;
++import com.baomidou.mybatisplus.annotation.TableName;
++import lombok.Data;
++
++import java.math.BigDecimal;
++import java.time.LocalDateTime;
++
++@Data
++@TableName("llm_call_observation")
++public class LlmCallObservation {
++    @TableId(type = IdType.AUTO)
++    private Long id;
++    private String runId;
++    private Long customerId;
++    private Long projectId;
++    private String scope;
++    private String normalizedPromptHash;
++    private String feature;
++    private String platformCode;
++    private String platformName;
++    private String modelId;
++    private String modelName;
++    private String governanceStack;
++    private String routingStrategy;
++    private String waitSemantics;
++    private String status;
++    private String errorCategory;
++    private Integer httpStatusCode;
++    private String providerErrorCode;
++    private Long retryAfterMs;
++    private String failureKind;
++    private Integer requestCount;
++    private Long waitMs;
++    private Long httpMs;
++    private Long totalMs;
++    private Integer promptTokens;
++    private Integer completionTokens;
++    private Integer totalTokens;
++    private BigDecimal estimatedCost;
++    private String currency;
++    private LocalDateTime occurredAt;
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCallObservationMapper.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCallObservationMapper.java
+new file mode 100644
+index 00000000..c3d7ee9d
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCallObservationMapper.java
+@@ -0,0 +1,8 @@
++package com.huanjing.geo.common.llm.measurement;
++
++import com.baomidou.mybatisplus.core.mapper.BaseMapper;
++import org.apache.ibatis.annotations.Mapper;
++
++@Mapper
++public interface LlmCallObservationMapper extends BaseMapper<LlmCallObservation> {
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCapacityMinuteMetric.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCapacityMinuteMetric.java
+new file mode 100644
+index 00000000..015e613b
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCapacityMinuteMetric.java
+@@ -0,0 +1,33 @@
++package com.huanjing.geo.common.llm.measurement;
++
++import com.baomidou.mybatisplus.annotation.IdType;
++import com.baomidou.mybatisplus.annotation.TableId;
++import com.baomidou.mybatisplus.annotation.TableName;
++import lombok.Data;
++
++import java.time.LocalDateTime;
++
++@Data
++@TableName("llm_capacity_minute_metric")
++public class LlmCapacityMinuteMetric {
++    @TableId(type = IdType.AUTO)
++    private Long id;
++    private String runId;
++    private LocalDateTime bucketMinute;
++    private String platformCode;
++    private String feature;
++    private String governanceStack;
++    private Long globalActivePeak;
++    private Long featureActivePeak;
++    private Long platformActivePeak;
++    private Long permitBusyCount;
++    private Long permitWaiterPeak;
++    private Long internalRateLimitedCount;
++    private Long platform429Count;
++    private Long http5xxCount;
++    private Long timeoutCount;
++    private Long legacyRateLimitedCount;
++    private Long legacyConcurrencyWaiterPeak;
++    private LocalDateTime createdAt;
++    private LocalDateTime updatedAt;
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCapacityMinuteMetricMapper.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCapacityMinuteMetricMapper.java
+new file mode 100644
+index 00000000..7b4357a6
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCapacityMinuteMetricMapper.java
+@@ -0,0 +1,39 @@
++package com.huanjing.geo.common.llm.measurement;
++
++import com.baomidou.mybatisplus.core.mapper.BaseMapper;
++import org.apache.ibatis.annotations.Mapper;
++import org.apache.ibatis.annotations.Param;
++import org.apache.ibatis.annotations.Insert;
++
++@Mapper
++public interface LlmCapacityMinuteMetricMapper extends BaseMapper<LlmCapacityMinuteMetric> {
++    @Insert("""
++            INSERT INTO llm_capacity_minute_metric (
++              run_id, bucket_minute, platform_code, feature, governance_stack,
++              global_active_peak, feature_active_peak, platform_active_peak,
++              permit_busy_count, permit_waiter_peak, internal_rate_limited_count,
++              platform429_count, http5xx_count, timeout_count,
++              legacy_rate_limited_count, legacy_concurrency_waiter_peak
++            ) VALUES (
++              #{metric.runId}, #{metric.bucketMinute}, #{metric.platformCode}, #{metric.feature}, #{metric.governanceStack},
++              #{metric.globalActivePeak}, #{metric.featureActivePeak}, #{metric.platformActivePeak},
++              #{metric.permitBusyCount}, #{metric.permitWaiterPeak}, #{metric.internalRateLimitedCount},
++              #{metric.platform429Count}, #{metric.http5xxCount}, #{metric.timeoutCount},
++              #{metric.legacyRateLimitedCount}, #{metric.legacyConcurrencyWaiterPeak}
++            )
++            ON DUPLICATE KEY UPDATE
++              global_active_peak = GREATEST(global_active_peak, VALUES(global_active_peak)),
++              feature_active_peak = GREATEST(feature_active_peak, VALUES(feature_active_peak)),
++              platform_active_peak = GREATEST(platform_active_peak, VALUES(platform_active_peak)),
++              permit_busy_count = permit_busy_count + VALUES(permit_busy_count),
++              permit_waiter_peak = GREATEST(permit_waiter_peak, VALUES(permit_waiter_peak)),
++              internal_rate_limited_count = internal_rate_limited_count + VALUES(internal_rate_limited_count),
++              platform429_count = platform429_count + VALUES(platform429_count),
++              http5xx_count = http5xx_count + VALUES(http5xx_count),
++              timeout_count = timeout_count + VALUES(timeout_count),
++              legacy_rate_limited_count = legacy_rate_limited_count + VALUES(legacy_rate_limited_count),
++              legacy_concurrency_waiter_peak = GREATEST(legacy_concurrency_waiter_peak, VALUES(legacy_concurrency_waiter_peak)),
++              updated_at = CURRENT_TIMESTAMP
++            """)
++    int upsert(@Param("metric") LlmCapacityMinuteMetric metric);
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCapacitySignal.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCapacitySignal.java
+new file mode 100644
+index 00000000..fd9b24ca
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmCapacitySignal.java
+@@ -0,0 +1,19 @@
++package com.huanjing.geo.common.llm.measurement;
++
++import com.huanjing.geo.common.llm.LlmGovernanceStack;
++
++public record LlmCapacitySignal(LlmCallMeasurementContext context,
++                                String feature,
++                                String platformCode,
++                                LlmGovernanceStack governanceStack,
++                                LlmErrorCategory errorCategory,
++                                long globalActive,
++                                long featureActive,
++                                long platformActive,
++                                long permitWaiters,
++                                long legacyConcurrencyWaiters) {
++
++    public LlmCapacitySignal {
++        context = context == null ? LlmCallMeasurementContext.empty() : context;
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmErrorCategory.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmErrorCategory.java
+new file mode 100644
+index 00000000..efb01705
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmErrorCategory.java
+@@ -0,0 +1,12 @@
++package com.huanjing.geo.common.llm.measurement;
++
++public enum LlmErrorCategory {
++    PERMIT_BUSY,
++    INTERNAL_RATE_LIMITED,
++    PLATFORM_429,
++    HTTP_5XX,
++    TIMEOUT,
++    CONFIG_ERROR,
++    BUSINESS_NON_RETRYABLE,
++    INVOKE_FAILED
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmHttpErrorException.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmHttpErrorException.java
+new file mode 100644
+index 00000000..c6eba230
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmHttpErrorException.java
+@@ -0,0 +1,42 @@
++package com.huanjing.geo.common.llm.measurement;
++
++import com.huanjing.geo.common.llm.LlmInvokeException;
++
++public class LlmHttpErrorException extends LlmInvokeException implements LlmStructuredException {
++    private final Integer httpStatusCode;
++    private final String providerErrorCode;
++    private final Long retryAfterMs;
++    private final LlmErrorCategory errorCategory;
++
++    public LlmHttpErrorException(Integer httpStatusCode,
++                                 String message,
++                                 String providerErrorCode,
++                                 Long retryAfterMs,
++                                 LlmErrorCategory errorCategory) {
++        super(message);
++        this.httpStatusCode = httpStatusCode;
++        this.providerErrorCode = providerErrorCode;
++        this.retryAfterMs = retryAfterMs;
++        this.errorCategory = errorCategory;
++    }
++
++    @Override
++    public Integer httpStatusCode() {
++        return httpStatusCode;
++    }
++
++    @Override
++    public String providerErrorCode() {
++        return providerErrorCode;
++    }
++
++    @Override
++    public Long retryAfterMs() {
++        return retryAfterMs;
++    }
++
++    @Override
++    public LlmErrorCategory errorCategory() {
++        return errorCategory;
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmMeasurementCollector.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmMeasurementCollector.java
+new file mode 100644
+index 00000000..72571afe
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmMeasurementCollector.java
+@@ -0,0 +1,360 @@
++package com.huanjing.geo.common.llm.measurement;
++
++import com.huanjing.geo.common.llm.LlmGovernanceStack;
++import com.huanjing.geo.common.llm.LlmRoutingStrategy;
++import com.huanjing.geo.common.llm.LlmWaitSemantics;
++import com.huanjing.geo.common.llm.LlmCapacityView;
++import com.huanjing.geo.common.llm.pool.LlmPoolProperties;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.beans.factory.ObjectProvider;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.scheduling.annotation.Async;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Service;
++import org.springframework.util.StringUtils;
++
++import java.time.LocalDateTime;
++import java.time.temporal.ChronoUnit;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.concurrent.ArrayBlockingQueue;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.concurrent.atomic.AtomicLong;
++
++@Slf4j
++@Service
++public class LlmMeasurementCollector {
++    private final LlmCallObservationMapper observationMapper;
++    private final LlmCapacityMinuteMetricMapper minuteMetricMapper;
++    private final ObjectProvider<LlmCapacityView> capacityViewProvider;
++    private final ObjectProvider<LlmPoolProperties> poolPropertiesProvider;
++    private final ObjectProvider<AiPlatformConfigMapper> platformConfigMapperProvider;
++    private final ArrayBlockingQueue<LlmMeasurementEvent> observationQueue;
++    private final ConcurrentHashMap<MinuteKey, MinuteAccumulator> minuteBuckets = new ConcurrentHashMap<>();
++    private final AtomicLong droppedObservations = new AtomicLong();
++    private final AtomicBoolean flushing = new AtomicBoolean(false);
++    private final int flushBatchSize;
++    private final long platformCacheRefreshMs;
++    private volatile List<String> cachedPlatformCodes = List.of();
++    private volatile long platformCacheLoadedAtMs;
++
++    public LlmMeasurementCollector(LlmCallObservationMapper observationMapper,
++                                   LlmCapacityMinuteMetricMapper minuteMetricMapper,
++                                   ObjectProvider<LlmCapacityView> capacityViewProvider,
++                                   ObjectProvider<LlmPoolProperties> poolPropertiesProvider,
++                                   ObjectProvider<AiPlatformConfigMapper> platformConfigMapperProvider,
++                                   @Value("${geo.llm.measurement.observation-queue-capacity:10000}") int queueCapacity,
++                                   @Value("${geo.llm.measurement.flush-batch-size:200}") int flushBatchSize,
++                                   @Value("${geo.llm.measurement.platform-cache-refresh-ms:300000}") long platformCacheRefreshMs) {
++        this.observationMapper = observationMapper;
++        this.minuteMetricMapper = minuteMetricMapper;
++        this.capacityViewProvider = capacityViewProvider;
++        this.poolPropertiesProvider = poolPropertiesProvider;
++        this.platformConfigMapperProvider = platformConfigMapperProvider;
++        this.observationQueue = new ArrayBlockingQueue<>(Math.max(100, queueCapacity));
++        this.flushBatchSize = Math.max(1, flushBatchSize);
++        this.platformCacheRefreshMs = Math.max(10_000L, platformCacheRefreshMs);
++    }
++
++    public void recordObservation(LlmMeasurementEvent event) {
++        if (event == null) {
++            return;
++        }
++        try {
++            if (!observationQueue.offer(event)) {
++                long dropped = droppedObservations.incrementAndGet();
++                if (dropped == 1 || dropped % 1000 == 0) {
++                    log.warn("LLM measurement observation queue full, dropped={}", dropped);
++                }
++            }
++            recordCapacitySignal(toCapacitySignal(event));
++        } catch (Exception ex) {
++            log.debug("failed to enqueue LLM measurement observation, reason={}", ex.getMessage());
++        }
++    }
++
++    public void recordCapacitySignal(LlmCapacitySignal signal) {
++        if (signal == null) {
++            return;
++        }
++        try {
++            LocalDateTime minute = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES);
++            MinuteKey key = new MinuteKey(
++                    safeRunId(signal.context().runId()),
++                    minute,
++                    safeDimension(signal.platformCode(), "unknown"),
++                    safeDimension(signal.feature(), "generic"),
++                    signal.governanceStack() == null ? LlmGovernanceStack.GATEWAY.name() : signal.governanceStack().name()
++            );
++            minuteBuckets.computeIfAbsent(key, ignored -> new MinuteAccumulator()).apply(signal);
++        } catch (Exception ex) {
++            log.debug("failed to record LLM capacity signal, reason={}", ex.getMessage());
++        }
++    }
++
++    @Async("llmMeasurementExecutor")
++    @Scheduled(fixedDelayString = "${geo.llm.measurement.flush-delay-ms:5000}")
++    public void flush() {
++        if (!flushing.compareAndSet(false, true)) {
++            return;
++        }
++        try {
++            flushObservations();
++            flushMinuteMetrics();
++        } finally {
++            flushing.set(false);
++        }
++    }
++
++    @Scheduled(fixedDelayString = "${geo.llm.measurement.capacity-sample-delay-ms:5000}")
++    public void sampleCapacity() {
++        try {
++            LlmCapacityView capacityView = capacityViewProvider.getIfAvailable();
++            if (capacityView == null) {
++                return;
++            }
++            long globalActive = safe(capacityView.activeGlobalCount());
++            long waiters = safe(capacityView.activeWaiterCount());
++            sampleFeatures(capacityView, globalActive, waiters);
++            samplePlatforms(capacityView, globalActive, waiters);
++        } catch (Exception ex) {
++            log.debug("failed to sample LLM capacity, reason={}", ex.getMessage());
++        }
++    }
++
++    private void sampleFeatures(LlmCapacityView capacityView, long globalActive, long waiters) {
++        LlmPoolProperties properties = poolPropertiesProvider.getIfAvailable();
++        if (properties == null || properties.getFeatureConcurrency() == null) {
++            return;
++        }
++        properties.getFeatureConcurrency().keySet().forEach(feature -> recordCapacitySignal(new LlmCapacitySignal(
++                LlmCallMeasurementContext.empty(),
++                feature,
++                "all",
++                LlmGovernanceStack.GATEWAY,
++                null,
++                globalActive,
++                safe(capacityView.activeFeatureCount(feature)),
++                0L,
++                waiters,
++                0L
++        )));
++    }
++
++    private void samplePlatforms(LlmCapacityView capacityView, long globalActive, long waiters) {
++        for (String platformCode : platformCodes()) {
++            recordCapacitySignal(new LlmCapacitySignal(
++                    LlmCallMeasurementContext.empty(),
++                    "all",
++                    platformCode,
++                    LlmGovernanceStack.GATEWAY,
++                    null,
++                    globalActive,
++                    0L,
++                    safe(capacityView.activePlatformCount(platformCode)),
++                    waiters,
++                    0L
++            ));
++        }
++    }
++
++    private List<String> platformCodes() {
++        long now = System.currentTimeMillis();
++        List<String> local = cachedPlatformCodes;
++        if (!local.isEmpty() && now - platformCacheLoadedAtMs < platformCacheRefreshMs) {
++            return local;
++        }
++        AiPlatformConfigMapper mapper = platformConfigMapperProvider.getIfAvailable();
++        if (mapper == null) {
++            return local;
++        }
++        try {
++            List<String> loaded = mapper.selectList(null).stream()
++                    .map(AiPlatformConfig::getPlatformCode)
++                    .filter(StringUtils::hasText)
++                    .map(String::trim)
++                    .distinct()
++                    .toList();
++            cachedPlatformCodes = loaded;
++            platformCacheLoadedAtMs = now;
++            return loaded;
++        } catch (Exception ex) {
++            log.debug("failed to refresh LLM measurement platform cache, reason={}", ex.getMessage());
++            return local;
++        }
++    }
++
++    private void flushObservations() {
++        List<LlmMeasurementEvent> drained = new ArrayList<>(flushBatchSize);
++        observationQueue.drainTo(drained, flushBatchSize);
++        for (LlmMeasurementEvent event : drained) {
++            try {
++                observationMapper.insert(toObservation(event));
++            } catch (Exception ex) {
++                log.warn("failed to persist LLM call observation, reason={}", ex.getMessage());
++            }
++        }
++    }
++
++    private void flushMinuteMetrics() {
++        if (minuteBuckets.isEmpty()) {
++            return;
++        }
++        List<MinuteKey> keys = List.copyOf(minuteBuckets.keySet());
++        for (MinuteKey key : keys) {
++            MinuteAccumulator accumulator = minuteBuckets.remove(key);
++            if (accumulator == null) {
++                continue;
++            }
++            try {
++                minuteMetricMapper.upsert(accumulator.toMetric(key));
++            } catch (Exception ex) {
++                log.warn("failed to persist LLM capacity minute metric, reason={}", ex.getMessage());
++            }
++        }
++    }
++
++    private LlmCapacitySignal toCapacitySignal(LlmMeasurementEvent event) {
++        return new LlmCapacitySignal(
++                event.context(),
++                event.feature(),
++                event.platformCode(),
++                event.governanceStack(),
++                event.errorCategory(),
++                0L,
++                0L,
++                0L,
++                0L,
++                0L
++        );
++    }
++
++    private LlmCallObservation toObservation(LlmMeasurementEvent event) {
++        LlmCallMeasurementContext context = event.context();
++        LlmCallObservation observation = new LlmCallObservation();
++        observation.setRunId(context.runId());
++        observation.setCustomerId(context.customerId());
++        observation.setProjectId(context.projectId());
++        observation.setScope(context.scope() == null ? null : context.scope().name());
++        observation.setNormalizedPromptHash(context.normalizedPromptHash());
++        observation.setFeature(trim(event.feature(), 64));
++        observation.setPlatformCode(trim(event.platformCode(), 64));
++        observation.setPlatformName(trim(event.platformName(), 128));
++        observation.setModelId(trim(event.modelId(), 128));
++        observation.setModelName(trim(event.modelName(), 128));
++        observation.setGovernanceStack(name(event.governanceStack()));
++        observation.setRoutingStrategy(name(event.routingStrategy()));
++        observation.setWaitSemantics(name(event.waitSemantics()));
++        observation.setStatus(trim(event.status(), 32));
++        observation.setErrorCategory(event.errorCategory() == null ? null : event.errorCategory().name());
++        observation.setHttpStatusCode(event.httpStatusCode());
++        observation.setProviderErrorCode(trim(event.providerErrorCode(), 128));
++        observation.setRetryAfterMs(event.retryAfterMs());
++        observation.setFailureKind(trim(event.failureKind(), 64));
++        observation.setRequestCount(event.requestCount());
++        observation.setWaitMs(event.waitMs());
++        observation.setHttpMs(event.httpMs());
++        observation.setTotalMs(event.totalMs());
++        observation.setPromptTokens(event.promptTokens());
++        observation.setCompletionTokens(event.completionTokens());
++        Integer promptTokens = event.promptTokens();
++        Integer completionTokens = event.completionTokens();
++        observation.setTotalTokens(promptTokens == null && completionTokens == null
++                ? null
++                : (promptTokens == null ? 0 : promptTokens) + (completionTokens == null ? 0 : completionTokens));
++        observation.setOccurredAt(event.occurredAt());
++        return observation;
++    }
++
++    private String safeRunId(String runId) {
++        return StringUtils.hasText(runId) ? runId.trim() : "ad_hoc";
++    }
++
++    private String safeDimension(String value, String fallback) {
++        return StringUtils.hasText(value) ? value.trim() : fallback;
++    }
++
++    private long safe(Long value) {
++        return value == null ? 0L : value;
++    }
++
++    private String trim(String value, int max) {
++        if (!StringUtils.hasText(value)) {
++            return null;
++        }
++        String trimmed = value.trim();
++        return trimmed.length() <= max ? trimmed : trimmed.substring(0, max);
++    }
++
++    private String name(Enum<?> value) {
++        return value == null ? null : value.name();
++    }
++
++    private record MinuteKey(String runId,
++                             LocalDateTime bucketMinute,
++                             String platformCode,
++                             String feature,
++                             String governanceStack) {
++    }
++
++    private static final class MinuteAccumulator {
++        private long globalActivePeak;
++        private long featureActivePeak;
++        private long platformActivePeak;
++        private long permitBusyCount;
++        private long permitWaiterPeak;
++        private long internalRateLimitedCount;
++        private long platform429Count;
++        private long http5xxCount;
++        private long timeoutCount;
++        private long legacyRateLimitedCount;
++        private long legacyConcurrencyWaiterPeak;
++
++        synchronized void apply(LlmCapacitySignal signal) {
++            globalActivePeak = Math.max(globalActivePeak, Math.max(0L, signal.globalActive()));
++            featureActivePeak = Math.max(featureActivePeak, Math.max(0L, signal.featureActive()));
++            platformActivePeak = Math.max(platformActivePeak, Math.max(0L, signal.platformActive()));
++            permitWaiterPeak = Math.max(permitWaiterPeak, Math.max(0L, signal.permitWaiters()));
++            legacyConcurrencyWaiterPeak = Math.max(legacyConcurrencyWaiterPeak, Math.max(0L, signal.legacyConcurrencyWaiters()));
++            if (signal.errorCategory() == LlmErrorCategory.PERMIT_BUSY) {
++                permitBusyCount++;
++            } else if (signal.errorCategory() == LlmErrorCategory.INTERNAL_RATE_LIMITED) {
++                internalRateLimitedCount++;
++                if (signal.governanceStack() == LlmGovernanceStack.LEGACY_LIMITER) {
++                    legacyRateLimitedCount++;
++                }
++            } else if (signal.errorCategory() == LlmErrorCategory.PLATFORM_429) {
++                platform429Count++;
++            } else if (signal.errorCategory() == LlmErrorCategory.HTTP_5XX) {
++                http5xxCount++;
++            } else if (signal.errorCategory() == LlmErrorCategory.TIMEOUT) {
++                timeoutCount++;
++            }
++        }
++
++        synchronized LlmCapacityMinuteMetric toMetric(MinuteKey key) {
++            LlmCapacityMinuteMetric metric = new LlmCapacityMinuteMetric();
++            metric.setRunId(key.runId());
++            metric.setBucketMinute(key.bucketMinute());
++            metric.setPlatformCode(key.platformCode());
++            metric.setFeature(key.feature());
++            metric.setGovernanceStack(key.governanceStack());
++            metric.setGlobalActivePeak(globalActivePeak);
++            metric.setFeatureActivePeak(featureActivePeak);
++            metric.setPlatformActivePeak(platformActivePeak);
++            metric.setPermitBusyCount(permitBusyCount);
++            metric.setPermitWaiterPeak(permitWaiterPeak);
++            metric.setInternalRateLimitedCount(internalRateLimitedCount);
++            metric.setPlatform429Count(platform429Count);
++            metric.setHttp5xxCount(http5xxCount);
++            metric.setTimeoutCount(timeoutCount);
++            metric.setLegacyRateLimitedCount(legacyRateLimitedCount);
++            metric.setLegacyConcurrencyWaiterPeak(legacyConcurrencyWaiterPeak);
++            return metric;
++        }
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmMeasurementEvent.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmMeasurementEvent.java
+new file mode 100644
+index 00000000..2be7d5c5
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmMeasurementEvent.java
+@@ -0,0 +1,37 @@
++package com.huanjing.geo.common.llm.measurement;
++
++import com.huanjing.geo.common.llm.LlmGovernanceStack;
++import com.huanjing.geo.common.llm.LlmRoutingStrategy;
++import com.huanjing.geo.common.llm.LlmWaitSemantics;
++
++import java.time.LocalDateTime;
++
++public record LlmMeasurementEvent(LlmCallMeasurementContext context,
++                                  String feature,
++                                  String platformCode,
++                                  String platformName,
++                                  String modelId,
++                                  String modelName,
++                                  LlmGovernanceStack governanceStack,
++                                  LlmRoutingStrategy routingStrategy,
++                                  LlmWaitSemantics waitSemantics,
++                                  String status,
++                                  LlmErrorCategory errorCategory,
++                                  Integer httpStatusCode,
++                                  String providerErrorCode,
++                                  Long retryAfterMs,
++                                  String failureKind,
++                                  Integer requestCount,
++                                  Long waitMs,
++                                  Long httpMs,
++                                  Long totalMs,
++                                  Integer promptTokens,
++                                  Integer completionTokens,
++                                  LocalDateTime occurredAt) {
++
++    public LlmMeasurementEvent {
++        context = context == null ? LlmCallMeasurementContext.empty() : context;
++        occurredAt = occurredAt == null ? LocalDateTime.now() : occurredAt;
++        status = status == null ? "unknown" : status;
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmObservationScope.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmObservationScope.java
+new file mode 100644
+index 00000000..504a9146
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmObservationScope.java
+@@ -0,0 +1,9 @@
++package com.huanjing.geo.common.llm.measurement;
++
++public enum LlmObservationScope {
++    GLOBAL,
++    INDUSTRY,
++    CUSTOMER,
++    PROJECT,
++    BASELINE_RUN
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmStructuredException.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmStructuredException.java
+new file mode 100644
+index 00000000..70014625
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/LlmStructuredException.java
+@@ -0,0 +1,11 @@
++package com.huanjing.geo.common.llm.measurement;
++
++public interface LlmStructuredException {
++    Integer httpStatusCode();
++
++    String providerErrorCode();
++
++    Long retryAfterMs();
++
++    LlmErrorCategory errorCategory();
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/RetryAfterParser.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/RetryAfterParser.java
+new file mode 100644
+index 00000000..5548f6ac
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/common/llm/measurement/RetryAfterParser.java
+@@ -0,0 +1,51 @@
++package com.huanjing.geo.common.llm.measurement;
++
++import org.springframework.util.StringUtils;
++
++import java.time.Duration;
++import java.time.ZonedDateTime;
++import java.time.format.DateTimeFormatter;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++
++public final class RetryAfterParser {
++    private RetryAfterParser() {
++    }
++
++    public static Long parse(Map<String, List<String>> headers) {
++        if (headers == null || headers.isEmpty()) {
++            return null;
++        }
++        for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
++            if (entry.getKey() != null && "retry-after".equals(entry.getKey().toLowerCase(Locale.ROOT))) {
++                List<String> values = entry.getValue();
++                if (values == null || values.isEmpty()) {
++                    return null;
++                }
++                return parse(values.get(0));
++            }
++        }
++        return null;
++    }
++
++    public static Long parse(String value) {
++        if (!StringUtils.hasText(value)) {
++            return null;
++        }
++        String trimmed = value.trim();
++        try {
++            long seconds = Long.parseLong(trimmed);
++            return Math.max(0L, seconds) * 1000L;
++        } catch (NumberFormatException ignored) {
++            // Try HTTP-date below.
++        }
++        try {
++            ZonedDateTime retryAt = ZonedDateTime.parse(trimmed, DateTimeFormatter.RFC_1123_DATE_TIME);
++            long millis = Duration.between(ZonedDateTime.now(retryAt.getZone()), retryAt).toMillis();
++            return Math.max(0L, millis);
++        } catch (Exception ignored) {
++            return null;
++        }
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineObservationCollectionWorker.java b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineObservationCollectionWorker.java
+new file mode 100644
+index 00000000..3c119e36
+--- /dev/null
++++ b/geo-project/geo-server/src/main/java/com/huanjing/geo/module/project/service/BaselineObservationCollectionWorker.java
+@@ -0,0 +1,801 @@
++package com.huanjing.geo.module.project.service;
++
++import cn.hutool.json.JSONUtil;
++import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
++import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
++import com.huanjing.geo.common.llm.LlmCallFacade;
++import com.huanjing.geo.common.llm.LlmCallRequest;
++import com.huanjing.geo.common.llm.LlmCallResult;
++import com.huanjing.geo.common.llm.LlmModelConfig;
++import com.huanjing.geo.common.llm.LlmRoutingStrategy;
++import com.huanjing.geo.common.llm.measurement.LlmCallMeasurementContext;
++import com.huanjing.geo.common.llm.measurement.LlmObservationScope;
++import com.huanjing.geo.common.llm.pool.LlmPoolProperties;
++import com.huanjing.geo.common.llm.router.LlmFeature;
++import com.huanjing.geo.common.llm.router.LlmRouteException;
++import com.huanjing.geo.common.llm.router.LlmRouteFailureKind;
++import com.huanjing.geo.common.llm.router.LlmRouteRequest;
++import com.huanjing.geo.common.llm.router.LlmRouteResult;
++import com.huanjing.geo.common.llm.limiter.PlatformConcurrencyLimiterService;
++import com.huanjing.geo.module.project.entity.BaselineCollectionTask;
++import com.huanjing.geo.module.project.entity.BaselineCompetitorMention;
++import com.huanjing.geo.module.project.entity.BaselineCompetitorSource;
++import com.huanjing.geo.module.project.entity.BaselineHighlightSpan;
++import com.huanjing.geo.module.project.entity.BaselineObservation;
++import com.huanjing.geo.module.project.entity.BaselineObservationScore;
++import com.huanjing.geo.module.project.entity.BaselineQuestionSnapshot;
++import com.huanjing.geo.module.project.entity.BaselineSnapshot;
++import com.huanjing.geo.module.project.entity.Project;
++import com.huanjing.geo.module.project.mapper.BaselineCollectionTaskMapper;
++import com.huanjing.geo.module.project.mapper.BaselineCompetitorMentionMapper;
++import com.huanjing.geo.module.project.mapper.BaselineCompetitorSourceMapper;
++import com.huanjing.geo.module.project.mapper.BaselineHighlightSpanMapper;
++import com.huanjing.geo.module.project.mapper.BaselineObservationMapper;
++import com.huanjing.geo.module.project.mapper.BaselineObservationScoreMapper;
++import com.huanjing.geo.module.project.mapper.BaselineQuestionSnapshotMapper;
++import com.huanjing.geo.module.project.mapper.BaselineSnapshotMapper;
++import com.huanjing.geo.module.project.mapper.ProjectMapper;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.dao.DuplicateKeyException;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.support.TransactionTemplate;
++import org.springframework.util.StringUtils;
++
++import java.time.LocalDateTime;
++import java.nio.charset.StandardCharsets;
++import java.security.MessageDigest;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.CompletionException;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.Executor;
++import java.util.concurrent.ExecutionException;
++import java.util.concurrent.Semaphore;
++import java.util.concurrent.ThreadLocalRandom;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.TimeoutException;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.stream.Collectors;
++
++@Slf4j
++@Service
++@RequiredArgsConstructor
++public class BaselineObservationCollectionWorker {
++    private static final String SCORE_ALGORITHM_VERSION = BaselineCanonicalVersionPolicy.SCORE_ALGORITHM_VERSION;
++    private static final String HIGHLIGHT_ALGORITHM_VERSION = BaselineCanonicalVersionPolicy.HIGHLIGHT_ALGORITHM_VERSION;
++    private static final String COMPETITOR_NORMALIZATION_VERSION = BaselineCanonicalVersionPolicy.COMPETITOR_NORMALIZATION_VERSION;
++    private static final long RUNNING_STALE_MINUTES = 30;
++    private static final Object QUEUE_LOCK = new Object();
++    private static final long RATE_LIMIT_BACKOFF_MS = 10_000L;
++    private static final long UNKNOWN_BACKOFF_MS = 2_000L;
++
++    private final BaselineCollectionTaskMapper baselineCollectionTaskMapper;
++    private final BaselineSnapshotMapper baselineSnapshotMapper;
++    private final BaselineQuestionSnapshotMapper baselineQuestionSnapshotMapper;
++    private final BaselineObservationMapper baselineObservationMapper;
++    private final BaselineObservationScoreMapper baselineObservationScoreMapper;
++    private final BaselineHighlightSpanMapper baselineHighlightSpanMapper;
++    private final BaselineCompetitorSourceMapper baselineCompetitorSourceMapper;
++    private final BaselineCompetitorMentionMapper baselineCompetitorMentionMapper;
++    private final ProjectMapper projectMapper;
++    private final AiPlatformConfigMapper aiPlatformConfigMapper;
++    private final LlmCallFacade llmCallFacade;
++    private final LlmPoolProperties llmPoolProperties;
++    private final TransactionTemplate transactionTemplate;
++    private final PlatformConcurrencyLimiterService platformConcurrencyLimiterService;
++    private final BaselineSemanticJudgeService baselineSemanticJudgeService;
++    @Autowired
++    @Qualifier("taskExecutor")
++    private Executor taskExecutor;
++    @Autowired
++    @Qualifier("baselineCollectionSampleExecutor")
++    private Executor baselineCollectionSampleExecutor;
++
++    @Value("${baseline.collection.db-write-max-concurrency:6}")
++    private int dbWriteMaxConcurrency;
++
++    @Value("${baseline.collection.transient-retry-max-attempts:2}")
++    private int transientRetryMaxAttempts;
++
++    @Value("${baseline.collection.transient-retry-initial-backoff-ms:800}")
++    private long transientRetryInitialBackoffMs;
++
++    @Value("${baseline.collection.transient-retry-max-backoff-ms:5000}")
++    private long transientRetryMaxBackoffMs;
++
++    @Value("${baseline.collection.model-connect-timeout-ms:10000}")
++    private int modelConnectTimeoutMs;
++
++    @Value("${baseline.collection.model-request-timeout-ms:45000}")
++    private int modelRequestTimeoutMs;
++
++    @Value("${baseline.collection.max-concurrent-baselines:1}")
++    private int maxConcurrentBaselines;
++
++    private volatile Semaphore dbWriteSemaphore;
++    private final ConcurrentHashMap<String, PlatformBackoffState> platformBackoffStates = new ConcurrentHashMap<>();
++
++    public void runTask(Long taskId) {
++        AtomicBoolean claimed = new AtomicBoolean(false);
++        synchronized (QUEUE_LOCK) {
++            transactionTemplate.executeWithoutResult(status -> {
++                BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++                if (task == null
++                        || BaselineObservationCollectionService.TASK_STATUS_COMPLETED.equals(task.getStatus())
++                        || BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus())) {
++                    return;
++                }
++                LocalDateTime now = LocalDateTime.now();
++                LocalDateTime staleBefore = now.minusMinutes(RUNNING_STALE_MINUTES);
++                if (isFreshRunning(task, staleBefore)) {
++                    return;
++                }
++                if (BaselineObservationCollectionService.TASK_STATUS_PENDING.equals(task.getStatus())
++                        && baselineCollectionTaskMapper.countRunning() >= normalizedMaxConcurrentBaselines()) {
++                    return;
++                }
++                BaselineCollectionTask update = new BaselineCollectionTask();
++                update.setStatus(BaselineObservationCollectionService.TASK_STATUS_RUNNING);
++                update.setStartedAt(task.getStartedAt() == null ? now : task.getStartedAt());
++                update.setUpdatedAt(now);
++                update.setErrorMessage(null);
++                int updated = baselineCollectionTaskMapper.update(update, new LambdaUpdateWrapper<BaselineCollectionTask>()
++                        .eq(BaselineCollectionTask::getId, taskId)
++                        .ne(BaselineCollectionTask::getStatus, BaselineObservationCollectionService.TASK_STATUS_COMPLETED)
++                        .ne(BaselineCollectionTask::getStatus, BaselineObservationCollectionService.TASK_STATUS_CANCELED)
++                        .and(wrapper -> wrapper
++                                .ne(BaselineCollectionTask::getStatus, BaselineObservationCollectionService.TASK_STATUS_RUNNING)
++                                .or()
++                                .isNull(BaselineCollectionTask::getUpdatedAt)
++                                .or()
++                                .le(BaselineCollectionTask::getUpdatedAt, staleBefore)));
++                claimed.set(updated > 0);
++            });
++        }
++        if (!claimed.get()) {
++            return;
++        }
++
++        try {
++            processTask(taskId);
++            if (!isCanceled(taskId)) {
++                finishTask(taskId);
++            }
++        } catch (Exception ex) {
++            failTask(taskId, ex);
++            log.warn("Baseline collection task failed, taskId={}", taskId, ex);
++        } finally {
++            dispatchPending();
++        }
++    }
++
++    public void dispatchPending() {
++        int available;
++        synchronized (QUEUE_LOCK) {
++            available = Math.max(0, normalizedMaxConcurrentBaselines() - baselineCollectionTaskMapper.countRunning());
++        }
++        if (available <= 0) {
++            return;
++        }
++        List<BaselineCollectionTask> pendingTasks = baselineCollectionTaskMapper.selectPending(available);
++        for (BaselineCollectionTask pendingTask : pendingTasks) {
++            taskExecutor.execute(() -> runTask(pendingTask.getId()));
++        }
++    }
++
++    private void processTask(Long taskId) {
++        BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++        BaselineSnapshot snapshot = baselineSnapshotMapper.selectById(task.getBaselineId());
++        Project project = projectMapper.selectById(task.getProjectId());
++        List<BaselineQuestionSnapshot> questions = baselineQuestionSnapshotMapper.selectList(
++                new LambdaQueryWrapper<BaselineQuestionSnapshot>()
++                        .eq(BaselineQuestionSnapshot::getBaselineId, task.getBaselineId())
++                        .orderByAsc(BaselineQuestionSnapshot::getSortOrder, BaselineQuestionSnapshot::getId));
++        List<AiPlatformConfig> platforms = loadPlatforms(task);
++        List<String> aliases = parseAliases(project.getProjectAliases());
++        List<BaselineObservationScoringRules.CompetitorName> competitors = loadCompetitors(task.getBaselineId());
++        List<CompletableFuture<Void>> futures = new ArrayList<>();
++        for (BaselineQuestionSnapshot question : questions) {
++            for (AiPlatformConfig platform : platforms) {
++                for (int sampleSeq = 1; sampleSeq <= task.getSamplePerCell(); sampleSeq++) {
++                    if (isCanceled(taskId)) {
++                        return;
++                    }
++                    if (observationExists(task.getBaselineId(), question.getId(), platform.getPlatformCode(), sampleSeq)) {
++                        continue;
++                    }
++                    int currentSampleSeq = sampleSeq;
++                    futures.add(CompletableFuture.runAsync(() -> collectAndPersistSample(
++                            taskId,
++                            snapshot,
++                            question,
++                            platform,
++                            project,
++                            aliases,
++                            competitors,
++                            currentSampleSeq
++                    ), baselineCollectionSampleExecutor));
++                }
++            }
++        }
++        waitForSamples(taskId, futures);
++    }
++
++    private void collectAndPersistSample(Long taskId,
++                                         BaselineSnapshot snapshot,
++                                         BaselineQuestionSnapshot question,
++                                         AiPlatformConfig platform,
++                                         Project project,
++                                         List<String> aliases,
++                                         List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                         int sampleSeq) {
++        if (isCanceled(taskId)
++                || observationExists(snapshot.getId(), question.getId(), platform.getPlatformCode(), sampleSeq)) {
++            return;
++        }
++        awaitPlatformBackoff(platform.getPlatformCode());
++        try (PlatformConcurrencyLimiterService.Permit ignored = platformConcurrencyLimiterService.acquire(platform)) {
++            if (isCanceled(taskId)) {
++                return;
++            }
++            BaselineObservation observation = collectOneWithRetry(snapshot, question, platform, sampleSeq);
++            if (isCanceled(taskId)) {
++                return;
++            }
++            BaselineSemanticJudgeResult judgeResult = null;
++            if ("SUCCESS".equals(observation.getCallStatus())) {
++                judgeResult = baselineSemanticJudgeService.judge(
++                        question,
++                        project,
++                        aliases,
++                        competitors,
++                        platform,
++                        observation.getRawResponseText()
++                );
++            }
++            persistObservation(taskId, snapshot, question, project, aliases, competitors, observation, judgeResult);
++        }
++    }
++
++    private void waitForSamples(Long taskId, List<CompletableFuture<Void>> futures) {
++        if (futures.isEmpty()) {
++            return;
++        }
++        CompletableFuture<Void> all = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
++        try {
++            while (!all.isDone()) {
++                if (isCanceled(taskId)) {
++                    futures.forEach(future -> future.cancel(true));
++                    return;
++                }
++                try {
++                    all.get(1, TimeUnit.SECONDS);
++                } catch (TimeoutException ignored) {
++                    // Poll cancellation state without blocking indefinitely.
++                }
++            }
++            all.get();
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            futures.forEach(future -> future.cancel(true));
++            throw new IllegalStateException("Interrupted while waiting for baseline samples", ex);
++        } catch (ExecutionException | CompletionException ex) {
++            Throwable cause = ex.getCause() == null ? ex : ex.getCause();
++            if (cause instanceof RuntimeException runtimeException) {
++                throw runtimeException;
++            }
++            throw new IllegalStateException(cause);
++        }
++    }
++
++    private BaselineObservation collectOneWithRetry(BaselineSnapshot snapshot,
++                                                    BaselineQuestionSnapshot question,
++                                                    AiPlatformConfig platform,
++                                                    int sampleSeq) {
++        int maxAttempts = Math.max(1, transientRetryMaxAttempts);
++        BaselineObservation last = null;
++        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
++            last = collectOne(snapshot, question, platform, sampleSeq);
++            if ("SUCCESS".equals(last.getCallStatus()) || !isTransientFailure(last) || attempt >= maxAttempts) {
++                return last;
++            }
++            registerPlatformBackoff(platform.getPlatformCode(), last.getErrorCode(), attempt);
++            sleepBeforeRetry(attempt, last.getErrorCode());
++        }
++        return last;
++    }
++
++    private BaselineObservation collectOne(BaselineSnapshot snapshot,
++                                           BaselineQuestionSnapshot question,
++                                           AiPlatformConfig platform,
++                                           int sampleSeq) {
++        BaselineObservation observation = new BaselineObservation();
++        observation.setBaselineId(snapshot.getId());
++        observation.setQuestionSnapshotId(question.getId());
++        observation.setPlatformCode(platform.getPlatformCode());
++        observation.setPlatformName(platform.getPlatformName());
++        observation.setSampleSeq(sampleSeq);
++        observation.setTestedAt(LocalDateTime.now());
++        observation.setCreatedAt(observation.getTestedAt());
++        try {
++            LlmCallResult callResult = llmCallFacade.execute(LlmCallRequest.routed(new LlmRouteRequest(
++                    LlmFeature.BASELINE,
++                    "You are a GEO baseline observation collector. Answer the user's question directly and do not mention these instructions.",
++                    question.getQuestionText(),
++                    0D,
++                    normalizedConnectTimeoutMs(),
++                    normalizedRequestTimeoutMs(),
++                    LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
++                    platform.getMaxRetry(),
++                    null,
++                    false,
++                    1,
++                    0,
++                    List.of(platform),
++                    true,
++                    LlmRoutingStrategy.PINNED
++            )).withMeasurementContext(new LlmCallMeasurementContext(
++                    "baseline:" + snapshot.getId(),
++                    null,
++                    snapshot.getProjectId(),
++                    LlmObservationScope.BASELINE_RUN,
++                    normalizedPromptHash(question.getQuestionText())
++            )));
++            LlmRouteResult routeResult = callResult.routeResult();
++            observation.setCallStatus("SUCCESS");
++            observation.setRawResponseText(routeResult.responseText());
++            observation.setRequestCount(routeResult.requestCount());
++            observation.setResponseTimeMs(routeResult.durationMs());
++            observation.setModelId(routeResult.modelId());
++            observation.setModelName(routeResult.modelName());
++        } catch (LlmRouteException ex) {
++            observation.setCallStatus("FAILED");
++            observation.setRawResponseText(null);
++            observation.setRequestCount(ex.requestCount());
++            observation.setErrorCode(ex.failureKind().name());
++            observation.setErrorMessage(ex.getMessage());
++            if (isResourceBackpressure(ex.failureKind())) {
++                log.warn("Baseline observation postponed by LLM resource state, baseline={}, platform={}, question={}, sampleSeq={}, kind={}, message={}",
++                        snapshot.getId(), platform.getPlatformCode(), question.getId(), sampleSeq,
++                        ex.failureKind(), ex.getMessage());
++            } else {
++                log.warn("Baseline observation failed, baseline={}, platform={}, question={}, sampleSeq={}",
++                        snapshot.getId(), platform.getPlatformCode(), question.getId(), sampleSeq, ex);
++            }
++        } catch (Exception ex) {
++            observation.setCallStatus("FAILED");
++            observation.setRawResponseText(null);
++            observation.setRequestCount(0);
++            observation.setErrorCode("UNKNOWN");
++            observation.setErrorMessage(ex.getMessage());
++            log.warn("Baseline observation failed, baseline={}, platform={}, question={}, sampleSeq={}",
++                    snapshot.getId(), platform.getPlatformCode(), question.getId(), sampleSeq, ex);
++        }
++        return observation;
++    }
++
++    private void persistObservation(Long taskId,
++                                    BaselineSnapshot snapshot,
++                                    BaselineQuestionSnapshot question,
++                                    Project project,
++                                    List<String> aliases,
++                                    List<BaselineObservationScoringRules.CompetitorName> competitors,
++                                    BaselineObservation observation,
++                                    BaselineSemanticJudgeResult judgeResult) {
++        Semaphore semaphore = dbWriteSemaphore();
++        acquireDbPermit(semaphore);
++        try {
++            transactionTemplate.executeWithoutResult(status -> {
++                BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++                if (task == null || BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus())) {
++                    return;
++                }
++                try {
++                    baselineObservationMapper.insert(observation);
++                } catch (DuplicateKeyException duplicate) {
++                    log.info("Baseline observation already exists, baseline={}, platform={}, question={}, sampleSeq={}",
++                            snapshot.getId(), observation.getPlatformCode(), question.getId(), observation.getSampleSeq());
++                    return;
++                }
++                if ("SUCCESS".equals(observation.getCallStatus())) {
++                    if (judgeResult == null) {
++                        throw new IllegalStateException("Baseline semantic judge result is required before persistence");
++                    }
++                    BaselineSemanticJudgeResult finalJudgeResult = judgeResult;
++                    BaselineObservationScore score = buildScore(snapshot, observation, finalJudgeResult);
++                    baselineObservationScoreMapper.insert(score);
++                    int competitorMentionCount = persistCompetitorMentions(snapshot, observation, finalJudgeResult);
++                    persistHighlightSpans(observation, finalJudgeResult);
++                    baselineCollectionTaskMapper.incrementProgress(taskId, 1, 0, 1, competitorMentionCount);
++                } else {
++                    baselineCollectionTaskMapper.incrementProgress(taskId, 0, 1, 0, 0);
++                }
++            });
++        } finally {
++            semaphore.release();
++        }
++    }
++
++    private BaselineObservationScore buildScore(BaselineSnapshot snapshot,
++                                                BaselineObservation observation,
++                                                BaselineSemanticJudgeResult result) {
++        BaselineObservationScore score = new BaselineObservationScore();
++        score.setBaselineId(snapshot.getId());
++        score.setObservationId(observation.getId());
++        score.setAlgorithmVersion(SCORE_ALGORITHM_VERSION);
++        score.setMentioned(result.isMentioned());
++        score.setRecommended(result.isRecommended());
++        score.setRankingPosition(result.getRankingPosition());
++        score.setSentiment(result.getSentiment());
++        score.setImpressionState(result.getImpressionState());
++        score.setMentionType(result.getMentionType());
++        score.setJudgeEvidence(buildJudgeEvidence(result));
++        score.setCreatedAt(LocalDateTime.now());
++        return score;
++    }
++
++    private int persistCompetitorMentions(BaselineSnapshot snapshot,
++                                          BaselineObservation observation,
++                                          BaselineSemanticJudgeResult result) {
++        List<BaselineSemanticJudgeResult.EntityHit> hits = result == null ? List.of() : result.getCompetitorHits();
++        int count = 0;
++        for (BaselineSemanticJudgeResult.EntityHit hit : hits) {
++            if (!StringUtils.hasText(hit.getCanonicalName())) {
++                continue;
++            }
++            BaselineCompetitorMention mention = new BaselineCompetitorMention();
++            mention.setBaselineId(snapshot.getId());
++            mention.setObservationId(observation.getId());
++            mention.setAlgorithmVersion(COMPETITOR_NORMALIZATION_VERSION);
++            mention.setCompetitorId(hit.getEntityId());
++            mention.setNormalizedName(hit.getCanonicalName());
++            mention.setRawText(StringUtils.hasText(hit.getRawText()) ? hit.getRawText() : hit.getCanonicalName());
++            mention.setMentionCount(Math.max(1, hit.getMentionCount()));
++            mention.setTracked(hit.isTracked());
++            mention.setStartOffset(hit.getStartOffset());
++            mention.setEndOffset(hit.getEndOffset());
++            mention.setCreatedAt(LocalDateTime.now());
++            baselineCompetitorMentionMapper.insert(mention);
++            count++;
++        }
++        return count;
++    }
++
++    private void persistHighlightSpans(BaselineObservation observation,
++                                       BaselineSemanticJudgeResult result) {
++        if (result == null) {
++            return;
++        }
++        insertHighlightSpan(observation.getId(), result.getBrandHit(), "BRAND");
++        for (BaselineSemanticJudgeResult.EntityHit hit : result.getCompetitorHits()) {
++            insertHighlightSpan(observation.getId(), hit, "COMPETITOR");
++        }
++        for (BaselineSemanticJudgeResult.EntityHit hit : result.getNegativeHits()) {
++            insertHighlightSpan(observation.getId(), hit, "NEGATIVE");
++        }
++    }
++
++    private void insertHighlightSpan(Long observationId,
++                                     BaselineSemanticJudgeResult.EntityHit hit,
++                                     String type) {
++        if (hit == null || !hit.hasOffset() || !StringUtils.hasText(hit.getRawText())) {
++            return;
++        }
++        BaselineHighlightSpan span = new BaselineHighlightSpan();
++        span.setObservationId(observationId);
++        span.setAlgorithmVersion(HIGHLIGHT_ALGORITHM_VERSION);
++        span.setType(type);
++        span.setText(hit.getRawText());
++        span.setStartOffset(hit.getStartOffset());
++        span.setEndOffset(hit.getEndOffset());
++        span.setNormalizedEntityId(hit.getEntityId());
++        span.setCreatedAt(LocalDateTime.now());
++        baselineHighlightSpanMapper.insert(span);
++    }
++
++    private String buildJudgeEvidence(BaselineSemanticJudgeResult result) {
++        if (result == null) {
++            return null;
++        }
++        List<String> parts = new ArrayList<>();
++        if (StringUtils.hasText(result.getJudgeEvidence())) {
++            parts.add(result.getJudgeEvidence());
++        }
++        parts.add(result.isJudgeUsed() ? "语义裁判" : "规则兜底");
++        if (StringUtils.hasText(result.getJudgeError())) {
++            parts.add("裁判降级: " + result.getJudgeError());
++        }
++        return String.join("；", parts);
++    }
++
++    private void finishTask(Long taskId) {
++        transactionTemplate.executeWithoutResult(status -> {
++            BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++            if (task == null || BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus())) {
++                return;
++            }
++            int completed = nullToZero(task.getSuccessObservationCount()) + nullToZero(task.getFailedObservationCount());
++            if (completed < nullToZero(task.getTotalObservationCount())) {
++                task.setStatus(BaselineObservationCollectionService.TASK_STATUS_PARTIAL_FAILED);
++                task.setErrorMessage("采集任务提前结束，仍有未完成样本");
++            } else if (nullToZero(task.getFailedObservationCount()) > 0) {
++                task.setStatus(BaselineObservationCollectionService.TASK_STATUS_PARTIAL_FAILED);
++            } else {
++                task.setStatus(BaselineObservationCollectionService.TASK_STATUS_COMPLETED);
++            }
++            task.setFinishedAt(LocalDateTime.now());
++            task.setUpdatedAt(task.getFinishedAt());
++            baselineCollectionTaskMapper.updateById(task);
++        });
++    }
++
++    private void failTask(Long taskId, Exception ex) {
++        transactionTemplate.executeWithoutResult(status -> {
++            BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++            if (task == null) {
++                return;
++            }
++            if (BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus())) {
++                return;
++            }
++            task.setStatus(BaselineObservationCollectionService.TASK_STATUS_FAILED);
++            task.setErrorMessage(ex.getMessage());
++            task.setFinishedAt(LocalDateTime.now());
++            task.setUpdatedAt(task.getFinishedAt());
++            baselineCollectionTaskMapper.updateById(task);
++        });
++    }
++
++    private boolean isCanceled(Long taskId) {
++        BaselineCollectionTask task = baselineCollectionTaskMapper.selectById(taskId);
++        return task == null || BaselineObservationCollectionService.TASK_STATUS_CANCELED.equals(task.getStatus());
++    }
++
++    private boolean observationExists(Long baselineId, Long questionSnapshotId, String platformCode, int sampleSeq) {
++        return baselineObservationMapper.selectCount(new LambdaQueryWrapper<BaselineObservation>()
++                .eq(BaselineObservation::getBaselineId, baselineId)
++                .eq(BaselineObservation::getQuestionSnapshotId, questionSnapshotId)
++                .eq(BaselineObservation::getPlatformCode, platformCode)
++                .eq(BaselineObservation::getSampleSeq, sampleSeq)) > 0;
++    }
++
++    private List<AiPlatformConfig> loadPlatforms(BaselineCollectionTask task) {
++        List<String> platformCodes = JSONUtil.parseArray(task.getSelectedPlatformCodesJson()).stream()
++                .map(String::valueOf)
++                .filter(StringUtils::hasText)
++                .toList();
++        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
++                .eq(AiPlatformConfig::getEnabled, true)
++                .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
++                .isNotNull(AiPlatformConfig::getLowModelId)
++                .apply("TRIM(low_model_id) <> ''")
++                .in(AiPlatformConfig::getPlatformCode, platformCodes));
++        Map<String, AiPlatformConfig> map = platforms.stream().collect(Collectors.toMap(
++                AiPlatformConfig::getPlatformCode,
++                this::useLowPerformanceModel,
++                (first, ignored) -> first,
++                LinkedHashMap::new
++        ));
++        return platformCodes.stream().map(map::get).filter(java.util.Objects::nonNull).toList();
++    }
++
++    private AiPlatformConfig useLowPerformanceModel(AiPlatformConfig platform) {
++        platform.setModelId(platform.getLowModelId().trim());
++        return platform;
++    }
++
++    private List<String> parseAliases(String aliasesJson) {
++        if (!StringUtils.hasText(aliasesJson)) {
++            return List.of();
++        }
++        try {
++            return JSONUtil.parseArray(aliasesJson).stream()
++                    .map(String::valueOf)
++                    .filter(StringUtils::hasText)
++                    .map(String::trim)
++                    .distinct()
++                    .toList();
++        } catch (Exception ignored) {
++            return Arrays.stream(aliasesJson.split("[,，]"))
++                    .map(String::trim)
++                    .filter(StringUtils::hasText)
++                    .distinct()
++                    .toList();
++        }
++    }
++
++    private List<BaselineObservationScoringRules.CompetitorName> loadCompetitors(Long baselineId) {
++        List<BaselineCompetitorSource> sources = baselineCompetitorSourceMapper.selectList(new LambdaQueryWrapper<BaselineCompetitorSource>()
++                .eq(BaselineCompetitorSource::getBaselineId, baselineId));
++        return sources.stream()
++                .filter(source -> StringUtils.hasText(source.getCompetitorName()))
++                .map(source -> new BaselineObservationScoringRules.CompetitorName(
++                        source.getCompetitorId(),
++                        source.getCompetitorName().trim(),
++                        parseAliases(source.getAliasesJson()),
++                        !"REJECTED".equals(source.getReviewStatus())
++                ))
++                .toList();
++    }
++
++    private Semaphore dbWriteSemaphore() {
++        Semaphore local = dbWriteSemaphore;
++        if (local == null) {
++            synchronized (this) {
++                local = dbWriteSemaphore;
++                if (local == null) {
++                    local = new Semaphore(Math.max(1, dbWriteMaxConcurrency));
++                    dbWriteSemaphore = local;
++                }
++            }
++        }
++        return local;
++    }
++
++    private void acquireDbPermit(Semaphore semaphore) {
++        try {
++            semaphore.acquire();
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Interrupted while waiting for baseline DB write permit", ex);
++        }
++    }
++
++    private boolean isTransientFailure(BaselineObservation observation) {
++        String errorCode = observation.getErrorCode();
++        return "ALL_RATE_LIMITED".equals(errorCode)
++                || "ALL_PERMIT_BUSY".equals(errorCode)
++                || "ALL_CIRCUIT_OPEN".equals(errorCode)
++                || isRetryableAllFailed(observation)
++                || "UNKNOWN".equals(errorCode);
++    }
++
++    private int normalizedConnectTimeoutMs() {
++        return modelConnectTimeoutMs <= 0
++                ? LlmModelConfig.DEFAULT_CONNECT_TIMEOUT_MS
++                : modelConnectTimeoutMs;
++    }
++
++    private int normalizedRequestTimeoutMs() {
++        if (modelRequestTimeoutMs <= 0) {
++            return LlmModelConfig.DEFAULT_REQUEST_TIMEOUT_MS;
++        }
++        return Math.min(modelRequestTimeoutMs, LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS);
++    }
++
++    private void sleepBeforeRetry(int attempt) {
++        sleepBeforeRetry(attempt, null);
++    }
++
++    private void sleepBeforeRetry(int attempt, String errorCode) {
++        long base = "ALL_CIRCUIT_OPEN".equals(errorCode)
++                ? Math.max(1_000L, llmPoolProperties.getCircuitBreakerOpenDurationMs())
++                : "ALL_RATE_LIMITED".equals(errorCode)
++                ? RATE_LIMIT_BACKOFF_MS
++                : Math.max(100L, transientRetryInitialBackoffMs);
++        long cap = Math.max(base, transientRetryMaxBackoffMs);
++        long exponential = base * (1L << Math.min(8, Math.max(0, attempt - 1)));
++        long backoff = Math.min(cap, exponential);
++        long jitter = ThreadLocalRandom.current().nextLong(0L, Math.max(1L, backoff / 3L));
++        try {
++            TimeUnit.MILLISECONDS.sleep(backoff + jitter);
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Interrupted while waiting for baseline retry backoff", ex);
++        }
++    }
++
++    private boolean isResourceBackpressure(LlmRouteFailureKind failureKind) {
++        return failureKind == LlmRouteFailureKind.ALL_PERMIT_BUSY
++                || failureKind == LlmRouteFailureKind.ALL_RATE_LIMITED
++                || failureKind == LlmRouteFailureKind.ALL_CIRCUIT_OPEN;
++    }
++
++    private boolean isRetryableAllFailed(BaselineObservation observation) {
++        if (!"ALL_FAILED".equals(observation.getErrorCode())) {
++            return false;
++        }
++        String message = observation.getErrorMessage();
++        if (!StringUtils.hasText(message)) {
++            return false;
++        }
++        String lower = message.toLowerCase();
++        return lower.contains("timeout")
++                || lower.contains("timed out")
++                || lower.contains("connection reset")
++                || lower.contains("connection refused")
++                || lower.contains("http 429")
++                || lower.contains("http 5");
++    }
++
++    private void awaitPlatformBackoff(String platformCode) {
++        PlatformBackoffState state = platformBackoffStates.get(platformCode);
++        if (state == null) {
++            return;
++        }
++        long delayMs = state.delayMillis();
++        if (delayMs <= 0L) {
++            return;
++        }
++        try {
++            TimeUnit.MILLISECONDS.sleep(delayMs + ThreadLocalRandom.current().nextLong(100L, 500L));
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Interrupted while waiting for baseline platform backoff", ex);
++        }
++    }
++
++    private void registerPlatformBackoff(String platformCode, String errorCode, int attempt) {
++        long backoffMs = switch (errorCode == null ? "" : errorCode) {
++            case "ALL_CIRCUIT_OPEN" -> Math.max(1_000L, llmPoolProperties.getCircuitBreakerOpenDurationMs());
++            case "ALL_RATE_LIMITED" -> RATE_LIMIT_BACKOFF_MS;
++            case "ALL_PERMIT_BUSY" -> Math.max(500L, transientRetryInitialBackoffMs);
++            case "ALL_FAILED", "UNKNOWN" -> UNKNOWN_BACKOFF_MS;
++            default -> 0L;
++        };
++        if (backoffMs <= 0L) {
++            return;
++        }
++        long exponential = backoffMs * (1L << Math.min(4, Math.max(0, attempt - 1)));
++        long cap = Math.max(backoffMs, Math.max(transientRetryMaxBackoffMs, llmPoolProperties.getCircuitBreakerOpenDurationMs()));
++        long jitter = ThreadLocalRandom.current().nextLong(0L, Math.max(1L, backoffMs / 5L));
++        long until = System.currentTimeMillis() + Math.min(cap, exponential) + jitter;
++        platformBackoffStates.computeIfAbsent(platformCode, ignored -> new PlatformBackoffState()).backoffUntil(until);
++    }
++
++    private static final class PlatformBackoffState {
++        private volatile long backoffUntilMillis;
++
++        long delayMillis() {
++            return Math.max(0L, backoffUntilMillis - System.currentTimeMillis());
++        }
++
++        void backoffUntil(long untilMillis) {
++            if (untilMillis > backoffUntilMillis) {
++                backoffUntilMillis = untilMillis;
++            }
++        }
++    }
++
++    private int nullToZero(Integer value) {
++        return value == null ? 0 : value;
++    }
++
++    private String normalizedPromptHash(String prompt) {
++        if (!StringUtils.hasText(prompt)) {
++            return null;
++        }
++        String normalized = prompt.trim().replaceAll("\\s+", " ").toLowerCase();
++        try {
++            MessageDigest digest = MessageDigest.getInstance("SHA-256");
++            byte[] bytes = digest.digest(normalized.getBytes(StandardCharsets.UTF_8));
++            StringBuilder hex = new StringBuilder(bytes.length * 2);
++            for (byte b : bytes) {
++                hex.append(String.format("%02x", b));
++            }
++            return hex.toString();
++        } catch (Exception ex) {
++            return null;
++        }
++    }
++
++    private int normalizedMaxConcurrentBaselines() {
++        return Math.max(1, maxConcurrentBaselines);
++    }
++
++    static boolean isFreshRunning(BaselineCollectionTask task, LocalDateTime staleBefore) {
++        return BaselineObservationCollectionService.TASK_STATUS_RUNNING.equals(task.getStatus())
++                && task.getUpdatedAt() != null
++                && task.getUpdatedAt().isAfter(staleBefore);
++    }
++}
+
+diff --git a/geo-project/geo-server/src/main/resources/db/migration/V261__llm_measurement_observability.sql b/geo-project/geo-server/src/main/resources/db/migration/V261__llm_measurement_observability.sql
+new file mode 100644
+index 00000000..8e2585f5
+--- /dev/null
++++ b/geo-project/geo-server/src/main/resources/db/migration/V261__llm_measurement_observability.sql
+@@ -0,0 +1,61 @@
++CREATE TABLE IF NOT EXISTS llm_call_observation (
++    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
++    run_id VARCHAR(96) NULL COMMENT 'batch/run identifier',
++    customer_id BIGINT NULL COMMENT 'customer id',
++    project_id BIGINT NULL COMMENT 'project id',
++    scope VARCHAR(32) NULL COMMENT 'GLOBAL/INDUSTRY/CUSTOMER/PROJECT/BASELINE_RUN',
++    normalized_prompt_hash VARCHAR(128) NULL COMMENT 'normalized prompt hash, no raw prompt',
++    feature VARCHAR(64) NULL COMMENT 'LLM feature',
++    platform_code VARCHAR(64) NULL COMMENT 'AI platform code',
++    platform_name VARCHAR(128) NULL COMMENT 'AI platform name',
++    model_id VARCHAR(128) NULL COMMENT 'model id',
++    model_name VARCHAR(128) NULL COMMENT 'model name',
++    governance_stack VARCHAR(32) NULL COMMENT 'GATEWAY/LEGACY_LIMITER/NO_PERMIT_LEGACY',
++    routing_strategy VARCHAR(64) NULL COMMENT 'routing strategy',
++    wait_semantics VARCHAR(32) NULL COMMENT 'wait semantics',
++    status VARCHAR(32) NOT NULL COMMENT 'success/failure',
++    error_category VARCHAR(64) NULL COMMENT 'structured error category',
++    http_status_code INT NULL COMMENT 'HTTP status code when available',
++    provider_error_code VARCHAR(128) NULL COMMENT 'provider error code when available',
++    retry_after_ms BIGINT NULL COMMENT 'Retry-After parsed as milliseconds',
++    failure_kind VARCHAR(64) NULL COMMENT 'route failure kind when available',
++    request_count INT NULL COMMENT 'attempted request count',
++    wait_ms BIGINT NULL COMMENT 'capacity wait/throttle duration',
++    http_ms BIGINT NULL COMMENT 'HTTP transport duration',
++    total_ms BIGINT NULL COMMENT 'facade total duration',
++    prompt_tokens INT NULL COMMENT 'prompt tokens',
++    completion_tokens INT NULL COMMENT 'completion tokens',
++    total_tokens INT NULL COMMENT 'total tokens',
++    estimated_cost DECIMAL(18,6) NULL COMMENT 'estimated cost',
++    currency VARCHAR(16) NULL COMMENT 'cost currency',
++    occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'event occurrence time',
++    KEY idx_llm_call_obs_run_time (run_id, occurred_at),
++    KEY idx_llm_call_obs_platform_time (platform_code, occurred_at),
++    KEY idx_llm_call_obs_feature_time (feature, occurred_at),
++    KEY idx_llm_call_obs_hash_scope (normalized_prompt_hash, scope)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='LLM call measurement observations';
++
++CREATE TABLE IF NOT EXISTS llm_capacity_minute_metric (
++    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
++    run_id VARCHAR(96) NOT NULL DEFAULT 'ad_hoc' COMMENT 'batch/run identifier',
++    bucket_minute DATETIME NOT NULL COMMENT 'minute bucket',
++    platform_code VARCHAR(64) NOT NULL DEFAULT 'unknown' COMMENT 'AI platform code',
++    feature VARCHAR(64) NOT NULL DEFAULT 'generic' COMMENT 'LLM feature',
++    governance_stack VARCHAR(32) NOT NULL DEFAULT 'GATEWAY' COMMENT 'governance stack',
++    global_active_peak BIGINT NOT NULL DEFAULT 0 COMMENT 'global permit active peak',
++    feature_active_peak BIGINT NOT NULL DEFAULT 0 COMMENT 'feature permit active peak',
++    platform_active_peak BIGINT NOT NULL DEFAULT 0 COMMENT 'platform permit active peak',
++    permit_busy_count BIGINT NOT NULL DEFAULT 0 COMMENT 'permit busy count',
++    permit_waiter_peak BIGINT NOT NULL DEFAULT 0 COMMENT 'permit waiter peak',
++    internal_rate_limited_count BIGINT NOT NULL DEFAULT 0 COMMENT 'internal rate limited count',
++    platform429_count BIGINT NOT NULL DEFAULT 0 COMMENT 'platform 429 count',
++    http5xx_count BIGINT NOT NULL DEFAULT 0 COMMENT 'HTTP 5xx count',
++    timeout_count BIGINT NOT NULL DEFAULT 0 COMMENT 'timeout count',
++    legacy_rate_limited_count BIGINT NOT NULL DEFAULT 0 COMMENT 'legacy rate limited count',
++    legacy_concurrency_waiter_peak BIGINT NOT NULL DEFAULT 0 COMMENT 'legacy concurrency waiter peak',
++    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
++    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
++    UNIQUE KEY uk_llm_capacity_minute (run_id, bucket_minute, platform_code, feature, governance_stack),
++    KEY idx_llm_capacity_minute_time (bucket_minute),
++    KEY idx_llm_capacity_minute_run (run_id, bucket_minute)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='LLM capacity minute metrics';
+
+diff --git a/geo-project/geo-server/src/test/java/com/huanjing/geo/common/llm/LlmCallFacadeTest.java b/geo-project/geo-server/src/test/java/com/huanjing/geo/common/llm/LlmCallFacadeTest.java
+new file mode 100644
+index 00000000..adf913f3
+--- /dev/null
++++ b/geo-project/geo-server/src/test/java/com/huanjing/geo/common/llm/LlmCallFacadeTest.java
+@@ -0,0 +1,235 @@
++package com.huanjing.geo.common.llm;
++
++import com.fasterxml.jackson.databind.ObjectMapper;
++import com.huanjing.geo.common.exception.BizException;
++import com.huanjing.geo.common.llm.limiter.PlatformConcurrencyLimiterService;
++import com.huanjing.geo.common.llm.limiter.PlatformRateLimiterService;
++import com.huanjing.geo.common.llm.measurement.LlmMeasurementCollector;
++import com.huanjing.geo.common.llm.measurement.RetryAfterParser;
++import com.huanjing.geo.common.llm.router.LlmFeature;
++import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
++import com.huanjing.geo.common.llm.router.LlmRouteRequest;
++import com.huanjing.geo.common.llm.router.LlmRouteResult;
++import com.huanjing.geo.module.system.entity.AiPlatformConfig;
++import org.junit.jupiter.api.Test;
++
++import java.time.Duration;
++import java.time.ZonedDateTime;
++import java.time.format.DateTimeFormatter;
++import java.util.Map;
++import java.util.List;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertThrows;
++import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++class LlmCallFacadeTest {
++
++    @Test
++    void directDelegatesToInvokerAndReturnsInvokeResult() throws Exception {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, new PlatformConcurrencyLimiterService(), httpClient);
++        LlmModelConfig modelConfig = modelConfig("direct");
++        LlmInvokeResult invokeResult = invokeResult("direct response");
++        when(invoker.invoke("prompt", modelConfig)).thenReturn(invokeResult);
++
++        LlmCallResult result = facade.execute(LlmCallRequest.direct("prompt", modelConfig));
++
++        assertEquals(invokeResult, result.invokeResult());
++        verify(invoker).invoke("prompt", modelConfig);
++        verify(router, never()).invoke(any());
++    }
++
++    @Test
++    void routedDelegatesToRouterAndReturnsRouteResult() throws Exception {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, new PlatformConcurrencyLimiterService(), httpClient);
++        LlmRouteRequest request = new LlmRouteRequest(
++                LlmFeature.ARTICLE, "system", "user", 0.1D,
++                1000, 2000, LlmModelConfig.MAX_REQUEST_TIMEOUT_MS,
++                0, null, false, 1, 0, List.of(platform("p")));
++        LlmRouteResult routeResult = new LlmRouteResult(
++                "p", "Platform", "primary", "model", "Model",
++                "routed response", 12L, 2, invokeResult("routed response"));
++        when(router.invoke(request)).thenReturn(routeResult);
++
++        LlmCallResult result = facade.execute(LlmCallRequest.routed(request));
++
++        assertEquals(routeResult, result.routeResult());
++        verify(router).invoke(request);
++        verify(invoker, never()).invoke(any(), any());
++    }
++
++    @Test
++    void legacyLimiterAppliesRateLimiterAndReleasesConcurrencyPermit() {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        PlatformConcurrencyLimiterService concurrencyLimiter = new PlatformConcurrencyLimiterService();
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, concurrencyLimiter, httpClient);
++        AiPlatformConfig platform = platform("legacy");
++        platform.setConcurrencyLimit(1);
++        when(rateLimiter.tryAcquire(platform, 1000)).thenReturn(true);
++        try {
++            when(httpClient.postJson(any(), any(), any(), eq(1000), eq(2000)))
++                    .thenReturn(new LlmHttpClient.HttpResponse(200, "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"));
++        } catch (Exception ex) {
++            throw new IllegalStateException(ex);
++        }
++
++        assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
++            LlmCallResult first = facade.execute(legacyRequest(platform));
++            LlmCallResult second = facade.execute(legacyRequest(platform));
++            assertThat(first.rawResponseText()).contains("\"choices\"");
++            assertThat(second.rawResponseText()).contains("\"choices\"");
++        });
++        verify(rateLimiter, org.mockito.Mockito.times(2)).tryAcquire(platform, 1000);
++    }
++
++    @Test
++    void legacyLimiterKeepsRateLimitFailureAsBizException429AndSkipsHttp() {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, new PlatformConcurrencyLimiterService(), httpClient);
++        AiPlatformConfig platform = platform("legacy");
++        when(rateLimiter.tryAcquire(platform, 1000)).thenReturn(false);
++
++        BizException ex = assertThrows(BizException.class, () -> facade.execute(legacyRequest(platform)));
++
++        assertEquals(429, ex.getCode());
++        assertEquals("Platform limited: legacy", ex.getMessage());
++        try {
++            verify(httpClient, never()).postJson(any(), any(), any(), any(Integer.class), any(Integer.class));
++        } catch (Exception verifyException) {
++            throw new IllegalStateException(verifyException);
++        }
++    }
++
++    @Test
++    void legacyHttpKeepsNon2xxAsBizExceptionWithStatusCode() throws Exception {
++        LlmPlatformRouter router = mock(LlmPlatformRouter.class);
++        LlmInvoker invoker = mock(LlmInvoker.class);
++        PlatformRateLimiterService rateLimiter = mock(PlatformRateLimiterService.class);
++        LlmHttpClient httpClient = mock(LlmHttpClient.class);
++        LlmCallFacade facade = facade(router, invoker, rateLimiter, new PlatformConcurrencyLimiterService(), httpClient);
++        AiPlatformConfig platform = platform("legacy");
++        when(rateLimiter.tryAcquire(platform, 1000)).thenReturn(true);
++        when(httpClient.postJson(any(), any(), any(), eq(1000), eq(2000)))
++                .thenReturn(new LlmHttpClient.HttpResponse(429, "{\"error\":{\"code\":\"rate_limit_exceeded\"}}",
++                        Map.of("Retry-After", List.of("2"))));
++
++        BizException ex = assertThrows(BizException.class, () -> facade.execute(legacyRequest(platform)));
++
++        assertEquals(429, ex.getCode());
++        assertThat(ex.getMessage()).contains("Model API HTTP 429");
++        assertThat(ex.getCause()).isInstanceOf(com.huanjing.geo.common.llm.measurement.LlmHttpErrorException.class);
++        var cause = (com.huanjing.geo.common.llm.measurement.LlmHttpErrorException) ex.getCause();
++        assertEquals("rate_limit_exceeded", cause.providerErrorCode());
++        assertEquals(2000L, cause.retryAfterMs());
++    }
++
++    @Test
++    void retryAfterParserSupportsSecondsAndHttpDate() {
++        assertEquals(3000L, RetryAfterParser.parse("3"));
++        String retryAt = ZonedDateTime.now().plusSeconds(2).format(DateTimeFormatter.RFC_1123_DATE_TIME);
++        assertThat(RetryAfterParser.parse(retryAt)).isBetween(0L, 3000L);
++        assertThat(RetryAfterParser.parse("not-a-retry-after")).isNull();
++    }
++
++    private LlmCallFacade facade(LlmPlatformRouter router,
++                                 LlmInvoker invoker,
++                                 PlatformRateLimiterService rateLimiter,
++                                 PlatformConcurrencyLimiterService concurrencyLimiter,
++                                 LlmHttpClient httpClient) {
++        return new LlmCallFacade(
++                router,
++                invoker,
++                rateLimiter,
++                concurrencyLimiter,
++                httpClient,
++                new ObjectMapper(),
++                mock(LlmMeasurementCollector.class)
++        );
++    }
++
++    private LlmCallRequest legacyRequest(AiPlatformConfig platform) {
++        return LlmCallRequest.legacy(
++                platform,
++                platform.getPlatformCode(),
++                platform.getPlatformName(),
++                "primary",
++                platform.getApiUrl(),
++                platform.getModelId(),
++                "sk-test",
++                "system",
++                "user",
++                0D,
++                1000,
++                1000,
++                2000,
++                LlmFeature.GENERIC,
++                1
++        );
++    }
++
++    private AiPlatformConfig platform(String platformCode) {
++        AiPlatformConfig platform = new AiPlatformConfig();
++        platform.setPlatformCode(platformCode);
++        platform.setPlatformName("Platform");
++        platform.setApiUrl("https://example.test/v1");
++        platform.setModelId("model");
++        platform.setModelName("Model");
++        platform.setConcurrencyLimit(1);
++        return platform;
++    }
++
++    private LlmModelConfig modelConfig(String platformCode) {
++        return new LlmModelConfig(
++                platformCode,
++                "Platform",
++                "model",
++                "Model",
++                "https://example.test/v1",
++                "sk-test",
++                "system",
++                0D,
++                1000,
++                2000,
++                0,
++                1,
++                null,
++                false
++        );
++    }
++
++    private LlmInvokeResult invokeResult(String responseText) {
++        return new LlmInvokeResult(
++                responseText,
++                1,
++                2,
++                3L,
++                0,
++                LlmCallStatus.SUCCESS,
++                "p",
++                "Platform",
++                "model",
++                "Model"
++        );
++    }
++}

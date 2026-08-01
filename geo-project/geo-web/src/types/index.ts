@@ -1627,6 +1627,9 @@ export interface SelfMediaPublishSchedule {
   lastAttemptAt?: string | null
   nextAttemptAt?: string | null
   lockedUntil?: string | null
+  runtimeStage?: string | null
+  runtimeStageAt?: string | null
+  runtimeStageMessage?: string | null
   failureCode?: string | null
   failureLabel?: string | null
   failureRetryable?: boolean | null
@@ -1793,6 +1796,11 @@ export interface SelfMediaPlatformQuickScheduleResponse {
   plannedPublishAt?: string | null
   nextAttemptAt?: string | null
   brandSafetyIntervalMinutes?: number | null
+  topicRegionText?: string | null
+  topicIndustryText?: string | null
+  topicQuery?: string | null
+  imageMaterialIds?: number[] | null
+  expectedImageCount?: number | null
   createResponse?: SelfMediaPublishScheduleCreateResponse | null
 }
 

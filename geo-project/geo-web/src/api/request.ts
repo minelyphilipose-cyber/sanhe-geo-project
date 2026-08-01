@@ -4,6 +4,7 @@ import { useUserStore } from '@/stores/user'
 import router from '@/router'
 import type { R } from '@/types'
 import { normalizeLocalAgentErrorMessage } from '@/api/localAgentErrorMessages'
+import { isServerErrorCode } from '@/api/responseErrorClassification'
 import { normalizeErrorMessage } from '@/utils/error'
 
 export interface GeoRequestConfig extends AxiosRequestConfig {
@@ -113,7 +114,7 @@ request.interceptors.response.use(
     const silentError = Boolean(config.silentError)
 
     if (res.code !== 0) {
-      if (res.code >= 500) {
+      if (isServerErrorCode(res.code)) {
         if (!silentError) {
           ElMessage.error(SERVER_ERROR_MESSAGE)
         }

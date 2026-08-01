@@ -15,9 +15,11 @@ import com.huanjing.geo.module.extension.dto.LocalAgentRuntimeStatusReportReques
 import com.huanjing.geo.module.extension.dto.LocalAgentRuntimeStatusVO;
 import com.huanjing.geo.module.extension.entity.ExtensionRuntimeStatus;
 import com.huanjing.geo.module.extension.entity.ExtensionSession;
+import com.huanjing.geo.module.extension.entity.LocalAgentBrowserMetricSample;
 import com.huanjing.geo.module.extension.entity.LocalAgentRuntimeStatus;
 import com.huanjing.geo.module.extension.entity.LocalAgentSession;
 import com.huanjing.geo.module.extension.mapper.ExtensionRuntimeStatusMapper;
+import com.huanjing.geo.module.extension.mapper.LocalAgentBrowserMetricSampleMapper;
 import com.huanjing.geo.module.extension.mapper.LocalAgentRuntimeStatusMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
@@ -25,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -37,6 +40,7 @@ public class SelfMediaRuntimeStatusService {
 
     private final ExtensionRuntimeStatusMapper extensionRuntimeStatusMapper;
     private final LocalAgentRuntimeStatusMapper localAgentRuntimeStatusMapper;
+    private final LocalAgentBrowserMetricSampleMapper localAgentBrowserMetricSampleMapper;
     private final BrowserEnvironmentMapper browserEnvironmentMapper;
     private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private final ObjectMapper objectMapper;
@@ -123,6 +127,11 @@ public class SelfMediaRuntimeStatusService {
         row.setCapacity(Math.max(1, request.capacity() == null ? 1 : request.capacity()));
         row.setSupportedPlatformsJson(json(request.supportedPlatforms()));
         row.setCapabilitiesJson(json(request.capabilities()));
+        row.setRuntimeState(limit(firstText(request.runtimeState(), "legacy"), 32));
+        row.setResourceMetricsJson(json(request.resourceMetrics()));
+        row.setLastCleanupAt(request.lastCleanupAt());
+        row.setHelperBootId(limit(request.helperBootId(), 64));
+        row.setPolicyVersion(request.policyVersion());
         row.setLastErrorCode(limit(request.lastErrorCode(), 128));
         row.setLastErrorMessage(limit(request.lastErrorMessage(), 512));
         row.setLastSeenAt(now);
@@ -130,7 +139,88 @@ public class SelfMediaRuntimeStatusService {
         row.setUpdatedAt(now);
 
         upsertLocalAgent(row);
+        appendBrowserMetricSamples(row, request.resourceMetrics(), now);
         return LocalAgentRuntimeStatusVO.from(row);
+    }
+
+    private void appendBrowserMetricSamples(LocalAgentRuntimeStatus runtime,
+                                            JsonNode resourceMetrics,
+                                            LocalDateTime createdAt) {
+        if (resourceMetrics == null
+                || !resourceMetrics.path("environments").isArray()
+                || !StringUtils.hasText(runtime.getHelperBootId())) {
+            return;
+        }
+        int count = 0;
+        for (JsonNode environment : resourceMetrics.path("environments")) {
+            if (count++ >= 100) {
+                break;
+            }
+            String providerProfileId = limit(text(environment, "providerProfileId"), 128);
+            String observedAtText = text(environment, "observedAt");
+            if (!StringUtils.hasText(providerProfileId) || !StringUtils.hasText(observedAtText)) {
+                continue;
+            }
+            java.time.Instant observedAtInstant = instant(observedAtText);
+            if (observedAtInstant == null) {
+                continue;
+            }
+            long observedAtEpochMs = observedAtInstant.toEpochMilli();
+            LocalAgentBrowserMetricSample sample = new LocalAgentBrowserMetricSample();
+            sample.setLocalAgentSessionId(runtime.getSessionId());
+            sample.setMachineId(runtime.getMachineId());
+            sample.setActiveProfile(runtime.getActiveProfile());
+            sample.setHelperBootId(runtime.getHelperBootId());
+            sample.setBrowserEnvironmentId(longValue(environment, "browserEnvironmentId"));
+            sample.setEnvironmentKey(limit(text(environment, "environmentKey"), 128));
+            sample.setProviderProfileId(providerProfileId);
+            sample.setBrowserSessionEpoch(limit(text(environment, "browserSessionEpoch"), 64));
+            sample.setObservedAt(LocalDateTime.ofInstant(observedAtInstant, ZoneOffset.UTC));
+            sample.setObservedAtEpochMs(observedAtEpochMs);
+            String observationStatus = limit(firstText(text(environment, "observationStatus"), "unknown"), 16);
+            boolean successfulObservation = "ok".equals(observationStatus);
+            sample.setObservationStatus(observationStatus);
+            java.time.Instant lastSuccessfulInstant = instant(text(environment, "lastSuccessfulObservedAt"));
+            sample.setLastSuccessfulObservedAt(lastSuccessfulInstant == null
+                    ? null
+                    : LocalDateTime.ofInstant(lastSuccessfulInstant, ZoneOffset.UTC));
+            sample.setFailedProbeDurationMs(integerValue(environment, "failedProbeDurationMs"));
+            sample.setHelperUptimeSeconds(longValue(environment, "helperUptimeSeconds"));
+            JsonNode taskVolume = environment.path("taskVolume");
+            sample.setRetainedTaskCount(integerValue(taskVolume, "retainedTaskCount"));
+            sample.setActiveTaskCount(integerValue(taskVolume, "activeTaskCount"));
+            JsonNode throughput = taskVolume.path("throughputSinceHelperBoot");
+            sample.setClaimedTotal(defaultZero(longValue(throughput, "claimedTotal")));
+            sample.setExecutionClaimedTotal(defaultZero(longValue(throughput, "executionClaimedTotal")));
+            sample.setExecutionStartedTotal(defaultZero(longValue(throughput, "executionStartedTotal")));
+            sample.setPublishCheckClaimedTotal(defaultZero(longValue(throughput, "publishCheckClaimedTotal")));
+            sample.setPublishCheckStartedTotal(defaultZero(longValue(throughput, "publishCheckStartedTotal")));
+            sample.setCompletedTotal(defaultZero(longValue(throughput, "completedTotal")));
+            sample.setFailedTotal(defaultZero(longValue(throughput, "failedTotal")));
+            if (successfulObservation) {
+                sample.setTotalTargetCount(integerValue(environment, "totalTargetCount"));
+                sample.setManagedTargetCount(integerValue(environment, "managedTargetCount"));
+                sample.setOperatorTargetCount(integerValue(environment, "operatorTargetCount"));
+                sample.setUnknownTargetCount(integerValue(environment, "unknownTargetCount"));
+                JsonNode processMetrics = environment.path("processMetrics");
+                sample.setProcessRssBytes(longValue(processMetrics, "rssBytes"));
+                sample.setProcessCpuPercent(doubleValue(processMetrics, "cpuPercent"));
+                sample.setProcessHandleCount(integerValue(processMetrics, "handleCount"));
+                JsonNode cdpSteps = environment.path("cdpStepLatencyMs");
+                sample.setCdpConnectMs(integerValue(cdpSteps, "connectMs"));
+                sample.setCdpBrowserGetVersionMs(integerValue(cdpSteps, "browserGetVersionMs"));
+                sample.setCdpBrowserPagesMs(integerValue(cdpSteps, "browserPagesMs"));
+            }
+            JsonNode errorCounts = environment.path("errorCounts");
+            sample.setNetworkEnableTimeoutCount(defaultZero(integerValue(errorCounts, "networkEnableTimeout")));
+            sample.setCdpDisconnectCount(defaultZero(integerValue(errorCounts, "cdpDisconnected")));
+            sample.setExtensionInjectionErrorCount(defaultZero(integerValue(errorCounts, "extensionInjectionError")));
+            sample.setPageTimeoutCount(defaultZero(integerValue(errorCounts, "pageTimeout")));
+            sample.setCdpProtocolTimeoutCount(defaultZero(integerValue(errorCounts, "cdpProtocolTimeout")));
+            sample.setMetricsJson(json(environment));
+            sample.setCreatedAt(createdAt);
+            localAgentBrowserMetricSampleMapper.insertIdempotent(sample);
+        }
     }
 
     private void upsertExtension(ExtensionRuntimeStatus row) {
@@ -290,6 +380,53 @@ public class SelfMediaRuntimeStatusService {
         }
         String trimmed = value.trim();
         return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
+    }
+
+    private String text(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        return value != null && value.isTextual() ? value.textValue() : null;
+    }
+
+    private Long longValue(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        return value != null && value.isIntegralNumber() && value.canConvertToLong()
+                ? value.longValue()
+                : null;
+    }
+
+    private Integer integerValue(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        return value != null && value.isIntegralNumber() && value.canConvertToInt()
+                ? value.intValue()
+                : null;
+    }
+
+    private Double doubleValue(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        if (value == null || !value.isNumber()) {
+            return null;
+        }
+        double number = value.doubleValue();
+        return Double.isFinite(number) ? number : null;
+    }
+
+    private int defaultZero(Integer value) {
+        return value == null ? 0 : Math.max(0, value);
+    }
+
+    private long defaultZero(Long value) {
+        return value == null ? 0L : Math.max(0L, value);
+    }
+
+    private java.time.Instant instant(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return java.time.Instant.parse(value);
+        } catch (RuntimeException ex) {
+            return null;
+        }
     }
 
     private String json(JsonNode node) {

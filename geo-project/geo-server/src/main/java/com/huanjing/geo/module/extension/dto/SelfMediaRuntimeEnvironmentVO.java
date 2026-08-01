@@ -1,5 +1,7 @@
 package com.huanjing.geo.module.extension.dto;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -43,6 +45,11 @@ public record SelfMediaRuntimeEnvironmentVO(
             Boolean adspowerApiOk,
             Integer runningTaskCount,
             Integer capacity,
+            String runtimeState,
+            JsonNode resourceMetrics,
+            LocalDateTime lastCleanupAt,
+            String helperBootId,
+            Long policyVersion,
             LocalDateTime lastSeenAt,
             String lastErrorCode,
             String lastErrorMessage

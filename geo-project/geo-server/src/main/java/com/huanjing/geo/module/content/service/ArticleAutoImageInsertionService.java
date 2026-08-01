@@ -3,8 +3,10 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.customer.entity.BrandImageFolder;
+import com.huanjing.geo.module.customer.entity.BrandImageFolderProject;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandImageFolderMapper;
+import com.huanjing.geo.module.customer.mapper.BrandImageFolderProjectMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import com.huanjing.geo.module.customer.service.BrandImageFolderService;
 import com.huanjing.geo.module.customer.service.BrandMaterialPublicUrlService;
@@ -33,6 +35,7 @@ public class ArticleAutoImageInsertionService {
     private static final int SHORT_ARTICLE_IMAGE_COUNT = 1;
     private static final int MEDIUM_ARTICLE_IMAGE_COUNT = 2;
     private static final int LONG_ARTICLE_IMAGE_COUNT = 3;
+    private static final int DOUYIN_BODY_IMAGE_COUNT = 5;
     private static final int SHORT_ARTICLE_TEXT_LENGTH = 600;
     private static final int LONG_ARTICLE_TEXT_LENGTH = 1500;
     private static final Pattern MARKDOWN_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*]\\(([^)]+)\\)");
@@ -45,11 +48,12 @@ public class ArticleAutoImageInsertionService {
             ArticlePromptChannels.INDUSTRY_SITE, ChannelImagePolicy.body()
     );
     private static final Set<String> SELF_MEDIA_EXCLUDED_SUB_CODES = Set.of("xiaohongshu");
-    private static final Set<String> SELF_MEDIA_STRIP_IMAGE_SUB_CODES = Set.of("toutiao", "douyin");
+    private static final Set<String> SELF_MEDIA_STRIP_IMAGE_SUB_CODES = Set.of("toutiao");
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "webp");
     private static final Set<String> TRAILING_SECTIONS = Set.of("结语", "总结", "免责声明", "联系方式", "联系我们");
 
     private final BrandImageFolderMapper folderMapper;
+    private final BrandImageFolderProjectMapper folderProjectMapper;
     private final BrandMaterialMapper brandMaterialMapper;
     private final BrandMaterialPublicUrlService publicUrlService;
 
@@ -74,12 +78,13 @@ public class ArticleAutoImageInsertionService {
         }
         Set<String> excludedUrls = existingImageUrls(contentMarkdown);
         addExcludedUrl(excludedUrls, excludedImageUrl);
-        int imageCount = bodyImageCount(contentMarkdown);
-        List<ImageRef> images = selectRandomIllustrationImages(project.getBrandId(), imageCount, excludedUrls);
+        boolean douyinImageText = isDouyinImageText(channelGroupCode, channelSubCode);
+        int imageCount = douyinImageText ? DOUYIN_BODY_IMAGE_COUNT : bodyImageCount(contentMarkdown);
+        List<ImageRef> images = selectRandomIllustrationImages(project, imageCount, excludedUrls);
         if (images.isEmpty()) {
             return contentMarkdown;
         }
-        return insertImagesAfterParagraphs(contentMarkdown, images);
+        return insertImagesAfterParagraphs(contentMarkdown, images, douyinImageText);
     }
 
     public String insertForTargetChannel(Project project, String targetChannel, String contentMarkdown, String excludedImageUrl) {
@@ -149,22 +154,34 @@ public class ArticleAutoImageInsertionService {
                 .trim();
     }
 
-    private List<ImageRef> selectRandomIllustrationImages(Long brandId, int limit, Set<String> excludedUrls) {
-        if (limit <= 0) {
+    private List<ImageRef> selectRandomIllustrationImages(Project project, int limit, Set<String> excludedUrls) {
+        Long brandId = project == null ? null : project.getBrandId();
+        if (brandId == null) {
             return List.of();
         }
-        List<Long> folderIds = illustrationFolderIds(brandId);
-        List<BrandMaterial> candidates = folderIds.isEmpty()
-                ? List.of()
-                : selectUsableBrandImages(brandId, folderIds);
-        if (candidates.isEmpty()) {
-            candidates = selectUsableBrandImages(brandId, null);
-        }
-        if (candidates.isEmpty()) {
+        if (limit <= 0) {
             return List.of();
         }
         Set<String> normalizedExcludedUrls = normalizeUrls(excludedUrls);
         Map<String, ImageRef> refs = new LinkedHashMap<>();
+        for (Long folderId : illustrationFolderIds(brandId, project.getId())) {
+            addShuffledImageRefs(refs, selectUsableBrandImages(brandId, List.of(folderId)),
+                    normalizedExcludedUrls, limit);
+            if (refs.size() >= limit) {
+                break;
+            }
+        }
+        if (refs.size() < limit) {
+            addShuffledImageRefs(refs, selectUsableBrandImages(brandId, null),
+                    normalizedExcludedUrls, limit);
+        }
+        return refs.values().stream().toList();
+    }
+
+    private void addShuffledImageRefs(Map<String, ImageRef> refs,
+                                      List<BrandMaterial> candidates,
+                                      Set<String> normalizedExcludedUrls,
+                                      int limit) {
         List<BrandMaterial> shuffled = new ArrayList<>(candidates);
         Collections.shuffle(shuffled);
         for (BrandMaterial material : shuffled) {
@@ -173,15 +190,13 @@ public class ArticleAutoImageInsertionService {
                 continue;
             }
             String normalizedUrl = normalizeUrl(ref.url());
-            if (normalizedExcludedUrls.contains(normalizedUrl)) {
-                continue;
+            if (!normalizedExcludedUrls.contains(normalizedUrl)) {
+                refs.putIfAbsent(normalizedUrl, ref);
             }
-            refs.putIfAbsent(normalizedUrl, ref);
             if (refs.size() >= limit) {
-                break;
+                return;
             }
         }
-        return refs.values().stream().toList();
     }
 
     private List<BrandMaterial> selectUsableBrandImages(Long brandId, List<Long> folderIds) {
@@ -200,12 +215,28 @@ public class ArticleAutoImageInsertionService {
                 .toList();
     }
 
-    private List<Long> illustrationFolderIds(Long brandId) {
-        return folderMapper.selectList(new LambdaQueryWrapper<BrandImageFolder>()
+    private List<Long> illustrationFolderIds(Long brandId, Long projectId) {
+        List<BrandImageFolder> folders = folderMapper.selectList(new LambdaQueryWrapper<BrandImageFolder>()
                         .eq(BrandImageFolder::getBrandId, brandId)
                         .likeRight(BrandImageFolder::getFolderName, ILLUSTRATION_FOLDER_PREFIX)
                         .eq(BrandImageFolder::getStatus, BrandImageFolderService.STATUS_ACTIVE))
+                .stream().toList();
+        if (folders.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> relatedFolderIds = projectId == null
+                ? Set.of()
+                : folderProjectMapper.selectList(new LambdaQueryWrapper<BrandImageFolderProject>()
+                        .eq(BrandImageFolderProject::getProjectId, projectId)
+                        .in(BrandImageFolderProject::getFolderId,
+                                folders.stream().map(BrandImageFolder::getId).toList()))
                 .stream()
+                .map(BrandImageFolderProject::getFolderId)
+                .collect(java.util.stream.Collectors.toSet());
+        return folders.stream()
+                .sorted((left, right) -> Boolean.compare(
+                        relatedFolderIds.contains(right.getId()),
+                        relatedFolderIds.contains(left.getId())))
                 .map(BrandImageFolder::getId)
                 .filter(Objects::nonNull)
                 .toList();
@@ -218,7 +249,9 @@ public class ArticleAutoImageInsertionService {
         );
     }
 
-    private String insertImagesAfterParagraphs(String markdown, List<ImageRef> images) {
+    private String insertImagesAfterParagraphs(String markdown,
+                                               List<ImageRef> images,
+                                               boolean appendRemainingImages) {
         List<String> lines = new ArrayList<>(List.of(markdown.split("\\R", -1)));
         List<Integer> paragraphEnds = paragraphEndIndexes(lines);
         if (paragraphEnds.isEmpty()) {
@@ -237,7 +270,10 @@ public class ArticleAutoImageInsertionService {
             lines.add(insert.lineIndex() + 2, markdownImage(insert.material()));
             lines.add(insert.lineIndex() + 3, "");
         }
-        return String.join("\n", lines).trim();
+        String result = String.join("\n", lines).trim();
+        return appendRemainingImages && insertCount < images.size()
+                ? appendImages(result, images.subList(insertCount, images.size()))
+                : result;
     }
 
     private String insertImageAfterOpeningParagraph(String markdown, ImageRef image) {
@@ -425,6 +461,14 @@ public class ArticleAutoImageInsertionService {
             return null;
         }
         return value.trim();
+    }
+
+    private boolean isDouyinImageText(String channelGroupCode, String channelSubCode) {
+        return ArticlePromptChannels.SELF_MEDIA.equals(trimToNull(channelGroupCode))
+                && "douyin".equals(ArticlePromptChannels.canonicalSubCode(
+                        ArticlePromptChannels.SELF_MEDIA,
+                        trimToNull(channelSubCode)
+                ));
     }
 
     private record ImageRef(String alt, String url) {

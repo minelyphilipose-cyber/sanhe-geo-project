@@ -49,6 +49,7 @@ Copy-Item config.example.json config.local.json
   "enableLegacyBackendTokenRoutes": false,
   "enableStaticHelperToken": false,
   "helperToken": "",
+  "browserObservationEnabled": false,
   "adspower": {
     "apiBase": "http://localhost:50325"
   }
@@ -84,7 +85,22 @@ npm run package:delivery -- -Environment dev
 
 打包脚本会生成 `geo-local-helper-prod-v{version}.zip` 或 `geo-local-helper-dev-v{version}.zip`，并把包内 `config.example.json` 固定到对应后台环境。
 
-本地助手不保存品牌、自媒体账号、环境标识与 AdsPower 环境 ID 的业务映射。`providerProfileId` 由后台品牌详情中的指纹浏览器环境绑定关系传入；运营只在后台页面配置环境关系，不需要编辑 `config.local.json`。
+本地助手不在配置文件中保存品牌、自媒体账号与 AdsPower 环境 ID 的业务映射。`providerProfileId` 由后台品牌详情中的指纹浏览器环境绑定关系传入；运营只在后台页面配置环境关系，不需要编辑 `config.local.json`。
+
+V2 阶段 1 可以显式设置 `"browserObservationEnabled": true` 开启只读浏览器资源观察。开启后：
+
+- Target 对账结果原子写入 `runtime/browser-resources.json`；
+- 观察审计写入并轮转 `runtime/browser-resource-audit.jsonl`；
+- 助手运行态向后台上报 Target 分类、CDP 分步骤延迟、错误分类、任务量和运行时长；
+- Windows 下按 CDP 返回的浏览器进程 PID 采集 RSS、累计 CPU/区间 CPU 和句柄数；
+- `GET /v1/adspower/managed-resources` 返回当前注册表和指标；
+- 页面关闭、环境停止、清理计划和 V2 治理型 CDP 自愈/熔断仍保持禁用。
+
+观察注册表只记录运行时资源身份和安全诊断字段，不保存正文、Cookie、密钥或 HMAC。
+页面 URL 在注册、更新和 Target 对账的统一写入边界去除查询参数与锚点。
+后台按环境和 `observedAt` 幂等追加原始样本；默认约每 60 秒一条，保留 14 天，供 24 小时基线和后续聚合查询使用。
+失败探针单独记录 `observationStatus=failed`、失败耗时和最近成功时间，不沿用上一份 Target、CDP 或进程测量值。
+任务指标同时包含存量和当前 `helperBootId` 内的领取、执行、回查、完成、失败累计量，避免受本地 200 条任务保留上限影响。
 
 ## 启动
 

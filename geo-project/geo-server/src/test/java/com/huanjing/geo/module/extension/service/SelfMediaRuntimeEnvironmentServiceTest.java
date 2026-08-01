@@ -39,7 +39,14 @@ class SelfMediaRuntimeEnvironmentServiceTest {
         SelfMediaRuntimeReadinessService readinessService =
                 new SelfMediaRuntimeReadinessService(readinessExtensionMapper, readinessHelperMapper, properties, new ObjectMapper());
         SelfMediaRuntimeEnvironmentService service =
-                new SelfMediaRuntimeEnvironmentService(environmentMapper, extensionMapper, helperMapper, readinessService, properties);
+                new SelfMediaRuntimeEnvironmentService(
+                        environmentMapper,
+                        extensionMapper,
+                        helperMapper,
+                        readinessService,
+                        properties,
+                        new com.fasterxml.jackson.databind.ObjectMapper()
+                );
 
         SelfMediaRuntimeEnvironmentBaseRow readyRow = baseRow(10L, 20L, "toutiao");
         SelfMediaRuntimeEnvironmentBaseRow blockedRow = baseRow(11L, 21L, "zhihu");
@@ -55,6 +62,11 @@ class SelfMediaRuntimeEnvironmentServiceTest {
         assertTrue(readyPage.getRecords().get(0).readiness().ready());
         assertEquals("brand_latest_helper", readyPage.getRecords().get(0).readiness().scope());
         assertEquals(100L, readyPage.getRecords().get(0).helper().sessionId());
+        assertEquals(
+                4,
+                readyPage.getRecords().get(0).helper().resourceMetrics()
+                        .path("summary").path("totalObservedTargetCount").asInt()
+        );
         assertEquals(1, blockedPage.getTotal());
         assertFalse(blockedPage.getRecords().get(0).readiness().ready());
         assertTrue(blockedPage.getRecords().get(0).readiness().blockedReasons()
@@ -76,7 +88,14 @@ class SelfMediaRuntimeEnvironmentServiceTest {
                         properties,
                         new ObjectMapper());
         SelfMediaRuntimeEnvironmentService service =
-                new SelfMediaRuntimeEnvironmentService(environmentMapper, extensionMapper, helperMapper, readinessService, properties);
+                new SelfMediaRuntimeEnvironmentService(
+                        environmentMapper,
+                        extensionMapper,
+                        helperMapper,
+                        readinessService,
+                        properties,
+                        new com.fasterxml.jackson.databind.ObjectMapper()
+                );
 
         when(environmentMapper.selectRuntimeEnvironmentRows(10L, "toutiao", null))
                 .thenReturn(List.of(baseRow(10L, 20L, "toutiao")));
@@ -134,6 +153,7 @@ class SelfMediaRuntimeEnvironmentServiceTest {
         status.setCapacity(2);
         status.setHelperVersion("0.1.7");
         status.setCapabilitiesJson("{\"claim\":true}");
+        status.setResourceMetricsJson("{\"summary\":{\"totalObservedTargetCount\":4}}");
         status.setLastSeenAt(LocalDateTime.now());
         return status;
     }

@@ -6,11 +6,13 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.distribution.TargetContext;
+import com.huanjing.geo.module.content.dto.DouyinImageTextPublishSnapshot;
 import com.huanjing.geo.module.content.dto.SelfMediaPlatformQuickScheduleRequest;
 import com.huanjing.geo.module.content.dto.LocalAgentClaimDiagnosticRow;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.dto.ThirdPartySubjectPoolPreviewResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.DistributionTask;
@@ -18,6 +20,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
@@ -67,6 +70,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -92,6 +96,7 @@ class SelfMediaPublishScheduleServiceTest {
     private SelfMediaPublishScheduleMapper scheduleMapper;
     private SelfMediaPublishScheduleRequestMapper requestMapper;
     private ArticleDraftMapper articleDraftMapper;
+    private ArticleDraftVersionMapper articleDraftVersionMapper;
     private ArticlePublishRecordMapper articlePublishRecordMapper;
     private DistributionTaskMapper distributionTaskMapper;
     private SelfMediaAccountMapper accountMapper;
@@ -108,11 +113,36 @@ class SelfMediaPublishScheduleServiceTest {
     private PlatformTransactionManager transactionManager;
     private SysUserMapper sysUserMapper;
     private LocalAgentSessionMapper localAgentSessionMapper;
+
+    @Test
+    void articleStatusResolutionUsesPublishedDistributingFailedPrecedence() {
+        assertEquals("published", SelfMediaPublishScheduleService.resolveArticleStatus(List.of(
+                SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED,
+                SelfMediaPublishScheduleConstants.STATUS_PENDING,
+                SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED
+        )));
+        assertEquals("published", SelfMediaPublishScheduleService.resolveArticleStatus(List.of(
+                SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING
+        )));
+        assertEquals("distributing", SelfMediaPublishScheduleService.resolveArticleStatus(List.of(
+                SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
+                SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
+        )));
+        assertEquals("failed", SelfMediaPublishScheduleService.resolveArticleStatus(List.of(
+                SelfMediaPublishScheduleConstants.STATUS_CANCELLED,
+                SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED
+        )));
+        assertEquals("approved", SelfMediaPublishScheduleService.resolveArticleStatus(List.of(
+                SelfMediaPublishScheduleConstants.STATUS_CANCELLED
+        )));
+    }
     private LocalAgentRuntimeStatusMapper localAgentRuntimeStatusMapper;
     private LocalAgentExecutionAuthorizationService localAgentExecutionAuthorizationService;
     private CurrentUserService currentUserService;
     private BusinessCalendarService businessCalendarService;
     private ThirdPartySubjectRotationService thirdPartySubjectRotationService;
+    private DouyinImageTextPublishSnapshotService douyinImageTextPublishSnapshotService;
+    private SelfMediaPublishMaterialSelectionService materialSelectionService;
     private SelfMediaPublishScheduleService service;
 
     @BeforeEach
@@ -120,6 +150,7 @@ class SelfMediaPublishScheduleServiceTest {
         scheduleMapper = mock(SelfMediaPublishScheduleMapper.class);
         requestMapper = mock(SelfMediaPublishScheduleRequestMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
+        articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
         articlePublishRecordMapper = mock(ArticlePublishRecordMapper.class);
         distributionTaskMapper = mock(DistributionTaskMapper.class);
         accountMapper = mock(SelfMediaAccountMapper.class);
@@ -160,11 +191,14 @@ class SelfMediaPublishScheduleServiceTest {
         when(currentUserService.requireCurrentUser()).thenReturn(user);
         businessCalendarService = spy(new BusinessCalendarService(new ObjectMapper()));
         thirdPartySubjectRotationService = mock(ThirdPartySubjectRotationService.class);
+        douyinImageTextPublishSnapshotService = mock(DouyinImageTextPublishSnapshotService.class);
+        materialSelectionService = mock(SelfMediaPublishMaterialSelectionService.class);
 
         service = new SelfMediaPublishScheduleService(
                 scheduleMapper,
                 requestMapper,
                 articleDraftMapper,
+                articleDraftVersionMapper,
                 articlePublishRecordMapper,
                 distributionTaskMapper,
                 accountMapper,
@@ -188,6 +222,8 @@ class SelfMediaPublishScheduleServiceTest {
                 thirdPartySubjectRotationService,
                 mock(ArticleTemplateAllocationService.class),
                 mock(TemplatePerspectiveService.class),
+                douyinImageTextPublishSnapshotService,
+                materialSelectionService,
                 new ObjectMapper()
         );
     }
@@ -728,6 +764,63 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void previewDouyinImageTextUsesImmediateBrowserStrategyAndReturnsAutomaticPreviewData() {
+        ArticleDraft article = article();
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+        when(brandMapper.selectById(8L)).thenReturn(brand());
+        SelfMediaAccount douyinAccount = account();
+        douyinAccount.setPlatform("douyin");
+        when(accountMapper.selectOne(any())).thenReturn(douyinAccount);
+        when(accountMapper.selectById(20L)).thenReturn(douyinAccount);
+        when(douyinImageTextPublishSnapshotService.previewTopic(any(Brand.class)))
+                .thenReturn(new DouyinImageTextPublishSnapshotService.TopicPreview(
+                        "阜阳",
+                        "全屋定制",
+                        "#阜阳全屋定制",
+                        "cityName",
+                        "whole_house_customization"
+                ));
+        when(materialSelectionService.selectDouyinImageTextImages(any(Project.class), any(ArticleDraft.class), any()))
+                .thenReturn(List.of(101L, 102L, 103L, 104L));
+        when(scheduleCapabilityService.immediatePublishReadiness(
+                "douyin",
+                SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH
+        )).thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(scheduleAdapterRouter.contract("douyin")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "douyin",
+                "抖音图文",
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                SelfMediaPlatformScheduleMode.PLATFORM_NATIVE,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+        when(browserEnvironmentService.validateForTaskCreation(douyinAccount, false)).thenReturn(binding());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "douyin"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:douyin", "month", "2026-07", 0, 8));
+
+        SelfMediaPlatformQuickScheduleResponse response =
+                service.previewPlatformQuickSchedule(quickRequest("douyin", false));
+
+        assertEquals("ready", response.getAction());
+        assertEquals(20L, response.getSelfMediaAccountId());
+        assertEquals("阜阳", response.getTopicRegionText());
+        assertEquals("全屋定制", response.getTopicIndustryText());
+        assertEquals("#阜阳全屋定制", response.getTopicQuery());
+        assertEquals(List.of(101L, 102L, 103L, 104L), response.getImageMaterialIds());
+        assertEquals(4, response.getExpectedImageCount());
+        verify(scheduleCapabilityService).immediatePublishReadiness(
+                "douyin",
+                SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH
+        );
+        verify(scheduleCapabilityService, never()).readiness("douyin", "platform_schedule");
+    }
+
+    @Test
     void previewPlatformQuickScheduleRequiresReplacementWhenMonthlyQuotaAlreadyPlanned() {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());
@@ -969,25 +1062,31 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
-    void dispatchPlatformQuickScheduleCreatesDouyinOfficialApiScheduleWithoutBrowserEnvironment() {
+    void dispatchPlatformQuickScheduleCreatesDouyinBrowserTaskDirectlyFromGeneratedArticle() {
         ArticleDraft article = article();
         when(articleDraftMapper.selectById(10L)).thenReturn(article);
         when(projectMapper.selectById(7L)).thenReturn(project());
         when(brandMapper.selectById(8L)).thenReturn(brand());
+        ArticleDraftVersion version = new ArticleDraftVersion();
+        version.setContentMarkdown("# article title for check\n\n自动生成的抖音图文正文。");
+        when(articleDraftVersionMapper.selectOne(any())).thenReturn(version);
         SelfMediaAccount douyinAccount = account();
         douyinAccount.setId(21L);
         douyinAccount.setPlatform("douyin");
         when(accountMapper.selectOne(any())).thenReturn(douyinAccount);
         when(accountMapper.selectById(21L)).thenReturn(douyinAccount);
-        when(scheduleCapabilityService.readiness("douyin", SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH))
+        when(scheduleCapabilityService.immediatePublishReadiness(
+                "douyin",
+                SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH
+        ))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
         when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "douyin"))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:douyin", "month", "2026-06", 0, 100));
         when(scheduleAdapterRouter.contract("douyin")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
                 "douyin",
                 "抖音图文",
-                SelfMediaPlatformPublishChannel.OFFICIAL_API,
-                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                SelfMediaPlatformScheduleMode.PLATFORM_NATIVE,
                 SelfMediaPlatformScheduleRules.defaults(),
                 false,
                 false,
@@ -997,14 +1096,44 @@ class SelfMediaPublishScheduleServiceTest {
                 60,
                 3
         )));
+        when(browserEnvironmentService.validateForTaskCreation(douyinAccount, false)).thenReturn(binding());
+        when(douyinImageTextPublishSnapshotService.previewTopic(any(Brand.class)))
+                .thenReturn(new DouyinImageTextPublishSnapshotService.TopicPreview(
+                        "阜阳", "全屋定制", "#阜阳全屋定制", "cityName", "全屋定制"));
+        when(materialSelectionService.selectDouyinImageTextImages(project(), article, version.getContentMarkdown()))
+                .thenReturn(List.of(101L, 102L, 103L, 104L));
+        DouyinImageTextPublishSnapshot snapshot = new DouyinImageTextPublishSnapshot(
+                1,
+                "image_text",
+                "article title for ch",
+                "自动生成的抖音图文正文。",
+                "阜阳",
+                "全屋定制",
+                "#阜阳全屋定制",
+                "cityName",
+                "全屋定制",
+                "阜阳市测试路",
+                List.of(101L, 102L, 103L, 104L),
+                4,
+                "immediate",
+                LocalDateTime.now()
+        );
+        when(douyinImageTextPublishSnapshotService.buildFromArticle(
+                brand(),
+                article,
+                version.getContentMarkdown(),
+                List.of(101L, 102L, 103L, 104L)
+        )).thenReturn(snapshot);
+        when(douyinImageTextPublishSnapshotService.toJson(snapshot)).thenReturn("{\"contentKind\":\"image_text\"}");
         when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of());
         stubRequestInsert();
         when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
             SelfMediaPublishSchedule row = invocation.getArgument(0);
             row.setId(74L);
             assertEquals("douyin", row.getPlatform());
-            assertNull(row.getBrowserEnvironmentId());
-            assertNull(row.getBrowserEnvironmentAccountId());
+            assertEquals(15L, row.getBrowserEnvironmentId());
+            assertEquals(25L, row.getBrowserEnvironmentAccountId());
+            assertEquals("{\"contentKind\":\"image_text\"}", row.getPublishPayloadJson());
             return 1;
         });
         when(scheduleMapper.selectById(74L)).thenAnswer(invocation -> {
@@ -1019,8 +1148,68 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("created", response.getAction());
         assertEquals("QUICK_DISPATCH_CREATED", response.getCode());
         assertEquals(21L, response.getSelfMediaAccountId());
-        verify(browserEnvironmentService, never()).validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean());
+        verify(douyinImageTextPublishSnapshotService).buildFromArticle(
+                any(Brand.class),
+                eq(article),
+                eq(version.getContentMarkdown()),
+                eq(List.of(101L, 102L, 103L, 104L))
+        );
+        verify(browserEnvironmentService).validateForTaskCreation(douyinAccount, false);
         verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("douyin"), eq(74L));
+    }
+
+    @Test
+    void prepareDouyinImageTextTaskOmitsPlatformScheduleTimeForImmediatePublish() {
+        SelfMediaPublishSchedule schedule =
+                scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        schedule.setId(75L);
+        schedule.setPlatform("douyin");
+        schedule.setDistributionTaskId(501L);
+        schedule.setScheduleStrategy(SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH);
+        schedule.setPlatformScheduledAt(LocalDateTime.now().plusMinutes(10));
+        schedule.setPublishPayloadJson("{\"contentKind\":\"image_text\"}");
+        SelfMediaAccount douyinAccount = account();
+        douyinAccount.setPlatform("douyin");
+        when(accountMapper.selectById(20L)).thenReturn(douyinAccount);
+        DouyinImageTextPublishSnapshot snapshot = new DouyinImageTextPublishSnapshot(
+                1,
+                "image_text",
+                "抖音图文标题",
+                "抖音图文正文",
+                "阜阳",
+                "智能家居",
+                "#阜阳智能家居",
+                "cityName",
+                "智能家居",
+                "阜阳市测试路",
+                List.of(101L, 102L, 103L, 104L),
+                4,
+                "immediate",
+                LocalDateTime.now()
+        );
+        when(douyinImageTextPublishSnapshotService.fromJson(schedule.getPublishPayloadJson()))
+                .thenReturn(snapshot);
+        when(douyinImageTextPublishSnapshotService.resolveImageUrls(snapshot, 8L))
+                .thenReturn(List.of("image-1", "image-2", "image-3", "image-4"));
+        DistributionTask task = new DistributionTask();
+        task.setId(501L);
+        when(contentDistributionService.distributeToAsOperator(eq(10L), any(TargetContext.class), eq(99L)))
+                .thenReturn(task);
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "prepareDistributionTaskForSchedule",
+                schedule,
+                99L
+        );
+
+        ArgumentCaptor<TargetContext> targetCaptor = ArgumentCaptor.forClass(TargetContext.class);
+        verify(contentDistributionService).distributeToAsOperator(eq(10L), targetCaptor.capture(), eq(99L));
+        TargetContext.SelfMediaTarget target = (TargetContext.SelfMediaTarget) targetCaptor.getValue();
+        assertEquals("immediate", target.platformOptions().get("publishMode"));
+        assertEquals("抖音图文正文\n#阜阳智能家居", target.platformOptions().get("description"));
+        assertFalse(target.platformOptions().containsKey("scheduledAt"));
+        assertFalse(target.platformOptions().containsKey("platformScheduledAt"));
     }
 
     @Test
@@ -1242,13 +1431,18 @@ class SelfMediaPublishScheduleServiceTest {
     void cancel_pendingScheduleMarksCancelled() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         row.setId(90L);
+        ArticleDraft article = article();
+        article.setStatus("distributing");
         when(scheduleMapper.selectById(90L)).thenReturn(row);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
 
         SelfMediaPublishScheduleVO response = service.cancel(90L, "operator cancel");
 
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_CANCELLED, response.getStatus());
         assertEquals("CANCELLED_BY_OPERATOR", response.getFailureCode());
+        assertEquals("approved", article.getStatus());
         verify(scheduleMapper).updateById(row);
+        verify(articleDraftMapper).updateById(article);
         verify(environmentLockService).release(90L);
     }
 
@@ -2636,7 +2830,10 @@ class SelfMediaPublishScheduleServiceTest {
         row.setMaxAttempts(3);
         row.setDiagnosticsJson("{\"expiredAt\":\"2026-07-10T19:07:03\",\"reason\":\"platform schedule time expired\"}");
         row.setLockedUntil(LocalDateTime.now().minusMinutes(1));
+        ArticleDraft article = article();
+        article.setStatus("failed");
         when(scheduleMapper.selectById(114L)).thenReturn(row);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
 
         SelfMediaPublishScheduleVO response = service.retryNow(114L);
 
@@ -2653,7 +2850,9 @@ class SelfMediaPublishScheduleServiceTest {
         assertTrue(response.getDiagnosticsJson().contains("retryRequestedAt"));
         assertTrue(!response.getDiagnosticsJson().contains("expiredAt"));
         assertTrue(!response.getDiagnosticsJson().contains("platform schedule time expired"));
+        assertEquals("distributing", article.getStatus());
         verify(scheduleMapper).updateById(row);
+        verify(articleDraftMapper).updateById(article);
         verify(environmentLockService).release(114L);
     }
 
@@ -2794,7 +2993,10 @@ class SelfMediaPublishScheduleServiceTest {
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
         row.setLockedUntil(LocalDateTime.now().plusMinutes(3));
         row.setNextAttemptAt(LocalDateTime.now().plusMinutes(5));
+        ArticleDraft article = article();
+        article.setStatus("distributing");
         when(scheduleMapper.selectById(116L)).thenReturn(row);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
 
         SelfMediaPublishScheduleVO response = service.markManualRequired(116L, "operator takeover");
 
@@ -2803,7 +3005,9 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("operator takeover", response.getFailureMessage());
         assertNull(row.getLockedUntil());
         assertNull(row.getNextAttemptAt());
+        assertEquals("failed", article.getStatus());
         verify(scheduleMapper).updateById(row);
+        verify(articleDraftMapper).updateById(article);
         verify(environmentLockService).release(116L);
     }
 
@@ -3463,6 +3667,34 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("publish_result_recheck", row.getRuntimeStage());
         verify(scheduleMapper).updateById(row);
         verify(environmentLockService).release(121L);
+    }
+
+    @Test
+    void markClaimFailedRechecksUnconfirmedDouyinImageTextWithoutRepublishing() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        row.setId(122L);
+        row.setPlatform("douyin");
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        row.setAttemptCount(1);
+        row.setMaxAttempts(4);
+        when(scheduleMapper.selectById(122L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markClaimFailed(
+                122L,
+                SelfMediaPublishScheduleConstants.STATUS_FILLING,
+                "DOUYIN_PUBLISH_NOT_CONFIRMED",
+                "抖音图文已越过发布点击边界，但作品管理页尚未匹配到目标作品",
+                "{\"stage\":\"verifying_manage_page\"}",
+                LocalDateTime.now().plusMinutes(2)
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals("publish_result_recheck", row.getRuntimeStage());
+        assertNotNull(response.getNextAttemptAt());
+        verify(companyChannelQuotaService, never()).refundDistribution(anyLong());
+        verify(scheduleMapper).updateById(row);
+        verify(environmentLockService).release(122L);
     }
 
     @Test

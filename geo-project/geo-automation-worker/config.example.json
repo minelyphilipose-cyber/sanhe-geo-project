@@ -1,0 +1,11 @@
+{
+  "host": "127.0.0.1",
+  "port": 17991,
+  "backendBase": "http://127.0.0.1:8080",
+  "activeProfile": "dev",
+  "workerName": "GEO Automation Worker",
+  "adspower": {
+    "apiBase": "http://127.0.0.1:50325",
+    "apiKey": ""
+  }
+}

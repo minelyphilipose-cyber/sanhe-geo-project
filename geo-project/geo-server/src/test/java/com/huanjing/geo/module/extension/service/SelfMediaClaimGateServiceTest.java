@@ -101,6 +101,27 @@ class SelfMediaClaimGateServiceTest {
     }
 
     @Test
+    void douyinImageTextCanBootstrapBrowserBeforeExtensionCapabilityIsKnown() {
+        SelfMediaRuntimeReadinessService readinessService = mock(SelfMediaRuntimeReadinessService.class);
+        SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
+        RuntimeReadinessQuery query = new RuntimeReadinessQuery(
+                10L, 99L, null, 20L, "douyin", "douyinImageText", "douyinImageText");
+        when(readinessService.evaluate(query)).thenReturn(RuntimeReadinessResult.blocked(
+                List.of(SelfMediaRuntimeReadinessService.EXTENSION_NOT_SEEN),
+                null,
+                1L,
+                30
+        ));
+        SelfMediaClaimGateService service = new SelfMediaClaimGateService(readinessService, properties);
+
+        ClaimGateEvaluation evaluation = service.evaluateForBrowserLaunch(query);
+
+        assertFalse(evaluation.wouldBlock());
+        assertFalse(evaluation.blockClaim());
+        assertTrue(evaluation.blockedReasons().isEmpty());
+    }
+
+    @Test
     void brandPlatformModeHasPriorityOverGlobalMode() {
         SelfMediaRuntimeReadinessService readinessService = mock(SelfMediaRuntimeReadinessService.class);
         SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();

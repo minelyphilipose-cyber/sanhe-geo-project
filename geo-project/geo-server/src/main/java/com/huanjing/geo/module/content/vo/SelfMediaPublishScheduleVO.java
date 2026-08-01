@@ -37,6 +37,9 @@ public class SelfMediaPublishScheduleVO {
     private String publishCheckCoverUrl;
     private String publishCheckLocationName;
     private String publishCheckFingerprint;
+    private String contentKind;
+    private Integer expectedImageCount;
+    private LocalDateTime snapshotCreatedAt;
     private String baseIdempotencyKey;
     private Integer generationNo;
     private Integer attemptCount;
@@ -44,6 +47,9 @@ public class SelfMediaPublishScheduleVO {
     private LocalDateTime lastAttemptAt;
     private LocalDateTime nextAttemptAt;
     private LocalDateTime lockedUntil;
+    private String runtimeStage;
+    private LocalDateTime runtimeStageAt;
+    private String runtimeStageMessage;
     private String failureCode;
     private String failureLabel;
     private Boolean failureRetryable;
@@ -97,6 +103,9 @@ public class SelfMediaPublishScheduleVO {
         vo.setLastAttemptAt(row.getLastAttemptAt());
         vo.setNextAttemptAt(row.getNextAttemptAt());
         vo.setLockedUntil(row.getLockedUntil());
+        vo.setRuntimeStage(row.getRuntimeStage());
+        vo.setRuntimeStageAt(row.getRuntimeStageAt());
+        vo.setRuntimeStageMessage(row.getRuntimeStageMessage());
         vo.setFailureCode(row.getFailureCode());
         vo.setFailureLabel(SelfMediaPublishFailureCodes.label(row.getFailureCode()));
         vo.setFailureRetryable(SelfMediaPublishFailureCodes.retryable(row.getFailureCode()));

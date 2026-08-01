@@ -3,8 +3,10 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.customer.entity.BrandImageFolder;
+import com.huanjing.geo.module.customer.entity.BrandImageFolderProject;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandImageFolderMapper;
+import com.huanjing.geo.module.customer.mapper.BrandImageFolderProjectMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import com.huanjing.geo.module.customer.service.BrandImageFolderService;
 import com.huanjing.geo.module.project.entity.Project;
@@ -29,13 +31,17 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class SelfMediaPublishMaterialSelectionService {
     private static final String COVER_FOLDER_NAME = "封面";
+    private static final String ILLUSTRATION_FOLDER_PREFIX = "插图";
     private static final String BRAND_IMAGE_CATEGORY = "brand_image";
+    private static final int DOUYIN_IMAGE_TEXT_MAX_IMAGES = 6;
+    private static final long DOUYIN_IMAGE_TEXT_MAX_IMAGE_BYTES = 50L * 1024L * 1024L;
     private static final Pattern MARKDOWN_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*]\\(([^\\s)]+)(?:\\s+\"[^\"]*\")?\\)");
     private static final Pattern MATERIAL_API_PATH_PATTERN = Pattern.compile(".*/api/brands/(\\d+)/materials/(\\d+)/(?:stream|preview-url)$");
     private static final Pattern PUBLIC_MATERIAL_API_PATH_PATTERN = Pattern.compile(".*/api/public/brand-materials/(\\d+)/stream$");
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "gif", "webp", "bmp");
 
     private final BrandImageFolderMapper folderMapper;
+    private final BrandImageFolderProjectMapper folderProjectMapper;
     private final BrandMaterialMapper materialMapper;
 
     public Selection select(Project project, ArticleDraft article, String markdown) {
@@ -47,6 +53,83 @@ public class SelfMediaPublishMaterialSelectionService {
         Long coverId = resolveCoverMaterialId(brandId, article, contentImageIds);
         List<Long> imageIds = contentImageIds.isEmpty() && coverId != null ? List.of(coverId) : contentImageIds;
         return new Selection(coverId, imageIds);
+    }
+
+    /**
+     * Reuses the existing article material selection rules for Douyin image-text
+     * publishing, then fills the list from project-related illustration folders.
+     * The article cover is always placed first when it can be resolved.
+     */
+    public List<Long> selectDouyinImageTextImages(Project project, ArticleDraft article, String markdown) {
+        Long brandId = materialBrandId(project, article);
+        if (brandId == null) {
+            return List.of();
+        }
+        List<Long> contentImageIds = resolveImageMaterialIds(brandId, markdown);
+        Long coverId = resolveCoverMaterialId(brandId, article, contentImageIds);
+        LinkedHashSet<Long> selected = new LinkedHashSet<>();
+        addDouyinImage(brandId, selected, coverId);
+        for (Long materialId : contentImageIds) {
+            addDouyinImage(brandId, selected, materialId);
+            if (selected.size() >= DOUYIN_IMAGE_TEXT_MAX_IMAGES) {
+                return List.copyOf(selected);
+            }
+        }
+        for (Long folderId : illustrationFolderIds(brandId, project == null ? null : project.getId())) {
+            List<BrandMaterial> materials = materialMapper.selectList(new LambdaQueryWrapper<BrandMaterial>()
+                    .eq(BrandMaterial::getBrandId, brandId)
+                    .eq(BrandMaterial::getCategory, BRAND_IMAGE_CATEGORY)
+                    .eq(BrandMaterial::getFolderId, folderId)
+                    .isNotNull(BrandMaterial::getObjectKey)
+                    .orderByDesc(BrandMaterial::getCreatedAt)
+                    .orderByDesc(BrandMaterial::getId));
+            for (BrandMaterial material : materials) {
+                if (isUsableDouyinImage(brandId, material)) {
+                    selected.add(material.getId());
+                }
+                if (selected.size() >= DOUYIN_IMAGE_TEXT_MAX_IMAGES) {
+                    return List.copyOf(selected);
+                }
+            }
+        }
+        return List.copyOf(selected);
+    }
+
+    private void addDouyinImage(Long brandId, Set<Long> selected, Long materialId) {
+        if (materialId == null || selected.size() >= DOUYIN_IMAGE_TEXT_MAX_IMAGES) {
+            return;
+        }
+        BrandMaterial material = materialMapper.selectById(materialId);
+        if (isUsableDouyinImage(brandId, material)) {
+            selected.add(materialId);
+        }
+    }
+
+    private List<Long> illustrationFolderIds(Long brandId, Long projectId) {
+        List<BrandImageFolder> folders = folderMapper.selectList(new LambdaQueryWrapper<BrandImageFolder>()
+                .eq(BrandImageFolder::getBrandId, brandId)
+                .likeRight(BrandImageFolder::getFolderName, ILLUSTRATION_FOLDER_PREFIX)
+                .eq(BrandImageFolder::getStatus, BrandImageFolderService.STATUS_ACTIVE)
+                .orderByDesc(BrandImageFolder::getUpdatedAt)
+                .orderByDesc(BrandImageFolder::getId));
+        if (folders.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> relatedFolderIds = projectId == null
+                ? Set.of()
+                : folderProjectMapper.selectList(new LambdaQueryWrapper<BrandImageFolderProject>()
+                        .eq(BrandImageFolderProject::getProjectId, projectId)
+                        .in(BrandImageFolderProject::getFolderId,
+                                folders.stream().map(BrandImageFolder::getId).toList()))
+                .stream()
+                .map(BrandImageFolderProject::getFolderId)
+                .collect(java.util.stream.Collectors.toSet());
+        return folders.stream()
+                .sorted((left, right) -> Boolean.compare(
+                        relatedFolderIds.contains(right.getId()),
+                        relatedFolderIds.contains(left.getId())))
+                .map(BrandImageFolder::getId)
+                .toList();
     }
 
     private Long materialBrandId(Project project, ArticleDraft article) {
@@ -169,6 +252,13 @@ public class SelfMediaPublishMaterialSelectionService {
                 && StringUtils.hasText(material.getObjectKey())
                 && IMAGE_TYPES.contains(normalizeType(material.getFileType()))
                 && activeFolder(brandId, material.getFolderId());
+    }
+
+    private boolean isUsableDouyinImage(Long brandId, BrandMaterial material) {
+        return isUsableImage(brandId, material)
+                && Set.of("jpg", "jpeg", "png", "webp").contains(normalizeType(material.getFileType()))
+                && (material.getFileSize() == null
+                || material.getFileSize() <= DOUYIN_IMAGE_TEXT_MAX_IMAGE_BYTES);
     }
 
     private boolean activeFolder(Long brandId, Long folderId) {

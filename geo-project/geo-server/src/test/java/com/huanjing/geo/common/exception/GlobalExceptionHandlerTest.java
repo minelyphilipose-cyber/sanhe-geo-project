@@ -13,6 +13,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GlobalExceptionHandlerTest {
 
@@ -37,6 +39,17 @@ class GlobalExceptionHandlerTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    void highValuedBusinessCodeIsNotClassifiedAsServerError() {
+        BizException exception = new BizException(70040, "manual verification required", 200, null);
+
+        assertFalse(GlobalExceptionHandler.shouldLogBizExceptionAsError(exception));
+        assertTrue(GlobalExceptionHandler.shouldLogBizExceptionAsError(
+                new BizException(500, "server error", 200, null)));
+        assertTrue(GlobalExceptionHandler.shouldLogBizExceptionAsError(
+                new BizException(70040, "server error", 503, null)));
     }
 
     @RestController

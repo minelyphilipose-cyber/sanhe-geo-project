@@ -17,13 +17,13 @@ import {
   checkSelfMediaAccountAuth,
   confirmSemiAutoDistribution,
   dispatchSelfMediaPlatformQuickSchedule,
-  distributeContentArticleToSelfMediaAccount,
   getArticleDistribution,
   getContentArticleDetail,
   getDouyinCapability,
   getSelfMediaAccountsByBrand,
   getWechatMpAuthUrl,
   getWechatMpCapability,
+  previewSelfMediaPlatformQuickSchedule,
   refreshDistributionTaskReviewStatus,
 } from '@/api/content'
 import { getBrandImageFolders, getBrandMaterialPreviewUrl, getCompanyDistributionQuotas } from '@/api/customer'
@@ -68,13 +68,6 @@ function localAgentSessionTimeValue(session: LocalAgentSession) {
   return Number.isFinite(timestamp) ? timestamp : 0
 }
 
-function createRequestId(prefix = 'self_media') {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID()
-  }
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
-}
-
 function formatDateTimeText(value?: string | null) {
   if (!value) return '-'
   const date = new Date(value)
@@ -89,6 +82,28 @@ function isImageFileType(fileType?: string | null) {
 
 function isPublishedLockedArticle(status?: string | null) {
   return ['published', 'distributed'].includes(String(status || '').toLowerCase())
+}
+
+function articleMarkdownToDescription(markdown?: string | null) {
+  return String(markdown || '')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/[*_~`>|]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function removeRepeatedTitlePrefix(description: string, title: string) {
+  const normalizedTitle = title.trim()
+  if (!normalizedTitle || !description.startsWith(normalizedTitle)) return description
+  return description
+    .slice(normalizedTitle.length)
+    .replace(/^[\s\n:：\-—]+/, '')
+    .trim()
 }
 
 export function useSelfMediaDistribution(options: UseSelfMediaDistributionOptions) {
@@ -117,7 +132,13 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   const selectedSelfMediaAccountId = ref<number | null>(null)
   const selectedCoverMaterialId = ref<number | null>(null)
   const selectedDouyinImageMaterialIds = ref<number[]>([])
+  const douyinTitle = ref('')
   const douyinText = ref('')
+  const douyinTopicRegionText = ref('')
+  const douyinTopicIndustryText = ref('')
+  const douyinTopicQuery = ref('')
+  const douyinTopicError = ref('')
+  const douyinTopicLoading = ref(false)
   const distributionAttempts = ref<DistributionTask[]>([])
   const refreshingReviewTaskId = ref<number | null>(null)
   const semiAutoConfirmingTaskId = ref<number | null>(null)
@@ -171,12 +192,14 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     return douyinActive.value ? 'success' : 'warning'
   })
   const douyinSubmitButtonText = computed(() =>
-    '发布抖音图文',
+    '立即发布图文',
   )
   const currentPlatformAccounts = computed(() => {
     switch (selectedMediaPlatform.value) {
       case 'douyin':
-        return douyinAccounts.value
+        return selectedSelfMediaAccountId.value
+          ? douyinAccounts.value.filter((account) => account.id === selectedSelfMediaAccountId.value)
+          : douyinAccounts.value.filter((account) => account.status === 'active').slice(0, 1)
       case 'toutiao':
         return toutiaoAccounts.value
       case 'baijiahao':
@@ -225,11 +248,24 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     return ['jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(type)
   }))
   const douyinImageMaterials = computed(() => currentFolderMaterials.value.filter((item) => {
-    const type = (item.fileType || '').toLowerCase()
-    return ['jpg', 'jpeg', 'png'].includes(type)
+    const type = (item.fileType || '').toLowerCase().replace(/^image\//, '').replace(/^\./, '')
+    return ['jpg', 'jpeg', 'png', 'webp'].includes(type)
+      && (!item.fileSize || item.fileSize <= 50 * 1024 * 1024)
   }))
+  const allDouyinImageMaterials = computed(() => {
+    const seen = new Set<number>()
+    return brandImageFolders.value
+      .flatMap((folder) => folder.materials || [])
+      .filter((item) => {
+        if (seen.has(item.id)) return false
+        seen.add(item.id)
+        const type = (item.fileType || '').toLowerCase().replace(/^image\//, '').replace(/^\./, '')
+        return ['jpg', 'jpeg', 'png', 'webp'].includes(type)
+          && (!item.fileSize || item.fileSize <= 50 * 1024 * 1024)
+      })
+  })
   const selectedDouyinMaterials = computed(() => selectedDouyinImageMaterialIds.value
-    .map((id) => douyinImageMaterials.value.find((item) => item.id === id))
+    .map((id) => allDouyinImageMaterials.value.find((item) => item.id === id))
     .filter((item): item is BrandMaterial => !!item))
 
   async function openMediaDistribute(row: ArticleDraft) {
@@ -254,7 +290,12 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     selectedSelfMediaAccountId.value = null
     selectedCoverMaterialId.value = null
     selectedDouyinImageMaterialIds.value = []
-    douyinText.value = row.title || ''
+    douyinTitle.value = row.title || ''
+    douyinText.value = ''
+    douyinTopicRegionText.value = ''
+    douyinTopicIndustryText.value = ''
+    douyinTopicQuery.value = ''
+    douyinTopicError.value = ''
     distributionAttempts.value = []
     browserEnvironmentAccounts.value = {}
     localAgentSessions.value = []
@@ -274,6 +315,14 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
         ElMessage.warning('文章已发布或已分发，不能再次发起自媒体分发')
         return
       }
+      const latestVersion = [...(detailRes.data.data.versions || [])]
+        .sort((left, right) => right.versionNo - left.versionNo)[0]
+      const articleTitle = detailRes.data.data.article?.title || row.title || ''
+      douyinTitle.value = articleTitle.slice(0, 20)
+      douyinText.value = removeRepeatedTitlePrefix(
+        articleMarkdownToDescription(latestVersion?.contentMarkdown),
+        articleTitle,
+      )
       mediaDistributeBrandId.value = brandId
       wechatCapability.value = wechatCapabilityRes.data.data
       douyinCapability.value = douyinCapabilityRes.data.data
@@ -343,6 +392,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
 
   async function refreshBrowserEnvironmentAccountStatuses() {
     await loadBrowserEnvironmentAccountStatuses([
+      ...douyinAccounts.value,
       ...toutiaoAccounts.value,
       ...baijiahaoAccounts.value,
       ...zhihuAccounts.value,
@@ -432,6 +482,50 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
 
   async function handleDouyinPlatformClick() {
     await handleSemiAutoPlatformClick('douyin')
+  }
+
+  async function selectDouyinAccount(account: SelfMediaAccount) {
+    if (account.status !== 'active') {
+      ElMessage.warning('该抖音账号当前不可用')
+      return
+    }
+    selectedSelfMediaAccountId.value = account.id
+    await loadDouyinTopicPreview(account.id)
+  }
+
+  async function loadDouyinTopicPreview(accountId?: number) {
+    if (!mediaDistributeArticleId.value) return
+    douyinTopicLoading.value = true
+    douyinTopicError.value = ''
+    try {
+      const { data } = await previewSelfMediaPlatformQuickSchedule({
+        articleId: mediaDistributeArticleId.value,
+        platform: 'douyin',
+        selfMediaAccountId: accountId,
+      })
+      const preview = data.data
+      selectedSelfMediaAccountId.value = preview.selfMediaAccountId || null
+      selectedDouyinImageMaterialIds.value = [...(preview.imageMaterialIds || [])]
+      douyinTopicRegionText.value = preview.topicRegionText || ''
+      douyinTopicIndustryText.value = preview.topicIndustryText || ''
+      douyinTopicQuery.value = preview.topicQuery || ''
+      if (preview.action !== 'ready') {
+        douyinTopicError.value = preview.message || '抖音图文自动发布条件尚未满足'
+      } else if (!douyinTopicRegionText.value || !douyinTopicIndustryText.value || !douyinTopicQuery.value) {
+        douyinTopicError.value = preview.message || '品牌地域或行业未能解析为中文描述，请先修正品牌配置'
+      } else if (selectedDouyinImageMaterialIds.value.length < 4) {
+        douyinTopicError.value = '封面图和插图文件夹中的可用图片不足4张，请先补充品牌图片素材'
+      }
+    } catch (error) {
+      douyinTopicRegionText.value = ''
+      douyinTopicIndustryText.value = ''
+      douyinTopicQuery.value = ''
+      selectedSelfMediaAccountId.value = null
+      selectedDouyinImageMaterialIds.value = []
+      douyinTopicError.value = error instanceof Error ? error.message : '中文地域和行业解析失败'
+    } finally {
+      douyinTopicLoading.value = false
+    }
   }
 
   function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatform {
@@ -716,7 +810,9 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       const schedule = created.createResponse?.createdSchedules?.[0]
       const publishAt = schedule?.plannedPublishAt || created.plannedPublishAt
       const attemptAt = schedule?.nextAttemptAt || created.nextAttemptAt
-      ElMessage.success(`${semiAutoPlatformLabel(platform)}排期已创建，预计发布时间 ${formatDateTimeText(publishAt)}，系统处理时间 ${formatDateTimeText(attemptAt)}`)
+      ElMessage.success(platform === 'douyin'
+        ? `抖音图文立即发布任务已创建，系统处理时间 ${formatDateTimeText(attemptAt)}`
+        : `${semiAutoPlatformLabel(platform)}排期已创建，预计发布时间 ${formatDateTimeText(publishAt)}，系统处理时间 ${formatDateTimeText(attemptAt)}`)
       mediaDistributeVisible.value = false
       await refreshDistributionHistory()
       await options.load()
@@ -741,13 +837,13 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   function handleFolderScopeChange() {
     ensureSelectedImageFolder()
     selectedCoverMaterialId.value = selectedMediaPlatform.value === 'wechat_mp' ? imageMaterials.value[0]?.id || null : null
-    selectedDouyinImageMaterialIds.value = selectedDouyinImageMaterialIds.value.filter((id) => douyinImageMaterials.value.some((item) => item.id === id))
+    selectedDouyinImageMaterialIds.value = selectedDouyinImageMaterialIds.value
+      .filter((id) => allDouyinImageMaterials.value.some((item) => item.id === id))
   }
 
   function selectImageFolder(folderId: number) {
     selectedImageFolderId.value = folderId
     selectedCoverMaterialId.value = selectedMediaPlatform.value === 'wechat_mp' ? imageMaterials.value[0]?.id || null : null
-    selectedDouyinImageMaterialIds.value = selectedDouyinImageMaterialIds.value.filter((id) => douyinImageMaterials.value.some((item) => item.id === id))
   }
 
   function ensureSelectedImageFolder() {
@@ -809,8 +905,8 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       selectedDouyinImageMaterialIds.value.splice(index, 1)
       return
     }
-    if (selectedDouyinImageMaterialIds.value.length >= 30) {
-      ElMessage.warning('抖音图文最多选择 30 张图片')
+    if (selectedDouyinImageMaterialIds.value.length >= 6) {
+      ElMessage.warning('抖音图文最多选择 6 张图片')
       return
     }
     selectedDouyinImageMaterialIds.value.push(materialId)
@@ -829,35 +925,67 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
 
   async function submitDouyinImageText() {
     if (!mediaDistributeArticleId.value || !selectedSelfMediaAccountId.value) {
-      ElMessage.warning('请选择抖音账号')
+      ElMessage.warning('系统尚未匹配到可用的抖音账号')
       return
     }
-    if (!selectedDouyinImageMaterialIds.value.length) {
-      ElMessage.warning('请选择至少 1 张抖音图文图片')
+    if (selectedDouyinImageMaterialIds.value.length < 4 || selectedDouyinImageMaterialIds.value.length > 6) {
+      ElMessage.warning('请选择 4–6 张抖音图文图片')
       return
     }
-    if (douyinText.value.length > 1000) {
-      ElMessage.warning('抖音文案不能超过 1000 字')
+    const title = douyinTitle.value.trim()
+    const description = douyinText.value.trim()
+    if (!title || title.length > 20) {
+      ElMessage.warning('作品标题不能为空且不能超过 20 字')
+      return
+    }
+    if (!description) {
+      ElMessage.warning('作品描述不能为空')
+      return
+    }
+    if (!douyinTopicQuery.value || douyinTopicError.value) {
+      ElMessage.warning(douyinTopicError.value || '中文地域和行业尚未解析完成')
+      return
+    }
+    if (`${description}\n${douyinTopicQuery.value}`.length > 1000) {
+      ElMessage.warning('作品描述与系统追加话题合计不能超过 1000 字')
       return
     }
     selfMediaSubmitting.value = true
     try {
-      const result = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
-        selfMediaAccountId: selectedSelfMediaAccountId.value,
-        imageMaterialIds: selectedDouyinImageMaterialIds.value,
-        platformOptions: {
-          text: douyinText.value.trim() || undefined,
+      const dispatch = async (replaceNextScheduled = false) => (await dispatchSelfMediaPlatformQuickSchedule({
+        articleId: mediaDistributeArticleId.value!,
+        platform: 'douyin',
+        replaceNextScheduled,
+        douyinImageText: {
+          title,
+          description,
         },
-        requestId: createRequestId('douyin'),
-      })
-      const task = result.data.data
-      if (task.status === 'submitted') {
-        ElMessage.success('抖音图文提交成功')
-        await refreshDistributionHistory()
-        await options.load()
+      })).data.data
+      let created = await dispatch()
+      if (created.action === 'replace_required') {
+        await ElMessageBox.confirm(
+          created.message || '继续发布将替换已有抖音排期，是否继续？',
+          '抖音图文任务替换确认',
+          {
+            confirmButtonText: '确认替换并立即发布',
+            cancelButtonText: '取消',
+            type: 'warning',
+          },
+        )
+        created = await dispatch(true)
+      }
+      if (created.action !== 'created') {
+        ElMessage.warning(created.message || '抖音图文立即发布任务未创建')
         return
       }
-      ElMessage.error(task.errorMessage || '抖音图文提交失败')
+      ElMessage.success('抖音图文立即发布任务已创建')
+      mediaDistributeVisible.value = false
+      await refreshDistributionHistory()
+      await options.load()
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(error instanceof Error ? error.message : '抖音图文立即发布任务创建失败')
+      }
     } finally {
       selfMediaSubmitting.value = false
     }
@@ -868,7 +996,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     if (platform === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1'
     if (platform === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
     if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish?from=tab_switch&target=article'
-    if (platform === 'douyin') return 'https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page'
+    if (platform === 'douyin') return 'https://creator.douyin.com/creator-micro/content/upload?default-tab=3'
     return undefined
   }
 
@@ -1159,6 +1287,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     confirmSemiAutoPublished,
     abandonSemiAutoPublished,
     submitDouyinImageText,
+    selectDouyinAccount,
   }
 
   return {
@@ -1179,7 +1308,13 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     selectedSelfMediaAccountId,
     selectedCoverMaterialId,
     selectedDouyinImageMaterialIds,
+    douyinTitle,
     douyinText,
+    douyinTopicRegionText,
+    douyinTopicIndustryText,
+    douyinTopicQuery,
+    douyinTopicError,
+    douyinTopicLoading,
     distributionAttempts,
     refreshingReviewTaskId,
     semiAutoConfirmingTaskId,

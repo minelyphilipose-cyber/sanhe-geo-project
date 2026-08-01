@@ -1,5 +1,5 @@
 ;(function installDouyinPlatform(global) {
-  const PUBLISH_URL = 'https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page'
+  const PUBLISH_URL = 'https://creator.douyin.com/creator-micro/content/upload?default-tab=3'
   const MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage'
   const MIN_SCHEDULE_LEAD_MINUTES = 120
   const MAX_SCHEDULE_LEAD_MINUTES = 14 * 24 * 60
@@ -9,10 +9,12 @@
     'DOUYIN_ARTICLE_FORM_NOT_READY',
     'DOUYIN_COVER_UPLOAD_TIMEOUT',
     'DOUYIN_IMAGE_EDITOR_CLOSE_TIMEOUT',
+    'DOUYIN_IMAGE_UPLOAD_TIMEOUT',
     'DOUYIN_PUBLISH_NOT_CONFIRMED',
     'PAGE_LOAD_TIMEOUT',
     'EDITOR_NOT_READY',
   ])
+  const IMAGE_UPLOAD_WAIT_TIMEOUT_MS = 180_000
 
   function normalizePlatform(value) {
     return String(value || '').trim().toLowerCase()
@@ -61,8 +63,685 @@
     return {
       platform: 'douyin',
       fillPublishOptions: (payload, fillProfile) => fillPublishOptions(payload, fillProfile, deps),
+      fillImageText: (payload, fillProfile) => fillImageText(payload, fillProfile, deps),
       describeState: () => describeState(deps),
     }
+  }
+
+  async function fillImageText(payload, fillProfile, deps) {
+    const waitForCondition = requireDependency(deps.waitForCondition, 'waitForCondition')
+    const delay = requireDependency(deps.delay, 'delay')
+    const persist = requireDependency(deps.persistImageTextState, 'persistImageTextState')
+    const taskId = Number(payload.taskId)
+    const expectedImageCount = Number(payload.expectedImageCount || payload.imageUrls?.length || 0)
+    const title = firstText(payload.title, payload.articleTitle)
+    const descriptionBase = firstText(payload.descriptionBase)
+    const topicQuery = firstText(payload.topicQuery)
+    const finalDescription = firstText(payload.description, payload.finalDescription)
+    if (!location.pathname.includes('/creator-micro/content/post/image')) {
+      throw new Error(`DOUYIN_IMAGE_EDITOR_NOT_READY：当前不是抖音图文详情页；${describeState(deps)}`)
+    }
+    if (!taskId || expectedImageCount < 4 || expectedImageCount > 6
+        || !title || !descriptionBase || !finalDescription || !topicQuery) {
+      throw new Error('DOUYIN_IMAGE_TEXT_PAYLOAD_INVALID：服务端下发的抖音图文最终载荷不完整')
+    }
+    if (title.length > 20 || finalDescription.length > 1000) {
+      throw new Error('DOUYIN_IMAGE_TEXT_LENGTH_INVALID：抖音图文标题或描述超过平台限制')
+    }
+    deps.updateStage?.('waiting_image_editor')
+    await persist(taskId, { stage: 'waiting_image_editor', expectedImageCount })
+    try {
+      await waitForImageUploadCompletion(expectedImageCount, waitForCondition, deps)
+    } catch (error) {
+      const message = String(error?.message || error)
+      const stage = message.startsWith('DOUYIN_IMAGE_UPLOAD_TIMEOUT') ? 'upload_timeout' : 'upload_failed'
+      await persist(taskId, {
+        stage,
+        expectedImageCount,
+        uploadFailure: message.slice(0, 1000),
+      }).catch(() => {})
+      throw error
+    }
+
+    deps.updateStage?.('filling_title')
+    await persist(taskId, { stage: 'filling_title', expectedImageCount })
+    const titleInput = await waitForCondition(
+      () => visibleQuery('input[placeholder="添加作品标题"]'),
+      15_000,
+      `DOUYIN_TITLE_INPUT_NOT_FOUND：未找到作品标题输入框；${describeState(deps)}`,
+    )
+    setNativeInputValue(titleInput, title)
+    if (String(titleInput.value || '').trim() !== title) {
+      throw new Error('DOUYIN_TITLE_FILL_FAILED：作品标题回读不一致')
+    }
+
+    deps.updateStage?.('filling_description')
+    await persist(taskId, { stage: 'filling_description' })
+    const editor = await waitForCondition(
+      () => visibleQuery('[data-slate-editor="true"][contenteditable="true"]')
+        || visibleQuery('[contenteditable="true"]'),
+      15_000,
+      `DOUYIN_DESCRIPTION_EDITOR_NOT_FOUND：未找到作品描述编辑器；${describeState(deps)}`,
+    )
+    await replaceEditableText(editor, finalDescription, delay)
+    await delay(250)
+    if (!editorContainsText(editor, finalDescription)) {
+      throw new Error('DOUYIN_DESCRIPTION_FILL_FAILED：作品描述与服务端最终内容回读不一致')
+    }
+
+    deps.updateStage?.('selecting_topic')
+    await persist(taskId, { stage: 'selecting_topic', topicQuery })
+    let topicSelected = false
+    let selectedTopic = ''
+    let topicSkippedReason = ''
+    try {
+      const popup = await waitForCondition(
+        () => visibleQuery('.mention-suggest-mount-dom'),
+        6_000,
+        '抖音话题候选未出现',
+      )
+      const candidate = firstTopicCandidate(popup)
+      if (!candidate) throw new Error('抖音话题首个候选不存在')
+      selectedTopic = defaultNormalizeText(
+        candidate.querySelector?.('[class*="tag-hash-view-name-"]')?.textContent
+        || candidate.textContent
+        || '',
+      )
+      if (!selectedTopic) throw new Error('抖音话题首个候选名称为空')
+      await click(candidate, fillProfile.platform, deps)
+      await waitForCondition(
+        () => !popup.isConnected || !isVisible(popup) || hasTopicNode(editor),
+        5_000,
+        '抖音话题候选点击后候选层未关闭',
+      )
+      if (!editorContainsText(editor, selectedTopic)) {
+        throw new Error('抖音话题候选点击后作品描述未保留选中话题')
+      }
+      topicSelected = true
+    } catch (error) {
+      topicSkippedReason = error?.message || String(error)
+      selectedTopic = ''
+      dismissTopicSuggestion(editor)
+    }
+    if (!topicSelected) {
+      deps.showStatus?.(`抖音话题候选未确认，已保留系统话题：${topicSkippedReason || '候选未出现'}`, 'error')
+    }
+    if (!normalizeForCompare(editor.innerText || editor.textContent).includes(normalizeForCompare(descriptionBase))) {
+      throw new Error('DOUYIN_DESCRIPTION_CHANGED：选择话题后作品描述发生异常变化')
+    }
+
+    deps.updateStage?.('selecting_location')
+    await persist(taskId, {
+      stage: 'selecting_location',
+      topicSelected,
+      selectedTopic,
+      topicSkipped: !topicSelected,
+      topicSkippedReason,
+    })
+    const locationResult = await selectFirstLocation(payload.locationQuery, fillProfile.platform, deps).catch((error) => ({
+      selected: false,
+      value: '',
+      skippedReason: error?.message || String(error),
+    }))
+    if (!locationResult.selected) {
+      deps.showStatus?.(`抖音位置未确认：${locationResult.skippedReason || '未知原因'}`, 'error')
+    }
+
+    deps.updateStage?.('selecting_music')
+    await persist(taskId, {
+      stage: 'selecting_music',
+      locationSelected: locationResult.selected,
+      selectedLocation: locationResult.value,
+      locationSkipped: !locationResult.selected,
+      locationSkippedReason: locationResult.skippedReason || '',
+    })
+    const musicResult = await selectFirstRecommendedMusic(fillProfile.platform, deps).catch(async (error) => {
+      await closeMusicDrawer(fillProfile.platform, deps).catch(() => {})
+      return { selected: false, value: '', skippedReason: error?.message || String(error) }
+    })
+    if (!musicResult.selected) {
+      deps.showStatus?.(`抖音音乐未确认：${musicResult.skippedReason || '未知原因'}`, 'error')
+    }
+
+    deps.updateStage?.('ready_to_publish')
+    await persist(taskId, {
+      stage: 'ready_to_publish',
+      topicSelected,
+      selectedTopic,
+      topicSkipped: !topicSelected,
+      topicSkippedReason,
+      locationSelected: locationResult.selected,
+      selectedLocation: locationResult.value,
+      locationSkipped: !locationResult.selected,
+      locationSkippedReason: locationResult.skippedReason || '',
+      musicSelected: musicResult.selected,
+      selectedMusic: musicResult.value,
+      musicSkipped: !musicResult.selected,
+      musicSkippedReason: musicResult.skippedReason || '',
+    })
+    assertImageTextReadyToPublish({
+      titleInput,
+      editor,
+      title,
+      descriptionBase,
+      topicQuery,
+      topicSelected,
+      selectedTopic,
+      expectedImageCount,
+    })
+    const publishButton = findExactVisibleButton('发布')
+    if (!publishButton || publishButton.disabled || publishButton.getAttribute('aria-disabled') === 'true') {
+      throw new Error(`DOUYIN_PUBLISH_BUTTON_DISABLED：发布按钮不可用；${describeState(deps)}`)
+    }
+
+    // Irreversible boundary: persist before the single permitted click.
+    deps.updateStage?.('submitting_publish')
+    await persist(taskId, {
+      stage: 'submitting_publish',
+      publishClicked: true,
+      publishClickedAt: new Date().toISOString(),
+    })
+    await click(publishButton, fillProfile.platform, deps, {
+      trustedOnly: true,
+      label: '抖音图文发布',
+    })
+    await delay(500)
+    await waitForCondition(
+      () => location.pathname.includes('/creator-micro/content/manage'),
+      30_000,
+      `DOUYIN_PUBLISH_NOT_CONFIRMED：点击发布后暂未进入作品管理页；${describeState(deps)}`,
+    )
+    await persist(taskId, { stage: 'verifying_manage_page' }).catch(() => {})
+    return {
+      filled: true,
+      published: true,
+      topicSelected,
+      selectedTopic,
+      topicSkippedReason,
+      locationSelected: locationResult.selected,
+      selectedLocation: locationResult.value,
+      locationSkippedReason: locationResult.skippedReason || '',
+      musicSelected: musicResult.selected,
+      selectedMusic: musicResult.value,
+      musicSkippedReason: musicResult.skippedReason || '',
+      message: '抖音图文已提交，正在通过作品管理页确认结果',
+    }
+  }
+
+  function visibleQuery(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector)).find(isVisible) || null
+  }
+
+  async function waitForImageUploadCompletion(expectedImageCount, waitForCondition, deps = {}) {
+    let latestState = readImageUploadState(expectedImageCount)
+    try {
+      return await waitForCondition(
+        () => {
+          latestState = readImageUploadState(expectedImageCount)
+          if (latestState.failed) {
+            throw new Error(
+              `DOUYIN_IMAGE_UPLOAD_FAILED：抖音页面报告图片上传失败，预期=${expectedImageCount}，`
+              + `页面=${latestState.uploadedCount}`,
+            )
+          }
+          return latestState.ready ? latestState : null
+        },
+        IMAGE_UPLOAD_WAIT_TIMEOUT_MS,
+        'DOUYIN_IMAGE_UPLOAD_TIMEOUT：等待抖音图片上传完成超时',
+      )
+    } catch (error) {
+      if (String(error?.message || error).startsWith('DOUYIN_IMAGE_UPLOAD_FAILED')) throw error
+      latestState = readImageUploadState(expectedImageCount)
+      throw new Error(
+        `DOUYIN_IMAGE_UPLOAD_TIMEOUT：等待抖音图片上传完成超时，预期=${expectedImageCount}，`
+        + `页面=${latestState.uploadedCount}，进度=${formatImageUploadProgress(latestState)}；${describeState(deps)}`,
+      )
+    }
+  }
+
+  function readImageUploadState(expectedImageCount, text = document.body?.innerText || document.body?.textContent || '') {
+    return evaluateImageUploadState(text, expectedImageCount, readRenderedImageTextThumbnailCount())
+  }
+
+  function evaluateImageUploadState(text, expectedImageCount, renderedThumbnailCount = 0) {
+    const progress = parseImageUploadProgress(text, expectedImageCount)
+    const explicitCount = readExplicitUploadedImageCount(text)
+    const thumbnailCount = Number(renderedThumbnailCount) || 0
+    const uploadedCount = explicitCount ?? thumbnailCount
+    return {
+      ...progress,
+      uploadedCount,
+      explicitCount,
+      thumbnailCount,
+      ready: uploadedCount === expectedImageCount && !progress.pending && !progress.failed,
+    }
+  }
+
+  function parseImageUploadProgress(text, expectedImageCount) {
+    const normalized = defaultNormalizeText(text)
+    const fractions = Array.from(normalized.matchAll(/(\d{1,2})\s*\/\s*(\d{1,2})/g))
+      .map((match) => ({ current: Number(match[1]), total: Number(match[2]) }))
+    const progress = fractions.find((item) => item.total === Number(expectedImageCount)) || null
+    const percentMatch = normalized.match(/(?:^|\s)(\d{1,3})\s*%(?:\s|$)/)
+    const percent = percentMatch ? Number(percentMatch[1]) : null
+    const failed = /图片上传失败|上传失败|重新上传失败/.test(normalized)
+    const hasUploadOperation = /取消上传|正在上传|上传中/.test(normalized)
+    const pending = !failed && (
+      hasUploadOperation
+      || Boolean(progress && progress.current < progress.total)
+    )
+    return {
+      current: progress?.current ?? null,
+      total: progress?.total ?? null,
+      percent,
+      pending,
+      failed,
+    }
+  }
+
+  function readExplicitUploadedImageCount(text) {
+    const matched = text.match(/已添加\s*(\d+)\s*张图片/)
+    return matched ? Number(matched[1]) : null
+  }
+
+  function readRenderedImageTextThumbnailCount() {
+    const editImageLabel = Array.from(document.querySelectorAll('span, div'))
+      .filter(isVisible)
+      .find((item) => defaultNormalizeText(item.textContent || '') === '编辑图片')
+    let section = editImageLabel?.parentElement || null
+    while (section && section !== document.body) {
+      const thumbnails = Array.from(section.querySelectorAll('[class*="img-"], [draggable="true"]'))
+        .filter(isVisible)
+        .filter((item) => isSupportedBackgroundImage(getComputedStyle(item).backgroundImage))
+      if (thumbnails.length > 0) return thumbnails.length
+      section = section.parentElement
+    }
+    return 0
+  }
+
+  function readUploadedImageCount() {
+    return readImageUploadState(Number.POSITIVE_INFINITY).uploadedCount
+  }
+
+  function formatImageUploadProgress(state) {
+    if (state.current !== null && state.total !== null) return `${state.current}/${state.total}`
+    if (state.percent !== null) return `${state.percent}%`
+    return state.pending ? '上传中' : '未知'
+  }
+
+  function setNativeInputValue(input, value, options = {}) {
+    input.focus()
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setter?.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true, composed: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    if (options.blur !== false) input.blur()
+  }
+
+  async function replaceEditableText(editor, value, delay) {
+    const text = String(value || '').replace(/\r\n?/g, '\n')
+    editor.focus()
+    selectEditableContents(editor)
+    document.execCommand('delete', false)
+    dispatchPasteIntoEditable(editor, text)
+    await delay(150)
+    if (editorContainsText(editor, text)) return
+
+    editor.focus()
+    selectEditableContents(editor)
+    document.execCommand('delete', false)
+    document.execCommand('insertHTML', false, plainTextToEditorHtml(text))
+    editor.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      composed: true,
+      inputType: 'insertFromPaste',
+      data: text,
+    }))
+    await delay(150)
+  }
+
+  function selectEditableContents(editor) {
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+
+  function dispatchPasteIntoEditable(editor, text) {
+    try {
+      const data = new DataTransfer()
+      data.setData('text/plain', text)
+      data.setData('text/html', plainTextToEditorHtml(text))
+      const event = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: data,
+      })
+      editor.dispatchEvent(event)
+    } catch (_) {
+      const event = new Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'clipboardData', {
+        value: {
+          getData: (type) => (type === 'text/html' ? plainTextToEditorHtml(text) : text),
+          types: ['text/plain', 'text/html'],
+        },
+      })
+      editor.dispatchEvent(event)
+    }
+  }
+
+  function plainTextToEditorHtml(text) {
+    return String(text || '')
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map((line) => `<div>${escapeEditorHtml(line) || '<br>'}</div>`)
+      .join('')
+  }
+
+  function escapeEditorHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
+  function dismissTopicSuggestion(editor) {
+    editor.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    }))
+    editor.dispatchEvent(new KeyboardEvent('keyup', {
+      key: 'Escape',
+      code: 'Escape',
+      bubbles: true,
+    }))
+  }
+
+  function editorContainsText(editor, expected) {
+    return normalizeForCompare(editor?.innerText || editor?.textContent)
+      .includes(normalizeForCompare(expected))
+  }
+
+  function firstTopicCandidate(popup) {
+    const candidates = Array.from(popup.querySelectorAll('[class*="tag-hash-"]')).filter(isVisible)
+    return candidates.find((candidate) => !candidate.parentElement?.closest?.('[class*="tag-hash-"]'))
+      || candidates.find((candidate) => candidate.querySelector?.('[class*="tag-hash-view-name-"]'))
+      || candidates[0]
+      || null
+  }
+
+  function hasTopicNode(editor) {
+    return Boolean(editor.querySelector('[data-mention], [class*="mention"], [class*="topic"]'))
+  }
+
+  async function selectFirstLocation(locationQuery, platform, deps) {
+    if (!firstText(locationQuery)) {
+      return { selected: false, value: '', skippedReason: '品牌公开地址为空' }
+    }
+    const waitForCondition = requireDependency(deps.waitForCondition, 'waitForCondition')
+    const typeTrustedText = requireDependency(deps.typeTrustedText, 'typeTrustedText')
+    const query = String(locationQuery).trim()
+    const control = findLocationControl()
+    if (!control) throw new Error('抖音位置选择器未找到')
+    const existingValue = readLocationSelection(control)
+    if (existingValue) {
+      return { selected: true, value: existingValue, skippedReason: '' }
+    }
+    await click(control, platform, deps)
+    const input = await waitForCondition(
+      () => findLocationInput(control),
+      5_000,
+      '抖音位置选择器展开后未出现输入框',
+    )
+    try {
+      clearLocationInput(input, false)
+      let trustedInputError = ''
+      try {
+        input.focus()
+        await typeTrustedText(input, query, {
+          platform: 'douyin',
+          label: '抖音图文位置',
+        })
+      } catch (error) {
+        trustedInputError = error?.message || String(error)
+      }
+      let listbox = await waitForCondition(
+        findLocationListbox,
+        8_000,
+        '抖音位置候选列表未出现',
+      ).catch(() => null)
+      if (!listbox) {
+        setNativeInputValue(input, '', { blur: false })
+        setNativeInputValue(input, query, { blur: false })
+        listbox = await waitForCondition(
+          findLocationListbox,
+          8_000,
+          `抖音位置候选列表未出现；trusted=${trustedInputError || '-'}`,
+        )
+      }
+      const option = Array.from(listbox.querySelectorAll('[role="option"]')).find(isVisible)
+      const collection = option?.querySelector('[class*="collection-v2-"]')
+      if (!option || !collection || !isVisible(collection)) {
+        throw new Error('抖音位置首项 collection-v2 节点未找到')
+      }
+      const selectedText = defaultNormalizeText(
+        collection.querySelector('[class*="name-"]')?.textContent
+        || collection.textContent
+        || '',
+      )
+      await click(collection, platform, deps)
+      let confirmedValue = ''
+      await waitForCondition(
+        () => {
+          confirmedValue = readLocationSelection(control)
+          return confirmedValue
+            && !Array.from(document.querySelectorAll('[role="listbox"]')).some(isVisible)
+        },
+        5_000,
+        '抖音位置点击后未回填地点名称',
+      )
+      return { selected: true, value: confirmedValue || selectedText, skippedReason: '' }
+    } catch (error) {
+      clearLocationInput(input, true)
+      throw error
+    }
+  }
+
+  function findLocationControl() {
+    const root = document.querySelector('#douyin_creator_pc_anchor_jump')
+    if (!root) return null
+    const candidates = Array.from(root.querySelectorAll(
+      '[class*="anchor-component-"] .semi-select-filterable, .semi-select-filterable',
+    )).filter(isVisible)
+    return candidates.find((control) => /输入相关位置|相关位置/.test(defaultNormalizeText(control.textContent || '')))
+      || candidates.find((control) => control.closest('[class*="anchor-component-"]'))
+      || null
+  }
+
+  function readLocationSelection(control) {
+    const selection = Array.from(control?.querySelectorAll?.('.semi-select-selection-text') || [])
+      .filter(isVisible)
+      .find((element) => !element.classList.contains('semi-select-selection-placeholder'))
+    return defaultNormalizeText(selection?.textContent || '')
+  }
+
+  function findLocationInput(control) {
+    const scoped = Array.from(control?.querySelectorAll?.(
+      '.semi-select-input input.semi-input[type="text"], input.semi-input[type="text"], input[type="text"]',
+    ) || []).find(isVisible)
+    if (scoped) return scoped
+    if (document.activeElement?.tagName === 'INPUT'
+        && isVisible(document.activeElement)
+        && locationInputScore(document.activeElement) > 0) {
+      return document.activeElement
+    }
+    return Array.from(document.querySelectorAll('input'))
+      .filter(isVisible)
+      .map((input) => ({ input, score: locationInputScore(input) }))
+      .filter((item) => item.score > 0)
+      .sort((left, right) => right.score - left.score)[0]?.input || null
+  }
+
+  function locationInputScore(input) {
+    const descriptor = defaultNormalizeText(
+      `${input.placeholder || ''} ${input.getAttribute('aria-label') || ''}`,
+    )
+    let context = ''
+    let current = input.parentElement
+    for (let depth = 0; current && depth < 5; depth += 1) {
+      context += ` ${defaultNormalizeText(current.textContent || '')}`
+      current = current.parentElement
+    }
+    let score = 0
+    if (/输入相关位置|相关位置/.test(descriptor)) score += 500
+    if (/位置|地点|地址/.test(descriptor)) score += 200
+    if (/添加标签/.test(context)) score += 150
+    if (/位置/.test(context)) score += 80
+    if (/搜索音乐|作品标题/.test(descriptor)) score -= 600
+    return score
+  }
+
+  function findLocationListbox() {
+    return Array.from(document.querySelectorAll('[role="listbox"]'))
+      .filter(isVisible)
+      .find((listbox) => Array.from(listbox.querySelectorAll('[role="option"]'))
+        .some((option) => isVisible(option) && option.querySelector('[class*="collection-v2-"]')))
+      || null
+  }
+
+  function clearLocationInput(input, dismiss) {
+    if (!input?.isConnected) return
+    setNativeInputValue(input, '', { blur: false })
+    if (dismiss) {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }))
+      input.blur()
+    }
+  }
+
+  async function selectFirstRecommendedMusic(platform, deps) {
+    const waitForCondition = requireDependency(deps.waitForCondition, 'waitForCondition')
+    const entry = findMusicSelectionEntry()
+    if (!entry) throw new Error('抖音选择音乐入口未找到')
+    await click(entry, platform, deps, {
+      trustedOnly: true,
+      label: '抖音选择音乐',
+    })
+    const drawer = await waitForCondition(
+      () => visibleQuery('.semi-sidesheet'),
+      8_000,
+      '抖音音乐抽屉未打开',
+    )
+    const firstMusic = await waitForCondition(
+      () => findFirstRecommendedMusicCard(drawer),
+      12_000,
+      `抖音第一首推荐音乐加载超时；抽屉=${defaultNormalizeText(drawer.textContent || '').slice(0, 180) || '-'}`,
+    )
+    const { left, card } = firstMusic
+    left.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    left.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
+    await click(left, platform, deps, {
+      trustedOnly: true,
+      label: '抖音第一首推荐音乐',
+    })
+    const useButton = await waitForCondition(
+      () => Array.from(card.querySelectorAll('button'))
+        .find((button) => isVisible(button) && defaultNormalizeText(button.textContent || '') === '使用'),
+      5_000,
+      '抖音第一首音乐未出现使用按钮',
+    )
+    const musicName = defaultNormalizeText(card.querySelector('[class*="song-name-"]')?.textContent || card.textContent || '')
+    await click(useButton, platform, deps, {
+      trustedOnly: true,
+      label: '抖音使用第一首音乐',
+    })
+    await waitForCondition(
+      () => !visibleQuery('.semi-sidesheet') && /修改音乐/.test(bodyText(deps)),
+      8_000,
+      '抖音音乐使用后主页面未确认',
+    )
+    return { selected: true, value: musicName, skippedReason: '' }
+  }
+
+  function findFirstRecommendedMusicCard(drawer) {
+    if (!drawer?.isConnected || !isVisible(drawer)) return null
+    const left = Array.from(drawer.querySelectorAll('[class*="card-container-left-"]'))
+      .find(isVisible)
+    if (!left) return null
+    const card = left.closest('[class*="card-wrapper-"]') || left.parentElement
+    return card && isVisible(card) ? { left, card } : null
+  }
+
+  function findMusicSelectionEntry() {
+    const scopedSelectors = [
+      '#DCPF [class*="container-right-"] span[class*="action-"]',
+      '[class*="container-right-"] span[class*="action-"]',
+      '[class*="container-right-"] span',
+    ]
+    for (const selector of scopedSelectors) {
+      const entry = Array.from(document.querySelectorAll(selector))
+        .filter(isVisible)
+        .find((element) => defaultNormalizeText(element.textContent || '') === '选择音乐')
+      if (entry) return entry
+    }
+    return Array.from(document.querySelectorAll('span[class*="action-"]'))
+      .filter(isVisible)
+      .find((element) => defaultNormalizeText(element.textContent || '') === '选择音乐')
+      || null
+  }
+
+  async function closeMusicDrawer(platform, deps) {
+    const drawer = visibleQuery('.semi-sidesheet')
+    if (!drawer) return
+    const close = Array.from(drawer.querySelectorAll('button, [role="button"], svg'))
+      .find((item) => isVisible(item) && /关闭|close/i.test(`${item.getAttribute?.('aria-label') || ''} ${item.textContent || ''}`))
+    if (close) await click(close, platform, deps)
+    else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }))
+  }
+
+  function findExactVisibleText(text) {
+    return Array.from(document.querySelectorAll('button, [role="button"], span, div'))
+      .filter(isVisible)
+      .find((item) => defaultNormalizeText(item.textContent || '') === text)
+  }
+
+  function findExactVisibleButton(text) {
+    return Array.from(document.querySelectorAll('button'))
+      .filter(isVisible)
+      .find((button) => defaultNormalizeText(button.textContent || '') === text)
+  }
+
+  function assertImageTextReadyToPublish(context) {
+    if (readUploadedImageCount() !== context.expectedImageCount) {
+      throw new Error('DOUYIN_IMAGE_COUNT_CHANGED：发布前图片数量发生变化')
+    }
+    if (String(context.titleInput.value || '').trim() !== context.title) {
+      throw new Error('DOUYIN_TITLE_CHANGED：发布前标题回读不一致')
+    }
+    if (!normalizeForCompare(context.editor.innerText || context.editor.textContent)
+      .includes(normalizeForCompare(context.descriptionBase))) {
+      throw new Error('DOUYIN_DESCRIPTION_CHANGED：发布前作品描述回读不一致')
+    }
+    const expectedTopicText = context.topicSelected ? context.selectedTopic : context.topicQuery
+    if (!normalizeForCompare(context.editor.innerText || context.editor.textContent)
+      .includes(normalizeForCompare(expectedTopicText).replace(/^#/, ''))) {
+      throw new Error('DOUYIN_TOPIC_CHANGED：发布前中文话题文本缺失')
+    }
+    const text = bodyText()
+    if (/上传失败|图片上传失败|字数超限|超过\d+字/.test(text)) {
+      throw new Error('DOUYIN_PAGE_VALIDATION_FAILED：页面存在上传错误或字数超限')
+    }
+    const scheduled = Array.from(document.querySelectorAll('input[type="radio"]:checked, [role="radio"][aria-checked="true"]'))
+      .some((item) => /定时发布/.test(item.closest?.('label, div')?.textContent || ''))
+    if (scheduled) throw new Error('DOUYIN_SCHEDULE_MODE_INVALID：抖音图文必须立即发布')
+  }
+
+  function normalizeForCompare(value) {
+    return String(value || '').replace(/[\s\u200B\uFEFF]+/g, '').trim()
   }
 
   async function maybeSelectArticleEditor(deps = {}) {
@@ -965,9 +1644,9 @@
     })
   }
 
-  async function click(el, platform, deps = {}) {
+  async function click(el, platform, deps = {}, options = {}) {
     const clickTrustedActionOnce = requireDependency(deps.clickTrustedActionOnce, 'clickTrustedActionOnce')
-    await clickTrustedActionOnce(el, { platform })
+    await clickTrustedActionOnce(el, { ...options, platform })
   }
 
   function bodyText(deps = {}) {
@@ -1104,6 +1783,15 @@
     editorSelectors,
     maybeSelectArticleEditor,
     testing: {
+      parseImageUploadProgress,
+      evaluateImageUploadState,
+      findFirstRecommendedMusicCard,
+      findLocationControl,
+      findLocationInput,
+      findLocationListbox,
+      findMusicSelectionEntry,
+      firstTopicCandidate,
+      readImageUploadState,
       isHiddenPresentationState,
       isRenderedUploadMediaElement,
       isRetryableFailureCode,

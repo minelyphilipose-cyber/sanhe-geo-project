@@ -112,6 +112,9 @@ export function evaluateXiaohongshuPublishSignals(target = {}, pageState = {}, o
 export function evaluateDouyinPublishSignals(target = {}, pageState = {}) {
   const normalizedTargetTitle = normalizeTitleCompact(target.title)
   const scheduleProbe = normalizeScheduleProbe(target.platformScheduledAt)
+  const imageText = String(target.contentKind || '') === 'image_text'
+  const expectedImageCount = Number(target.expectedImageCount || 0)
+  const taskStartedAtMs = parseLocalDateTimeMs(target.taskStartedAt)
   const cards = (Array.isArray(pageState.douyinCards) ? pageState.douyinCards : [])
     .map((item) => {
       const title = String(item?.title || '').trim()
@@ -119,6 +122,13 @@ export function evaluateDouyinPublishSignals(target = {}, pageState = {}) {
       const status = firstText(item?.status, String(item?.text || '').match(/(定时发布中|已发布|审核中|发布成功|未通过|草稿)/)?.[1])
       const publishedAt = String(item?.publishedAt || '').trim()
       const scheduleMatched = !scheduleProbe || normalizeScheduleProbe(publishedAt).includes(scheduleProbe)
+      const imageCountMatched = !imageText || expectedImageCount <= 0
+        || new RegExp(`${expectedImageCount}\\s*张`).test(String(item?.text || ''))
+      const recordAtMs = parseLocalDateTimeMs(publishedAt)
+      const taskWindowMatched = !imageText || !Number.isFinite(taskStartedAtMs)
+        || Number.isFinite(recordAtMs)
+          && recordAtMs >= taskStartedAtMs - 15 * 60 * 1000
+          && recordAtMs <= Date.now() + 10 * 60 * 1000
       let score = Math.round(titleScore * 1000)
       if (scheduleMatched) score += 500
       if (/已发布|发布成功/.test(status)) score += 340
@@ -132,10 +142,12 @@ export function evaluateDouyinPublishSignals(target = {}, pageState = {}) {
         titleScore,
         titleMatched: titleScore >= 0.55,
         scheduleMatched,
+        imageCountMatched,
+        taskWindowMatched,
         score,
       }
     })
-    .filter((item) => item.titleMatched)
+    .filter((item) => item.titleMatched && item.imageCountMatched && item.taskWindowMatched)
     .sort((left, right) => right.score - left.score)
   const matchedCard = cards[0] || null
   const status = matchedCard?.status || ''
@@ -145,13 +157,18 @@ export function evaluateDouyinPublishSignals(target = {}, pageState = {}) {
       ? 'reviewing'
       : /定时发布中/.test(status)
         ? 'scheduled'
-        : ''
+        : /未通过/.test(status)
+          ? 'rejected'
+          : ''
   const publishedLink = (matchedCard?.links || []).find((link) => /\/video\/|\/note\/|modal_id=|item_id=/.test(link.href || ''))
     || (matchedCard?.links || [])[0]
   const platformPublishId = douyinPublishIdFromUrl(publishedLink?.href)
 
   return {
     found: ['published', 'reviewing'].includes(pageStatusCode),
+    failed: pageStatusCode === 'rejected',
+    failureCode: pageStatusCode === 'rejected' ? 'DOUYIN_REVIEW_REJECTED' : undefined,
+    failureMessage: pageStatusCode === 'rejected' ? '抖音作品未通过审核' : undefined,
     pendingScheduled: pageStatusCode === 'scheduled',
     reason: matchedCard
       ? (pageStatusCode === 'scheduled' ? 'platform schedule time not due' : '')
@@ -546,7 +563,9 @@ function normalizeScheduleProbe(value) {
 
 function parseLocalDateTimeMs(value) {
   const text = String(value || '').trim()
-  const match = text.match(/(\d{4})-(\d{1,2})-(\d{1,2})[T\s](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/)
+  const match = text.match(
+    /(\d{4})\s*(?:-|\/|年)\s*(\d{1,2})\s*(?:-|\/|月)\s*(\d{1,2})\s*(?:日)?[T\s]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/,
+  )
   if (!match) return Number.NaN
   const year = Number(match[1])
   const month = Number(match[2]) - 1

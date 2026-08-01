@@ -26,7 +26,7 @@ export default defineConfig({
                 proxyTimeout: DEFAULT_API_PROXY_TIMEOUT_MS,
             },
             '/oss': {
-                target: 'http://192.168.112.175:9000',
+                target: 'http://192.168.112.142:9000',
                 changeOrigin: true,
                 rewrite: (path) => path.replace(/^\/oss/, ''),
             },

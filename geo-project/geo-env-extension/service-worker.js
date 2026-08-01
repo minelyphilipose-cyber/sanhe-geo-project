@@ -1,13 +1,17 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.1.11'
-const EXTENSION_BUILD_REVISION = '20260717.1'
+const EXTENSION_VERSION = '0.2.0'
+const EXTENSION_BUILD_REVISION = '20260731.3'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
 const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/graphic/articles'
 const XIAOHONGSHU_MANAGE_URL = 'https://creator.xiaohongshu.com/new/note-manager'
 const BAIJIAHAO_MANAGE_URL = 'https://baijiahao.baidu.com/builder/rc/content'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
+const DOUYIN_IMAGE_TEXT_STATE_KEY = 'geoDouyinImageTextTaskStates'
+const DOUYIN_IMAGE_TEXT_ACTIVE_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const DOUYIN_IMAGE_TEXT_SUBMITTED_STATE_TTL_MS = 90 * 24 * 60 * 60 * 1000
+const DOUYIN_IMAGE_TEXT_STATE_MAX_ENTRIES = 200
 const ACTIVE_PROFILE_KEY = 'geoEnvActiveProfile'
 const PROFILES_KEY = 'geoEnvProfiles'
 const SESSIONS_KEY = 'geoEnvSessions'
@@ -33,6 +37,7 @@ const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 
 const autoLoginReportAtByKey = new Map()
 const autoPollTabUpdatedAtByKey = new Map()
 const bindIntentInFlight = new Set()
+let douyinImageTextStateWriteChain = Promise.resolve()
 const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
 const RUNTIME_STATUS_HEARTBEAT_MS = 60 * 1000
 const HELPER_SIGNING_CONTEXT_CACHE_MS = 10 * 1000
@@ -321,6 +326,7 @@ async function reportRuntimeStatus(options = {}) {
         accountDetect: true,
         publishSubmit: true,
         publishCheck: false,
+        douyinImageText: true,
         buildRevision: EXTENSION_BUILD_REVISION,
       },
       lastTaskId: options.lastTaskId || null,
@@ -1186,8 +1192,12 @@ async function handleTask(config, session, task, options = {}) {
   }
   assertExpectedIdentityPresent(payload)
   payload.precheckedIdentity = precheckedIdentity || null
+  applyDouyinImageTextPlatformOptions(payload)
 
   const tab = await prepareFillTab(options.fillTabId || null, task.platform, payload.publishUrl)
+  if (isDouyinImageTextPayload(payload, task)) {
+    await prepareDouyinImageTextEditor(config, session, tab.id, task, payload)
+  }
   if (normalizePlatform(task.platform) === 'baijiahao') await delay(1200)
   await waitForPlatformShellReady(tab.id, task.platform)
   let fillResult
@@ -1208,11 +1218,262 @@ async function handleTask(config, session, task, options = {}) {
     }
   }
 
+  fillResult = await ensureVerifiedDouyinImageTextPublishResult(
+    tab.id,
+    task,
+    payload,
+    fillResult,
+  )
+
+  if (isDouyinImageTextPayload(payload, task)) {
+    const verification = fillResult?.publishOptions?.publishVerification || {}
+    const status = String(verification.pageStatusCode || verification.platformStatus || '')
+    const terminalStage = ['reviewing', 'published', 'rejected'].includes(status)
+      ? 'completed'
+      : 'publish_unknown'
+    await saveDouyinImageTextTaskState(task.taskId, {
+      stage: terminalStage,
+      reviewStatus: status || 'unknown',
+      manageVerification: verification,
+    })
+  }
+
   await apiRequest(taskApiConfig, `/api/v1/extension/tasks/${task.taskId}/ack`, {
     method: 'POST',
     body: JSON.stringify({ fillResult }),
   }, session.extensionToken)
   return fillResult
+}
+
+function applyDouyinImageTextPlatformOptions(payload = {}) {
+  const options = payload.platformOptions || {}
+  if (options.contentKind !== 'image_text') return payload
+  for (const key of [
+    'contentKind',
+    'publishMode',
+    'title',
+    'description',
+    'descriptionBase',
+    'topicRegionText',
+    'topicIndustryText',
+    'topicQuery',
+    'locationQuery',
+    'imageUrls',
+    'imageMaterialIds',
+    'expectedImageCount',
+    'snapshotCreatedAt',
+    'scheduleId',
+  ]) {
+    if (options[key] !== undefined && options[key] !== null) payload[key] = options[key]
+  }
+  payload.articleTitle = payload.title
+  payload.content = payload.description || payload.descriptionBase
+  delete payload.scheduledAt
+  delete payload.platformScheduledAt
+  payload.scheduleRequired = false
+  return payload
+}
+
+function isDouyinImageTextPayload(payload = {}, task = {}) {
+  return normalizePlatform(task.platform || payload.platform) === 'douyin'
+    && String(payload.contentKind || payload.platformOptions?.contentKind || '') === 'image_text'
+}
+
+async function ensureVerifiedDouyinImageTextPublishResult(tabId, task, payload, fillResult) {
+  if (!isDouyinImageTextPayload(payload, task)) return fillResult
+  const publishOptions = fillResult?.publishOptions || {}
+  const verification = publishOptions.publishVerification || {}
+  if (verification.verified === true || publishOptions.published !== true) return fillResult
+
+  const error = new Error(
+    'DOUYIN_PUBLISH_NOT_CONFIRMED：抖音图文已越过发布点击边界，但尚未取得作品管理页确认凭证',
+  )
+  error.code = 'DOUYIN_PUBLISH_NOT_CONFIRMED'
+  return normalizeFillResult(
+    await recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payload, error),
+    task,
+  )
+}
+
+async function loadDouyinImageTextTaskState(taskId) {
+  await douyinImageTextStateWriteChain.catch(() => {})
+  const stored = await storageGet([DOUYIN_IMAGE_TEXT_STATE_KEY])
+  const original = stored[DOUYIN_IMAGE_TEXT_STATE_KEY] || {}
+  const states = pruneDouyinImageTextTaskStates(original)
+  if (Object.keys(states).length !== Object.keys(original).length) {
+    await storageSet({ [DOUYIN_IMAGE_TEXT_STATE_KEY]: states })
+  }
+  return states[String(taskId)] || null
+}
+
+async function saveDouyinImageTextTaskState(taskId, patch = {}) {
+  if (!taskId) return null
+  const write = douyinImageTextStateWriteChain
+    .catch(() => {})
+    .then(async () => {
+      const stored = await storageGet([DOUYIN_IMAGE_TEXT_STATE_KEY])
+      const states = pruneDouyinImageTextTaskStates(stored[DOUYIN_IMAGE_TEXT_STATE_KEY] || {})
+      const key = String(taskId)
+      const now = new Date()
+      const previous = states[key] || {}
+      const stageChanged = Boolean(patch.stage && patch.stage !== previous.stage)
+      const stageTimingsMs = { ...(previous.stageTimingsMs || {}) }
+      if (stageChanged && previous.stage && previous.stageStartedAt) {
+        const elapsed = now.getTime() - Date.parse(previous.stageStartedAt)
+        if (Number.isFinite(elapsed) && elapsed >= 0) {
+          stageTimingsMs[previous.stage] = Math.round(
+            Number(stageTimingsMs[previous.stage] || 0) + elapsed,
+          )
+        }
+      }
+      states[key] = {
+        ...previous,
+        ...patch,
+        taskId: Number(taskId),
+        stageStartedAt: stageChanged
+          ? now.toISOString()
+          : (previous.stageStartedAt || now.toISOString()),
+        stageTimingsMs,
+        updatedAt: now.toISOString(),
+      }
+      const pruned = pruneDouyinImageTextTaskStates(states, now.getTime())
+      await storageSet({ [DOUYIN_IMAGE_TEXT_STATE_KEY]: pruned })
+      return pruned[key] || states[key]
+    })
+  douyinImageTextStateWriteChain = write.then(() => undefined, () => undefined)
+  return write
+}
+
+function pruneDouyinImageTextTaskStates(states = {}, nowMs = Date.now()) {
+  return Object.fromEntries(
+    Object.entries(states)
+      .filter(([, state]) => state && typeof state === 'object')
+      .map(([key, state]) => {
+        const updatedAtMs = Date.parse(state.updatedAt || '')
+        return { key, state, updatedAtMs }
+      })
+      .filter(({ state, updatedAtMs }) => {
+        if (!Number.isFinite(updatedAtMs)) return true
+        const ttl = state.publishClicked === true
+          ? DOUYIN_IMAGE_TEXT_SUBMITTED_STATE_TTL_MS
+          : DOUYIN_IMAGE_TEXT_ACTIVE_STATE_TTL_MS
+        return nowMs - updatedAtMs <= ttl
+      })
+      .sort((left, right) => {
+        const leftTime = Number.isFinite(left.updatedAtMs) ? left.updatedAtMs : 0
+        const rightTime = Number.isFinite(right.updatedAtMs) ? right.updatedAtMs : 0
+        return rightTime - leftTime
+      })
+      .slice(0, DOUYIN_IMAGE_TEXT_STATE_MAX_ENTRIES)
+      .map(({ key, state }) => [key, state]),
+  )
+}
+
+async function prepareDouyinImageTextEditor(config, session, tabId, task, payload) {
+  const taskId = Number(task.taskId || payload.taskId)
+  const expectedImageCount = Number(payload.expectedImageCount || payload.imageUrls?.length || 0)
+  if (!Number.isInteger(expectedImageCount) || expectedImageCount < 4 || expectedImageCount > 6) {
+    throw new Error(`DOUYIN_IMAGE_COUNT_INVALID：抖音图文图片数量必须为4–6张，实际=${expectedImageCount}`)
+  }
+  if (!Array.isArray(payload.imageUrls) || payload.imageUrls.length !== expectedImageCount) {
+    throw new Error('DOUYIN_IMAGE_URLS_INVALID：抖音图文图片地址与预期数量不一致')
+  }
+  const previous = await loadDouyinImageTextTaskState(taskId)
+  if (['waiting_image_editor', 'filling_title', 'filling_description', 'selecting_topic', 'selecting_location', 'selecting_music', 'ready_to_publish'].includes(previous?.stage)) {
+    const current = await chrome.tabs.get(tabId).catch(() => null)
+    if (current?.url?.includes('/creator-micro/content/post/image')) {
+      payload.douyinImageTextState = previous
+      return
+    }
+  }
+  if (['submitting_publish', 'verifying_manage_page', 'completed', 'publish_unknown'].includes(previous?.stage)) {
+    payload.douyinImageTextState = previous
+    throw new Error('DOUYIN_PUBLISH_ALREADY_SUBMITTED：该图文任务已越过发布点击边界，禁止重复发布')
+  }
+  await saveDouyinImageTextTaskState(taskId, {
+    stage: 'uploading_images',
+    expectedImageCount,
+    scheduleId: payload.scheduleId || null,
+    publishClicked: false,
+  })
+  const tab = await chrome.tabs.get(tabId)
+  if (!tab?.url?.includes('/creator-micro/content/upload')) {
+    await chrome.tabs.update(tabId, {
+      url: 'https://creator.douyin.com/creator-micro/content/upload?default-tab=3',
+      active: true,
+    })
+    await waitForTabComplete(tabId, 45_000)
+  }
+  const currentTab = await chrome.tabs.get(tabId)
+  const browserTargetId = await browserTargetIdForTab(tabId)
+  const uploaded = await helperRequest(config, '/v1/extension/files/upload-images-to-page', {
+    method: 'POST',
+    body: JSON.stringify({
+      urls: payload.imageUrls,
+      backendBase: config.apiBase,
+      taskId,
+      environmentKey: task.environmentKey || config.environmentKey,
+      platform: 'douyin',
+      targetPageUrl: currentTab.url,
+      browserTargetId: browserTargetId || null,
+      uploadTarget: 'douyin_image_text_images',
+      expectedImageCount,
+    }),
+  }, session)
+  await appendEventLog({
+    type: 'douyin_image_text_upload',
+    ok: Boolean(uploaded?.ok),
+    taskId,
+    expectedImageCount,
+    confirmedImageCount: Number(uploaded?.upload?.completion?.confirmedCount || 0),
+    explicitImageCount: Number(uploaded?.upload?.completion?.explicitCount || 0),
+    thumbnailCount: Number(uploaded?.upload?.completion?.thumbnailCount || 0),
+    pageUrl: uploaded?.upload?.pageUrl || '',
+  })
+  if (!uploaded?.ok
+      || Number(uploaded?.upload?.inputState?.filesLength) !== expectedImageCount
+      || uploaded?.upload?.completion?.complete !== true
+      || Number(uploaded?.upload?.completion?.confirmedCount) !== expectedImageCount) {
+    throw new Error('DOUYIN_IMAGE_UPLOAD_FAILED：本地助手未能完整提交全部图文图片')
+  }
+  await saveDouyinImageTextTaskState(taskId, { stage: 'waiting_image_editor' })
+  await waitForTabUrl(tabId, (url) => url.includes('/creator-micro/content/post/image'), 60_000)
+  await waitForTabComplete(tabId, 45_000).catch(() => null)
+  await ensureContentScript(tabId)
+  await waitForContentScript(tabId, 12, 500)
+  payload.douyinImageTextState = await saveDouyinImageTextTaskState(taskId, { stage: 'waiting_image_editor' })
+}
+
+function waitForTabUrl(tabId, predicate, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let timer = null
+    const finish = (error, tab) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      chrome.tabs.onUpdated.removeListener(listener)
+      chrome.tabs.onRemoved.removeListener(removed)
+      if (error) reject(error)
+      else resolve(tab)
+    }
+    const inspect = async () => {
+      const tab = await chrome.tabs.get(tabId).catch(() => null)
+      if (!tab) return finish(new Error('抖音图文上传标签页已关闭'))
+      if (predicate(String(tab.url || ''))) finish(null, tab)
+    }
+    const listener = (updatedTabId, changeInfo, tab) => {
+      if (updatedTabId !== tabId) return
+      if (predicate(String(changeInfo.url || tab?.url || ''))) finish(null, tab)
+    }
+    const removed = (removedTabId) => {
+      if (removedTabId === tabId) finish(new Error('抖音图文上传标签页已关闭'))
+    }
+    chrome.tabs.onUpdated.addListener(listener)
+    chrome.tabs.onRemoved.addListener(removed)
+    timer = setTimeout(() => finish(new Error('DOUYIN_IMAGE_EDITOR_TIMEOUT：上传后未跳转至抖音图文详情页')), timeoutMs)
+    void inspect()
+  })
 }
 
 async function waitForPlatformShellReady(tabId, platform) {
@@ -1483,15 +1744,26 @@ async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payloa
   if (normalizePlatform(task?.platform || payload?.platform) !== 'douyin' || !isRecoverableDouyinPublishVerifyError(error, message)) {
     throw error
   }
+  const persistedState = await loadDouyinImageTextTaskState(task?.taskId || payload?.taskId).catch(() => null)
+  if (persistedState) {
+    payload.douyinImageTextState = persistedState
+  }
   const context = buildDouyinManageVerifyContext(payload)
   if (!context.title) throw error
 
   let latest = null
   let recoveryTabId = tabId
+  const current = await chrome.tabs.get(recoveryTabId).catch(() => null)
+  if (!current?.url || !isDouyinWorksManageUrl(current.url)) {
+    recoveryTabId = await openDouyinManageVerifyTab(recoveryTabId)
+  }
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    await delay(900 + attempt * 700)
-    await waitForTabComplete(recoveryTabId, 30_000).catch(() => null)
-    latest = await inspectDouyinManageTab(recoveryTabId, context, attempt)
+    latest = await refreshAndInspectPlatformWorksList(
+      recoveryTabId,
+      context,
+      attempt + 1,
+      inspectDouyinManageTab,
+    )
     if (latest?.verified) {
       return {
         titleFilled: true,
@@ -1510,11 +1782,6 @@ async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payloa
     }
     if (latest?.isManagePage !== true && attempt < 4) {
       recoveryTabId = await openDouyinManageVerifyTab(recoveryTabId)
-      await delay(1600)
-      continue
-    }
-    if (latest?.isManagePage && attempt >= 1 && attempt < 4) {
-      await chrome.tabs.reload(recoveryTabId, { bypassCache: true }).catch(() => null)
     }
   }
   const unresolved = new Error(
@@ -1524,7 +1791,22 @@ async function recoverDouyinPublishAfterMessageChannelClosed(tabId, task, payloa
   )
   unresolved.code = 'DOUYIN_PUBLISH_NOT_CONFIRMED'
   unresolved.originalMessage = message
+  await saveDouyinImageTextTaskState(task?.taskId || payload?.taskId, {
+    stage: 'publish_unknown',
+    reviewStatus: 'unknown',
+    manageVerification: latest || null,
+  }).catch(() => null)
   throw unresolved
+}
+
+function isDouyinWorksManageUrl(value) {
+  try {
+    const url = new URL(String(value || ''), DOUYIN_MANAGE_URL)
+    return url.hostname === 'creator.douyin.com'
+      && url.pathname.includes('/creator-micro/content/manage')
+  } catch {
+    return false
+  }
 }
 
 async function openDouyinManageVerifyTab(tabId) {
@@ -1599,6 +1881,8 @@ function publishNotConfirmedError(platform, title, originalMessage, verification
 function isRecoverableDouyinPublishVerifyError(error, message) {
   const text = String(message || '')
   return isMessageChannelClosedError(text)
+    || error?.code === 'DOUYIN_PUBLISH_NOT_CONFIRMED'
+    || text.includes('DOUYIN_PUBLISH_NOT_CONFIRMED')
     || isWorksListVerifyTimeout(error, text)
     || text.includes('页面填充执行超时')
     || (text.includes('抖音发布后未检测到成功状态') && text.includes('作品管理'))
@@ -1662,18 +1946,28 @@ function buildDouyinManageVerifyContext(payload = {}) {
   const platformOptions = payload.platformOptions || {}
   const profileOptions = payload.profile?.platformOptions || {}
   const douyinOptions = payload.douyinOptions || platformOptions.douyin || profileOptions.douyin || {}
+  const immediateImageText = firstText(payload.contentKind, platformOptions.contentKind) === 'image_text'
+    && firstText(payload.publishMode, platformOptions.publishMode) === 'immediate'
   return {
     title: firstText(payload.title, payload.articleTitle).slice(0, 30),
-    scheduledAt: firstText(
-      payload.scheduledAt,
-      payload.platformScheduledAt,
-      platformOptions.scheduledAt,
-      platformOptions.platformScheduledAt,
-      profileOptions.scheduledAt,
-      profileOptions.platformScheduledAt,
-      douyinOptions.scheduledAt,
-      douyinOptions.platformScheduledAt,
+    expectedImageCount: Number(payload.expectedImageCount || platformOptions.expectedImageCount || 0),
+    taskStartedAt: firstText(
+      payload.douyinImageTextState?.publishClickedAt,
+      payload.snapshotCreatedAt,
+      platformOptions.snapshotCreatedAt,
     ),
+    scheduledAt: immediateImageText
+      ? ''
+      : firstText(
+        payload.scheduledAt,
+        payload.platformScheduledAt,
+        platformOptions.scheduledAt,
+        platformOptions.platformScheduledAt,
+        profileOptions.scheduledAt,
+        profileOptions.platformScheduledAt,
+        douyinOptions.scheduledAt,
+        douyinOptions.platformScheduledAt,
+      ),
   }
 }
 
@@ -1697,25 +1991,6 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
       const normalizeCompact = (value) => normalizeText(value).replace(/\s+/g, '')
       const isManagePage = location.hostname === 'creator.douyin.com' && location.href.includes('/creator-micro/content/manage')
       const pageText = normalizeText(document.body?.innerText || document.body?.textContent || '')
-      const explicitSuccess = /发布成功|定时发布成功|提交成功/.test(pageText)
-      if (isManagePage && explicitSuccess) {
-        return {
-          verified: true,
-          platformStatus: scheduledAt ? 'scheduled' : 'published',
-          pageStatusCode: scheduledAt ? 'scheduled' : 'submitted',
-          pageStatus: '发布成功',
-          platformScheduledAt: scheduledAt || null,
-          scheduledAtText: scheduledAt || null,
-          platformPublishId: null,
-          platformPublishedUrl: null,
-          coverImageUrl: null,
-          recordLinks: [],
-          title,
-          manageUrl: location.href,
-          matchedText: pageText.slice(0, 180),
-          diagnostics: `attempt=${attempt}; explicit_success`,
-        }
-      }
       if (!isManagePage || !title) {
         return {
           verified: false,
@@ -1727,8 +2002,19 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
       }
 
       const normalizedTitle = normalizeCompact(title)
+      const expectedImageCount = Number(context?.expectedImageCount || 0)
+      const taskStartedAt = String(context?.taskStartedAt || '').trim()
       const scheduledVariants = scheduleTextVariants(scheduledAt)
-      const candidates = Array.from(document.querySelectorAll('section, article, li, tr, div'))
+      const semanticCards = Array.from(document.querySelectorAll('[class*="info-title-text-"]'))
+        .map((titleEl) => titleEl.closest('[class*="video-card-content-"]')
+          || titleEl.closest('[class*="video-card-new-"]'))
+        .filter(Boolean)
+      const semanticCardSet = new Set(semanticCards)
+      const candidateElements = Array.from(new Set([
+        ...semanticCards,
+        ...document.querySelectorAll('section, article, li, tr, div'),
+      ]))
+      const candidates = candidateElements
         .filter(isVisible)
         .map((el) => {
           const rect = el.getBoundingClientRect()
@@ -1738,13 +2024,14 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
             rect,
             text,
             compactText: normalizeCompact(text),
+            semanticCard: semanticCardSet.has(el),
             hasImage: Array.from(el.querySelectorAll('img')).some(isVisible) || hasBackgroundImage(el),
           }
         })
         .filter((item) => item.text
           && item.rect.width >= 260
           && item.rect.height >= 60
-          && item.rect.width <= 1600
+          && (item.semanticCard || item.rect.width <= 1600)
           && item.rect.height <= 420
           && !looksLikeWholeManagePage(item.text)
           && item.compactText.includes(normalizedTitle))
@@ -1768,7 +2055,7 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
       const links = extractManageRecordLinks(record.el)
       return {
         verified: true,
-        platformStatus: scheduledAt ? 'scheduled' : 'published',
+        platformStatus: pageStatusCode,
         pageStatusCode,
         pageStatus,
         platformScheduledAt: scheduledAt || null,
@@ -1786,22 +2073,51 @@ async function inspectDouyinManageTab(tabId, context, attempt) {
 
       function isExpectedRecord(item) {
         if (!item.compactText.includes(normalizedTitle)) return false
+        if (expectedImageCount > 0 && !new RegExp(`${expectedImageCount}\\s*张`).test(item.text)) return false
+        if (!scheduledAt && !/审核中|已发布|未通过/.test(item.text)) return false
+        if (!scheduledAt && taskStartedAt && !isRecordInTaskWindow(item.text, taskStartedAt)) return false
         if (scheduledAt) {
           if (/已发布|发布成功|审核中/.test(item.text)) return true
           if (!scheduledVariants.some((value) => value && item.compactText.includes(normalizeCompact(value)))) return false
           if (!/定时发布中|定时|修改定时/.test(item.text)) return false
         }
-        if (!scheduledAt && /草稿|未通过|删除作品/.test(item.text) && !/审核中|已发布|发布成功/.test(item.text)) return false
+        if (!scheduledAt && /草稿|删除作品/.test(item.text) && !/审核中|已发布|未通过/.test(item.text)) return false
         return true
+      }
+
+      function isRecordInTaskWindow(text, startedAt) {
+        const recordAt = parseManageRecordDateTime(text)
+        const startedMs = Date.parse(startedAt)
+        if (!Number.isFinite(startedMs) || !Number.isFinite(recordAt)) return false
+        const lowerBound = startedMs - 15 * 60 * 1000
+        const upperBound = Date.now() + 10 * 60 * 1000
+        return recordAt >= lowerBound && recordAt <= upperBound
+      }
+
+      function parseManageRecordDateTime(text) {
+        const match = String(text || '').match(
+          /(\d{4})\s*(?:年|[-/])\s*(\d{1,2})\s*(?:月|[-/])\s*(\d{1,2})\s*(?:日)?\s+(\d{1,2}):(\d{1,2})/,
+        )
+        if (!match) return Number.NaN
+        return new Date(
+          Number(match[1]),
+          Number(match[2]) - 1,
+          Number(match[3]),
+          Number(match[4]),
+          Number(match[5]),
+        ).getTime()
       }
 
       function manageRecordScore(item) {
         let score = 0
+        if (item.semanticCard) score += 600
         if (item.compactText.includes(normalizedTitle)) score += 1000
         if (item.hasImage) score += 80
         if (scheduledAt && scheduledVariants.some((value) => value && item.compactText.includes(normalizeCompact(value)))) score += 500
         if (scheduledAt && /定时发布中|修改定时/.test(item.text)) score += 260
         if (!scheduledAt && /审核中|已发布|发布成功/.test(item.text)) score += 220
+        if (expectedImageCount > 0 && new RegExp(`${expectedImageCount}\\s*张`).test(item.text)) score += 300
+        if (taskStartedAt && item.text.includes(taskStartedAt.slice(0, 10))) score += 100
         if (/播放|点赞|评论|收藏|详情页进入率/.test(item.text)) score += 60
         score -= Math.min(item.text.length, 1200) / 12
         score -= Math.min(item.rect.width * item.rect.height, 1_000_000) / 120_000
@@ -1928,12 +2244,12 @@ async function recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload,
     recoveryTabId = await openPlatformManageVerifyTab(recoveryTabId, 'toutiao', TOUTIAO_MANAGE_URL)
   }
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    await reloadPlatformWorksList(recoveryTabId, 30_000)
-    for (let poll = 0; poll < 3; poll += 1) {
-      await delay(900 + poll * 600)
-      latest = await inspectToutiaoWorksListTab(recoveryTabId, context, attempt + 1)
-      if (latest?.verified) break
-    }
+    latest = await refreshAndInspectPlatformWorksList(
+      recoveryTabId,
+      context,
+      attempt + 1,
+      inspectToutiaoWorksListTab,
+    )
     if (latest?.verified) {
       return {
         titleFilled: true,
@@ -1962,10 +2278,29 @@ function isToutiaoWorksManageUrl(value) {
 }
 
 async function reloadPlatformWorksList(tabId, timeoutMs) {
-  await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
+  // A failed reload must not fall through to matching the stale redirected DOM.
+  await chrome.tabs.reload(tabId, { bypassCache: true })
   // Give Chrome time to transition the tab from the previous complete state to loading.
   await delay(350)
   await waitForTabComplete(tabId, timeoutMs).catch(() => null)
+}
+
+async function refreshAndInspectPlatformWorksList(
+  tabId,
+  context,
+  refreshAttempt,
+  inspector,
+  options = {},
+) {
+  await reloadPlatformWorksList(tabId, Number(options.timeoutMs || 30_000))
+  let latest = null
+  const pollCount = Math.max(1, Number(options.pollCount || 3))
+  for (let poll = 0; poll < pollCount; poll += 1) {
+    await delay(900 + poll * 600)
+    latest = await inspector(tabId, context, refreshAttempt)
+    if (latest?.verified) break
+  }
+  return latest
 }
 
 function isWorksListVerifyTimeout(error, message) {
@@ -3030,6 +3365,7 @@ function isBaijiahaoIdentityUrl(url) {
 function isDouyinPublishPath(url) {
   return url.pathname.includes('/creator-micro/content/upload')
     || url.pathname.includes('/creator-micro/content/post/article')
+    || url.pathname.includes('/creator-micro/content/post/image')
 }
 
 function isDouyinIdentityUrl(url) {
@@ -3420,6 +3756,35 @@ async function dispatchTrustedClick(tabId, click) {
     await chrome.debugger.detach(target).catch(() => {})
   }
   return { ok: true }
+}
+
+async function dispatchTrustedText(tabId, input) {
+  const text = String(input?.text || '')
+  const characters = Array.from(text)
+  if (!tabId || characters.length === 0 || characters.length > 120) {
+    throw new Error('真实文本输入参数不完整或长度超限')
+  }
+  const tab = await chrome.tabs.get(tabId).catch(() => null)
+  if (!tab?.url || !isAllowedPlatformUrl('douyin', tab.url)) {
+    throw new Error('真实文本输入仅允许用于抖音页面')
+  }
+  const target = { tabId }
+  await chrome.debugger.attach(target, '1.3')
+  try {
+    for (const character of characters) {
+      await chrome.debugger.sendCommand(target, 'Input.insertText', {
+        text: character,
+      })
+      await delay(45)
+    }
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {})
+  }
+  return {
+    ok: true,
+    label: String(input?.label || '').slice(0, 60),
+    length: characters.length,
+  }
 }
 
 async function setFileInputFromUrl(tabId, urlValue, options = {}) {
@@ -4319,6 +4684,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         session,
       )
     }
+    if (message?.type === 'GEO_ENV_DOUYIN_IMAGE_TEXT_STATE') {
+      const taskId = Number(message.taskId)
+      if (!Number.isInteger(taskId) || taskId <= 0) {
+        return { ok: false, error: 'invalid douyin image-text taskId' }
+      }
+      const state = await saveDouyinImageTextTaskState(taskId, message.state || {})
+      return { ok: true, state }
+    }
     if (message?.type === 'GEO_ENV_REPORT_LOGIN_STATUS') {
       const status = await reportActiveTabLoginStatus()
       return { ok: true, status }
@@ -4336,6 +4709,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message?.type === 'GEO_ENV_TRUSTED_CLICK') {
       return dispatchTrustedClick(sender.tab?.id || null, message.click || {})
+    }
+    if (message?.type === 'GEO_ENV_TRUSTED_TYPE') {
+      return dispatchTrustedText(sender.tab?.id || null, message.input || {})
     }
     if (message?.type === 'GEO_ENV_SET_FILE_INPUT_FROM_URL') {
       return setFileInputFromUrl(sender.tab?.id || null, message.url, {

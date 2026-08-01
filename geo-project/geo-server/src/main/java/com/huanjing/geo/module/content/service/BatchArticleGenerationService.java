@@ -1137,9 +1137,16 @@ public class BatchArticleGenerationService {
                                 promptContext.runtimePolicy().allowContactInfo(),
                                 true,
                                 generationForbiddenPhrases,
-                                ArticlePromptChannels.maxTitleChars(task.getChannelGroupCode()),
+                                ArticlePromptChannels.maxTitleChars(
+                                        task.getChannelGroupCode(),
+                                        task.getChannelSubCode()
+                                ),
                                 effectiveTemperature,
-                                batchMeasurementContext(task, infrastructureRetryCount, attemptNo)
+                                batchMeasurementContext(task, infrastructureRetryCount, attemptNo),
+                                ArticlePromptChannels.maxContentChars(
+                                        task.getChannelGroupCode(),
+                                        task.getChannelSubCode()
+                                )
                         )
                 );
                 renewTaskClaim(task);

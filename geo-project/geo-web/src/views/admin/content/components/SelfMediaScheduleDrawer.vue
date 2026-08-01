@@ -163,6 +163,9 @@
               >
                 {{ rowActionLabel(primaryRowAction(scope.row)!, scope.row) }}
               </el-button>
+              <el-tag v-else-if="requiresManualPlatformVerification(scope.row)" size="small" type="warning">
+                人工核对
+              </el-tag>
               <el-button link type="primary" @click="showDiagnostics(scope.row)">诊断</el-button>
               <el-dropdown v-if="moreRowActions(scope.row).length" trigger="click" @command="(command: string) => runRowAction(scope.row, command as RowAction)">
                 <el-button link type="primary">
@@ -247,6 +250,13 @@
         <section class="schedule-diagnostics-section">
           <h4>处理建议</h4>
           <p class="schedule-diagnostics-advice">{{ recommendationText(diagnosticsRow) }}</p>
+          <el-alert
+            v-if="requiresManualPlatformVerification(diagnosticsRow)"
+            title="平台页面可能已经被填充，请先核对抖音作品或草稿，系统不会重复执行填充。"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
           <div class="schedule-diagnostics-actions">
             <el-button v-if="canHandleMaterials(diagnosticsRow)" type="primary" @click="handleMaterials(diagnosticsRow)">处理素材</el-button>
             <el-button v-if="canRetryNow(diagnosticsRow)" @click="retryNow(diagnosticsRow)">立即重试</el-button>
@@ -372,6 +382,7 @@ import {
 } from '@/api/content'
 import type { SelfMediaPublishSchedule } from '@/types'
 import { formatDateTime } from '@/utils/format'
+import { requiresManualPlatformVerification } from '../selfMediaScheduleRetry'
 
 type ScheduleHealth = 'failed' | 'manual' | 'overdue' | 'running' | 'waiting' | 'scheduled' | 'checking' | 'done' | 'cancelled'
 type ScheduleHealthGroup = 'attention' | 'processing' | 'waiting_publish' | 'url_pending' | 'done'
@@ -1484,6 +1495,7 @@ function canRetryNow(row: SelfMediaPublishSchedule | null) {
   if (!props.canPublish || !row) return false
   if (['cancelled', 'published_confirmed', 'cancel_pending_platform', 'routed_to_semi_auto'].includes(row.status)) return false
   if (hasPendingRetryRequest(row) || isLocked(row)) return false
+  if (requiresManualPlatformVerification(row)) return false
   if (isPublishResultContext(row)) return false
   return ['pending', 'filling', 'filled_verified', 'scheduling', 'schedule_failed', 'manual_required'].includes(row.status)
 }
@@ -1765,6 +1777,9 @@ function alertTypeLabel(value?: string | null) {
 }
 
 function recommendationText(row: SelfMediaPublishSchedule) {
+  if (requiresManualPlatformVerification(row)) {
+    return '平台页面可能已经完成内容填充。请先核对抖音作品管理页和草稿；已提交则确认发布结果，未提交则人工处理当前草稿或重新创建任务，禁止直接重复填充。'
+  }
   if (row.failureCode === 'WECHAT_COVER_MATERIAL_NOT_FOUND') return '公众号封面素材不存在或不属于当前品牌。请打开文章详情更换封面素材后重新创建排期。'
   if (row.failureCode === 'WECHAT_COVER_MATERIAL_INVALID') return '公众号封面素材格式不受支持。请更换 JPG、PNG、GIF 或 BMP 图片后重新创建排期。'
   if (row.failureCode === 'WECHAT_COVER_FILE_MISSING') return '公众号封面素材文件缺失。请重新上传或更换封面素材后重新创建排期。'

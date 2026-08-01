@@ -12,6 +12,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
 import com.huanjing.geo.module.content.mapper.SelfMediaScheduleCapabilityMapper;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
 import com.huanjing.geo.module.content.vo.SelfMediaScheduleCapabilityVO;
@@ -123,6 +124,35 @@ public class SelfMediaScheduleCapabilityService {
             return PlatformScheduleReadiness.rejected("PLATFORM_SCHEDULE_STRATEGY_DISABLED", "平台 v1 策略未启用自动定时发布");
         }
         return PlatformScheduleReadiness.ready(row, contract);
+    }
+
+    /**
+     * Immediate browser publishing is not a platform scheduled-publish request.
+     * It may therefore use the backend execution queue even when the platform's
+     * verified scheduled-publish strategy is different.
+     */
+    public PlatformScheduleReadiness immediatePublishReadiness(String platform, String requestedStrategy) {
+        String normalized = normalizePlatform(platform);
+        SelfMediaScheduleCapability row = mapper.selectByPlatform(normalized);
+        if (row == null || !STATUS_VERIFIED.equals(normalize(row.getVerificationStatus()))) {
+            return PlatformScheduleReadiness.rejected(
+                    "PLATFORM_CAPABILITY_UNVERIFIED",
+                    "平台浏览器发布能力尚未完成验证"
+            );
+        }
+        SelfMediaPlatformCapabilityContract contract = scheduleAdapterRouter.contract(normalized).orElse(null);
+        if (contract == null) {
+            return PlatformScheduleReadiness.rejected("PLATFORM_CONTRACT_MISSING", "平台发布能力契约尚未接入");
+        }
+        String strategy = normalize(requestedStrategy);
+        if (STRATEGY_BACKEND_DELAYED_PUBLISH.equals(strategy)
+                && SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION.equals(contract.publishChannel())) {
+            return PlatformScheduleReadiness.ready(row, contract);
+        }
+        return PlatformScheduleReadiness.rejected(
+                "PLATFORM_BACKEND_DELAYED_UNSUPPORTED",
+                "平台契约声明不支持指纹浏览器立即发布"
+        );
     }
 
     public Map<String, Object> automationOptions(String platform) {

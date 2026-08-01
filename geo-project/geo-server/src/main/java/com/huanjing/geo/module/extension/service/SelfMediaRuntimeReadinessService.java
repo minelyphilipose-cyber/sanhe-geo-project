@@ -57,7 +57,9 @@ public class SelfMediaRuntimeReadinessService {
             if (!"verified".equalsIgnoreCase(extension.getLoginStatus())) {
                 blockedReasons.add(ACCOUNT_NOT_VERIFIED);
             }
-            if (versionBelow(extension.getExtensionVersion(), properties.getGate().getMinExtensionVersion())) {
+            if (versionBelow(
+                    extension.getExtensionVersion(),
+                    properties.getGate().minExtensionVersionFor(query.platform()))) {
                 blockedReasons.add(EXTENSION_VERSION_TOO_LOW);
             }
             if (!supportsCapability(extension.getCapabilitiesJson(), query.requiredExtensionFeature())) {
@@ -80,7 +82,9 @@ public class SelfMediaRuntimeReadinessService {
                     && helper.getRunningTaskCount() >= helper.getCapacity()) {
                 blockedReasons.add(HELPER_CAPACITY_FULL);
             }
-            if (versionBelow(helper.getHelperVersion(), properties.getGate().getMinHelperVersion())) {
+            if (versionBelow(
+                    helper.getHelperVersion(),
+                    properties.getGate().minHelperVersionFor(query.platform()))) {
                 blockedReasons.add(HELPER_VERSION_TOO_LOW);
             }
             if (!supportsCapability(helper.getCapabilitiesJson(), query.requiredHelperFeature())) {

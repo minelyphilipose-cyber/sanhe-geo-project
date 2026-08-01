@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.1.11'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.2.0'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -68,7 +68,8 @@ if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
           : '填充失败'
         const errorMessage = error?.message || String(error || '未知错误')
         const failureCode = classifyGeoFillFailureCode(errorMessage, message?.payload?.platform)
-        showStatus(`${errorPrefix}：${errorMessage}`, 'error')
+        const statusType = failureCode === 'WORKS_LIST_VERIFY_TIMEOUT' ? 'info' : 'error'
+        showStatus(`${errorPrefix}：${errorMessage}`, statusType)
         sendResponse({
           ok: false,
           error: errorMessage,
@@ -91,6 +92,7 @@ function isEditorReadyReportLocation() {
   if (location.hostname === 'creator.douyin.com') {
     return href.includes('/creator-micro/content/upload')
       || href.includes('/creator-micro/content/post/article')
+      || href.includes('/creator-micro/content/post/image')
   }
   return false
 }
@@ -171,6 +173,7 @@ function collectAdapterState(platform) {
     delay,
     clickTrustedActionOnce,
     requestTrustedClickAt,
+    typeTrustedText,
     findVisibleTextElement,
     nearestLargeContainer,
     normalizeText,
@@ -220,6 +223,26 @@ async function fillPayload(payload) {
   }
   showStatus(`v${GEO_ENV_CONTENT_SCRIPT_VERSION} 正在等待编辑器...`, 'info')
   const fillProfile = buildFillProfile(payload)
+  if (normalizePlatform(fillProfile.platform) === 'douyin'
+      && String(payload.contentKind || payload.platformOptions?.contentKind || '') === 'image_text') {
+    await ensureEditorVisible(fillProfile)
+    assertPlatformLoggedIn(fillProfile)
+    const identityCheck = resolveFillIdentityCheck(payload)
+    const result = await DOUYIN_PUBLISH_OPTIONS_ADAPTER.fillImageText(payload, fillProfile)
+    updateActiveFillStage('completed')
+    return normalizeFillResult({
+      titleFilled: true,
+      contentFilled: true,
+      tagsFilled: Boolean(result.topicSelected),
+      publishOptions: result,
+      platform: fillProfile.platform,
+      taskId: payload.taskId || null,
+      identityCheck,
+      filledTitle: payload.title || payload.articleTitle || '',
+      titleElement: 'input[placeholder="添加作品标题"]',
+      contentElement: '[data-slate-editor="true"][contenteditable="true"]',
+    }, payload)
+  }
   await ensureEditorVisible(fillProfile)
   updateActiveFillStage('editor_ready')
   normalizeEditorViewport(fillProfile)
@@ -387,6 +410,7 @@ var DOUYIN_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_DOUYIN_PLATFORM__?.createP
   delay,
   clickTrustedActionOnce,
   requestTrustedClickAt,
+  typeTrustedText,
   findVisibleTextElement,
   nearestLargeContainer,
   normalizeText,
@@ -394,10 +418,22 @@ var DOUYIN_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_DOUYIN_PLATFORM__?.createP
   collectVisibleActionElements,
   showStatus,
   updateStage: updateActiveFillStage,
+  persistImageTextState: async (taskId, state) => {
+    const response = await safeRuntimeRequest({
+      type: 'GEO_ENV_DOUYIN_IMAGE_TEXT_STATE',
+      taskId,
+      state,
+    })
+    if (!response?.ok) throw new Error(response?.error || '抖音图文状态持久化失败')
+    return response.state
+  },
 }) || {
   platform: 'douyin',
   fillPublishOptions: async () => {
     throw new Error('DOUYIN_ADAPTER_NOT_LOADED：抖音平台适配器未加载，请重新加载扩展')
+  },
+  fillImageText: async () => {
+    throw new Error('DOUYIN_ADAPTER_NOT_LOADED：抖音图文平台适配器未加载，请重新加载扩展')
   },
 }
 
@@ -1587,23 +1623,14 @@ async function verifyToutiaoScheduledWorkInList(value, context = {}) {
     throw new Error(`WORKS_LIST_VERIFY_TIMEOUT：头条作品管理页未进入；target=${value.full}；href=${location.href}；${describeToutiaoPreviewState()}`)
   }
 
-  const matched = await waitForCondition(
-    () => findToutiaoScheduledWorkMatch(value, context),
-    15000,
-    `WORKS_LIST_VERIFY_TIMEOUT：头条作品列表未匹配到定时文章；target=${value.full}；${describeToutiaoWorksListState(context)}`,
-  ).catch(() => null)
-  if (!matched) {
-    throw new Error(`WORKS_LIST_VERIFY_TIMEOUT：头条作品列表未匹配到定时文章；target=${value.full}；${describeToutiaoWorksListState(context)}`)
-  }
-  return {
-    verified: true,
-    platformStatus: 'scheduled',
-    matchedTitle: matched.title,
-    scheduledAtText: matched.scheduledAtText,
-    locationText: matched.locationText,
-    hasCover: matched.hasCover,
-    pageUrl: location.href,
-  }
+  // The first works-list document after Toutiao redirects is frequently a cached
+  // snapshot that does not contain the just-submitted article. Do not accept a
+  // match from that stale document. The service worker owns the irreversible
+  // post-submit boundary and will refresh the list before matching it.
+  throw new Error(
+    `WORKS_LIST_VERIFY_TIMEOUT：头条已进入作品管理页，需刷新列表后确认定时文章；`
+    + `target=${value.full}；${describeToutiaoWorksListState(context)}`,
+  )
 }
 
 function isToutiaoPreviewPublishCompleted() {
@@ -4577,6 +4604,10 @@ async function clickTrustedActionOnce(el, options = {}) {
   target.scrollIntoView?.({ block: 'center', inline: 'center' })
   await delay(100)
   if (normalizePlatform(options.platform) === 'douyin') {
+    if (options.trustedOnly) {
+      await requestTrustedClick(target, options)
+      return
+    }
     firePointerClick(target, options)
     target.click?.()
     await delay(80)
@@ -4655,6 +4686,31 @@ async function requestTrustedClickAt(point, platform, label = '', rect = null) {
       label,
     },
   })
+}
+
+async function typeTrustedText(el, text, options = {}) {
+  const value = String(text || '')
+  if (!value) return
+  el.scrollIntoView?.({ block: 'center', inline: 'nearest' })
+  el.focus?.()
+  await delay(80)
+  globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = {
+    ...(globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || {}),
+    lastTrustedTextInput: {
+      label: options.label || '',
+      length: Array.from(value).length,
+    },
+  }
+  const response = await safeRuntimeRequest({
+    type: 'GEO_ENV_TRUSTED_TYPE',
+    input: {
+      text: value,
+      label: options.label || '',
+    },
+  })
+  if (!response?.ok) {
+    throw new Error(response?.error || '真实文本输入失败')
+  }
 }
 
 function findTitleElement(fillProfile) {

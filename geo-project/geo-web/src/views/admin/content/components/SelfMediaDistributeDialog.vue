@@ -26,7 +26,7 @@
           :class="{ active: selectedMediaPlatform === 'douyin', disabled: selfMediaSubmitting || !douyinDistributionAvailable }"
           type="button"
           :disabled="selfMediaSubmitting || !douyinDistributionAvailable"
-          @click="actions.handleDouyinPlatformClick()"
+          @click="actions.handleSemiAutoPlatformClick('douyin')"
         >
           <span class="douyin-mark">抖</span>
           <span class="media-name">抖音图文</span>
@@ -102,7 +102,15 @@
       </div>
 
       <div v-if="currentPlatformAccounts.length" class="self-media-account-list">
-        <div v-for="account in currentPlatformAccounts" :key="account.id" class="self-media-account-row">
+        <div
+          v-for="account in currentPlatformAccounts"
+          :key="account.id"
+          class="self-media-account-row"
+          :class="{ selected: selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId === account.id }"
+        >
+          <el-tag v-if="selectedMediaPlatform === 'douyin'" size="small" type="primary">
+            系统自动匹配
+          </el-tag>
           <div class="self-media-account-main">
             <div class="self-media-account-title">{{ account.accountName }}</div>
             <div class="self-media-account-meta">{{ account.platformAccountId }}</div>
@@ -159,69 +167,6 @@
         v-else-if="actions.isSemiAutoPlatform(selectedMediaPlatform)"
         :description="`当前品牌暂无可用的${actions.semiAutoPlatformLabel(selectedMediaPlatform)}账号`"
       />
-
-      <div v-if="selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId" class="cover-picker">
-        <div class="cover-picker-header">
-          <span>选择抖音图文图片</span>
-          <el-tag size="small" type="info">{{ selectedDouyinImageMaterialIds.length }}/30</el-tag>
-        </div>
-        <div class="folder-toolbar">
-          <el-radio-group v-model="folderScope" size="small" @change="actions.handleFolderScopeChange">
-            <el-radio-button label="project">项目关联</el-radio-button>
-            <el-radio-button label="all">品牌全部</el-radio-button>
-          </el-radio-group>
-        </div>
-        <div v-if="displayImageFolders.length" class="folder-list">
-          <button
-            v-for="folder in displayImageFolders"
-            :key="folder.id"
-            type="button"
-            class="folder-item"
-            :class="{ selected: selectedImageFolderId === folder.id }"
-            @click="actions.selectImageFolder(folder.id)"
-          >
-            <span>{{ folder.folderName }}</span>
-            <el-tag v-if="folder.projectRelated" size="small" type="success">项目</el-tag>
-            <el-tag size="small" type="info">{{ folder.materialCount || folder.materials.length }}</el-tag>
-          </button>
-        </div>
-        <el-empty v-if="!douyinImageMaterials.length" description="当前品牌暂无 JPG/PNG 图片素材" />
-        <div v-else class="cover-grid">
-          <button
-            v-for="material in douyinImageMaterials"
-            :key="material.id"
-            type="button"
-            class="cover-item"
-            :class="{ selected: selectedDouyinImageMaterialIds.includes(material.id) }"
-            @click="actions.toggleDouyinImage(material.id)"
-          >
-            <img :src="actions.materialThumbUrl(material)" :alt="material.fileName" loading="lazy" />
-            <span>{{ material.fileName }}</span>
-          </button>
-        </div>
-        <div v-if="selectedDouyinMaterials.length" class="douyin-selected-list">
-          <div v-for="(material, index) in selectedDouyinMaterials" :key="material.id" class="douyin-selected-row">
-            <span class="douyin-selected-index">{{ index + 1 }}</span>
-            <span class="douyin-selected-name">{{ material.fileName }}</span>
-            <el-button size="small" :disabled="index === 0" @click="actions.moveDouyinImage(index, -1)">上移</el-button>
-            <el-button size="small" :disabled="index === selectedDouyinMaterials.length - 1" @click="actions.moveDouyinImage(index, 1)">下移</el-button>
-          </div>
-        </div>
-        <div class="douyin-text-editor">
-          <div class="cover-picker-header">
-            <span>图文文案</span>
-            <el-tag size="small" :type="douyinTextValue.length > 1000 ? 'danger' : 'info'">{{ douyinTextValue.length }}/1000</el-tag>
-          </div>
-          <el-input
-            v-model="douyinTextValue"
-            type="textarea"
-            :rows="4"
-            maxlength="1000"
-            show-word-limit
-            placeholder="可填写抖音图文文案；不填时后端使用文章标题"
-          />
-        </div>
-      </div>
 
       <div v-if="distributionAttempts.length" class="distribution-history">
         <div class="cover-picker-header">
@@ -315,15 +260,6 @@
     </div>
     <template #footer>
       <el-button @click="visible = false">关闭</el-button>
-      <el-button
-        v-if="selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId"
-        type="primary"
-        :loading="selfMediaSubmitting"
-        :disabled="!selectedDouyinImageMaterialIds.length || douyinTextValue.length > 1000 || !douyinDistributionAvailable"
-        @click="actions.submitDouyinImageText()"
-      >
-        {{ douyinSubmitButtonText }}
-      </el-button>
     </template>
   </el-dialog>
 </template>
@@ -369,7 +305,13 @@ const props = defineProps<{
   douyinImageMaterials: BrandMaterial[]
   selectedDouyinImageMaterialIds: number[]
   selectedDouyinMaterials: BrandMaterial[]
+  douyinTitle: string
   douyinText: string
+  douyinTopicRegionText: string
+  douyinTopicIndustryText: string
+  douyinTopicQuery: string
+  douyinTopicError: string
+  douyinTopicLoading: boolean
   distributionAttempts: DistributionTask[]
   refreshingReviewTaskId: number | null
   semiAutoConfirmingTaskId: number | null
@@ -383,6 +325,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   'update:imageFolderScope': [value: 'project' | 'all']
   'update:selectedCoverMaterialId': [value: number | null]
+  'update:douyinTitle': [value: string]
   'update:douyinText': [value: string]
   brandConfig: [brandId: number | null]
 }>()
@@ -400,6 +343,19 @@ const folderScope = computed({
 const douyinTextValue = computed({
   get: () => props.douyinText,
   set: (value) => emit('update:douyinText', value),
+})
+
+const douyinTitleValue = computed({
+  get: () => props.douyinTitle,
+  set: (value) => emit('update:douyinTitle', value),
+})
+
+const douyinDescriptionTotalLength = computed(() => {
+  const description = props.douyinText.trim()
+  if (!props.douyinTopicQuery) return description.length
+  return description.includes(props.douyinTopicQuery)
+    ? description.length
+    : `${description}\n${props.douyinTopicQuery}`.length
 })
 
 const helperHealthSummary = computed(() => {
@@ -679,6 +635,16 @@ function formatShortTime(value?: string | null) {
   color: var(--el-text-color-primary);
 }
 
+.douyin-auto-selection-hint {
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: #f0f7ff;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .folder-toolbar {
   display: flex;
   justify-content: flex-start;
@@ -733,6 +699,10 @@ function formatShortTime(value?: string | null) {
   box-shadow: 0 0 0 1px var(--el-color-primary) inset;
 }
 
+.douyin-auto-cover-item {
+  cursor: default;
+}
+
 .cover-item img {
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -764,7 +734,7 @@ function formatShortTime(value?: string | null) {
   min-height: 44px;
   padding: 8px 10px;
   display: grid;
-  grid-template-columns: 32px 1fr auto auto;
+  grid-template-columns: 32px 1fr;
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid #ebeef5;

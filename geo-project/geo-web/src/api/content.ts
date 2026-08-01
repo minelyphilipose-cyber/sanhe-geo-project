@@ -1579,6 +1579,7 @@ export function createSelfMediaPublishSchedules(data: {
 export function previewSelfMediaPlatformQuickSchedule(data: {
   articleId: number
   platform: string
+  selfMediaAccountId?: number
 }) {
   return request.post<R<SelfMediaPlatformQuickScheduleResponse>>('/content/self-media-schedules/platform-quick-preview', data)
 }
@@ -1586,6 +1587,12 @@ export function previewSelfMediaPlatformQuickSchedule(data: {
 export function createSelfMediaPlatformQuickSchedule(data: {
   articleId: number
   platform: string
+  selfMediaAccountId?: number
+  douyinImageText?: {
+    title: string
+    description: string
+    imageMaterialIds?: number[]
+  }
   replaceNextScheduled?: boolean
 }) {
   return request.post<R<SelfMediaPlatformQuickScheduleResponse>>('/content/self-media-schedules/platform-quick-create', data, {
@@ -1598,6 +1605,12 @@ export function createSelfMediaPlatformQuickSchedule(data: {
 export function dispatchSelfMediaPlatformQuickSchedule(data: {
   articleId: number
   platform: string
+  selfMediaAccountId?: number
+  douyinImageText?: {
+    title: string
+    description: string
+    imageMaterialIds?: number[]
+  }
   replaceNextScheduled?: boolean
 }) {
   return request.post<R<SelfMediaPlatformQuickScheduleResponse>>('/content/self-media-schedules/platform-quick-dispatch', data, {

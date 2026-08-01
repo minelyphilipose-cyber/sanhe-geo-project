@@ -62,6 +62,8 @@ public class ArticleGenerationEngine {
         }
         TitleLimitResult titleLimit = limitTitle(content, input.maxTitleChars());
         content = titleLimit.content();
+        ContentLimitResult contentLimit = limitBodyContent(content, input.maxContentChars());
+        content = contentLimit.content();
         markdownImageReferenceValidator.validate(input.project(), content);
         BatchArticleQualityChecker.QualityResult quality = null;
         String title = extractTitle(content);
@@ -70,6 +72,10 @@ public class ArticleGenerationEngine {
             if (titleLimit.truncated()) {
                 quality = qualityChecker.withWarning(quality, "title_truncated",
                         "标题超过" + input.maxTitleChars() + "字，已自动截短");
+            }
+            if (contentLimit.truncated()) {
+                quality = qualityChecker.withWarning(quality, "content_truncated",
+                        "正文超过" + input.maxContentChars() + "字，已按平台限制自动收束");
             }
             if (titleDuplicateChecker.exists(input.project().getId(), title)) {
                 quality = qualityChecker.withWarning(quality, "duplicate_title", "标题与项目历史文章标准化后完全相同");
@@ -170,6 +176,35 @@ public class ArticleGenerationEngine {
         return StringUtils.hasText(value) ? value : title.trim();
     }
 
+    private ContentLimitResult limitBodyContent(String content, Integer maxContentChars) {
+        if (!StringUtils.hasText(content) || maxContentChars == null || maxContentChars <= 0) {
+            return new ContentLimitResult(content, false);
+        }
+        int firstLineEnd = content.indexOf('\n');
+        String titleLine = firstLineEnd < 0 ? content.trim() : content.substring(0, firstLineEnd).trim();
+        String body = firstLineEnd < 0 ? "" : content.substring(firstLineEnd + 1).trim();
+        if (body.codePointCount(0, body.length()) <= maxContentChars) {
+            return new ContentLimitResult(content, false);
+        }
+        int end = body.offsetByCodePoints(0, maxContentChars);
+        String candidate = body.substring(0, end);
+        int minimumBoundary = candidate.length() * 2 / 3;
+        int boundary = -1;
+        for (int index = minimumBoundary; index < candidate.length(); index++) {
+            char current = candidate.charAt(index);
+            if ("。！？!?；;\n".indexOf(current) >= 0) {
+                boundary = index + 1;
+            }
+        }
+        String shortenedBody = (boundary > 0 ? candidate.substring(0, boundary) : candidate)
+                .replaceFirst("[，、：,:\\s]+$", "")
+                .trim();
+        String shortened = StringUtils.hasText(shortenedBody)
+                ? titleLine + "\n\n" + shortenedBody
+                : titleLine;
+        return new ContentLimitResult(shortened.trim(), true);
+    }
+
     public String extractTitle(String content) {
         String[] lines = content.split("\\r?\\n");
         for (String line : lines) {
@@ -197,7 +232,44 @@ public class ArticleGenerationEngine {
                                  List<String> forbiddenPhrases,
                                  Integer maxTitleChars,
                                  double effectiveTemperature,
-                                 LlmCallMeasurementContext measurementContext) {
+                                 LlmCallMeasurementContext measurementContext,
+                                 Integer maxContentChars) {
+        public GenerateInput(Project project,
+                             Brand brand,
+                             String systemPrompt,
+                             String userPrompt,
+                             String modelPlatformCode,
+                             String modelId,
+                             boolean longForm,
+                             boolean allowContactInfo,
+                             boolean checkQuality,
+                             List<String> forbiddenPhrases,
+                             Integer maxTitleChars,
+                             double effectiveTemperature,
+                             LlmCallMeasurementContext measurementContext) {
+            this(project, brand, systemPrompt, userPrompt, modelPlatformCode, modelId, longForm,
+                    allowContactInfo, checkQuality, forbiddenPhrases, maxTitleChars, effectiveTemperature,
+                    measurementContext, null);
+        }
+
+        public GenerateInput(Project project,
+                             Brand brand,
+                             String systemPrompt,
+                             String userPrompt,
+                             String modelPlatformCode,
+                             String modelId,
+                             boolean longForm,
+                             boolean allowContactInfo,
+                             boolean checkQuality,
+                             List<String> forbiddenPhrases,
+                             Integer maxTitleChars,
+                             double effectiveTemperature,
+                             Integer maxContentChars) {
+            this(project, brand, systemPrompt, userPrompt, modelPlatformCode, modelId, longForm,
+                    allowContactInfo, checkQuality, forbiddenPhrases, maxTitleChars, effectiveTemperature,
+                    LlmCallMeasurementContext.empty(), maxContentChars);
+        }
+
         public GenerateInput(Project project,
                              Brand brand,
                              String systemPrompt,
@@ -212,7 +284,7 @@ public class ArticleGenerationEngine {
                              double effectiveTemperature) {
             this(project, brand, systemPrompt, userPrompt, modelPlatformCode, modelId, longForm,
                     allowContactInfo, checkQuality, forbiddenPhrases, maxTitleChars, effectiveTemperature,
-                    LlmCallMeasurementContext.empty());
+                    LlmCallMeasurementContext.empty(), null);
         }
 
         public GenerateInput {
@@ -234,5 +306,8 @@ public class ArticleGenerationEngine {
     }
 
     private record TitleLimitResult(String content, boolean truncated) {
+    }
+
+    private record ContentLimitResult(String content, boolean truncated) {
     }
 }

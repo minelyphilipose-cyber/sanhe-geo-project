@@ -28,7 +28,7 @@ public class GlobalExceptionHandler {
         if (e.getHttpStatus() > 0 && e.getHttpStatus() != 200) {
             response.setStatus(e.getHttpStatus());
         }
-        if (e.getCode() >= 500) {
+        if (shouldLogBizExceptionAsError(e)) {
             log.error("Business exception code={} path={} method={} ip={} msg={}",
                     e.getCode(), request.getRequestURI(), request.getMethod(), request.getRemoteAddr(), e.getMessage(), e);
         } else {
@@ -36,6 +36,14 @@ public class GlobalExceptionHandler {
                     e.getCode(), request.getRequestURI(), request.getMethod(), request.getRemoteAddr(), e.getMessage());
         }
         return R.fail(e.getCode(), e.getMessage(), e.getData());
+    }
+
+    static boolean shouldLogBizExceptionAsError(BizException exception) {
+        return isServerErrorValue(exception.getHttpStatus()) || isServerErrorValue(exception.getCode());
+    }
+
+    private static boolean isServerErrorValue(int value) {
+        return value >= 500 && value < 600;
     }
 
     @ExceptionHandler(BadCredentialsException.class)

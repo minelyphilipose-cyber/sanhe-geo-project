@@ -532,6 +532,7 @@
       v-model="mediaDistributeVisible"
       v-model:image-folder-scope="imageFolderScope"
       v-model:selected-cover-material-id="selectedCoverMaterialId"
+      v-model:douyin-title="douyinTitle"
       v-model:douyin-text="douyinText"
       :selected-media-platform="selectedMediaPlatform"
       :local-helper-health="lastLocalHelperHealth"
@@ -561,6 +562,11 @@
       :douyin-image-materials="douyinImageMaterials"
       :selected-douyin-image-material-ids="selectedDouyinImageMaterialIds"
       :selected-douyin-materials="selectedDouyinMaterials"
+      :douyin-topic-region-text="douyinTopicRegionText"
+      :douyin-topic-industry-text="douyinTopicIndustryText"
+      :douyin-topic-query="douyinTopicQuery"
+      :douyin-topic-error="douyinTopicError"
+      :douyin-topic-loading="douyinTopicLoading"
       :distribution-attempts="distributionAttempts"
       :refreshing-review-task-id="refreshingReviewTaskId"
       :semi-auto-confirming-task-id="semiAutoConfirmingTaskId"
@@ -703,7 +709,13 @@ const {
   selectedSelfMediaAccountId,
   selectedCoverMaterialId,
   selectedDouyinImageMaterialIds,
+  douyinTitle,
   douyinText,
+  douyinTopicRegionText,
+  douyinTopicIndustryText,
+  douyinTopicQuery,
+  douyinTopicError,
+  douyinTopicLoading,
   distributionAttempts,
   refreshingReviewTaskId,
   semiAutoConfirmingTaskId,
@@ -788,6 +800,7 @@ const statusOptions = [
   { label: '已分发', value: 'distributed' },
   { label: '已发布', value: 'published' },
   { label: '已下架', value: 'unpublished' },
+  { label: '分发失败', value: 'failed' },
 ]
 
 const channelFilterOptions = [

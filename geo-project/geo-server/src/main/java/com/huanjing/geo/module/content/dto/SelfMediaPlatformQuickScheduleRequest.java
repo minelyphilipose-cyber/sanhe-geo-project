@@ -12,5 +12,9 @@ public class SelfMediaPlatformQuickScheduleRequest {
     @NotBlank
     private String platform;
 
+    private Long selfMediaAccountId;
+
     private Boolean replaceNextScheduled;
+
+    private DouyinImageTextQuickPublishRequest douyinImageText;
 }

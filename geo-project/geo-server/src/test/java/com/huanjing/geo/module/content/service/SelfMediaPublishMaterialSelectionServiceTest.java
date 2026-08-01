@@ -4,8 +4,10 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.customer.entity.BrandImageFolder;
+import com.huanjing.geo.module.customer.entity.BrandImageFolderProject;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandImageFolderMapper;
+import com.huanjing.geo.module.customer.mapper.BrandImageFolderProjectMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import com.huanjing.geo.module.customer.service.BrandImageFolderService;
 import com.huanjing.geo.module.project.entity.Project;
@@ -19,11 +21,13 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class SelfMediaPublishMaterialSelectionServiceTest {
     private BrandImageFolderMapper folderMapper;
+    private BrandImageFolderProjectMapper folderProjectMapper;
     private BrandMaterialMapper materialMapper;
     private SelfMediaPublishMaterialSelectionService service;
 
@@ -44,8 +48,9 @@ class SelfMediaPublishMaterialSelectionServiceTest {
     @BeforeEach
     void setUp() {
         folderMapper = mock(BrandImageFolderMapper.class);
+        folderProjectMapper = mock(BrandImageFolderProjectMapper.class);
         materialMapper = mock(BrandMaterialMapper.class);
-        service = new SelfMediaPublishMaterialSelectionService(folderMapper, materialMapper);
+        service = new SelfMediaPublishMaterialSelectionService(folderMapper, folderProjectMapper, materialMapper);
     }
 
     @Test
@@ -82,6 +87,39 @@ class SelfMediaPublishMaterialSelectionServiceTest {
 
         assertEquals(88L, selection.coverMaterialId());
         assertEquals(List.of(88L), selection.imageMaterialIds());
+    }
+
+    @Test
+    void automaticallyCombinesArticleCoverWithProjectIllustrationFolderImages() {
+        BrandImageFolder coverFolder = activeFolder(9L);
+        BrandImageFolder illustrationFolder = activeFolder(10L);
+        illustrationFolder.setFolderName("插图_huawei");
+        BrandMaterial cover = material(88L, "https://cdn.local/cover.png", coverFolder.getId());
+        List<BrandMaterial> illustrations = List.of(
+                material(101L, "https://cdn.local/1.png", illustrationFolder.getId()),
+                material(102L, "https://cdn.local/2.png", illustrationFolder.getId()),
+                material(103L, "https://cdn.local/3.png", illustrationFolder.getId())
+        );
+        ArticleDraft article = new ArticleDraft();
+        article.setCoverImageUrl(cover.getFileUrl());
+        when(materialMapper.selectOne(any())).thenReturn(cover);
+        when(materialMapper.selectById(anyLong())).thenAnswer(invocation -> {
+            long id = invocation.getArgument(0);
+            if (id == cover.getId()) return cover;
+            return illustrations.stream().filter(item -> item.getId() == id).findFirst().orElse(null);
+        });
+        when(folderMapper.selectList(any())).thenReturn(List.of(illustrationFolder));
+        when(folderMapper.selectById(coverFolder.getId())).thenReturn(coverFolder);
+        when(folderMapper.selectById(illustrationFolder.getId())).thenReturn(illustrationFolder);
+        BrandImageFolderProject relation = new BrandImageFolderProject();
+        relation.setFolderId(illustrationFolder.getId());
+        relation.setProjectId(30L);
+        when(folderProjectMapper.selectList(any())).thenReturn(List.of(relation));
+        when(materialMapper.selectList(any())).thenReturn(illustrations);
+
+        List<Long> selected = service.selectDouyinImageTextImages(project(), article, "");
+
+        assertEquals(List.of(88L, 101L, 102L, 103L), selected);
     }
 
     private Project project() {

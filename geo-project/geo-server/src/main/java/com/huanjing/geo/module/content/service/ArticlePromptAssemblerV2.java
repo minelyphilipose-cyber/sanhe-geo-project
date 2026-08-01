@@ -130,7 +130,10 @@ public class ArticlePromptAssemblerV2 {
         snapshot.put("templateVersionNo", version == null ? null : version.getVersionNo());
         snapshot.put("runtimePolicy", runtimePolicy);
         snapshot.put("effectiveLengthPolicy", contentLengthPolicy);
-        snapshot.put("effectiveTitleMaxChars", ArticlePromptChannels.maxTitleChars(runtimePolicy.channelGroupCode()));
+        snapshot.put("effectiveTitleMaxChars", ArticlePromptChannels.maxTitleChars(
+                runtimePolicy.channelGroupCode(),
+                runtimePolicy.channelSubCode()
+        ));
         snapshot.put("effectiveTemperature", ArticleGenerationTemperatures.resolve(true, specialIndustry));
         snapshot.put("omittedMaterialKeys", omittedMaterialKeys.stream().distinct().toList());
         snapshot.put("perspectiveMatchedScope", input.perspectiveMatchedScope());
@@ -367,7 +370,10 @@ public class ArticlePromptAssemblerV2 {
 
     private String outputRules(ArticleContentLengthPolicy contentLengthPolicy,
                                ArticleRuntimePolicy runtimePolicy) {
-        Integer maxTitleChars = ArticlePromptChannels.maxTitleChars(runtimePolicy.channelGroupCode());
+        Integer maxTitleChars = ArticlePromptChannels.maxTitleChars(
+                runtimePolicy.channelGroupCode(),
+                runtimePolicy.channelSubCode()
+        );
         String titleRequirement = maxTitleChars == null
                 ? "首行使用一个清晰标题；"
                 : "首行使用一个清晰、完整、自然的标题，标题不超过" + maxTitleChars

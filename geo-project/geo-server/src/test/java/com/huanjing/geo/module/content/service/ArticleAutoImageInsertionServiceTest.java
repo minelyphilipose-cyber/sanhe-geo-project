@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service;
 import com.huanjing.geo.module.customer.entity.BrandImageFolder;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandImageFolderMapper;
+import com.huanjing.geo.module.customer.mapper.BrandImageFolderProjectMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import com.huanjing.geo.module.customer.service.BrandMaterialPublicUrlService;
 import com.huanjing.geo.module.project.entity.Project;
@@ -21,6 +22,7 @@ import static org.mockito.Mockito.when;
 class ArticleAutoImageInsertionServiceTest {
 
     private BrandImageFolderMapper folderMapper;
+    private BrandImageFolderProjectMapper folderProjectMapper;
     private BrandMaterialMapper brandMaterialMapper;
     private BrandMaterialPublicUrlService publicUrlService;
     private ArticleAutoImageInsertionService service;
@@ -28,9 +30,15 @@ class ArticleAutoImageInsertionServiceTest {
     @BeforeEach
     void setUp() {
         folderMapper = mock(BrandImageFolderMapper.class);
+        folderProjectMapper = mock(BrandImageFolderProjectMapper.class);
         brandMaterialMapper = mock(BrandMaterialMapper.class);
         publicUrlService = mock(BrandMaterialPublicUrlService.class);
-        service = new ArticleAutoImageInsertionService(folderMapper, brandMaterialMapper, publicUrlService);
+        service = new ArticleAutoImageInsertionService(
+                folderMapper,
+                folderProjectMapper,
+                brandMaterialMapper,
+                publicUrlService
+        );
     }
 
     @Test
@@ -103,7 +111,7 @@ class ArticleAutoImageInsertionServiceTest {
         String xiaohongshu = service.insertForChannel(project(), "self_media", "xiaohongshu", "正文", null);
         String toutiao = service.insertForChannel(project(), "self_media", "toutiao", "正文", null);
 
-        assertThat(douyin).isEqualTo("正文");
+        assertThat(douyin).contains("![配图.png](https://app.example.com/api/public/brand-materials/1/stream)");
         assertThat(xiaohongshu).isEqualTo("正文");
         assertThat(toutiao).isEqualTo("正文");
     }
@@ -209,7 +217,13 @@ class ArticleAutoImageInsertionServiceTest {
     }
 
     @Test
-    void insertForChannel_stripsExistingImagesForDouyinBody() {
+    void insertForChannel_preservesAndCompletesDouyinImagesDuringGeneration() {
+        BrandMaterial generatedImage = material(3L, "自动配图.png", "https://cdn.example.com/auto.png");
+        when(folderMapper.selectList(any())).thenReturn(List.of(folder(100L, "插图_项目")));
+        when(brandMaterialMapper.selectList(any())).thenReturn(List.of(generatedImage));
+        when(publicUrlService.buildPublicStreamUrl(generatedImage))
+                .thenReturn("https://app.example.com/api/public/brand-materials/3/stream");
+
         String result = service.insertForChannel(project(), "self_media", "douyin", """
                 # 标题
 
@@ -223,10 +237,10 @@ class ArticleAutoImageInsertionServiceTest {
         assertThat(result).contains("# 标题");
         assertThat(result).contains("第一段文字。");
         assertThat(result).contains("第二段文字。");
-        assertThat(result).doesNotContain("![");
-        assertThat(result).doesNotContain("<img");
-        verify(folderMapper, never()).selectList(any());
-        verify(brandMaterialMapper, never()).selectList(any());
+        assertThat(result).contains("![正文配图](https://app.example.com/api/public/brand-materials/2/stream)");
+        assertThat(result).contains("![自动配图.png](https://app.example.com/api/public/brand-materials/3/stream)");
+        verify(folderMapper).selectList(any());
+        verify(brandMaterialMapper, org.mockito.Mockito.atLeastOnce()).selectList(any());
     }
 
     @Test

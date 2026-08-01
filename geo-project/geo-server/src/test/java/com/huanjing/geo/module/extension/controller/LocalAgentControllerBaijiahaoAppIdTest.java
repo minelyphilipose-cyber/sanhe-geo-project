@@ -55,7 +55,7 @@ class LocalAgentControllerBaijiahaoAppIdTest {
     @Test
     void defaultPublishUrlUsesDouyinCreatorUploadPage() throws Exception {
         assertEquals(
-                "https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page",
+                "https://creator.douyin.com/creator-micro/content/upload?default-tab=3",
                 defaultPublishUrl("douyin")
         );
     }

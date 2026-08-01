@@ -204,7 +204,7 @@ semi-auto:
           - a
           - img
       douyin:
-        publish-url: ${SEMI_AUTO_DOUYIN_PUBLISH_URL:https://creator.douyin.com/creator-micro/content/post/article?media_type=article&type=new&enter_from=publish_page}
+        publish-url: ${SEMI_AUTO_DOUYIN_PUBLISH_URL:https://creator.douyin.com/creator-micro/content/upload?default-tab=3}
         cookie-domains:
           - ".douyin.com"
           - ".bytedance.com"
@@ -233,6 +233,12 @@ semi-auto:
           - img
 
 geo:
+  self-media-runtime:
+    gate:
+      platforms:
+        douyin:
+          min-extension-version: ${DOUYIN_IMAGE_TEXT_MIN_EXTENSION_VERSION:0.2.0}
+          min-helper-version: ${DOUYIN_IMAGE_TEXT_MIN_HELPER_VERSION:0.2.0}
   scheduling:
     pool-size: ${GEO_SCHEDULING_POOL_SIZE:8}
     await-termination-seconds: ${GEO_SCHEDULING_AWAIT_TERMINATION_SECONDS:30}

@@ -505,7 +505,8 @@ class ExtensionTaskStateServiceTest {
     @Test
     void failPostSubmissionVerificationErrorDoesNotScheduleFreshPublishRetry() {
         stubTask("filling");
-        when(taskMapper.markSemiAutoFailed(eq(30L), eq("WORKS_LIST_VERIFY_TIMEOUT"), any(), any())).thenReturn(1);
+        when(taskMapper.markSemiAutoPublishVerificationPending(
+                eq(30L), eq("WORKS_LIST_VERIFY_TIMEOUT"), any(), any())).thenReturn(1);
         Map<String, Object> request = Map.of(
                 "error", Map.of(
                         "code", "WORKS_LIST_VERIFY_TIMEOUT",
@@ -513,7 +514,7 @@ class ExtensionTaskStateServiceTest {
                 )
         );
 
-        assertEquals("failed", service.fail(30L, 99L, 7L, request).status());
+        assertEquals("submitted", service.fail(30L, 99L, 7L, request).status());
 
         verify(selfMediaPublishScheduleService).markDistributionTaskScheduleFailed(
                 eq(30L),
@@ -522,6 +523,7 @@ class ExtensionTaskStateServiceTest {
                 any(String.class),
                 isNull()
         );
+        verify(taskMapper, never()).markSemiAutoFailed(any(), any(), any(), any());
         verifyNoInteractions(articleDraftMapper);
         verifyNoInteractions(companyChannelQuotaService);
     }
@@ -552,7 +554,8 @@ class ExtensionTaskStateServiceTest {
     @Test
     void failZhihuPublishNotSubmittedOnlyRequestsResultCheckWithoutRestoringArticle() {
         stubTask("filling");
-        when(taskMapper.markSemiAutoFailed(eq(30L), eq("ZHIHU_PUBLISH_NOT_SUBMITTED"), any(), any())).thenReturn(1);
+        when(taskMapper.markSemiAutoPublishVerificationPending(
+                eq(30L), eq("ZHIHU_PUBLISH_NOT_SUBMITTED"), any(), any())).thenReturn(1);
         Map<String, Object> request = Map.of(
                 "error", Map.of(
                         "code", "ZHIHU_PUBLISH_NOT_SUBMITTED",
@@ -560,7 +563,7 @@ class ExtensionTaskStateServiceTest {
                 )
         );
 
-        assertEquals("failed", service.fail(30L, 99L, 7L, request).status());
+        assertEquals("submitted", service.fail(30L, 99L, 7L, request).status());
 
         verify(selfMediaPublishScheduleService).markDistributionTaskScheduleFailed(
                 eq(30L),

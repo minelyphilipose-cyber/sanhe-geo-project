@@ -1,6 +1,9 @@
 package com.huanjing.geo.module.extension.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.extension.config.SelfMediaRuntimeProperties;
 import com.huanjing.geo.module.extension.dto.RuntimeReadinessQuery;
 import com.huanjing.geo.module.extension.dto.RuntimeReadinessResult;
@@ -36,6 +39,7 @@ public class SelfMediaRuntimeEnvironmentService {
     private final LocalAgentRuntimeStatusMapper localAgentRuntimeStatusMapper;
     private final SelfMediaRuntimeReadinessService readinessService;
     private final SelfMediaRuntimeProperties runtimeProperties;
+    private final ObjectMapper objectMapper;
 
     public Page<SelfMediaRuntimeEnvironmentVO> pageRuntimeEnvironments(Long brandId,
                                                                        String platform,
@@ -197,6 +201,11 @@ public class SelfMediaRuntimeEnvironmentService {
                 helper.getAdspowerApiOk(),
                 helper.getRunningTaskCount(),
                 helper.getCapacity(),
+                helper.getRuntimeState(),
+                parseJson(helper.getResourceMetricsJson()),
+                helper.getLastCleanupAt(),
+                helper.getHelperBootId(),
+                helper.getPolicyVersion(),
                 helper.getLastSeenAt(),
                 helper.getLastErrorCode(),
                 helper.getLastErrorMessage()
@@ -205,6 +214,17 @@ public class SelfMediaRuntimeEnvironmentService {
 
     private String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : null;
+    }
+
+    private JsonNode parseJson(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(value);
+        } catch (JsonProcessingException ex) {
+            return null;
+        }
     }
 
     private String trimToNull(String value) {

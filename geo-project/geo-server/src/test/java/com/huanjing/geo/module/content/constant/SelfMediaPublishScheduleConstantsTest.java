@@ -39,6 +39,18 @@ class SelfMediaPublishScheduleConstantsTest {
                 "migration must not add a full-scope unique key on distribution_task_id");
     }
 
+    @Test
+    void duplicateProtectedStatusesContainEveryActiveStatusAndTerminalProtectionStates() {
+        assertTrue(SelfMediaPublishScheduleConstants.DUPLICATE_PROTECTED_STATUSES
+                .containsAll(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES));
+        assertTrue(SelfMediaPublishScheduleConstants.DUPLICATE_PROTECTED_STATUSES
+                .contains(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED));
+        assertTrue(SelfMediaPublishScheduleConstants.DUPLICATE_PROTECTED_STATUSES
+                .contains(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED));
+        assertTrue(SelfMediaPublishScheduleConstants.DUPLICATE_PROTECTED_STATUSES
+                .contains(SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED));
+    }
+
     private static List<Set<String>> extractGeneratedColumnStatusSets(String migration) {
         Matcher matcher = Pattern.compile("IF\\(status IN \\((.*?)\\),\\s*(?:1|distribution_task_id),\\s*NULL\\)", Pattern.DOTALL)
                 .matcher(migration);

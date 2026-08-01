@@ -15,6 +15,9 @@ class ArticlePromptChannelsTest {
         assertEquals("douyin", ArticlePromptChannels.contentStyle("self_media", "douyin_image_text"));
         assertEquals("抖音图文", ArticlePromptChannels.channelName("self_media", "douyin_image_text"));
         assertTrue(ArticlePromptChannels.channelGuide("self_media", "douyin_image_text").contains("抖音图文"));
+        assertEquals(20, ArticlePromptChannels.maxTitleChars("self_media", "douyin_image_text"));
+        assertEquals(850, ArticlePromptChannels.maxContentChars("self_media", "douyin"));
+        assertNull(ArticlePromptChannels.maxContentChars("self_media", "zhihu"));
     }
 
     @Test

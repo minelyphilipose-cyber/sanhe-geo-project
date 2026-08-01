@@ -253,8 +253,15 @@ public class ArticleAiDraftService {
                             context.runtimePolicy().allowContactInfo(),
                             true,
                             generationForbiddenPhrases(context),
-                            ArticlePromptChannels.maxTitleChars(context.channelGroupCode()),
-                            ArticleGenerationTemperatures.resolve(context.v2(), context.medicalContext() != null)
+                            ArticlePromptChannels.maxTitleChars(
+                                    context.channelGroupCode(),
+                                    context.channelSubCode()
+                            ),
+                            ArticleGenerationTemperatures.resolve(context.v2(), context.medicalContext() != null),
+                            ArticlePromptChannels.maxContentChars(
+                                    context.channelGroupCode(),
+                                    context.channelSubCode()
+                            )
                     )
             );
             model = generated.model();
@@ -330,8 +337,15 @@ public class ArticleAiDraftService {
                             context.runtimePolicy().allowContactInfo(),
                             true,
                             generationForbiddenPhrases(context),
-                            ArticlePromptChannels.maxTitleChars(context.channelGroupCode()),
-                            ArticleGenerationTemperatures.resolve(context.v2(), context.medicalContext() != null)
+                            ArticlePromptChannels.maxTitleChars(
+                                    context.channelGroupCode(),
+                                    context.channelSubCode()
+                            ),
+                            ArticleGenerationTemperatures.resolve(context.v2(), context.medicalContext() != null),
+                            ArticlePromptChannels.maxContentChars(
+                                    context.channelGroupCode(),
+                                    context.channelSubCode()
+                            )
                     )
             );
             model = generated.model();

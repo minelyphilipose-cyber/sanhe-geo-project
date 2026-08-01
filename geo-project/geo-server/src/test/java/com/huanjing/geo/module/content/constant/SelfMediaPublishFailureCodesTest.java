@@ -35,6 +35,18 @@ class SelfMediaPublishFailureCodesTest {
     }
 
     @Test
+    void douyinUnpublishedDraftRequiresNonDestructiveManualResolution() {
+        assertEquals("DOUYIN_UNPUBLISHED_DRAFT_BLOCKED",
+                SelfMediaPublishFailureCodes.classifyByMessage(
+                        "DOUYIN_UNPUBLISHED_DRAFT_BLOCKED：检测到抖音账号存在上次未发布图文"));
+        assertEquals("抖音存在未完成图文草稿",
+                SelfMediaPublishFailureCodes.label("DOUYIN_UNPUBLISHED_DRAFT_BLOCKED"));
+        assertFalse(SelfMediaPublishFailureCodes.retryable("DOUYIN_UNPUBLISHED_DRAFT_BLOCKED"));
+        assertEquals("查看处理说明",
+                SelfMediaPublishFailureCodes.actionLabel("DOUYIN_UNPUBLISHED_DRAFT_BLOCKED"));
+    }
+
+    @Test
     void postSubmissionVerificationFailuresAreNeverFreshPublishRetries() {
         assertTrue(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("WORKS_LIST_VERIFY_TIMEOUT"));
         assertTrue(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure("TOUTIAO_PUBLISH_NOT_CONFIRMED"));
@@ -51,6 +63,8 @@ class SelfMediaPublishFailureCodesTest {
                 SelfMediaPublishFailureCodes.BAIJIAHAO_REVIEW_REJECTED));
         assertTrue(SelfMediaPublishFailureCodes.isLocalAgentPublishCheckTerminalFailure(
                 SelfMediaPublishFailureCodes.BAIJIAHAO_WORK_WITHDRAWN));
+        assertTrue(SelfMediaPublishFailureCodes.isLocalAgentPublishCheckTerminalFailure(
+                SelfMediaPublishFailureCodes.DOUYIN_REVIEW_REJECTED));
         assertFalse(SelfMediaPublishFailureCodes.isLocalAgentPublishCheckTerminalFailure(
                 "OFFICIAL_API_REVIEW_REJECTED"));
         assertFalse(SelfMediaPublishFailureCodes.isLocalAgentPublishCheckTerminalFailure(

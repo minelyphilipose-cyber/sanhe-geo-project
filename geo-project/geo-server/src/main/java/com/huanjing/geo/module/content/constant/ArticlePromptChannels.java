@@ -13,6 +13,8 @@ public final class ArticlePromptChannels {
     public static final String AUTHORITY_MEDIA = "authority_media";
     public static final String FORUM = "forum";
     public static final int SELF_MEDIA_MAX_TITLE_CHARS = 28;
+    public static final int DOUYIN_MAX_TITLE_CHARS = 20;
+    public static final int DOUYIN_MAX_CONTENT_CHARS = 850;
 
     public static final Set<String> GROUPS = Set.of(
             AGENT_SITE, INDUSTRY_SITE, SELF_MEDIA, AUTHORITY_MEDIA, FORUM
@@ -130,6 +132,21 @@ public final class ArticlePromptChannels {
 
     public static Integer maxTitleChars(String groupCode) {
         return SELF_MEDIA.equals(groupCode) ? SELF_MEDIA_MAX_TITLE_CHARS : null;
+    }
+
+    public static Integer maxTitleChars(String groupCode, String subCode) {
+        String canonicalSubCode = canonicalSubCode(groupCode, subCode);
+        if (SELF_MEDIA.equals(groupCode) && "douyin".equals(canonicalSubCode)) {
+            return DOUYIN_MAX_TITLE_CHARS;
+        }
+        return maxTitleChars(groupCode);
+    }
+
+    public static Integer maxContentChars(String groupCode, String subCode) {
+        String canonicalSubCode = canonicalSubCode(groupCode, subCode);
+        return SELF_MEDIA.equals(groupCode) && "douyin".equals(canonicalSubCode)
+                ? DOUYIN_MAX_CONTENT_CHARS
+                : null;
     }
 
     public static boolean isStrictEditorialSelfMedia(String groupCode, String subCode) {

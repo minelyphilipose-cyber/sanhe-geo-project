@@ -182,6 +182,53 @@ test('douyin publish check accepts manual early publish with a different actual 
   assert.equal(result.scheduledAtText, '')
 })
 
+test('douyin image-text publish check requires image count and task time window', () => {
+  const target = {
+    title: '阜阳全屋定制案例',
+    contentKind: 'image_text',
+    expectedImageCount: 4,
+    taskStartedAt: '2020-07-30T16:40:00',
+  }
+  const pageState = {
+    url: 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish',
+    douyinCards: [{
+      title: '阜阳全屋定制案例',
+      publishedAt: '2020年07月30日 16:53',
+      status: '审核中',
+      text: '阜阳全屋定制案例 2020年07月30日 16:53 审核中 4张',
+      links: [],
+    }],
+  }
+
+  assert.equal(evaluateDouyinPublishSignals(target, pageState).found, true)
+  assert.equal(evaluateDouyinPublishSignals({ ...target, expectedImageCount: 6 }, pageState).found, false)
+})
+
+test('douyin image-text publish check reports rejected work', () => {
+  const result = evaluateDouyinPublishSignals(
+    {
+      title: '阜阳全屋定制案例',
+      contentKind: 'image_text',
+      expectedImageCount: 4,
+      taskStartedAt: '2020-07-30T16:40:00',
+    },
+    {
+      douyinCards: [{
+        title: '阜阳全屋定制案例',
+        publishedAt: '2020年07月30日 16:53',
+        status: '未通过',
+        text: '阜阳全屋定制案例 2020年07月30日 16:53 未通过 4张',
+        links: [],
+      }],
+    },
+  )
+
+  assert.equal(result.found, false)
+  assert.equal(result.failed, true)
+  assert.equal(result.platformStatus, 'rejected')
+  assert.equal(result.failureCode, 'DOUYIN_REVIEW_REJECTED')
+})
+
 test('xiaohongshu publish check returns current detail url after opening published note', () => {
   const result = evaluateXiaohongshuPublishSignals(
     {

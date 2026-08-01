@@ -41,6 +41,61 @@ public final class SelfMediaPublishScheduleConstants {
             STATUS_CANCEL_PENDING_PLATFORM
     );
 
+    /**
+     * Statuses that prevent creating another schedule for the same article/account/platform.
+     */
+    public static final Set<String> DUPLICATE_PROTECTED_STATUSES = Set.of(
+            STATUS_PENDING,
+            STATUS_FILLING,
+            STATUS_FILLED_VERIFIED,
+            STATUS_SCHEDULING,
+            STATUS_SCHEDULED,
+            STATUS_PUBLISH_DUE,
+            STATUS_CHECKING_PUBLISH_RESULT,
+            STATUS_PUBLISHED_CONFIRMED,
+            STATUS_PUBLISHED_URL_PENDING,
+            STATUS_PUBLISH_UNKNOWN,
+            STATUS_SCHEDULE_FAILED,
+            STATUS_CANCEL_PENDING_PLATFORM,
+            STATUS_MANUAL_REQUIRED,
+            STATUS_ROUTED_TO_SEMI_AUTO
+    );
+
+    /**
+     * Aggregate schedule statuses that mean the platform has accepted the article.
+     * A published aggregate always has precedence over distributing and failed states.
+     */
+    public static final Set<String> ARTICLE_PUBLISHED_STATUSES = Set.of(
+            STATUS_PUBLISHED_CONFIRMED,
+            STATUS_PUBLISHED_URL_PENDING
+    );
+
+    /**
+     * Aggregate schedule statuses that still own the article publishing workflow.
+     */
+    public static final Set<String> ARTICLE_DISTRIBUTING_STATUSES = Set.of(
+            STATUS_PENDING,
+            STATUS_FILLING,
+            STATUS_FILLED_VERIFIED,
+            STATUS_SCHEDULING,
+            STATUS_SCHEDULED,
+            STATUS_PUBLISH_DUE,
+            STATUS_CHECKING_PUBLISH_RESULT,
+            STATUS_PUBLISH_UNKNOWN,
+            STATUS_CANCEL_PENDING_PLATFORM,
+            STATUS_ROUTED_TO_SEMI_AUTO
+    );
+
+    /**
+     * Terminal statuses that require retry or manual intervention when no active/published
+     * schedule exists for the same article.
+     */
+    public static final Set<String> ARTICLE_FAILED_STATUSES = Set.of(
+            STATUS_SCHEDULE_FAILED,
+            STATUS_PUBLISH_FAILED,
+            STATUS_MANUAL_REQUIRED
+    );
+
     private SelfMediaPublishScheduleConstants() {
     }
 }

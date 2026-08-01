@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "GEO 自媒体助手",
   "description": "GEO AdsPower environment task filling extension.",
-  "version": "0.1.11",
-  "version_name": "0.1.11-claim-safety-20260717.1",
+  "version": "0.2.0",
+  "version_name": "0.2.0-douyin-image-text-20260731.3",
   "action": {
     "default_popup": "popup.html"
   },

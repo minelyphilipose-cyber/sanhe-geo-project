@@ -380,6 +380,7 @@ public class ProjectSelfMediaScheduleService {
             row.setFailureMessage("运营批量改期到下月后重新等待系统自动处理");
             row.setUpdatedAt(now);
             selfMediaPublishScheduleMapper.updateById(row);
+            scheduleService.syncArticleForScheduleState(row);
             changed++;
         }
         if (changed <= 0) {
@@ -426,6 +427,7 @@ public class ProjectSelfMediaScheduleService {
             row.setFailureMessage("运营批量忽略该异常排期");
             row.setUpdatedAt(now);
             selfMediaPublishScheduleMapper.updateById(row);
+            scheduleService.syncArticleForScheduleState(row);
             ignored++;
         }
         if (ignored <= 0) {

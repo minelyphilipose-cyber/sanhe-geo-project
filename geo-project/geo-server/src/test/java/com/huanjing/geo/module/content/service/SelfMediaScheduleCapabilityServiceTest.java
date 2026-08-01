@@ -216,6 +216,28 @@ class SelfMediaScheduleCapabilityServiceTest {
         assertEquals("PLATFORM_CAPABILITY_UNVERIFIED", readiness.code());
     }
 
+    @Test
+    void immediatePublishAllowsBackendQueueWhenVerifiedScheduleStrategyDiffers() {
+        when(mapper.selectByPlatform("douyin"))
+                .thenReturn(capability("douyin", "verified", true, "platform_schedule"));
+        when(adapterRouter.contract("douyin")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "douyin",
+                "抖音图文",
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                SelfMediaPlatformScheduleMode.PLATFORM_NATIVE,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+
+        SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
+                service.immediatePublishReadiness("douyin", "backend_delayed_publish");
+
+        assertTrue(readiness.ready());
+    }
+
     private SelfMediaScheduleCapabilityUpsertRequest verifiedRequest() {
         SelfMediaScheduleCapabilityUpsertRequest request = new SelfMediaScheduleCapabilityUpsertRequest();
         request.setPlatform("Toutiao");

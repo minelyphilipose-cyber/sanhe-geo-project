@@ -50,6 +50,27 @@ public class SelfMediaRuntimeProperties {
             return defaultMode;
         }
 
+        public String minExtensionVersionFor(String platform) {
+            GateRule platformRule = ruleFor(platform);
+            if (platformRule != null && StringUtils.hasText(platformRule.getMinExtensionVersion())) {
+                return platformRule.getMinExtensionVersion();
+            }
+            return minExtensionVersion;
+        }
+
+        public String minHelperVersionFor(String platform) {
+            GateRule platformRule = ruleFor(platform);
+            if (platformRule != null && StringUtils.hasText(platformRule.getMinHelperVersion())) {
+                return platformRule.getMinHelperVersion();
+            }
+            return minHelperVersion;
+        }
+
+        private GateRule ruleFor(String platform) {
+            String normalizedPlatform = normalizePlatform(platform);
+            return normalizedPlatform == null ? null : platforms.get(normalizedPlatform);
+        }
+
         private static boolean hasMode(GateRule rule) {
             return rule != null && StringUtils.hasText(rule.getMode());
         }
@@ -62,6 +83,8 @@ public class SelfMediaRuntimeProperties {
     @Data
     public static class GateRule {
         private String mode;
+        private String minExtensionVersion;
+        private String minHelperVersion;
     }
 
     @Data

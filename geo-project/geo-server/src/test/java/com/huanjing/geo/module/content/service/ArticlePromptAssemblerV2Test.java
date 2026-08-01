@@ -104,7 +104,7 @@ class ArticlePromptAssemblerV2Test {
     }
 
     @Test
-    void limitsSelfMediaTitleToTwentyEightCharacters() throws Exception {
+    void limitsDouyinTitleToTwentyCharacters() throws Exception {
         Project project = new Project();
         project.setId(1L);
         project.setBrandId(2L);
@@ -129,12 +129,12 @@ class ArticlePromptAssemblerV2Test {
 
         BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
 
-        assertTrue(result.userPrompt().contains("标题不超过28个字"));
+        assertTrue(result.userPrompt().contains("标题不超过20个字"));
         assertTrue(result.userPrompt().contains("正文篇幅较短时以自然分段为主"));
         assertTrue(result.userPrompt().contains("只有确实存在多个相对独立的信息单元时才使用 Markdown 二级标题"));
         assertFalse(result.userPrompt().contains("不得把整篇长文写成从头到尾没有小标题"));
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
-        assertEquals(28, snapshot.path("effectiveTitleMaxChars").asInt());
+        assertEquals(20, snapshot.path("effectiveTitleMaxChars").asInt());
     }
 
     @Test

@@ -15,6 +15,11 @@ public record LocalAgentRuntimeStatusVO(
         Boolean adspowerApiOk,
         Integer runningTaskCount,
         Integer capacity,
+        String runtimeState,
+        String resourceMetricsJson,
+        LocalDateTime lastCleanupAt,
+        String helperBootId,
+        Long policyVersion,
         LocalDateTime lastSeenAt
 ) {
     public static LocalAgentRuntimeStatusVO from(LocalAgentRuntimeStatus row) {
@@ -32,6 +37,11 @@ public record LocalAgentRuntimeStatusVO(
                 row.getAdspowerApiOk(),
                 row.getRunningTaskCount(),
                 row.getCapacity(),
+                row.getRuntimeState(),
+                row.getResourceMetricsJson(),
+                row.getLastCleanupAt(),
+                row.getHelperBootId(),
+                row.getPolicyVersion(),
                 row.getLastSeenAt()
         );
     }
