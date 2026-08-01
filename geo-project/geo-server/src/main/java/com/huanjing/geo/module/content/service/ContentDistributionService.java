@@ -957,7 +957,6 @@ public class ContentDistributionService {
         if (submitResult.isSuccess()) {
             DistributionTask completedTask = distributionTaskMapper.selectById(task.getId());
             recordOwnedSourcePublish(article, completedTask, submitResult);
-            alertUntrustedForumEvidence(article, completedTask, site, submitResult);
             companyChannelQuotaService.confirmDistribution(task.getId());
         } else {
             companyChannelQuotaService.refundDistribution(task.getId());
@@ -1652,31 +1651,6 @@ public class ContentDistributionService {
                 "ambiguous_url",
                 "unverified_public_url"
         ).contains(value);
-    }
-
-    private void alertUntrustedForumEvidence(ArticleDraft article,
-                                             DistributionTask task,
-                                             PublishSite site,
-                                             SubmitResult submitResult) {
-        if (submitResult == null
-                || Set.of("verified", "pending_review").contains(
-                        String.valueOf(submitResult.getPublicEvidenceStatus()))) {
-            return;
-        }
-        Map<String, Object> context = new LinkedHashMap<>();
-        context.put("projectId", article.getProjectId());
-        context.put("articleId", article.getId());
-        context.put("taskId", task == null ? null : task.getId());
-        context.put("siteId", site == null ? null : site.getId());
-        context.put("evidenceStatus", String.valueOf(submitResult.getPublicEvidenceStatus()));
-        context.put("evidenceReason", blankToNull(submitResult.getPublicEvidenceReason()));
-        systemAlertService.createAlert(
-                "forum_publish_evidence_untrusted",
-                "warn",
-                "content_distribution",
-                "论坛发布已完成，但未取得可信主题详情页证据",
-                context
-        );
     }
 
     private String urlSource(DistributionTask task) {

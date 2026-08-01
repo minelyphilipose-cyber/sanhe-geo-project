@@ -78,10 +78,10 @@ V329 不得首次直接在生产库验证。上线前必须先在生产克隆库
 
 ## 4. 文章正文处理
 
-官网类发布终态清理与通用 90 天 COS 归档链路相互独立。官网类满足严格终态门控后直接释放热数据；
-其他文章仍执行先归档、后置空的两步流程。
+站点分发终态清理与通用 90 天 COS 归档链路相互独立。站点分发满足严格任务终态门控后直接释放热数据；
+其他文章仍执行先归档、后置空的两步流程。这三类站点都是外部分发目标，不承担客户文章展示。
 
-### 4.1 官网类发布终态驱动清理
+### 4.1 站点分发任务终态驱动清理
 
 仅处理以下目标：
 
@@ -92,52 +92,28 @@ V329 不得首次直接在生产库验证。上线前必须先在生产克隆库
 必须同时满足：
 
 - `article_publish_record.publish_status = distributed`；
-- `url_quality` 必须是新发布链路写入的 `verified_public_url` 或
-  `pending_review_url`，且 `published_url` 是 HTTP(S) 公网链接；
-- 历史 `public_url` 只用于兼容展示，不再具备清理资格，不允许通过补偿任务批量升级；
-- 同一规范化公开链接如果关联多个不同文章 ID，则所有相关文章均排除出清理候选；
-- 最后一次符合条件的发布时间已超过至少 24 小时的热窗口；请求值和调度配置低于 24
+- 发布凭证的 `source_type = distribution_task`，且 `source_id`、`article_id`、`target_kind`
+  能关联同一条 `distribution_tasks`；
+- 关联任务状态为 `submitted`、`confirmed` 或 `published`；
+- `published_url` 和 `url_quality` 仅作为可选诊断元数据，不参与发布成功或清理资格判断；
+  URL 为空、重复、无法验证或后续不可访问都不阻止清理，也无需修改历史 `url_quality`；
+- 最后一次符合条件的成功任务凭证时间已超过至少 24 小时的热窗口；请求值和调度配置低于 24
   小时都会被后端强制提升到 24 小时；
 - 文章当前状态为 `distributed` 或 `published`；`deleted` 只允许用于并发或历史残留的幂等补清理，
   `approved`、`unpublished` 等状态禁止清理；
-- 所有官网类成功凭证的 `published_url` 都必须通过 URI 校验：scheme 为 `http/https` 且 host 非空；
 - 没有活动分发任务；
 - 没有待执行、失败待处理或结果不确定的自媒体排期；只有 `published_confirmed`、`cancelled`
-  不阻止官网类清理；
+  不阻止站点分发清理；
 - 清理事务内锁定文章、发布凭证、分发任务和自媒体排期后再次复核。
 
-论坛发布凭证规则：
-
-- 只从提交后的主题详情页 `canonical` 取得公开地址，不再扫描页面中的任意链接；
-- canonical 必须与论坛同源，且必须是 `thread-<tid>-<page>-<page>.html` 或
-  `forum.php?mod=viewthread&tid=<tid>`；
-- 页面 `#thread_subject` 必须与提交标题规范化后完全一致；
-- 页面必须存在 `[id^="postmessage_"]` 正文节点；
-- 恩山论坛满足上述条件后写入 `verified_public_url`；
-- 安徽论坛显示“审核中”时，在明确配置延迟认可策略后写入 `pending_review_url`，仍需经过
-  清理服务强制的至少 24 小时保护期；
-- 无法核验、标题不一致、canonical 为版块页或跨域时，发布任务仍可保持成功，但记录为
-  `unverified_public_url` 或 `ambiguous_url`，产生系统告警且禁止清理。
-
-安徽论坛现有 `publish_site.content_constraints` 需要合并以下字段；恩山论坛无需增加配置：
-
-```json
-{
-  "moderationPolicy": "assume_approved_after_delay",
-  "moderationGraceHours": 24
-}
-```
-
-这是对现有 JSON 的增量合并，不得覆盖原有 `baseUrl`、`fid`、`boards`、发帖地址等字段。
-本次证据规则不新增 Flyway 迁移，也不要求增加全局环境变量。
-
-论坛发布日志只记录 `siteId`、`articleId`、目标 host/path、HTTP 状态、证据状态、原因和耗时；
-不得记录 Cookie、`formhash`、标题正文或完整请求参数。
+发布适配器仍可尽力提取 URL、canonical 和页面证据用于诊断，但这些结果不是业务成功条件，
+不产生 URL 不可信业务告警。真实的认证失败、表单失败和提交失败仍按发布失败处理并告警。
+发布日志不得记录 Cookie、`formhash`、标题正文或完整请求参数。
 
 清理动作：
 
 - 置空该文章全部版本的 `content_markdown`，写入 `content_purged_at`；
-- 只置空与成功官网类发布凭证绑定的 `request_payload`、`fill_payload`、`response_payload`；
+- 只置空与成功站点分发任务凭证绑定的 `request_payload`、`fill_payload`、`response_payload`；
 - 置空发布凭证中的大体积 `raw_response`，长期保留项目、文章、渠道、状态、时间、URL 和幂等来源；
 - 将 `article_draft.status` 置为 `deleted`，保留轻量主记录和所有发布凭证。
 
@@ -174,8 +150,8 @@ Content-Type: application/json
 }
 ```
 
-核对 `article_publish_record` 及公开链接仍存在、移动看板发布统计不变、正文和成功任务 payload
-已经置空，并按 `nextCursorArticleId` 分页。验证结束后立即关闭独立执行开关。
+核对 `article_publish_record` 及其中已有的可选 URL 仍保留、移动看板发布统计不变、正文和成功任务
+payload 已经置空，并按 `nextCursorArticleId` 分页。验证结束后立即关闭独立执行开关。
 
 H2 MySQL 兼容模式测试只用于验证 SQL 形状和数据变更，不作为锁语义证明。首次开启真实清理前，
 必须在生产克隆 MySQL 上并发演练以下竞态：
@@ -441,7 +417,7 @@ dry-run 和 execute 均最多扫描 `max-batches-per-run` 批。
 
 - 发现异常时，先关闭所有 execute 开关并重新部署容器；
 - 不删除 COS 归档对象；
-- 官网类终态清理默认不生成 COS 正文归档，置空后只能依赖数据库备份或目标站点恢复；
+- 站点分发终态清理默认不生成 COS 正文归档，置空后只能依赖数据库备份恢复；
 - 文章正文已置空后，可继续通过 COS 回源，不能仅通过关闭开关恢复数据库正文；
 - 如确需恢复正文，应按 `content_object_key` 读取 COS，经 checksum 校验后再回填；
 - 轮询明细物理删除不可从 summary 反向恢复，只能依赖数据库备份；
@@ -452,9 +428,9 @@ dry-run 和 execute 均最多扫描 `max-batches-per-run` 批。
 
 1. 部署代码，保持所有新开关为 `false`；
 2. 确认 V329、V330 执行成功；
-3. 官网类终态清理 dry-run；
-4. 官网类终态清理 limit=1，核对发布凭证、公开链接和移动看板统计；
-5. 官网类终态清理小批放量并关闭独立 execute 开关；
+3. 站点分发终态清理 dry-run；
+4. 站点分发终态清理 limit=1，核对成功任务凭证和移动看板统计；
+5. 站点分发终态清理小批放量并关闭独立 execute 开关；
 6. 其他文章归档 dry-run；
 7. 其他文章归档小批 execute；
 8. 至少观察 24 小时；

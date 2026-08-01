@@ -11,20 +11,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
-import java.net.URI;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
- * Removes hot article bodies after an owned website has durably accepted the
- * publication. The publish record and public URL remain as permanent evidence.
+ * Removes hot article bodies after an owned distribution target has durably
+ * accepted the publication. The lightweight publish and task records remain as
+ * permanent evidence; a public URL is optional diagnostic metadata.
  */
 @Service
 @RequiredArgsConstructor
@@ -39,11 +36,11 @@ public class WebsitePublishedContentCleanupService {
             "'brand_geo_site','industry_site','forum_site'";
     private static final String UNAMBIGUOUS_TERMINAL_DISTRIBUTION_STATUS_SQL =
             "'confirmed','published','failed','cancelled'";
+    private static final String SUCCESSFUL_DISTRIBUTION_STATUS_SQL =
+            "'submitted','confirmed','published'";
     private static final String NON_BLOCKING_SELF_MEDIA_STATUS_SQL =
             "'published_confirmed','cancelled'";
-    private static final String WEBSITE_EVIDENCE_QUALITY_SQL =
-            "'verified_public_url','pending_review_url'";
-    private static final String WEBSITE_SUCCESS_RECORD_SQL = trustedWebsiteRecordSql("r");
+    private static final String WEBSITE_SUCCESS_RECORD_SQL = successfulWebsiteRecordSql("r");
 
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
@@ -109,8 +106,7 @@ public class WebsitePublishedContentCleanupService {
                 startMetrics
         );
         try {
-            List<Candidate> loaded = validatePublicEvidence(
-                    loadCandidates(cutoff, cursorArticleId, limit + 1));
+            List<Candidate> loaded = loadCandidates(cutoff, cursorArticleId, limit + 1);
             boolean hasMore = loaded.size() > limit;
             List<Candidate> candidates = hasMore ? loaded.subList(0, limit) : loaded;
             Long nextCursor = candidates.isEmpty() ? null : candidates.get(candidates.size() - 1).articleId();
@@ -122,11 +118,6 @@ public class WebsitePublishedContentCleanupService {
             long payloadRows = 0;
             long publishRecordRows = 0;
             for (Candidate candidate : candidates) {
-                if (!candidate.publicEvidenceValid()) {
-                    skipped++;
-                    items.add(CleanupItem.blocked(candidate, "invalid_public_url"));
-                    continue;
-                }
                 if (dryRun) {
                     items.add(CleanupItem.pending(candidate));
                     continue;
@@ -326,37 +317,8 @@ public class WebsitePublishedContentCleanupService {
                 rs.getInt("body_row_count"),
                 rs.getLong("body_bytes"),
                 rs.getInt("payload_row_count"),
-                rs.getLong("payload_bytes"),
-                false
+                rs.getLong("payload_bytes")
         ), args.toArray());
-    }
-
-    private List<Candidate> validatePublicEvidence(List<Candidate> candidates) {
-        if (candidates.isEmpty()) {
-            return candidates;
-        }
-        String placeholders = String.join(",", java.util.Collections.nCopies(candidates.size(), "?"));
-        List<Object> args = candidates.stream().map(Candidate::articleId).map(Object.class::cast).toList();
-        Map<Long, List<String>> urlsByArticle = new HashMap<>();
-        jdbcTemplate.query("""
-                SELECT r.article_id, r.published_url
-                  FROM article_publish_record r
-                 WHERE r.article_id IN (%s)
-                   AND %s
-                """.formatted(placeholders, WEBSITE_SUCCESS_RECORD_SQL), rs -> {
-            urlsByArticle.computeIfAbsent(rs.getLong("article_id"), ignored -> new ArrayList<>())
-                    .add(rs.getString("published_url"));
-        }, args.toArray());
-        Set<Long> validArticleIds = new HashSet<>();
-        urlsByArticle.forEach((articleId, urls) -> {
-            if (!urls.isEmpty() && urls.stream().allMatch(this::isValidPublicHttpUrl)) {
-                validArticleIds.add(articleId);
-            }
-        });
-        return candidates.stream()
-                .map(candidate -> candidate.withPublicEvidenceValid(
-                        validArticleIds.contains(candidate.articleId())))
-                .toList();
     }
 
     private CleanupMutation cleanupArticle(Long articleId, LocalDateTime cutoff) {
@@ -383,18 +345,16 @@ public class WebsitePublishedContentCleanupService {
                 Long.class,
                 articleId
         );
-        List<PublishedEvidence> evidence = jdbcTemplate.query("""
-                SELECT r.published_url,
-                       COALESCE(r.published_at, r.verified_at, r.created_at) AS effective_published_at
+        List<SuccessfulPublicationEvidence> evidence = jdbcTemplate.query("""
+                SELECT COALESCE(r.published_at, r.verified_at, r.created_at) AS effective_published_at
                   FROM article_publish_record r
                  WHERE r.article_id = ?
                    AND %s
                  ORDER BY r.id
-                """.formatted(WEBSITE_SUCCESS_RECORD_SQL), (rs, rowNum) -> new PublishedEvidence(
-                rs.getString("published_url"),
+                """.formatted(WEBSITE_SUCCESS_RECORD_SQL), (rs, rowNum) -> new SuccessfulPublicationEvidence(
                 rs.getTimestamp("effective_published_at").toLocalDateTime()
         ), articleId);
-        if (!validEvidenceOlderThanCutoff(evidence, cutoff)) {
+        if (!successfulEvidenceOlderThanCutoff(evidence, cutoff)) {
             return CleanupMutation.none();
         }
         Integer eligible = jdbcTemplate.queryForObject("""
@@ -438,6 +398,8 @@ public class WebsitePublishedContentCleanupService {
                        payload_purged_at = CURRENT_TIMESTAMP
                  WHERE distribution_tasks.article_id = ?
                    AND distribution_tasks.payload_purged_at IS NULL
+                   AND distribution_tasks.target_kind IN (%s)
+                   AND distribution_tasks.status IN (%s)
                    AND (distribution_tasks.request_payload IS NOT NULL
                         OR distribution_tasks.fill_payload IS NOT NULL
                         OR distribution_tasks.response_payload IS NOT NULL)
@@ -445,18 +407,23 @@ public class WebsitePublishedContentCleanupService {
                        SELECT 1
                          FROM article_publish_record r
                         WHERE r.source_type = 'distribution_task'
-                          AND r.source_id = distribution_tasks.id
-                          AND r.article_id = distribution_tasks.article_id
-                          AND %s
+                           AND r.source_id = distribution_tasks.id
+                           AND r.article_id = distribution_tasks.article_id
+                           AND r.target_kind = distribution_tasks.target_kind
+                           AND %s
                    )
-                """.formatted(WEBSITE_SUCCESS_RECORD_SQL), articleId);
+                """.formatted(
+                WEBSITE_TARGET_KIND_SQL,
+                SUCCESSFUL_DISTRIBUTION_STATUS_SQL,
+                websiteDistributionRecordSql("r")
+        ), articleId);
         int publishRecordRows = jdbcTemplate.update("""
                 UPDATE article_publish_record
                    SET raw_response = NULL
                  WHERE article_publish_record.article_id = ?
                    AND article_publish_record.raw_response IS NOT NULL
                    AND %s
-                """.formatted(websiteEvidenceRecordSql("article_publish_record")), articleId);
+                 """.formatted(successfulWebsiteRecordSql("article_publish_record")), articleId);
         int articleRows = jdbcTemplate.update("""
                 UPDATE article_draft
                    SET status = 'deleted',
@@ -472,29 +439,16 @@ public class WebsitePublishedContentCleanupService {
         return Math.min(value, MAX_LIMIT);
     }
 
-    private boolean validEvidenceOlderThanCutoff(List<PublishedEvidence> evidence, LocalDateTime cutoff) {
-        if (evidence.isEmpty() || evidence.stream().anyMatch(item -> !isValidPublicHttpUrl(item.publishedUrl()))) {
+    private boolean successfulEvidenceOlderThanCutoff(List<SuccessfulPublicationEvidence> evidence,
+                                                       LocalDateTime cutoff) {
+        if (evidence.isEmpty()) {
             return false;
         }
         LocalDateTime latestPublishedAt = evidence.stream()
-                .map(PublishedEvidence::publishedAt)
+                .map(SuccessfulPublicationEvidence::publishedAt)
                 .max(LocalDateTime::compareTo)
                 .orElse(null);
         return latestPublishedAt != null && !latestPublishedAt.isAfter(cutoff);
-    }
-
-    private boolean isValidPublicHttpUrl(String value) {
-        if (!StringUtils.hasText(value)) {
-            return false;
-        }
-        try {
-            URI uri = URI.create(value.trim());
-            String scheme = uri.getScheme();
-            return ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
-                    && StringUtils.hasText(uri.getHost());
-        } catch (IllegalArgumentException ex) {
-            return false;
-        }
     }
 
     private static String activeDistributionPredicate(String taskAlias) {
@@ -510,21 +464,8 @@ public class WebsitePublishedContentCleanupService {
                              WHERE submitted_r.source_type = 'distribution_task'
                                AND submitted_r.source_id = %1$s.id
                                AND submitted_r.article_id = %1$s.article_id
-                               AND submitted_r.target_kind IN (%3$s)
-                               AND submitted_r.publish_status = 'distributed'
-                               AND submitted_r.url_quality IN (%4$s)
-                               AND (
-                                    LOWER(TRIM(submitted_r.published_url)) LIKE 'http://%%'
-                                    OR LOWER(TRIM(submitted_r.published_url)) LIKE 'https://%%'
-                               )
-                               AND NOT EXISTS (
-                                   SELECT 1
-                                     FROM article_publish_record duplicate_r
-                                    WHERE duplicate_r.article_id <> submitted_r.article_id
-                                      AND NULLIF(TRIM(duplicate_r.published_url), '') IS NOT NULL
-                                      AND LOWER(TRIM(duplicate_r.published_url))
-                                          = LOWER(TRIM(submitted_r.published_url))
-                               )
+                               AND submitted_r.target_kind = %1$s.target_kind
+                               AND %4$s
                         )
                     )
                 )
@@ -532,30 +473,34 @@ public class WebsitePublishedContentCleanupService {
                 taskAlias,
                 UNAMBIGUOUS_TERMINAL_DISTRIBUTION_STATUS_SQL,
                 WEBSITE_TARGET_KIND_SQL,
-                WEBSITE_EVIDENCE_QUALITY_SQL
+                websiteDistributionRecordSql("submitted_r")
         );
     }
 
-    private static String websiteEvidenceRecordSql(String alias) {
+    private static String websiteDistributionRecordSql(String alias) {
         return """
                 %1$s.target_kind IN (%2$s)
                 AND %1$s.publish_status = 'distributed'
-                AND %1$s.url_quality IN (%3$s)
-                """.formatted(alias, WEBSITE_TARGET_KIND_SQL, WEBSITE_EVIDENCE_QUALITY_SQL);
+                AND %1$s.source_type = 'distribution_task'
+                """.formatted(alias, WEBSITE_TARGET_KIND_SQL);
     }
 
-    private static String trustedWebsiteRecordSql(String alias) {
+    private static String successfulWebsiteRecordSql(String alias) {
         return """
                 %1$s
-                AND NOT EXISTS (
+                AND EXISTS (
                     SELECT 1
-                      FROM article_publish_record duplicate_r
-                     WHERE duplicate_r.article_id <> %2$s.article_id
-                       AND NULLIF(TRIM(duplicate_r.published_url), '') IS NOT NULL
-                       AND LOWER(TRIM(duplicate_r.published_url))
-                           = LOWER(TRIM(%2$s.published_url))
+                      FROM distribution_tasks evidence_dt
+                     WHERE evidence_dt.id = %2$s.source_id
+                       AND evidence_dt.article_id = %2$s.article_id
+                       AND evidence_dt.target_kind = %2$s.target_kind
+                       AND evidence_dt.status IN (%3$s)
                 )
-                """.formatted(websiteEvidenceRecordSql(alias), alias);
+                """.formatted(
+                websiteDistributionRecordSql(alias),
+                alias,
+                SUCCESSFUL_DISTRIBUTION_STATUS_SQL
+        );
     }
 
     private static String eligibleArticleStatusPredicate(String articleAlias) {
@@ -616,15 +561,10 @@ public class WebsitePublishedContentCleanupService {
                              int bodyRowCount,
                              long bodyBytes,
                              int payloadRowCount,
-                             long payloadBytes,
-                             boolean publicEvidenceValid) {
-        private Candidate withPublicEvidenceValid(boolean valid) {
-            return new Candidate(articleId, projectId, articleStatus, lastPublishedAt,
-                    bodyRowCount, bodyBytes, payloadRowCount, payloadBytes, valid);
-        }
+                             long payloadBytes) {
     }
 
-    private record PublishedEvidence(String publishedUrl, LocalDateTime publishedAt) {
+    private record SuccessfulPublicationEvidence(LocalDateTime publishedAt) {
     }
 
     private record CleanupMutation(int bodyRows,
@@ -655,10 +595,6 @@ public class WebsitePublishedContentCleanupService {
                               String errorMessage) {
         private static CleanupItem pending(Candidate candidate) {
             return from(candidate, "pending", 0, 0, 0, null);
-        }
-
-        private static CleanupItem blocked(Candidate candidate, String errorMessage) {
-            return from(candidate, "blocked", 0, 0, 0, errorMessage);
         }
 
         private static CleanupItem cleaned(Candidate candidate, CleanupMutation mutation) {

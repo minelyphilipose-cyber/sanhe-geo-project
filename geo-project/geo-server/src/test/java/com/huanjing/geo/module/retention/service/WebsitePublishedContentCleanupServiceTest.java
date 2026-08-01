@@ -7,7 +7,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -27,7 +26,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -57,7 +55,7 @@ class WebsitePublishedContentCleanupServiceTest {
 
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
-    void dryRunRequiresOwnedWebsiteDistributedPublicEvidenceAndNoActiveWork() throws Exception {
+    void dryRunRequiresOwnedTargetSuccessfulTaskEvidenceAndNoActiveWork() throws Exception {
         stubSingleCandidate();
 
         WebsitePublishedContentCleanupService.CleanupBatchResult result =
@@ -75,8 +73,11 @@ class WebsitePublishedContentCleanupServiceTest {
         String sql = sqlCaptor.getValue();
         assertTrue(sql.contains("'brand_geo_site','industry_site','forum_site'"));
         assertTrue(sql.contains("r.publish_status = 'distributed'"));
-        assertTrue(sql.contains("r.url_quality IN ('verified_public_url','pending_review_url')"));
-        assertTrue(sql.contains("duplicate_r.article_id <> r.article_id"));
+        assertTrue(sql.contains("r.source_type = 'distribution_task'"));
+        assertTrue(sql.contains("evidence_dt.status IN ('submitted','confirmed','published')"));
+        assertFalse(sql.contains("url_quality"));
+        assertFalse(sql.contains("duplicate_r"));
+        assertFalse(sql.contains("published_url"));
         assertTrue(sql.contains("a.status IN ('distributed', 'published')"));
         assertTrue(sql.contains("a.status = 'deleted'"));
         assertTrue(sql.contains("purged_v.content_purged_at IS NOT NULL"));
@@ -137,6 +138,9 @@ class WebsitePublishedContentCleanupServiceTest {
         assertTrue(allUpdates.contains("payload_purged_at = CURRENT_TIMESTAMP"));
         assertTrue(allUpdates.contains("raw_response = NULL"));
         assertTrue(allUpdates.contains("status = 'deleted'"));
+        String payloadUpdate = updateSql.getAllValues().get(1);
+        assertTrue(payloadUpdate.contains("distribution_tasks.status IN ('submitted','confirmed','published')"));
+        assertFalse(payloadUpdate.contains("FROM distribution_tasks evidence_dt"));
     }
 
     @Test
@@ -169,9 +173,7 @@ class WebsitePublishedContentCleanupServiceTest {
                     String sql = invocation.getArgument(0);
                     RowMapper mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
-                    if (sql.contains("SELECT r.published_url,")) {
-                        when(rs.getString("published_url"))
-                                .thenReturn("https://agent.example/articles/101");
+                    if (sql.contains("AS effective_published_at")) {
                         when(rs.getTimestamp("effective_published_at"))
                                 .thenReturn(Timestamp.valueOf(LocalDateTime.now().minusDays(2)));
                         return List.of(mapper.mapRow(rs, 0));
@@ -187,14 +189,5 @@ class WebsitePublishedContentCleanupServiceTest {
                     when(rs.getLong("payload_bytes")).thenReturn(1024L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
-        doAnswer(invocation -> {
-            RowCallbackHandler handler = invocation.getArgument(1);
-            ResultSet rs = mock(ResultSet.class);
-            when(rs.getLong("article_id")).thenReturn(101L);
-            when(rs.getString("published_url"))
-                    .thenReturn("https://agent.example/articles/101");
-            handler.processRow(rs);
-            return null;
-        }).when(jdbcTemplate).query(anyString(), any(RowCallbackHandler.class), any(Object[].class));
     }
 }
