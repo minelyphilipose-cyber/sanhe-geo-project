@@ -11,6 +11,7 @@ import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExport
 import com.huanjing.geo.module.presale.export.service.PresaleExportStatuses;
 import com.huanjing.geo.module.presale.dto.PromptSourceMode;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
+import com.huanjing.geo.module.presale.dto.request.PresaleReportInputLimits;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
 import com.huanjing.geo.module.presale.dto.PresalePromptCategoryCode;
 import com.huanjing.geo.module.presale.dto.response.PromptTemplateVO;
@@ -139,15 +140,16 @@ public class PresaleReportService {
         currentUserService.ensurePermission(PERM_CREATE);
         var currentUser = currentUserService.requireCurrentUser();
         Long userId = currentUser.getId();
+        validateBaseInputLimits(req);
+        List<String> brandFormerNames = normalizeBrandFormerNames(req.getBrandFormerNames(), req.getBrandName());
+        List<String> specifiedCompetitors = normalizeSpecifiedCompetitors(
+                req.getSpecifiedCompetitors(), req.getBrandName(), brandFormerNames);
         PartnerPresaleReportQuotaService.Reservation reservation =
                 partnerPresaleReportQuotaService.reserveIfPartner(currentUser, req);
         if (reservation.existingReportId() != null) {
             return reservation.existingReportId();
         }
         LocalDateTime now = LocalDateTime.now();
-        List<String> brandFormerNames = normalizeBrandFormerNames(req.getBrandFormerNames(), req.getBrandName());
-        List<String> specifiedCompetitors = normalizeSpecifiedCompetitors(
-                req.getSpecifiedCompetitors(), req.getBrandName(), brandFormerNames);
 
         PresaleReport report = new PresaleReport();
         report.setBrandName(req.getBrandName());
@@ -679,7 +681,22 @@ public class PresaleReportService {
                 throw new BizException(400, "指定竞品不能重复");
             }
         }
+        if (PresaleReportInputLimits.competitorGroupLength(values)
+                > PresaleReportInputLimits.COMPETITOR_GROUP_MAX_LENGTH) {
+            throw new BizException(400, "3 个指定竞品拼接后总长度不能超过 100 字");
+        }
         return values;
+    }
+
+    private void validateBaseInputLimits(CreateReportRequest req) {
+        if (req.getBrandName() != null
+                && req.getBrandName().length() > PresaleReportInputLimits.BRAND_NAME_MAX_LENGTH) {
+            throw new BizException(400, "品牌名最多 18 字");
+        }
+        if (req.getIndustryRole() != null
+                && req.getIndustryRole().length() > PresaleReportInputLimits.INDUSTRY_ROLE_MAX_LENGTH) {
+            throw new BizException(400, "身份最多 50 字");
+        }
     }
 
     private String normalizeCompetitorName(String value) {

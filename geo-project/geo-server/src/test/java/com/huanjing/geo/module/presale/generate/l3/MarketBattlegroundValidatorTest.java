@@ -9,8 +9,11 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.persist.entity.PresalePage03MarketConfig;
 import com.huanjing.geo.module.presale.service.PresalePage03MarketConfigService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -34,6 +37,21 @@ class MarketBattlegroundValidatorTest {
         MarketBattleground market = defaultMarket("一二三四五六七八九十", "甲乙丙丁戊己庚辛壬癸");
 
         assertDoesNotThrow(() -> validator.validate(market));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "automotive, 汽车",
+            "retail, 电商零售",
+            "finance, 金融",
+            "tourism, 旅游酒店",
+            "tech_software, 'SaaS 企业软件'"
+    })
+    void defaults_renderConfiguredIndustryCodesAsVisibleLabels(String industryCode, String expectedLabel) throws Exception {
+        MarketBattleground market = defaultMarket("亳州", industryCode);
+
+        assertEquals("NATIONAL · 全国" + expectedLabel + "每天", market.getNationalCard().getLabel());
+        assertEquals("REGIONAL · 亳州" + expectedLabel + "每天", market.getRegionalCard().getLabel());
     }
 
     @Test

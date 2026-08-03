@@ -21,6 +21,8 @@ public class MarketBattlegroundValidator {
     static final String PLATFORM_SUFFIX = "元宝 / Kimi 等";
     static final String BRAND_LINE_PREFIX = "→";
     static final int CALCULATION_CARD_LABEL_MAX_LENGTH = 36;
+    static final int PAGE_TITLE_MIN_LENGTH = 12;
+    static final int PAGE_TITLE_MAX_LENGTH = 22;
 
     public void validateRawJson(JsonNode marketNode) {
         if (marketNode == null || marketNode.isNull()) {
@@ -141,9 +143,9 @@ public class MarketBattlegroundValidator {
     }
 
     private void validatePageTitle(String value) {
-        requireText("market_battleground.page_title", value, 34);
+        requireText("market_battleground.page_title", value, PAGE_TITLE_MAX_LENGTH);
         int length = value.length();
-        if (length < 12 || length > 22) {
+        if (length < PAGE_TITLE_MIN_LENGTH) {
             throw new BizException(400, "market_battleground.page_title length must be between 12 and 22");
         }
         if (!value.contains("AI")) {

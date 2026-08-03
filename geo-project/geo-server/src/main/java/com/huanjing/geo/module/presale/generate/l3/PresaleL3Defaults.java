@@ -72,7 +72,8 @@ public class PresaleL3Defaults {
         List<EditableFieldMetaVO> out = new ArrayList<>();
         meta(out, "market_battleground.topbar_title", "顶部章节标题", "顶部条", 40, 32);
         meta(out, "market_battleground.topbar_right", "顶部右侧标识", "顶部条", 24, 18);
-        meta(out, "market_battleground.page_title", "页面主标题", "页面标题", 34, 28);
+        meta(out, "market_battleground.page_title", "页面主标题", "页面标题",
+                MarketBattlegroundValidator.PAGE_TITLE_MAX_LENGTH, 18);
         meta(out, "market_battleground.page_kicker", "英文副标题", "页面标题", 48, 38);
         meta(out, "market_battleground.market_card.label", "市场卡标签", "深色市场卡", 32, 26);
         meta(out, "market_battleground.market_card.source", "市场卡来源", "深色市场卡", 32, 26);
@@ -219,11 +220,19 @@ public class PresaleL3Defaults {
             case "auto_service", "汽车服务" ->
                     new IndustryProfile("汽车服务", "生活/出行", "约 1.0% - 2.5%", "约 12% - 25%",
                             List.of("汽车保养哪家门店靠谱？", "修车选哪家性价比高？", "洗美养护推荐哪家店？"));
-            default ->
-                    new IndustryProfile(isBlank(industry) ? "本地服务" : industry, "生活/服务",
-                            "约 0.8% - 3.0%", "约 5% - 25%",
-                            List.of("服务机构哪家更靠谱？", "选哪家性价比更高？", "本地推荐哪家更合适？"));
+            case "automotive" -> genericIndustryProfile("汽车");
+            case "retail" -> genericIndustryProfile("电商零售");
+            case "finance" -> genericIndustryProfile("金融");
+            case "tourism" -> genericIndustryProfile("旅游酒店");
+            case "tech_software" -> genericIndustryProfile("SaaS 企业软件");
+            default -> genericIndustryProfile(isBlank(industry) ? "本地服务" : industry);
         };
+    }
+
+    private IndustryProfile genericIndustryProfile(String industryLabel) {
+        return new IndustryProfile(industryLabel, "生活/服务",
+                "约 0.8% - 3.0%", "约 5% - 25%",
+                List.of("服务机构哪家更靠谱？", "选哪家性价比更高？", "本地推荐哪家更合适？"));
     }
 
     private MarketScale estimateMarketScale(String region, IndustryProfile profile, PresalePage03MarketConfig config) {

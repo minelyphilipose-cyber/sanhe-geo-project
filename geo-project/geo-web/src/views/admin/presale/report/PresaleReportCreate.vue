@@ -49,7 +49,7 @@
                 <el-input
                   v-model="form.brandName"
                   placeholder="请输入品牌全称"
-                  maxlength="100"
+                  :maxlength="REPORT_BRAND_NAME_MAX_LENGTH"
                   show-word-limit
                 />
               </el-form-item>
@@ -67,10 +67,6 @@
                     maxlength="100"
                     show-word-limit
                   />
-                  <div class="form-tip">
-                    <el-icon><InfoFilled /></el-icon>
-                    <span>最多 3 个；仅用于竞品统计时排除，不计入本品牌提及。</span>
-                  </div>
                 </div>
               </el-form-item>
 
@@ -93,7 +89,6 @@
                     :value="opt.value"
                   />
                 </el-select>
-                <span class="form-tip inline-tip">自定义行业请使用短名称；地区 + 行业需控制在 {{ REPORT_MARKET_LABEL_PAIR_MAX_LENGTH }} 字内。</span>
               </el-form-item>
 
               <el-form-item class="form-item span-full" prop="industryRole">
@@ -115,7 +110,6 @@
                     :value="opt.value"
                   />
                 </el-select>
-                <span v-if="!form.industry" class="form-tip inline-tip">请先选择行业</span>
               </el-form-item>
 
               <el-form-item class="form-item span-full" prop="region">
@@ -126,9 +120,8 @@
                   v-model="form.region"
                   placeholder="如:全国"
                   :maxlength="REPORT_MARKET_LABEL_PAIR_MAX_LENGTH"
-                  show-word-limit
                 />
-                <span class="form-tip inline-tip">建议填写城市或区域短名，如“阜阳”“华东”。</span>
+                <div class="field-counter">地区与行业 {{ marketLabelPairLength }} / {{ REPORT_MARKET_LABEL_PAIR_MAX_LENGTH }}</div>
               </el-form-item>
 
               <el-form-item class="form-item span-full" prop="userType">
@@ -183,12 +176,13 @@
                     :key="index"
                     v-model="form.specifiedCompetitors[index]"
                     :placeholder="`竞品 ${index + 1}`"
-                    maxlength="100"
-                    show-word-limit
+                    :maxlength="REPORT_COMPETITOR_GROUP_MAX_LENGTH"
                   />
-                  <div class="form-tip">
-                    <el-icon><InfoFilled /></el-icon>
-                    <span>留空将由系统自动识别 Top 3；若填写，需填满 3 个，并按这 3 个竞品进行对比诊断。</span>
+                  <div
+                    class="field-counter"
+                    :class="{ 'is-error': specifiedCompetitorGroupLength > REPORT_COMPETITOR_GROUP_MAX_LENGTH }"
+                  >
+                    竞品合计 {{ specifiedCompetitorGroupLength }} / {{ REPORT_COMPETITOR_GROUP_MAX_LENGTH }}
                   </div>
                 </div>
               </el-form-item>
@@ -311,14 +305,6 @@
                     </el-button>
                   </div>
 
-                  <el-alert
-                    v-if="group.hasCompetitorVar"
-                    title="{competitor} 为竞品组占位符。系统会在第一轮分析后识别最多 3 个竞品，并用「品牌1、品牌2、品牌3」的形式整体替换该占位符。每条对比型问题在每个平台只执行一次。"
-                    type="info"
-                    :closable="false"
-                    class="competitor-hint"
-                  />
-
                   <div
                     v-for="item in group.items"
                     :key="item.source.id"
@@ -355,9 +341,8 @@
                         show-word-limit
                         class="prompt-editor"
                       />
-                      <div class="variable-help">
-                        可用变量: {brand} {product} {industry} {industry_role} {region} {user_type}
-                        <span v-if="item.source.hasCompetitorVar">{competitor}</span>
+                      <div v-if="templatePromptItemError(item)" class="validation-error">
+                        {{ templatePromptItemError(item) }}
                       </div>
                       <div class="render-preview">
                         <span class="preview-label">实时预览</span>
@@ -444,14 +429,6 @@
                     <el-button size="small" text @click="addLlmQuestion(cat.code)">手动新增</el-button>
                   </div>
 
-                  <el-alert
-                    v-if="cat.code === 'COMPARISON'"
-                    title="对比型问题必须包含 {competitor}，其他类型不能包含该占位符。"
-                    type="info"
-                    :closable="false"
-                    class="competitor-hint"
-                  />
-
                   <div
                     v-for="item in llmQuestionsByCategory[cat.code]"
                     :key="item.id"
@@ -461,8 +438,8 @@
                     <div class="prompt-row-head">
                       <div class="prompt-meta">
                         <span class="prompt-code">LLM_{{ cat.code }}</span>
-                        <el-tag size="small" :type="llmQuestionError(item) ? 'danger' : 'success'">
-                          {{ llmQuestionError(item) || '有效' }}
+                        <el-tag v-if="llmQuestionError(item)" size="small" type="danger">
+                          {{ llmQuestionError(item) }}
                         </el-tag>
                       </div>
                       <div class="prompt-actions">
@@ -477,9 +454,6 @@
                       show-word-limit
                       class="prompt-editor"
                     />
-                    <div v-if="cat.code === 'COMPARISON'" class="variable-help">
-                      可用变量: 仅 {competitor}（其他信息请直接写真实文本）
-                    </div>
                     <div class="render-preview">
                       <span class="preview-label">实时预览</span>
                       <span v-html="renderPromptHtml(item.promptContent)"></span>
@@ -544,6 +518,20 @@ import {
 } from '@/api/presaleReport'
 import { calculatePromptScope } from '@/utils/presale/prompt-scope'
 import { createIdempotencyKey } from '@/utils/idempotency'
+import {
+  countMarketLabelPair,
+  REPORT_MARKET_INDUSTRY_LABEL_MAX_LENGTH,
+  REPORT_MARKET_LABEL_PAIR_MAX_LENGTH,
+  resolveMarketIndustryLabel
+} from './presaleMarketInput'
+import {
+  competitorGroupLength,
+  findDuplicateLlmQuestion,
+  REPORT_BRAND_NAME_MAX_LENGTH,
+  REPORT_COMPETITOR_GROUP_MAX_LENGTH,
+  REPORT_INDUSTRY_ROLE_MAX_LENGTH,
+  templatePromptError
+} from './presaleReportValidation'
 
 interface PromptDraftItem {
   sourceTemplateId: number
@@ -594,8 +582,6 @@ const MAX_LLM_TOTAL_COUNT = 60
 const MAX_LLM_CATEGORY_COUNT = 30
 const MIN_LLM_COGNITIVE_COUNT = 3
 const MAX_LLM_EXISTING_QUESTIONS = 80
-const REPORT_MARKET_INDUSTRY_LABEL_MAX_LENGTH = 9
-const REPORT_MARKET_LABEL_PAIR_MAX_LENGTH = 11
 
 const router = useRouter()
 const route = useRoute()
@@ -647,6 +633,10 @@ function validateSpecifiedCompetitors(_: unknown, value: string[] | undefined, c
     callback(new Error('指定竞品必须为空或填满 3 个'))
     return
   }
+  if (competitorGroupLength(values) > REPORT_COMPETITOR_GROUP_MAX_LENGTH) {
+    callback(new Error(`3 个竞品拼接后总长度不能超过 ${REPORT_COMPETITOR_GROUP_MAX_LENGTH} 字`))
+    return
+  }
   const normalizedBrand = normalizeCompetitorName(form.brandName)
   const normalizedFormerNames = new Set(
     normalizeBrandFormerNameInputs(form.brandFormerNames).map(normalizeCompetitorName)
@@ -691,39 +681,7 @@ function validateBrandFormerNames(_: unknown, value: string[] | undefined, callb
 }
 
 function marketIndustryLabel(value: string | undefined) {
-  const key = (value || '').trim().toLowerCase()
-  switch (key) {
-    case 'medical_beauty':
-    case 'medical_beauty_hospital':
-    case '医美':
-    case '医疗美容':
-      return '医美'
-    case 'dental':
-    case '口腔':
-      return '口腔'
-    case 'hair_transplant':
-    case '植发':
-      return '植发'
-    case 'home_decoration':
-    case 'decoration':
-    case '家装':
-    case '装修':
-      return '家装'
-    case 'education':
-    case '教培':
-    case '教育':
-      return '教培'
-    case 'local_food':
-    case 'restaurant':
-    case '餐饮':
-    case '本地餐饮':
-      return '餐饮'
-    case 'auto_service':
-    case '汽车服务':
-      return '汽车服务'
-    default:
-      return (value || '').trim()
-  }
+  return resolveMarketIndustryLabel(value, industryOptions)
 }
 
 function validateMarketIndustry(_: unknown, value: string | undefined, callback: (error?: Error) => void) {
@@ -746,13 +704,19 @@ function validateMarketLabelPair(_: unknown, __: string | undefined, callback: (
 }
 
 const rules: FormRules = {
-  brandName: [{ required: true, message: '品牌名不能为空', trigger: 'blur' }],
+  brandName: [
+    { required: true, message: '品牌名不能为空', trigger: 'blur' },
+    { max: REPORT_BRAND_NAME_MAX_LENGTH, message: `品牌名最多 ${REPORT_BRAND_NAME_MAX_LENGTH} 字`, trigger: 'blur' }
+  ],
   brandFormerNames: [{ validator: validateBrandFormerNames, trigger: 'blur' }],
   industry: [
     { required: true, message: '请选择行业', trigger: 'change' },
     { validator: validateMarketIndustry, trigger: 'change' }
   ],
-  industryRole: [{ required: true, message: '请选择身份', trigger: 'change' }],
+  industryRole: [
+    { required: true, message: '请选择身份', trigger: 'change' },
+    { max: REPORT_INDUSTRY_ROLE_MAX_LENGTH, message: `身份最多 ${REPORT_INDUSTRY_ROLE_MAX_LENGTH} 字`, trigger: 'change' }
+  ],
   region: [
     { required: true, message: '请输入地区', trigger: 'blur' },
     { validator: validateMarketLabelPair, trigger: 'blur' }
@@ -772,6 +736,14 @@ const industryOptions = [
   { value: 'medical_beauty', label: '医美美容' },
   { value: 'tech_software', label: 'SaaS 企业软件' }
 ]
+
+const marketLabelPairLength = computed(() =>
+  countMarketLabelPair(form.region, marketIndustryLabel(form.industry))
+)
+
+const specifiedCompetitorGroupLength = computed(() =>
+  competitorGroupLength(form.specifiedCompetitors)
+)
 
 const allRoleOptions = [
   { value: 'chain_brand', label: '连锁品牌' },
@@ -874,7 +846,6 @@ const promptGroups = computed(() => {
     return {
       category,
       items,
-      hasCompetitorVar: items.some((item) => item.source.hasCompetitorVar),
       modifiedCount: items.filter((item) => isModified(item)).length
     }
   }).filter((group) => group.items.length > 0)
@@ -1250,7 +1221,30 @@ function validateLlmSubmit(showMessage: boolean) {
       break
     }
   }
+  const duplicate = findDuplicateLlmQuestion(llmQuestions.value)
+  if (duplicate) {
+    issues.push(`${categoryLabel(duplicate.categoryCode)}下存在重复问题`)
+  }
 
+  if (showMessage && issues.length) {
+    ElMessage.warning(issues[0])
+  }
+  return issues
+}
+
+function templatePromptItemError(item: PromptItem) {
+  return templatePromptError(item.draft.promptContent, item.source.hasCompetitorVar)
+}
+
+function validateTemplateSubmit(showMessage: boolean) {
+  const issues: string[] = []
+  for (const item of promptItems.value) {
+    const error = templatePromptItemError(item)
+    if (error) {
+      issues.push(`${item.source.promptCode} 不合法：${error}`)
+      break
+    }
+  }
   if (showMessage && issues.length) {
     ElMessage.warning(issues[0])
   }
@@ -1382,6 +1376,9 @@ async function onSubmit() {
   if (!ok) return
   if (activePromptTab.value === 'template' && (!promptSources.value.length || promptLoadFailed.value || promptLoading.value)) {
     ElMessage.error('Prompt 清单未加载完成')
+    return
+  }
+  if (activePromptTab.value === 'template' && validateTemplateSubmit(true).length) {
     return
   }
   if (activePromptTab.value === 'llm' && validateLlmSubmit(true).length) {
@@ -1775,23 +1772,24 @@ function formatInt(value: number) {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-.form-tip {
-  grid-column: 1 / -1;
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 0;
-  color: var(--text-3);
+.validation-error {
+  margin-top: 6px;
+  color: var(--el-color-danger);
   font-size: 12px;
   line-height: 1.5;
 }
-.form-tip .el-icon {
-  margin-top: 3px;
-  flex: none;
+.field-counter {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: 4px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
-.inline-tip {
-  display: inline-flex;
-  margin-top: 8px;
+.field-counter.is-error {
+  color: var(--el-color-danger);
 }
 .competitor-inputs,
 .former-name-inputs {
@@ -2025,9 +2023,6 @@ function formatInt(value: number) {
   color: #909399;
   font-size: 12px;
 }
-.competitor-hint {
-  margin-bottom: 10px;
-}
 .prompt-row {
   border: 1px solid #ebeef5;
   border-radius: 4px;
@@ -2066,7 +2061,6 @@ function formatInt(value: number) {
 .prompt-editor {
   margin-bottom: 8px;
 }
-.variable-help,
 .modified-tip {
   color: #909399;
   font-size: 12px;

@@ -92,6 +92,7 @@
                 :model-value="draft.market_battleground.topbar_title"
                 :maxlength="fieldMax('market_battleground.topbar_title', 40)"
                 :warn-length="fieldWarn('market_battleground.topbar_title')"
+                readonly
                 @update:model-value="draft.market_battleground.topbar_title = $event"
               />
               <EditableText
@@ -99,6 +100,7 @@
                 :model-value="draft.market_battleground.topbar_right"
                 :maxlength="fieldMax('market_battleground.topbar_right', 24)"
                 :warn-length="fieldWarn('market_battleground.topbar_right')"
+                readonly
                 @update:model-value="draft.market_battleground.topbar_right = $event"
               />
             </el-collapse-item>
@@ -107,7 +109,7 @@
               <EditableText
                 label="页面主标题"
                 :model-value="draft.market_battleground.page_title"
-                :maxlength="fieldMax('market_battleground.page_title', 34)"
+                :maxlength="fieldMax('market_battleground.page_title', 22)"
                 :warn-length="fieldWarn('market_battleground.page_title')"
                 @update:model-value="draft.market_battleground.page_title = $event"
               />
@@ -116,6 +118,7 @@
                 :model-value="draft.market_battleground.page_kicker"
                 :maxlength="fieldMax('market_battleground.page_kicker', 48)"
                 :warn-length="fieldWarn('market_battleground.page_kicker')"
+                readonly
                 @update:model-value="draft.market_battleground.page_kicker = $event"
               />
             </el-collapse-item>
@@ -164,6 +167,7 @@
                 :model-value="draft.market_battleground.market_card.platform_label"
                 :maxlength="fieldMax('market_battleground.market_card.platform_label', 16)"
                 :warn-length="fieldWarn('market_battleground.market_card.platform_label')"
+                readonly
                 @update:model-value="draft.market_battleground.market_card.platform_label = $event"
               />
               <div v-for="(platform, idx) in draft.market_battleground.market_card.platforms" :key="idx" class="list-editor-item">
@@ -262,6 +266,7 @@
                 :model-value="draft.market_battleground.bridge_text"
                 :maxlength="fieldMax('market_battleground.bridge_text', 20)"
                 :warn-length="fieldWarn('market_battleground.bridge_text')"
+                readonly
                 @update:model-value="draft.market_battleground.bridge_text = $event"
               />
               <EditableText
@@ -358,6 +363,7 @@
                   :model-value="draft.market_battleground.narrative.brand_line_prefix"
                   :maxlength="fieldMax('market_battleground.narrative.brand_line_prefix', 8)"
                   :warn-length="fieldWarn('market_battleground.narrative.brand_line_prefix')"
+                  readonly
                   @update:model-value="draft.market_battleground.narrative.brand_line_prefix = $event"
                 />
                 <EditableText
@@ -621,7 +627,8 @@ const EditableText = defineComponent({
     maxlength: { type: Number, required: true },
     warnLength: { type: Number, default: 0 },
     defaultText: { type: String, default: '' },
-    type: { type: String, default: 'text' }
+    type: { type: String, default: 'text' },
+    readonly: { type: Boolean, default: false }
   },
   emits: ['update:modelValue', 'restore'],
   setup(props, { emit }) {
@@ -630,9 +637,11 @@ const EditableText = defineComponent({
       h('div', { class: 'field-block' }, [
         h('div', { class: 'field-label' }, [
           h('span', props.label),
-          h(ElTag, { size: 'small', type: props.modelValue == null ? 'info' : 'success', effect: 'plain' }, () =>
-            props.modelValue == null ? '默认' : '已修改'
-          ),
+          props.readonly
+            ? null
+            : h(ElTag, { size: 'small', type: props.modelValue == null ? 'info' : 'success', effect: 'plain' }, () =>
+                props.modelValue == null ? '默认' : '已修改'
+              ),
           props.defaultText
             ? h(
                 ElButton,
@@ -649,7 +658,8 @@ const EditableText = defineComponent({
           type: props.type,
           rows: props.type === 'textarea' ? 3 : undefined,
           maxlength: props.maxlength,
-          showWordLimit: true,
+          readonly: props.readonly,
+          showWordLimit: !props.readonly,
           placeholder: props.modelValue == null ? '当前使用默认文案，输入后将改为自定义' : '',
           'onUpdate:modelValue': (value: string) => emit('update:modelValue', value)
         }),

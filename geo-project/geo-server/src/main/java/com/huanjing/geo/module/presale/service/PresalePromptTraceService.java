@@ -160,10 +160,23 @@ public class PresalePromptTraceService {
         if (out.getSize() > 100) {
             out.setSize(100);
         }
-        if (hasText(out.getKeyword())) {
-            out.setKeyword(out.getKeyword().trim());
+        out.setPlatformCode(trimToNull(out.getPlatformCode()));
+        out.setCategory(trimToNull(out.getCategory()));
+        out.setKeyword(trimToNull(out.getKeyword()));
+        out.setStatus(trimToNull(out.getStatus()));
+        if (out.getBatchNo() != null && out.getBatchNo() != 1 && out.getBatchNo() != 2) {
+            out.setBatchNo(null);
+        }
+        if (!STATUS_SUCCESS.equals(out.getStatus())
+                && !STATUS_ANALYZE_FAILED.equals(out.getStatus())
+                && !STATUS_QUERY_FAILED.equals(out.getStatus())) {
+            out.setStatus(null);
         }
         return out;
+    }
+
+    private String trimToNull(String value) {
+        return hasText(value) ? value.trim() : null;
     }
 
     private ReportVersionOptionVO toVersionOption(PresaleReportVersion version, Long promptTraceCount) {

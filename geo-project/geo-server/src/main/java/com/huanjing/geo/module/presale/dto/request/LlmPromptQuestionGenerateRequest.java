@@ -13,13 +13,14 @@ import java.util.Map;
 @Data
 public class LlmPromptQuestionGenerateRequest {
     @NotBlank(message = "品牌名不能为空")
-    @Size(max = 100, message = "品牌名最多 100 字")
+    @Size(max = PresaleReportInputLimits.BRAND_NAME_MAX_LENGTH, message = "品牌名最多 18 字")
     private String brandName;
 
     @NotBlank(message = "行业不能为空")
     private String industry;
 
     @NotBlank(message = "身份不能为空")
+    @Size(max = PresaleReportInputLimits.INDUSTRY_ROLE_MAX_LENGTH, message = "身份最多 50 字")
     private String industryRole;
 
     @NotBlank(message = "地区不能为空")

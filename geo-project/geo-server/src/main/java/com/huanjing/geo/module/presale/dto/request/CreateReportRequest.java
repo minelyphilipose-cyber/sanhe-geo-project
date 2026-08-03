@@ -17,7 +17,7 @@ public class CreateReportRequest {
     private String requestId;
 
     @NotBlank(message = "品牌名不能为空")
-    @Size(max = 100, message = "品牌名最多 100 字")
+    @Size(max = PresaleReportInputLimits.BRAND_NAME_MAX_LENGTH, message = "品牌名最多 18 字")
     private String brandName;
 
     /** 品牌曾用名,可选,最多 3 个。仅用于竞品统计排除,不参与本品牌提及判断。 */
@@ -29,6 +29,7 @@ public class CreateReportRequest {
 
     /** 身份字典 key。 */
     @NotBlank(message = "身份不能为空")
+    @Size(max = PresaleReportInputLimits.INDUSTRY_ROLE_MAX_LENGTH, message = "身份最多 50 字")
     private String industryRole;
 
     @NotBlank(message = "地区不能为空")

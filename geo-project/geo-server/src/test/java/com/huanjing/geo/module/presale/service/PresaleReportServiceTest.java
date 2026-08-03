@@ -24,6 +24,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -102,6 +104,22 @@ class PresaleReportServiceTest {
         verify(currentUserService).ensurePermission("presale.report.create");
         verify(reportMapper, never()).insert(any());
         verify(versionMapper, never()).insert(any());
+    }
+
+    @Test
+    void createReport_rejectsSpecifiedCompetitorGroupLongerThanDatabaseColumn() {
+        CreateReportRequest req = createRequest();
+        req.setSpecifiedCompetitors(List.of(
+                "甲".repeat(33),
+                "乙".repeat(33),
+                "丙".repeat(33)
+        ));
+        when(currentUserService.requireCurrentUser()).thenReturn(user());
+
+        BizException ex = assertThrows(BizException.class, () -> service.createReport(req));
+
+        assertEquals(400, ex.getCode());
+        verify(reportMapper, never()).insert(any());
     }
 
     @Test

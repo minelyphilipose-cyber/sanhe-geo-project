@@ -21,6 +21,15 @@ const TOP_LEVEL_ORDER: Array<keyof EditableContentDTO> = [
   'roi_disclaimer'
 ]
 
+const MARKET_FIXED_TEXT = {
+  topbarTitle: 'MARKET BATTLEGROUND · AI 搜索新战场',
+  topbarRight: 'GEO · CONFIDENTIAL',
+  pageKicker: 'THE NEW BATTLEGROUND FOR YOUR BRAND',
+  bridgeText: '↓ 聚焦到您的核心市场',
+  platformLabel: 'TOP 平台',
+  brandLinePrefix: '→'
+} as const
+
 export interface EditableValidationError {
   field: string
   message: string
@@ -259,47 +268,92 @@ function normalizeCalculationCard(value: Partial<MarketBattleground['national_ca
 }
 
 function validateMarketBattleground(errors: EditableValidationError[], value: MarketBattleground) {
-  checkText(errors, '顶部章节标题', value.topbar_title, 40)
-  checkText(errors, '顶部右侧标识', value.topbar_right, 24)
-  checkText(errors, 'AI搜索新战场 页面主标题', value.page_title, 34)
-  checkText(errors, 'AI搜索新战场 英文副标题', value.page_kicker, 48)
-  checkText(errors, '市场卡标签', value.market_card.label, 32)
-  checkText(errors, '市场卡来源', value.market_card.source, 32)
+  checkMarketLiteral(errors, '顶部章节标题', value.topbar_title, MARKET_FIXED_TEXT.topbarTitle)
+  checkMarketLiteral(errors, '顶部右侧标识', value.topbar_right, MARKET_FIXED_TEXT.topbarRight)
+  validateMarketPageTitle(errors, value.page_title)
+  checkMarketLiteral(errors, 'AI搜索新战场 英文副标题', value.page_kicker, MARKET_FIXED_TEXT.pageKicker)
+  checkRequiredMarketText(errors, '市场卡标签', value.market_card.label, 32)
+  checkRequiredMarketText(errors, '市场卡来源', value.market_card.source, 32)
   value.market_card.stats.forEach((item, idx) => {
-    checkText(errors, `市场数据 ${idx + 1} 数值`, item.value, 12)
-    checkText(errors, `市场数据 ${idx + 1} 单位`, item.unit, 8)
-    checkText(errors, `市场数据 ${idx + 1} 说明`, item.label, 24)
+    checkRequiredMarketText(errors, `市场数据 ${idx + 1} 数值`, item.value, 12)
+    checkRequiredMarketText(errors, `市场数据 ${idx + 1} 单位`, item.unit, 8)
+    checkRequiredMarketText(errors, `市场数据 ${idx + 1} 说明`, item.label, 24)
   })
-  checkText(errors, '平台列表标签', value.market_card.platform_label, 16)
+  checkMarketLiteral(errors, '平台列表标签', value.market_card.platform_label, MARKET_FIXED_TEXT.platformLabel)
   value.market_card.platforms.forEach((item, idx) => {
-    checkText(errors, `平台 ${idx + 1} 名称`, item.name, 12)
-    checkText(errors, `平台 ${idx + 1} 数值`, item.value, 12)
+    checkRequiredMarketText(errors, `平台 ${idx + 1} 名称`, item.name, 12)
+    checkRequiredMarketText(errors, `平台 ${idx + 1} 数值`, item.value, 12)
   })
-  checkText(errors, '其他平台说明', value.market_card.platform_suffix, 18)
+  checkRequiredMarketText(errors, '其他平台说明', value.market_card.platform_suffix, 18)
   validateCalculationCard(errors, '全国推导卡', value.national_card)
-  checkText(errors, '过渡文案', value.bridge_text, 20)
+  checkMarketLiteral(errors, '过渡文案', value.bridge_text, MARKET_FIXED_TEXT.bridgeText)
   validateCalculationCard(errors, '区域推导卡', value.regional_card)
-  checkText(errors, '问题场景引导', value.narrative.intro, 56)
-  value.narrative.questions.forEach((item, idx) => checkText(errors, `示例问题 ${idx + 1}`, item, 34))
-  checkText(errors, '结论句', value.narrative.conclusion, 44)
-  checkText(errors, '品牌句前缀', value.narrative.brand_line_prefix, 8)
-  checkText(errors, '品牌句品牌名', value.narrative.brand_name, 18)
-  checkText(errors, '品牌句后缀', value.narrative.brand_line_suffix, 48)
-  checkText(errors, '数据脚注', value.footnote, 150)
-  checkText(errors, '页脚品牌', value.footer_brand, 24)
+  checkRequiredMarketText(errors, '问题场景引导', value.narrative.intro, 56)
+  value.narrative.questions.forEach((item, idx) => {
+    checkRequiredMarketText(errors, `示例问题 ${idx + 1}`, item, 34)
+    if (value.narrative.brand_name && item.includes(value.narrative.brand_name)) {
+      errors.push({ field: `示例问题 ${idx + 1}`, message: `示例问题 ${idx + 1}不能包含品牌名` })
+    }
+  })
+  checkRequiredMarketText(errors, '结论句', value.narrative.conclusion, 44)
+  checkMarketLiteral(errors, '品牌句前缀', value.narrative.brand_line_prefix, MARKET_FIXED_TEXT.brandLinePrefix)
+  checkRequiredMarketText(errors, '品牌句品牌名', value.narrative.brand_name, 18)
+  checkRequiredMarketText(errors, '品牌句后缀', value.narrative.brand_line_suffix, 48)
+  checkRequiredMarketText(errors, '数据脚注', value.footnote, 150)
+  checkRequiredMarketText(errors, '页脚品牌', value.footer_brand, 24)
 }
 
 function validateCalculationCard(errors: EditableValidationError[], label: string, value: MarketBattleground['national_card']) {
-  checkText(errors, `${label} 标签`, value.label, 36)
-  checkText(errors, `${label} 大数字前缀`, value.value_prefix, 6)
-  checkText(errors, `${label} 大数字`, value.value, 12)
-  checkText(errors, `${label} 大数字单位`, value.unit, 8)
-  checkText(errors, `${label} 大数字说明`, value.subtitle, 28)
-  checkText(errors, `${label} 推导标题`, value.calculation_label, 24)
+  checkRequiredMarketText(errors, `${label} 标签`, value.label, 36)
+  checkRequiredMarketText(errors, `${label} 大数字前缀`, value.value_prefix, 6)
+  checkRequiredMarketText(errors, `${label} 大数字`, value.value, 12)
+  checkRequiredMarketText(errors, `${label} 大数字单位`, value.unit, 8)
+  checkRequiredMarketText(errors, `${label} 大数字说明`, value.subtitle, 28)
+  checkRequiredMarketText(errors, `${label} 推导标题`, value.calculation_label, 24)
   value.rows.forEach((row, idx) => {
-    checkText(errors, `${label} 推导行 ${idx + 1} 标签`, row.label, 18)
-    checkText(errors, `${label} 推导行 ${idx + 1} 数值`, row.value, 30)
+    checkRequiredMarketText(errors, `${label} 推导行 ${idx + 1} 标签`, row.label, 18)
+    checkRequiredMarketText(errors, `${label} 推导行 ${idx + 1} 数值`, row.value, 30)
   })
+}
+
+function validateMarketPageTitle(errors: EditableValidationError[], value: string) {
+  checkRequiredMarketText(errors, 'AI搜索新战场 页面主标题', value, 22)
+  if (value.length < 12) {
+    errors.push({ field: 'AI搜索新战场 页面主标题', message: 'AI搜索新战场 页面主标题至少 12 字' })
+  }
+  if (!value.includes('AI')) {
+    errors.push({ field: 'AI搜索新战场 页面主标题', message: 'AI搜索新战场 页面主标题必须包含 AI' })
+  }
+  if (!['每天', '数', '万', '亿'].some((word) => value.includes(word))) {
+    errors.push({ field: 'AI搜索新战场 页面主标题', message: 'AI搜索新战场 页面主标题必须包含数量表达' })
+  }
+  if (value.includes('!') || value.includes('！')) {
+    errors.push({ field: 'AI搜索新战场 页面主标题', message: 'AI搜索新战场 页面主标题不能包含感叹号' })
+  }
+}
+
+function checkMarketLiteral(
+  errors: EditableValidationError[],
+  field: string,
+  value: string,
+  expected: string
+) {
+  if (value !== expected) {
+    errors.push({ field, message: `${field}为固定文案，不能修改` })
+  }
+}
+
+function checkRequiredMarketText(
+  errors: EditableValidationError[],
+  field: string,
+  value: string,
+  maxLength: number
+) {
+  if (!value.trim()) {
+    errors.push({ field, message: `${field}不能为空` })
+    return
+  }
+  checkText(errors, field, value, maxLength)
 }
 
 function collectMarketClearedFields(value: MarketBattleground, fields: string[]) {

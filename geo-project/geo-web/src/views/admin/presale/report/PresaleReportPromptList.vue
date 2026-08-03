@@ -376,8 +376,7 @@ onMounted(async () => {
 watch([reportId, versionNo], async ([newReportId, newVersionNo], [oldReportId, oldVersionNo]) => {
   const changed = newReportId !== oldReportId || newVersionNo !== oldVersionNo
   if (changed) {
-    resetFilter()
-    pagination.current = 1
+    restoreStateFromQuery()
   }
   if (newReportId !== oldReportId) {
     await loadVersions()
