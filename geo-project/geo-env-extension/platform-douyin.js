@@ -15,6 +15,8 @@
     'EDITOR_NOT_READY',
   ])
   const IMAGE_UPLOAD_WAIT_TIMEOUT_MS = 180_000
+  const MUSIC_USE_MAX_ATTEMPTS = 3
+  const MUSIC_USE_CONFIRM_TIMEOUT_MS = 3_500
 
   function normalizePlatform(value) {
     return String(value || '').trim().toLowerCase()
@@ -148,7 +150,10 @@
         || '',
       )
       if (!selectedTopic) throw new Error('抖音话题首个候选名称为空')
-      await click(candidate, fillProfile.platform, deps)
+      await click(candidate, fillProfile.platform, deps, {
+        trustedOnly: true,
+        label: '抖音选择首个话题',
+      })
       await waitForCondition(
         () => !popup.isConnected || !isVisible(popup) || hasTopicNode(editor),
         5_000,
@@ -492,7 +497,10 @@
     if (existingValue) {
       return { selected: true, value: existingValue, skippedReason: '' }
     }
-    await click(control, platform, deps)
+    await click(control, platform, deps, {
+      trustedOnly: true,
+      label: '抖音打开位置选择器',
+    })
     const input = await waitForCondition(
       () => findLocationInput(control),
       5_000,
@@ -534,7 +542,10 @@
         || collection.textContent
         || '',
       )
-      await click(collection, platform, deps)
+      await click(collection, platform, deps, {
+        trustedOnly: true,
+        label: '抖音选择首个位置',
+      })
       let confirmedValue = ''
       await waitForCondition(
         () => {
@@ -625,6 +636,7 @@
 
   async function selectFirstRecommendedMusic(platform, deps) {
     const waitForCondition = requireDependency(deps.waitForCondition, 'waitForCondition')
+    const delay = requireDependency(deps.delay, 'delay')
     const entry = findMusicSelectionEntry()
     if (!entry) throw new Error('抖音选择音乐入口未找到')
     await click(entry, platform, deps, {
@@ -641,39 +653,123 @@
       12_000,
       `抖音第一首推荐音乐加载超时；抽屉=${defaultNormalizeText(drawer.textContent || '').slice(0, 180) || '-'}`,
     )
-    const { left, card } = firstMusic
+    const musicName = readMusicName(firstMusic.card)
+    const failures = []
+    await activateRecommendedMusic(firstMusic, platform, deps)
+
+    for (let attempt = 1; attempt <= MUSIC_USE_MAX_ATTEMPTS; attempt += 1) {
+      let target
+      try {
+        target = await waitForStableMusicUseTarget(
+          drawer,
+          musicName,
+          waitForCondition,
+        )
+        await click(target.useButton, platform, deps, {
+          trustedOnly: true,
+          label: `抖音使用第一首音乐（第${attempt}次）`,
+        })
+      } catch (error) {
+        failures.push(`第${attempt}次点击失败：${error?.message || String(error)}`)
+        if (!visibleQuery('.semi-sidesheet')) break
+        const current = findRecommendedMusicCard(drawer, musicName)
+        if (current) await activateRecommendedMusic(current, platform, deps).catch(() => {})
+        continue
+      }
+
+      if (await waitForMusicApplied(deps, delay, MUSIC_USE_CONFIRM_TIMEOUT_MS)) {
+        return { selected: true, value: musicName, skippedReason: '' }
+      }
+      failures.push(`第${attempt}次点击后未出现“修改音乐”`)
+      if (!visibleQuery('.semi-sidesheet')) break
+      const current = findRecommendedMusicCard(drawer, musicName)
+      if (current) await activateRecommendedMusic(current, platform, deps).catch(() => {})
+    }
+
+    throw new Error(`抖音第一首音乐“使用”按钮未生效；${failures.join('；') || '未获得有效点击结果'}`)
+  }
+
+  function findFirstRecommendedMusicCard(drawer) {
+    return findRecommendedMusicCard(drawer)
+  }
+
+  function findRecommendedMusicCard(drawer, expectedMusicName = '') {
+    if (!drawer?.isConnected || !isVisible(drawer)) return null
+    const candidates = Array.from(drawer.querySelectorAll('[class*="card-container-left-"]'))
+      .filter(isVisible)
+      .map((left) => ({
+        left,
+        card: left.closest('[class*="card-wrapper-"]') || left.parentElement,
+      }))
+      .filter(({ card }) => card && isVisible(card))
+    if (!expectedMusicName) return candidates[0] || null
+    const normalizedExpected = defaultNormalizeText(expectedMusicName)
+    return candidates.find(({ card }) => readMusicName(card) === normalizedExpected) || null
+  }
+
+  function readMusicName(card) {
+    return defaultNormalizeText(
+      card?.querySelector?.('[class*="song-name-"]')?.textContent
+      || card?.textContent
+      || '',
+    )
+  }
+
+  async function activateRecommendedMusic(target, platform, deps) {
+    const { left } = target || {}
+    if (!left?.isConnected || !isVisible(left)) {
+      throw new Error('抖音第一首推荐音乐卡片已失效')
+    }
     left.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    left.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }))
     left.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
+    left.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }))
     await click(left, platform, deps, {
       trustedOnly: true,
       label: '抖音第一首推荐音乐',
     })
-    const useButton = await waitForCondition(
-      () => Array.from(card.querySelectorAll('button'))
-        .find((button) => isVisible(button) && defaultNormalizeText(button.textContent || '') === '使用'),
-      5_000,
-      '抖音第一首音乐未出现使用按钮',
-    )
-    const musicName = defaultNormalizeText(card.querySelector('[class*="song-name-"]')?.textContent || card.textContent || '')
-    await click(useButton, platform, deps, {
-      trustedOnly: true,
-      label: '抖音使用第一首音乐',
-    })
-    await waitForCondition(
-      () => !visibleQuery('.semi-sidesheet') && /修改音乐/.test(bodyText(deps)),
-      8_000,
-      '抖音音乐使用后主页面未确认',
-    )
-    return { selected: true, value: musicName, skippedReason: '' }
   }
 
-  function findFirstRecommendedMusicCard(drawer) {
-    if (!drawer?.isConnected || !isVisible(drawer)) return null
-    const left = Array.from(drawer.querySelectorAll('[class*="card-container-left-"]'))
-      .find(isVisible)
-    if (!left) return null
-    const card = left.closest('[class*="card-wrapper-"]') || left.parentElement
-    return card && isVisible(card) ? { left, card } : null
+  async function waitForStableMusicUseTarget(drawer, musicName, waitForCondition) {
+    let previousButton = null
+    let previousRect = ''
+    let stableObservations = 0
+    return waitForCondition(
+      () => {
+        const current = findRecommendedMusicCard(drawer, musicName)
+        const useButton = Array.from(current?.card?.querySelectorAll?.('button') || [])
+          .find((button) => button.isConnected
+            && isVisible(button)
+            && defaultNormalizeText(button.textContent || '') === '使用')
+        if (!current || !useButton) {
+          previousButton = null
+          previousRect = ''
+          stableObservations = 0
+          return null
+        }
+        const rect = useButton.getBoundingClientRect()
+        const rectSignature = `${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)}x${Math.round(rect.height)}`
+        if (previousButton === useButton && previousRect === rectSignature) {
+          stableObservations += 1
+        } else {
+          previousButton = useButton
+          previousRect = rectSignature
+          stableObservations = 1
+        }
+        return stableObservations >= 2 ? { ...current, useButton } : null
+      },
+      5_000,
+      '抖音第一首音乐未出现稳定的使用按钮',
+    )
+  }
+
+  async function waitForMusicApplied(deps, delay, timeoutMs) {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (!visibleQuery('.semi-sidesheet') && /修改音乐/.test(bodyText(deps))) return true
+      await delay(200)
+    }
+    return false
   }
 
   function findMusicSelectionEntry() {
@@ -1786,6 +1882,7 @@
       parseImageUploadProgress,
       evaluateImageUploadState,
       findFirstRecommendedMusicCard,
+      findRecommendedMusicCard,
       findLocationControl,
       findLocationInput,
       findLocationListbox,
@@ -1797,6 +1894,7 @@
       isRetryableFailureCode,
       isSupportedBackgroundImage,
       isVisible,
+      waitForStableMusicUseTarget,
     },
   }
 })(globalThis)

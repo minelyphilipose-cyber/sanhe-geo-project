@@ -260,6 +260,8 @@
           <div class="schedule-diagnostics-actions">
             <el-button v-if="canHandleMaterials(diagnosticsRow)" type="primary" @click="handleMaterials(diagnosticsRow)">处理素材</el-button>
             <el-button v-if="canRetryNow(diagnosticsRow)" @click="retryNow(diagnosticsRow)">立即重试</el-button>
+            <el-button v-if="canRepublish(diagnosticsRow)" type="warning" @click="republish(diagnosticsRow)">重新发布</el-button>
+            <el-button v-if="diagnosticsRow && canRecheck(diagnosticsRow)" @click="recheck(diagnosticsRow)">重新检测结果</el-button>
           </div>
         </section>
 
@@ -378,6 +380,7 @@ import {
   getSelfMediaPublishSchedules,
   markSelfMediaPublishScheduleManualRequired,
   recheckSelfMediaPublishScheduleResult,
+  republishSelfMediaPublishSchedule,
   retrySelfMediaPublishScheduleNow,
 } from '@/api/content'
 import type { SelfMediaPublishSchedule } from '@/types'
@@ -386,7 +389,7 @@ import { requiresManualPlatformVerification } from '../selfMediaScheduleRetry'
 
 type ScheduleHealth = 'failed' | 'manual' | 'overdue' | 'running' | 'waiting' | 'scheduled' | 'checking' | 'done' | 'cancelled'
 type ScheduleHealthGroup = 'attention' | 'processing' | 'waiting_publish' | 'url_pending' | 'done'
-type RowAction = 'handleMaterials' | 'retryNow' | 'recheck' | 'markManual' | 'confirmPublished' | 'confirmFailed' | 'cancel'
+type RowAction = 'handleMaterials' | 'retryNow' | 'republish' | 'recheck' | 'markManual' | 'confirmPublished' | 'confirmFailed' | 'cancel'
 
 const props = defineProps<{
   modelValue: boolean
@@ -1474,58 +1477,27 @@ function accountDisplay(row: SelfMediaPublishSchedule) {
 }
 
 function canCancel(row: SelfMediaPublishSchedule) {
-  return props.canPublish && !['cancelled', 'published_confirmed', 'published_url_pending', 'schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto'].includes(row.status)
+  return props.canPublish && row.canCancel === true
 }
 
 function canConfirmPublished(row: SelfMediaPublishSchedule) {
-  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed'].includes(row.status)
+  return props.canPublish && row.canConfirmPublished === true
 }
 
 function canConfirmFailed(row: SelfMediaPublishSchedule) {
-  return props.canPublish && !['cancelled', 'published_confirmed', 'published_url_pending', 'schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto'].includes(row.status)
+  return props.canPublish && row.canConfirmFailed === true
 }
 
 function canRecheck(row: SelfMediaPublishSchedule) {
-  if (!props.canPublish) return false
-  if (['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed'].includes(row.status)) return true
-  return row.status === 'manual_required' && isPublishResultContext(row)
+  return props.canPublish && row.canRecheckPublishResult === true
 }
 
 function canRetryNow(row: SelfMediaPublishSchedule | null) {
-  if (!props.canPublish || !row) return false
-  if (['cancelled', 'published_confirmed', 'cancel_pending_platform', 'routed_to_semi_auto'].includes(row.status)) return false
-  if (hasPendingRetryRequest(row) || isLocked(row)) return false
-  if (requiresManualPlatformVerification(row)) return false
-  if (isPublishResultContext(row)) return false
-  return ['pending', 'filling', 'filled_verified', 'scheduling', 'schedule_failed', 'manual_required'].includes(row.status)
+  return Boolean(props.canPublish && row?.canRetryExecution === true)
 }
 
-function isPublishResultContext(row: SelfMediaPublishSchedule | null) {
-  if (!row) return false
-  if (row.queueKind === 'publish_result_check') return true
-  if (['scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'publish_failed'].includes(row.status)) return true
-  const code = String(row.failureCode || '').toLowerCase()
-  if (code.startsWith('publish_result')
-    || code.startsWith('published_url')
-    || code.includes('publish_check')
-    || code.endsWith('_publish_not_confirmed')
-    || code === 'works_list_verify_timeout') return true
-  const diagnostics = String(row.diagnosticsJson || '').toLowerCase()
-  return diagnostics.includes('publish_result_recheck_requested')
-    || diagnostics.includes('publish_result_check_attempt_limit_exceeded')
-    || diagnostics.includes('publish_result_check_heartbeat_timeout')
-    || diagnostics.includes('published_url_required_but_missing')
-    || diagnostics.includes('publish_check_page_timeout')
-}
-
-function hasPendingRetryRequest(row: SelfMediaPublishSchedule | null) {
-  if (!row) return false
-  const text = `${row.failureCode || ''} ${row.failureMessage || ''} ${row.status || ''}`.toLowerCase()
-  return text.includes('retry_requested')
-    || text.includes('requested immediate retry')
-    || text.includes('立即重试')
-    || text.includes('已请求')
-    || text.includes('重试中')
+function canRepublish(row: SelfMediaPublishSchedule | null) {
+  return Boolean(props.canPublish && row?.canRepublish === true)
 }
 
 function isMaterialFailure(row: SelfMediaPublishSchedule | null) {
@@ -1560,14 +1532,14 @@ function handleMaterials(row: SelfMediaPublishSchedule | null) {
 }
 
 function canMarkManual(row: SelfMediaPublishSchedule) {
-  if (!props.canPublish) return false
-  return ['pending', 'filling', 'filled_verified', 'scheduling', 'scheduled', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'schedule_failed', 'publish_failed'].includes(row.status)
+  return props.canPublish && row.canMarkManual === true
 }
 
 function allRowActions(row: SelfMediaPublishSchedule): RowAction[] {
   const actions: RowAction[] = []
   if (canHandleMaterials(row)) actions.push('handleMaterials')
   if (canRetryNow(row)) actions.push('retryNow')
+  if (canRepublish(row)) actions.push('republish')
   if (canRecheck(row)) actions.push('recheck')
   if (canConfirmPublished(row)) actions.push('confirmPublished')
   if (canMarkManual(row)) actions.push('markManual')
@@ -1579,7 +1551,8 @@ function allRowActions(row: SelfMediaPublishSchedule): RowAction[] {
 function primaryRowAction(row: SelfMediaPublishSchedule): RowAction | null {
   if (canHandleMaterials(row)) return 'handleMaterials'
   if (row.status === 'published_url_pending' && canConfirmPublished(row)) return 'confirmPublished'
-  if (isPublishResultContext(row) && canRecheck(row)) return 'recheck'
+  if (row.operationPhase === 'publish_result_check' && canRecheck(row)) return 'recheck'
+  if (canRepublish(row)) return 'republish'
   if (canRetryNow(row)) return 'retryNow'
   if (canRecheck(row)) return 'recheck'
   if (canConfirmPublished(row)) return 'confirmPublished'
@@ -1595,7 +1568,8 @@ function rowActionLabel(action: RowAction, row: SelfMediaPublishSchedule) {
   const labels: Record<RowAction, string> = {
     handleMaterials: '处理素材',
     retryNow: '立即重试',
-    recheck: '重新校验',
+    republish: '重新发布',
+    recheck: '重新检测结果',
     markManual: '转人工',
     confirmPublished: row.status === 'published_url_pending' ? '补充链接' : '确认发布',
     confirmFailed: '确认失败',
@@ -1606,7 +1580,7 @@ function rowActionLabel(action: RowAction, row: SelfMediaPublishSchedule) {
 
 function rowActionType(action: RowAction | null): 'primary' | 'success' | 'warning' | 'danger' {
   if (action === 'confirmPublished') return 'success'
-  if (action === 'markManual' || action === 'confirmFailed') return 'warning'
+  if (action === 'republish' || action === 'markManual' || action === 'confirmFailed') return 'warning'
   if (action === 'cancel') return 'danger'
   return 'primary'
 }
@@ -1614,6 +1588,7 @@ function rowActionType(action: RowAction | null): 'primary' | 'success' | 'warni
 function runRowAction(row: SelfMediaPublishSchedule, action: RowAction) {
   if (action === 'handleMaterials') return handleMaterials(row)
   if (action === 'retryNow') return retryNow(row)
+  if (action === 'republish') return republish(row)
   if (action === 'recheck') return recheck(row)
   if (action === 'markManual') return markManual(row)
   if (action === 'confirmPublished') return confirmPublished(row)
@@ -1707,6 +1682,26 @@ async function retryNow(row: SelfMediaPublishSchedule | null) {
   }
 }
 
+async function republish(row: SelfMediaPublishSchedule | null) {
+  if (!row) return
+  try {
+    await ElMessageBox.confirm(
+      `请先确认平台中不存在排期 #${row.id} 对应的作品。确认后系统会重新填充并再次提交。`,
+      '确认重新发布',
+      {
+        confirmButtonText: '确认未发布，重新发布',
+        cancelButtonText: '返回核对',
+        type: 'warning',
+      },
+    )
+    await republishSelfMediaPublishSchedule(row.id)
+    ElMessage.success('已加入重新发布队列')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  }
+}
+
 async function markManual(row: SelfMediaPublishSchedule) {
   try {
     const result = await ElMessageBox.prompt(`确认将排期 #${row.id} 转为人工处理？`, '转人工处理', {
@@ -1727,8 +1722,8 @@ async function markManual(row: SelfMediaPublishSchedule) {
 
 async function recheck(row: SelfMediaPublishSchedule) {
   try {
-    await ElMessageBox.confirm(`确认重新校验排期 #${row.id} 的平台发布结果？`, '重新校验发布结果', {
-      confirmButtonText: '重新校验',
+    await ElMessageBox.confirm(`确认重新检测排期 #${row.id} 的平台发布结果？`, '重新检测发布结果', {
+      confirmButtonText: '重新检测结果',
       cancelButtonText: '返回',
       type: 'warning',
     })

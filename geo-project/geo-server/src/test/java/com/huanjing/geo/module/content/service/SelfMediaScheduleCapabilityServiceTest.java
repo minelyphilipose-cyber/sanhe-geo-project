@@ -238,6 +238,30 @@ class SelfMediaScheduleCapabilityServiceTest {
         assertTrue(readiness.ready());
     }
 
+    @Test
+    void automaticPublishingUsesContractModeAndImmediateBrowserReadiness() {
+        when(mapper.selectByPlatform("douyin"))
+                .thenReturn(capability("douyin", "verified", true, "platform_schedule"));
+        when(adapterRouter.contract("douyin")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "douyin",
+                "抖音图文",
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+
+        assertEquals("backend_delayed_publish", service.automaticScheduleStrategy("douyin_image_text"));
+        SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
+                service.automaticPublishReadiness("douyin_image_text");
+
+        assertTrue(readiness.ready());
+        assertEquals("douyin", readiness.contract().platform());
+    }
+
     private SelfMediaScheduleCapabilityUpsertRequest verifiedRequest() {
         SelfMediaScheduleCapabilityUpsertRequest request = new SelfMediaScheduleCapabilityUpsertRequest();
         request.setPlatform("Toutiao");

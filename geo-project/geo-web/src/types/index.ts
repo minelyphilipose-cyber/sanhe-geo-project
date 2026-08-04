@@ -1639,6 +1639,15 @@ export interface SelfMediaPublishSchedule {
   failureActionKind?: string | null
   failureMessage?: string | null
   diagnosticsJson?: string | null
+  operationPhase?: 'schedule_execution' | 'execution_uncertain' | 'publish_result_check' | 'terminal' | string | null
+  canRetryExecution?: boolean | null
+  canRepublish?: boolean | null
+  canRecheckPublishResult?: boolean | null
+  canConfirmPublished?: boolean | null
+  canConfirmFailed?: boolean | null
+  canMarkManual?: boolean | null
+  canCancel?: boolean | null
+  availableActions?: string[]
   activeAlerts?: SelfMediaPublishScheduleAlert[]
   createdAt?: string | null
   updatedAt?: string | null

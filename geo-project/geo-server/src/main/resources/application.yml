@@ -237,8 +237,8 @@ geo:
     gate:
       platforms:
         douyin:
-          min-extension-version: ${DOUYIN_IMAGE_TEXT_MIN_EXTENSION_VERSION:0.2.0}
-          min-helper-version: ${DOUYIN_IMAGE_TEXT_MIN_HELPER_VERSION:0.2.0}
+          min-extension-version: ${DOUYIN_IMAGE_TEXT_MIN_EXTENSION_VERSION:0.2.3}
+          min-helper-version: ${DOUYIN_IMAGE_TEXT_MIN_HELPER_VERSION:0.2.3}
   scheduling:
     pool-size: ${GEO_SCHEDULING_POOL_SIZE:8}
     await-termination-seconds: ${GEO_SCHEDULING_AWAIT_TERMINATION_SECONDS:30}
@@ -531,7 +531,7 @@ geo:
       allow-prerelease: ${EXTENSION_VERSION_ALLOW_PRERELEASE:false}
     env:
       # Readiness prompt only. Keep empty to disable outdated-version warnings.
-      expected-version: ${GEO_ENV_EXTENSION_EXPECTED_VERSION:}
+      expected-version: ${GEO_ENV_EXTENSION_EXPECTED_VERSION:0.2.3}
 
 presale:
   prompt:

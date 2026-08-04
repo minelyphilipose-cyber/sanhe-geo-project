@@ -704,7 +704,7 @@
               :loading="selfMediaScheduleRetryingId === retryingRowKey(row)"
               @click="retrySelfMediaDetailRow(row)"
             >
-              重新处理
+              {{ selfMediaDetailRowActionLabel(row) }}
             </el-button>
             <span v-else class="detail-action-placeholder">-</span>
           </template>
@@ -1049,7 +1049,14 @@ import type {
   ProjectSelfMediaScheduleBatchDetailItem,
   ProjectSelfMediaScheduleConfig,
 } from '@/api/project'
-import { getContentArticleDetail, getSelfMediaAccountsByBrand, getSelfMediaAutomationOverview, retrySelfMediaPublishScheduleNow } from '@/api/content'
+import {
+  getContentArticleDetail,
+  getSelfMediaAccountsByBrand,
+  getSelfMediaAutomationOverview,
+  recheckSelfMediaPublishScheduleResult,
+  republishSelfMediaPublishSchedule,
+  retrySelfMediaPublishScheduleNow,
+} from '@/api/content'
 import type {
   ArticleDetailResponse,
   KeywordGroup,
@@ -1820,11 +1827,25 @@ function retryingRowKey(row: ProjectSelfMediaScheduleBatchDetailItem) {
 }
 
 function canRetrySelfMediaDetailRow(row: ProjectSelfMediaScheduleBatchDetailItem) {
-  if (row.scheduleId && retryableScheduleStatuses.has(row.scheduleStatus || '')) return true
+  if (row.scheduleId && selfMediaDetailScheduleAction(row)) return true
   if (!row.scheduleId && row.scheduleStatus === 'rejected' && row.articleId) return true
   if (!row.scheduleId && row.articleId) return true
   if (!row.scheduleId && row.generationStatus === 'failed') return true
   return false
+}
+
+function selfMediaDetailScheduleAction(row: ProjectSelfMediaScheduleBatchDetailItem) {
+  const actions = row.allowedActions || []
+  return ['RECHECK_PUBLISH_RESULT', 'REPUBLISH', 'RETRY_EXECUTION']
+    .find((action) => actions.includes(action)) || ''
+}
+
+function selfMediaDetailRowActionLabel(row: ProjectSelfMediaScheduleBatchDetailItem) {
+  const action = selfMediaDetailScheduleAction(row)
+  if (action === 'RECHECK_PUBLISH_RESULT') return '重新检测结果'
+  if (action === 'REPUBLISH') return '重新发布'
+  if (action === 'RETRY_EXECUTION') return '立即重试'
+  return '重新处理'
 }
 
 function compactDateTime(value?: string | null) {
@@ -2025,13 +2046,36 @@ async function retrySelfMediaDetailRow(row: ProjectSelfMediaScheduleBatchDetailI
   selfMediaScheduleRetryingId.value = key
   try {
     if (row.scheduleId) {
+      const action = selfMediaDetailScheduleAction(row)
+      if (action === 'RECHECK_PUBLISH_RESULT') {
+        await ElMessageBox.confirm(
+          '确认重新检测该内容的平台发布结果？系统不会重复提交内容。',
+          '重新检测结果',
+          { type: 'warning', confirmButtonText: '重新检测结果', cancelButtonText: '返回' },
+        )
+        await recheckSelfMediaPublishScheduleResult(row.scheduleId)
+        ElMessage.success('已加入发布结果检测队列')
+        await Promise.all([loadSelfMediaScheduleBatch(), openSelfMediaBatchDetail()])
+        return
+      }
+      if (action === 'REPUBLISH') {
+        await ElMessageBox.confirm(
+          '请先确认平台中不存在该作品。确认后系统会重新填充并再次提交。',
+          '确认重新发布',
+          { type: 'warning', confirmButtonText: '确认未发布，重新发布', cancelButtonText: '返回核对' },
+        )
+        await republishSelfMediaPublishSchedule(row.scheduleId)
+        ElMessage.success('已加入重新发布队列')
+        await Promise.all([loadSelfMediaScheduleBatch(), openSelfMediaBatchDetail()])
+        return
+      }
       await ElMessageBox.confirm(
-        `确认重新处理这条内容？系统会重新安排合适的处理时间。`,
-        '重新处理',
-        { type: 'warning', confirmButtonText: '重新处理', cancelButtonText: '返回' },
+        '确认立即重试这条内容？系统会从安全的执行阶段重新开始。',
+        '立即重试',
+        { type: 'warning', confirmButtonText: '立即重试', cancelButtonText: '返回' },
       )
       await retrySelfMediaPublishScheduleNow(row.scheduleId)
-      ElMessage.success('已重新安排处理')
+      ElMessage.success('已加入自动执行队列')
       await Promise.all([loadSelfMediaScheduleBatch(), openSelfMediaBatchDetail()])
       return
     }

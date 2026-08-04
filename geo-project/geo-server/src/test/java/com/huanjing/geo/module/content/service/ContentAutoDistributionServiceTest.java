@@ -4,6 +4,7 @@ import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
+import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
@@ -18,6 +19,8 @@ import com.huanjing.geo.module.content.mapper.ContentAutoDistributionItemMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionPlanMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
+import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
+import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
@@ -28,6 +31,7 @@ import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.mapper.PublishSiteMapper;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
@@ -63,8 +67,11 @@ class ContentAutoDistributionServiceTest {
     private BatchArticleGenerationTaskMapper generationTaskMapper;
     private ArticleDraftMapper articleDraftMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
+    private ProjectMapper projectMapper;
+    private SysUserMapper sysUserMapper;
     private BatchArticleGenerationService generationService;
     private BatchArticlePublishService publishService;
+    private SelfMediaPublishScheduleService publishScheduleService;
     private SelfMediaScheduleCapabilityService scheduleCapabilityService;
     private BrowserEnvironmentService browserEnvironmentService;
     private ContentAutoDistributionService service;
@@ -81,18 +88,21 @@ class ContentAutoDistributionServiceTest {
         generationTaskMapper = mock(BatchArticleGenerationTaskMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
+        projectMapper = mock(ProjectMapper.class);
+        sysUserMapper = mock(SysUserMapper.class);
         generationService = mock(BatchArticleGenerationService.class);
         publishService = mock(BatchArticlePublishService.class);
+        publishScheduleService = mock(SelfMediaPublishScheduleService.class);
         scheduleCapabilityService = mock(SelfMediaScheduleCapabilityService.class);
         browserEnvironmentService = mock(BrowserEnvironmentService.class);
         service = new ContentAutoDistributionService(
-                mock(ProjectMapper.class),
+                projectMapper,
                 allocationMapper,
                 keywordGroupResultMapper,
                 mock(BrandMapper.class),
                 mock(CompanyMapper.class),
                 mock(PublishSiteMapper.class),
-                mock(SysUserMapper.class),
+                sysUserMapper,
                 batchMapper,
                 itemMapper,
                 mock(ContentAutoDistributionPlanMapper.class),
@@ -103,13 +113,57 @@ class ContentAutoDistributionServiceTest {
                 mock(SelfMediaPublishScheduleMapper.class),
                 generationService,
                 publishService,
-                mock(SelfMediaPublishScheduleService.class),
+                publishScheduleService,
                 scheduleCapabilityService,
                 browserEnvironmentService,
                 mock(SystemAlertService.class),
                 mock(ForumBoardRoutingService.class),
                 mock(StringRedisTemplate.class)
         );
+    }
+
+    @Test
+    void automaticSelfMediaDistributionUsesPlatformContractStrategy() {
+        ContentAutoDistributionBatch batch = new ContentAutoDistributionBatch();
+        batch.setProjectId(7L);
+        ContentAutoDistributionItem item = new ContentAutoDistributionItem();
+        item.setId(31L);
+        item.setBrandId(8L);
+        item.setArticleId(10L);
+        item.setTargetId(20L);
+        item.setPlannedPublishAt(LocalDateTime.now().plusMinutes(10));
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setId(20L);
+        account.setPlatform("douyin");
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account);
+        when(scheduleCapabilityService.automaticScheduleStrategy("douyin"))
+                .thenReturn("backend_delayed_publish");
+        SysUser operator = new SysUser();
+        operator.setId(99L);
+        operator.setIsActive(true);
+        when(sysUserMapper.selectOne(any())).thenReturn(operator);
+        SelfMediaPublishScheduleVO createdSchedule = new SelfMediaPublishScheduleVO();
+        createdSchedule.setId(51L);
+        SelfMediaPublishScheduleCreateResponse response = new SelfMediaPublishScheduleCreateResponse();
+        response.getCreatedSchedules().add(createdSchedule);
+        when(publishScheduleService.createSystemSchedules(
+                any(SelfMediaPublishScheduleCreateRequest.class),
+                eq("auto-distribution-self-media-31"),
+                eq(99L)
+        )).thenReturn(response);
+
+        ReflectionTestUtils.invokeMethod(service, "scheduleSelfMediaGeneratedItems", batch, List.of(item));
+
+        ArgumentCaptor<SelfMediaPublishScheduleCreateRequest> requestCaptor =
+                ArgumentCaptor.forClass(SelfMediaPublishScheduleCreateRequest.class);
+        verify(publishScheduleService).createSystemSchedules(
+                requestCaptor.capture(),
+                eq("auto-distribution-self-media-31"),
+                eq(99L)
+        );
+        assertEquals("backend_delayed_publish", requestCaptor.getValue().getScheduleStrategy());
+        assertEquals(List.of(10L), requestCaptor.getValue().getArticleIds());
+        assertEquals(List.of(20L), requestCaptor.getValue().getSelfMediaAccountIds());
     }
 
     @Test

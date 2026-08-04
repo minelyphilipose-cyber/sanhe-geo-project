@@ -8,7 +8,7 @@ import java.util.Locale;
 @Component
 public class DouyinPlatformScheduleAdapter implements SelfMediaPlatformScheduleAdapter {
     public static final String PLATFORM = "douyin";
-    private static final int DEFAULT_FILL_LEAD_MINUTES = 10;
+    private static final int BACKEND_DELAYED_FILL_LEAD_MINUTES = 0;
     private static final int PLATFORM_SCHEDULE_FILL_LEAD_MINUTES = 130;
     private static final int PLATFORM_SCHEDULE_MIN_REMAINING_MINUTES = 120;
     private static final int PLATFORM_SCHEDULE_MAX_REMAINING_MINUTES = 14 * 24 * 60;
@@ -24,17 +24,17 @@ public class DouyinPlatformScheduleAdapter implements SelfMediaPlatformScheduleA
         if (SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalize(strategy))) {
             return platformScheduleRules();
         }
-        return new SelfMediaPlatformScheduleRules(DEFAULT_FILL_LEAD_MINUTES, 0, 1);
+        return backendDelayedRules();
     }
 
     @Override
     public SelfMediaPlatformCapabilityContract capabilityContract() {
         return new SelfMediaPlatformCapabilityContract(
                 platform(),
-                "抖音文章",
+                "抖音图文",
                 SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
-                SelfMediaPlatformScheduleMode.PLATFORM_NATIVE,
-                platformScheduleRules(),
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                backendDelayedRules(),
                 true,
                 false,
                 false,
@@ -43,6 +43,10 @@ public class DouyinPlatformScheduleAdapter implements SelfMediaPlatformScheduleA
                 60,
                 PLATFORM_SCHEDULE_MAX_ATTEMPTS
         );
+    }
+
+    private SelfMediaPlatformScheduleRules backendDelayedRules() {
+        return new SelfMediaPlatformScheduleRules(BACKEND_DELAYED_FILL_LEAD_MINUTES, 0, 1);
     }
 
     private SelfMediaPlatformScheduleRules platformScheduleRules() {

@@ -12,6 +12,7 @@ import { describeUploadPageCandidates, puppeteerPageTargetId, selectUploadTarget
 import {
   evaluateBaijiahaoPublishSignals,
   evaluateDouyinPublishSignals,
+  evaluateToutiaoPublishSignals,
   evaluateXiaohongshuPublishSignals,
 } from './publish-check.js'
 import {
@@ -405,6 +406,7 @@ async function connectPuppeteer(puppeteer, wsEndpoint, config = {}) {
   return puppeteer.connect({
     browserWSEndpoint: wsEndpoint,
     protocolTimeout: puppeteerProtocolTimeoutMs(config),
+    defaultViewport: null,
   })
 }
 
@@ -2560,6 +2562,11 @@ function compactPublishCheckRuntimeResult(result) {
     topCandidates: Array.isArray(result.topCandidates) ? result.topCandidates.slice(0, 5) : [],
     targetTitle: result.targetTitle || '',
     url: result.url || '',
+    pageTitle: result.pageTitle || '',
+    textSample: String(result.textSample || '').slice(0, 1200),
+    reloadCount: result.reloadCount,
+    hasTitle: result.hasTitle === true,
+    hasPublishedSignal: result.hasPublishedSignal === true,
   }
 }
 
@@ -2627,7 +2634,7 @@ async function checkPublishResultInAdspowerPage(
       let reloadCount = 0
       while (Date.now() < deadline) {
         latest = await evaluatePublishResult(page, schedule)
-        if (latest.found) return latest
+        if (latest.found || latest.failed) return latest
         if (shouldReloadPublishCheckPage(platform, latest, reloadCount)) {
           reloadCount += 1
           await page.reload({ waitUntil: 'domcontentloaded', timeout: puppeteerPageGotoTimeoutMs(config) }).catch(() => null)
@@ -2669,6 +2676,29 @@ async function checkPublishResultInAdspowerPage(
 
 async function waitForPublishCheckPageReady(page, platform) {
   const normalized = String(platform || '').trim().toLowerCase()
+  if (normalized === 'toutiao') {
+    await page.waitForFunction(() => {
+      const text = document.body?.innerText || ''
+      return location.pathname.includes('/profile_v4/graphic/articles')
+        && Boolean(
+          document.querySelector('.article-card')
+          || /共\s*0\s*条内容|暂无内容/.test(text)
+        )
+    }, { timeout: 15_000 }).catch(() => null)
+    return
+  }
+  if (normalized === 'douyin') {
+    await page.waitForFunction(() => {
+      const text = document.body?.innerText || ''
+      return location.pathname.includes('/creator-micro/content/manage')
+        && Boolean(
+          document.querySelector('[class*="info-title-text-"]')
+          || document.querySelector('[class*="video-card-content-"]')
+          || /共\s*0\s*个作品|暂无作品|没有更多作品/.test(text)
+        )
+    }, { timeout: 15_000 }).catch(() => null)
+    return
+  }
   if (normalized !== 'baijiahao') return
   await page.waitForFunction(() => {
     const text = document.body?.innerText || ''
@@ -2682,14 +2712,16 @@ async function waitForPublishCheckPageReady(page, platform) {
 
 function publishCheckEvaluateTimeoutMs(platform) {
   const normalized = String(platform || '').trim().toLowerCase()
-  return normalized === 'douyin' ? 45_000 : 20_000
+  return normalized === 'douyin' || normalized === 'toutiao' ? 45_000 : 20_000
 }
 
 function shouldReloadPublishCheckPage(platform, result, reloadCount) {
   const normalized = String(platform || '').trim().toLowerCase()
   if (reloadCount >= 2 || result?.found) return false
   if (normalized === 'toutiao') {
-    return !result?.hasTitle || (!result?.hasPublishedSignal && !result?.hasScheduledSignal)
+    return Number(result?.cardCandidateCount || 0) === 0
+      || !result?.hasTitle
+      || (!result?.hasPublishedSignal && !result?.hasScheduledSignal)
   }
   if (normalized === 'baijiahao') {
     const text = String(result?.textSample || '')
@@ -2745,7 +2777,8 @@ function isReusablePublishCheckPage(platform, currentUrl, targetUrl) {
   }
   if (normalized === 'toutiao') {
     return current.hostname.includes('toutiao.com')
-      && current.pathname.includes('/profile_v4/manage/content')
+      && (current.pathname.includes('/profile_v4/graphic/articles')
+        || current.pathname.includes('/profile_v4/manage/content'))
   }
   return current.pathname === target.pathname
 }
@@ -2773,65 +2806,48 @@ async function evaluateToutiaoPublishResult(page, schedule) {
     locationName: schedule?.publishCheckLocationName || '',
     platformScheduledAt: schedule?.platformScheduledAt || schedule?.plannedPublishAt || '',
   }
-  return page.evaluate((input) => {
-    const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
-    const normalizeTitle = (value) => normalize(value).replace(/[「」『』【】\[\]（）()《》<>“”"‘’'`,，。！？!?、:：；;·.\-—_]/g, '')
-    const parseTimeMs = (value) => {
-      const match = String(value || '').match(/(\d{4})-(\d{1,2})-(\d{1,2})[T\s](\d{1,2}):(\d{1,2})/)
-      if (!match) return Number.NaN
-      return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5])).getTime()
+  const pageState = await page.evaluate(() => {
+    const isVisible = (element) => {
+      if (!element?.getBoundingClientRect) return false
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity) !== 0
+        && rect.width > 0
+        && rect.height > 0
     }
     const text = document.body?.innerText || ''
-    const normalizedText = normalize(text)
-    const normalizedTitleText = normalizeTitle(text)
-    const normalizedTitle = normalizeTitle(input.title)
-    const titleProbe = normalizedTitle.length > 24 ? normalizedTitle.slice(0, 24) : normalizedTitle
-    const locationProbe = normalize(input.locationName)
-    const hasTitle = Boolean(titleProbe && normalizedTitleText.includes(titleProbe))
-    const hasLocation = !locationProbe || normalizedText.includes(locationProbe)
-    const scheduledAtMs = parseTimeMs(input.platformScheduledAt)
-    const isBeforeScheduledAt = Number.isFinite(scheduledAtMs) && scheduledAtMs > Date.now()
-    const hasScheduledSignal = /定时发布中|待发布|将于\d{1,2}[-月]\d{1,2}|发布时间/.test(text)
-    const hasPublishedSignal = /已发布|发布成功|审核中/.test(text)
-    let matchedUrl = ''
-    if (hasTitle) {
-      const anchors = Array.from(document.querySelectorAll('a[href]'))
-      const anchor = anchors.find((item) => {
-        const href = item.href || ''
-        return normalizeTitle(item.textContent).includes(titleProbe) && /toutiao\.com\/item\//.test(href)
-      }) || anchors.find((item) => {
-        const href = item.href || ''
-        const boxText = normalizeTitle(item.closest('.article-card, [class*="article-card"], li, tr, div')?.textContent || item.textContent)
-        return boxText.includes(titleProbe) && /toutiao\.com\/item\//.test(href)
-      })
-      matchedUrl = anchor?.href || ''
-    }
-    const pendingScheduled = hasTitle && hasLocation && !hasPublishedSignal && (isBeforeScheduledAt || hasScheduledSignal)
-    const found = hasTitle && hasLocation && hasPublishedSignal
     return {
-      found,
-      pendingScheduled,
-      reason: pendingScheduled
-        ? 'platform schedule time not due'
-        : hasTitle && hasLocation && !hasPublishedSignal
-          ? 'title matched but published signal missing'
-          : 'title not matched',
-      hasTitle,
-      hasLocation,
-      hasScheduledSignal,
-      hasPublishedSignal,
-      isBeforeScheduledAt,
-      platformStatus: found ? (/审核中/.test(text) ? 'reviewing' : 'published') : (pendingScheduled ? 'scheduled' : 'unknown'),
-      pageStatusCode: found ? (/审核中/.test(text) ? 'reviewing' : 'published') : (pendingScheduled ? 'scheduled' : ''),
-      targetTitle: input.title,
-      locationName: input.locationName,
-      platformScheduledAt: input.platformScheduledAt,
       url: location.href,
-      platformPublishedUrl: found ? matchedUrl : '',
       pageTitle: document.title,
       textSample: text.slice(0, 1200),
+      text,
+      toutiaoCards: Array.from(document.querySelectorAll('.article-card'))
+        .filter(isVisible)
+        .map((card) => {
+          const titleElement = card.querySelector('a.title, .title-wrap a[href*="toutiao.com/item/"]')
+          const tags = Array.from(card.querySelectorAll('.abstruct .byte-tag'))
+            .map((element) => String(element.textContent || '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean)
+          const locationIcon = card.querySelector('.byte-icon-location')
+          const locationTag = locationIcon?.closest('.byte-tag')
+          return {
+            title: String(titleElement?.textContent || '').trim(),
+            status: tags.find((value) => /定时发布中|待发布|已发布|发布成功|审核中|审核未通过|未通过|仅我可见|草稿/.test(value)) || '',
+            location: String(locationTag?.textContent || '').replace(/\s+/g, ' ').trim(),
+            publishedAt: String(card.querySelector('.create-time')?.textContent || '').trim(),
+            text: String(card.textContent || '').replace(/\s+/g, ' ').trim(),
+            coverImageUrl: card.querySelector('a.image img')?.src || '',
+            links: Array.from(card.querySelectorAll('a[href]')).map((anchor) => ({
+              text: String(anchor.textContent || '').trim(),
+              href: anchor.href || '',
+            })),
+          }
+        }),
     }
-  }, target)
+  })
+  return evaluateToutiaoPublishSignals(target, pageState)
 }
 
 async function evaluateZhihuPublishResult(page, schedule) {
@@ -3126,10 +3142,25 @@ async function evaluateDouyinPublishResult(page, schedule) {
     taskStartedAt: schedule?.lastAttemptAt || schedule?.updatedAt || schedule?.snapshotCreatedAt || '',
   }
   const structuredPageState = await page.evaluate(() => {
+    const titleNodes = Array.from(document.querySelectorAll('[class*="info-title-text-"]'))
     const contentNodes = Array.from(document.querySelectorAll('[class*="video-card-content-"]'))
-    const cardNodes = Array.from(new Set(contentNodes.map((content) => {
-      return content.closest('[class*="video-card-new-"]') || content.parentElement || content
-    })))
+    const findCardRoot = (node) => {
+      let current = node
+      let fallback = node?.parentElement || node
+      for (let depth = 0; current && depth < 10; depth += 1, current = current.parentElement) {
+        if (current.matches?.('[class*="video-card-new-"]')) return current
+        if (current.querySelector?.('[class*="info-title-text-"]')) {
+          fallback = current
+          if (current.querySelector('[class*="info-time-"]')
+            || current.querySelector('[class*="video-card-cover-"]')
+            || /已发布|审核中|未通过/.test(current.innerText || '')) {
+            return current
+          }
+        }
+      }
+      return fallback
+    }
+    const cardNodes = Array.from(new Set([...titleNodes, ...contentNodes].map(findCardRoot).filter(Boolean)))
     const backgroundImageUrl = (element) => {
       const value = element ? getComputedStyle(element).backgroundImage : ''
       return String(value || '').match(/^url\(["']?(.*?)["']?\)$/)?.[1] || ''
@@ -3182,11 +3213,18 @@ async function evaluateDouyinPublishResult(page, schedule) {
     const expectedImageCount = Number(input.expectedImageCount || 0)
     const taskStartedAtMs = Date.parse(String(input.taskStartedAt || ''))
     const recordDateTimeMs = (text) => {
-      const match = String(text || '').match(
+      const fullMatch = String(text || '').match(
         /(\d{4})\s*(?:年|[-/])\s*(\d{1,2})\s*(?:月|[-/])\s*(\d{1,2})\s*(?:日)?\s+(\d{1,2}):(\d{1,2})/,
       )
-      if (!match) return Number.NaN
-      return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5])).getTime()
+      const shortMatch = fullMatch ? null : String(text || '').match(
+        /(?:^|\s)(\d{1,2})\s*(?:月|[-/])\s*(\d{1,2})\s*(?:日)?\s+(\d{1,2}):(\d{1,2})/,
+      )
+      if (!fullMatch && !shortMatch) return Number.NaN
+      const reference = Number.isFinite(taskStartedAtMs) ? new Date(taskStartedAtMs) : new Date()
+      const year = fullMatch ? Number(fullMatch[1]) : reference.getFullYear()
+      const values = fullMatch || shortMatch
+      const offset = fullMatch ? 1 : 0
+      return new Date(year, Number(values[1 + offset]) - 1, Number(values[2 + offset]), Number(values[3 + offset]), Number(values[4 + offset])).getTime()
     }
     const isVisible = (el) => {
       const rect = el?.getBoundingClientRect?.()
@@ -3259,6 +3297,7 @@ async function evaluateDouyinPublishResult(page, schedule) {
         hasTitle: Boolean(titleProbe && normalizeTitle(text).includes(titleProbe)),
         hasPublishedSignal: /定时发布中|已发布|审核中|发布成功/.test(text),
         candidateCount: 0,
+        cardCandidateCount: fallbackCandidates.length,
         topCandidates: fallbackCandidates.map((item) => ({ text: item.slice(0, 180), titleMatched: false })),
         targetTitle: input.title,
         platformScheduledAt: input.platformScheduledAt,
@@ -3298,6 +3337,7 @@ async function evaluateDouyinPublishResult(page, schedule) {
       hasTitle: true,
       hasPublishedSignal: Boolean(pageStatusCode),
       candidateCount: records.length,
+      cardCandidateCount: records.length,
       topCandidates,
       platformStatus: pageStatusCode || 'matched',
       pageStatusCode,
@@ -4084,7 +4124,7 @@ function defaultPublishUrlForPlatform(platform) {
 
 function defaultWorksListUrlForPlatform(platform) {
   const normalized = String(platform || '').trim().toLowerCase()
-  if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/manage/content/all'
+  if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/articles'
   if (normalized === 'douyin') return 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
   if (normalized === 'xiaohongshu') return 'https://creator.xiaohongshu.com/new/note-manager'
   if (normalized === 'baijiahao') return null

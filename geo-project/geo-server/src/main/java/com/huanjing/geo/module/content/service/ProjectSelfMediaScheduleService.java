@@ -283,8 +283,14 @@ public class ProjectSelfMediaScheduleService {
             if (item.getScheduleId() == null || !isRetryableScheduleStatus(item.getScheduleStatus())) {
                 continue;
             }
-            scheduleService.retryNow(item.getScheduleId());
-            retried++;
+            List<String> actions = item.getAllowedActions() == null ? List.of() : item.getAllowedActions();
+            if (actions.contains(SelfMediaPublishScheduleActionPolicy.ACTION_RETRY_EXECUTION)) {
+                scheduleService.retryNow(item.getScheduleId());
+                retried++;
+            } else if (actions.contains(SelfMediaPublishScheduleActionPolicy.ACTION_RECHECK_PUBLISH_RESULT)) {
+                scheduleService.recheckPublishResult(item.getScheduleId());
+                retried++;
+            }
         }
         if (retried <= 0) {
             throw new BizException(ERROR_CODE, "当前批次没有可重新处理的异常排期");
@@ -2606,26 +2612,45 @@ public class ProjectSelfMediaScheduleService {
         String generationStatus = normalizeText(item.getGenerationStatus());
         String scheduleStatus = normalizeText(item.getScheduleStatus());
         if ("failed".equals(generationStatus) && item.getScheduleId() == null) {
-            actions.add("重新处理");
+            actions.add("RETRY_GENERATION");
             item.setOperatorActionHint("文章生成失败，可先重新处理失败项；如果持续失败，请检查选题、模板或提示词。");
         } else if ("rejected".equals(scheduleStatus)) {
-            actions.add("重新处理");
+            actions.add("RETRY_GENERATION");
             item.setOperatorActionHint("文章已生成，但发布时间没有安排成功。请调整发布时间或账号后重新处理。");
         } else if (item.getArticleId() != null && item.getScheduleId() == null) {
-            actions.add("重新处理");
+            actions.add("RETRY_GENERATION");
             item.setOperatorActionHint("文章已生成但还没有安排发布时间，可点击重新处理补上排期。");
-        } else if (isRetryableScheduleStatus(scheduleStatus)) {
-            if (schedule != null && isPublishResultCheckQueue(schedule.getQueueKind())) {
-                actions.add("重新校验");
-                item.setOperatorActionHint("发布结果尚未确认，只能重新校验；为避免重复发布，不能改期或忽略。");
+        } else if (schedule != null) {
+            boolean supportsPublishCheck = scheduleAdapterRouter.contract(schedule.getPlatform())
+                    .map(contract -> contract.supportsPublishCheck())
+                    .orElse(true);
+            SelfMediaPublishScheduleActionPolicy.Decision decision =
+                    SelfMediaPublishScheduleActionPolicy.evaluate(
+                            schedule,
+                            supportsPublishCheck,
+                            LocalDateTime.now(clock)
+                    );
+            if (decision.canRetryExecution()) {
+                actions.add(SelfMediaPublishScheduleActionPolicy.ACTION_RETRY_EXECUTION);
+                item.setOperatorActionHint("执行阶段失败，可立即重试；系统会从安全的执行边界重新开始。");
+            } else if (decision.canRepublish()) {
+                actions.add(SelfMediaPublishScheduleActionPolicy.ACTION_REPUBLISH);
+                item.setOperatorActionHint("页面可能已填充。请先核对平台；确认没有发布后，可重新发布。");
+            } else if (decision.canRecheckPublishResult()) {
+                actions.add(SelfMediaPublishScheduleActionPolicy.ACTION_RECHECK_PUBLISH_RESULT);
+                item.setOperatorActionHint("内容已经进入提交后阶段，只能重新检测发布结果，不能直接重发。");
+            } else if (SelfMediaPublishScheduleActionPolicy.PHASE_PUBLISH_RESULT_CHECK.equals(decision.phase())) {
+                item.setOperatorActionHint("发布结果需要人工核对，可在发布排期诊断中确认发布或确认失败。");
+            } else if (SelfMediaPublishScheduleConstants.STATUS_PENDING.equals(scheduleStatus)) {
+                item.setOperatorActionHint("已安排好，等待系统到时间后处理。");
+            } else if (SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_URL_PENDING.equals(scheduleStatus)) {
+                item.setOperatorActionHint("平台已确认发布，系统正在继续补充发布链接。");
+            } else if (SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(scheduleStatus)) {
+                item.setOperatorActionHint("已确认发布完成。");
+            } else if (SelfMediaPublishScheduleConstants.STATUS_CANCELLED.equals(scheduleStatus)) {
+                item.setOperatorActionHint("已取消，系统不会继续处理。");
             } else {
-                actions.add("重新处理");
-                actions.add("改期到下月");
-                actions.add("忽略");
-                if (isManualRequiredMarkableScheduleStatus(scheduleStatus)) {
-                    actions.add("转人工");
-                }
-                item.setOperatorActionHint("这条内容处理异常，可重新处理；如果本月时间不足，建议改期到下月。");
+                item.setOperatorActionHint("当前任务正在处理或暂无可执行的人工动作。");
             }
         } else if (SelfMediaPublishScheduleConstants.STATUS_PENDING.equals(scheduleStatus)) {
             item.setOperatorActionHint("已安排好，等待系统到时间后处理。");

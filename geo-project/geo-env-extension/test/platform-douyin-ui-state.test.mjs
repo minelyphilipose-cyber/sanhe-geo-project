@@ -183,12 +183,16 @@ test('Douyin image-text uses first semantic topic, collection-v2 location and fi
   assert.match(source, /\[class\*="anchor-component-"\] \.semi-select-filterable/)
   assert.match(
     source,
-    /await click\(control, platform, deps\)[\s\S]+findLocationInput\(control\)[\s\S]+typeTrustedText\(input, query/,
+    /await click\(control, platform, deps, \{[\s\S]+trustedOnly: true[\s\S]+抖音打开位置选择器[\s\S]+findLocationInput\(control\)[\s\S]+typeTrustedText\(input, query/,
   )
   assert.match(source, /\.semi-select-input input\.semi-input\[type="text"\]/)
   assert.match(
     source,
-    /await click\(collection, platform, deps\)[\s\S]+readLocationSelection\(control\)/,
+    /await click\(collection, platform, deps, \{[\s\S]+trustedOnly: true[\s\S]+抖音选择首个位置[\s\S]+readLocationSelection\(control\)/,
+  )
+  assert.match(
+    source,
+    /await click\(candidate, fillProfile\.platform, deps, \{[\s\S]+trustedOnly: true[\s\S]+抖音选择首个话题/,
   )
   assert.match(source, /findLocationListbox/)
   assert.match(source, /findLocationInput/)
@@ -206,7 +210,7 @@ test('Douyin image-text uses first semantic topic, collection-v2 location and fi
   )
   assert.match(
     source,
-    /await click\(useButton, platform, deps, \{[\s\S]+trustedOnly: true[\s\S]+抖音使用第一首音乐/,
+    /await click\(target\.useButton, platform, deps, \{[\s\S]+trustedOnly: true[\s\S]+抖音使用第一首音乐/,
   )
   assert.match(
     contentScriptSource,
@@ -218,6 +222,16 @@ test('Douyin image-text uses first semantic topic, collection-v2 location and fi
     /await click\(left, platform, deps, \{[\s\S]+trustedOnly: true[\s\S]+抖音第一首推荐音乐/,
   )
   assert.match(source, /defaultNormalizeText\(button\.textContent \|\| ''\) === '使用'/)
+  assert.match(source, /MUSIC_USE_MAX_ATTEMPTS = 3/)
+  assert.match(source, /waitForStableMusicUseTarget/)
+  assert.match(source, /previousButton === useButton && previousRect === rectSignature/)
+  assert.match(source, /findRecommendedMusicCard\(drawer, musicName\)/)
+  assert.match(source, /waitForMusicApplied\(deps, delay, MUSIC_USE_CONFIRM_TIMEOUT_MS\)/)
+  assert.match(source, /第\$\{attempt\}次点击后未出现“修改音乐”/)
+  assert.match(
+    contentScriptSource,
+    /lastTrustedClickResult[\s\S]+response\?\.ok !== true[\s\S]+扩展后台未响应/,
+  )
 })
 
 test('Douyin only accepts the server-composed final description from task options', () => {
@@ -365,4 +379,52 @@ test('Douyin captured DOM fixture resolves the exact first topic, location and m
       .trim(),
     '你还有上次未发布的图文，是否继续编辑？ 继续编辑 放弃',
   )
+})
+
+test('Douyin waits for the re-rendered music use button to remain stable before clicking', async () => {
+  const html = fs.readFileSync(
+    new URL('./fixtures/douyin-image-text-controls.html', import.meta.url),
+    'utf8',
+  )
+  const dom = new JSDOM(html, {
+    url: 'https://creator.douyin.com/creator-micro/content/post/image?media_type=image',
+  })
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', {
+    configurable: true,
+    value() {
+      return { width: 52, height: 32, left: 380, top: 120, right: 432, bottom: 152 }
+    },
+  })
+  const platform = loadPlatformForTesting({
+    document: dom.window.document,
+    location: dom.window.location,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+  })
+  const drawer = dom.window.document.querySelector('.semi-sidesheet')
+  const musicName = '如果你也刚好抬头看树（主歌）'
+  let evaluations = 0
+  const waitForCondition = async (predicate) => {
+    let result = predicate()
+    evaluations += 1
+    const original = drawer.querySelector('button')
+    const replacement = original.cloneNode(true)
+    replacement.dataset.reRendered = 'true'
+    original.replaceWith(replacement)
+    while (!result && evaluations < 5) {
+      result = predicate()
+      evaluations += 1
+    }
+    if (!result) throw new Error('stable music use button not found')
+    return result
+  }
+
+  const target = await platform.testing.waitForStableMusicUseTarget(
+    drawer,
+    musicName,
+    waitForCondition,
+  )
+
+  assert.equal(evaluations, 3)
+  assert.equal(target.useButton.dataset.reRendered, 'true')
+  assert.equal(target.useButton.isConnected, true)
 })

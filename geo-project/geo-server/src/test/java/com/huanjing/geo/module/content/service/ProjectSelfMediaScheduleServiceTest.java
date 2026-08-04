@@ -1000,13 +1000,13 @@ class ProjectSelfMediaScheduleServiceTest {
                 .thenReturn(schedule);
         SelfMediaPublishScheduleVO retried = new SelfMediaPublishScheduleVO();
         retried.setId(88L);
-        when(scheduleService.retryNow(88L)).thenReturn(retried);
+        when(scheduleService.recheckPublishResult(88L)).thenReturn(retried);
 
         ProjectSelfMediaScheduleBatchDetailVO detail = service.retryAbnormalScheduleItems(7L, "2026-06");
 
         assertEquals(2, detail.getItems().size());
-        assertEquals(List.of("重新校验"), detail.getItems().get(0).getAllowedActions());
-        verify(scheduleService).retryNow(88L);
+        assertEquals(List.of("RECHECK_PUBLISH_RESULT"), detail.getItems().get(0).getAllowedActions());
+        verify(scheduleService).recheckPublishResult(88L);
     }
 
     @Test

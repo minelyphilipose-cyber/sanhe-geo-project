@@ -50,16 +50,17 @@ class SelfMediaPlatformCapabilityContractTest {
     }
 
     @Test
-    void douyinSupportsAdspowerNativeScheduleAndCover() {
+    void douyinImageTextUsesAdspowerBackendDelayedPublishAndCover() {
         SelfMediaPlatformCapabilityContract douyin = new DouyinPlatformScheduleAdapter().capabilityContract();
 
-        assertTrue(douyin.supportsPlatformSchedule());
+        assertTrue(douyin.supportsBackendDelayedPublish());
+        assertFalse(douyin.supportsPlatformSchedule());
         assertTrue(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION.equals(douyin.publishChannel()));
         assertTrue(douyin.requiresCoverUpload());
         assertTrue(douyin.supportsPublishCheck());
-        assertTrue(douyin.scheduleRules().minRemainingMinutes() >= 120);
-        assertTrue(douyin.scheduleRules().fillLeadMinutes() > douyin.scheduleRules().minRemainingMinutes());
-        assertTrue(douyin.scheduleRules().maxRemainingMinutes() >= 14 * 24 * 60);
+        assertTrue(douyin.scheduleRules().minRemainingMinutes() == 0);
+        assertTrue(douyin.scheduleRules().fillLeadMinutes() == 0);
+        assertTrue(douyin.scheduleRules().maxAttempts() == 1);
     }
 
     @Test

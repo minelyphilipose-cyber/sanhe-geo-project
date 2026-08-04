@@ -297,13 +297,23 @@ test('helper emergency build revision targets the deployed extension', () => {
   const contentScript = readProjectFile('geo-env-extension/content-script.js')
 
   assert.equal(manifest.version, helperPackage.version)
-  assert.equal(manifest.version, '0.2.0')
+  assert.equal(manifest.version, '0.2.3')
   assert.match(
     manifest.version_name,
     new RegExp(`${helperPackage.version.replaceAll('.', '\\.')}.+${helperPackage.buildRevision.replaceAll('.', '\\.')}`),
   )
   assert.match(contentScript, new RegExp(`GEO_ENV_CONTENT_SCRIPT_VERSION = '${helperPackage.version.replaceAll('.', '\\.')}'`))
   assert.match(serviceWorker, /EXTENSION_HELPER_BUILD_MISMATCH/)
+})
+
+test('Puppeteer preserves the real AdsPower window viewport', () => {
+  const server = readProjectFile('geo-local-helper/src/server.js')
+
+  assert.match(
+    server,
+    /function connectPuppeteer[\s\S]+puppeteer\.connect\(\{[\s\S]+defaultViewport: null/,
+    'connecting to an existing AdsPower browser must not force Puppeteer\'s 800x600 viewport',
+  )
 })
 
 test('helper retries a failed schedule report with a bounded minimal payload after backend 5xx', () => {
@@ -389,6 +399,11 @@ test('zhihu only accepts immediate-page confirmation and never opens a delayed r
   assert.match(contentScript, /updateStage: updateActiveFillStage/)
   assert.match(serviceWorker, /isRecoverableZhihuPublishVerifyError[\s\S]+ZHIHU_PUBLISH_NOT_SUBMITTED[\s\S]+ZHIHU_PUBLISH_NOT_CONFIRMED/)
   assert.match(serviceWorker, /zhihu: 'ZHIHU_PUBLISH_NOT_CONFIRMED'/)
+  assert.match(
+    serviceWorker,
+    /isZhihuJustPublishedUrl[\s\S]+just_published[\s\S]+zhihu_just_published_url/,
+    '知乎发布跳转带 just_published=1 时应直接作为提交成功的确定信号',
+  )
   assert.match(
     serviceWorker,
     /recoverZhihuPublishAfterFillError[\s\S]+findVerifiedPlatformTab\('zhihu'[\s\S]+publishNotConfirmedError\('ZHIHU'/,
@@ -668,8 +683,9 @@ test('publish checks let an explicit published status override the expected sche
 
   assert.match(publishCheck, /const found = hasTitle && hasConfirmedPublishedEvidence/)
   assert.match(publishCheck, /const found = hasTitle && hasPublishedNearTitle/)
-  assert.match(server, /const found = hasTitle && hasLocation && hasPublishedSignal/)
-  assert.doesNotMatch(server, /const found = hasTitle && hasLocation && !isBeforeScheduledAt && hasPublishedSignal/)
+  assert.match(publishCheck, /found: Boolean\(matchedCard && \(published \|\| reviewing\)\)/)
+  assert.doesNotMatch(publishCheck, /found: Boolean\(matchedCard && !scheduleMatched && \(published \|\| reviewing\)\)/)
+  assert.match(server, /evaluateToutiaoPublishSignals\(target, pageState\)/)
 })
 
 test('handled publish-check timeouts are counted against the claimed browser environment', () => {

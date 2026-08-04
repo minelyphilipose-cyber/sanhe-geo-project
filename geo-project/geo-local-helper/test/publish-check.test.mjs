@@ -3,8 +3,97 @@ import test from 'node:test'
 import {
   evaluateBaijiahaoPublishSignals,
   evaluateDouyinPublishSignals,
+  evaluateToutiaoPublishSignals,
   evaluateXiaohongshuPublishSignals,
+  parseLocalDateTimeMs,
 } from '../src/publish-check.js'
+
+test('short platform time resolves to the nearest year at New Year boundary', () => {
+  const beforeNewYear = new Date(2026, 11, 31, 23, 58, 0).getTime()
+  const afterNewYear = new Date(2027, 0, 1, 0, 2, 0).getTime()
+  assert.equal(parseLocalDateTimeMs('01-01 00:02', beforeNewYear), afterNewYear)
+
+  const afterBoundary = new Date(2027, 0, 1, 0, 5, 0).getTime()
+  const previousYearCard = new Date(2026, 11, 31, 23, 59, 0).getTime()
+  assert.equal(parseLocalDateTimeMs('12-31 23:59', afterBoundary), previousYearCard)
+})
+
+test('toutiao publish check matches the structured published article card', () => {
+  const result = evaluateToutiaoPublishSignals(
+    {
+      title: '阜阳植伢口腔基础信息整理：从五个维度全面了解这家口腔机构',
+      locationName: '阜阳',
+      platformScheduledAt: '2026-08-01T16:51:00',
+    },
+    {
+      url: 'https://mp.toutiao.com/profile_v4/graphic/articles',
+      pageTitle: '头条号',
+      text: '作品管理 文章 已发布',
+      toutiaoCards: [{
+        title: '阜阳植伢口腔基础信息整理：从五个维度全面了解这家口腔机构',
+        status: '已发布',
+        location: '阜阳',
+        publishedAt: '08-01 16:51',
+        text: '阜阳植伢口腔基础信息整理：从五个维度全面了解这家口腔机构 已发布 阜阳 首发',
+        links: [{
+          text: '阜阳植伢口腔基础信息整理：从五个维度全面了解这家口腔机构',
+          href: 'https://www.toutiao.com/item/7668982667588698634/',
+        }],
+      }],
+    },
+  )
+
+  assert.equal(result.found, true)
+  assert.equal(result.platformStatus, 'published')
+  assert.equal(result.platformPublishedUrl, 'https://www.toutiao.com/item/7668982667588698634/')
+  assert.equal(result.platformPublishId, '7668982667588698634')
+  assert.equal(result.matchedCard.scheduleMatched, true)
+  assert.equal(result.matchedCard.locationMatched, true)
+})
+
+test('toutiao publish check does not require location text when the article card omits it', () => {
+  const result = evaluateToutiaoPublishSignals(
+    {
+      title: '阜阳电动车选购指南：如何找到高性价比的代步工具',
+      locationName: '阜阳',
+    },
+    {
+      url: 'https://mp.toutiao.com/profile_v4/graphic/articles',
+      toutiaoCards: [{
+        title: '阜阳电动车选购指南：如何找到高性价比的代步工具',
+        status: '审核中',
+        location: '',
+        publishedAt: '08-01 14:07',
+        text: '阜阳电动车选购指南：如何找到高性价比的代步工具 审核中',
+        links: [],
+      }],
+    },
+  )
+
+  assert.equal(result.found, true)
+  assert.equal(result.platformStatus, 'reviewing')
+  assert.equal(result.hasLocation, false)
+})
+
+test('toutiao publish check rejects a page-level published label without a matching card', () => {
+  const result = evaluateToutiaoPublishSignals(
+    { title: '未出现在当前账号作品列表中的标题' },
+    {
+      url: 'https://mp.toutiao.com/profile_v4/graphic/articles',
+      text: '作品管理 已发布',
+      toutiaoCards: [{
+        title: '其他文章',
+        status: '已发布',
+        text: '其他文章 已发布',
+        links: [],
+      }],
+    },
+  )
+
+  assert.equal(result.found, false)
+  assert.equal(result.hasTitle, false)
+  assert.equal(result.reason, 'title not matched in structured article cards')
+})
 
 test('xiaohongshu publish check keeps future scheduled note pending', () => {
   const result = evaluateXiaohongshuPublishSignals(
@@ -229,6 +318,58 @@ test('douyin image-text publish check reports rejected work', () => {
   assert.equal(result.failureCode, 'DOUYIN_REVIEW_REJECTED')
 })
 
+test('douyin image-text publish check parses list timestamps without a year', () => {
+  const result = evaluateDouyinPublishSignals(
+    {
+      title: '阜阳做极简衣柜定制，哪家封边工艺精细品质稳定',
+      contentKind: 'image_text',
+      expectedImageCount: 6,
+      taskStartedAt: '2026-08-03T12:10:00',
+    },
+    {
+      url: 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish',
+      douyinCards: [{
+        title: '阜阳做极简衣柜定制，哪家封边工艺精细品质稳定',
+        publishedAt: '08-03 12:17',
+        status: '审核中',
+        text: '阜阳做极简衣柜定制，哪家封边工艺精细品质稳定 08-03 12:17 审核中 6张',
+        links: [],
+      }],
+    },
+  )
+
+  assert.equal(result.found, true)
+  assert.equal(result.platformStatus, 'reviewing')
+  assert.equal(result.candidateCount, 1)
+  assert.equal(result.cardCandidateCount, 1)
+  assert.equal(result.topCandidates[0].taskWindowMatched, true)
+})
+
+test('douyin publish check preserves raw candidates rejected by matching rules', () => {
+  const result = evaluateDouyinPublishSignals(
+    {
+      title: '目标标题',
+      contentKind: 'image_text',
+      expectedImageCount: 6,
+      taskStartedAt: '2026-08-03T12:10:00',
+    },
+    {
+      douyinCards: [{
+        title: '完全不同的作品标题',
+        publishedAt: '08-03 12:17',
+        status: '已发布',
+        text: '完全不同的作品标题 08-03 12:17 已发布 6张',
+        links: [],
+      }],
+    },
+  )
+
+  assert.equal(result.found, false)
+  assert.equal(result.candidateCount, 0)
+  assert.equal(result.cardCandidateCount, 1)
+  assert.equal(result.topCandidates[0].titleMatched, false)
+})
+
 test('xiaohongshu publish check returns current detail url after opening published note', () => {
   const result = evaluateXiaohongshuPublishSignals(
     {
@@ -272,6 +413,22 @@ test('xiaohongshu publish check does not treat note manager route as published s
   assert.equal(result.found, false)
   assert.equal(result.pendingScheduled, false)
   assert.equal(result.reason, 'title matched but published signal missing')
+})
+
+test('xiaohongshu publish check reports a matched rejected note as failed', () => {
+  const result = evaluateXiaohongshuPublishSignals(
+    { title: '阜阳健康管理文章' },
+    {
+      url: 'https://creator.xiaohongshu.com/new/note-manager',
+      text: '笔记管理\n阜阳健康管理文章\n审核未通过\n违规原因',
+    },
+  )
+
+  assert.equal(result.found, false)
+  assert.equal(result.failed, true)
+  assert.equal(result.platformStatus, 'rejected')
+  assert.equal(result.failureCode, 'XIAOHONGSHU_REVIEW_REJECTED')
+  assert.equal(result.reason, 'matched rejected note')
 })
 
 test('baijiahao publish check keeps future scheduled article pending', () => {

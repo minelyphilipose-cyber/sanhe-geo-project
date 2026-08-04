@@ -461,7 +461,7 @@ public class LocalAgentController {
 
     private String defaultWorksListUrl(String platform) {
         if ("toutiao".equalsIgnoreCase(platform)) {
-            return "https://mp.toutiao.com/profile_v4/manage/content/all";
+            return "https://mp.toutiao.com/profile_v4/graphic/articles";
         }
         if ("xiaohongshu".equalsIgnoreCase(platform)) {
             return "https://creator.xiaohongshu.com/new/note-manager";

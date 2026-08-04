@@ -52,6 +52,7 @@ export function evaluateXiaohongshuPublishSignals(target = {}, pageState = {}, o
     && isBeforeScheduledAt
     && (hasScheduleTime || hasScheduledSignal || isNoteManager)
   const found = hasTitle && hasConfirmedPublishedEvidence
+  const failed = hasTitle && hasRejectedSignal
   const matchStrategy = matchedUrl
     ? 'anchor_title_url'
     : currentPublishedUrl
@@ -64,9 +65,14 @@ export function evaluateXiaohongshuPublishSignals(target = {}, pageState = {}, o
 
   return {
     found,
+    failed,
+    failureCode: failed ? 'XIAOHONGSHU_REVIEW_REJECTED' : undefined,
+    failureMessage: failed ? '小红书笔记审核未通过或已被平台拒绝' : undefined,
     pendingScheduled,
     reason: pendingScheduled
       ? 'platform schedule time not due'
+      : failed
+        ? 'matched rejected note'
       : found
         ? (hasPublishedCard ? 'matched published note card' : 'matched title and platform status')
         : hasTitle && !hasPublishedSignal
@@ -115,7 +121,7 @@ export function evaluateDouyinPublishSignals(target = {}, pageState = {}) {
   const imageText = String(target.contentKind || '') === 'image_text'
   const expectedImageCount = Number(target.expectedImageCount || 0)
   const taskStartedAtMs = parseLocalDateTimeMs(target.taskStartedAt)
-  const cards = (Array.isArray(pageState.douyinCards) ? pageState.douyinCards : [])
+  const evaluatedCards = (Array.isArray(pageState.douyinCards) ? pageState.douyinCards : [])
     .map((item) => {
       const title = String(item?.title || '').trim()
       const titleScore = partialTitleScore(normalizedTargetTitle, title)
@@ -124,7 +130,7 @@ export function evaluateDouyinPublishSignals(target = {}, pageState = {}) {
       const scheduleMatched = !scheduleProbe || normalizeScheduleProbe(publishedAt).includes(scheduleProbe)
       const imageCountMatched = !imageText || expectedImageCount <= 0
         || new RegExp(`${expectedImageCount}\\s*张`).test(String(item?.text || ''))
-      const recordAtMs = parseLocalDateTimeMs(publishedAt)
+      const recordAtMs = parseLocalDateTimeMs(publishedAt, taskStartedAtMs)
       const taskWindowMatched = !imageText || !Number.isFinite(taskStartedAtMs)
         || Number.isFinite(recordAtMs)
           && recordAtMs >= taskStartedAtMs - 15 * 60 * 1000
@@ -147,8 +153,9 @@ export function evaluateDouyinPublishSignals(target = {}, pageState = {}) {
         score,
       }
     })
-    .filter((item) => item.titleMatched && item.imageCountMatched && item.taskWindowMatched)
     .sort((left, right) => right.score - left.score)
+  const cards = evaluatedCards
+    .filter((item) => item.titleMatched && item.imageCountMatched && item.taskWindowMatched)
   const matchedCard = cards[0] || null
   const status = matchedCard?.status || ''
   const pageStatusCode = /已发布|发布成功/.test(status)
@@ -176,13 +183,16 @@ export function evaluateDouyinPublishSignals(target = {}, pageState = {}) {
     hasTitle: Boolean(matchedCard),
     hasPublishedSignal: Boolean(pageStatusCode),
     candidateCount: cards.length,
-    topCandidates: cards.slice(0, 5).map((item) => ({
+    cardCandidateCount: evaluatedCards.length,
+    topCandidates: evaluatedCards.slice(0, 5).map((item) => ({
       text: String(item.text || '').slice(0, 180),
       title: item.title,
       publishedAt: item.publishedAt,
       status: item.status,
       titleMatched: item.titleMatched,
       titleScore: item.titleScore,
+      imageCountMatched: item.imageCountMatched,
+      taskWindowMatched: item.taskWindowMatched,
       width: item.width,
       height: item.height,
       score: item.score,
@@ -205,6 +215,134 @@ export function evaluateDouyinPublishSignals(target = {}, pageState = {}) {
     platformPublishedUrl: '',
     platformPublishId,
     coverImageUrl: matchedCard?.coverImageUrl || '',
+    pageTitle: pageState.pageTitle || '',
+    matchedText: String(matchedCard?.text || '').slice(0, 300),
+    textSample: String(pageState.text || '').slice(0, 1200),
+  }
+}
+
+export function evaluateToutiaoPublishSignals(target = {}, pageState = {}) {
+  const normalizedTargetTitle = normalizeTitleCompact(target.title)
+  const scheduleProbe = normalizeScheduleProbe(target.platformScheduledAt)
+  const expectedLocation = normalizeCompact(target.locationName)
+  const cards = (Array.isArray(pageState.toutiaoCards) ? pageState.toutiaoCards : [])
+    .map((item) => {
+      const title = String(item?.title || '').trim()
+      const text = String(item?.text || '')
+      const status = firstText(
+        item?.status,
+        text.match(/(定时发布中|待发布|已发布|发布成功|审核中|审核未通过|未通过|仅我可见|草稿)/)?.[1],
+      )
+      const location = String(item?.location || '').trim()
+      const publishedAt = String(item?.publishedAt || '').trim()
+      const titleScore = partialTitleScore(normalizedTargetTitle, title)
+      const scheduleMatched = toutiaoScheduleMatches(target.platformScheduledAt, publishedAt)
+      const locationMatched = !expectedLocation || normalizeCompact(location).includes(expectedLocation)
+      let score = Math.round(titleScore * 1000)
+      if (scheduleMatched) score += 260
+      if (locationMatched) score += 80
+      if (/已发布|发布成功/.test(status)) score += 220
+      else if (/审核中/.test(status)) score += 180
+      else if (/定时发布中|待发布/.test(status)) score += 120
+      return {
+        ...item,
+        title,
+        text,
+        status,
+        location,
+        publishedAt,
+        titleScore,
+        titleMatched: titleScore >= 0.55,
+        scheduleMatched,
+        locationMatched,
+        score,
+      }
+    })
+    .filter((item) => item.titleMatched)
+    .sort((left, right) => right.score - left.score)
+
+  const matchedCard = cards[0] || null
+  const status = matchedCard?.status || ''
+  const published = /已发布|发布成功/.test(status)
+  const reviewing = /审核中/.test(status) && !/未通过/.test(status)
+  const scheduled = /定时发布中|待发布/.test(status)
+  const rejected = /审核未通过|未通过/.test(status)
+  const publishedLink = (matchedCard?.links || []).find((link) => /toutiao\.com\/item\/\d+/.test(link?.href || ''))
+  const platformPublishedUrl = String(publishedLink?.href || '')
+  const platformPublishId = platformPublishedUrl.match(/\/item\/(\d+)/)?.[1] || ''
+
+  return {
+    found: Boolean(matchedCard && (published || reviewing)),
+    failed: Boolean(matchedCard && rejected),
+    failureCode: rejected ? 'TOUTIAO_REVIEW_REJECTED' : undefined,
+    failureMessage: rejected ? '头条作品审核未通过' : undefined,
+    pendingScheduled: Boolean(matchedCard && scheduled),
+    reason: !matchedCard
+      ? 'title not matched in structured article cards'
+      : published
+        ? 'matched published article card'
+        : reviewing
+          ? 'matched reviewing article card'
+          : scheduled
+            ? 'platform schedule time not due'
+            : rejected
+              ? 'matched rejected article card'
+              : 'title matched but card status unresolved',
+    hasTitle: Boolean(matchedCard),
+    hasLocation: Boolean(matchedCard && matchedCard.locationMatched),
+    hasScheduledSignal: scheduled,
+    hasPublishedSignal: published || reviewing,
+    platformStatus: published
+      ? 'published'
+      : reviewing
+        ? 'reviewing'
+        : scheduled
+          ? 'scheduled'
+          : rejected
+            ? 'rejected'
+            : 'unknown',
+    pageStatusCode: published
+      ? 'published'
+      : reviewing
+        ? 'reviewing'
+        : scheduled
+          ? 'scheduled'
+          : rejected
+            ? 'rejected'
+            : '',
+    targetTitle: target.title || '',
+    locationName: target.locationName || '',
+    platformScheduledAt: target.platformScheduledAt || '',
+    scheduleProbe,
+    scheduledAtText: matchedCard?.scheduleMatched ? matchedCard.publishedAt : '',
+    url: pageState.url || '',
+    platformPublishedUrl: matchedCard && (published || reviewing) ? platformPublishedUrl : '',
+    platformPublishId: matchedCard && (published || reviewing) ? platformPublishId : '',
+    matchStrategy: matchedCard ? 'article_card_title_status' : 'article_card_title_probe',
+    cardCandidateCount: Array.isArray(pageState.toutiaoCards) ? pageState.toutiaoCards.length : 0,
+    candidateCount: cards.length,
+    matchedCard: matchedCard ? {
+      title: matchedCard.title,
+      status: matchedCard.status,
+      location: matchedCard.location,
+      publishedAt: matchedCard.publishedAt,
+      publishedUrl: platformPublishedUrl,
+      titleMatched: matchedCard.titleMatched,
+      titleScore: matchedCard.titleScore,
+      scheduleMatched: matchedCard.scheduleMatched,
+      locationMatched: matchedCard.locationMatched,
+    } : undefined,
+    topCandidates: cards.slice(0, 5).map((item) => ({
+      title: item.title,
+      status: item.status,
+      location: item.location,
+      publishedAt: item.publishedAt,
+      titleMatched: item.titleMatched,
+      titleScore: item.titleScore,
+      scheduleMatched: item.scheduleMatched,
+      locationMatched: item.locationMatched,
+      score: item.score,
+    })),
     pageTitle: pageState.pageTitle || '',
     matchedText: String(matchedCard?.text || '').slice(0, 300),
     textSample: String(pageState.text || '').slice(0, 1200),
@@ -561,19 +699,49 @@ function normalizeScheduleProbe(value) {
     .replace(/:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/, ''))
 }
 
-function parseLocalDateTimeMs(value) {
+function toutiaoScheduleMatches(expectedValue, actualValue) {
+  if (!expectedValue) return true
+  const expected = String(expectedValue || '').trim()
+  const actual = String(actualValue || '').trim()
+  if (!actual) return false
+  const expectedMatch = expected.match(/(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})(?:日)?[\sT]+(\d{1,2}):(\d{1,2})/)
+    || expected.match(/(\d{4})-(\d{1,2})-(\d{1,2})[T\s](\d{1,2}):(\d{1,2})/)
+  const actualMatch = actual.match(/(?:(\d{4})[-/年])?(\d{1,2})[-/月](\d{1,2})[日\s]*(\d{1,2}):(\d{1,2})/)
+  if (!expectedMatch || !actualMatch) {
+    return normalizeScheduleProbe(actual).includes(normalizeScheduleProbe(expected))
+  }
+  return Number(expectedMatch[2]) === Number(actualMatch[2])
+    && Number(expectedMatch[3]) === Number(actualMatch[3])
+    && Number(expectedMatch[4]) === Number(actualMatch[4])
+    && Number(expectedMatch[5]) === Number(actualMatch[5])
+}
+
+export function parseLocalDateTimeMs(value, referenceMs = Number.NaN) {
   const text = String(value || '').trim()
-  const match = text.match(
+  const fullMatch = text.match(
     /(\d{4})\s*(?:-|\/|年)\s*(\d{1,2})\s*(?:-|\/|月)\s*(\d{1,2})\s*(?:日)?[T\s]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/,
   )
-  if (!match) return Number.NaN
-  const year = Number(match[1])
-  const month = Number(match[2]) - 1
-  const day = Number(match[3])
-  const hour = Number(match[4])
-  const minute = Number(match[5])
-  const second = Number(match[6] || 0)
-  return new Date(year, month, day, hour, minute, second).getTime()
+  const shortMatch = fullMatch ? null : text.match(
+    /(?:^|\s)(\d{1,2})\s*(?:-|\/|月)\s*(\d{1,2})\s*(?:日)?[T\s]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/,
+  )
+  if (!fullMatch && !shortMatch) return Number.NaN
+  const reference = Number.isFinite(referenceMs) ? new Date(referenceMs) : new Date()
+  const month = Number((fullMatch || shortMatch)[fullMatch ? 2 : 1]) - 1
+  const day = Number((fullMatch || shortMatch)[fullMatch ? 3 : 2])
+  const hour = Number((fullMatch || shortMatch)[fullMatch ? 4 : 3])
+  const minute = Number((fullMatch || shortMatch)[fullMatch ? 5 : 4])
+  const second = Number((fullMatch || shortMatch)[fullMatch ? 6 : 5] || 0)
+  if (fullMatch) {
+    return new Date(Number(fullMatch[1]), month, day, hour, minute, second).getTime()
+  }
+  const referenceYear = reference.getFullYear()
+  return [referenceYear - 1, referenceYear, referenceYear + 1]
+    .map((year) => new Date(year, month, day, hour, minute, second).getTime())
+    .reduce((nearest, candidate) => (
+      Math.abs(candidate - reference.getTime()) < Math.abs(nearest - reference.getTime())
+        ? candidate
+        : nearest
+    ))
 }
 
 function firstText(...values) {

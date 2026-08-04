@@ -150,6 +150,12 @@ public class SelfMediaPublishScheduleController {
         return R.ok(scheduleService.retryNow(id));
     }
 
+    @PostMapping("/self-media-schedules/{id}/republish")
+    public R<SelfMediaPublishScheduleVO> republish(@PathVariable Long id) {
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(scheduleService.republish(id));
+    }
+
     @PostMapping("/self-media-schedules/{id}/mark-manual-required")
     public R<SelfMediaPublishScheduleVO> markManualRequired(@PathVariable Long id,
                                                             @RequestBody(required = false) SelfMediaPublishScheduleCancelRequest request) {

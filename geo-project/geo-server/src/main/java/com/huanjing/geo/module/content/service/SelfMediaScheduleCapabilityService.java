@@ -91,6 +91,32 @@ public class SelfMediaScheduleCapabilityService {
         return readiness(platform, null);
     }
 
+    /**
+     * Resolve the execution strategy from the platform contract instead of
+     * duplicating platform-specific switches in callers.
+     */
+    public String automaticScheduleStrategy(String platform) {
+        String normalized = normalizePlatform(platform);
+        return defaultStrategy(scheduleAdapterRouter.contract(normalized).orElse(null));
+    }
+
+    /**
+     * Automatic distribution uses the same readiness boundary as the actual
+     * execution channel. AdsPower immediate publishing is intentionally not
+     * validated as a native platform scheduled-publish request.
+     */
+    public PlatformScheduleReadiness automaticPublishReadiness(String platform) {
+        String normalized = normalizePlatform(platform);
+        String strategy = automaticScheduleStrategy(normalized);
+        SelfMediaPlatformCapabilityContract contract = scheduleAdapterRouter.contract(normalized).orElse(null);
+        if (contract != null
+                && STRATEGY_BACKEND_DELAYED_PUBLISH.equals(strategy)
+                && SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION.equals(contract.publishChannel())) {
+            return immediatePublishReadiness(normalized, strategy);
+        }
+        return readiness(normalized, strategy);
+    }
+
     public PlatformScheduleReadiness readiness(String platform, String requestedStrategy) {
         String normalized = normalizePlatform(platform);
         SelfMediaScheduleCapability row = mapper.selectByPlatform(normalized);

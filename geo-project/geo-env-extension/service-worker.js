@@ -1,7 +1,7 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.2.0'
-const EXTENSION_BUILD_REVISION = '20260731.3'
+const EXTENSION_VERSION = '0.2.3'
+const EXTENSION_BUILD_REVISION = '20260803.1'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
 const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/graphic/articles'
 const XIAOHONGSHU_MANAGE_URL = 'https://creator.xiaohongshu.com/new/note-manager'
@@ -886,7 +886,8 @@ async function enrichTaskFailure(config, task, error) {
 async function captureFailureSnapshot(tabId, platform) {
   const targetTab = await chrome.tabs.get(tabId).catch(() => null)
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => [])
-  const screenshot = activeTab?.id === tabId
+  const activeTabMatched = activeTab?.id === tabId
+  const screenshot = activeTabMatched
     ? await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'jpeg', quality: 45 }).catch(() => '')
     : ''
   const ping = await chrome.tabs.sendMessage(tabId, {
@@ -894,12 +895,24 @@ async function captureFailureSnapshot(tabId, platform) {
     payload: { platform },
   }).catch(() => null)
   return {
+    capturedAt: new Date().toISOString(),
+    platform: normalizePlatform(platform),
+    tabId,
     href: targetTab?.url || activeTab?.url || '',
     title: targetTab?.title || activeTab?.title || '',
+    activeTabMatched,
     screenshotCaptured: Boolean(screenshot),
-    screenshotPrefix: screenshot ? screenshot.slice(0, 120) : '',
+    screenshotFormat: screenshot ? 'jpeg' : '',
+    screenshotBytes: estimateDataUrlBytes(screenshot),
     page: ping?.ok ? ping.result : null,
   }
+}
+
+function estimateDataUrlBytes(value) {
+  const payload = String(value || '').split(',', 2)[1] || ''
+  if (!payload) return 0
+  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0
+  return Math.max(0, Math.floor(payload.length * 3 / 4) - padding)
 }
 
 function classifyTaskFailureCode(text, platform = '') {
@@ -2467,8 +2480,9 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
   if (isZhihuPublishedArticleUrl(url)) {
     const pageTitle = normalizeZhihuTitleText(tab?.title || '')
     const titleMatch = matchZhihuPublishedTitle(context.expectedTitle || '', pageTitle, '')
+    const justPublished = isZhihuJustPublishedUrl(url)
     return {
-      verified: Boolean(titleMatch?.matched),
+      verified: justPublished || Boolean(titleMatch?.matched),
       pageUrl: publishedUrl,
       platformPublishedUrl: publishedUrl,
       publishedUrl,
@@ -2494,7 +2508,7 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
         reviewText: false,
         publishedAtText: false,
       },
-      recoveredFrom: 'tab_url',
+      recoveredFrom: justPublished ? 'zhihu_just_published_url' : 'tab_url',
     }
   }
   if (!isAllowedPlatformUrl('zhihu', url)) {
@@ -2663,7 +2677,8 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
     },
   }).catch(() => [])
   const result = state?.result || {}
-  if (result.successText && (result.successModal || !result.editorStillOpen) && result.titleMatch?.matched) {
+  const justPublished = isZhihuJustPublishedUrl(result.href || url)
+  if (justPublished || (result.successText && (result.successModal || !result.editorStillOpen) && result.titleMatch?.matched)) {
     return {
       verified: true,
       pageUrl: normalizeZhihuPublishedUrl(result.href || url),
@@ -2683,7 +2698,11 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
         publishedAtText: Boolean(result.publishedAtText),
       },
       textSample: result.textSample || '',
-      recoveredFrom: result.successModal ? 'zhihu_publish_success_modal' : 'page_text',
+      recoveredFrom: justPublished
+        ? 'zhihu_just_published_url'
+        : result.successModal
+          ? 'zhihu_publish_success_modal'
+          : 'page_text',
     }
   }
   return {
@@ -2692,6 +2711,15 @@ async function inspectZhihuPublishedTab(tabId, context = {}) {
     pageTitle: result.title || tab?.title || '',
     textSample: result.textSample || '',
     reason: result.editorStillOpen ? 'editor_still_open' : 'publish_signal_not_found',
+  }
+}
+
+function isZhihuJustPublishedUrl(value) {
+  if (!isZhihuPublishedArticleUrl(value)) return false
+  try {
+    return new URL(value).searchParams.get('just_published') === '1'
+  } catch {
+    return /[?&]just_published=1(?:&|$)/.test(String(value || ''))
   }
 }
 

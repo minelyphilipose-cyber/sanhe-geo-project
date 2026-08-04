@@ -694,7 +694,14 @@ public class ContentAutoDistributionService {
             request.setSelfMediaAccountIds(List.of(item.getTargetId()));
             request.setWindowStart(item.getPlannedPublishAt());
             request.setWindowEnd(item.getPlannedPublishAt().plusMinutes(1));
-            request.setScheduleStrategy("platform_schedule");
+            SelfMediaAccount account = selfMediaAccountMapper.selectById(item.getTargetId());
+            if (account == null) {
+                markItemFailed(item.getId(), "自媒体账号不存在，无法创建自动分发任务");
+                continue;
+            }
+            request.setScheduleStrategy(
+                    selfMediaScheduleCapabilityService.automaticScheduleStrategy(account.getPlatform())
+            );
             request.setMinIntervalMinutes(1);
             String requestKey = "auto-distribution-self-media-" + item.getId();
             SelfMediaPublishScheduleCreateResponse response =
@@ -767,7 +774,7 @@ public class ContentAutoDistributionService {
             return false;
         }
         SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
-                selfMediaScheduleCapabilityService.readiness(account.getPlatform());
+                selfMediaScheduleCapabilityService.automaticPublishReadiness(account.getPlatform());
         if (!readiness.ready()) {
             markItemFailed(item.getId(), readiness.message());
             return false;

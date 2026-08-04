@@ -1641,6 +1641,10 @@ export function retrySelfMediaPublishScheduleNow(id: number) {
   return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/retry-now`)
 }
 
+export function republishSelfMediaPublishSchedule(id: number) {
+  return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/republish`)
+}
+
 export function markSelfMediaPublishScheduleManualRequired(id: number, data?: { reason?: string }) {
   return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/mark-manual-required`, data ?? {})
 }

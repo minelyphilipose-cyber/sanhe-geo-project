@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.2.0'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.2.3'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -4654,10 +4654,12 @@ function requiresTrustedClick(platform) {
 
 async function requestTrustedClick(el, options = {}) {
   const rect = el.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return
+  if (!el.isConnected || rect.width <= 0 || rect.height <= 0) {
+    throw new Error(`${options.label || '真实点击'}目标已失效`)
+  }
   const clientX = Math.round(rect.left + rect.width * (options.clickRatioX || 0.5))
   const clientY = Math.round(rect.top + rect.height * (options.clickRatioY || 0.5))
-  await requestTrustedClickAt(
+  return requestTrustedClickAt(
     { clientX, clientY },
     options.platform,
     options.label || normalizeText(el.textContent || el.getAttribute('aria-label') || '').slice(0, 30),
@@ -4666,7 +4668,9 @@ async function requestTrustedClick(el, options = {}) {
 }
 
 async function requestTrustedClickAt(point, platform, label = '', rect = null) {
-  if (!Number.isFinite(point?.clientX) || !Number.isFinite(point?.clientY)) return
+  if (!Number.isFinite(point?.clientX) || !Number.isFinite(point?.clientY)) {
+    throw new Error(`${label || '真实点击'}坐标无效`)
+  }
   globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = {
     ...(globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || {}),
     lastTrustedClick: {
@@ -4678,7 +4682,7 @@ async function requestTrustedClickAt(point, platform, label = '', rect = null) {
         : '-',
     },
   }
-  await safeRuntimeRequest({
+  const response = await safeRuntimeRequest({
     type: 'GEO_ENV_TRUSTED_CLICK',
     click: {
       clientX: point.clientX,
@@ -4686,6 +4690,18 @@ async function requestTrustedClickAt(point, platform, label = '', rect = null) {
       label,
     },
   })
+  globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = {
+    ...(globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || {}),
+    lastTrustedClickResult: {
+      label,
+      ok: response?.ok === true,
+      error: response?.error || '',
+    },
+  }
+  if (response?.ok !== true) {
+    throw new Error(`${label || '真实点击'}未执行：${response?.error || '扩展后台未响应'}`)
+  }
+  return response
 }
 
 async function typeTrustedText(el, text, options = {}) {

@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.vo;
 
 import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
+import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleActionPolicy;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -59,6 +60,15 @@ public class SelfMediaPublishScheduleVO {
     private String failureActionKind;
     private String failureMessage;
     private String diagnosticsJson;
+    private String operationPhase;
+    private Boolean canRetryExecution;
+    private Boolean canRepublish;
+    private Boolean canRecheckPublishResult;
+    private Boolean canConfirmPublished;
+    private Boolean canConfirmFailed;
+    private Boolean canMarkManual;
+    private Boolean canCancel;
+    private List<String> availableActions = new ArrayList<>();
     private List<SelfMediaPublishScheduleAlertVO> activeAlerts = new ArrayList<>();
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -115,6 +125,21 @@ public class SelfMediaPublishScheduleVO {
         vo.setFailureActionKind(SelfMediaPublishFailureCodes.actionKind(row.getFailureCode()));
         vo.setFailureMessage(row.getFailureMessage());
         vo.setDiagnosticsJson(row.getDiagnosticsJson());
+        SelfMediaPublishScheduleActionPolicy.Decision actionDecision =
+                SelfMediaPublishScheduleActionPolicy.evaluate(
+                        row,
+                        SelfMediaPublishScheduleActionPolicy.defaultSupportsPublishCheck(row.getPlatform()),
+                        LocalDateTime.now()
+                );
+        vo.setOperationPhase(actionDecision.phase());
+        vo.setCanRetryExecution(actionDecision.canRetryExecution());
+        vo.setCanRepublish(actionDecision.canRepublish());
+        vo.setCanRecheckPublishResult(actionDecision.canRecheckPublishResult());
+        vo.setCanConfirmPublished(actionDecision.canConfirmPublished());
+        vo.setCanConfirmFailed(actionDecision.canConfirmFailed());
+        vo.setCanMarkManual(actionDecision.canMarkManual());
+        vo.setCanCancel(actionDecision.canCancel());
+        vo.setAvailableActions(actionDecision.availableActions());
         vo.setCreatedAt(row.getCreatedAt());
         vo.setUpdatedAt(row.getUpdatedAt());
         vo.setScheduledAt(row.getScheduledAt());
