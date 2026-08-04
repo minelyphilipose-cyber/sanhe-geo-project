@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
+import com.huanjing.geo.module.content.constant.XiaohongshuArticlePolicies;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -94,7 +95,7 @@ class ArticlePromptAssemblerV2Test {
 
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals("article_v2", snapshot.path("promptContract").asText());
-        assertEquals("v2_xiaohongshu_special_20260725", snapshot.path("promptRevision").asText());
+        assertEquals("v2_xiaohongshu_converged_20260804", snapshot.path("promptRevision").asText());
         assertEquals("brand_only", snapshot.path("runtimePolicy").path("contactDisclosureMode").asText());
         assertEquals(1200, snapshot.path("effectiveLengthPolicy").path("targetMinChars").asInt());
         assertEquals(1800, snapshot.path("effectiveLengthPolicy").path("targetMaxChars").asInt());
@@ -239,6 +240,50 @@ class ArticlePromptAssemblerV2Test {
 
         assertTrue(result.userPrompt().contains("小红书信息笔记风格"));
         assertFalse(result.userPrompt().contains("# 小红书特殊行业表达要求"));
+    }
+
+    @Test
+    void neutralEducationTemplateOmitsBrandFactsAndUsesTightOutputRules() throws Exception {
+        Project project = new Project();
+        project.setId(1L);
+        project.setBrandId(2L);
+        project.setCompanyName("测试医疗有限公司");
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试医美");
+        brand.setMainBusiness("医疗美容服务");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setName(XiaohongshuArticlePolicies.NEUTRAL_EDUCATION_TEMPLATE_NAME);
+        template.setArticleTypeCode("social_note");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        version.setVersionNo(1);
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "皮肤屏障为什么会随环境变化", null,
+                null, null, List.of(), "social_note", "xiaohongshu", "short", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "xiaohongshu",
+                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result =
+                assembler.assemble(input, template, version, policy, true);
+
+        assertTrue(result.userPrompt().contains("特殊行业中立科普"));
+        assertTrue(result.userPrompt().contains("不承担品牌露出"));
+        assertTrue(result.userPrompt().contains("正文不含标题控制在约500～700字"));
+        assertTrue(result.userPrompt().contains("标题不超过20个字"));
+        assertTrue(result.userPrompt().contains("本模板不向正文提供企业、品牌、具体机构、品牌专属产品服务、资质或案例素材"));
+        assertFalse(result.userPrompt().contains("测试医美"));
+        assertFalse(result.userPrompt().contains("医疗美容服务"));
+
+        JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
+        assertEquals("neutral_education", snapshot.path("xiaohongshuContentMode").asText());
+        assertEquals(500, snapshot.path("effectiveLengthPolicy").path("targetMinChars").asInt());
+        assertEquals(700, snapshot.path("effectiveLengthPolicy").path("targetMaxChars").asInt());
+        assertEquals(20, snapshot.path("effectiveTitleMaxChars").asInt());
     }
 
     @Test

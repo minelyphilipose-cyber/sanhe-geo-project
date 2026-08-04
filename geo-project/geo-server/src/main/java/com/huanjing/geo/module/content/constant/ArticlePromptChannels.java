@@ -13,6 +13,7 @@ public final class ArticlePromptChannels {
     public static final String AUTHORITY_MEDIA = "authority_media";
     public static final String FORUM = "forum";
     public static final int SELF_MEDIA_MAX_TITLE_CHARS = 28;
+    public static final int XIAOHONGSHU_NEUTRAL_EDUCATION_MAX_TITLE_CHARS = 20;
     public static final int DOUYIN_MAX_TITLE_CHARS = 20;
     public static final int DOUYIN_MAX_CONTENT_CHARS = 850;
 
@@ -140,6 +141,14 @@ public final class ArticlePromptChannels {
             return DOUYIN_MAX_TITLE_CHARS;
         }
         return maxTitleChars(groupCode);
+    }
+
+    public static Integer maxTitleChars(String groupCode, String subCode, boolean neutralEducationMode) {
+        String canonicalSubCode = canonicalSubCode(groupCode, subCode);
+        if (neutralEducationMode && SELF_MEDIA.equals(groupCode) && "xiaohongshu".equals(canonicalSubCode)) {
+            return XIAOHONGSHU_NEUTRAL_EDUCATION_MAX_TITLE_CHARS;
+        }
+        return maxTitleChars(groupCode, canonicalSubCode);
     }
 
     public static Integer maxContentChars(String groupCode, String subCode) {

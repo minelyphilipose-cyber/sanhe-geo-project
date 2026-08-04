@@ -12,6 +12,7 @@ import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
+import com.huanjing.geo.module.content.constant.XiaohongshuArticlePolicies;
 import com.huanjing.geo.module.content.dto.*;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
@@ -255,13 +256,15 @@ public class ArticleAiDraftService {
                             generationForbiddenPhrases(context),
                             ArticlePromptChannels.maxTitleChars(
                                     context.channelGroupCode(),
-                                    context.channelSubCode()
+                                    context.channelSubCode(),
+                                    isNeutralEducationMode(context)
                             ),
                             ArticleGenerationTemperatures.resolve(context.v2(), context.medicalContext() != null),
                             ArticlePromptChannels.maxContentChars(
                                     context.channelGroupCode(),
                                     context.channelSubCode()
-                            )
+                            ),
+                            structureValidationContext(context)
                     )
             );
             model = generated.model();
@@ -339,13 +342,15 @@ public class ArticleAiDraftService {
                             generationForbiddenPhrases(context),
                             ArticlePromptChannels.maxTitleChars(
                                     context.channelGroupCode(),
-                                    context.channelSubCode()
+                                    context.channelSubCode(),
+                                    isNeutralEducationMode(context)
                             ),
                             ArticleGenerationTemperatures.resolve(context.v2(), context.medicalContext() != null),
                             ArticlePromptChannels.maxContentChars(
                                     context.channelGroupCode(),
                                     context.channelSubCode()
-                            )
+                            ),
+                            structureValidationContext(context)
                     )
             );
             model = generated.model();
@@ -646,6 +651,20 @@ public class ArticleAiDraftService {
 
     private List<String> generationForbiddenPhrases(ArticleGenerationPromptContextFactory.PromptContextResult context) {
         return context.v2() && context.medicalContext() != null ? List.of() : context.forbiddenPhrases();
+    }
+
+    private boolean isNeutralEducationMode(ArticleGenerationPromptContextFactory.PromptContextResult context) {
+        return context.medicalContext() != null
+                && XiaohongshuArticlePolicies.isNeutralEducationTemplate(context.template());
+    }
+
+    private ArticleGenerationEngine.StructureValidationContext structureValidationContext(
+            ArticleGenerationPromptContextFactory.PromptContextResult context) {
+        return new ArticleGenerationEngine.StructureValidationContext(
+                context.channelGroupCode(),
+                context.channelSubCode(),
+                isNeutralEducationMode(context)
+        );
     }
 
     private List<String> medicalForbiddenPhrases(ArticleGenerationPromptContextFactory.PromptContextResult context) {

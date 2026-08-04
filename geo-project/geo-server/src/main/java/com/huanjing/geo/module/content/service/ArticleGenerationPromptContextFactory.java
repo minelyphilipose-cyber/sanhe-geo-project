@@ -7,6 +7,7 @@ import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
+import com.huanjing.geo.module.content.constant.XiaohongshuArticlePolicies;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
@@ -196,7 +197,10 @@ public class ArticleGenerationPromptContextFactory {
                 : promptBuilder.buildFromTemplate(input, resolution.template(), resolution.version());
         if (medicalContext != null) {
             prompt = v2
-                    ? medicalArticleGenerationService.applyMedicalPromptV2(prompt, medicalContext)
+                    ? medicalArticleGenerationService.applyMedicalPromptV2(
+                    prompt,
+                    medicalContext,
+                    XiaohongshuArticlePolicies.isNeutralEducationTemplate(resolution.template()))
                     : medicalArticleGenerationService.applyMedicalPrompt(prompt, medicalContext);
         }
         return new PromptContextResult(project, brand, input, prompt, forbiddenPhrases,

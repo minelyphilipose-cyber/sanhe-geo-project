@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
+import com.huanjing.geo.module.content.constant.XiaohongshuArticlePolicies;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -65,31 +66,36 @@ public class ArticlePromptAssemblerV2 {
             ArticleRuntimePolicy runtimePolicy,
             boolean specialIndustry
     ) {
+        boolean neutralEducationMode = specialIndustry
+                && XiaohongshuArticlePolicies.isNeutralEducationTemplate(template);
         List<String> omittedMaterialKeys = new ArrayList<>();
         ArticleContentLengthPolicy contentLengthPolicy = contentLengthPolicyResolver.resolve(
-                runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode(), input.length());
+                runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode(), input.length(), neutralEducationMode);
         StringBuilder prompt = new StringBuilder(4096);
         section(prompt, "真实性与硬边界", truthfulnessRules(input.forbiddenPhrases()));
         section(prompt, "全局写作原则", GLOBAL_WRITING_RULES);
-        section(prompt, "当前渠道与写作视角", channelDirection(runtimePolicy));
+        section(prompt, "当前渠道与写作视角", channelDirection(runtimePolicy, neutralEducationMode));
         section(prompt, "当前文章任务", templateTask(input, template));
         section(prompt, "严格审核平台品牌表达要求",
-                strictEditorialBrandDirection(input, template, runtimePolicy, specialIndustry));
+                strictEditorialBrandDirection(input, template, runtimePolicy, specialIndustry, neutralEducationMode));
         section(prompt, "小红书特殊行业表达要求",
-                xiaohongshuSpecialIndustryDirection(input, runtimePolicy, specialIndustry));
+                xiaohongshuSpecialIndustryDirection(input, runtimePolicy, specialIndustry, neutralEducationMode));
         section(prompt, "主题、关键词与读者", topicMaterial(input, omittedMaterialKeys));
-        section(prompt, "可用事实材料",
-                FACT_MATERIAL_USAGE + "\n" + factMaterial(input, omittedMaterialKeys, specialIndustry));
+        section(prompt, "可用事实材料", neutralEducationMode
+                ? neutralEducationFactMaterial(omittedMaterialKeys)
+                : FACT_MATERIAL_USAGE + "\n" + factMaterial(input, omittedMaterialKeys, specialIndustry));
         section(prompt, "联系方式边界", contactDirection(input.project(), input.brand(), runtimePolicy, omittedMaterialKeys));
-        section(prompt, "输出要求", outputRules(contentLengthPolicy, runtimePolicy));
+        section(prompt, "输出要求", outputRules(contentLengthPolicy, runtimePolicy, neutralEducationMode));
 
         Map<String, Object> promptSnapshot = baseSnapshot(
                 input, template, version, runtimePolicy, contentLengthPolicy, omittedMaterialKeys, specialIndustry);
+        promptSnapshot.put("xiaohongshuContentMode", neutralEducationMode ? "neutral_education" : "default");
         promptSnapshot.put("systemPrompt", SYSTEM_PROMPT);
         promptSnapshot.put("userPrompt", prompt.toString().trim());
 
         Map<String, Object> inputSnapshot = baseSnapshot(
                 input, template, version, runtimePolicy, contentLengthPolicy, omittedMaterialKeys, specialIndustry);
+        inputSnapshot.put("xiaohongshuContentMode", neutralEducationMode ? "neutral_education" : "default");
         inputSnapshot.put("projectId", input.project() == null ? null : input.project().getId());
         inputSnapshot.put("sourceProjectId", input.sourceProjectId());
         inputSnapshot.put("sourceBrandId", input.sourceBrandId());
@@ -124,15 +130,18 @@ public class ArticlePromptAssemblerV2 {
                                              boolean specialIndustry) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("promptContract", PROMPT_CONTRACT);
-        snapshot.put("promptRevision", "v2_xiaohongshu_special_20260725");
+        snapshot.put("promptRevision", "v2_xiaohongshu_converged_20260804");
         snapshot.put("templateId", template == null ? null : template.getId());
         snapshot.put("templateVersionId", version == null ? null : version.getId());
         snapshot.put("templateVersionNo", version == null ? null : version.getVersionNo());
         snapshot.put("runtimePolicy", runtimePolicy);
         snapshot.put("effectiveLengthPolicy", contentLengthPolicy);
+        boolean neutralEducationMode = specialIndustry
+                && XiaohongshuArticlePolicies.isNeutralEducationTemplate(template);
         snapshot.put("effectiveTitleMaxChars", ArticlePromptChannels.maxTitleChars(
                 runtimePolicy.channelGroupCode(),
-                runtimePolicy.channelSubCode()
+                runtimePolicy.channelSubCode(),
+                neutralEducationMode
         ));
         snapshot.put("effectiveTemperature", ArticleGenerationTemperatures.resolve(true, specialIndustry));
         snapshot.put("omittedMaterialKeys", omittedMaterialKeys.stream().distinct().toList());
@@ -161,8 +170,11 @@ public class ArticlePromptAssemblerV2 {
         return text.toString();
     }
 
-    private String channelDirection(ArticleRuntimePolicy policy) {
+    private String channelDirection(ArticleRuntimePolicy policy, boolean neutralEducationMode) {
         String channelGuide = ArticlePromptChannels.channelGuide(policy.channelGroupCode(), policy.channelSubCode());
+        if (neutralEducationMode) {
+            return channelGuide + "\n采用与任何企业、品牌、具体机构或品牌专属产品无关的中立科普视角，只解释公开、通用的小知识，不承担品牌露出或转化任务。";
+        }
         boolean strictEditorial = ArticlePromptChannels.isStrictEditorialSelfMedia(
                 policy.channelGroupCode(), policy.channelSubCode());
         String perspectiveGuide = switch (policy.perspectiveCode()) {
@@ -205,10 +217,14 @@ public class ArticlePromptAssemblerV2 {
     private String strictEditorialBrandDirection(BatchArticlePromptBuilder.PromptBuildInput input,
                                                   ArticlePromptTemplate template,
                                                   ArticleRuntimePolicy runtimePolicy,
-                                                  boolean specialIndustry) {
+                                                  boolean specialIndustry,
+                                                  boolean neutralEducationMode) {
         if (!ArticlePromptChannels.isStrictEditorialSelfMedia(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode())) {
             return null;
+        }
+        if (neutralEducationMode) {
+            return "本篇为特殊行业小红书中立科普内容，不承担品牌露出任务。标题和正文不得出现企业、品牌、具体机构、医生或品牌专属产品服务名称，也不得引用品牌定位、主营业务、服务范围、资质、案例和联系方式。";
         }
         String platform = ArticlePromptChannels.channelName(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode());
@@ -241,26 +257,47 @@ public class ArticlePromptAssemblerV2 {
 
     private String xiaohongshuSpecialIndustryDirection(BatchArticlePromptBuilder.PromptBuildInput input,
                                                         ArticleRuntimePolicy runtimePolicy,
-                                                        boolean specialIndustry) {
+                                                        boolean specialIndustry,
+                                                        boolean neutralEducationMode) {
         if (!specialIndustry
                 || !ArticlePromptChannels.SELF_MEDIA.equals(runtimePolicy.channelGroupCode())
                 || !"xiaohongshu".equals(ArticlePromptChannels.canonicalSubCode(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode()))) {
             return null;
         }
-        String brandDirection = isBrandFocused(input)
-                ? "当前主题本身围绕品牌展开，品牌可自然出现1～2次，并以与主题直接相关的公开事实支撑内容；不得连续介绍品牌或扩写成企业资料清单。"
-                : "正文仍需自然出现品牌名称，并使用至少一项与主题直接相关的真实品牌事实；通常出现1次，确有解释需要时最多2次，不得把品牌写成默认答案或推荐结论。";
+        if (!neutralEducationMode) {
+            String brandDirection = isBrandFocused(input)
+                    ? "当前主题本身围绕品牌展开，品牌可自然出现1～2次，并以与主题直接相关的公开事实支撑内容；不得连续介绍品牌或扩写成企业资料清单。"
+                    : "正文仍需自然出现品牌名称，并使用至少一项与主题直接相关的真实品牌事实；通常出现1次，确有解释需要时最多2次，不得把品牌写成默认答案或推荐结论。";
+            return """
+                    当前内容用于小红书特殊行业信息笔记。审核收敛只改变表达边界，不得改变用户主题，也不得把文章改写成统一的合规说明、风险清单或机构选择指南。
+                    1. 标题和首段直接承接用户主题。除非主题本身要求讨论，否则不要主动加入合规、风险、避雷、资质核验或机构推荐等标签。
+                    2. 使用亲切但中性的个人号信息分享口吻，可以省略主语或直接使用品牌名称作为事实主体；不得以“我们机构”“本院”等机构官方身份发声，也不得伪装消费者、患者或到店体验者。
+                    3. %s
+                    4. 以公开信息、服务边界、流程说明或问题解释体现品牌价值，不使用强种草、强推荐、效果暗示、第三方口碑或催促决策的表达，不以私信、咨询、预约、购买或到店行动收束。
+                    5. 资质、个体差异、风险和专业评估只在能够直接解释当前主题时自然带入；资质如需出现，只概括与当前论点相关的一项事实，不罗列完整许可范围、编号或后台审计信息。
+                    6. 正文按实际语义自然分段；存在多个独立信息单元时使用少量、具体的小标题，不强制清单格式、固定标题数量、统一开篇或统一总结。
+                    7. 默认不添加营销型表情、话题标签或联系方式。保持信息清楚、实体一致和上下文连贯，不为规避审核写成生硬、含混的句子。
+                    """.formatted(brandDirection).trim();
+        }
         return """
-                当前内容用于小红书特殊行业信息笔记。审核收敛只改变表达边界，不得改变用户主题，也不得把文章改写成统一的合规说明、风险清单或机构选择指南。
-                1. 标题和首段直接承接用户主题。除非主题本身要求讨论，否则不要主动加入合规、风险、避雷、资质核验或机构推荐等标签。
-                2. 使用亲切但中性的个人号信息分享口吻，可以省略主语或直接使用品牌名称作为事实主体；不得以“我们机构”“本院”等机构官方身份发声，也不得伪装消费者、患者或到店体验者。
-                3. %s
-                4. 以公开信息、服务边界、流程说明或问题解释体现品牌价值，不使用强种草、强推荐、效果暗示、第三方口碑或催促决策的表达，不以私信、咨询、预约、购买或到店行动收束。
-                5. 资质、个体差异、风险和专业评估只在能够直接解释当前主题时自然带入；资质如需出现，只概括与当前论点相关的一项事实，不罗列完整许可范围、编号或后台审计信息。
-                6. 正文按实际语义自然分段；存在多个独立信息单元时使用少量、具体的小标题，不强制清单格式、固定标题数量、统一开篇或统一总结。
+                当前内容用于小红书特殊行业中立科普，不承担品牌露出、机构介绍、产品说明或转化任务。围绕用户主题解释公开、通用、可核验的小知识，不虚构数据或专业结论。
+                1. 标题不超过20个字，使用单一、中性、事实型的陈述短句。标题不得出现品牌或机构名称，不使用问号、感叹号、括号、书名号、竖线等装饰符号；不得出现“推荐、避雷、怎么选、哪家好、必看、亲测、效果、变美、恢复快、安全、无痛、零风险、内幕、揭秘、真相、踩坑、后悔、前后对比”等选择、效果、体验、焦虑或悬念表达。
+                2. 首段直接解释主题，不制造痛点、焦虑或决策压力。使用亲切但中性的知识分享口吻，不使用第一人称经历，不伪装消费者、患者、医生或从业者。
+                3. 标题和正文均不得出现企业、品牌、具体机构、医生、品牌专属产品服务、联系方式或地域导流信息，不使用输入材料中的品牌事实，也不以“某机构”“正规机构怎么选”等替代说法暗示选择。主题本身涉及的通用概念、项目类别或技术名称可以用于客观科普。
+                4. 只解释概念、原理、常见现象、一般流程、信息边界和理性注意事项；不得给出诊断、治疗方案、适用性判断、效果预测、机构选择或消费决策建议。
+                5. 个体差异、风险和专业评估仅在与主题直接相关时用一句中性边界说明带过，不扩写成风险清单或焦虑内容。
+                6. 正文控制在500～700字，以3～6个自然段为主；最多使用2个具体的 Markdown 二级标题，最多使用4个列表项，不使用三级及更深层级标题，不强制清单格式、统一开篇或统一总结。
                 7. 默认不添加营销型表情、话题标签或联系方式。保持信息清楚、实体一致和上下文连贯，不为规避审核写成生硬、含混的句子。
-                """.formatted(brandDirection).trim();
+                """.trim();
+    }
+
+    private String neutralEducationFactMaterial(List<String> omitted) {
+        omitted.addAll(List.of(
+                "companyName", "brandName", "brandShortName", "brandPositioning", "mainBusiness",
+                "coreProducts", "serviceArea", "businessIntro", "brandQualificationDescription",
+                "brandCaseDescription", "selectedOfferings"));
+        return "本模板不向正文提供企业、品牌、具体机构、品牌专属产品服务、资质或案例素材。只能依据主题和通用知识完成中立科普，不得从其他提示词片段恢复或推断品牌信息。";
     }
 
     private boolean contains(String source, String target) {
@@ -369,10 +406,12 @@ public class ArticlePromptAssemblerV2 {
     }
 
     private String outputRules(ArticleContentLengthPolicy contentLengthPolicy,
-                               ArticleRuntimePolicy runtimePolicy) {
+                               ArticleRuntimePolicy runtimePolicy,
+                               boolean neutralEducationMode) {
         Integer maxTitleChars = ArticlePromptChannels.maxTitleChars(
                 runtimePolicy.channelGroupCode(),
-                runtimePolicy.channelSubCode()
+                runtimePolicy.channelSubCode(),
+                neutralEducationMode
         );
         String titleRequirement = maxTitleChars == null
                 ? "首行使用一个清晰标题；"
@@ -381,11 +420,19 @@ public class ArticlePromptAssemblerV2 {
         return "输出一篇完整的 Markdown 文章。"
                 + contentLengthPolicyResolver.promptRequirement(contentLengthPolicy)
                 + titleRequirement
-                + semanticStructureRequirement(contentLengthPolicy)
+                + semanticStructureRequirement(contentLengthPolicy, runtimePolicy, neutralEducationMode)
                 + "只输出文章正文。";
     }
 
-    private String semanticStructureRequirement(ArticleContentLengthPolicy contentLengthPolicy) {
+    private String semanticStructureRequirement(ArticleContentLengthPolicy contentLengthPolicy,
+                                                ArticleRuntimePolicy runtimePolicy,
+                                                boolean neutralEducationMode) {
+        if (ArticlePromptChannels.SELF_MEDIA.equals(runtimePolicy.channelGroupCode())
+                && "xiaohongshu".equals(ArticlePromptChannels.canonicalSubCode(
+                runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode()))
+                && neutralEducationMode) {
+            return "正文以3～6个自然段为主，最多使用2个具体的 Markdown 二级标题、4个列表项，不使用三级及更深层级标题；不用表情、话题标签、装饰符号、固定清单、统一开篇或统一总结。";
+        }
         if (contentLengthPolicy.targetMinChars() >= 2000) {
             return "一级标题只用于文章标题。正文应根据实际内容划分若干语义单元，进入新的子问题、判断维度或信息阶段时，使用 Markdown 二级标题组织相关段落；不得把整篇长文写成从头到尾没有小标题的连续正文。"
                     + "每个小标题必须概括所属段落的具体信息，相近内容归入同一标题，不要一段设置一个标题，也不规定标题数量、固定名称或固定顺序。"

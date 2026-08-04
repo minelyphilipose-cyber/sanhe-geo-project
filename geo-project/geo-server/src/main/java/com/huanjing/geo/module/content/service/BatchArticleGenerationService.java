@@ -19,6 +19,7 @@ import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
 import com.huanjing.geo.module.content.constant.SelfMediaAccountIdentity;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
+import com.huanjing.geo.module.content.constant.XiaohongshuArticlePolicies;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerationBatchSummary;
@@ -105,7 +106,7 @@ public class BatchArticleGenerationService {
             "wechat", "特殊行业公众号个人号克制科普模板",
             "douyin", "特殊行业抖音图文个人号克制科普模板",
             "zhihu", "特殊行业知乎个人号深度问答模板",
-            "xiaohongshu", "特殊行业小红书个人号清单笔记模板",
+            "xiaohongshu", XiaohongshuArticlePolicies.NEUTRAL_EDUCATION_TEMPLATE_NAME,
             "toutiao", "特殊行业今日头条个人号搜索科普模板",
             "netease", "特殊行业网易个人号门户科普模板",
             "sohu", "特殊行业搜狐个人号搜索科普模板"
@@ -1139,13 +1140,19 @@ public class BatchArticleGenerationService {
                                 generationForbiddenPhrases,
                                 ArticlePromptChannels.maxTitleChars(
                                         task.getChannelGroupCode(),
-                                        task.getChannelSubCode()
+                                        task.getChannelSubCode(),
+                                        XiaohongshuArticlePolicies.isNeutralEducationTemplate(promptContext.template())
                                 ),
                                 effectiveTemperature,
                                 batchMeasurementContext(task, infrastructureRetryCount, attemptNo),
                                 ArticlePromptChannels.maxContentChars(
                                         task.getChannelGroupCode(),
                                         task.getChannelSubCode()
+                                ),
+                                new ArticleGenerationEngine.StructureValidationContext(
+                                        task.getChannelGroupCode(),
+                                        task.getChannelSubCode(),
+                                        XiaohongshuArticlePolicies.isNeutralEducationTemplate(promptContext.template())
                                 )
                         )
                 );

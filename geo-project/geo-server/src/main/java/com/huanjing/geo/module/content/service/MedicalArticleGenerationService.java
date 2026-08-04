@@ -248,22 +248,37 @@ public class MedicalArticleGenerationService {
             BatchArticlePromptBuilder.PromptBuildResult prompt,
             MedicalPromptContext context
     ) {
+        return applyMedicalPromptV2(prompt, context, false);
+    }
+
+    public BatchArticlePromptBuilder.PromptBuildResult applyMedicalPromptV2(
+            BatchArticlePromptBuilder.PromptBuildResult prompt,
+            MedicalPromptContext context,
+            boolean neutralEducationMode
+    ) {
         if (context == null) {
             return prompt;
         }
         List<String> facts = new ArrayList<>();
-        appendFact(facts, "特殊行业", specialIndustryService.industryLabel(context.industryCode()));
-        appendFact(facts, "项目或服务品类", context.categoryName());
-        appendFact(facts, "辅助关注角度", context.topicAngle());
-        appendFact(facts, "本篇关注方向", context.focus());
-        appendFact(facts, "可选项目或服务资质（仅摘取主题所需部分）", context.qualificationRef());
-        appendFact(facts, "可选主体资质（不得整段复制）", context.medicalLicense());
-        appendFact(facts, "可选服务/业务范围（仅按主题需要引用）", context.diagnosisScope());
-        appendFact(facts, "可选执业/服务人员公开信息（仅按主题需要引用）", context.practitionerInfoPublic());
+        if (!neutralEducationMode) {
+            appendFact(facts, "特殊行业", specialIndustryService.industryLabel(context.industryCode()));
+            appendFact(facts, "项目或服务品类", context.categoryName());
+            appendFact(facts, "辅助关注角度", context.topicAngle());
+            appendFact(facts, "本篇关注方向", context.focus());
+            appendFact(facts, "可选项目或服务资质（仅摘取主题所需部分）", context.qualificationRef());
+            appendFact(facts, "可选主体资质（不得整段复制）", context.medicalLicense());
+            appendFact(facts, "可选服务/业务范围（仅按主题需要引用）", context.diagnosisScope());
+            appendFact(facts, "可选执业/服务人员公开信息（仅按主题需要引用）", context.practitionerInfoPublic());
+        }
 
-        StringBuilder specialRules = new StringBuilder("# 特殊行业内容边界\n")
-                .append("以下规则只约束表达方式，不得改变用户主题。标题必须直接回应原主题，不得为了体现行业规则主动加入与主题无关的审核术语或风险标签。\n")
-                .append(V2_SPECIAL_INDUSTRY_COMPLIANCE_DIRECTION);
+        StringBuilder specialRules = new StringBuilder("# 特殊行业内容边界\n");
+        if (neutralEducationMode) {
+            specialRules.append("本篇采用无品牌中立科普模式。特殊行业属性只用于限制表达边界，不向正文提供企业、品牌、具体机构、品牌专属项目服务、资质、案例或人员信息。")
+                    .append("不得补充品牌露出、机构选择、适用性判断、效果预测、诊断治疗建议或转化信息。");
+        } else {
+            specialRules.append("以下规则只约束表达方式，不得改变用户主题。标题必须直接回应原主题，不得为了体现行业规则主动加入与主题无关的审核术语或风险标签。\n")
+                    .append(V2_SPECIAL_INDUSTRY_COMPLIANCE_DIRECTION);
+        }
         if (!facts.isEmpty()) {
             specialRules.append("\n以下是备用的特殊行业事实材料，不是必写清单，也不决定文章结构或出现顺序。")
                     .append("只在能够直接解释当前主题时按需引用；未列出的事实不得补写。")

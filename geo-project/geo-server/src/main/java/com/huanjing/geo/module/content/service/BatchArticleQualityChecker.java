@@ -59,6 +59,12 @@ public class BatchArticleQualityChecker {
         return result(issues);
     }
 
+    public QualityResult withHardIssue(QualityResult result, String type, String message) {
+        List<Issue> issues = new ArrayList<>(result == null ? List.of() : result.issues());
+        issues.add(new Issue(type, message, true));
+        return result(issues);
+    }
+
     private QualityResult result(List<Issue> issues) {
         boolean rewriteRequired = issues.stream().anyMatch(Issue::rewriteRequired);
         String status = issues.isEmpty() ? "passed" : "warning";

@@ -68,7 +68,8 @@ class ArticleGenerationEngineTest {
                 mock(MarkdownImageReferenceValidator.class),
                 promptFilter,
                 qualityChecker,
-                mock(ArticleTitleDuplicateChecker.class)
+                mock(ArticleTitleDuplicateChecker.class),
+                new XiaohongshuArticleStructureValidator()
         );
 
         Project project = new Project();

@@ -13,6 +13,7 @@ import com.huanjing.geo.common.llm.router.LlmRouteException;
 import com.huanjing.geo.common.llm.router.LlmRouteRequest;
 import com.huanjing.geo.common.llm.router.LlmRouteResult;
 import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.project.entity.Project;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +38,7 @@ public class ArticleGenerationEngine {
     private final ArticleAiDraftPromptFilter promptFilter;
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTitleDuplicateChecker titleDuplicateChecker;
+    private final XiaohongshuArticleStructureValidator xiaohongshuStructureValidator;
 
     @Value("${geo.llm.routing.article-request-timeout-ms:300000}")
     private int articleRequestTimeoutMs = LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS;
@@ -69,6 +71,18 @@ public class ArticleGenerationEngine {
         String title = extractTitle(content);
         if (input.checkQuality()) {
             quality = qualityChecker.check(content, input.brand(), input.forbiddenPhrases());
+            StructureValidationContext structureContext = input.structureValidationContext();
+            if (structureContext != null
+                    && structureContext.neutralEducationMode()
+                    && ArticlePromptChannels.SELF_MEDIA.equals(structureContext.channelGroupCode())
+                    && "xiaohongshu".equals(ArticlePromptChannels.canonicalSubCode(
+                    structureContext.channelGroupCode(), structureContext.channelSubCode()))) {
+                for (XiaohongshuArticleStructureValidator.Violation violation
+                        : xiaohongshuStructureValidator.validate(content, input.project(), input.brand(),
+                        structureContext.neutralEducationMode())) {
+                    quality = qualityChecker.withHardIssue(quality, violation.type(), violation.message());
+                }
+            }
             if (titleLimit.truncated()) {
                 quality = qualityChecker.withWarning(quality, "title_truncated",
                         "标题超过" + input.maxTitleChars() + "字，已自动截短");
@@ -233,7 +247,46 @@ public class ArticleGenerationEngine {
                                  Integer maxTitleChars,
                                  double effectiveTemperature,
                                  LlmCallMeasurementContext measurementContext,
-                                 Integer maxContentChars) {
+                                 Integer maxContentChars,
+                                 StructureValidationContext structureValidationContext) {
+        public GenerateInput(Project project,
+                             Brand brand,
+                             String systemPrompt,
+                             String userPrompt,
+                             String modelPlatformCode,
+                             String modelId,
+                             boolean longForm,
+                             boolean allowContactInfo,
+                             boolean checkQuality,
+                             List<String> forbiddenPhrases,
+                             Integer maxTitleChars,
+                             double effectiveTemperature,
+                             LlmCallMeasurementContext measurementContext,
+                             Integer maxContentChars) {
+            this(project, brand, systemPrompt, userPrompt, modelPlatformCode, modelId, longForm,
+                    allowContactInfo, checkQuality, forbiddenPhrases, maxTitleChars, effectiveTemperature,
+                    measurementContext, maxContentChars, null);
+        }
+
+        public GenerateInput(Project project,
+                             Brand brand,
+                             String systemPrompt,
+                             String userPrompt,
+                             String modelPlatformCode,
+                             String modelId,
+                             boolean longForm,
+                             boolean allowContactInfo,
+                             boolean checkQuality,
+                             List<String> forbiddenPhrases,
+                             Integer maxTitleChars,
+                             double effectiveTemperature,
+                             Integer maxContentChars,
+                             StructureValidationContext structureValidationContext) {
+            this(project, brand, systemPrompt, userPrompt, modelPlatformCode, modelId, longForm,
+                    allowContactInfo, checkQuality, forbiddenPhrases, maxTitleChars, effectiveTemperature,
+                    LlmCallMeasurementContext.empty(), maxContentChars, structureValidationContext);
+        }
+
         public GenerateInput(Project project,
                              Brand brand,
                              String systemPrompt,
@@ -249,7 +302,7 @@ public class ArticleGenerationEngine {
                              LlmCallMeasurementContext measurementContext) {
             this(project, brand, systemPrompt, userPrompt, modelPlatformCode, modelId, longForm,
                     allowContactInfo, checkQuality, forbiddenPhrases, maxTitleChars, effectiveTemperature,
-                    measurementContext, null);
+                    measurementContext, null, null);
         }
 
         public GenerateInput(Project project,
@@ -267,7 +320,7 @@ public class ArticleGenerationEngine {
                              Integer maxContentChars) {
             this(project, brand, systemPrompt, userPrompt, modelPlatformCode, modelId, longForm,
                     allowContactInfo, checkQuality, forbiddenPhrases, maxTitleChars, effectiveTemperature,
-                    LlmCallMeasurementContext.empty(), maxContentChars);
+                    LlmCallMeasurementContext.empty(), maxContentChars, null);
         }
 
         public GenerateInput(Project project,
@@ -284,7 +337,7 @@ public class ArticleGenerationEngine {
                              double effectiveTemperature) {
             this(project, brand, systemPrompt, userPrompt, modelPlatformCode, modelId, longForm,
                     allowContactInfo, checkQuality, forbiddenPhrases, maxTitleChars, effectiveTemperature,
-                    LlmCallMeasurementContext.empty(), null);
+                    LlmCallMeasurementContext.empty(), null, null);
         }
 
         public GenerateInput {
@@ -292,6 +345,11 @@ public class ArticleGenerationEngine {
                     ? LlmCallMeasurementContext.empty()
                     : measurementContext;
         }
+    }
+
+    public record StructureValidationContext(String channelGroupCode,
+                                             String channelSubCode,
+                                             boolean neutralEducationMode) {
     }
 
     public record GeneratedArticle(String title,

@@ -115,7 +115,8 @@ class ArticleAiDraftServiceTest {
                 mock(MarkdownImageReferenceValidator.class),
                 promptFilter,
                 mock(BatchArticleQualityChecker.class),
-                mock(ArticleTitleDuplicateChecker.class)
+                mock(ArticleTitleDuplicateChecker.class),
+                mock(XiaohongshuArticleStructureValidator.class)
         );
         promptContextFactory = mock(ArticleGenerationPromptContextFactory.class);
         BatchArticlePromptBuilder promptBuilder = new BatchArticlePromptBuilder(

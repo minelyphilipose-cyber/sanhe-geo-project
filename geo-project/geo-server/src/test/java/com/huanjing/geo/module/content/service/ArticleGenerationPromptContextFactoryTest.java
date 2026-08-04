@@ -35,6 +35,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -112,7 +113,7 @@ class ArticleGenerationPromptContextFactoryTest {
                         List.<BrandOfferingPromptSelector.SelectedOffering>of()));
         when(medicalArticleGenerationService.resolveContext(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
         when(medicalArticleGenerationService.resolveContextV2(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
-        when(medicalArticleGenerationService.applyMedicalPromptV2(any(), any()))
+        when(medicalArticleGenerationService.applyMedicalPromptV2(any(), any(), anyBoolean()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }
 

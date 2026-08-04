@@ -13,12 +13,21 @@ public class ArticleContentLengthPolicyResolver {
     public ArticleContentLengthPolicy resolve(String channelGroupCode,
                                               String channelSubCode,
                                               String requestedLengthCode) {
+        return resolve(channelGroupCode, channelSubCode, requestedLengthCode, false);
+    }
+
+    public ArticleContentLengthPolicy resolve(String channelGroupCode,
+                                              String channelSubCode,
+                                              String requestedLengthCode,
+                                              boolean neutralEducationMode) {
         String requested = normalizeLengthCode(requestedLengthCode);
         String subCode = ArticlePromptChannels.canonicalSubCode(channelGroupCode, channelSubCode);
         if (ArticlePromptChannels.SELF_MEDIA.equals(channelGroupCode)) {
             return switch (subCode == null ? "" : subCode) {
                 case "douyin" -> policy(requested, 400, 700, SOURCE_CHANNEL_POLICY);
-                case "xiaohongshu" -> policy(requested, 600, 900, SOURCE_CHANNEL_POLICY);
+                case "xiaohongshu" -> neutralEducationMode
+                        ? policy(requested, 500, 700, SOURCE_CHANNEL_POLICY)
+                        : policy(requested, 600, 900, SOURCE_CHANNEL_POLICY);
                 default -> policy(requested, 2000, 3000, SOURCE_CHANNEL_POLICY);
             };
         }

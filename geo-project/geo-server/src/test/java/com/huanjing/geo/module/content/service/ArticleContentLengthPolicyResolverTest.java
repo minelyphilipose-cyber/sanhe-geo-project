@@ -41,6 +41,16 @@ class ArticleContentLengthPolicyResolverTest {
     }
 
     @Test
+    void neutralEducationXiaohongshuUsesTighterLengthPolicy() {
+        ArticleContentLengthPolicy policy = resolver.resolve(
+                ArticlePromptChannels.SELF_MEDIA, "xiaohongshu", "long", true);
+
+        assertThat(policy.targetMinChars()).isEqualTo(500);
+        assertThat(policy.targetMaxChars()).isEqualTo(700);
+        assertThat(policy.source()).isEqualTo(ArticleContentLengthPolicyResolver.SOURCE_CHANNEL_POLICY);
+    }
+
+    @Test
     void nonSelfMediaKeepRequestedLengthTiers() {
         assertThat(resolver.resolve(ArticlePromptChannels.FORUM, null, "short"))
                 .extracting(ArticleContentLengthPolicy::targetMinChars, ArticleContentLengthPolicy::targetMaxChars)
