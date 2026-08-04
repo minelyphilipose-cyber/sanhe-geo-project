@@ -69,6 +69,7 @@ public class PresaleEvaluationModelRouter {
         }
         return platforms.stream()
                 .filter(platform -> platform != null && StringUtils.hasText(platform.getPlatformCode()))
+                .filter(platform -> !Boolean.TRUE.equals(platform.getDegraded()))
                 .sorted(Comparator
                         .comparingDouble(this::activeRatio)
                         .thenComparing(platform -> priorityRank(platform.getPriorityLevel()))

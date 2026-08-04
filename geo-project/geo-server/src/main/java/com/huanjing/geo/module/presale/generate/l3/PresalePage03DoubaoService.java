@@ -18,18 +18,24 @@ import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.PresaleEvaluationModelRouter;
 import com.huanjing.geo.module.presale.service.PresalePage03MarketConfigService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
-import java.util.LinkedHashMap;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
  * Page03 市场战场页使用售前评估模型池生成,后端负责结构校验与数值重算。
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class PresalePage03DoubaoService {
 
@@ -64,36 +70,76 @@ public class PresalePage03DoubaoService {
                     operatorIsManager
             );
 
-            LlmCallResult result = marketBattlegroundWithEvaluationModel(sourceCtx, prompt);
-            JsonNode aiNode = objectMapper.readTree(result.rawResponse());
-            MarketBattleground market = buildMarketPatch(raw, aiNode);
-
-            editable.setMarketBattleground(market);
-            EditableContentDTO normalized = l3Defaults.normalizeGenerated(editable, raw, null);
-            marketBattlegroundValidator.validate(normalized.getMarketBattleground());
-            return objectMapper.writeValueAsString(normalized);
-        } catch (LlmInvokeException ex) {
-            throw new BizException(500, "Page03 Doubao generation failed: " + ex.getMessage());
+            return marketBattlegroundWithEvaluationModel(
+                    sourceCtx, prompt, raw, editable, degradedPlatforms(raw));
         } catch (JsonProcessingException | IllegalArgumentException ex) {
             throw new BizException(500, "Page03 Doubao output invalid: " + ex.getMessage());
         }
     }
 
-    private LlmCallResult marketBattlegroundWithEvaluationModel(PlatformCallContext sourceCtx, String prompt)
-            throws LlmInvokeException {
-        List<PlatformCallContext> candidates = evaluationModelRouter.routeContexts(sourceCtx);
+    private String marketBattlegroundWithEvaluationModel(PlatformCallContext sourceCtx,
+                                                          String prompt,
+                                                          RawSnapshotDTO raw,
+                                                          EditableContentDTO editable,
+                                                          Set<String> excludedPlatforms) {
+        List<PlatformCallContext> candidates = evaluationModelRouter.routeContexts(sourceCtx).stream()
+                .filter(candidate -> candidate != null
+                        && StringUtils.hasText(candidate.platformCode())
+                        && !excludedPlatforms.contains(normalizePlatformCode(candidate.platformCode())))
+                .toList();
         if (candidates.isEmpty()) {
-            throw new LlmInvokeException("No presale evaluation model enabled");
+            throw new BizException(500,
+                    "Page03 generation failed: no evaluation model available after excluding degraded platforms");
         }
-        LlmPermitUnavailableException lastBusy = null;
+
+        List<String> failures = new ArrayList<>();
         for (PlatformCallContext candidate : candidates) {
             try {
-                return llmInvoker.marketBattleground(candidate, prompt);
-            } catch (LlmPermitUnavailableException ex) {
-                lastBusy = ex;
+                LlmCallResult result = llmInvoker.marketBattleground(candidate, prompt);
+                JsonNode aiNode = objectMapper.readTree(result.rawResponse());
+                MarketBattleground market = buildMarketPatch(raw, aiNode);
+                editable.setMarketBattleground(market);
+                EditableContentDTO normalized = l3Defaults.normalizeGenerated(editable, raw, null);
+                marketBattlegroundValidator.validate(normalized.getMarketBattleground());
+                return objectMapper.writeValueAsString(normalized);
+            } catch (LlmPermitUnavailableException | LlmInvokeException | BizException
+                     | JsonProcessingException | IllegalArgumentException ex) {
+                String platformCode = normalizePlatformCode(candidate.platformCode());
+                failures.add(platformCode + ": " + safeMessage(ex));
+                log.warn("Page03 evaluation model failed, trying next candidate: versionId={}, platformCode={}, reason={}",
+                        sourceCtx.versionId(), platformCode, safeMessage(ex));
             }
         }
-        throw new LlmInvokeException("All presale evaluation models are busy", lastBusy);
+
+        throw new BizException(500, "Page03 generation failed for all evaluation models: "
+                + String.join("; ", failures));
+    }
+
+    private Set<String> degradedPlatforms(RawSnapshotDTO raw) {
+        if (raw == null || raw.getTestSummary() == null
+                || raw.getTestSummary().getDegradedPlatforms() == null) {
+            return Set.of();
+        }
+        Set<String> out = new HashSet<>();
+        for (String platformCode : raw.getTestSummary().getDegradedPlatforms()) {
+            String normalized = normalizePlatformCode(platformCode);
+            if (StringUtils.hasText(normalized)) {
+                out.add(normalized);
+            }
+        }
+        return out;
+    }
+
+    private String normalizePlatformCode(String platformCode) {
+        return StringUtils.hasText(platformCode)
+                ? platformCode.trim().toLowerCase(Locale.ROOT)
+                : "";
+    }
+
+    private String safeMessage(Exception ex) {
+        return ex.getMessage() == null || ex.getMessage().isBlank()
+                ? ex.getClass().getSimpleName()
+                : ex.getMessage();
     }
 
     private String buildPromptInputJson(RawSnapshotDTO raw) throws JsonProcessingException {

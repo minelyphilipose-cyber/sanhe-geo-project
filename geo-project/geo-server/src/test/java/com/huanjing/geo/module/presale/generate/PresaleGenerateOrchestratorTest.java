@@ -1424,6 +1424,30 @@ class PresaleGenerateOrchestratorTest {
     }
 
     @Test
+    void realFullFlow_page03Fails_keepsDefaultL3AndReachesDone() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupSimpleRealFlow(9907L, 8907L, List.of());
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+                .thenReturn("{\"raw\":\"ok\"}");
+        when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
+                .thenReturn("{\"scores\":{\"overall\":60.0}}");
+        when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"editable\":\"default\"}");
+        when(page03DoubaoService.generateAndApply(anyLong(), anyString(), anyString(), any(), anyBoolean()))
+                .thenThrow(new com.huanjing.geo.common.exception.BizException(500, "all evaluation models failed"));
+
+        orchestrator.triggerGenerate(9907L, 907L, false);
+
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        assertTrue(versionCaptor.getAllValues().stream()
+                .anyMatch(v -> PresaleGenerateStatus.DONE.name().equals(v.getGenerationStatus())));
+        assertTrue(versionCaptor.getAllValues().stream()
+                .noneMatch(v -> PresaleGenerateStatus.FAILED.name().equals(v.getGenerationStatus())));
+        verify(page03DoubaoService).generateAndApply(
+                eq(9907L), eq("{\"raw\":\"ok\"}"), eq("{\"editable\":\"default\"}"), eq(907L), eq(false));
+    }
+
+    @Test
     void realFullFlow_zeroCompetitors_reachesDone() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupSimpleRealFlow(9906L, 8906L, List.of());

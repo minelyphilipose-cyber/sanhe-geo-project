@@ -521,12 +521,17 @@ public class PresaleGenerateOrchestrator {
         enterStage(versionId, STAGE_L3_INIT, "derive editable content");
         try {
             editableJson = l3InitService.derive(rawJson, computedJson);
-            editableJson = page03DoubaoService.generateAndApply(
-                    versionId, rawJson, editableJson, operatorUserId, isManager);
         } catch (BizException ex) {
             markFailed(versionId, FAILURE_CATEGORY_L3_INIT_ERROR,
                     truncateReason("L3 init failed: " + ex.getMessage()));
             return;
+        }
+        try {
+            editableJson = page03DoubaoService.generateAndApply(
+                    versionId, rawJson, editableJson, operatorUserId, isManager);
+        } catch (BizException ex) {
+            log.warn("Page03 AI enhancement failed, keeping default L3 content: versionId={}, reason={}",
+                    versionId, ex.getMessage());
         }
         ensureGenerationStillRunning(versionId, STAGE_L3_INIT);
         writeEditableContentJson(versionId, editableJson);

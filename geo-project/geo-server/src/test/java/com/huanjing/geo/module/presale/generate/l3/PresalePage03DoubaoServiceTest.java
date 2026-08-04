@@ -6,8 +6,10 @@ import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.ClientInfo;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.SamplePrompt;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
 import com.huanjing.geo.module.presale.generate.llm.CallStatus;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
+import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.PresaleEvaluationModelRouter;
@@ -24,6 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PresalePage03DoubaoServiceTest {
@@ -169,6 +173,102 @@ class PresalePage03DoubaoServiceTest {
         );
         assertTrue(ex.getMessage().contains("parent_category_share"));
         assertTrue(ex.getMessage().contains("^\\d+(\\.\\d{1,2})?%$"));
+    }
+
+    @Test
+    void generateAndApply_excludesPlatformsDegradedDuringCurrentReport() throws Exception {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("无二火锅")
+                        .industry("restaurant")
+                        .region("阜阳")
+                        .build())
+                .testSummary(TestSummary.builder()
+                        .degradedPlatforms(List.of(" DeepSeek "))
+                        .build())
+                .build();
+        String rawJson = objectMapper.writeValueAsString(raw);
+        String editableJson = objectMapper.writeValueAsString(l3Defaults.normalize(new EditableContentDTO(), raw, null));
+        PlatformCallContext deepseek = new PlatformCallContext(
+                291L, 3, "deepseek", null, "", "无二火锅", 1L, false);
+        PlatformCallContext doubao = new PlatformCallContext(
+                291L, 3, "doubao", null, "", "无二火锅", 1L, false);
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(deepseek, doubao));
+        when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
+                .thenReturn(successResult("doubao"));
+
+        service.generateAndApply(291L, rawJson, editableJson, 1L, false);
+
+        ArgumentCaptor<PlatformCallContext> ctxCaptor = ArgumentCaptor.forClass(PlatformCallContext.class);
+        verify(llmInvoker).marketBattleground(ctxCaptor.capture(), anyString());
+        assertEquals("doubao", ctxCaptor.getValue().platformCode());
+    }
+
+    @Test
+    void generateAndApply_triesNextModelAfterInvokeFailure() throws Exception {
+        RawSnapshotDTO raw = basicRaw();
+        String rawJson = objectMapper.writeValueAsString(raw);
+        String editableJson = objectMapper.writeValueAsString(l3Defaults.normalize(new EditableContentDTO(), raw, null));
+        PlatformCallContext deepseek = new PlatformCallContext(
+                292L, 3, "deepseek", null, "", "无二火锅", 1L, false);
+        PlatformCallContext doubao = new PlatformCallContext(
+                292L, 3, "doubao", null, "", "无二火锅", 1L, false);
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(deepseek, doubao));
+        when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
+                .thenAnswer(invocation -> {
+                    PlatformCallContext ctx = invocation.getArgument(0);
+                    if ("deepseek".equals(ctx.platformCode())) {
+                        throw new LlmInvokeException("upstream timeout");
+                    }
+                    return successResult("doubao");
+                });
+
+        String resultJson = service.generateAndApply(292L, rawJson, editableJson, 1L, false);
+
+        assertEquals("餐饮消费类占比", objectMapper.readValue(resultJson, EditableContentDTO.class)
+                .getMarketBattleground().getNationalCard().getRows().get(1).getLabel());
+        verify(llmInvoker, times(2)).marketBattleground(any(PlatformCallContext.class), anyString());
+    }
+
+    @Test
+    void generateAndApply_triesNextModelAfterInvalidOutput() throws Exception {
+        RawSnapshotDTO raw = basicRaw();
+        String rawJson = objectMapper.writeValueAsString(raw);
+        String editableJson = objectMapper.writeValueAsString(l3Defaults.normalize(new EditableContentDTO(), raw, null));
+        PlatformCallContext deepseek = new PlatformCallContext(
+                293L, 3, "deepseek", null, "", "无二火锅", 1L, false);
+        PlatformCallContext doubao = new PlatformCallContext(
+                293L, 3, "doubao", null, "", "无二火锅", 1L, false);
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(deepseek, doubao));
+        when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
+                .thenReturn(new LlmCallResult("{\"parent_category_share\":\"invalid\"}",
+                                10, 10, 10L, 0, CallStatus.SUCCESS,
+                                "deepseek", "DeepSeek", "deepseek-chat", "DeepSeek"),
+                        successResult("doubao"));
+
+        String resultJson = service.generateAndApply(293L, rawJson, editableJson, 1L, false);
+
+        assertEquals("餐饮消费类占比", objectMapper.readValue(resultJson, EditableContentDTO.class)
+                .getMarketBattleground().getNationalCard().getRows().get(1).getLabel());
+        verify(llmInvoker, times(2)).marketBattleground(any(PlatformCallContext.class), anyString());
+    }
+
+    private RawSnapshotDTO basicRaw() {
+        return RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("无二火锅")
+                        .industry("restaurant")
+                        .region("阜阳")
+                        .build())
+                .build();
+    }
+
+    private LlmCallResult successResult(String platformCode) {
+        return new LlmCallResult(doubaoResponse(), 100, 200, 30L, 0,
+                CallStatus.SUCCESS, platformCode, platformCode, platformCode + "-model", platformCode);
     }
 
     private String doubaoResponse() {
