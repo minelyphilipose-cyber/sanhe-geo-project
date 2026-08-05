@@ -50,6 +50,31 @@
       </div>
     </el-card>
 
+    <el-card
+      v-if="version?.queryWebMode === 'REQUIRED' && isDone"
+      shadow="never"
+      class="web-metrics-card"
+    >
+      <div class="stages-title">联网 QUERY 样本</div>
+      <div class="web-metrics-grid">
+        <div><strong>{{ version.plannedQueryCount ?? 0 }}</strong><span>全部计划样本</span></div>
+        <div><strong>{{ version.plannedWebQueryCount ?? 0 }}</strong><span>计划联网</span></div>
+        <div><strong>{{ version.webValidQueryCount ?? 0 }}</strong><span>联网有效</span></div>
+        <div><strong>{{ version.effectiveSampleCount ?? 0 }}</strong><span>参与指标</span></div>
+        <div><strong>{{ webCoverage }}%</strong><span>联网覆盖率</span></div>
+      </div>
+      <el-alert
+        v-if="webExcludedCount > 0"
+        type="warning"
+        :closable="false"
+        class="web-metrics-alert"
+      >
+        搜索失败 {{ version.queryFailedCount ?? 0 }}，分析失败 {{ version.analyzeFailedCount ?? 0 }}，
+        跳过 {{ version.skippedQueryCount ?? 0 }}，平台降级排除 {{ version.degradedExcludedSampleCount ?? 0 }}。
+        <span v-if="version.mainWebFailureCode">主要失败码：{{ version.mainWebFailureCode }}</span>
+      </el-alert>
+    </el-card>
+
     <!-- 阶段清单(v1 静态展示,P2 后端返回真实阶段) -->
     <el-card shadow="never" class="stages-card">
       <div class="stages-title">生成阶段</div>
@@ -127,6 +152,18 @@ const isRunning = computed(
 )
 const isDone = computed(() => version.value?.generationStatus === 'DONE')
 const isFailed = computed(() => version.value?.generationStatus === 'FAILED')
+const webCoverage = computed(() => {
+  const planned = version.value?.plannedWebQueryCount ?? 0
+  if (planned <= 0) return 0
+  return Math.round(((version.value?.webValidQueryCount ?? 0) * 1000) / planned) / 10
+})
+const webExcludedCount = computed(
+  () =>
+    (version.value?.queryFailedCount ?? 0) +
+    (version.value?.analyzeFailedCount ?? 0) +
+    (version.value?.skippedQueryCount ?? 0) +
+    (version.value?.degradedExcludedSampleCount ?? 0)
+)
 
 const statusText = computed(() => {
   if (!version.value) return '加载中...'
@@ -327,8 +364,36 @@ onBeforeUnmount(stopPolling)
   margin-bottom: 16px;
 }
 .status-card,
-.stages-card {
+.stages-card,
+.web-metrics-card {
   margin-bottom: 16px;
+}
+.web-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.web-metrics-grid > div {
+  padding: 12px;
+  border-radius: 6px;
+  background: #f5f7fa;
+  text-align: center;
+}
+.web-metrics-grid strong,
+.web-metrics-grid span {
+  display: block;
+}
+.web-metrics-grid strong {
+  font-size: 20px;
+  color: #303133;
+}
+.web-metrics-grid span {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+.web-metrics-alert {
+  margin-top: 12px;
 }
 .status-header {
   display: flex;

@@ -43,6 +43,16 @@ export interface MergedViewMeta {
   schema_version: string;
   /** INIT/QUEUED/.../DONE/FAILED,前端仅在 DONE 时渲染完整报告。 */
   generation_status: string;
+  query_web_mode?: 'OFF' | 'SHADOW' | 'REQUIRED';
+  planned_query_count?: number;
+  planned_web_query_count?: number;
+  web_valid_query_count?: number;
+  effective_sample_count?: number;
+  query_failed_count?: number;
+  analyze_failed_count?: number;
+  skipped_query_count?: number;
+  degraded_excluded_sample_count?: number;
+  main_web_failure_code?: string | null;
   /** 来源 raw.meta.generated_at,RFC3339 带 +08:00,可 null。 */
   generated_at?: string | null;
   /** frozen_at != null 派生。 */

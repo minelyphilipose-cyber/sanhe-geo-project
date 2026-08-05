@@ -3,6 +3,7 @@ package com.huanjing.geo.module.dispatch.websearch.transport;
 import com.huanjing.geo.common.llm.LlmHttpClient;
 import com.huanjing.geo.module.dispatch.entity.PollProviderCall;
 import com.huanjing.geo.module.dispatch.websearch.enums.ErrorCategory;
+import com.huanjing.geo.module.dispatch.websearch.enums.IntegrationType;
 import com.huanjing.geo.module.dispatch.websearch.model.WebSearchRequest;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import lombok.RequiredArgsConstructor;
@@ -36,10 +37,7 @@ public class WebSearchProviderCallExecutor {
         try {
             LlmHttpClient.HttpResponse response = httpClient.postJson(
                     request.profile().endpointUrl(),
-                    Map.of(
-                            "Authorization", "Bearer " + apiKey,
-                            "Content-Type", "application/json"
-                    ),
+                    headers(request.profile().integrationType(), apiKey),
                     requestBody,
                     request.profile().connectTimeoutMs(),
                     requestTimeoutMs
@@ -77,6 +75,13 @@ public class WebSearchProviderCallExecutor {
                 LocalDateTime.now(), exchange.latencyMs());
         return new WebSearchProviderException(
                 ErrorCategory.PARSE_ERROR, exchange.httpStatus(), "Failed to parse provider response", cause);
+    }
+
+    private Map<String, String> headers(IntegrationType type, String apiKey) {
+        if (type == IntegrationType.MIMO_CHAT_WEB) {
+            return Map.of("api-key", apiKey, "Content-Type", "application/json");
+        }
+        return Map.of("Authorization", "Bearer " + apiKey, "Content-Type", "application/json");
     }
 
     private int effectiveRequestTimeout(WebSearchRequest request, LocalDateTime startedAt) {

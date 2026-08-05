@@ -52,10 +52,21 @@ public class PresaleCompetitorAggregator {
     }
 
     public Batch1MentionStats aggregateBatch1MentionStats(Long versionId, Collection<String> selfBrandNames) {
+        return aggregateBatch1MentionStats(versionId, selfBrandNames, Set.of());
+    }
+
+    public Batch1MentionStats aggregateBatch1MentionStats(Long versionId,
+                                                          Collection<String> selfBrandNames,
+                                                          Set<String> excludedPlatformCodes) {
+        Set<String> excluded = excludedPlatformCodes == null ? Set.of() : excludedPlatformCodes.stream()
+                .filter(code -> code != null && !code.isBlank())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
         List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
                 new LambdaQueryWrapper<PresaleAiPromptResult>()
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
+                        .eq(PresaleAiPromptResult::getEffectiveSample, true)
                         .eq(PresaleAiPromptResult::getBatchNo, 1)
+                        .notIn(!excluded.isEmpty(), PresaleAiPromptResult::getPlatformCode, excluded)
                         .isNotNull(PresaleAiPromptResult::getIsMentioned)
         );
         if (rows == null || rows.isEmpty()) {
@@ -122,6 +133,14 @@ public class PresaleCompetitorAggregator {
                 .toList();
     }
 
+    public List<String> extractTopCompetitorsFromBatch1(Long versionId,
+                                                        Collection<String> selfBrandNames,
+                                                        Set<String> excludedPlatformCodes) {
+        return extractTopRawCompetitorMentions(versionId, selfBrandNames, 3, excludedPlatformCodes).stream()
+                .map(RawCompetitorMention::name)
+                .toList();
+    }
+
     public List<RawCompetitorMention> extractTopRawCompetitorMentions(Long versionId, String brandName, int limit) {
         return extractTopRawCompetitorMentions(versionId, Collections.singletonList(brandName), limit);
     }
@@ -129,10 +148,18 @@ public class PresaleCompetitorAggregator {
     public List<RawCompetitorMention> extractTopRawCompetitorMentions(Long versionId,
                                                                       Collection<String> selfBrandNames,
                                                                       int limit) {
+        return extractTopRawCompetitorMentions(versionId, selfBrandNames, limit, Set.of());
+    }
+
+    public List<RawCompetitorMention> extractTopRawCompetitorMentions(Long versionId,
+                                                                      Collection<String> selfBrandNames,
+                                                                      int limit,
+                                                                      Set<String> excludedPlatformCodes) {
         if (limit <= 0) {
             return List.of();
         }
-        Batch1MentionStats stats = aggregateBatch1MentionStats(versionId, selfBrandNames);
+        Batch1MentionStats stats = aggregateBatch1MentionStats(
+                versionId, selfBrandNames, excludedPlatformCodes);
         return stats.countByNormalized().entrySet().stream()
                 .sorted(Comparator
                         .comparing(Map.Entry<String, Integer>::getValue, Comparator.reverseOrder())

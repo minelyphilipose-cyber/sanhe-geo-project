@@ -18,6 +18,7 @@ public class ReportVersionMetaVO {
     /** INIT / QUEUED / RUNNING / DONE / FAILED。 */
     private String generationStatus;
     private String generationStage;
+    private String queryWebMode;
 
     private Integer totalLlmCalls;
     private Integer completedLlmCalls;
@@ -26,6 +27,15 @@ public class ReportVersionMetaVO {
     private Integer batch2TotalCalls;
     private Integer batch2CompletedCalls;
     private Integer extractedCompetitorCount;
+    private Integer plannedQueryCount;
+    private Integer plannedWebQueryCount;
+    private Integer webValidQueryCount;
+    private Integer effectiveSampleCount;
+    private Integer queryFailedCount;
+    private Integer analyzeFailedCount;
+    private Integer skippedQueryCount;
+    private Integer degradedExcludedSampleCount;
+    private String mainWebFailureCode;
 
     private Boolean isDegraded;
     private List<String> degradedPlatforms;

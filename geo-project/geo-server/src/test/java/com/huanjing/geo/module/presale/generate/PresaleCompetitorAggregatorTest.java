@@ -1,16 +1,23 @@
 package com.huanjing.geo.module.presale.generate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -19,6 +26,12 @@ class PresaleCompetitorAggregatorTest {
 
     @Mock
     private PresaleAiPromptResultMapper aiPromptResultMapper;
+
+    @BeforeEach
+    void initializeMybatisMetadata() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                PresaleAiPromptResult.class);
+    }
 
     @Test
     void extractTop3AndFilterBrand() {
@@ -96,6 +109,21 @@ class PresaleCompetitorAggregatorTest {
         List<String> competitors = aggregator.extractTopCompetitorsFromBatch1(9303L, "Acme");
 
         assertEquals(List.of("Claude", "Gemini"), competitors);
+    }
+
+    @Test
+    void batch1ExtractionExcludesDegradedPlatformsInDatabaseQuery() {
+        PresaleCompetitorAggregator aggregator = new PresaleCompetitorAggregator(
+                aiPromptResultMapper, new ObjectMapper());
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+
+        aggregator.extractTopRawCompetitorMentions(
+                9304L, List.of("Acme"), 10, Set.of("degraded-platform"));
+
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PresaleAiPromptResult>>
+                wrapper = ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
+        org.mockito.Mockito.verify(aiPromptResultMapper).selectList(wrapper.capture());
+        assertTrue(wrapper.getValue().getSqlSegment().toUpperCase().contains("NOT IN"));
     }
 
     private PresaleAiPromptResult promptResult(Long id, String mentionedCompetitorsJson) {

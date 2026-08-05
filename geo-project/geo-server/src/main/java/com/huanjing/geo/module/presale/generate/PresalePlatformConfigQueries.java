@@ -2,6 +2,7 @@ package com.huanjing.geo.module.presale.generate;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.dispatch.websearch.enums.UsageScene;
 
 public final class PresalePlatformConfigQueries {
 
@@ -18,6 +19,7 @@ public final class PresalePlatformConfigQueries {
         return new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
                 .eq(AiPlatformConfig::getEnabledForPresale, true)
+                .eq(AiPlatformConfig::getUsageScene, UsageScene.STANDARD_CHAT.name())
                 .isNotNull(AiPlatformConfig::getLowModelId)
                 .apply("TRIM(low_model_id) <> ''")
                 .orderByAsc(AiPlatformConfig::getPlatformCode);

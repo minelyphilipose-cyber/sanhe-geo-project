@@ -62,6 +62,16 @@ export interface VersionRowMeta {
   version_no: number;
   schema_version: string;
   generation_status: string;
+  query_web_mode?: 'OFF' | 'SHADOW' | 'REQUIRED';
+  planned_query_count?: number;
+  planned_web_query_count?: number;
+  web_valid_query_count?: number;
+  effective_sample_count?: number;
+  query_failed_count?: number;
+  analyze_failed_count?: number;
+  skipped_query_count?: number;
+  degraded_excluded_sample_count?: number;
+  main_web_failure_code?: string | null;
   /** RFC3339 带 +08:00,可 null。 */
   frozen_at?: string | null;
   frozen_by?: number | null;
@@ -246,6 +256,16 @@ function buildMeta(
     version_no: row.version_no,
     schema_version: row.schema_version,
     generation_status: row.generation_status,
+    query_web_mode: row.query_web_mode ?? 'OFF',
+    planned_query_count: row.planned_query_count ?? 0,
+    planned_web_query_count: row.planned_web_query_count ?? 0,
+    web_valid_query_count: row.web_valid_query_count ?? 0,
+    effective_sample_count: row.effective_sample_count ?? 0,
+    query_failed_count: row.query_failed_count ?? 0,
+    analyze_failed_count: row.analyze_failed_count ?? 0,
+    skipped_query_count: row.skipped_query_count ?? 0,
+    degraded_excluded_sample_count: row.degraded_excluded_sample_count ?? 0,
+    main_web_failure_code: row.main_web_failure_code ?? null,
     generated_at: raw?.meta?.generated_at ?? null,
     frozen: row.frozen_at != null,
     frozen_at: row.frozen_at ?? null,

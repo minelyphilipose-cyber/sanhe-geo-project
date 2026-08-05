@@ -1596,13 +1596,14 @@ public class DispatchExecutionService {
     }
 
     private List<AiPlatformConfig> resolveQuestionPollPlatformCandidates() {
-        return aiPlatformConfigMapper.selectList(
+        List<AiPlatformConfig> candidates = aiPlatformConfigMapper.selectList(
                 new LambdaQueryWrapper<AiPlatformConfig>()
                         .eq(AiPlatformConfig::getEnabled, true)
                         .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
-                        .eq(AiPlatformConfig::getUsageScene, "QUESTION_POLL_WEB")
+                        .in(AiPlatformConfig::getUsageScene, "STANDARD_CHAT", "QUESTION_POLL_WEB")
                         .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId)
         );
+        return QuestionPollPlatformSelection.preferredEnabled(candidates);
     }
 
     private List<AiPlatformConfig> resolveRandomEnabledPlatformCandidates() {

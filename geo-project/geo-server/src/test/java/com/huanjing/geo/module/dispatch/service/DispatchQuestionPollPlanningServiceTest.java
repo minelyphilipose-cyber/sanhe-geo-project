@@ -366,7 +366,12 @@ class DispatchQuestionPollPlanningServiceTest {
         AiPlatformConfig platform = new AiPlatformConfig();
         platform.setId(id);
         platform.setPlatformCode(code);
+        platform.setChannelCode(code);
         platform.setPlatformName(code);
+        platform.setUsageScene("QUESTION_POLL_WEB");
+        platform.setIntegrationType("VOLCENGINE_RESPONSES_WEB");
+        platform.setEnabled(true);
+        platform.setEnabledForQuestionPoll(true);
         return platform;
     }
 

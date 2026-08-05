@@ -422,7 +422,7 @@ public class AiPlatformConfigService {
                     "web-search configuration requires exactly one of api_key or primary_key_ref");
         }
         if (hasPrimaryRef) {
-            validateEnvRef(primaryKeyRef, "primary_key_ref");
+            validateCredentialRef(primaryKeyRef, "primary_key_ref");
         }
         if (providerConfig != null && (providerConfig.hasNonNull("credentialRef")
                 || providerConfig.hasNonNull("searchCredentialRef")
@@ -451,6 +451,19 @@ public class AiPlatformConfigService {
         if (!StringUtils.hasText(value) || !value.trim().matches("^env://[A-Za-z_][A-Za-z0-9_]*$")) {
             throw new BizException(400, fieldName + " must use env://ENVIRONMENT_VARIABLE");
         }
+    }
+
+    private void validateCredentialRef(String value, String fieldName) {
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(400, fieldName + " is required");
+        }
+        String normalized = value.trim();
+        if (normalized.matches("^env://[A-Za-z_][A-Za-z0-9_]*$")
+                || normalized.matches("^db://ai-platform-config/[1-9][0-9]*$")) {
+            return;
+        }
+        throw new BizException(400,
+                fieldName + " must use env://ENVIRONMENT_VARIABLE or db://ai-platform-config/{id}");
     }
 
     private void validateFinalHttpsEndpoint(String value, String fieldName) {

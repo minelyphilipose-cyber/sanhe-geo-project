@@ -25,6 +25,23 @@
       </template>
     </el-alert>
 
+    <el-alert
+      v-if="isDone && meta?.query_web_mode === 'REQUIRED'"
+      :type="webExcludedCount > 0 ? 'warning' : 'success'"
+      :closable="false"
+      show-icon
+      class="viewer-alert"
+    >
+      <template #title>
+        联网有效样本 {{ meta.web_valid_query_count ?? 0 }} / {{ meta.planned_web_query_count ?? 0 }}，
+        最终参与指标样本 {{ meta.effective_sample_count ?? 0 }}。
+        <span v-if="webExcludedCount > 0">
+          搜索失败 {{ meta.query_failed_count ?? 0 }}，分析失败 {{ meta.analyze_failed_count ?? 0 }}，
+          跳过 {{ meta.skipped_query_count ?? 0 }}，降级排除 {{ meta.degraded_excluded_sample_count ?? 0 }}。
+        </span>
+      </template>
+    </el-alert>
+
     <!-- ═══ 19 页渲染 ═══ -->
     <!--
       β·1 阶段:Page01(封面)和 Page02(诊断对象)用真实 SFC。
@@ -139,6 +156,13 @@ const meta = computed(() => mergedView.value?.meta)
 const isDone = computed(() => meta.value?.generation_status === 'DONE')
 const matchLevel = computed(() => meta.value?.match_level)
 const degradedPlatforms = computed(() => meta.value?.degraded_platforms ?? [])
+const webExcludedCount = computed(
+  () =>
+    (meta.value?.query_failed_count ?? 0) +
+    (meta.value?.analyze_failed_count ?? 0) +
+    (meta.value?.skipped_query_count ?? 0) +
+    (meta.value?.degraded_excluded_sample_count ?? 0)
+)
 </script>
 
 <style scoped>

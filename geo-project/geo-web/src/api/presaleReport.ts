@@ -24,6 +24,7 @@ export interface ReportVersionMetaVO {
     | 'L2_COMPUTE'
     | 'L3_INIT'
     | null
+  queryWebMode?: 'OFF' | 'SHADOW' | 'REQUIRED'
   totalLlmCalls?: number
   completedLlmCalls?: number
   batch1TotalCalls?: number | null
@@ -31,6 +32,15 @@ export interface ReportVersionMetaVO {
   batch2TotalCalls?: number | null
   batch2CompletedCalls?: number | null
   extractedCompetitorCount?: number | null
+  plannedQueryCount?: number
+  plannedWebQueryCount?: number
+  webValidQueryCount?: number
+  effectiveSampleCount?: number
+  queryFailedCount?: number
+  analyzeFailedCount?: number
+  skippedQueryCount?: number
+  degradedExcludedSampleCount?: number
+  mainWebFailureCode?: string | null
   isDegraded?: boolean
   degradedPlatforms?: string[]
   failureReason?: string | null

@@ -284,6 +284,7 @@ public class PresaleRawSnapshotAssembler {
     private int countPromptResults(Long versionId, int batchNo, Set<String> degradedPlatforms) {
         LambdaQueryWrapper<PresaleAiPromptResult> wrapper = new LambdaQueryWrapper<PresaleAiPromptResult>()
                 .eq(PresaleAiPromptResult::getVersionId, versionId)
+                .eq(PresaleAiPromptResult::getEffectiveSample, true)
                 .eq(PresaleAiPromptResult::getBatchNo, batchNo);
         if (degradedPlatforms != null && !degradedPlatforms.isEmpty()) {
             wrapper.notIn(PresaleAiPromptResult::getPlatformCode, degradedPlatforms);
@@ -458,6 +459,7 @@ public class PresaleRawSnapshotAssembler {
             List<PresaleAiPromptResult> batch1Rows = aiPromptResultMapper.selectList(
                     new LambdaQueryWrapper<PresaleAiPromptResult>()
                             .eq(PresaleAiPromptResult::getVersionId, versionId)
+                            .eq(PresaleAiPromptResult::getEffectiveSample, true)
                             .eq(PresaleAiPromptResult::getPlatformCode, platformCode)
                             .eq(PresaleAiPromptResult::getBatchNo, 1)
                             .isNotNull(PresaleAiPromptResult::getIsMentioned)
@@ -597,6 +599,8 @@ public class PresaleRawSnapshotAssembler {
                         .eq(PresaleAiPromptJudgeResult::getBatchNo, 2)
                         .eq(PresaleAiPromptJudgeResult::getCategory, "COMPARISON")
                         .eq(PresaleAiPromptJudgeResult::getJudgeStatus, STATUS_SUCCESS)
+                        .inSql(PresaleAiPromptJudgeResult::getPromptResultId,
+                                effectivePromptResultIdSql(versionId))
         );
         int target = 0;
         int competitor = 0;
@@ -675,6 +679,8 @@ public class PresaleRawSnapshotAssembler {
                         .eq(PresaleAiPromptJudgeResult::getBatchNo, 2)
                         .eq(PresaleAiPromptJudgeResult::getCategory, "COMPARISON")
                         .eq(PresaleAiPromptJudgeResult::getJudgeStatus, "SUCCESS")
+                        .inSql(PresaleAiPromptJudgeResult::getPromptResultId,
+                                effectivePromptResultIdSql(versionId))
         );
         Map<String, Integer> freq = new HashMap<>();
         for (PresaleAiPromptJudgeResult row : judgeRows == null ? List.<PresaleAiPromptJudgeResult>of() : judgeRows) {
@@ -713,6 +719,7 @@ public class PresaleRawSnapshotAssembler {
         List<PresaleAiPromptResult> batch2Rows = aiPromptResultMapper.selectList(
                 new LambdaQueryWrapper<PresaleAiPromptResult>()
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
+                        .eq(PresaleAiPromptResult::getEffectiveSample, true)
                         .eq(PresaleAiPromptResult::getBatchNo, 2)
                         .isNotNull(PresaleAiPromptResult::getIsMentioned)
         );
@@ -757,10 +764,19 @@ public class PresaleRawSnapshotAssembler {
                 .toList();
     }
 
+    private String effectivePromptResultIdSql(Long versionId) {
+        if (versionId == null || versionId < 1) {
+            throw new IllegalArgumentException("versionId must be positive");
+        }
+        return "SELECT id FROM presale_ai_prompt_result WHERE effective_sample = 1 AND version_id = "
+                + versionId;
+    }
+
     private SentimentDetail buildSentimentDetail(Long versionId) {
         List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
                 new LambdaQueryWrapper<PresaleAiPromptResult>()
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
+                        .eq(PresaleAiPromptResult::getEffectiveSample, true)
                         .eq(PresaleAiPromptResult::getIsMentioned, 1)
                         .isNotNull(PresaleAiPromptResult::getSentiment)
         );

@@ -37,6 +37,9 @@ public class PresaleReportVersion {
     /** 生成子阶段(BATCH1/COMPETITOR_EXTRACT/BATCH2/L1_AGGREGATE/L2_COMPUTE/L3_INIT)。 */
     private String generationStage;
 
+    /** Version-level QUERY contract mode, fixed when a generation run starts. */
+    private String queryWebMode;
+
     /** 总 LLM 调用数,v1.2 契约 11×30×2 = 660。 */
     private Integer totalLlmCalls;
 
@@ -47,6 +50,16 @@ public class PresaleReportVersion {
     private Integer batch2TotalCalls;
     private Integer batch2CompletedCalls;
     private Integer extractedCompetitorCount;
+
+    private Integer plannedQueryCount;
+    private Integer plannedWebQueryCount;
+    private Integer webValidQueryCount;
+    private Integer effectiveSampleCount;
+    private Integer queryFailedCount;
+    private Integer analyzeFailedCount;
+    private Integer skippedQueryCount;
+    private Integer degradedExcludedSampleCount;
+    private String mainWebFailureCode;
 
     /** 是否降级(部分平台失败)。 */
     private Boolean isDegraded;

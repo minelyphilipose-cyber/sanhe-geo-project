@@ -24,6 +24,8 @@ public class PresaleAiCall {
     private String stage;
     private Long parentCallId;
     private String requestPromptContent;
+    private String queryContractVersion;
+    private String searchEvidenceJson;
     private String callStatus;
     private Integer retryCount;
     private String rawResponse;

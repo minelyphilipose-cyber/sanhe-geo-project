@@ -119,6 +119,7 @@ public class PresaleComputedSnapshotEnricher {
     private RankingStats queryRankingStats(Long versionId, RawSnapshotDTO rawSnapshot) {
         LambdaQueryWrapper<PresaleAiPromptResult> wrapper = new LambdaQueryWrapper<PresaleAiPromptResult>()
                 .eq(PresaleAiPromptResult::getVersionId, versionId)
+                .eq(PresaleAiPromptResult::getEffectiveSample, true)
                 .eq(PresaleAiPromptResult::getBatchNo, 1)
                 .isNotNull(PresaleAiPromptResult::getRanking);
         Set<String> degradedPlatforms = rawSnapshot == null

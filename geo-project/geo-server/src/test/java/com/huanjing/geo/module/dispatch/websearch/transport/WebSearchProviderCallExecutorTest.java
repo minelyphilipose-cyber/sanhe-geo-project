@@ -9,12 +9,15 @@ import com.huanjing.geo.module.dispatch.websearch.model.WebSearchRequest;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.http.HttpTimeoutException;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -94,9 +97,27 @@ class WebSearchProviderCallExecutorTest {
         verify(httpClient, never()).postJson(anyString(), any(), anyString(), anyInt(), anyInt());
     }
 
+    @Test
+    void mimoUsesApiKeyHeaderInsteadOfBearerAuthorization() throws Exception {
+        when(httpClient.postJson(anyString(), any(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new LlmHttpClient.HttpResponse(200, "{}"));
+
+        executor.postJson(request(60, IntegrationType.MIMO_CHAT_WEB), "{}");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> headers = ArgumentCaptor.forClass(Map.class);
+        verify(httpClient).postJson(anyString(), headers.capture(), anyString(), anyInt(), anyInt());
+        assertEquals("secret", headers.getValue().get("api-key"));
+        assertTrue(!headers.getValue().containsKey("Authorization"));
+    }
+
     private WebSearchRequest request(int deadlineOffsetSeconds) {
+        return request(deadlineOffsetSeconds, IntegrationType.VOLCENGINE_RESPONSES_WEB);
+    }
+
+    private WebSearchRequest request(int deadlineOffsetSeconds, IntegrationType integrationType) {
         WebSearchPlatformProfile profile = new WebSearchPlatformProfile(
-                1L, "test_web", "test", "provider", IntegrationType.VOLCENGINE_RESPONSES_WEB,
+                1L, "test_web", "test", "provider", integrationType,
                 "https://example.test/responses", "model", "env://TEST_KEY", null,
                 1L, "{}", "hash", 3_000, 60_000);
         return new WebSearchRequest(

@@ -8,6 +8,9 @@ import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
+import com.huanjing.geo.module.presale.generate.web.PresaleQueryWebMode;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebExecutionContext;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebReadinessChecker;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
@@ -25,6 +28,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -33,6 +37,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class PresaleReportServiceTest {
@@ -66,6 +71,8 @@ class PresaleReportServiceTest {
     private LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator;
     @Mock
     private PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
+    @Mock
+    private PresaleWebReadinessChecker webReadinessChecker;
 
     private PresaleReportService service;
 
@@ -85,8 +92,11 @@ class PresaleReportServiceTest {
                 promptTemplateDraftValidator,
                 llmPromptQuestionDraftValidator,
                 partnerPresaleReportQuotaService,
+                webReadinessChecker,
                 new ObjectMapper()
         );
+        lenient().when(webReadinessChecker.checkConfiguredMode())
+                .thenReturn(new PresaleWebExecutionContext(PresaleQueryWebMode.OFF, Map.of()));
     }
 
     @Test

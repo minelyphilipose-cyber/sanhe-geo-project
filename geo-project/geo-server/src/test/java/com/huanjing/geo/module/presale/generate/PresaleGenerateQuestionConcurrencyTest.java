@@ -8,6 +8,8 @@ import com.huanjing.geo.module.presale.generate.llm.CallStatus;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebQueryInvoker;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebReadinessChecker;
 import com.huanjing.geo.module.presale.generate.llm.PromptTemplateRenderer;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
@@ -109,6 +111,12 @@ class PresaleGenerateQuestionConcurrencyTest {
     private PresaleGenerateCancellationRegistry cancellationRegistry;
     @Mock
     private PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
+    @Mock
+    private PresaleSampleStatisticsService sampleStatisticsService;
+    @Mock
+    private PresaleWebReadinessChecker webReadinessChecker;
+    @Mock
+    private PresaleWebQueryInvoker webQueryInvoker;
 
     private PresaleGenerateOrchestrator orchestrator;
 
@@ -137,6 +145,9 @@ class PresaleGenerateQuestionConcurrencyTest {
                 evaluationModelRouter,
                 cancellationRegistry,
                 partnerPresaleReportQuotaService,
+                sampleStatisticsService,
+                webReadinessChecker,
+                webQueryInvoker,
                 new ObjectMapper(),
                 directExecutor
         );

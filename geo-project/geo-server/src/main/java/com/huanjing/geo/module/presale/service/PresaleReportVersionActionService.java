@@ -21,6 +21,8 @@ import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.PhaseDescription;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateCancellationRegistry;
+import com.huanjing.geo.module.presale.generate.web.PresaleQueryWebMode;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebReadinessChecker;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
 import com.huanjing.geo.module.presale.generate.l3.MarketBattlegroundValidator;
@@ -99,6 +101,7 @@ public class PresaleReportVersionActionService {
     private final PresaleL3Defaults l3Defaults;
     private final MarketBattlegroundValidator marketBattlegroundValidator;
     private final PresaleGenerateCancellationRegistry cancellationRegistry;
+    private final PresaleWebReadinessChecker webReadinessChecker;
 
     /**
      * P1·F·1·a 已存在的 Mock Orchestrator,retry 时重新触发生成。
@@ -435,12 +438,22 @@ public class PresaleReportVersionActionService {
 
         // 状态:派生完成后直接就绪(无需重跑 LLM)
         next.setGenerationStatus(PresaleGenerateStatus.DONE.name());
+        next.setQueryWebMode(source.getQueryWebMode());
 
         // 事实冻结层字段:继承源版本
         next.setTotalLlmCalls(source.getTotalLlmCalls());
         next.setCompletedLlmCalls(source.getCompletedLlmCalls());
         next.setIsDegraded(source.getIsDegraded());
         next.setDegradedPlatforms(source.getDegradedPlatforms());
+        next.setPlannedQueryCount(source.getPlannedQueryCount());
+        next.setPlannedWebQueryCount(source.getPlannedWebQueryCount());
+        next.setWebValidQueryCount(source.getWebValidQueryCount());
+        next.setEffectiveSampleCount(source.getEffectiveSampleCount());
+        next.setQueryFailedCount(source.getQueryFailedCount());
+        next.setAnalyzeFailedCount(source.getAnalyzeFailedCount());
+        next.setSkippedQueryCount(source.getSkippedQueryCount());
+        next.setDegradedExcludedSampleCount(source.getDegradedExcludedSampleCount());
+        next.setMainWebFailureCode(source.getMainWebFailureCode());
         next.setFailureReason(null); // source 是 DONE,本就为 null,这里显式一次
 
         // 三层 JSON:继承源版本(用户此后可在新版本上继续编辑 L3)
@@ -622,6 +635,8 @@ public class PresaleReportVersionActionService {
         if (!PresaleGenerateStatus.FAILED.name().equals(version.getGenerationStatus())) {
             throw new BizException(409, "Only FAILED version can be retried");
         }
+        // Retry keeps the saved version contract and checks it before cancellation state is changed.
+        webReadinessChecker.checkSavedMode(version.getQueryWebMode());
         cancellationRegistry.clear(version.getId());
 
         // 重置失败态相关字段(保留 L1/L2/L3 JSON,避免重试期间前端看到空页)
@@ -667,6 +682,8 @@ public class PresaleReportVersionActionService {
         if (version.getFrozenAt() != null) {
             throw new BizException(409, "Frozen version cannot be regenerated");
         }
+        // Regenerate is a new run and adopts the current application mode. Check before any cleanup.
+        PresaleQueryWebMode queryWebMode = webReadinessChecker.checkConfiguredMode().mode();
         cancellationRegistry.clear(version.getId());
 
         clearGeneratedRunData(version.getId());
@@ -674,6 +691,7 @@ public class PresaleReportVersionActionService {
         LambdaUpdateWrapper<PresaleReportVersion> update = new LambdaUpdateWrapper<PresaleReportVersion>()
                 .eq(PresaleReportVersion::getId, version.getId())
                 .set(PresaleReportVersion::getGenerationStatus, PresaleGenerateStatus.QUEUED.name())
+                .set(PresaleReportVersion::getQueryWebMode, queryWebMode.name())
                 .set(PresaleReportVersion::getGenerationStage, null)
                 .set(PresaleReportVersion::getTotalLlmCalls, version.getTotalLlmCalls())
                 .set(PresaleReportVersion::getCompletedLlmCalls, 0)
@@ -685,6 +703,15 @@ public class PresaleReportVersionActionService {
                 .set(PresaleReportVersion::getFailureCategory, null)
                 .set(PresaleReportVersion::getIsDegraded, false)
                 .set(PresaleReportVersion::getDegradedPlatforms, null);
+        update.set(PresaleReportVersion::getPlannedQueryCount, 0)
+                .set(PresaleReportVersion::getPlannedWebQueryCount, 0)
+                .set(PresaleReportVersion::getWebValidQueryCount, 0)
+                .set(PresaleReportVersion::getEffectiveSampleCount, 0)
+                .set(PresaleReportVersion::getQueryFailedCount, 0)
+                .set(PresaleReportVersion::getAnalyzeFailedCount, 0)
+                .set(PresaleReportVersion::getSkippedQueryCount, 0)
+                .set(PresaleReportVersion::getDegradedExcludedSampleCount, 0)
+                .set(PresaleReportVersion::getMainWebFailureCode, null);
         versionMapper.update(null, update);
 
         triggerGenerateAfterCommit(version.getId(), user.getId(), accessService.canManageCurrentUser());

@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.presale.generate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.module.presale.dto.snapshot.common.MatchLevel;
 import com.huanjing.geo.module.presale.dto.snapshot.common.ScoreSet;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.BenchmarksFrozen;
@@ -18,7 +20,9 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptJudgeResult
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -38,6 +42,14 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class PresaleRawSnapshotAssemblerTest {
+
+    @BeforeEach
+    void initializeMybatisMetadata() {
+        if (TableInfoHelper.getTableInfo(PresaleAiPromptResult.class) == null) {
+            TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                    PresaleAiPromptResult.class);
+        }
+    }
 
     @Mock
     private PresaleAiCallMapper aiCallMapper;

@@ -152,6 +152,7 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "FROM presale_ai_prompt_result r " +
             "INNER JOIN presale_report_version_prompt_template pt ON pt.id = r.prompt_template_id " +
             "WHERE r.version_id = #{versionId} " +
+            "AND r.effective_sample = 1 " +
             "AND ( " +
             "  (pt.category = '对比型' AND r.batch_no = 2) " +
             "  OR (pt.category <> '对比型' AND r.batch_no = 1) " +
@@ -220,6 +221,7 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "    SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.attribute_hit_rate IS NOT NULL AND j.sentiment_score IS NOT NULL THEN 1 ELSE 0 END) AS sample_count " +
             "  FROM presale_ai_prompt_judge_result j " +
             "  WHERE j.version_id = #{versionId} " +
+            "    AND EXISTS (SELECT 1 FROM presale_ai_prompt_result pr WHERE pr.id = j.prompt_result_id AND pr.effective_sample = 1) " +
             "    AND j.category = 'COGNITIVE' " +
             "  GROUP BY j.platform_code " +
             "  UNION ALL " +
@@ -256,6 +258,7 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "      SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.preferred_brand = 'tie' THEN 1 ELSE 0 END) AS tie_cnt " +
             "    FROM presale_ai_prompt_judge_result j " +
             "    WHERE j.version_id = #{versionId} " +
+            "      AND EXISTS (SELECT 1 FROM presale_ai_prompt_result pr WHERE pr.id = j.prompt_result_id AND pr.effective_sample = 1) " +
             "      AND j.category = 'COMPARISON' " +
             "    GROUP BY j.platform_code " +
             "  ) c " +
@@ -264,14 +267,15 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
     List<PlatformIntentJudgeAggregateRow> selectJudgeAggregatesByVersionId(@Param("versionId") Long versionId);
 
     @Select("SELECT " +
-            "prompt_template_id AS promptTemplateId, " +
-            "platform_code AS platformCode, " +
-            "category AS category, " +
-            "judge_status AS judgeStatus, " +
-            "attribute_hit_rate AS attributeHitRate, " +
-            "preferred_brand AS preferredBrand " +
-            "FROM presale_ai_prompt_judge_result " +
-            "WHERE version_id = #{versionId} " +
-            "AND category IN ('COGNITIVE', 'COMPARISON')")
+            "j.prompt_template_id AS promptTemplateId, " +
+            "j.platform_code AS platformCode, " +
+            "j.category AS category, " +
+            "j.judge_status AS judgeStatus, " +
+            "j.attribute_hit_rate AS attributeHitRate, " +
+            "j.preferred_brand AS preferredBrand " +
+            "FROM presale_ai_prompt_judge_result j " +
+            "WHERE j.version_id = #{versionId} " +
+            "AND EXISTS (SELECT 1 FROM presale_ai_prompt_result pr WHERE pr.id = j.prompt_result_id AND pr.effective_sample = 1) " +
+            "AND j.category IN ('COGNITIVE', 'COMPARISON')")
     List<PromptJudgeSignalRow> selectPromptJudgeSignalsByVersionId(@Param("versionId") Long versionId);
 }

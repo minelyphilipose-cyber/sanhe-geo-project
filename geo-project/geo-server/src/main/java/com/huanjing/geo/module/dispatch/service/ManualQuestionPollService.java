@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -68,11 +69,14 @@ public class ManualQuestionPollService {
 
     public List<ManualQuestionPollPlatformOption> platformOptions() {
         requireOperator();
-        return aiPlatformConfigMapper.selectList(
+        List<AiPlatformConfig> candidates = aiPlatformConfigMapper.selectList(
                 new LambdaQueryWrapper<AiPlatformConfig>()
-                        .eq(AiPlatformConfig::getUsageScene, "QUESTION_POLL_WEB")
+                        .in(AiPlatformConfig::getUsageScene, "STANDARD_CHAT", "QUESTION_POLL_WEB")
                         .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId)
-        ).stream().map(this::toOption).toList();
+        );
+        return QuestionPollPlatformSelection.preferredForOptions(candidates).stream()
+                .map(this::toOption)
+                .toList();
     }
 
     @Transactional
@@ -188,6 +192,18 @@ public class ManualQuestionPollService {
 
     private List<AiPlatformConfig> requirePlatforms(List<Long> requestedIds) {
         List<AiPlatformConfig> rows = aiPlatformConfigMapper.selectBatchIds(requestedIds);
+        Set<Long> preferredIds = QuestionPollPlatformSelection.preferredEnabled(
+                aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
+                        .in(AiPlatformConfig::getUsageScene, "STANDARD_CHAT", "QUESTION_POLL_WEB")))
+                .stream().map(AiPlatformConfig::getId).collect(java.util.stream.Collectors.toSet());
+        if (preferredIds.isEmpty()) {
+            // Defensive compatibility for a concurrent configuration refresh; requested rows are
+            // still checked by isSelectable below.
+            preferredIds = rows.stream().map(AiPlatformConfig::getId)
+                    .collect(java.util.stream.Collectors.toSet());
+        }
         Map<Long, AiPlatformConfig> byId = new LinkedHashMap<>();
         rows.forEach(row -> byId.put(row.getId(), row));
         List<AiPlatformConfig> ordered = new ArrayList<>();
@@ -196,9 +212,10 @@ public class ManualQuestionPollService {
             if (config == null) {
                 throw new BizException(404, "Question poll platform not found: " + id, 404, null);
             }
-            if (!isSelectable(config)) {
+            if (!isSelectable(config) || !preferredIds.contains(config.getId())) {
                 throw new BizException(400,
-                        "Question poll platform is not enabled: " + config.getPlatformName(), 400, null);
+                        "Question poll platform is not the active route for its channel: "
+                                + config.getPlatformName(), 400, null);
             }
             ordered.add(config);
         }
@@ -227,7 +244,7 @@ public class ManualQuestionPollService {
     private boolean isSelectable(AiPlatformConfig config) {
         return Boolean.TRUE.equals(config.getEnabled())
                 && Boolean.TRUE.equals(config.getEnabledForQuestionPoll())
-                && "QUESTION_POLL_WEB".equalsIgnoreCase(config.getUsageScene());
+                && QuestionPollPlatformSelection.supportsQuestionPollScene(config);
     }
 
     private PollBatch findByRequest(Long operatorId, String requestId) {

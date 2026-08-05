@@ -17,6 +17,14 @@ import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.llm.PromptTemplateRenderer;
+import com.huanjing.geo.module.presale.generate.web.PresaleQueryWebMode;
+import com.huanjing.geo.module.presale.generate.web.PresaleSearchEvidence;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebExecutionContext;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebQueryException;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebQueryInvoker;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebQueryResult;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebReadinessChecker;
+import com.huanjing.geo.module.presale.generate.web.ResolvedCompanionExecutionConfig;
 import com.huanjing.geo.module.presale.generate.l3.PresaleL3InitService;
 import com.huanjing.geo.module.presale.generate.l3.PresalePage03DoubaoService;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
@@ -134,6 +142,9 @@ public class PresaleGenerateOrchestrator {
     private final PresaleEvaluationModelRouter evaluationModelRouter;
     private final PresaleGenerateCancellationRegistry cancellationRegistry;
     private final PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
+    private final PresaleSampleStatisticsService sampleStatisticsService;
+    private final PresaleWebReadinessChecker webReadinessChecker;
+    private final PresaleWebQueryInvoker webQueryInvoker;
     private final ObjectMapper objectMapper;
     private final Executor platformExecutor;
     private final Map<Long, AtomicLong> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
@@ -190,6 +201,9 @@ public class PresaleGenerateOrchestrator {
                                        PresaleEvaluationModelRouter evaluationModelRouter,
                                        PresaleGenerateCancellationRegistry cancellationRegistry,
                                        PartnerPresaleReportQuotaService partnerPresaleReportQuotaService,
+                                       PresaleSampleStatisticsService sampleStatisticsService,
+                                       PresaleWebReadinessChecker webReadinessChecker,
+                                       PresaleWebQueryInvoker webQueryInvoker,
                                        ObjectMapper objectMapper,
                                        @Qualifier("presalePlatformExecutor") Executor platformExecutor) {
         this.versionMapper = versionMapper;
@@ -213,6 +227,9 @@ public class PresaleGenerateOrchestrator {
         this.evaluationModelRouter = evaluationModelRouter;
         this.cancellationRegistry = cancellationRegistry;
         this.partnerPresaleReportQuotaService = partnerPresaleReportQuotaService;
+        this.sampleStatisticsService = sampleStatisticsService;
+        this.webReadinessChecker = webReadinessChecker;
+        this.webQueryInvoker = webQueryInvoker;
         this.objectMapper = objectMapper;
         this.platformExecutor = Objects.requireNonNull(platformExecutor, "presalePlatformExecutor must not be null");
     }
@@ -322,6 +339,10 @@ public class PresaleGenerateOrchestrator {
         return Math.max(1, maxConcurrentReports);
     }
 
+    private PresaleWebExecutionContext legacyWebContext() {
+        return new PresaleWebExecutionContext(PresaleQueryWebMode.OFF, Map.of());
+    }
+
     private void runMockFlow(Long versionId) {
         log.info("Presale mock generate start, versionId={}, delay={}ms", versionId, mockDelayMs);
         markRunningForMock(versionId);
@@ -377,7 +398,19 @@ public class PresaleGenerateOrchestrator {
     }
 
     private void runRealFullFlow(Long versionId, Long operatorUserId, boolean isManager) {
-        PreflightResult preflight = preflight(versionId);
+        PresaleReportVersion initialVersion = versionMapper.selectById(versionId);
+        PresaleWebExecutionContext webContext;
+        try {
+            webContext = webReadinessChecker == null
+                    ? legacyWebContext()
+                    : webReadinessChecker.checkSavedMode(
+                            initialVersion == null ? null : initialVersion.getQueryWebMode());
+        } catch (RuntimeException ex) {
+            markFailed(versionId, FAILURE_CATEGORY_CONFIG_MISSING,
+                    truncateReason("WEB_READINESS_FAILED: " + ex.getMessage()));
+            return;
+        }
+        PreflightResult preflight = preflight(versionId, webContext);
         if (!preflight.success()) {
             markFailed(versionId, FAILURE_CATEGORY_CONFIG_MISSING,
                     truncateReason("CONFIG_MISSING: " + preflight.failureReason()));
@@ -392,7 +425,8 @@ public class PresaleGenerateOrchestrator {
             return;
         }
         PresaleReport promptRenderReport = buildPromptRenderReport(report);
-        Batch1ExecutionResult batch1Result = executeBatch1(version, report, promptRenderReport, operatorUserId, isManager, preflight);
+        Batch1ExecutionResult batch1Result = executeBatch1(version, report, promptRenderReport,
+                operatorUserId, isManager, preflight, webContext);
         if (batch1Result.stopPipeline) {
             return;
         }
@@ -416,8 +450,10 @@ public class PresaleGenerateOrchestrator {
         List<String> selfBrandNames = selfBrandNames(report);
         PresaleCompetitorNormalizationService.NormalizationOutcome normalizationOutcome =
                 specifiedCompetitors.isEmpty()
-                        ? extractTopCompetitorsFromBatch1(versionId, report.getBrandName(), selfBrandNames, operatorUserId, isManager)
-                        : specifiedCompetitorsFromBatch1Stats(versionId, selfBrandNames, specifiedCompetitors);
+                        ? extractTopCompetitorsFromBatch1(versionId, report.getBrandName(), selfBrandNames,
+                                batch1Result.degradedPlatforms(), operatorUserId, isManager)
+                        : specifiedCompetitorsFromBatch1Stats(versionId, selfBrandNames,
+                                specifiedCompetitors, batch1Result.degradedPlatforms());
         List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitorStats =
                 normalizationOutcome.competitors();
         ensureGenerationStillRunning(versionId, STAGE_COMPETITOR_EXTRACT);
@@ -453,7 +489,8 @@ public class PresaleGenerateOrchestrator {
                     isManager,
                     extractedCompetitors,
                     preflight.competitorPromptCount(),
-                    batch1Result.degradedPlatforms()
+                    batch1Result.degradedPlatforms(),
+                    webContext
             );
             if (batch2Result.stopPipeline) {
                 return;
@@ -481,6 +518,13 @@ public class PresaleGenerateOrchestrator {
                 )
         );
         ensureGenerationStillRunning(versionId, STAGE_JUDGE_COMPARISON);
+
+        String competitorGroupName = extractedCompetitors.isEmpty()
+                ? null : CompetitorGroupKeyUtils.storageKey(extractedCompetitors);
+        if (sampleStatisticsService != null) {
+            sampleStatisticsService.classifyAndPersist(
+                    versionId, webContext, allDegraded, competitorGroupName);
+        }
 
         String rawJson;
         enterStage(versionId, STAGE_L1_AGGREGATE, "assemble raw snapshot");
@@ -542,7 +586,7 @@ public class PresaleGenerateOrchestrator {
                 versionId, operatorUserId, isManager);
     }
 
-    private PreflightResult preflight(Long versionId) {
+    private PreflightResult preflight(Long versionId, PresaleWebExecutionContext webContext) {
         PresaleReportVersion version = versionMapper.selectById(versionId);
         if (version == null) {
             return PreflightResult.fail("version not found: " + versionId);
@@ -555,7 +599,9 @@ public class PresaleGenerateOrchestrator {
             return PreflightResult.fail("report.brand_name is blank");
         }
 
-        int platformCount = countWhitelistedPlatforms();
+        int platformCount = webContext != null && webContext.mode().requiresWebQuery()
+                ? webContext.reportPlatforms().size()
+                : countWhitelistedPlatforms();
         if (platformCount < 1) {
             return PreflightResult.fail("whitelisted platform count is 0");
         }
@@ -583,11 +629,12 @@ public class PresaleGenerateOrchestrator {
                                                 PresaleReport promptRenderReport,
                                                 Long operatorUserId,
                                                 boolean isManager,
-                                                PreflightResult preflight) {
+                                                PreflightResult preflight,
+                                                PresaleWebExecutionContext webContext) {
         Long versionId = version.getId();
         enterStage(versionId, STAGE_BATCH1, "batch1 executing");
 
-        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
+        List<AiPlatformConfig> platforms = reportPlatformsForRun(webContext);
         List<PresaleReportVersionPromptTemplate> templates = versionPromptTemplateMapper.selectList(
                 new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
                         .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
@@ -636,7 +683,8 @@ public class PresaleGenerateOrchestrator {
                                 completedCalls,
                                 skippedCalls,
                                 lastWrittenCompleted,
-                                reportPromptSemaphore
+                                reportPromptSemaphore,
+                                webContext
                         ), platformExecutor)
                         .handle((result, ex) -> {
                             if (ex == null) {
@@ -722,6 +770,17 @@ public class PresaleGenerateOrchestrator {
         return Batch1ExecutionResult.continuePipeline(degradedPlatforms, overRunCount, results);
     }
 
+    @SuppressWarnings("unused")
+    private Batch1ExecutionResult executeBatch1(PresaleReportVersion version,
+                                                PresaleReport report,
+                                                PresaleReport promptRenderReport,
+                                                Long operatorUserId,
+                                                boolean isManager,
+                                                PreflightResult preflight) {
+        return executeBatch1(version, report, promptRenderReport, operatorUserId, isManager,
+                preflight, legacyWebContext());
+    }
+
     PlatformBatchResult executePlatformBatch1(AiPlatformConfig platform,
                                               Long versionId,
                                               List<PresaleReportVersionPromptTemplate> templates,
@@ -735,7 +794,8 @@ public class PresaleGenerateOrchestrator {
                                               AtomicInteger completedCalls,
                                               AtomicInteger skippedCalls,
                                               AtomicInteger lastWrittenCompleted,
-                                              Semaphore reportPromptSemaphore) {
+                                              Semaphore reportPromptSemaphore,
+                                              PresaleWebExecutionContext webContext) {
         String platformCode = platform.getPlatformCode();
         PlatformBatchState state = new PlatformBatchState(platformCode, templates.size());
 
@@ -761,7 +821,8 @@ public class PresaleGenerateOrchestrator {
                         isManager,
                         completedCalls,
                         skippedCalls,
-                        lastWrittenCompleted
+                        lastWrittenCompleted,
+                        webContext
                 ),
                 interruptedFailure
         );
@@ -780,6 +841,26 @@ public class PresaleGenerateOrchestrator {
         );
     }
 
+    PlatformBatchResult executePlatformBatch1(AiPlatformConfig platform,
+                                              Long versionId,
+                                              List<PresaleReportVersionPromptTemplate> templates,
+                                              Map<ReuseDecisionService.ReuseKey, ReuseSnapshot> reuseCache,
+                                              Set<String> degradedPlatforms,
+                                              AtomicInteger degradedCount,
+                                              PresaleReport report,
+                                              PresaleReport promptRenderReport,
+                                              Long operatorUserId,
+                                              boolean isManager,
+                                              AtomicInteger completedCalls,
+                                              AtomicInteger skippedCalls,
+                                              AtomicInteger lastWrittenCompleted,
+                                              Semaphore reportPromptSemaphore) {
+        return executePlatformBatch1(platform, versionId, templates, reuseCache, degradedPlatforms,
+                degradedCount, report, promptRenderReport, operatorUserId, isManager,
+                completedCalls, skippedCalls, lastWrittenCompleted, reportPromptSemaphore,
+                legacyWebContext());
+    }
+
     private void processBatch1Template(String platformCode,
                                        Long versionId,
                                        PresaleReportVersionPromptTemplate template,
@@ -793,7 +874,8 @@ public class PresaleGenerateOrchestrator {
                                        boolean isManager,
                                        AtomicInteger completedCalls,
                                        AtomicInteger skippedCalls,
-                                       AtomicInteger lastWrittenCompleted) {
+                                       AtomicInteger lastWrittenCompleted,
+                                       PresaleWebExecutionContext webContext) {
         ensureGenerationStillRunning(versionId, "batch1");
         if (state.isDegraded()) {
             insertSkippedCall(versionId, 1, platformCode, template.getId(), "", "QUERY");
@@ -820,7 +902,11 @@ public class PresaleGenerateOrchestrator {
                 promptTemplateRenderer.variables(ctx, promptRenderReport)
         );
 
-        ReuseDecision reuseDecision = reuseDecisionService.decide(ctx, reuseCache);
+        ReuseDecision reuseDecision = webContext.usesWebQuery(platformCode)
+                ? reuseDecisionService.decide(ctx, reuseCache, webContext.mode(), webContext.identity(platformCode))
+                : webContext.mode().requiresWebQuery()
+                    ? reuseDecisionService.decideNative(ctx, reuseCache)
+                    : reuseDecisionService.decide(ctx, reuseCache);
         if (reuseDecision == ReuseDecision.SKIP_ALL) {
             state.incrementProcessed();
             int nextCompleted = completedCalls.addAndGet(2);
@@ -875,11 +961,22 @@ public class PresaleGenerateOrchestrator {
         PresaleAiCall queryCall;
         LlmCallResult queryResult;
         try {
-            queryResult = llmInvoker.query(ctx, renderedPrompt);
-            queryCall = insertCall(
-                    versionId, 1, platformCode, template.getId(), "",
-                    "QUERY", null, renderedPrompt, queryResult, null
-            );
+            QueryInvocation queryInvocation = invokeQuery(webContext, ctx, renderedPrompt);
+            queryResult = queryInvocation.callResult();
+            queryCall = insertQueryCall(versionId, 1, platformCode, template.getId(), "",
+                    renderedPrompt, queryInvocation);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new BatchInterruptedException("batch1 interrupted during web query");
+        } catch (PresaleWebQueryException ex) {
+            insertFailedWebQueryCall(versionId, 1, platformCode, template.getId(), "",
+                    renderedPrompt, webContext.requireCompanion(platformCode), ex);
+            state.incrementProcessed();
+            state.incrementFailed();
+            int nextCompleted = completedCalls.addAndGet(2);
+            updateBatch1ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted);
+            maybeDegradeBatch1Platform(state, degradedPlatforms, degradedCount);
+            return;
         } catch (LlmInvokeException ex) {
             throwIfCapacityDeferred(versionId, ex);
             insertFailedCall(versionId, 1, platformCode, template.getId(), "",
@@ -935,7 +1032,8 @@ public class PresaleGenerateOrchestrator {
                                               AtomicInteger lastWrittenCompleted,
                                               int batch1Completed,
                                               int completedOffset,
-                                              Semaphore reportPromptSemaphore) {
+                                              Semaphore reportPromptSemaphore,
+                                              PresaleWebExecutionContext webContext) {
         String platformCode = platform.getPlatformCode();
         String competitorGroupName = CompetitorGroupKeyUtils.storageKey(topCompetitors);
         PlatformBatchState state = new PlatformBatchState(platformCode, templates.size());
@@ -968,7 +1066,8 @@ public class PresaleGenerateOrchestrator {
                         skippedCalls,
                         lastWrittenCompleted,
                         batch1Completed,
-                        completedOffset
+                        completedOffset,
+                        webContext
                 ),
                 interruptedFailure
         );
@@ -987,6 +1086,29 @@ public class PresaleGenerateOrchestrator {
         );
     }
 
+    PlatformBatchResult executePlatformBatch2(AiPlatformConfig platform,
+                                              Long versionId,
+                                              List<PresaleReportVersionPromptTemplate> templates,
+                                              List<String> topCompetitors,
+                                              Map<ReuseDecisionService.ReuseKey, ReuseSnapshot> reuseCache,
+                                              Set<String> degradedPlatforms,
+                                              AtomicInteger degradedCount,
+                                              PresaleReport report,
+                                              PresaleReport promptRenderReport,
+                                              Long operatorUserId,
+                                              boolean isManager,
+                                              AtomicInteger completedCalls,
+                                              AtomicInteger skippedCalls,
+                                              AtomicInteger lastWrittenCompleted,
+                                              int batch1Completed,
+                                              int completedOffset,
+                                              Semaphore reportPromptSemaphore) {
+        return executePlatformBatch2(platform, versionId, templates, topCompetitors, reuseCache,
+                degradedPlatforms, degradedCount, report, promptRenderReport, operatorUserId,
+                isManager, completedCalls, skippedCalls, lastWrittenCompleted, batch1Completed,
+                completedOffset, reportPromptSemaphore, legacyWebContext());
+    }
+
     private void processBatch2Template(String platformCode,
                                        Long versionId,
                                        PresaleReportVersionPromptTemplate template,
@@ -1003,7 +1125,8 @@ public class PresaleGenerateOrchestrator {
                                        AtomicInteger skippedCalls,
                                        AtomicInteger lastWrittenCompleted,
                                        int batch1Completed,
-                                       int completedOffset) {
+                                       int completedOffset,
+                                       PresaleWebExecutionContext webContext) {
         ensureGenerationStillRunning(versionId, "batch2");
         if (state.isDegraded()) {
             insertSkippedCall(versionId, 2, platformCode, template.getId(), competitorGroupName, "QUERY");
@@ -1031,7 +1154,11 @@ public class PresaleGenerateOrchestrator {
                 promptTemplateRenderer.variables(ctx, promptRenderReport)
         );
 
-        ReuseDecision reuseDecision = reuseDecisionService.decide(ctx, reuseCache);
+        ReuseDecision reuseDecision = webContext.usesWebQuery(platformCode)
+                ? reuseDecisionService.decide(ctx, reuseCache, webContext.mode(), webContext.identity(platformCode))
+                : webContext.mode().requiresWebQuery()
+                    ? reuseDecisionService.decideNative(ctx, reuseCache)
+                    : reuseDecisionService.decide(ctx, reuseCache);
         if (reuseDecision == ReuseDecision.SKIP_ALL) {
             state.incrementProcessed();
             int nextCompleted = completedCalls.addAndGet(2);
@@ -1088,11 +1215,23 @@ public class PresaleGenerateOrchestrator {
         PresaleAiCall queryCall;
         LlmCallResult queryResult;
         try {
-            queryResult = llmInvoker.query(ctx, renderedPrompt);
-            queryCall = insertCall(
-                    versionId, 2, platformCode, template.getId(), competitorGroupName,
-                    "QUERY", null, renderedPrompt, queryResult, null
-            );
+            QueryInvocation queryInvocation = invokeQuery(webContext, ctx, renderedPrompt);
+            queryResult = queryInvocation.callResult();
+            queryCall = insertQueryCall(versionId, 2, platformCode, template.getId(), competitorGroupName,
+                    renderedPrompt, queryInvocation);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new BatchInterruptedException("batch2 interrupted during web query");
+        } catch (PresaleWebQueryException ex) {
+            insertFailedWebQueryCall(versionId, 2, platformCode, template.getId(), competitorGroupName,
+                    renderedPrompt, webContext.requireCompanion(platformCode), ex);
+            state.incrementProcessed();
+            state.incrementFailed();
+            int nextCompleted = completedCalls.addAndGet(2);
+            updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false,
+                    lastWrittenCompleted, batch1Completed, completedOffset);
+            maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
+            return;
         } catch (LlmInvokeException ex) {
             throwIfCapacityDeferred(versionId, ex);
             insertFailedCall(versionId, 2, platformCode, template.getId(), competitorGroupName,
@@ -1148,10 +1287,11 @@ public class PresaleGenerateOrchestrator {
                                                 boolean isManager,
                                                 List<String> competitors,
                                                 int competitorPromptCount,
-                                                Set<String> batch1DegradedPlatforms) {
+                                                Set<String> batch1DegradedPlatforms,
+                                                PresaleWebExecutionContext webContext) {
         enterStage(versionId, STAGE_BATCH2, "batch2 executing");
 
-        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
+        List<AiPlatformConfig> platforms = reportPlatformsForRun(webContext);
         List<PresaleReportVersionPromptTemplate> templates = versionPromptTemplateMapper.selectList(
                 new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
                         .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
@@ -1218,7 +1358,8 @@ public class PresaleGenerateOrchestrator {
                                 lastWrittenCompleted,
                                 batch1Completed,
                                 completedOffset,
-                                reportPromptSemaphore
+                                reportPromptSemaphore,
+                                webContext
                         ), platformExecutor)
                         .handle((result, ex) -> {
                             if (ex == null) {
@@ -1322,6 +1463,19 @@ public class PresaleGenerateOrchestrator {
                 overRunCount,
                 results
         );
+    }
+
+    @SuppressWarnings("unused")
+    private Batch2ExecutionResult executeBatch2(Long versionId,
+                                                PresaleReport report,
+                                                PresaleReport promptRenderReport,
+                                                Long operatorUserId,
+                                                boolean isManager,
+                                                List<String> competitors,
+                                                int competitorPromptCount,
+                                                Set<String> batch1DegradedPlatforms) {
+        return executeBatch2(versionId, report, promptRenderReport, operatorUserId, isManager,
+                competitors, competitorPromptCount, batch1DegradedPlatforms, legacyWebContext());
     }
 
     private void updateBatch2ProgressRolling(Long versionId,
@@ -1632,6 +1786,15 @@ public class PresaleGenerateOrchestrator {
         return count == null ? 0 : count.intValue();
     }
 
+    private List<AiPlatformConfig> reportPlatformsForRun(PresaleWebExecutionContext webContext) {
+        if (webContext != null && webContext.mode().requiresWebQuery()) {
+            return webContext.reportPlatforms();
+        }
+        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(
+                PresalePlatformConfigQueries.presaleEnabledWrapper());
+        return platforms == null ? List.of() : platforms;
+    }
+
     private List<String> loadWhitelistedPlatformCodes() {
         List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
         if (platforms == null) {
@@ -1763,20 +1926,22 @@ public class PresaleGenerateOrchestrator {
             Long versionId,
             String brandName,
             List<String> selfBrandNames,
+            Set<String> excludedPlatformCodes,
             Long operatorUserId,
             boolean isManager) {
         if (competitorNormalizationService == null) {
             List<PresaleCompetitorAggregator.ExtractedCompetitor> competitors =
-                    extractTopCompetitorsFromBatch1(versionId, selfBrandNames).stream()
+                    extractTopCompetitorsFromBatch1(versionId, selfBrandNames, excludedPlatformCodes).stream()
                             .map(name -> new PresaleCompetitorAggregator.ExtractedCompetitor(name, 0, List.of(name)))
                             .toList();
             return new PresaleCompetitorNormalizationService.NormalizationOutcome(competitors, false);
         }
         List<PresaleCompetitorAggregator.RawCompetitorMention> rawTop =
-                competitorAggregator.extractTopRawCompetitorMentions(versionId, selfBrandNames, 10);
+                competitorAggregator.extractTopRawCompetitorMentions(
+                        versionId, selfBrandNames, 10, excludedPlatformCodes);
         if ((rawTop == null || rawTop.isEmpty()) && competitorAggregator != null) {
             List<PresaleCompetitorAggregator.ExtractedCompetitor> competitors =
-                    extractTopCompetitorsFromBatch1(versionId, selfBrandNames).stream()
+                    extractTopCompetitorsFromBatch1(versionId, selfBrandNames, excludedPlatformCodes).stream()
                             .map(name -> new PresaleCompetitorAggregator.ExtractedCompetitor(name, 0, List.of(name)))
                             .toList();
             return new PresaleCompetitorNormalizationService.NormalizationOutcome(competitors, false);
@@ -1787,9 +1952,11 @@ public class PresaleGenerateOrchestrator {
     private PresaleCompetitorNormalizationService.NormalizationOutcome specifiedCompetitorsFromBatch1Stats(
             Long versionId,
             List<String> selfBrandNames,
-            List<String> specifiedCompetitors) {
+            List<String> specifiedCompetitors,
+            Set<String> excludedPlatformCodes) {
         PresaleCompetitorAggregator.Batch1MentionStats stats =
-                competitorAggregator.aggregateBatch1MentionStats(versionId, selfBrandNames);
+                competitorAggregator.aggregateBatch1MentionStats(
+                        versionId, selfBrandNames, excludedPlatformCodes);
         List<PresaleCompetitorAggregator.ExtractedCompetitor> competitors = specifiedCompetitors.stream()
                 .filter(name -> name != null && !name.isBlank())
                 .map(name -> {
@@ -1801,6 +1968,17 @@ public class PresaleGenerateOrchestrator {
                 })
                 .toList();
         return new PresaleCompetitorNormalizationService.NormalizationOutcome(competitors, false);
+    }
+
+    private List<String> extractTopCompetitorsFromBatch1(Long versionId,
+                                                         List<String> selfBrandNames,
+                                                         Set<String> excludedPlatformCodes) {
+        if (excludedPlatformCodes == null || excludedPlatformCodes.isEmpty()) {
+            return extractTopCompetitorsFromBatch1(versionId, selfBrandNames);
+        }
+        List<String> competitors = competitorAggregator.extractTopCompetitorsFromBatch1(
+                versionId, selfBrandNames, excludedPlatformCodes);
+        return competitors == null ? List.of() : competitors;
     }
 
     private List<String> extractTopCompetitorsFromBatch1(Long versionId, List<String> selfBrandNames) {
@@ -2041,6 +2219,72 @@ public class PresaleGenerateOrchestrator {
         return row;
     }
 
+    private QueryInvocation invokeQuery(PresaleWebExecutionContext webContext,
+                                        PlatformCallContext ctx,
+                                        String renderedPrompt)
+            throws LlmInvokeException, InterruptedException {
+        if (webContext != null && webContext.usesWebQuery(ctx.platformCode())) {
+            PresaleWebQueryResult result = webQueryInvoker.invoke(
+                    webContext.requireCompanion(ctx.platformCode()), renderedPrompt,
+                    () -> ensureWebQueryStillRunning(ctx.versionId()));
+            return new QueryInvocation(result.callResult(), PresaleSearchEvidence.CONTRACT_VERSION,
+                    result.evidenceJson());
+        }
+        return new QueryInvocation(llmInvoker.query(ctx, renderedPrompt), null, null);
+    }
+
+    private PresaleAiCall insertQueryCall(Long versionId,
+                                          int batchNo,
+                                          String platformCode,
+                                          Long promptTemplateId,
+                                          String competitorName,
+                                          String requestPromptContent,
+                                          QueryInvocation invocation) {
+        PresaleAiCall row = buildCall(versionId, batchNo, platformCode, promptTemplateId, competitorName,
+                "QUERY", null, requestPromptContent, invocation.callResult(), null);
+        row.setQueryContractVersion(invocation.queryContractVersion());
+        row.setSearchEvidenceJson(invocation.searchEvidenceJson());
+        insertAiCall(row, "presale.ai_call.insert");
+        return row;
+    }
+
+    private PresaleAiCall insertFailedWebQueryCall(Long versionId,
+                                                   int batchNo,
+                                                   String platformCode,
+                                                   Long promptTemplateId,
+                                                   String competitorName,
+                                                   String requestPromptContent,
+                                                   ResolvedCompanionExecutionConfig companion,
+                                                   PresaleWebQueryException failure) {
+        PresaleAiCall row = new PresaleAiCall();
+        row.setVersionId(versionId);
+        row.setBatchNo(batchNo);
+        // Report attribution always remains on the base platform.
+        row.setPlatformCode(platformCode);
+        // Execution/model snapshots belong to the companion that actually handled the request.
+        row.setPlatformCodeSnapshot(companion.companionPlatformCode());
+        row.setPlatformNameSnapshot(companion.companionPlatformName());
+        row.setModelIdSnapshot(companion.modelId());
+        row.setModelNameSnapshot(companion.modelName());
+        row.setPromptTemplateId(promptTemplateId);
+        row.setCompetitorName(competitorName);
+        row.setStage("QUERY");
+        row.setRequestPromptContent(requestPromptContent);
+        row.setQueryContractVersion(PresaleSearchEvidence.CONTRACT_VERSION);
+        row.setSearchEvidenceJson(failure.getEvidenceJson());
+        row.setCallStatus(CallStatus.FAILED.name());
+        int physicalCalls = failure.getPartialEvidence() == null
+                ? 0 : failure.getPartialEvidence().physicalCallCount();
+        row.setRetryCount(Math.max(0, physicalCalls - 1));
+        row.setFailureReason(truncateReason(failure.getFailureCode() + ": " + failure.getMessage()));
+        if (failure.getPartialEvidence() != null) {
+            row.setPromptTokens(failure.getPartialEvidence().promptTokens());
+            row.setCompletionTokens(failure.getPartialEvidence().completionTokens());
+        }
+        insertAiCall(row, "presale.ai_call.insert.web_failed");
+        return row;
+    }
+
     private PresaleAiCall insertFailedCall(Long versionId,
                                            int batchNo,
                                            String platformCode,
@@ -2186,6 +2430,11 @@ public class PresaleGenerateOrchestrator {
     }
 
     private record CallModelSnapshot(String platformCode, String platformName, String modelId, String modelName) {
+    }
+
+    private record QueryInvocation(LlmCallResult callResult,
+                                   String queryContractVersion,
+                                   String searchEvidenceJson) {
     }
 
     private void insertPromptResultAnalyzeFailed(Long versionId,
@@ -2416,6 +2665,16 @@ public class PresaleGenerateOrchestrator {
         String status = current.getGenerationStatus();
         if (status != null && !PresaleGenerateStatus.RUNNING.name().equals(status)) {
             throw new BatchInterruptedException(stage + " canceled: generation status is " + status);
+        }
+    }
+
+    private void ensureWebQueryStillRunning(Long versionId) throws InterruptedException {
+        if (cancellationRegistry.isCanceled(versionId)) {
+            throw new InterruptedException("presale web QUERY canceled by request");
+        }
+        PresaleReportVersion current = versionMapper.selectById(versionId);
+        if (current == null || !PresaleGenerateStatus.RUNNING.name().equals(current.getGenerationStatus())) {
+            throw new InterruptedException("presale web QUERY canceled because generation is not RUNNING");
         }
     }
 

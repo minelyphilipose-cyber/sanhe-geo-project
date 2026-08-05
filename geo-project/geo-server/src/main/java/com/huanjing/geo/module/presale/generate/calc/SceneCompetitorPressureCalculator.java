@@ -195,6 +195,7 @@ public class SceneCompetitorPressureCalculator {
         }
         LambdaQueryWrapper<PresaleAiPromptResult> q = new LambdaQueryWrapper<PresaleAiPromptResult>()
                 .eq(PresaleAiPromptResult::getVersionId, versionId)
+                .eq(PresaleAiPromptResult::getEffectiveSample, true)
                 .eq(PresaleAiPromptResult::getBatchNo, 1)
                 .in(PresaleAiPromptResult::getPromptTemplateId, templateIds);
         if (degraded != null && !degraded.isEmpty()) {

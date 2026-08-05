@@ -11,6 +11,8 @@ import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.llm.PromptTemplateRenderer;
+import com.huanjing.geo.module.presale.generate.web.PresaleQueryWebMode;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebExecutionContext;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
@@ -158,6 +160,22 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(l3InitService.derive(anyString(), anyString())).thenReturn("{}");
         lenient().when(page03DoubaoService.generateAndApply(anyLong(), anyString(), anyString(), any(), anyBoolean()))
                 .thenAnswer(inv -> inv.getArgument(2, String.class));
+    }
+
+    @Test
+    void requiredRunUsesReadinessPlatformSnapshotWithoutReloadingDatabase() {
+        AiPlatformConfig platform = platforms("wenxin").get(0);
+        PresaleWebExecutionContext context = new PresaleWebExecutionContext(
+                PresaleQueryWebMode.REQUIRED, Map.of(), List.of(platform));
+        platform.setPlatformCode("changed-after-snapshot");
+
+        @SuppressWarnings("unchecked")
+        List<AiPlatformConfig> resolved = ReflectionTestUtils.invokeMethod(
+                orchestrator, "reportPlatformsForRun", context);
+
+        assertNotNull(resolved);
+        assertEquals(List.of("wenxin"), resolved.stream().map(AiPlatformConfig::getPlatformCode).toList());
+        verify(aiPlatformConfigMapper, never()).selectList(any());
     }
 
     @AfterEach

@@ -25,6 +25,8 @@ import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.generate.PromptTemplateIntentStatRow;
+import com.huanjing.geo.module.presale.generate.web.PresaleQueryWebMode;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebReadinessChecker;
 import com.huanjing.geo.module.presale.access.AccessScope;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
@@ -96,6 +98,7 @@ public class PresaleReportService {
     private final PromptTemplateDraftValidator promptTemplateDraftValidator;
     private final LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator;
     private final PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
+    private final PresaleWebReadinessChecker webReadinessChecker;
     private final ObjectMapper objectMapper;
     @Value("${presale.prompt.active-version:v2}")
     private String activePromptTemplateVersion;
@@ -113,6 +116,7 @@ public class PresaleReportService {
                                 PromptTemplateDraftValidator promptTemplateDraftValidator,
                                 LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator,
                                 PartnerPresaleReportQuotaService partnerPresaleReportQuotaService,
+                                PresaleWebReadinessChecker webReadinessChecker,
                                 ObjectMapper objectMapper) {
         this.reportMapper = reportMapper;
         this.versionMapper = versionMapper;
@@ -127,6 +131,7 @@ public class PresaleReportService {
         this.promptTemplateDraftValidator = promptTemplateDraftValidator;
         this.llmPromptQuestionDraftValidator = llmPromptQuestionDraftValidator;
         this.partnerPresaleReportQuotaService = partnerPresaleReportQuotaService;
+        this.webReadinessChecker = webReadinessChecker;
         this.objectMapper = objectMapper;
     }
 
@@ -144,6 +149,8 @@ public class PresaleReportService {
         List<String> brandFormerNames = normalizeBrandFormerNames(req.getBrandFormerNames(), req.getBrandName());
         List<String> specifiedCompetitors = normalizeSpecifiedCompetitors(
                 req.getSpecifiedCompetitors(), req.getBrandName(), brandFormerNames);
+        // REQUIRED readiness must fail before quota reservation or any report/version write.
+        PresaleQueryWebMode queryWebMode = webReadinessChecker.checkConfiguredMode().mode();
         PartnerPresaleReportQuotaService.Reservation reservation =
                 partnerPresaleReportQuotaService.reserveIfPartner(currentUser, req);
         if (reservation.existingReportId() != null) {
@@ -171,12 +178,21 @@ public class PresaleReportService {
         version.setReportId(report.getId());
         version.setVersionNo(1);
         version.setGenerationStatus(PresaleGenerateStatus.QUEUED.name());
+        version.setQueryWebMode(queryWebMode.name());
         version.setTotalLlmCalls(0);
         version.setCompletedLlmCalls(0);
         version.setBatch1TotalCalls(0);
         version.setBatch1CompletedCalls(0);
         version.setBatch2TotalCalls(null);
         version.setBatch2CompletedCalls(0);
+        version.setPlannedQueryCount(0);
+        version.setPlannedWebQueryCount(0);
+        version.setWebValidQueryCount(0);
+        version.setEffectiveSampleCount(0);
+        version.setQueryFailedCount(0);
+        version.setAnalyzeFailedCount(0);
+        version.setSkippedQueryCount(0);
+        version.setDegradedExcludedSampleCount(0);
         version.setIsDegraded(false);
         version.setExportSuccessCount(0);
         version.setCreatedAt(now);
@@ -576,6 +592,7 @@ public class PresaleReportService {
                 .versionNo(v.getVersionNo())
                 .generationStatus(v.getGenerationStatus())
                 .generationStage(v.getGenerationStage())
+                .queryWebMode(v.getQueryWebMode())
                 .totalLlmCalls(v.getTotalLlmCalls())
                 .completedLlmCalls(v.getCompletedLlmCalls())
                 .batch1TotalCalls(v.getBatch1TotalCalls())
@@ -583,6 +600,15 @@ public class PresaleReportService {
                 .batch2TotalCalls(v.getBatch2TotalCalls())
                 .batch2CompletedCalls(v.getBatch2CompletedCalls())
                 .extractedCompetitorCount(v.getExtractedCompetitorCount())
+                .plannedQueryCount(v.getPlannedQueryCount())
+                .plannedWebQueryCount(v.getPlannedWebQueryCount())
+                .webValidQueryCount(v.getWebValidQueryCount())
+                .effectiveSampleCount(v.getEffectiveSampleCount())
+                .queryFailedCount(v.getQueryFailedCount())
+                .analyzeFailedCount(v.getAnalyzeFailedCount())
+                .skippedQueryCount(v.getSkippedQueryCount())
+                .degradedExcludedSampleCount(v.getDegradedExcludedSampleCount())
+                .mainWebFailureCode(v.getMainWebFailureCode())
                 .isDegraded(v.getIsDegraded())
                 .degradedPlatforms(degradedPlatforms)
                 .failureReason(v.getFailureReason())

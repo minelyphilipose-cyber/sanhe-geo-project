@@ -534,6 +534,15 @@ geo:
       expected-version: ${GEO_ENV_EXTENSION_EXPECTED_VERSION:0.2.3}
 
 presale:
+  query-web:
+    # Safe rollout: deploy schema and code with OFF, then switch to REQUIRED after companion readiness checks.
+    mode: ${PRESALE_QUERY_WEB_MODE:REQUIRED}
+    max-attempts: ${PRESALE_QUERY_WEB_MAX_ATTEMPTS:2}
+    connect-timeout-ms: ${PRESALE_QUERY_WEB_CONNECT_TIMEOUT_MS:10000}
+    request-timeout-ms: ${PRESALE_QUERY_WEB_REQUEST_TIMEOUT_MS:120000}
+    max-evidence-bytes: ${PRESALE_QUERY_WEB_MAX_EVIDENCE_BYTES:65536}
+    max-evidence-items: ${PRESALE_QUERY_WEB_MAX_EVIDENCE_ITEMS:20}
+    max-text-length: ${PRESALE_QUERY_WEB_MAX_TEXT_LENGTH:2000}
   prompt:
     active-version: v3
   judge:
@@ -553,10 +562,14 @@ presale:
         max-pool-size: ${PRESALE_GENERATE_MAX_POOL_SIZE:13}
         queue-capacity: ${PRESALE_GENERATE_QUEUE_CAPACITY:200}
       platform:
-        core-pool-size: ${PRESALE_PLATFORM_CORE_POOL_SIZE:8}
+        # One report currently spans ten enabled base platforms. Keep all platform batches schedulable
+        # without increasing the provider-specific concurrency limits stored in ai_platform_config.
+        core-pool-size: ${PRESALE_PLATFORM_CORE_POOL_SIZE:10}
         max-pool-size: ${PRESALE_PLATFORM_MAX_POOL_SIZE:12}
         queue-capacity: ${PRESALE_PLATFORM_QUEUE_CAPACITY:50}
-    prompt-max-concurrency-per-report: ${PRESALE_PROMPT_MAX_CONCURRENCY_PER_REPORT:6}
+    # Presale calls are HTTP-bound. Eight-way report concurrency is a modest step for the current
+    # 4 vCPU / 6 GiB application container while the two-report and provider limits remain unchanged.
+    prompt-max-concurrency-per-report: ${PRESALE_PROMPT_MAX_CONCURRENCY_PER_REPORT:8}
     db-write-max-concurrency: ${PRESALE_DB_WRITE_MAX_CONCURRENCY:6}
     max-concurrent-reports: ${PRESALE_MAX_CONCURRENT_REPORTS:2}
     capacity-failure-defer-enabled: ${PRESALE_GENERATE_CAPACITY_FAILURE_DEFER_ENABLED:false}

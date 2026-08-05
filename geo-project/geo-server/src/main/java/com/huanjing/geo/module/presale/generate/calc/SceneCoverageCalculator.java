@@ -92,6 +92,7 @@ public class SceneCoverageCalculator {
         List<PresaleAiPromptResult> promptRows = aiPromptResultMapper.selectList(
                 new LambdaQueryWrapper<PresaleAiPromptResult>()
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
+                        .eq(PresaleAiPromptResult::getEffectiveSample, true)
                         .in(PresaleAiPromptResult::getBatchNo, List.of(1, 2))
         );
         List<PromptJudgeSignalRow> judgeSignalRows = aiPromptResultMapper.selectPromptJudgeSignalsByVersionId(versionId);

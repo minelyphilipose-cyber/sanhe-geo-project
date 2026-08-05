@@ -348,13 +348,14 @@ public class DispatchQuestionPollPlanningService {
     }
 
     private List<AiPlatformConfig> resolveQuestionPollPlatformCandidates(String questionTier) {
-        return aiPlatformConfigMapper.selectList(
+        List<AiPlatformConfig> candidates = aiPlatformConfigMapper.selectList(
                 new LambdaQueryWrapper<AiPlatformConfig>()
                         .eq(AiPlatformConfig::getEnabled, true)
                         .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
-                        .eq(AiPlatformConfig::getUsageScene, "QUESTION_POLL_WEB")
+                        .in(AiPlatformConfig::getUsageScene, "STANDARD_CHAT", "QUESTION_POLL_WEB")
                         .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId)
-        ).stream()
+        );
+        return QuestionPollPlatformSelection.preferredEnabled(candidates).stream()
                 .filter(platform -> supportsQuestionTier(platform, questionTier))
                 .toList();
     }
