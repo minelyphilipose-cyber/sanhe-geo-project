@@ -32,6 +32,11 @@ public class CreateReportRequest {
     @Size(max = PresaleReportInputLimits.INDUSTRY_ROLE_MAX_LENGTH, message = "身份最多 50 字")
     private String industryRole;
 
+    /** 代理/经销类客户所代理的品牌,可选,最多 10 个；不作为目标品牌提及。 */
+    @Size(max = PresaleReportInputLimits.REPRESENTED_BRAND_MAX_COUNT, message = "代理品牌最多 10 个")
+    private List<@Size(max = PresaleReportInputLimits.REPRESENTED_BRAND_MAX_LENGTH,
+            message = "代理品牌最多 100 字") String> representedBrands;
+
     @NotBlank(message = "地区不能为空")
     @Size(max = 50, message = "地区最多 50 字")
     private String region;

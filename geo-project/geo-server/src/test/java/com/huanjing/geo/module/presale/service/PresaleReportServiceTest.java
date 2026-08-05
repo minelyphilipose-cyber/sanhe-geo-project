@@ -6,6 +6,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.partner.service.PartnerPresaleReportQuotaService;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
+import com.huanjing.geo.module.presale.dto.response.ReportScopePreviewVO;
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.web.PresaleQueryWebMode;
@@ -97,6 +98,7 @@ class PresaleReportServiceTest {
         );
         lenient().when(webReadinessChecker.checkConfiguredMode())
                 .thenReturn(new PresaleWebExecutionContext(PresaleQueryWebMode.OFF, Map.of()));
+        lenient().when(webReadinessChecker.configuredMode()).thenReturn(PresaleQueryWebMode.OFF);
     }
 
     @Test
@@ -130,6 +132,43 @@ class PresaleReportServiceTest {
 
         assertEquals(400, ex.getCode());
         verify(reportMapper, never()).insert(any());
+    }
+
+    @Test
+    void createReport_rejectsRepresentedBrandsForNonAgentRole() {
+        CreateReportRequest req = createRequest();
+        req.setRepresentedBrands(List.of("上游品牌A"));
+        when(currentUserService.requireCurrentUser()).thenReturn(user());
+
+        BizException ex = assertThrows(BizException.class, () -> service.createReport(req));
+
+        assertEquals(400, ex.getCode());
+        verify(reportMapper, never()).insert(any());
+    }
+
+    @Test
+    void createReport_rejectsDuplicateRepresentedBrands() {
+        CreateReportRequest req = createRequest();
+        req.setIndustryRole("dealer");
+        req.setRepresentedBrands(List.of("上游品牌A", " 上游品牌A "));
+        when(currentUserService.requireCurrentUser()).thenReturn(user());
+
+        BizException ex = assertThrows(BizException.class, () -> service.createReport(req));
+
+        assertEquals(400, ex.getCode());
+        verify(reportMapper, never()).insert(any());
+    }
+
+    @Test
+    void scopePreviewUsesRequiredExecutionPlatformsIncludingCompanionOnlyChannel() {
+        when(webReadinessChecker.configuredMode()).thenReturn(PresaleQueryWebMode.REQUIRED);
+        when(aiPlatformConfigMapper.selectCount(any())).thenReturn(1L);
+        when(aiPromptResultMapper.selectTemplateIntentStats(any())).thenReturn(List.of());
+
+        ReportScopePreviewVO preview = service.getScopePreview();
+
+        assertEquals(1, preview.getPlatformCount());
+        verify(aiPlatformConfigMapper).selectCount(any());
     }
 
     @Test

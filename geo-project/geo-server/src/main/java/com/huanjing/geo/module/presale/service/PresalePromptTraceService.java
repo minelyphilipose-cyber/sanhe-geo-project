@@ -8,6 +8,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.dto.request.PresalePromptTraceQueryRequest;
 import com.huanjing.geo.module.presale.dto.response.PresalePromptTraceDetailVO;
+import com.huanjing.geo.module.presale.dto.response.PresalePromptTraceEvidenceVO;
 import com.huanjing.geo.module.presale.dto.response.PresalePromptTraceFilterOptionsVO;
 import com.huanjing.geo.module.presale.dto.response.PresalePromptTraceListItemVO;
 import com.huanjing.geo.module.presale.dto.response.PresalePromptTracePageVO;
@@ -20,6 +21,7 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -35,6 +37,9 @@ public class PresalePromptTraceService {
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_ANALYZE_FAILED = "ANALYZE_FAILED";
     private static final String STATUS_QUERY_FAILED = "QUERY_FAILED";
+    private static final String WEB_SEARCH_CONTRACT = "WEB_SEARCH_V1";
+    private static final int MAX_VISIBLE_EVIDENCE_ITEMS = 20;
+    private static final int MAX_VISIBLE_SEARCH_QUERIES = 5;
 
     private final PresaleReportVersionMapper versionMapper;
     private final PresaleAiPromptResultMapper promptResultMapper;
@@ -118,6 +123,7 @@ public class PresalePromptTraceService {
                 .queryFailureReason(row.getQueryFailureReason())
                 .queryDurationMs(row.getQueryDurationMs())
                 .queryModelSnapshotInferred(Boolean.TRUE.equals(row.getQueryModelSnapshotInferred()))
+                .evidence(toEvidenceView(row))
                 .analyzePromptContent(row.getAnalyzePromptContent())
                 .analyzeRawResponse(row.getAnalyzeRawResponse())
                 .analyzeCallStatus(row.getAnalyzeCallStatus())
@@ -126,6 +132,232 @@ public class PresalePromptTraceService {
                 .analyzeModelSnapshotInferred(Boolean.TRUE.equals(row.getAnalyzeModelSnapshotInferred()))
                 .parseView(toParseView(row))
                 .build();
+    }
+
+    private PresalePromptTraceEvidenceVO toEvidenceView(PresalePromptTraceRow row) {
+        String contractVersion = trimToNull(row == null ? null : row.getQueryContractVersion());
+        String evidenceJson = row == null ? null : row.getSearchEvidenceJson();
+        JsonNode root = readEvidenceRoot(evidenceJson);
+        String resolvedContract = firstText(contractVersion,
+                root == null ? null : text(root.get("queryContractVersion")));
+        if (!WEB_SEARCH_CONTRACT.equals(resolvedContract)) {
+            return PresalePromptTraceEvidenceVO.builder()
+                    .webSearch(false)
+                    .queryContractVersion(resolvedContract)
+                    .searchTriggered(false)
+                    .searchStatus("NOT_APPLICABLE")
+                    .searchStatusText("原生 API 回答")
+                    .evidenceLevel("NONE")
+                    .evidenceLevelText("无联网证据")
+                    .notice("本次问题通过平台原生 API 回答，未配置独立的联网引用来源。")
+                    .searchQueries(List.of())
+                    .sources(List.of())
+                    .citations(List.of())
+                    .build();
+        }
+        if (!hasText(evidenceJson)) {
+            return emptyWebEvidence(resolvedContract, "联网调用未保存可展示的引用证据。");
+        }
+        if (root == null || !root.isObject()) {
+            return emptyWebEvidence(resolvedContract, "引用证据暂无法解析，但不影响查看该次模型回答。");
+        }
+        try {
+            boolean triggered = root.path("searchTriggered").asBoolean(false);
+            String searchStatus = firstText(text(root.get("searchStatus")), "UNKNOWN");
+            String evidenceLevel = firstText(text(root.get("evidenceLevel")), "NONE");
+            List<PresalePromptTraceEvidenceVO.SourceView> sources = readEvidenceSources(root.path("sources"));
+            List<PresalePromptTraceEvidenceVO.CitationView> citations = readEvidenceCitations(root.path("citations"));
+            List<String> queries = readSearchQueries(root, sources);
+            return PresalePromptTraceEvidenceVO.builder()
+                    .webSearch(true)
+                    .queryContractVersion(resolvedContract)
+                    .searchTriggered(triggered)
+                    .searchStatus(searchStatus)
+                    .searchStatusText(searchStatusText(searchStatus, triggered))
+                    .evidenceLevel(evidenceLevel)
+                    .evidenceLevelText(evidenceLevelText(evidenceLevel))
+                    .failureCode(trimToNull(text(root.get("failureCode"))))
+                    .notice(evidenceNotice(triggered, searchStatus, sources))
+                    .searchQueries(queries)
+                    .sources(sources)
+                    .citations(citations)
+                    .build();
+        } catch (Exception ex) {
+            return emptyWebEvidence(resolvedContract, "引用证据暂无法解析，但不影响查看该次模型回答。");
+        }
+    }
+
+    private JsonNode readEvidenceRoot(String evidenceJson) {
+        if (!hasText(evidenceJson)) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(evidenceJson);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private PresalePromptTraceEvidenceVO emptyWebEvidence(String contractVersion, String notice) {
+        return PresalePromptTraceEvidenceVO.builder()
+                .webSearch(true)
+                .queryContractVersion(contractVersion)
+                .searchTriggered(false)
+                .searchStatus("UNKNOWN")
+                .searchStatusText("证据不可用")
+                .evidenceLevel("NONE")
+                .evidenceLevelText("无可展示来源")
+                .notice(notice)
+                .searchQueries(List.of())
+                .sources(List.of())
+                .citations(List.of())
+                .build();
+    }
+
+    private List<PresalePromptTraceEvidenceVO.SourceView> readEvidenceSources(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<PresalePromptTraceEvidenceVO.SourceView> out = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (out.size() >= MAX_VISIBLE_EVIDENCE_ITEMS) {
+                break;
+            }
+            if (item == null || !item.isObject()) continue;
+            String url = safeHttpUrl(firstText(text(item.get("normalizedUrl")), text(item.get("originalUrl"))));
+            if (!hasText(url)) {
+                continue;
+            }
+            // 展示域名必须从最终可点击 URL 推导，避免证据中的 domain 与真实链接不一致。
+            String domain = safeHost(url);
+            String title = firstText(trimToNull(text(item.get("title"))), domain, "来源 " + (out.size() + 1));
+            out.add(PresalePromptTraceEvidenceVO.SourceView.builder()
+                    .index(out.size() + 1)
+                    .rank(nullableInt(item.get("rank")))
+                    .title(title)
+                    .url(url)
+                    .domain(domain)
+                    .media(trimToNull(text(item.get("media"))))
+                    .snippet(trimToNull(text(item.get("snippet"))))
+                    .publishTime(trimToNull(text(item.get("publishTime"))))
+                    .query(trimToNull(text(item.get("query"))))
+                    .build());
+        }
+        return out;
+    }
+
+    private List<PresalePromptTraceEvidenceVO.CitationView> readEvidenceCitations(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<PresalePromptTraceEvidenceVO.CitationView> out = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (out.size() >= MAX_VISIBLE_EVIDENCE_ITEMS) {
+                break;
+            }
+            if (item == null || !item.isObject()) continue;
+            String citationText = trimToNull(text(item.get("citationText")));
+            if (!hasText(citationText)) {
+                continue;
+            }
+            Integer citationIndex = nullableInt(item.get("citationIndex"));
+            out.add(PresalePromptTraceEvidenceVO.CitationView.builder()
+                    .index(citationIndex == null ? out.size() + 1 : citationIndex + 1)
+                    .text(citationText)
+                    .confidence(trimToNull(text(item.get("confidence"))))
+                    .validationStatus(trimToNull(text(item.get("validationStatus"))))
+                    .build());
+        }
+        return out;
+    }
+
+    private List<String> readSearchQueries(JsonNode root,
+                                           List<PresalePromptTraceEvidenceVO.SourceView> sources) {
+        Set<String> queries = new LinkedHashSet<>();
+        JsonNode events = root.path("searchEvidence");
+        if (events.isArray()) {
+            for (JsonNode event : events) {
+                addQuery(queries, text(event == null ? null : event.get("query")));
+            }
+        }
+        for (PresalePromptTraceEvidenceVO.SourceView source : sources) {
+            addQuery(queries, source.getQuery());
+        }
+        return queries.stream().limit(MAX_VISIBLE_SEARCH_QUERIES).toList();
+    }
+
+    private void addQuery(Set<String> queries, String query) {
+        if (queries.size() < MAX_VISIBLE_SEARCH_QUERIES && hasText(query)) {
+            queries.add(query.trim());
+        }
+    }
+
+    private String safeHttpUrl(String value) {
+        if (!hasText(value)) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(value.trim());
+            String scheme = uri.getScheme();
+            return (("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    && hasText(uri.getHost()))
+                    ? uri.toString() : null;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private String safeHost(String value) {
+        try {
+            return URI.create(value).getHost();
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private Integer nullableInt(JsonNode node) {
+        return node != null && node.isIntegralNumber() ? node.intValue() : null;
+    }
+
+    private String evidenceNotice(boolean triggered,
+                                  String searchStatus,
+                                  List<PresalePromptTraceEvidenceVO.SourceView> sources) {
+        if (!triggered) {
+            return "本次联网搜索未实际触发，回答仍按真实 QUERY 结果保留。";
+        }
+        if (sources != null && !sources.isEmpty()) {
+            return null;
+        }
+        if ("SUCCEEDED".equalsIgnoreCase(searchStatus)) {
+            return "平台已完成搜索，但供应商未返回可展示的来源链接。";
+        }
+        return "联网搜索未获取到可展示来源，回答结果未因此阻塞。";
+    }
+
+    private String searchStatusText(String status, boolean triggered) {
+        if (!triggered) return "未触发搜索";
+        return switch (status == null ? "" : status.toUpperCase()) {
+            case "SUCCEEDED" -> "联网检索完成";
+            case "FAILED" -> "联网检索失败";
+            default -> "已发起联网检索";
+        };
+    }
+
+    private String evidenceLevelText(String level) {
+        return switch (level == null ? "" : level.toUpperCase()) {
+            case "CITATIONS" -> "含回答引用片段";
+            case "SOURCES" -> "含来源链接";
+            case "TOOL_EVENT" -> "仅记录检索事件";
+            default -> "无可展示来源";
+        };
+    }
+
+    private String firstText(String... values) {
+        if (values == null) return null;
+        for (String value : values) {
+            if (hasText(value)) return value.trim();
+        }
+        return null;
     }
 
     private PresaleReportVersion requireVersion(PresaleReport report, Integer versionNo) {

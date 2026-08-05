@@ -37,6 +37,12 @@ public class PresaleReportVersion {
     /** 生成子阶段(BATCH1/COMPETITOR_EXTRACT/BATCH2/L1_AGGREGATE/L2_COMPUTE/L3_INIT)。 */
     private String generationStage;
 
+    /**
+     * 每次从 QUEUED 原子领取为 RUNNING 时递增。
+     * 异步任务必须携带领取时的值，避免上一轮延迟返回后污染新一轮生成。
+     */
+    private Long generationAttempt;
+
     /** Version-level QUERY contract mode, fixed when a generation run starts. */
     private String queryWebMode;
 

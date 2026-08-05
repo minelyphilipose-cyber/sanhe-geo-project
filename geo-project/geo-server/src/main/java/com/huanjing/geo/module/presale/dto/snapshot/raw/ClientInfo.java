@@ -39,6 +39,10 @@ public class ClientInfo {
     @JsonProperty("industry_role")
     private String industryRole;
 
+    /** 代理/经销类客户所代理的上游品牌；仅作归属消歧，不作为目标品牌提及。 */
+    @JsonProperty("represented_brands")
+    private List<String> representedBrands;
+
     /** 区域(如"北京市")。v1.2 必填业务字段。 */
     private String region;
 

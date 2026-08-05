@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   competitorGroupLength,
   findDuplicateLlmQuestion,
+  supportsRepresentedBrands,
   templatePromptError
 } from './presaleReportValidation'
 
@@ -26,5 +27,11 @@ describe('presale report validation', () => {
     ])
 
     expect(duplicate?.categoryCode).toBe('COGNITIVE')
+  })
+
+  it('shows represented brands for dealer and custom agent roles only', () => {
+    expect(supportsRepresentedBrands('dealer', '经销商')).toBe(true)
+    expect(supportsRepresentedBrands('custom_role', '汽车品牌代理商')).toBe(true)
+    expect(supportsRepresentedBrands('service_provider', '服务商')).toBe(false)
   })
 })

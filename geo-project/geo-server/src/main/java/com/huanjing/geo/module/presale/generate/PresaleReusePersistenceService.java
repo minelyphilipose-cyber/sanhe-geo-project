@@ -6,6 +6,7 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -17,14 +18,24 @@ public class PresaleReusePersistenceService {
 
     private final PresaleAiCallMapper aiCallMapper;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
+    private final PresaleReportVersionMapper versionMapper;
     private final ReuseDecisionService reuseDecisionService;
 
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void cleanupLegacySingleCompetitorBatch2Rows(Long versionId, String competitorGroupName) {
+        cleanupLegacySingleCompetitorBatch2Rows(versionId, 0L, competitorGroupName);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
+    public void cleanupLegacySingleCompetitorBatch2Rows(Long versionId,
+                                                        long generationAttempt,
+                                                        String competitorGroupName) {
         if (versionId == null || competitorGroupName == null
                 || !competitorGroupName.contains(CompetitorGroupKeyUtils.SEPARATOR)) {
             return;
         }
+        requireCurrentRun(versionId, generationAttempt,
+                "generation attempt superseded before legacy batch2 cleanup");
         aiPromptResultMapper.delete(new LambdaQueryWrapper<PresaleAiPromptResult>()
                 .eq(PresaleAiPromptResult::getVersionId, versionId)
                 .eq(PresaleAiPromptResult::getBatchNo, 2)
@@ -48,15 +59,46 @@ public class PresaleReusePersistenceService {
                                               PresaleAiCall reusedQueryCall,
                                               PresaleAiCall newAnalyzeCall,
                                               PresaleAiPromptResult newPromptResult) {
+        requireCurrentRun(ctx);
         deletePromptResultByKey(ctx);
         deleteFailedAnalyzeCallsByKey(ctx);
 
         newAnalyzeCall.setParentCallId(reusedQueryCall.getId());
-        aiCallMapper.insert(newAnalyzeCall);
+        int callInserted = ctx.generationAttempt() > 0L
+                ? aiCallMapper.insertForCurrentRun(newAnalyzeCall, ctx.generationAttempt())
+                : aiCallMapper.insert(newAnalyzeCall);
+        if (callInserted == 0 && ctx.generationAttempt() > 0L) {
+            throw new BatchInterruptedException("generation attempt superseded during reused ANALYZE insert");
+        }
 
         newPromptResult.setQueryCallId(reusedQueryCall.getId());
         newPromptResult.setAnalyzeCallId(newAnalyzeCall.getId());
-        aiPromptResultMapper.insert(newPromptResult);
+        int resultInserted = ctx.generationAttempt() > 0L
+                ? aiPromptResultMapper.upsertForCurrentRun(newPromptResult, ctx.generationAttempt())
+                : aiPromptResultMapper.insert(newPromptResult);
+        if (resultInserted == 0 && ctx.generationAttempt() > 0L) {
+            throw new BatchInterruptedException("generation attempt superseded during reused result upsert");
+        }
+    }
+
+    private void requireCurrentRun(PlatformCallContext ctx) {
+        if (ctx == null || ctx.generationAttempt() <= 0L) {
+            return;
+        }
+        requireCurrentRun(ctx.versionId(), ctx.generationAttempt(),
+                "generation attempt superseded before reused ANALYZE persistence");
+    }
+
+    private void requireCurrentRun(Long versionId, long generationAttempt, String message) {
+        if (generationAttempt <= 0L) {
+            return;
+        }
+        Long currentAttempt = versionMapper == null
+                ? null
+                : versionMapper.selectRunningAttemptForUpdate(versionId);
+        if (currentAttempt == null || currentAttempt.longValue() != generationAttempt) {
+            throw new BatchInterruptedException(message);
+        }
     }
 
     private void deletePromptResultByKey(PlatformCallContext ctx) {

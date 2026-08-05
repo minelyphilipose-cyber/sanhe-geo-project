@@ -73,6 +73,9 @@ public class MergedViewDTO {
     @JsonProperty("industry_role")
     private String industryRole;
 
+    @JsonProperty("represented_brands")
+    private List<String> representedBrands;
+
     private String region;
 
     @JsonProperty("user_demand")

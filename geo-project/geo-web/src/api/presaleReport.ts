@@ -77,6 +77,7 @@ export interface ReportDetailVO {
   brandFormerNames?: string[]
   industry: string
   industryRole: string
+  representedBrands?: string[]
   region: string
   userDemand: string | null
   createdAt: string
@@ -113,6 +114,7 @@ export interface RegenerateDraftVO {
   brandFormerNames?: string[]
   industry: string
   industryRole: string
+  representedBrands?: string[]
   region: string
   userDemand?: string | null
   userType?: string | null
@@ -253,6 +255,40 @@ export interface PresalePromptTraceParseViewVO {
   }
 }
 
+export interface PresalePromptTraceEvidenceSourceVO {
+  index: number
+  rank: number | null
+  title: string
+  url: string
+  domain: string | null
+  media: string | null
+  snippet: string | null
+  publishTime: string | null
+  query: string | null
+}
+
+export interface PresalePromptTraceEvidenceCitationVO {
+  index: number
+  text: string
+  confidence: string | null
+  validationStatus: string | null
+}
+
+export interface PresalePromptTraceEvidenceVO {
+  webSearch: boolean
+  queryContractVersion: string | null
+  searchTriggered: boolean
+  searchStatus: string
+  searchStatusText: string
+  evidenceLevel: string
+  evidenceLevelText: string
+  failureCode: string | null
+  notice: string | null
+  searchQueries: string[]
+  sources: PresalePromptTraceEvidenceSourceVO[]
+  citations: PresalePromptTraceEvidenceCitationVO[]
+}
+
 export interface PresalePromptTraceDetailVO {
   summary: PresalePromptTraceListItemVO
   queryPromptContent: string | null
@@ -261,6 +297,7 @@ export interface PresalePromptTraceDetailVO {
   queryFailureReason: string | null
   queryDurationMs: number | null
   queryModelSnapshotInferred: boolean
+  evidence: PresalePromptTraceEvidenceVO
   analyzePromptContent: string | null
   analyzeRawResponse: string | null
   analyzeCallStatus: string | null
@@ -291,6 +328,7 @@ export interface CreateReportRequest {
   brandFormerNames?: string[]
   industry: string
   industryRole: string
+  representedBrands?: string[]
   region: string
   userDemand?: string
   userType?: string

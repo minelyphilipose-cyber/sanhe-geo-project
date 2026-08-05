@@ -16,6 +16,7 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -44,8 +45,18 @@ public class PresaleSampleStatisticsService {
                                                PresaleWebExecutionContext context,
                                                Set<String> degradedPlatforms,
                                                String competitorGroupName) {
+        return classifyAndPersist(versionId, context, degradedPlatforms, competitorGroupName, 0L);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public StatisticsResult classifyAndPersist(Long versionId,
+                                               PresaleWebExecutionContext context,
+                                               Set<String> degradedPlatforms,
+                                               String competitorGroupName,
+                                               long generationAttempt) {
+        requireCurrentRun(versionId, generationAttempt);
         if (context == null || !context.mode().requiresWebQuery()) {
-            markLegacy(versionId);
+            markLegacy(versionId, generationAttempt);
             return StatisticsResult.legacy();
         }
         Set<String> reportPlatformCodes = context.reportPlatforms().stream()
@@ -132,7 +143,7 @@ public class PresaleSampleStatisticsService {
                 .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()
                         .thenComparing(Map.Entry.comparingByKey()))
                 .map(Map.Entry::getKey).findFirst().orElse(null));
-        versionMapper.updateById(update);
+        updateVersionForRun(update, generationAttempt);
         return new StatisticsResult(planned, plannedWeb, webValid, effective.size(), queryFailed, analyzeFailed,
                 skipped, degradedExcluded, new EffectiveSampleIndex(effective));
     }
@@ -189,7 +200,7 @@ public class PresaleSampleStatisticsService {
         }
     }
 
-    private void markLegacy(Long versionId) {
+    private void markLegacy(Long versionId, long generationAttempt) {
         promptResultMapper.update(null, new UpdateWrapper<PresaleAiPromptResult>()
                 .eq("version_id", versionId)
                 .set("effective_sample", true));
@@ -204,7 +215,32 @@ public class PresaleSampleStatisticsService {
         update.setSkippedQueryCount(0);
         update.setDegradedExcludedSampleCount(0);
         update.setMainWebFailureCode(null);
-        versionMapper.updateById(update);
+        updateVersionForRun(update, generationAttempt);
+    }
+
+    private void requireCurrentRun(Long versionId, long generationAttempt) {
+        if (generationAttempt <= 0L) {
+            return;
+        }
+        Long currentAttempt = versionMapper.selectRunningAttemptForUpdate(versionId);
+        if (currentAttempt == null || currentAttempt != generationAttempt) {
+            throw new BatchInterruptedException("generation attempt superseded during sample classification");
+        }
+    }
+
+    private void updateVersionForRun(PresaleReportVersion update, long generationAttempt) {
+        if (generationAttempt <= 0L) {
+            versionMapper.updateById(update);
+            return;
+        }
+        int updated = versionMapper.update(update,
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PresaleReportVersion>()
+                        .eq(PresaleReportVersion::getId, update.getId())
+                        .eq(PresaleReportVersion::getGenerationStatus, PresaleGenerateStatus.RUNNING.name())
+                        .eq(PresaleReportVersion::getGenerationAttempt, generationAttempt));
+        if (updated == 0) {
+            throw new BatchInterruptedException("generation attempt superseded during statistics update");
+        }
     }
 
     private String mainFailureCode(List<PresaleAiCall> queryCalls) {

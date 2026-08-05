@@ -92,6 +92,7 @@ export interface MergedViewDTO {
   brand_name: string;
   industry: string;
   industry_role: string;
+  represented_brands?: string[];
   region: string;
   user_demand?: string | null;
 

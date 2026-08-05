@@ -33,6 +33,9 @@ public class PresaleReport {
     /** 身份字典 key(如 chain_brand)。 */
     private String industryRole;
 
+    /** 代理/经销类客户所代理的品牌 JSON 数组；不作为目标品牌提及。 */
+    private String representedBrands;
+
     private String region;
 
     /** 客户诉求,可选。 */

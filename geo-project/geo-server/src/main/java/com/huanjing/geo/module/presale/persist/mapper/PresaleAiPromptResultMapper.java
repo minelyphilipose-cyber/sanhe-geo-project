@@ -21,6 +21,9 @@ import java.util.List;
 @Mapper
 public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptResult> {
 
+    int upsertForCurrentRun(@Param("row") PresaleAiPromptResult row,
+                            @Param("generationAttempt") long generationAttempt);
+
     String PROMPT_TRACE_SELECT = "SELECT " +
             "r.id AS promptResultId, " +
             "v.report_id AS reportId, " +
@@ -46,6 +49,8 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "qc.duration_ms AS queryDurationMs, " +
             "CASE WHEN qc.id IS NULL THEN NULL ELSE COALESCE(qc.model_name_snapshot, CONCAT(COALESCE(qc.platform_name_snapshot, p.platform_name, r.platform_code), ' / ', COALESCE(p.model_name, qc.model_id_snapshot, p.low_model_id, p.model_id))) END AS queryModelName, " +
             "CASE WHEN qc.id IS NOT NULL AND qc.model_id_snapshot IS NULL THEN 1 ELSE 0 END AS queryModelSnapshotInferred, " +
+            "qc.query_contract_version AS queryContractVersion, " +
+            "qc.search_evidence_json AS searchEvidenceJson, " +
             "ac.request_prompt_content AS analyzePromptContent, " +
             "ac.raw_response AS analyzeRawResponse, " +
             "ac.call_status AS analyzeCallStatus, " +

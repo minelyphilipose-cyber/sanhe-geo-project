@@ -66,12 +66,7 @@ public class SceneCoverageCalculator {
                                         RawSnapshotDTO raw,
                                         Map<String, Integer> intentTotalPrompts,
                                         List<PlatformIntentCell> platformIntentCells) {
-        List<String> whitelistedPlatformCodes = aiPlatformConfigMapper.selectList(
-                        PresalePlatformConfigQueries.presaleEnabledWrapper()
-                ).stream()
-                .map(AiPlatformConfig::getPlatformCode)
-                .filter(code -> code != null && !code.isBlank())
-                .toList();
+        List<String> whitelistedPlatformCodes = reportPlatformCodes(raw);
         Set<String> allPlatforms = new HashSet<>(
                 whitelistedPlatformCodes == null ? List.of() : whitelistedPlatformCodes
         );
@@ -254,6 +249,23 @@ public class SceneCoverageCalculator {
                     && !COMPARISON_STANCE_COMPETITOR.equals(resolveJudgeStance(cell));
         }
         return false;
+    }
+
+    private List<String> reportPlatformCodes(RawSnapshotDTO raw) {
+        if (raw != null && raw.getPlatformBreakdown() != null
+                && !raw.getPlatformBreakdown().isEmpty()) {
+            return raw.getPlatformBreakdown().stream()
+                    .map(item -> item == null ? null : item.getPlatformCode())
+                    .filter(code -> code != null && !code.isBlank())
+                    .distinct()
+                    .toList();
+        }
+        List<AiPlatformConfig> configured = aiPlatformConfigMapper.selectList(
+                PresalePlatformConfigQueries.presaleEnabledWrapper());
+        return (configured == null ? List.<AiPlatformConfig>of() : configured).stream()
+                .map(AiPlatformConfig::getPlatformCode)
+                .filter(code -> code != null && !code.isBlank())
+                .toList();
     }
 
     private String resolveJudgeStance(PlatformIntentCell cell) {

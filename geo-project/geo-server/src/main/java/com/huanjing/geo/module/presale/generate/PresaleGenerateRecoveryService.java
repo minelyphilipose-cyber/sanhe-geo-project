@@ -83,7 +83,13 @@ public class PresaleGenerateRecoveryService {
             if (version == null || version.getId() == null) {
                 continue;
             }
-            int updated = versionMapper.markStaleRunningFailed(version.getId(), STALE_FAILURE_REASON);
+            long generationAttempt = version.getGenerationAttempt() == null
+                    ? 0L
+                    : version.getGenerationAttempt();
+            int updated = generationAttempt > 0L
+                    ? versionMapper.markStaleRunningAttemptFailed(
+                            version.getId(), generationAttempt, STALE_FAILURE_REASON)
+                    : versionMapper.markStaleRunningFailed(version.getId(), STALE_FAILURE_REASON);
             if (updated <= 0) {
                 continue;
             }

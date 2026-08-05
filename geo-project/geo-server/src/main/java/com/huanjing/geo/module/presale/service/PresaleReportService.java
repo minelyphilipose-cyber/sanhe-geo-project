@@ -10,6 +10,7 @@ import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
 import com.huanjing.geo.module.presale.export.service.PresaleExportStatuses;
 import com.huanjing.geo.module.presale.dto.PromptSourceMode;
+import com.huanjing.geo.module.presale.PresaleAgentRoleRules;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleReportInputLimits;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
@@ -26,6 +27,7 @@ import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.generate.PromptTemplateIntentStatRow;
 import com.huanjing.geo.module.presale.generate.web.PresaleQueryWebMode;
+import com.huanjing.geo.module.presale.generate.web.PresaleWebExecutionContext;
 import com.huanjing.geo.module.presale.generate.web.PresaleWebReadinessChecker;
 import com.huanjing.geo.module.presale.access.AccessScope;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
@@ -147,10 +149,13 @@ public class PresaleReportService {
         Long userId = currentUser.getId();
         validateBaseInputLimits(req);
         List<String> brandFormerNames = normalizeBrandFormerNames(req.getBrandFormerNames(), req.getBrandName());
+        List<String> representedBrands = normalizeRepresentedBrands(
+                req.getRepresentedBrands(), req.getIndustryRole(), req.getBrandName());
         List<String> specifiedCompetitors = normalizeSpecifiedCompetitors(
-                req.getSpecifiedCompetitors(), req.getBrandName(), brandFormerNames);
+                req.getSpecifiedCompetitors(), req.getBrandName(), brandFormerNames, representedBrands);
         // REQUIRED readiness must fail before quota reservation or any report/version write.
-        PresaleQueryWebMode queryWebMode = webReadinessChecker.checkConfiguredMode().mode();
+        PresaleWebExecutionContext webExecutionContext = webReadinessChecker.checkConfiguredMode();
+        PresaleQueryWebMode queryWebMode = webExecutionContext.mode();
         PartnerPresaleReportQuotaService.Reservation reservation =
                 partnerPresaleReportQuotaService.reserveIfPartner(currentUser, req);
         if (reservation.existingReportId() != null) {
@@ -163,6 +168,7 @@ public class PresaleReportService {
         report.setBrandFormerNames(toJsonArray(brandFormerNames, "品牌曾用名序列化失败"));
         report.setIndustry(req.getIndustry());
         report.setIndustryRole(req.getIndustryRole());
+        report.setRepresentedBrands(toJsonArray(representedBrands, "代理品牌序列化失败"));
         report.setRegion(req.getRegion());
         report.setUserDemand(req.getUserDemand());
         report.setUserType(req.getUserType());
@@ -204,7 +210,8 @@ public class PresaleReportService {
         for (PresaleReportVersionPromptTemplate row : promptSnapshots) {
             versionPromptTemplateMapper.insert(row);
         }
-        applyPromptScopeToVersion(version.getId(), promptSnapshots);
+        applyPromptScopeToVersion(version.getId(), promptSnapshots,
+                countEnabledPlatforms(webExecutionContext));
 
         // 回填 latest_version_id
         report.setLatestVersionId(version.getId());
@@ -254,8 +261,9 @@ public class PresaleReportService {
         );
     }
 
-    private void applyPromptScopeToVersion(Long versionId, List<PresaleReportVersionPromptTemplate> promptSnapshots) {
-        int platformCount = countEnabledPlatforms();
+    private void applyPromptScopeToVersion(Long versionId,
+                                           List<PresaleReportVersionPromptTemplate> promptSnapshots,
+                                           int platformCount) {
         int genericPromptCount = 0;
         int competitorPromptCount = 0;
         for (PresaleReportVersionPromptTemplate row : promptSnapshots) {
@@ -309,7 +317,7 @@ public class PresaleReportService {
      */
     public ReportScopePreviewVO getScopePreview() {
         currentUserService.ensurePermission(PERM_CREATE);
-        return buildScopePreview();
+        return buildScopePreview(countConfiguredPlatformsForPreview());
     }
 
     public List<PromptTemplateVO> listPromptTemplates() {
@@ -354,6 +362,7 @@ public class PresaleReportService {
                 .brandFormerNames(parseJsonStringArray(report.getBrandFormerNames()))
                 .industry(report.getIndustry())
                 .industryRole(report.getIndustryRole())
+                .representedBrands(parseJsonStringArray(report.getRepresentedBrands()))
                 .region(report.getRegion())
                 .userDemand(report.getUserDemand())
                 .userType(report.getUserType())
@@ -672,7 +681,8 @@ public class PresaleReportService {
 
     private List<String> normalizeSpecifiedCompetitors(List<String> input,
                                                        String brandName,
-                                                       List<String> brandFormerNames) {
+                                                       List<String> brandFormerNames,
+                                                       List<String> representedBrands) {
         if (input == null || input.isEmpty()) {
             return List.of();
         }
@@ -695,13 +705,19 @@ public class PresaleReportService {
                     .filter(value -> !value.isEmpty())
                     .forEach(selfNames::add);
         }
+        if (representedBrands != null) {
+            representedBrands.stream()
+                    .map(this::normalizeCompetitorName)
+                    .filter(value -> !value.isEmpty())
+                    .forEach(selfNames::add);
+        }
         for (String value : values) {
             String normalized = normalizeCompetitorName(value);
             if (normalized.isEmpty()) {
                 throw new BizException(400, "指定竞品不能为空");
             }
             if (selfNames.contains(normalized)) {
-                throw new BizException(400, "指定竞品不能与品牌名称或曾用名相同");
+                throw new BizException(400, "指定竞品不能与品牌名称、曾用名或代理品牌相同");
             }
             if (!dedup.add(normalized)) {
                 throw new BizException(400, "指定竞品不能重复");
@@ -710,6 +726,43 @@ public class PresaleReportService {
         if (PresaleReportInputLimits.competitorGroupLength(values)
                 > PresaleReportInputLimits.COMPETITOR_GROUP_MAX_LENGTH) {
             throw new BizException(400, "3 个指定竞品拼接后总长度不能超过 100 字");
+        }
+        return values;
+    }
+
+    private List<String> normalizeRepresentedBrands(List<String> input,
+                                                    String industryRole,
+                                                    String brandName) {
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+        List<String> values = input.stream()
+                .map(value -> value == null ? "" : value.trim())
+                .filter(value -> !value.isEmpty())
+                .toList();
+        if (values.isEmpty()) {
+            return List.of();
+        }
+        if (!PresaleAgentRoleRules.supportsRepresentedBrands(industryRole)) {
+            throw new BizException(400, "仅代理商、经销商等渠道身份可以填写代理品牌");
+        }
+        if (values.size() > PresaleReportInputLimits.REPRESENTED_BRAND_MAX_COUNT) {
+            throw new BizException(400, "代理品牌最多 10 个");
+        }
+
+        Set<String> dedup = new LinkedHashSet<>();
+        String normalizedBrand = normalizeCompetitorName(brandName);
+        for (String value : values) {
+            if (value.length() > PresaleReportInputLimits.REPRESENTED_BRAND_MAX_LENGTH) {
+                throw new BizException(400, "代理品牌最多 100 字");
+            }
+            String normalized = normalizeCompetitorName(value);
+            if (normalized.equals(normalizedBrand)) {
+                throw new BizException(400, "代理品牌不能与目标品牌相同");
+            }
+            if (!dedup.add(normalized)) {
+                throw new BizException(400, "代理品牌不能重复");
+            }
         }
         return values;
     }
@@ -765,13 +818,24 @@ public class PresaleReportService {
         }
     }
 
-    private int countEnabledPlatforms() {
+    private int countEnabledPlatforms(PresaleWebExecutionContext context) {
+        if (context != null && context.mode().requiresWebQuery()) {
+            return context.reportPlatforms().size();
+        }
         Long count = aiPlatformConfigMapper.selectCount(PresalePlatformConfigQueries.presaleEnabledWrapper());
         return count == null ? 0 : count.intValue();
     }
 
-    private ReportScopePreviewVO buildScopePreview() {
-        int platformCount = countEnabledPlatforms();
+    private int countConfiguredPlatformsForPreview() {
+        PresaleQueryWebMode mode = webReadinessChecker.configuredMode();
+        Long count = aiPlatformConfigMapper.selectCount(
+                mode != null && mode.requiresWebQuery()
+                        ? PresalePlatformConfigQueries.requiredReportPlatformWrapper()
+                        : PresalePlatformConfigQueries.presaleEnabledWrapper());
+        return count == null ? 0 : count.intValue();
+    }
+
+    private ReportScopePreviewVO buildScopePreview(int platformCount) {
         Map<Integer, Integer> promptCountByCompetitorVar = countPromptTemplatesByCompetitorVar();
         int genericPromptCount = promptCountByCompetitorVar.getOrDefault(0, 0);
         int competitorPromptCount = promptCountByCompetitorVar.getOrDefault(1, 0);

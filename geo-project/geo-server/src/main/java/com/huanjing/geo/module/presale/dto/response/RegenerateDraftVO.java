@@ -15,6 +15,7 @@ public class RegenerateDraftVO {
     private List<String> brandFormerNames;
     private String industry;
     private String industryRole;
+    private List<String> representedBrands;
     private String region;
     private String userDemand;
     private String userType;

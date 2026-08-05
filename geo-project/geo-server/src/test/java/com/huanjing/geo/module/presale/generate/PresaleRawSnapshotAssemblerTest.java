@@ -39,6 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class PresaleRawSnapshotAssemblerTest {
@@ -164,6 +166,32 @@ class PresaleRawSnapshotAssemblerTest {
 
         assertNotNull(raw.getCompetitors());
         assertEquals(0, raw.getCompetitors().size());
+    }
+
+    @Test
+    void fixedExecutionPlatformsKeepCompanionOnlyLogicalPlatformInSnapshot() throws Exception {
+        PresaleRawSnapshotAssembler assembler = createAssembler();
+        PresaleReport report = report();
+        PresaleReportVersion version = version();
+
+        mockCommonCounts(1L, 0L, 2L, 2L);
+        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(aiPromptResultMapper.selectList(any())).thenReturn(
+                List.of(promptResult(1L, 1, 1, "POSITIVE", null, null)),
+                List.of(promptResult(2L, 1, 1, "POSITIVE", null, null))
+        );
+
+        String json = assembler.assembleWithCompetitorStats(
+                1001L, report, version, Set.of(), List.of(),
+                List.of(platform("ernie", "文心一言"))
+        );
+        RawSnapshotDTO raw = new ObjectMapper().readValue(json, RawSnapshotDTO.class);
+
+        assertEquals(1, raw.getTestSummary().getTotalPlatforms());
+        assertEquals(1, raw.getPlatformBreakdown().size());
+        assertEquals("ernie", raw.getPlatformBreakdown().get(0).getPlatformCode());
+        assertEquals("文心一言", raw.getPlatformBreakdown().get(0).getPlatformName());
+        verify(aiPlatformConfigMapper, never()).selectList(any());
     }
 
     @Test

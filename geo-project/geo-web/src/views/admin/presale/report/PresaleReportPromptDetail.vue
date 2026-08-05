@@ -93,6 +93,8 @@
         <pre v-else class="text-block">—</pre>
       </el-card>
 
+      <PromptTraceEvidenceCard :evidence="detail.evidence" />
+
       <el-card shadow="never" class="content-card admin-rich-card">
         <template #header>解析结果</template>
         <div class="parse-grid">
@@ -185,6 +187,7 @@ import {
   type PresalePromptTraceDetailVO,
   type PresalePromptTraceStatus
 } from '@/api/presaleReport'
+import PromptTraceEvidenceCard from './detail/PromptTraceEvidenceCard.vue'
 
 const markdown = new MarkdownIt({
   html: false,

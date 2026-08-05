@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper">
+
+    <insert id="upsertForCurrentRun" useGeneratedKeys="true" keyProperty="row.id">
+        INSERT INTO presale_ai_prompt_result (
+            version_id, batch_no, platform_code, prompt_template_id, competitor_name,
+            query_call_id, analyze_call_id, effective_sample, request_prompt_content,
+            is_mentioned, ranking, sentiment, mentioned_competitors, scene_advantages,
+            top_keywords_json, negative_evidence_json
+        )
+        SELECT
+            #{row.versionId}, #{row.batchNo}, #{row.platformCode}, #{row.promptTemplateId}, #{row.competitorName},
+            #{row.queryCallId}, #{row.analyzeCallId}, #{row.effectiveSample}, #{row.requestPromptContent},
+            #{row.isMentioned}, #{row.ranking}, #{row.sentiment}, #{row.mentionedCompetitors}, #{row.sceneAdvantages},
+            #{row.topKeywordsJson}, #{row.negativeEvidenceJson}
+        FROM presale_report_version v
+        WHERE v.id = #{row.versionId}
+          AND v.generation_status = 'RUNNING'
+          AND v.generation_attempt = #{generationAttempt}
+        ON DUPLICATE KEY UPDATE
+            id = LAST_INSERT_ID(id),
+            query_call_id = VALUES(query_call_id),
+            analyze_call_id = VALUES(analyze_call_id),
+            effective_sample = VALUES(effective_sample),
+            request_prompt_content = VALUES(request_prompt_content),
+            is_mentioned = VALUES(is_mentioned),
+            ranking = VALUES(ranking),
+            sentiment = VALUES(sentiment),
+            mentioned_competitors = VALUES(mentioned_competitors),
+            scene_advantages = VALUES(scene_advantages),
+            top_keywords_json = VALUES(top_keywords_json),
+            negative_evidence_json = VALUES(negative_evidence_json),
+            created_at = CURRENT_TIMESTAMP
+    </insert>
+
+</mapper>

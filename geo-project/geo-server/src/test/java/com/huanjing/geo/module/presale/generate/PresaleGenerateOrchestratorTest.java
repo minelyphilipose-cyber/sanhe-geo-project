@@ -153,7 +153,7 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         lenient().when(aiPlatformConfigMapper.selectCount(any())).thenReturn(1L);
         lenient().when(versionMapper.tryTransitionToRunning(anyLong(), anyInt())).thenReturn(1);
-        lenient().when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+        lenient().when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any()))
                 .thenReturn("{\"client_info\":{\"brand_name\":\"Acme\",\"industry\":\"Software\"},\"test_summary\":{\"total_platforms\":1,\"total_prompts\":1},\"benchmarks_frozen\":{\"industry_avg\":{\"overall\":50.0}},\"competitors\":[]}");
         lenient().when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
                 .thenReturn("{}");
@@ -187,6 +187,10 @@ class PresaleGenerateOrchestratorTest {
     void interruptedException_directThrow_markedAsInterrupted() {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", true);
         ReflectionTestUtils.setField(orchestrator, "mockDelayMs", 1000L);
+        PresaleReportVersion claimed = new PresaleReportVersion();
+        claimed.setId(9701L);
+        // Legacy fixture: production rows have a non-null attempt after V346.
+        when(versionMapper.selectById(9701L)).thenReturn(claimed);
         Thread.currentThread().interrupt();
 
         orchestrator.triggerGenerate(9701L, 701L, false);
@@ -1313,7 +1317,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupSimpleRealFlow(9901L, 8901L, List.of("Claude"));
 
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
         when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
                 .thenReturn("{\"scores\":{\"overall\":60.0}}");
         when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"editable\":\"ok\"}");
@@ -1369,7 +1373,7 @@ class PresaleGenerateOrchestratorTest {
     void realFullFlow_l1Fails_marksL1Error() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupSimpleRealFlow(9902L, 8902L, List.of());
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any()))
                 .thenThrow(new com.huanjing.geo.common.exception.BizException(500, "L1 aggregate failed: boom"));
 
         orchestrator.triggerGenerate(9902L, 902L, false);
@@ -1387,7 +1391,7 @@ class PresaleGenerateOrchestratorTest {
     void realFullFlow_benchmarkMissing_marksConfigMissing() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupSimpleRealFlow(9903L, 8903L, List.of());
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("BENCHMARK_MISSING fallback (_ALL_,_ALL_) not found"));
 
         orchestrator.triggerGenerate(9903L, 903L, false);
@@ -1405,7 +1409,7 @@ class PresaleGenerateOrchestratorTest {
     void realFullFlow_l2Fails_marksL2Error() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupSimpleRealFlow(9904L, 8904L, List.of("Claude"));
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
         when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
                 .thenThrow(new com.huanjing.geo.common.exception.BizException(500, "L2 compute failed"));
 
@@ -1424,7 +1428,7 @@ class PresaleGenerateOrchestratorTest {
     void realFullFlow_l3Fails_marksL3Error() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupSimpleRealFlow(9905L, 8905L, List.of("Claude"));
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
         when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
                 .thenReturn("{\"scores\":{\"overall\":60.0}}");
         when(l3InitService.derive(anyString(), anyString()))
@@ -1445,7 +1449,7 @@ class PresaleGenerateOrchestratorTest {
     void realFullFlow_page03Fails_keepsDefaultL3AndReachesDone() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupSimpleRealFlow(9907L, 8907L, List.of());
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any()))
                 .thenReturn("{\"raw\":\"ok\"}");
         when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
                 .thenReturn("{\"scores\":{\"overall\":60.0}}");
@@ -1470,7 +1474,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupSimpleRealFlow(9906L, 8906L, List.of());
 
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
         when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
                 .thenReturn("{\"scores\":{\"overall\":60.0}}");
         when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"editable\":\"ok\"}");
@@ -1493,7 +1497,7 @@ class PresaleGenerateOrchestratorTest {
     void promptResult_persistsRenderedRequestPromptContent() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupSimpleRealFlow(9910L, 8910L, List.of());
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
         when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
                 .thenReturn("{\"scores\":{\"overall\":60.0}}");
         when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"editable\":\"ok\"}");
@@ -1538,7 +1542,7 @@ class PresaleGenerateOrchestratorTest {
         when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
         when(llmInvoker.analyze(any(), anyString(), anyString()))
                 .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
         when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
                 .thenReturn("{\"scores\":{\"overall\":60.0}}");
         when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"editable\":\"ok\"}");

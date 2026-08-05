@@ -13,6 +13,7 @@ public class PresalePromptTraceDetailVO {
     private String queryFailureReason;
     private Integer queryDurationMs;
     private Boolean queryModelSnapshotInferred;
+    private PresalePromptTraceEvidenceVO evidence;
     private String analyzePromptContent;
     private String analyzeRawResponse;
     private String analyzeCallStatus;

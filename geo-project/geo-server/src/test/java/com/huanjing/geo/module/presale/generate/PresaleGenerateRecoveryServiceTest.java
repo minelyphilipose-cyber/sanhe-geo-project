@@ -63,15 +63,17 @@ class PresaleGenerateRecoveryServiceTest {
     void shouldFailStaleRunningVersionAndSyncLatestReport() {
         PresaleReportVersion running = version(11L, 21L, PresaleGenerateStatus.RUNNING.name());
         running.setGenerationStage("BATCH1");
+        running.setGenerationAttempt(3L);
         when(versionMapper.countRunningGenerations()).thenReturn(1);
         when(versionMapper.selectStaleRunning(any(), anyInt())).thenReturn(List.of(running));
-        when(versionMapper.markStaleRunningFailed(eq(11L), any())).thenReturn(1);
+        when(versionMapper.markStaleRunningAttemptFailed(eq(11L), eq(3L), any())).thenReturn(1);
 
         int recovered = recoveryService.recoverOnce();
 
         assertEquals(1, recovered);
         verify(orchestrator, never()).triggerGenerate(any(), any(), eq(false));
-        verify(versionMapper).markStaleRunningFailed(eq(11L), eq("Generation worker heartbeat timed out"));
+        verify(versionMapper).markStaleRunningAttemptFailed(
+                eq(11L), eq(3L), eq("Generation worker heartbeat timed out"));
 
         ArgumentCaptor<PresaleReport> captor = ArgumentCaptor.forClass(PresaleReport.class);
         verify(reportMapper).update(captor.capture(), any());

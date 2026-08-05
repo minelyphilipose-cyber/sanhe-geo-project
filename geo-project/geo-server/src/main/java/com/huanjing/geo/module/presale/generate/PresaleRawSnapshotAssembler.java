@@ -99,9 +99,20 @@ public class PresaleRawSnapshotAssembler {
                            PresaleReportVersion version,
                            Set<String> degradedPlatforms,
                            List<String> extractedCompetitorDisplayNames) {
+        return assemble(versionId, report, version, degradedPlatforms,
+                extractedCompetitorDisplayNames, null);
+    }
+
+    public String assemble(Long versionId,
+                           PresaleReport report,
+                           PresaleReportVersion version,
+                           Set<String> degradedPlatforms,
+                           List<String> extractedCompetitorDisplayNames,
+                           List<AiPlatformConfig> reportPlatforms) {
         List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitors =
                 buildLegacyExtractedCompetitors(versionId, report, extractedCompetitorDisplayNames);
-        return assembleWithCompetitorStats(versionId, report, version, degradedPlatforms, extractedCompetitors);
+        return assembleWithCompetitorStats(versionId, report, version, degradedPlatforms,
+                extractedCompetitors, reportPlatforms);
     }
 
     public String assembleWithCompetitorStats(Long versionId,
@@ -109,6 +120,16 @@ public class PresaleRawSnapshotAssembler {
                                               PresaleReportVersion version,
                                               Set<String> degradedPlatforms,
                                               List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitors) {
+        return assembleWithCompetitorStats(versionId, report, version, degradedPlatforms,
+                extractedCompetitors, null);
+    }
+
+    public String assembleWithCompetitorStats(Long versionId,
+                                              PresaleReport report,
+                                              PresaleReportVersion version,
+                                              Set<String> degradedPlatforms,
+                                              List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitors,
+                                              List<AiPlatformConfig> reportPlatforms) {
         try {
             List<String> extractedCompetitorDisplayNames = extractedCompetitors == null
                     ? List.of()
@@ -117,13 +138,15 @@ public class PresaleRawSnapshotAssembler {
                     .toList();
             RawMeta meta = buildMeta(report, version);
             ClientInfo clientInfo = buildClientInfo(report);
-            List<PlatformBreakdown> platformBreakdown = buildPlatformBreakdown(versionId, degradedPlatforms);
+            List<AiPlatformConfig> fixedReportPlatforms = normalizeReportPlatforms(reportPlatforms);
+            List<PlatformBreakdown> platformBreakdown = buildPlatformBreakdown(
+                    versionId, degradedPlatforms, fixedReportPlatforms);
             TestSummary testSummary = buildTestSummary(versionId, degradedPlatforms, extractedCompetitorDisplayNames, platformBreakdown);
             List<Competitor> competitors = buildCompetitors(versionId, report, extractedCompetitors);
             List<String> specifiedCompetitors = parseSpecifiedCompetitors(report);
             List<String> groupSceneAdvantages = aggregateGroupSceneAdvantages(versionId, extractedCompetitorDisplayNames);
             List<SamplePrompt> samplePrompts = buildSamplePrompts(versionId);
-            SentimentDetail sentimentDetail = buildSentimentDetail(versionId);
+            SentimentDetail sentimentDetail = buildSentimentDetail(versionId, fixedReportPlatforms);
             BenchmarksFrozen benchmarksFrozen = benchmarkResolver.resolve(
                     report.getIndustry(), report.getIndustryRole());
 
@@ -186,9 +209,15 @@ public class PresaleRawSnapshotAssembler {
                 .brandFormerNames(parseBrandFormerNames(report))
                 .industry(report.getIndustry())
                 .industryRole(report.getIndustryRole())
+                .representedBrands(emptyToNull(parseJsonStringArray(
+                        report.getRepresentedBrands(), "represented_brands", report.getId())))
                 .region(report.getRegion())
                 .userDemand(report.getUserDemand())
                 .build();
+    }
+
+    private List<String> emptyToNull(List<String> values) {
+        return values == null || values.isEmpty() ? null : values;
     }
 
     private TestSummary buildTestSummary(Long versionId,
@@ -196,7 +225,7 @@ public class PresaleRawSnapshotAssembler {
                                          List<String> extractedCompetitorDisplayNames,
                                          List<PlatformBreakdown> platformBreakdown) {
         Set<String> safeDegradedSet = degradedPlatforms == null ? Set.of() : degradedPlatforms;
-        int platformCount = countEffectiveEnabledPlatforms(safeDegradedSet);
+        int platformCount = platformBreakdown == null ? 0 : platformBreakdown.size();
         int genericPromptCount = countPromptTemplates(versionId, 0);
         int competitorPromptCount = countPromptTemplates(versionId, 1);
         int competitorCount = extractedCompetitorDisplayNames == null ? 0 : extractedCompetitorDisplayNames.size();
@@ -252,13 +281,6 @@ public class PresaleRawSnapshotAssembler {
         } catch (Exception ex) {
             log.warn("Skip optional TestSummary field, setter={}", setterName, ex);
         }
-    }
-
-    private int countEffectiveEnabledPlatforms(Set<String> degradedPlatforms) {
-        Set<String> safeDegraded = degradedPlatforms == null ? Set.of() : degradedPlatforms;
-        return (int) listEnabledPlatforms().stream()
-                .filter(platform -> !safeDegraded.contains(platform.getPlatformCode()))
-                .count();
     }
 
     private int countPromptTemplates(Long versionId, int hasCompetitorVar) {
@@ -446,8 +468,9 @@ public class PresaleRawSnapshotAssembler {
         return text;
     }
 
-    private List<PlatformBreakdown> buildPlatformBreakdown(Long versionId, Set<String> degradedPlatforms) {
-        List<AiPlatformConfig> platforms = listEnabledPlatforms();
+    private List<PlatformBreakdown> buildPlatformBreakdown(Long versionId,
+                                                           Set<String> degradedPlatforms,
+                                                           List<AiPlatformConfig> platforms) {
         Map<Long, String> categoryByTemplateId = loadVersionTemplateCategoryMap(versionId);
         Set<String> safeDegraded = degradedPlatforms == null ? Set.of() : degradedPlatforms;
         List<PlatformBreakdown> out = new ArrayList<>();
@@ -528,6 +551,22 @@ public class PresaleRawSnapshotAssembler {
     private List<AiPlatformConfig> listEnabledPlatforms() {
         List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
         return platforms == null ? List.of() : platforms;
+    }
+
+    private List<AiPlatformConfig> normalizeReportPlatforms(List<AiPlatformConfig> reportPlatforms) {
+        List<AiPlatformConfig> source = reportPlatforms == null ? listEnabledPlatforms() : reportPlatforms;
+        if (source == null || source.isEmpty()) {
+            return List.of();
+        }
+        Map<String, AiPlatformConfig> byCode = new LinkedHashMap<>();
+        for (AiPlatformConfig platform : source) {
+            if (platform == null || platform.getPlatformCode() == null
+                    || platform.getPlatformCode().isBlank()) {
+                continue;
+            }
+            byCode.putIfAbsent(platform.getPlatformCode().trim(), platform);
+        }
+        return List.copyOf(byCode.values());
     }
 
     private Map<Long, String> loadVersionTemplateCategoryMap(Long versionId) {
@@ -660,6 +699,7 @@ public class PresaleRawSnapshotAssembler {
             out.add(report.getBrandName().trim());
         }
         out.addAll(parseBrandFormerNames(report));
+        out.addAll(parseRepresentedBrands(report));
         return out;
     }
 
@@ -667,6 +707,12 @@ public class PresaleRawSnapshotAssembler {
         return report == null
                 ? List.of()
                 : parseJsonStringArray(report.getBrandFormerNames(), "brand_former_names", report.getId());
+    }
+
+    private List<String> parseRepresentedBrands(PresaleReport report) {
+        return report == null
+                ? List.of()
+                : parseJsonStringArray(report.getRepresentedBrands(), "represented_brands", report.getId());
     }
 
     private List<String> aggregateCompetitorSceneAdvantages(Long versionId, String competitorDisplayName) {
@@ -772,7 +818,8 @@ public class PresaleRawSnapshotAssembler {
                 + versionId;
     }
 
-    private SentimentDetail buildSentimentDetail(Long versionId) {
+    private SentimentDetail buildSentimentDetail(Long versionId,
+                                                 List<AiPlatformConfig> reportPlatforms) {
         List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
                 new LambdaQueryWrapper<PresaleAiPromptResult>()
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
@@ -794,7 +841,8 @@ public class PresaleRawSnapshotAssembler {
         int negative = (int) rows.stream().filter(r -> "NEGATIVE".equals(r.getSentiment())).count();
 
         List<SentimentDetail.SentimentKeyword> topKeywords = aggregateTopKeywords(rows);
-        List<SentimentDetail.NegativeEvidence> negativeEvidence = aggregateNegativeEvidence(rows);
+        List<SentimentDetail.NegativeEvidence> negativeEvidence = aggregateNegativeEvidence(
+                rows, reportPlatforms);
 
         return SentimentDetail.builder()
                 .positiveCount(positive)
@@ -858,15 +906,14 @@ public class PresaleRawSnapshotAssembler {
                 .collect(Collectors.toList());
     }
 
-    private List<SentimentDetail.NegativeEvidence> aggregateNegativeEvidence(List<PresaleAiPromptResult> rows) {
+    private List<SentimentDetail.NegativeEvidence> aggregateNegativeEvidence(
+            List<PresaleAiPromptResult> rows,
+            List<AiPlatformConfig> reportPlatforms) {
         if (rows.isEmpty()) {
             return Collections.emptyList();
         }
 
-        List<AiPlatformConfig> platformRows = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
-        if (platformRows == null) {
-            platformRows = List.of();
-        }
+        List<AiPlatformConfig> platformRows = reportPlatforms == null ? List.of() : reportPlatforms;
         Map<String, String> platformNameByCode = platformRows.stream()
                 .filter(p -> p.getPlatformCode() != null)
                 .collect(Collectors.toMap(AiPlatformConfig::getPlatformCode,

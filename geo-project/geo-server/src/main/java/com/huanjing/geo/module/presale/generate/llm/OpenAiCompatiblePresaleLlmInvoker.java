@@ -94,7 +94,10 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         String userPrompt = AnalyzePromptTemplates.renderUserPrompt(
                 originalPrompt,
                 queryAnswer,
-                ctx.brandName()
+                ctx.brandName(),
+                ctx.industry(),
+                ctx.industryRole(),
+                ctx.representedBrands()
         );
         LlmCallResult result = invokeWithRetry(
                 ctx,

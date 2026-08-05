@@ -291,6 +291,7 @@ public class PresaleReportExportService {
                 .brandFormerNames(parseJsonStringArray(report.getBrandFormerNames()))
                 .industry(report.getIndustry())
                 .industryRole(report.getIndustryRole())
+                .representedBrands(parseJsonStringArray(report.getRepresentedBrands()))
                 .region(report.getRegion())
                 .userDemand(report.getUserDemand())
                 .createdAt(report.getCreatedAt())

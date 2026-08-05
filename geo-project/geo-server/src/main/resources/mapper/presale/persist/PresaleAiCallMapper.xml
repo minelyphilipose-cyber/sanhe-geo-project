@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper">
+
+    <insert id="insertForCurrentRun" useGeneratedKeys="true" keyProperty="row.id">
+        INSERT INTO presale_ai_call (
+            version_id, batch_no, platform_code,
+            platform_code_snapshot, platform_name_snapshot, model_id_snapshot, model_name_snapshot,
+            prompt_template_id, competitor_name, stage, parent_call_id,
+            request_prompt_content, query_contract_version, search_evidence_json,
+            call_status, retry_count, raw_response, payload_purged_at, failure_reason,
+            prompt_tokens, completion_tokens, duration_ms
+        )
+        SELECT
+            #{row.versionId}, #{row.batchNo}, #{row.platformCode},
+            #{row.platformCodeSnapshot}, #{row.platformNameSnapshot}, #{row.modelIdSnapshot}, #{row.modelNameSnapshot},
+            #{row.promptTemplateId}, #{row.competitorName}, #{row.stage}, #{row.parentCallId},
+            #{row.requestPromptContent}, #{row.queryContractVersion}, #{row.searchEvidenceJson},
+            #{row.callStatus}, #{row.retryCount}, #{row.rawResponse}, #{row.payloadPurgedAt}, #{row.failureReason},
+            #{row.promptTokens}, #{row.completionTokens}, #{row.durationMs}
+        FROM presale_report_version v
+        WHERE v.id = #{row.versionId}
+          AND v.generation_status = 'RUNNING'
+          AND v.generation_attempt = #{generationAttempt}
+    </insert>
+
+</mapper>

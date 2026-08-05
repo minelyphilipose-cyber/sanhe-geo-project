@@ -5,6 +5,7 @@
     <update id="tryTransitionToRunning">
         UPDATE presale_report_version
         SET generation_status = 'RUNNING',
+            generation_attempt = generation_attempt + 1,
             updated_at = NOW()
         WHERE id = #{versionId}
           AND generation_status = 'QUEUED'

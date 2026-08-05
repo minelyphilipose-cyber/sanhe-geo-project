@@ -59,6 +59,8 @@ export interface ClientInfo {
   brand_former_names?: string[];
   industry: string;
   industry_role: string;
+  /** 代理/经销类客户代理的上游品牌，仅用于归属消歧。 */
+  represented_brands?: string[];
   region: string;
   /** 可为 null 或省略(v1.2 变更为可选)。 */
   user_demand?: string | null;

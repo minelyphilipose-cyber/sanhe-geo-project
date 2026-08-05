@@ -5,6 +5,7 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -12,12 +13,16 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -31,6 +36,8 @@ class PresaleReusePersistenceServiceTest {
     private PresaleAiPromptResultMapper aiPromptResultMapper;
     @Mock
     private ReuseDecisionService reuseDecisionService;
+    @Mock
+    private PresaleReportVersionMapper versionMapper;
 
     @InjectMocks
     private PresaleReusePersistenceService service;
@@ -91,5 +98,24 @@ class PresaleReusePersistenceServiceTest {
 
         assertEquals(556L, newAnalyze.getParentCallId());
         assertEquals(556L, newResult.getQueryCallId());
+    }
+
+    @Test
+    void supersededAttempt_rejectsPersistenceBeforeDeletingCurrentRows() {
+        PlatformCallContext staleContext = new PlatformCallContext(
+                202L, 1, "kimi", 45L, "", "Acme",
+                null, null, List.of(), 1L, false, 7L
+        );
+        when(versionMapper.selectRunningAttemptForUpdate(202L)).thenReturn(8L);
+
+        BatchInterruptedException error = assertThrows(BatchInterruptedException.class,
+                () -> service.replaceFailedAnalyzeAndResult(
+                        staleContext, new PresaleAiCall(), new PresaleAiCall(), new PresaleAiPromptResult()));
+
+        assertEquals("generation attempt superseded before reused ANALYZE persistence", error.getMessage());
+        verify(aiPromptResultMapper, never()).delete(any());
+        verify(aiCallMapper, never()).delete(any());
+        verify(aiCallMapper, never()).insertForCurrentRun(any(), anyLong());
+        verify(aiPromptResultMapper, never()).upsertForCurrentRun(any(), anyLong());
     }
 }

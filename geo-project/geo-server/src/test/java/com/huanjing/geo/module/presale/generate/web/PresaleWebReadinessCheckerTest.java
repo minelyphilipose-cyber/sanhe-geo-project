@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
@@ -71,6 +72,24 @@ class PresaleWebReadinessCheckerTest {
         base.setPlatformCode("changed-after-readiness");
         assertEquals("wenxin", context.reportPlatforms().get(0).getPlatformCode());
         assertNull(context.reportPlatforms().get(0).getApiKey());
+    }
+
+    @Test
+    void requiredModeAllowsEnabledCompanionWhenBasePresaleCapabilityIsDisabled() {
+        AiPlatformConfig base = base();
+        base.setEnabledForPresale(false);
+        AiPlatformConfig companion = companion();
+        when(mapper.selectList(any())).thenReturn(List.of(base), List.of(companion));
+        when(credentialService.resolvePrimaryCredentialStrict("env://QIANFAN_API_KEY", null))
+                .thenReturn("secret");
+
+        PresaleWebExecutionContext context = checker.check(PresaleQueryWebMode.REQUIRED);
+
+        assertEquals(1, context.reportPlatforms().size());
+        assertEquals("wenxin", context.reportPlatforms().get(0).getPlatformCode());
+        assertEquals("文心一言", context.reportPlatforms().get(0).getPlatformName());
+        assertEquals("wenxin_web", context.requireCompanion("wenxin").companionPlatformCode());
+        assertTrue(context.usesWebQuery("wenxin"));
     }
 
     @Test

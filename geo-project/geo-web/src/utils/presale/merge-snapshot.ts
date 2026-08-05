@@ -134,6 +134,7 @@ export function mergeSnapshot(
     brand_name: raw.client_info.brand_name,
     industry: raw.client_info.industry,
     industry_role: raw.client_info.industry_role,
+    represented_brands: raw.client_info.represented_brands ?? [],
     region: raw.client_info.region,
     user_demand: raw.client_info.user_demand ?? null,
 

@@ -22,6 +22,7 @@ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -68,6 +69,7 @@ public class PresaleJudgeService {
     private final PresaleEvaluationModelRouter evaluationModelRouter;
     private final ObjectMapper objectMapper;
     private final Executor judgeExecutor;
+    private final PresaleJudgePersistenceService judgePersistenceService;
 
     @Value("${presale.judge.retry.max-attempts:2}")
     private int judgeMaxAttempts;
@@ -78,6 +80,7 @@ public class PresaleJudgeService {
     @Value("${presale.judge.retry.permit-busy-backoff-ms:1000}")
     private long permitBusyBackoffMs;
 
+    @Autowired
     public PresaleJudgeService(PresaleAiPromptResultMapper promptResultMapper,
                                PresaleAiPromptJudgeResultMapper judgeResultMapper,
                                IndustryCoreAttributeConfigMapper attributeConfigMapper,
@@ -87,7 +90,8 @@ public class PresaleJudgeService {
                                AiPlatformConfigMapper aiPlatformConfigMapper,
                                PresaleEvaluationModelRouter evaluationModelRouter,
                                ObjectMapper objectMapper,
-                               @Qualifier("presaleJudgeExecutor") Executor judgeExecutor) {
+                               @Qualifier("presaleJudgeExecutor") Executor judgeExecutor,
+                               PresaleJudgePersistenceService judgePersistenceService) {
         this.promptResultMapper = promptResultMapper;
         this.judgeResultMapper = judgeResultMapper;
         this.attributeConfigMapper = attributeConfigMapper;
@@ -98,10 +102,26 @@ public class PresaleJudgeService {
         this.evaluationModelRouter = evaluationModelRouter;
         this.objectMapper = objectMapper;
         this.judgeExecutor = judgeExecutor;
+        this.judgePersistenceService = judgePersistenceService;
+    }
+
+    PresaleJudgeService(PresaleAiPromptResultMapper promptResultMapper,
+                        PresaleAiPromptJudgeResultMapper judgeResultMapper,
+                        IndustryCoreAttributeConfigMapper attributeConfigMapper,
+                        PresaleReportVersionMapper reportVersionMapper,
+                        PresaleReportMapper reportMapper,
+                        PresaleLlmInvoker llmInvoker,
+                        AiPlatformConfigMapper aiPlatformConfigMapper,
+                        PresaleEvaluationModelRouter evaluationModelRouter,
+                        ObjectMapper objectMapper,
+                        Executor judgeExecutor) {
+        this(promptResultMapper, judgeResultMapper, attributeConfigMapper, reportVersionMapper,
+                reportMapper, llmInvoker, aiPlatformConfigMapper, evaluationModelRouter,
+                objectMapper, judgeExecutor, null);
     }
 
     public void judgeCognitiveAfterBatch1(Long versionId, String brandName, Long operatorUserId, boolean isManager) {
-        judgeCognitiveAfterBatch1(versionId, brandName, operatorUserId, isManager, null);
+        judgeCognitiveAfterBatch1(versionId, brandName, null, null, List.of(), operatorUserId, isManager, null);
     }
 
     public void judgeCognitiveAfterBatch1(Long versionId,
@@ -109,11 +129,48 @@ public class PresaleJudgeService {
                                           Long operatorUserId,
                                           boolean isManager,
                                           Runnable progressCallback) {
-        runJudge(versionId, 1, CATEGORY_COGNITIVE, brandName, operatorUserId, isManager, progressCallback);
+        judgeCognitiveAfterBatch1(versionId, brandName, null, null, List.of(),
+                operatorUserId, isManager, progressCallback);
+    }
+
+    public void judgeCognitiveAfterBatch1(Long versionId,
+                                          String brandName,
+                                          String industry,
+                                          String industryRole,
+                                          Long operatorUserId,
+                                          boolean isManager,
+                                          Runnable progressCallback) {
+        judgeCognitiveAfterBatch1(versionId, brandName, industry, industryRole, List.of(),
+                operatorUserId, isManager, progressCallback);
+    }
+
+    public void judgeCognitiveAfterBatch1(Long versionId,
+                                          String brandName,
+                                          String industry,
+                                          String industryRole,
+                                          List<String> representedBrands,
+                                          Long operatorUserId,
+                                          boolean isManager,
+                                          Runnable progressCallback) {
+        judgeCognitiveAfterBatch1(versionId, brandName, industry, industryRole, representedBrands,
+                operatorUserId, isManager, progressCallback, 0L);
+    }
+
+    public void judgeCognitiveAfterBatch1(Long versionId,
+                                          String brandName,
+                                          String industry,
+                                          String industryRole,
+                                          List<String> representedBrands,
+                                          Long operatorUserId,
+                                          boolean isManager,
+                                          Runnable progressCallback,
+                                          long generationAttempt) {
+        runJudge(versionId, 1, CATEGORY_COGNITIVE, brandName, industry, industryRole, representedBrands,
+                operatorUserId, isManager, progressCallback, generationAttempt);
     }
 
     public void judgeComparisonAfterBatch2(Long versionId, String brandName, Long operatorUserId, boolean isManager) {
-        judgeComparisonAfterBatch2(versionId, brandName, operatorUserId, isManager, null);
+        judgeComparisonAfterBatch2(versionId, brandName, null, null, List.of(), operatorUserId, isManager, null);
     }
 
     public void judgeComparisonAfterBatch2(Long versionId,
@@ -121,16 +178,57 @@ public class PresaleJudgeService {
                                            Long operatorUserId,
                                            boolean isManager,
                                            Runnable progressCallback) {
-        runJudge(versionId, 2, CATEGORY_COMPARISON, brandName, operatorUserId, isManager, progressCallback);
+        judgeComparisonAfterBatch2(versionId, brandName, null, null, List.of(),
+                operatorUserId, isManager, progressCallback);
+    }
+
+    public void judgeComparisonAfterBatch2(Long versionId,
+                                           String brandName,
+                                           String industry,
+                                           String industryRole,
+                                           Long operatorUserId,
+                                           boolean isManager,
+                                           Runnable progressCallback) {
+        judgeComparisonAfterBatch2(versionId, brandName, industry, industryRole, List.of(),
+                operatorUserId, isManager, progressCallback);
+    }
+
+    public void judgeComparisonAfterBatch2(Long versionId,
+                                           String brandName,
+                                           String industry,
+                                           String industryRole,
+                                           List<String> representedBrands,
+                                           Long operatorUserId,
+                                           boolean isManager,
+                                           Runnable progressCallback) {
+        judgeComparisonAfterBatch2(versionId, brandName, industry, industryRole, representedBrands,
+                operatorUserId, isManager, progressCallback, 0L);
+    }
+
+    public void judgeComparisonAfterBatch2(Long versionId,
+                                           String brandName,
+                                           String industry,
+                                           String industryRole,
+                                           List<String> representedBrands,
+                                           Long operatorUserId,
+                                           boolean isManager,
+                                           Runnable progressCallback,
+                                           long generationAttempt) {
+        runJudge(versionId, 2, CATEGORY_COMPARISON, brandName, industry, industryRole, representedBrands,
+                operatorUserId, isManager, progressCallback, generationAttempt);
     }
 
     private void runJudge(Long versionId,
                           int batchNo,
                           String category,
                           String brandName,
+                          String industry,
+                          String industryRole,
+                          List<String> representedBrands,
                           Long operatorUserId,
                           boolean isManager,
-                          Runnable progressCallback) {
+                          Runnable progressCallback,
+                          long generationAttempt) {
         List<PresaleJudgeCandidateRow> candidates = promptResultMapper.selectJudgeCandidatesByVersionAndCategory(
                 versionId, batchNo, category
         );
@@ -155,7 +253,9 @@ public class PresaleJudgeService {
         for (Map.Entry<String, List<PresaleJudgeCandidateRow>> entry : byPlatform.entrySet()) {
             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 for (PresaleJudgeCandidateRow candidate : entry.getValue()) {
-                    JudgeOutcome outcome = processOneCandidate(candidate, category, brandName, operatorUserId, isManager);
+                    JudgeOutcome outcome = processOneCandidate(candidate, category, brandName,
+                            industry, industryRole, representedBrands, operatorUserId, isManager,
+                            generationAttempt);
                     if (outcome == JudgeOutcome.SUCCESS) {
                         successCount.incrementAndGet();
                     } else if (outcome == JudgeOutcome.FAILED) {
@@ -184,17 +284,24 @@ public class PresaleJudgeService {
     private JudgeOutcome processOneCandidate(PresaleJudgeCandidateRow candidate,
                                              String category,
                                              String brandName,
+                                             String industry,
+                                             String industryRole,
+                                             List<String> representedBrands,
                                              Long operatorUserId,
-                                             boolean isManager) {
+                                             boolean isManager,
+                                             long generationAttempt) {
         if (candidate == null || candidate.getPromptResultId() == null) {
             return JudgeOutcome.SKIPPED;
         }
+        requireCurrentRun(candidate.getVersionId(), generationAttempt);
         if (hasSuccessfulJudge(candidate, category)) {
             return JudgeOutcome.SKIPPED;
         }
 
         if (!StringUtils.hasText(candidate.getQueryAnswer())) {
-            upsertJudgeFailure(candidate, category, 1, "QUERY_ANSWER_EMPTY", null, null, null);
+            requireCurrentRun(candidate.getVersionId(), generationAttempt);
+            upsertJudgeFailure(candidate, category, 1, "QUERY_ANSWER_EMPTY", null, null, null,
+                    generationAttempt);
             return JudgeOutcome.FAILED;
         }
 
@@ -202,19 +309,20 @@ public class PresaleJudgeService {
         List<String> cognitiveAttributes = CATEGORY_COGNITIVE.equals(category)
                 ? resolveCognitiveAttributes(candidate.getVersionId())
                 : DEFAULT_COGNITIVE_ATTRIBUTES;
-        String judgePrompt = buildJudgePrompt(category, brandName, candidate.getCompetitorName(), candidate.getQueryAnswer(), cognitiveAttributes);
+        String judgePrompt = buildJudgePrompt(category, brandName, industry, industryRole, representedBrands,
+                candidate.getCompetitorName(), candidate.getQueryAnswer(), cognitiveAttributes);
         JudgeAttemptError lastError = null;
         int attemptsUsed = 0;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             attemptsUsed = attempt;
             try {
                 List<PresaleAiPromptJudgeResult> successRows = invokeAndBuildSuccess(
-                        candidate, category, brandName, operatorUserId, isManager, judgePrompt, attempt, cognitiveAttributes
+                        candidate, category, brandName, industry, industryRole, representedBrands,
+                        operatorUserId, isManager, judgePrompt, attempt, cognitiveAttributes,
+                        generationAttempt
                 );
-                cleanupLegacyComparisonGroupJudge(candidate, category);
-                for (PresaleAiPromptJudgeResult successRow : successRows) {
-                    upsertJudgeSuccess(successRow);
-                }
+                requireCurrentRun(candidate.getVersionId(), generationAttempt);
+                persistJudgeSuccess(candidate, category, successRows, generationAttempt);
                 return JudgeOutcome.SUCCESS;
             } catch (JudgeAttemptError ex) {
                 lastError = ex;
@@ -229,18 +337,33 @@ public class PresaleJudgeService {
         String rawResponse = lastError == null ? null : lastError.rawResponse();
         String judgePlatformCode = lastError == null ? null : lastError.judgePlatformCode();
         String modelId = StringUtils.hasText(judgePlatformCode) ? resolveModelId(judgePlatformCode) : null;
-        upsertJudgeFailure(candidate, category, attemptsUsed, errorMessage, rawResponse, judgePlatformCode, modelId);
+        requireCurrentRun(candidate.getVersionId(), generationAttempt);
+        upsertJudgeFailure(candidate, category, attemptsUsed, errorMessage, rawResponse,
+                judgePlatformCode, modelId, generationAttempt);
         return JudgeOutcome.FAILED;
+    }
+
+    private void requireCurrentRun(Long versionId, long generationAttempt) {
+        if (generationAttempt <= 0L) {
+            return;
+        }
+        if (reportVersionMapper.countCurrentRunningAttempt(versionId, generationAttempt) != 1) {
+            throw new BatchInterruptedException("generation attempt superseded during judge persistence");
+        }
     }
 
     private List<PresaleAiPromptJudgeResult> invokeAndBuildSuccess(PresaleJudgeCandidateRow candidate,
                                                                    String category,
                                                                    String brandName,
+                                                                   String industry,
+                                                                   String industryRole,
+                                                                   List<String> representedBrands,
                                                                    Long operatorUserId,
                                                                    boolean isManager,
                                                                    String judgePrompt,
                                                                    int attempt,
-                                                                   List<String> cognitiveAttributes) throws JudgeAttemptError {
+                                                                   List<String> cognitiveAttributes,
+                                                                   long generationAttempt) throws JudgeAttemptError {
         String competitorName = normalizeCompetitor(candidate.getCompetitorName());
         PlatformCallContext sourceCtx = new PlatformCallContext(
                 candidate.getVersionId(),
@@ -249,8 +372,12 @@ public class PresaleJudgeService {
                 candidate.getPromptTemplateId(),
                 competitorName,
                 brandName,
+                industry,
+                industryRole,
+                representedBrands,
                 operatorUserId,
-                isManager
+                isManager,
+                generationAttempt
         );
         LlmCallResult result;
         PlatformCallContext judgeCtx;
@@ -550,8 +677,28 @@ public class PresaleJudgeService {
         return row;
     }
 
-    private void upsertJudgeSuccess(PresaleAiPromptJudgeResult row) {
-        judgeResultMapper.upsertByPromptResultId(row);
+    private void persistJudgeSuccess(PresaleJudgeCandidateRow candidate,
+                                     String category,
+                                     List<PresaleAiPromptJudgeResult> rows,
+                                     long generationAttempt) {
+        String legacyGroup = legacyComparisonGroup(candidate, category);
+        if (judgePersistenceService != null && generationAttempt > 0L) {
+            judgePersistenceService.persistSuccess(candidate.getVersionId(), generationAttempt,
+                    candidate.getPromptResultId(), legacyGroup, rows);
+            return;
+        }
+        cleanupLegacyComparisonGroupJudge(candidate, category);
+        rows.forEach(judgeResultMapper::upsertByPromptResultId);
+    }
+
+    private String legacyComparisonGroup(PresaleJudgeCandidateRow candidate, String category) {
+        if (!CATEGORY_COMPARISON.equals(category) || candidate == null || candidate.getPromptResultId() == null) {
+            return null;
+        }
+        String groupName = normalizeCompetitor(candidate.getCompetitorName());
+        return StringUtils.hasText(groupName) && groupName.contains(CompetitorGroupKeyUtils.SEPARATOR)
+                ? groupName
+                : null;
     }
 
     private void cleanupLegacyComparisonGroupJudge(PresaleJudgeCandidateRow candidate, String category) {
@@ -573,7 +720,8 @@ public class PresaleJudgeService {
                                     String errorMessage,
                                     String rawResponse,
                                     String judgePlatformCode,
-                                    String modelId) {
+                                    String modelId,
+                                    long generationAttempt) {
         PresaleAiPromptJudgeResult row = initBaseJudgeRow(candidate, category);
         row.setJudgeStatus(STATUS_FAILED);
         row.setJudgeAttemptCount(attemptCount);
@@ -584,7 +732,11 @@ public class PresaleJudgeService {
         row.setRawJudgeResponse(rawResponse);
         row.setJudgePayloadJson(null);
         clearAllJudgeFields(row);
-        judgeResultMapper.upsertByPromptResultId(row);
+        if (judgePersistenceService != null && generationAttempt > 0L) {
+            judgePersistenceService.persistFailure(row, generationAttempt);
+        } else {
+            judgeResultMapper.upsertByPromptResultId(row);
+        }
     }
 
     private void clearAllJudgeFields(PresaleAiPromptJudgeResult row) {
@@ -695,6 +847,9 @@ public class PresaleJudgeService {
 
     private String buildJudgePrompt(String category,
                                     String brandName,
+                                    String industry,
+                                    String industryRole,
+                                    List<String> representedBrands,
                                     String competitorName,
                                     String answer,
                                     List<String> cognitiveAttributes) {
@@ -703,16 +858,28 @@ public class PresaleJudgeService {
         if (CATEGORY_COGNITIVE.equals(category)) {
             return JudgePromptTemplates.COGNITIVE_TEMPLATE
                     .replace("{brand}", safeBrand)
+                    .replace("{industry}", safeText(industry))
+                    .replace("{industryRole}", safeText(industryRole))
+                    .replace("{representedBrands}", joinRepresentedBrands(representedBrands))
                     .replace("{attributes}", String.join("、", safeCognitiveAttributes(cognitiveAttributes)))
                     .replace("{answer}", safeAnswer);
         }
         if (CATEGORY_COMPARISON.equals(category)) {
             return JudgePromptTemplates.COMPARISON_TEMPLATE
                     .replace("{brand}", safeBrand)
+                    .replace("{industry}", safeText(industry))
+                    .replace("{industryRole}", safeText(industryRole))
+                    .replace("{representedBrands}", joinRepresentedBrands(representedBrands))
                     .replace("{competitor}", safeText(normalizeCompetitor(competitorName)))
                     .replace("{answer}", safeAnswer);
         }
         throw new IllegalArgumentException("unsupported judge category: " + category);
+    }
+
+    private String joinRepresentedBrands(List<String> representedBrands) {
+        return representedBrands == null || representedBrands.isEmpty()
+                ? ""
+                : String.join("、", representedBrands);
     }
 
     private String toJsonOrNull(Object value) {

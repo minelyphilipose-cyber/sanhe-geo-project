@@ -53,8 +53,12 @@ public class PresaleEvaluationModelRouter {
                 source.promptTemplateId(),
                 source.competitorName(),
                 source.brandName(),
+                source.industry(),
+                source.industryRole(),
+                source.representedBrands(),
                 source.operatorUserId(),
-                source.operatorIsManager()
+                source.operatorIsManager(),
+                source.generationAttempt()
         );
     }
 

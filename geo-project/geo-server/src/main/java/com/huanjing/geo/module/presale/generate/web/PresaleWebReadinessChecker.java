@@ -60,10 +60,10 @@ public class PresaleWebReadinessChecker {
             return new PresaleWebExecutionContext(fixedMode, Map.of());
         }
         List<AiPlatformConfig> bases = platformConfigMapper.selectList(
-                PresalePlatformConfigQueries.presaleEnabledWrapper());
+                PresalePlatformConfigQueries.requiredReportPlatformWrapper());
         if (bases == null || bases.isEmpty()) {
             throw new PresaleWebReadinessException(
-                    "REQUIRED web QUERY has no enabled STANDARD_CHAT presale platform");
+                    "REQUIRED web QUERY has no enabled presale platform or web companion");
         }
 
         EnumSet<IntegrationType> registeredCodecs = EnumSet.noneOf(IntegrationType.class);
@@ -113,8 +113,11 @@ public class PresaleWebReadinessChecker {
                 .filter(row -> parseIntegrationType(row.getIntegrationType()).isWebSearch())
                 .toList();
         if (rows == null || rows.isEmpty()) {
-            // The base remains the logical report platform. A companion only overrides QUERY when
-            // its own presale capability is explicitly enabled; otherwise the base uses its native API.
+            if (!nativePresaleEnabled(base)) {
+                throw new IllegalArgumentException(
+                        "enabled web companion cannot be resolved for companion-only report platform");
+            }
+            // 基础模型仍可单独通过原生 API 参与；存在 companion 时由 companion 优先覆盖 QUERY。
             return null;
         }
         if (rows.size() != 1) {
@@ -168,6 +171,13 @@ public class PresaleWebReadinessChecker {
                 positiveOrDefault(companion.getConcurrencyLimit(), 1),
                 positiveOrDefault(companion.getRpmLimit(), 60),
                 positiveOrDefault(companion.getTpmLimit(), 60_000));
+    }
+
+    private boolean nativePresaleEnabled(AiPlatformConfig base) {
+        return base != null
+                && Boolean.TRUE.equals(base.getEnabled())
+                && Boolean.TRUE.equals(base.getEnabledForPresale())
+                && StringUtils.hasText(base.getLowModelId());
     }
 
     private JsonNode parseProviderConfig(String json) {

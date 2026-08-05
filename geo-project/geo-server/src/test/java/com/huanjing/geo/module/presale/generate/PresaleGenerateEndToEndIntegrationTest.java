@@ -88,6 +88,7 @@ class PresaleGenerateEndToEndIntegrationTest {
     @Test
     void realFlow_benchmarkMissing_marksConfigMissing() {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ReflectionTestUtils.setField(orchestrator, "maxConcurrentReports", 1000);
 
         PresaleReport report = insertReport();
         PresaleReportVersion version = insertVersion(report.getId());
@@ -98,7 +99,9 @@ class PresaleGenerateEndToEndIntegrationTest {
         when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(101L, "B1_TEMPLATE", "batch1 prompt", 0)));
         when(competitorAggregator.extractTopCompetitorsFromBatch1(anyLong(), anyString())).thenReturn(List.of());
         when(reuseDecisionService.preloadByVersionAndBatch(anyLong(), anyInt())).thenReturn(Map.of());
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+        when(aiCallMapper.insertForCurrentRun(any(), anyLong())).thenReturn(1);
+        when(aiPromptResultMapper.upsertForCurrentRun(any(), anyLong())).thenReturn(1);
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("BENCHMARK_MISSING fallback (_ALL_,_ALL_) not found"));
 
         Object target = AopTestUtils.getTargetObject(orchestrator);
@@ -115,6 +118,7 @@ class PresaleGenerateEndToEndIntegrationTest {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void realFlow_multiPlatform_parallelExecution_snapshotComplete() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ReflectionTestUtils.setField(orchestrator, "maxConcurrentReports", 1000);
 
         PresaleReport report = insertReport();
         PresaleReportVersion version = insertVersion(report.getId());
@@ -140,6 +144,8 @@ class PresaleGenerateEndToEndIntegrationTest {
         );
         when(reuseDecisionService.preloadByVersionAndBatch(anyLong(), anyInt())).thenReturn(Map.of());
         when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
+        when(aiCallMapper.insertForCurrentRun(any(), anyLong())).thenReturn(1);
+        when(aiPromptResultMapper.upsertForCurrentRun(any(), anyLong())).thenReturn(1);
         when(promptTemplateRenderer.variables(any(PlatformCallContext.class), any(PresaleReport.class)))
                 .thenCallRealMethod();
         when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
@@ -171,7 +177,7 @@ class PresaleGenerateEndToEndIntegrationTest {
                 });
         when(competitorAggregator.extractTopCompetitorsFromBatch1(anyLong(), anyString()))
                 .thenReturn(List.of("c1", "c2"));
-        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any(), any()))
                 .thenReturn("{\"platform_breakdown\":[{\"platform_code\":\"kimi\"},{\"platform_code\":\"qwen\"},{\"platform_code\":\"doubao\"},{\"platform_code\":\"deepseek\"},{\"platform_code\":\"glm\"}]}");
         when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), any(), any(Boolean.class)))
                 .thenReturn("{\"summary\":\"ok\"}");

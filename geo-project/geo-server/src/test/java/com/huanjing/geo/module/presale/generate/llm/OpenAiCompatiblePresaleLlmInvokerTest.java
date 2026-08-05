@@ -7,9 +7,12 @@ import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -18,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -76,7 +80,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
                         "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":[{\\\"keyword\\\":\\\"性价比高\\\",\\\"sentiment\\\":\\\"POSITIVE\\\"}],\\\"negative_evidence\\\":{\\\"has_negative\\\":false,\\\"snippet\\\":null}}\\n```\"}}],\"usage\":{\"prompt_tokens\":22,\"completion_tokens\":18}}"));
 
         PlatformCallContext ctx = new PlatformCallContext(
-                1L, 1, "kimi", 1002L, "", "Acme", 11L, false
+                1L, 1, "kimi", 1002L, "", "Acme",
+                "汽车服务", "授权经销商", List.of("宝马", "MINI"), 11L, false
         );
         LlmCallResult result = invoker.analyze(ctx, "问句", "回答");
 
@@ -85,6 +90,17 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         assertTrue(result.rawResponse().contains("\"is_mentioned\":true"));
         assertEquals(22, result.promptTokens());
         assertEquals(18, result.completionTokens());
+
+        ArgumentCaptor<String> requestBodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(httpClient).postJson(anyString(), anyMap(), requestBodyCaptor.capture(), anyInt(), anyInt());
+        var messages = new ObjectMapper().readTree(requestBodyCaptor.getValue()).path("messages");
+        String systemPrompt = messages.get(0).path("content").asText();
+        String userPrompt = messages.get(1).path("content").asText();
+        assertTrue(userPrompt.contains("客户行业:汽车服务"));
+        assertTrue(userPrompt.contains("客户身份:授权经销商"));
+        assertTrue(userPrompt.contains("代理品牌:宝马、MINI"));
+        assertTrue(systemPrompt.contains("上游品牌"));
+        assertTrue(systemPrompt.contains("不得写入 mentioned_competitors"));
     }
 
     @Test

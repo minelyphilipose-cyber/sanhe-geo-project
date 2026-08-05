@@ -40,6 +40,10 @@
             <div class="mono p02-field-label">BUSINESS ROLE</div>
             <div class="p02-matrix-value">{{ industryRoleLabel }}</div>
           </div>
+          <div v-if="representedBrandsText" class="data-matrix-row p02-matrix-row">
+            <div class="mono p02-field-label">REPRESENTED BRANDS</div>
+            <div class="p02-matrix-value">{{ representedBrandsText }}</div>
+          </div>
           <div class="data-matrix-row p02-matrix-row">
             <div class="mono p02-field-label">USER INQUIRY</div>
             <div class="p02-matrix-inquiry">
@@ -117,6 +121,9 @@ const mergedView = computed(() => mergedViewRef.value!)
 const industryLabel = computed(() => presaleLabel('presale_industry', mergedView.value.industry))
 const industryRoleLabel = computed(() =>
   presaleLabel('presale_industry_role', mergedView.value.industry_role)
+)
+const representedBrandsText = computed(() =>
+  (mergedView.value.represented_brands || []).filter(Boolean).join('、')
 )
 
 const brandSubText = computed(() => {

@@ -112,6 +112,45 @@
                 </el-select>
               </el-form-item>
 
+              <el-form-item
+                v-if="showRepresentedBrands"
+                class="form-item span-full"
+                prop="representedBrands"
+              >
+                <template #label>
+                  <span class="field-label">代理品牌 <span class="optional-badge">可选，可填写多个</span></span>
+                </template>
+                <div class="represented-brand-editor">
+                  <div
+                    v-for="(_, index) in form.representedBrands"
+                    :key="index"
+                    class="represented-brand-row"
+                  >
+                    <el-input
+                      v-model="form.representedBrands[index]"
+                      :placeholder="`代理品牌 ${index + 1}`"
+                      maxlength="100"
+                      show-word-limit
+                    />
+                    <el-button
+                      text
+                      type="danger"
+                      aria-label="删除代理品牌"
+                      @click="removeRepresentedBrand(index)"
+                    >删除</el-button>
+                  </div>
+                  <el-button
+                    v-if="form.representedBrands.length < MAX_REPRESENTED_BRANDS"
+                    class="represented-brand-add"
+                    plain
+                    @click="addRepresentedBrand"
+                  >+ 添加代理品牌</el-button>
+                  <div class="field-help">
+                    仅用于区分客户主体与其代理的上游品牌，不会被计作目标品牌提及或竞品。
+                  </div>
+                </div>
+              </el-form-item>
+
               <el-form-item class="form-item span-full" prop="region">
                 <template #label>
                   <span class="field-label">地区 <span class="req">*</span></span>
@@ -530,6 +569,7 @@ import {
   REPORT_BRAND_NAME_MAX_LENGTH,
   REPORT_COMPETITOR_GROUP_MAX_LENGTH,
   REPORT_INDUSTRY_ROLE_MAX_LENGTH,
+  supportsRepresentedBrands,
   templatePromptError
 } from './presaleReportValidation'
 
@@ -543,8 +583,9 @@ interface PromptItem {
   draft: PromptDraftItem
 }
 
-type CreateReportForm = Omit<CreateReportRequest, 'specifiedCompetitors'> & {
+type CreateReportForm = Omit<CreateReportRequest, 'specifiedCompetitors' | 'representedBrands'> & {
   brandFormerNames: string[]
+  representedBrands: string[]
   specifiedCompetitors: string[]
 }
 
@@ -582,6 +623,7 @@ const MAX_LLM_TOTAL_COUNT = 60
 const MAX_LLM_CATEGORY_COUNT = 30
 const MIN_LLM_COGNITIVE_COUNT = 3
 const MAX_LLM_EXISTING_QUESTIONS = 80
+const MAX_REPRESENTED_BRANDS = 10
 
 const router = useRouter()
 const route = useRoute()
@@ -615,6 +657,7 @@ const form = reactive<CreateReportForm>({
   brandFormerNames: ['', '', ''],
   industry: '',
   industryRole: '',
+  representedBrands: [],
   region: '',
   userDemand: DEFAULT_USER_DEMAND,
   userType: '',
@@ -641,15 +684,41 @@ function validateSpecifiedCompetitors(_: unknown, value: string[] | undefined, c
   const normalizedFormerNames = new Set(
     normalizeBrandFormerNameInputs(form.brandFormerNames).map(normalizeCompetitorName)
   )
+  const normalizedRepresentedBrands = new Set(
+    normalizeRepresentedBrandInputs(form.representedBrands).map(normalizeCompetitorName)
+  )
   const dedup = new Set<string>()
   for (const item of values) {
     const normalized = normalizeCompetitorName(item)
-    if (normalized === normalizedBrand || normalizedFormerNames.has(normalized)) {
-      callback(new Error('指定竞品不能与品牌名称或曾用名相同'))
+    if (normalized === normalizedBrand || normalizedFormerNames.has(normalized) || normalizedRepresentedBrands.has(normalized)) {
+      callback(new Error('指定竞品不能与品牌名称、曾用名或代理品牌相同'))
       return
     }
     if (dedup.has(normalized)) {
       callback(new Error('指定竞品不能重复'))
+      return
+    }
+    dedup.add(normalized)
+  }
+  callback()
+}
+
+function validateRepresentedBrands(_: unknown, value: string[] | undefined, callback: (error?: Error) => void) {
+  const values = normalizeRepresentedBrandInputs(value)
+  if (values.length > MAX_REPRESENTED_BRANDS) {
+    callback(new Error(`代理品牌最多 ${MAX_REPRESENTED_BRANDS} 个`))
+    return
+  }
+  const normalizedBrand = normalizeCompetitorName(form.brandName)
+  const dedup = new Set<string>()
+  for (const item of values) {
+    const normalized = normalizeCompetitorName(item)
+    if (normalized === normalizedBrand) {
+      callback(new Error('代理品牌不能与目标品牌相同'))
+      return
+    }
+    if (dedup.has(normalized)) {
+      callback(new Error('代理品牌不能重复'))
       return
     }
     dedup.add(normalized)
@@ -717,6 +786,7 @@ const rules: FormRules = {
     { required: true, message: '请选择身份', trigger: 'change' },
     { max: REPORT_INDUSTRY_ROLE_MAX_LENGTH, message: `身份最多 ${REPORT_INDUSTRY_ROLE_MAX_LENGTH} 字`, trigger: 'change' }
   ],
+  representedBrands: [{ validator: validateRepresentedBrands, trigger: 'blur' }],
   region: [
     { required: true, message: '请输入地区', trigger: 'blur' },
     { validator: validateMarketLabelPair, trigger: 'blur' }
@@ -758,6 +828,24 @@ const allRoleOptions = [
 
 const filteredRoleOptions = computed(() => allRoleOptions)
 
+const showRepresentedBrands = computed(() => {
+  return supportsRepresentedBrands(
+    form.industryRole,
+    optionLabel(allRoleOptions, form.industryRole)
+  )
+})
+
+watch(showRepresentedBrands, (visible) => {
+  if (visible) {
+    if (form.representedBrands.length === 0) {
+      form.representedBrands = ['']
+    }
+    return
+  }
+  form.representedBrands = []
+  formRef.value?.clearValidate('representedBrands')
+}, { immediate: true })
+
 function optionLabel(options: Array<{ value: string; label: string }>, value: string) {
   if (!value) {
     return ''
@@ -777,6 +865,25 @@ function normalizeBrandFormerNameInputs(value: string[] | undefined): string[] {
     .filter(Boolean)
 }
 
+function normalizeRepresentedBrandInputs(value: string[] | undefined): string[] {
+  return (value || [])
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function addRepresentedBrand() {
+  if (form.representedBrands.length < MAX_REPRESENTED_BRANDS) {
+    form.representedBrands.push('')
+  }
+}
+
+function removeRepresentedBrand(index: number) {
+  form.representedBrands.splice(index, 1)
+  if (form.representedBrands.length === 0) {
+    form.representedBrands.push('')
+  }
+}
+
 function normalizeCompetitorName(value: string | undefined): string {
   return (value || '').trim().replace(/\s+/g, '').toLowerCase()
 }
@@ -788,6 +895,14 @@ function specifiedCompetitorsForSubmit(): string[] | undefined {
 
 function brandFormerNamesForSubmit(): string[] | undefined {
   const values = normalizeBrandFormerNameInputs(form.brandFormerNames)
+  return values.length === 0 ? undefined : values
+}
+
+function representedBrandsForSubmit(): string[] | undefined {
+  if (!showRepresentedBrands.value) {
+    return undefined
+  }
+  const values = normalizeRepresentedBrandInputs(form.representedBrands)
   return values.length === 0 ? undefined : values
 }
 
@@ -989,6 +1104,9 @@ function applyRegenerateDraft(draft: RegenerateDraftVO) {
     : ['', '', '']
   form.industry = draft.industry || ''
   form.industryRole = draft.industryRole || ''
+  form.representedBrands = draft.representedBrands?.length
+    ? [...draft.representedBrands]
+    : (showRepresentedBrands.value ? [''] : [])
   form.region = draft.region || ''
   form.userDemand = draft.userDemand || DEFAULT_USER_DEMAND
   form.userType = draft.userType || ''
@@ -1389,6 +1507,7 @@ async function onSubmit() {
   try {
     const specifiedCompetitors = specifiedCompetitorsForSubmit()
     const brandFormerNames = brandFormerNamesForSubmit()
+    const representedBrands = representedBrandsForSubmit()
     const payload: CreateReportRequest =
       activePromptTab.value === 'llm'
         ? {
@@ -1396,6 +1515,7 @@ async function onSubmit() {
             brandFormerNames,
             industry: form.industry,
             industryRole: form.industryRole,
+            representedBrands,
             region: form.region.trim(),
             userDemand: form.userDemand?.trim() || undefined,
             userType: form.userType?.trim() || undefined,
@@ -1412,6 +1532,7 @@ async function onSubmit() {
             brandFormerNames,
             industry: form.industry,
             industryRole: form.industryRole,
+            representedBrands,
             region: form.region.trim(),
             userDemand: form.userDemand?.trim() || undefined,
             userType: form.userType?.trim() || undefined,
@@ -1468,6 +1589,7 @@ async function onCancel() {
     normalizeBrandFormerNameInputs(form.brandFormerNames).length > 0 ||
     form.industry ||
     form.industryRole ||
+    normalizeRepresentedBrandInputs(form.representedBrands).length > 0 ||
     form.region ||
     (form.userDemand && form.userDemand !== DEFAULT_USER_DEMAND) ||
     form.userType ||
@@ -1797,6 +1919,25 @@ function formatInt(value: number) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   width: 100%;
+}
+.represented-brand-editor {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+.represented-brand-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.represented-brand-add {
+  justify-self: start;
+}
+.field-help {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .scope-grid {
   display: grid;

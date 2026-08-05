@@ -18,6 +18,25 @@ public interface PresaleReportVersionMapper extends BaseMapper<PresaleReportVers
     @Select("""
             SELECT COUNT(1)
             FROM presale_report_version
+            WHERE id = #{versionId}
+              AND generation_status = 'RUNNING'
+              AND generation_attempt = #{generationAttempt}
+            """)
+    int countCurrentRunningAttempt(@Param("versionId") Long versionId,
+                                   @Param("generationAttempt") long generationAttempt);
+
+    @Select("""
+            SELECT generation_attempt
+            FROM presale_report_version
+            WHERE id = #{versionId}
+              AND generation_status = 'RUNNING'
+            FOR UPDATE
+            """)
+    Long selectRunningAttemptForUpdate(@Param("versionId") Long versionId);
+
+    @Select("""
+            SELECT COUNT(1)
+            FROM presale_report_version
             WHERE generation_status = 'RUNNING'
             """)
     int countRunningGenerations();
@@ -54,6 +73,21 @@ public interface PresaleReportVersionMapper extends BaseMapper<PresaleReportVers
             """)
     int markStaleRunningFailed(@Param("versionId") Long versionId,
                                @Param("failureReason") String failureReason);
+
+    @Update("""
+            UPDATE presale_report_version
+            SET generation_status = 'FAILED',
+                generation_stage = NULL,
+                failure_category = 'WORKER_HEARTBEAT_TIMEOUT',
+                failure_reason = #{failureReason},
+                updated_at = NOW()
+            WHERE id = #{versionId}
+              AND generation_status = 'RUNNING'
+              AND generation_attempt = #{generationAttempt}
+            """)
+    int markStaleRunningAttemptFailed(@Param("versionId") Long versionId,
+                                      @Param("generationAttempt") long generationAttempt,
+                                      @Param("failureReason") String failureReason);
 
     /**
      * 取指定 report 的最大 version_no(用于派生新版本递增编号)。

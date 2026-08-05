@@ -29,6 +29,7 @@ import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -175,6 +176,57 @@ class PresaleJudgeServiceTest {
         assertEquals("FAILED", saved.getJudgeStatus());
         assertEquals(2, saved.getJudgeAttemptCount());
         assertNotNull(saved.getJudgeError());
+    }
+
+    @Test
+    void shouldPassClientIndustryAndRoleToCognitiveJudge() throws Exception {
+        PresaleJudgeCandidateRow row = baseCandidate();
+        row.setBatchNo(1);
+        row.setCategory("\u8ba4\u77e5\u578b");
+        when(promptResultMapper.selectJudgeCandidatesByVersionAndCategory(1L, 1, "\u8ba4\u77e5\u578b"))
+                .thenReturn(List.of(row));
+        when(llmInvoker.judge(any(), anyString(), anyDouble()))
+                .thenReturn(new LlmCallResult(
+                        "{\"sentiment\":\"NEUTRAL\",\"sentiment_score\":0,\"attributes_hit\":[],\"factual_errors\":[],\"tone\":\"OBJECTIVE\"}",
+                        10, 20, 100L, 0, com.huanjing.geo.module.presale.generate.llm.CallStatus.SUCCESS
+                ));
+
+        judgeService.judgeCognitiveAfterBatch1(
+                1L, "\u76ee\u6807\u54c1\u724c", "\u6c7d\u8f66\u670d\u52a1",
+                "\u6388\u6743\u7ecf\u9500\u5546", List.of("\u5b9d\u9a6c", "MINI"), 100L, true, null);
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmInvoker).judge(any(), promptCaptor.capture(), anyDouble());
+        assertTrue(promptCaptor.getValue().contains("\u5ba2\u6237\u884c\u4e1a:\u6c7d\u8f66\u670d\u52a1"));
+        assertTrue(promptCaptor.getValue().contains("\u5ba2\u6237\u8eab\u4efd:\u6388\u6743\u7ecf\u9500\u5546"));
+        assertTrue(promptCaptor.getValue().contains("\u4ee3\u7406\u54c1\u724c:\u5b9d\u9a6c\u3001MINI"));
+        assertTrue(promptCaptor.getValue().contains("\u4e0a\u6e38\u54c1\u724c"));
+    }
+
+    @Test
+    void shouldPassClientIndustryAndRoleToComparisonJudge() throws Exception {
+        PresaleJudgeCandidateRow row = baseCandidate();
+        row.setBatchNo(2);
+        row.setCategory("\u5bf9\u6bd4\u578b");
+        row.setCompetitorName("\u7ade\u54c1A");
+        when(promptResultMapper.selectJudgeCandidatesByVersionAndCategory(1L, 2, "\u5bf9\u6bd4\u578b"))
+                .thenReturn(List.of(row));
+        when(llmInvoker.judge(any(), anyString(), anyDouble()))
+                .thenReturn(new LlmCallResult(
+                        "{\"verdicts\":[{\"competitor\":\"\u7ade\u54c1A\",\"preferred_brand\":\"tie\",\"target_sentiment\":\"NEUTRAL\",\"target_advantages\":[],\"target_disadvantages\":[],\"competitor_advantages\":[],\"reasoning_quality\":\"medium\"}]}",
+                        10, 20, 100L, 0, com.huanjing.geo.module.presale.generate.llm.CallStatus.SUCCESS
+                ));
+
+        judgeService.judgeComparisonAfterBatch2(
+                1L, "\u76ee\u6807\u54c1\u724c", "\u6c7d\u8f66\u670d\u52a1",
+                "\u6388\u6743\u7ecf\u9500\u5546", List.of("\u5b9d\u9a6c", "MINI"), 100L, true, null);
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmInvoker).judge(any(), promptCaptor.capture(), anyDouble());
+        assertTrue(promptCaptor.getValue().contains("\u5ba2\u6237\u884c\u4e1a:\u6c7d\u8f66\u670d\u52a1"));
+        assertTrue(promptCaptor.getValue().contains("\u5ba2\u6237\u8eab\u4efd:\u6388\u6743\u7ecf\u9500\u5546"));
+        assertTrue(promptCaptor.getValue().contains("\u4ee3\u7406\u54c1\u724c:\u5b9d\u9a6c\u3001MINI"));
+        assertTrue(promptCaptor.getValue().contains("\u4e0d\u5f97\u5c06\u4ee3\u7406\u54c1\u724c\u4f18\u52bf"));
     }
 
     private PresaleJudgeCandidateRow baseCandidate() {

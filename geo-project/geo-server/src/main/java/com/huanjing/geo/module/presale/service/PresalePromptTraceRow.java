@@ -28,6 +28,8 @@ public class PresalePromptTraceRow {
     private Integer queryDurationMs;
     private String queryModelName;
     private Boolean queryModelSnapshotInferred;
+    private String queryContractVersion;
+    private String searchEvidenceJson;
     private String analyzePromptContent;
     private String analyzeRawResponse;
     private String analyzeCallStatus;

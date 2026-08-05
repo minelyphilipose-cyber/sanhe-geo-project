@@ -3,6 +3,7 @@ package com.huanjing.geo.module.presale.generate.calc;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
@@ -26,6 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class SceneCoverageCalculatorTest {
@@ -165,6 +168,35 @@ class SceneCoverageCalculatorTest {
         SceneAndIntentResult result = calculator.compute(2001L, raw, totals);
         // 9-3=6, threshold=ceil(6/2)=3, 命中3个平台即 covered
         assertEquals(1, result.sceneCoverage().getHighValue().getCovered());
+    }
+
+    @Test
+    void platformThresholdUsesFixedRawSnapshotInsteadOfCurrentPresaleSwitches() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper,
+                competitorAggregator, new ObjectMapper());
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(71L, "P71", "推荐型", "recommendation")
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
+                row(71L, "ernie", 1, 1, null)
+        ));
+        RawSnapshotDTO raw = raw(List.of(), List.of());
+        raw.setPlatformBreakdown(List.of(
+                PlatformBreakdown.builder().platformCode("ernie").platformName("文心一言").build(),
+                PlatformBreakdown.builder().platformCode("kimi").platformName("Kimi").build()
+        ));
+
+        SceneAndIntentResult result = calculator.compute(7001L, raw, Map.of(
+                "RECOMMENDATION", 1,
+                "COMPARISON", 0,
+                "INQUIRY", 0,
+                "COGNITIVE", 0,
+                "SCENARIO", 0
+        ));
+
+        assertEquals(1, result.sceneCoverage().getHighValue().getCovered());
+        verify(aiPlatformConfigMapper, never()).selectList(any());
     }
 
     @Test
