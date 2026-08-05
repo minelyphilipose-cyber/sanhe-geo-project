@@ -3,6 +3,8 @@ package com.huanjing.geo.module.dispatch.websearch;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.dispatch.entity.PollInvocationAttempt;
+import com.huanjing.geo.module.dispatch.mapper.PollInvocationAttemptMapper;
+import com.huanjing.geo.module.dispatch.service.PollDatabaseWriteRetryService;
 import com.huanjing.geo.module.dispatch.websearch.enums.ErrorCategory;
 import com.huanjing.geo.module.dispatch.websearch.enums.IntegrationType;
 import com.huanjing.geo.module.dispatch.websearch.enums.ResultCode;
@@ -35,6 +37,8 @@ public class WebSearchPollExecutionService {
     private final PollAttemptCreationService attemptCreationService;
     private final AttemptLifecycleService lifecycleService;
     private final PollResultProjectionService projectionService;
+    private final PollInvocationAttemptMapper attemptMapper;
+    private final PollDatabaseWriteRetryService databaseWriteRetryService;
     private final WebSearchLlmGateway gateway;
     private final WebSearchAttemptResultWriter resultWriter;
     private final ObjectMapper objectMapper;
@@ -42,11 +46,19 @@ public class WebSearchPollExecutionService {
     public WebSearchPollExecutionOutcome execute(WebSearchPollCommand command) {
         validate(command);
         long chainStarted = System.currentTimeMillis();
-        PollInvocationAttempt previous = null;
+        PollInvocationAttempt previous = attemptMapper.selectLatestTerminalByShardItemId(command.shardItemId());
+        int firstAttemptIndex = 0;
+        if (previous != null) {
+            WebSearchPollExecutionOutcome resumed = resumePersistedAttempt(previous, chainStarted);
+            if (resumed != null) {
+                return resumed;
+            }
+            firstAttemptIndex = 1;
+        }
         WebSearchResponse lastResponse = null;
         ResultCode lastResultCode = ResultCode.R0;
 
-        for (int attemptIndex = 0; attemptIndex < MAX_SEARCH_ATTEMPTS; attemptIndex++) {
+        for (int attemptIndex = firstAttemptIndex; attemptIndex < MAX_SEARCH_ATTEMPTS; attemptIndex++) {
             TriggerType triggerType = attemptIndex == 0 ? command.triggerType() : TriggerType.SEARCH_RETRY;
             String systemPrompt = attemptIndex == 0
                     ? command.systemPrompt()
@@ -78,7 +90,7 @@ public class WebSearchPollExecutionService {
             LocalDateTime completedAt = LocalDateTime.now();
             lifecycleService.succeed(attempt.getId(), completedAt);
             boolean shouldRetrySearch = resultCode == ResultCode.R1 && attemptIndex + 1 < MAX_SEARCH_ATTEMPTS;
-            projectionService.finalizeAttempt(attempt.getId(), !shouldRetrySearch, completedAt);
+            finalizeAttempt(attempt.getId(), !shouldRetrySearch, completedAt);
             lastResponse = response;
             lastResultCode = resultCode;
             previous = attempt;
@@ -123,14 +135,16 @@ public class WebSearchPollExecutionService {
         draft.setBrandDictionaryVersion(sha256(writeJson(command.brandNames())));
         draft.setBrandDictionarySnapshotJson(writeJson(command.brandNames()));
         draft.setAdapterVersion(ADAPTER_VERSION);
-        return attemptCreationService.create(
-                draft,
-                LocalDateTime.now(),
-                Duration.ofMillis(command.requestTimeoutMs()),
-                1,
-                Duration.ZERO,
-                DEADLINE_SAFETY_MARGIN
-        );
+        return databaseWriteRetryService.execute(
+                "Poll attempt creation",
+                () -> attemptCreationService.create(
+                        draft,
+                        LocalDateTime.now(),
+                        Duration.ofMillis(command.requestTimeoutMs()),
+                        1,
+                        Duration.ZERO,
+                        DEADLINE_SAFETY_MARGIN
+                ));
     }
 
     private WebSearchPlatformProfile profile(AiPlatformConfig platform,
@@ -173,7 +187,88 @@ public class WebSearchPollExecutionService {
         LocalDateTime completedAt = LocalDateTime.now();
         resultWriter.writeFailure(attempt, category, errorCode, message, completedAt);
         lifecycleService.fail(attempt.getId(), completedAt);
-        projectionService.finalizeAttempt(attempt.getId(), true, completedAt);
+        finalizeAttempt(attempt.getId(), true, completedAt);
+    }
+
+    private WebSearchPollExecutionOutcome resumePersistedAttempt(PollInvocationAttempt attempt,
+                                                                 long chainStarted) {
+        ResultCode resultCode = parseResultCode(attempt.getResultCode());
+        boolean searchRetryPending = "SUCCEEDED".equals(attempt.getStatus())
+                && resultCode == ResultCode.R1
+                && !TriggerType.SEARCH_RETRY.name().equals(attempt.getTriggerType());
+        if (attempt.getFinalizedAt() == null) {
+            LocalDateTime finalizedAt = attempt.getCompletedAt() == null
+                    ? LocalDateTime.now()
+                    : attempt.getCompletedAt();
+            finalizeAttempt(attempt.getId(), !searchRetryPending, finalizedAt);
+        }
+        if (searchRetryPending) {
+            return null;
+        }
+        int attemptCount = TriggerType.SEARCH_RETRY.name().equals(attempt.getTriggerType()) ? 2 : 1;
+        if (!"SUCCEEDED".equals(attempt.getStatus())) {
+            return WebSearchPollExecutionOutcome.failed(
+                    attemptCount,
+                    persistedLatency(attempt, chainStarted),
+                    parseErrorCategory(attempt.getErrorCategory()),
+                    attempt.getErrorMessage());
+        }
+        return WebSearchPollExecutionOutcome.succeeded(
+                responseFromAttempt(attempt),
+                resultCode,
+                attemptCount,
+                persistedLatency(attempt, chainStarted));
+    }
+
+    private void finalizeAttempt(Long attemptId, boolean automaticChainFinalized, LocalDateTime finalizedAt) {
+        databaseWriteRetryService.run(
+                "Poll result projection",
+                () -> projectionService.finalizeAttempt(attemptId, automaticChainFinalized, finalizedAt));
+    }
+
+    private WebSearchResponse responseFromAttempt(PollInvocationAttempt attempt) {
+        return new WebSearchResponse(
+                null,
+                attempt.getRequestedModelId(),
+                attempt.getResponseModelId(),
+                attempt.getAnswer(),
+                parseSearchStatus(attempt.getSearchStatus()),
+                Boolean.TRUE.equals(attempt.getGenerationSkipped()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.Map.of(),
+                null);
+    }
+
+    private ResultCode parseResultCode(String value) {
+        try {
+            return value == null ? ResultCode.R0 : ResultCode.valueOf(value);
+        } catch (IllegalArgumentException ex) {
+            return ResultCode.R0;
+        }
+    }
+
+    private com.huanjing.geo.module.dispatch.websearch.enums.SearchStatus parseSearchStatus(String value) {
+        try {
+            return value == null
+                    ? com.huanjing.geo.module.dispatch.websearch.enums.SearchStatus.NOT_CONFIRMED
+                    : com.huanjing.geo.module.dispatch.websearch.enums.SearchStatus.valueOf(value);
+        } catch (IllegalArgumentException ex) {
+            return com.huanjing.geo.module.dispatch.websearch.enums.SearchStatus.NOT_CONFIRMED;
+        }
+    }
+
+    private ErrorCategory parseErrorCategory(String value) {
+        try {
+            return value == null ? ErrorCategory.INTERNAL_ERROR : ErrorCategory.valueOf(value);
+        } catch (IllegalArgumentException ex) {
+            return ErrorCategory.INTERNAL_ERROR;
+        }
+    }
+
+    private long persistedLatency(PollInvocationAttempt attempt, long chainStarted) {
+        return attempt.getLatencyMs() == null ? elapsed(chainStarted) : Math.max(1L, attempt.getLatencyMs());
     }
 
     private String provider(AiPlatformConfig platform, String providerConfig) {

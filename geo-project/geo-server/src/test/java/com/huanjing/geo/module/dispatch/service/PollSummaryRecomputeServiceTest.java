@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.dispatch.service;
 
+import com.huanjing.geo.module.retention.service.PollRetentionSliceLockService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -79,7 +80,8 @@ class PollSummaryRecomputeServiceTest {
         }).when(jdbcTemplate).query(anyString(), any(RowMapper.class), any(Object[].class));
 
         PollSummaryRecomputeService.SummaryVerification verification =
-                new PollSummaryRecomputeService(jdbcTemplate).verifySlice(200L, batchDate, "A");
+                new PollSummaryRecomputeService(jdbcTemplate, mock(PollRetentionSliceLockService.class))
+                        .verifySlice(200L, batchDate, "A");
 
         assertEquals(1, verification.sourceRowCount());
         assertEquals(1, verification.keywordSummarySourceRowCount());
@@ -163,7 +165,8 @@ class PollSummaryRecomputeServiceTest {
         }).when(jdbcTemplate).query(anyString(), any(RowMapper.class), any(), any(), any());
         when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
 
-        PollSummaryRecomputeService service = new PollSummaryRecomputeService(jdbcTemplate);
+        PollSummaryRecomputeService service = new PollSummaryRecomputeService(
+                jdbcTemplate, mock(PollRetentionSliceLockService.class));
         service.recomputeSlice(200L, batchDate, "A");
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);

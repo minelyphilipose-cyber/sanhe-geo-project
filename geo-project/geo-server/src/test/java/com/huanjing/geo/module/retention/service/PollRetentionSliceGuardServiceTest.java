@@ -21,22 +21,22 @@ class PollRetentionSliceGuardServiceTest {
     @Test
     void allowsWritesWhenSliceHasNotBeenPurged() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(10L);
         when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(0);
-        PollRetentionSliceGuardService service = new PollRetentionSliceGuardService(jdbcTemplate);
+        PollRetentionSliceLockService lockService = mock(PollRetentionSliceLockService.class);
+        PollRetentionSliceGuardService service = new PollRetentionSliceGuardService(jdbcTemplate, lockService);
 
         assertDoesNotThrow(() -> service.lockAndRequireWritable(
                 100L, LocalDate.of(2026, 1, 1), "a"));
 
-        verify(jdbcTemplate).update(anyString(), any(Object[].class));
+        verify(lockService).lockSlice(100L, LocalDate.of(2026, 1, 1), "A");
     }
 
     @Test
     void rejectsLateWritesAfterSliceWasPurged() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(10L);
         when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(1);
-        PollRetentionSliceGuardService service = new PollRetentionSliceGuardService(jdbcTemplate);
+        PollRetentionSliceGuardService service = new PollRetentionSliceGuardService(
+                jdbcTemplate, mock(PollRetentionSliceLockService.class));
 
         BizException error = assertThrows(BizException.class, () -> service.lockAndRequireWritable(
                 100L, LocalDate.of(2026, 1, 1), "A"));

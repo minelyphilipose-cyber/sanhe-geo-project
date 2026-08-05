@@ -109,6 +109,25 @@ class DispatchTaskStateServiceTest {
         verify(dispatchQueueService).clearQueueMark(44L);
     }
 
+    @Test
+    void databaseWaitDoesNotConsumeBusinessRetryOrCreateAlert() {
+        DispatchTask task = runningTask(45L, "{\"mode\":\"question-poll-shard\",\"shardId\":89}");
+        task.setRetryCount(2);
+        when(dispatchTaskMapper.selectById(45L)).thenReturn(task);
+        LocalDateTime nextRetryAt = LocalDateTime.now().plusSeconds(1);
+
+        service.markDatabaseWaiting(45L, 1, nextRetryAt, "database busy", "{}");
+
+        ArgumentCaptor<DispatchTask> captor = ArgumentCaptor.forClass(DispatchTask.class);
+        verify(dispatchTaskMapper).updateById(captor.capture());
+        assertEquals(2, captor.getValue().getRetryCount());
+        assertEquals(1, captor.getValue().getResourceWaitCount());
+        assertEquals(DispatchTaskStatus.RETRY_PENDING.value(), captor.getValue().getStatus());
+        assertEquals(nextRetryAt, captor.getValue().getNextRetryAt());
+        verify(dispatchQueueService).clearQueueMark(45L);
+        verify(dispatchAlertService, never()).createAlert(any(), any(), any(), any(), any(), any(), any());
+    }
+
     private static DispatchTask runningTask(Long id, String payloadJson) {
         DispatchTask task = new DispatchTask();
         task.setId(id);

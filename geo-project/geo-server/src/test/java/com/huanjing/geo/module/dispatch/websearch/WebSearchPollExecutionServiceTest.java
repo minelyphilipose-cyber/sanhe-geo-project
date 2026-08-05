@@ -2,6 +2,8 @@ package com.huanjing.geo.module.dispatch.websearch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.dispatch.entity.PollInvocationAttempt;
+import com.huanjing.geo.module.dispatch.mapper.PollInvocationAttemptMapper;
+import com.huanjing.geo.module.dispatch.service.PollDatabaseWriteRetryService;
 import com.huanjing.geo.module.dispatch.websearch.enums.ResultCode;
 import com.huanjing.geo.module.dispatch.websearch.enums.SearchStatus;
 import com.huanjing.geo.module.dispatch.websearch.enums.TriggerType;
@@ -11,6 +13,7 @@ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DeadlockLoserDataAccessException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,15 +25,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 class WebSearchPollExecutionServiceTest {
 
     private final PollAttemptCreationService creationService = mock(PollAttemptCreationService.class);
     private final AttemptLifecycleService lifecycleService = mock(AttemptLifecycleService.class);
     private final PollResultProjectionService projectionService = mock(PollResultProjectionService.class);
+    private final PollInvocationAttemptMapper attemptMapper = mock(PollInvocationAttemptMapper.class);
     private final WebSearchLlmGateway gateway = mock(WebSearchLlmGateway.class);
     private final WebSearchAttemptResultWriter resultWriter = mock(WebSearchAttemptResultWriter.class);
     private WebSearchPollExecutionService service;
@@ -38,7 +44,8 @@ class WebSearchPollExecutionServiceTest {
     @BeforeEach
     void setUp() {
         service = new WebSearchPollExecutionService(
-                creationService, lifecycleService, projectionService, gateway, resultWriter, new ObjectMapper());
+                creationService, lifecycleService, projectionService, attemptMapper,
+                new PollDatabaseWriteRetryService(), gateway, resultWriter, new ObjectMapper());
         AtomicLong ids = new AtomicLong(100);
         when(creationService.create(any(), any(), any(), any(Integer.class), any(), any()))
                 .thenAnswer(invocation -> {
@@ -104,6 +111,66 @@ class WebSearchPollExecutionServiceTest {
         verify(gateway).execute(request.capture());
         assertEquals("db://ai-platform-config/1",
                 request.getValue().profile().primaryCredentialRef());
+    }
+
+    @Test
+    void resumesPersistedProviderOutcomeWithoutCallingProviderAgain() {
+        PollInvocationAttempt persisted = new PollInvocationAttempt();
+        persisted.setId(88L);
+        persisted.setShardItemId(2L);
+        persisted.setTriggerType(TriggerType.SCHEDULED.name());
+        persisted.setStatus("SUCCEEDED");
+        persisted.setResultCode(ResultCode.R3.name());
+        persisted.setSearchStatus(SearchStatus.TRIGGERED.name());
+        persisted.setAnswer("已落库联网回答");
+        persisted.setRequestedModelId("model");
+        persisted.setResponseModelId("model");
+        persisted.setCompletedAt(LocalDateTime.now());
+        when(attemptMapper.selectLatestTerminalByShardItemId(2L)).thenReturn(persisted);
+
+        WebSearchPollExecutionOutcome outcome = service.execute(command());
+
+        assertTrue(outcome.success());
+        assertEquals("已落库联网回答", outcome.response().answer());
+        verify(projectionService).finalizeAttempt(any(), any(Boolean.class), any());
+        verify(gateway, never()).execute(any());
+        verify(creationService, never()).create(any(), any(), any(), any(Integer.class), any(), any());
+    }
+
+    @Test
+    void retriesProjectionInFreshServiceInvocationAfterDeadlock() {
+        when(gateway.execute(any())).thenReturn(response(SearchStatus.TRIGGERED, "联网回答"));
+        when(resultWriter.writeSuccess(any(), any(), any(), any())).thenReturn(ResultCode.R3);
+        doThrow(new DeadlockLoserDataAccessException("Deadlock found", null))
+                .doNothing()
+                .when(projectionService).finalizeAttempt(any(), any(Boolean.class), any());
+
+        WebSearchPollExecutionOutcome outcome = service.execute(command());
+
+        assertTrue(outcome.success());
+        verify(projectionService, times(2)).finalizeAttempt(any(), any(Boolean.class), any());
+        verify(gateway, times(1)).execute(any());
+    }
+
+    @Test
+    void retriesAttemptCreationBeforeCallingProvider() {
+        doThrow(new DeadlockLoserDataAccessException("Deadlock found", null))
+                .doAnswer(invocation -> {
+                    PollInvocationAttempt draft = invocation.getArgument(0);
+                    draft.setId(101L);
+                    draft.setRootAttemptId(101L);
+                    draft.setAttemptDeadlineAt(LocalDateTime.now().plusMinutes(2));
+                    return draft;
+                })
+                .when(creationService).create(any(), any(), any(), any(Integer.class), any(), any());
+        when(gateway.execute(any())).thenReturn(response(SearchStatus.TRIGGERED, "联网回答"));
+        when(resultWriter.writeSuccess(any(), any(), any(), any())).thenReturn(ResultCode.R3);
+
+        WebSearchPollExecutionOutcome outcome = service.execute(command());
+
+        assertTrue(outcome.success());
+        verify(creationService, times(2)).create(any(), any(), any(), any(Integer.class), any(), any());
+        verify(gateway, times(1)).execute(any());
     }
 
     private WebSearchPollCommand command() {

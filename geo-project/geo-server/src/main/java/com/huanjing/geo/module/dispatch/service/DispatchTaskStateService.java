@@ -147,6 +147,26 @@ public class DispatchTaskStateService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markDatabaseWaiting(Long taskId,
+                                    int nextResourceWaitCount,
+                                    LocalDateTime nextRetryAt,
+                                    String lastError,
+                                    String errorContext) {
+        DispatchTask task = dispatchTaskMapper.selectById(taskId);
+        if (task == null) {
+            dispatchQueueService.clearQueueMark(taskId);
+            return;
+        }
+        task.setLastError(lastError);
+        task.setErrorContext(errorContext);
+        task.setResourceWaitCount(nextResourceWaitCount);
+        task.setStatus(DispatchTaskStatus.RETRY_PENDING.value());
+        task.setNextRetryAt(nextRetryAt);
+        dispatchTaskMapper.updateById(task);
+        dispatchQueueService.clearQueueMark(taskId);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markDeadLetter(Long taskId,
                                String reason,
                                String errorContext,

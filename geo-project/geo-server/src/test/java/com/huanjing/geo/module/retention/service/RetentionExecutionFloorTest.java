@@ -69,6 +69,7 @@ class RetentionExecutionFloorTest {
         PollRetentionDryRunResponse poll = new PollRetentionDryRunService(
                 jdbcTemplate,
                 mock(TransactionTemplate.class),
+                mock(PollRetentionSliceLockService.class),
                 mock(CurrentUserService.class),
                 auditService,
                 mock(PollAuditPurgeService.class),
@@ -119,6 +120,7 @@ class RetentionExecutionFloorTest {
         PollRetentionDryRunResponse poll = new PollRetentionDryRunService(
                 jdbcTemplate,
                 mock(TransactionTemplate.class),
+                mock(PollRetentionSliceLockService.class),
                 mock(CurrentUserService.class),
                 auditService,
                 mock(PollAuditPurgeService.class),
@@ -153,6 +155,7 @@ class RetentionExecutionFloorTest {
         PollRetentionDryRunService pollPurge = new PollRetentionDryRunService(
                 jdbcTemplate,
                 mock(TransactionTemplate.class),
+                mock(PollRetentionSliceLockService.class),
                 mock(CurrentUserService.class),
                 auditService,
                 mock(PollAuditPurgeService.class),

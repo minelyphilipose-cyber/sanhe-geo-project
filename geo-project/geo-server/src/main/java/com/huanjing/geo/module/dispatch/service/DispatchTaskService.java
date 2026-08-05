@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -598,6 +599,34 @@ public class DispatchTaskService {
 
     private void handleFailure(DispatchTask task, Exception ex) {
         LocalDateTime now = LocalDateTime.now();
+        if (ex instanceof PollResultPersistenceBusyException) {
+            int nextResourceWaitCount = (task.getResourceWaitCount() == null ? 0 : task.getResourceWaitCount()) + 1;
+            if (nextResourceWaitCount > dispatchProperties.getResourceBusyMaxAttempts()) {
+                markDeadLetter(task, "poll result persistence remained busy after " + nextResourceWaitCount + " waits");
+                return;
+            }
+            long retryDelayMs = ThreadLocalRandom.current().nextLong(250L, 751L);
+            LocalDateTime nextRetryAt = now.plusNanos(retryDelayMs * 1_000_000L);
+            String lastError = trimError(ex.getMessage());
+            String errorContext = JSONUtil.toJsonStr(buildErrorContext(
+                    lastError,
+                    ex.getClass().getName(),
+                    task.getCurrentChannel(),
+                    task.getPlatformCode(),
+                    now
+            ));
+            dispatchTaskStateService.markDatabaseWaiting(
+                    task.getId(),
+                    nextResourceWaitCount,
+                    nextRetryAt,
+                    lastError,
+                    errorContext
+            );
+            enqueueIfNeeded(task, nextRetryAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
+            log.info("Task {} postponed briefly for poll result persistence, delayMs={}, waitCount={}",
+                    task.getId(), retryDelayMs, nextResourceWaitCount);
+            return;
+        }
         if (ex instanceof DispatchResourceBusyException resourceBusyException) {
             String lastError = trimError(ex.getMessage());
             LlmCapacityFailure capacityFailure = resolveCapacityFailure(resourceBusyException);

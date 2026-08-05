@@ -1,21 +1,18 @@
 package com.huanjing.geo.module.dispatch.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.dispatch.entity.PollBatchShard;
 import com.huanjing.geo.module.dispatch.entity.PollBatchShardItem;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
-import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
-import com.huanjing.geo.module.retention.service.PollRetentionSliceGuardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -25,23 +22,16 @@ public class DispatchPollShardPersistenceService {
     static final String SHARD_STATUS_RUNNING = "running";
     static final String SHARD_STATUS_COMPLETED = "completed";
     static final String SHARD_STATUS_FAILED = "failed";
-    static final String TRIGGER_TYPE_SCHEDULED = "SCHEDULED";
-
     private final PollBatchShardMapper pollBatchShardMapper;
     private final PollBatchShardItemMapper pollBatchShardItemMapper;
-    private final PollResultMapper pollResultMapper;
-    private final PollRetentionSliceGuardService retentionSliceGuardService;
+    private final PollResultPersistenceTransactionService resultPersistenceTransactionService;
+    private final PollDatabaseWriteRetryService databaseWriteRetryService;
+    private final ObjectMapper objectMapper;
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PollResult ensurePollResult(PollResult result) {
-        normalizeRequiredIdentity(result);
-        retentionSliceGuardService.lockAndRequireWritable(result);
-        PollResult existing = findPollResult(result);
-        if (existing != null) {
-            return existing;
-        }
-        pollResultMapper.insert(result);
-        return result;
+        return databaseWriteRetryService.execute(
+                "Poll result persistence",
+                () -> resultPersistenceTransactionService.ensurePollResult(result));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -62,55 +52,42 @@ public class DispatchPollShardPersistenceService {
         return shard;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PollResult upsertPollResultAndMarkItem(PollResult result, PollBatchShardItem item) {
-        normalizeRequiredIdentity(result);
-        retentionSliceGuardService.lockAndRequireWritable(result);
-        PollResult existing = findPollResult(result);
-        if (existing == null) {
-            pollResultMapper.insert(result);
-        } else {
-            result.setId(existing.getId());
-            pollResultMapper.updateById(result);
-        }
-
-        item.setPollResultId(result.getId());
-        item.setStatus("completed".equals(result.getStatus()) ? "completed" : "failed");
-        item.setLastError("completed".equals(result.getStatus()) ? null : trim(result.getDetailJson()));
-        pollBatchShardItemMapper.updateById(item);
-        return result;
+        return databaseWriteRetryService.execute(
+                "Poll result persistence",
+                () -> resultPersistenceTransactionService.upsertPollResultAndMarkItem(result, item));
     }
 
-    private PollResult findPollResult(PollResult result) {
-        LambdaQueryWrapper<PollResult> wrapper = new LambdaQueryWrapper<PollResult>()
-                .eq(PollResult::getProjectId, result.getProjectId())
-                .eq(PollResult::getPlatformId, result.getPlatformId())
-                .eq(PollResult::getBatchDate, result.getBatchDate())
-                .eq(PollResult::getBatchNo, result.getBatchNo())
-                .eq(PollResult::getQuestionTier, result.getQuestionTier());
-        if (result.getKeywordResultId() == null) {
-            wrapper.isNull(PollResult::getKeywordResultId)
-                    .eq(PollResult::getKeywordTextSnapshot, result.getKeywordTextSnapshot());
-        } else {
-            wrapper.eq(PollResult::getKeywordResultId, result.getKeywordResultId());
-        }
-        return pollResultMapper.selectOne(wrapper.last("LIMIT 1"));
+    public void stagePollResult(PollBatchShardItem item, PollResult result) {
+        String snapshotJson = writeSnapshot(result);
+        databaseWriteRetryService.run(
+                "Poll result staging",
+                () -> resultPersistenceTransactionService.stagePollResult(item, result, snapshotJson));
     }
 
-    private void normalizeRequiredIdentity(PollResult result) {
-        Objects.requireNonNull(result, "Poll result must not be null");
-        if (!StringUtils.hasText(result.getChannelCode())) {
-            if (!StringUtils.hasText(result.getPlatformCode())) {
-                throw new IllegalArgumentException("Poll result platformCode is required when channelCode is blank");
+    public PollResult readStagedPollResult(PollBatchShardItem item) {
+        if (item == null || item.getResultSnapshotJson() == null || item.getResultSnapshotJson().isBlank()) {
+            return null;
+        }
+        try {
+            PollResult result = objectMapper.readValue(item.getResultSnapshotJson(), PollResult.class);
+            if (item.getKeywordResultId() != null
+                    && !item.getKeywordResultId().equals(result.getKeywordResultId())) {
+                throw new IllegalStateException("Poll result snapshot keyword does not match shard item " + item.getId());
             }
-            result.setChannelCode(result.getPlatformCode().trim());
-        } else {
-            result.setChannelCode(result.getChannelCode().trim());
+            return result;
+        } catch (IllegalStateException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to read poll result snapshot for shard item " + item.getId(), ex);
         }
-        if (!StringUtils.hasText(result.getTriggerType())) {
-            result.setTriggerType(TRIGGER_TYPE_SCHEDULED);
-        } else {
-            result.setTriggerType(result.getTriggerType().trim());
+    }
+
+    private String writeSnapshot(PollResult result) {
+        try {
+            return objectMapper.writeValueAsString(result);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to serialize poll result snapshot", ex);
         }
     }
 

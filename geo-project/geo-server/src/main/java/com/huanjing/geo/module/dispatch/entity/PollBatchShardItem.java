@@ -19,6 +19,8 @@ public class PollBatchShardItem {
     private Integer sortOrder;
     private String status;
     private Long pollResultId;
+    private String resultSnapshotJson;
+    private LocalDateTime resultSnapshotAt;
     private String lastError;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

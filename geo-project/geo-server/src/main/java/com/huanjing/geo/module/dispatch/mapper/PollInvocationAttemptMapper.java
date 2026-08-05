@@ -79,4 +79,14 @@ public interface PollInvocationAttemptMapper extends BaseMapper<PollInvocationAt
               AND finalized_at IS NULL
             """)
     int markFinalized(@Param("id") Long id, @Param("finalizedAt") LocalDateTime finalizedAt);
+
+    @Select("""
+            SELECT *
+            FROM poll_invocation_attempts
+            WHERE shard_item_id = #{shardItemId}
+              AND status IN ('SUCCEEDED', 'FAILED', 'ABANDONED')
+            ORDER BY attempt_no DESC, id DESC
+            LIMIT 1
+            """)
+    PollInvocationAttempt selectLatestTerminalByShardItemId(@Param("shardItemId") Long shardItemId);
 }

@@ -25,8 +25,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -73,6 +76,37 @@ class DispatchTaskServiceReleaseTest {
         verify(dispatchExecutionService).execute(task);
         verify(dispatchTaskStateService).markCompleted(21L);
         verify(dispatchQueueService, never()).clearQueueMark(21L);
+    }
+
+    @Test
+    void databaseContentionRequeuesWithoutConsumingBusinessRetry() {
+        DispatchTask task = new DispatchTask();
+        task.setId(22L);
+        task.setProjectId(7L);
+        task.setTaskType(DispatchTaskType.QUESTION_POLL.name());
+        task.setStatus(DispatchTaskStatus.RUNNING.value());
+        task.setRetryCount(0);
+        task.setResourceWaitCount(0);
+        task.setPriorityLevel(1);
+        when(dispatchTaskMapper.selectById(22L)).thenReturn(task);
+        when(dispatchTaskStateService.markRunning(eq(22L), anyInt())).thenReturn(task);
+        doThrow(new PollResultPersistenceBusyException("database busy", null))
+                .when(dispatchExecutionService).execute(task);
+        doAnswer(invocation -> {
+            task.setStatus(DispatchTaskStatus.RETRY_PENDING.value());
+            task.setNextRetryAt(invocation.getArgument(2));
+            return null;
+        }).when(dispatchTaskStateService).markDatabaseWaiting(
+                eq(22L), eq(1), any(LocalDateTime.class), eq("database busy"), any(String.class));
+
+        service.processTask(22L);
+
+        verify(dispatchTaskStateService).markDatabaseWaiting(
+                eq(22L), eq(1), any(LocalDateTime.class), eq("database busy"), any(String.class));
+        verify(dispatchTaskStateService, never()).markRetryPending(
+                anyLong(), anyInt(), any(), any(), any(), any(), any(), any());
+        verify(dispatchQueueService).enqueueTask(eq(22L), eq(1), anyLong(), anyLong());
+        assertEquals(0, task.getRetryCount());
     }
 
     @Test

@@ -19,6 +19,7 @@ import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceLockService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
@@ -75,7 +76,8 @@ class DispatchQuestionPollPlanningServiceTest {
                 mock(AiPlatformConfigMapper.class),
                 new ObjectMapper(),
                 properties,
-                mock(ObjectProvider.class)
+                mock(ObjectProvider.class),
+                mock(PollRetentionSliceLockService.class)
         );
 
         assertEquals(20, service.resolveEffectiveShardSize());
@@ -207,7 +209,8 @@ class DispatchQuestionPollPlanningServiceTest {
                 platformMapper,
                 new ObjectMapper(),
                 properties,
-                provider
+                provider,
+                mock(PollRetentionSliceLockService.class)
         );
 
         Project project = new Project();
@@ -303,7 +306,8 @@ class DispatchQuestionPollPlanningServiceTest {
                 platformMapper,
                 new ObjectMapper(),
                 properties,
-                provider
+                provider,
+                mock(PollRetentionSliceLockService.class)
         );
         Project project = new Project();
         project.setId(1L);
@@ -344,7 +348,8 @@ class DispatchQuestionPollPlanningServiceTest {
                 mock(AiPlatformConfigMapper.class),
                 new ObjectMapper(),
                 properties,
-                mock(ObjectProvider.class)
+                mock(ObjectProvider.class),
+                mock(PollRetentionSliceLockService.class)
         );
     }
 

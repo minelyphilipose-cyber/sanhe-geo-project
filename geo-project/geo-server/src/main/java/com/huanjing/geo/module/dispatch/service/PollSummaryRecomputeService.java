@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.dispatch.service;
 
+import com.huanjing.geo.module.retention.service.PollRetentionSliceLockService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -38,6 +39,7 @@ public class PollSummaryRecomputeService {
     private static final String RECORD_SEPARATOR = "\u001E";
 
     private final JdbcTemplate jdbcTemplate;
+    private final PollRetentionSliceLockService sliceLockService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public RecomputeResult recomputeSlice(Long projectId, LocalDate batchDate, String questionTier) {
@@ -230,23 +232,7 @@ public class PollSummaryRecomputeService {
     }
 
     private void lockSliceForUpdate(Long projectId, LocalDate batchDate, String questionTier) {
-        jdbcTemplate.update("""
-                INSERT IGNORE INTO data_retention_recompute_slice_lock (
-                  domain, project_id, batch_date, question_tier
-                ) VALUES ('poll_results', ?, ?, ?)
-                """, projectId, Date.valueOf(batchDate), questionTier);
-        Long lockId = jdbcTemplate.queryForObject("""
-                SELECT id
-                  FROM data_retention_recompute_slice_lock
-                 WHERE domain = 'poll_results'
-                   AND project_id = ?
-                   AND batch_date = ?
-                   AND question_tier = ?
-                 FOR UPDATE
-                """, Long.class, projectId, Date.valueOf(batchDate), questionTier);
-        if (lockId == null) {
-            throw new IllegalStateException("Poll summary recompute slice lock row not found");
-        }
+        sliceLockService.lockSlice(projectId, batchDate, questionTier);
     }
 
     private List<PollSourceRow> loadSourceRows(Long projectId, LocalDate batchDate, String questionTier) {

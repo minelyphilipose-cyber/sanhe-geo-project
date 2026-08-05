@@ -224,7 +224,12 @@ public class DispatchExecutionService {
         try {
             for (int i = 0; i < items.size(); i++) {
                 PollBatchShardItem item = items.get(i);
-                if ("completed".equals(item.getStatus())) {
+                if (isTerminalPollItem(item)) {
+                    continue;
+                }
+                PollResult stagedResult = pollShardPersistenceService.readStagedPollResult(item);
+                if (stagedResult != null) {
+                    pollShardPersistenceService.upsertPollResultAndMarkItem(stagedResult, item);
                     continue;
                 }
                 int remainingItems = countRemainingPollItems(items, i);
@@ -272,10 +277,14 @@ public class DispatchExecutionService {
                 }
                 PollResult detail = buildPollResult(batch, task, project, platform, keyword, invokeResult,
                         projectNames, judgeBrandNames, brand, siteDomains, normalizedPhones, contactTerms);
+                pollShardPersistenceService.stagePollResult(item, detail);
                 pollShardPersistenceService.upsertPollResultAndMarkItem(detail, item);
             }
             pollShardPersistenceService.markShardCompleted(shardId);
             pollAggregationService.tryAggregateBatch(shard.getBatchId());
+        } catch (PollResultPersistenceBusyException ex) {
+            pollShardPersistenceService.markShardResourceWaiting(shardId, ex.getMessage());
+            throw ex;
         } catch (DispatchResourceBusyException ex) {
             pollShardPersistenceService.markShardResourceWaiting(shardId, ex.getMessage());
             throw ex;
@@ -290,11 +299,15 @@ public class DispatchExecutionService {
         int remaining = 0;
         for (int i = currentIndex; i < items.size(); i++) {
             PollBatchShardItem item = items.get(i);
-            if (!"completed".equals(item.getStatus())) {
+            if (!isTerminalPollItem(item)) {
                 remaining++;
             }
         }
         return Math.max(remaining, 1);
+    }
+
+    private boolean isTerminalPollItem(PollBatchShardItem item) {
+        return "completed".equals(item.getStatus()) || "failed".equals(item.getStatus());
     }
 
     private Integer resolveMonitoringRequestTimeoutMs(AiPlatformConfig platform,

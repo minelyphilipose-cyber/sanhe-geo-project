@@ -40,6 +40,7 @@ public class PollRetentionDryRunService {
 
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
+    private final PollRetentionSliceLockService sliceLockService;
     private final CurrentUserService currentUserService;
     private final DataRetentionRunAuditService auditService;
     private final PollAuditPurgeService pollAuditPurgeService;
@@ -685,23 +686,7 @@ public class PollRetentionDryRunService {
     }
 
     private void lockSliceForUpdate(Long projectId, LocalDate batchDate, String questionTier) {
-        jdbcTemplate.update("""
-                INSERT IGNORE INTO data_retention_recompute_slice_lock (
-                  domain, project_id, batch_date, question_tier
-                ) VALUES ('poll_results', ?, ?, ?)
-                """, projectId, Date.valueOf(batchDate), questionTier);
-        Long lockId = jdbcTemplate.queryForObject("""
-                SELECT id
-                  FROM data_retention_recompute_slice_lock
-                 WHERE domain = 'poll_results'
-                   AND project_id = ?
-                   AND batch_date = ?
-                   AND question_tier = ?
-                 FOR UPDATE
-                """, Long.class, projectId, Date.valueOf(batchDate), questionTier);
-        if (lockId == null) {
-            throw new IllegalStateException("Poll retention slice lock row not found");
-        }
+        sliceLockService.lockSlice(projectId, batchDate, questionTier);
     }
 
     private void summarize(PollRetentionDryRunResponse response) {

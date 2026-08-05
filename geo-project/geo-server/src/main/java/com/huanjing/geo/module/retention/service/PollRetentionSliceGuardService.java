@@ -14,6 +14,7 @@ import java.time.LocalDate;
 public class PollRetentionSliceGuardService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final PollRetentionSliceLockService sliceLockService;
 
     public void lockAndRequireWritable(PollResult result) {
         if (result == null) {
@@ -27,23 +28,7 @@ public class PollRetentionSliceGuardService {
             throw new IllegalArgumentException("poll retention slice identity is incomplete");
         }
         String normalizedTier = questionTier.trim().toUpperCase();
-        jdbcTemplate.update("""
-                INSERT IGNORE INTO data_retention_recompute_slice_lock (
-                  domain, project_id, batch_date, question_tier
-                ) VALUES ('poll_results', ?, ?, ?)
-                """, projectId, Date.valueOf(batchDate), normalizedTier);
-        Long lockId = jdbcTemplate.queryForObject("""
-                SELECT id
-                  FROM data_retention_recompute_slice_lock
-                 WHERE domain = 'poll_results'
-                   AND project_id = ?
-                   AND batch_date = ?
-                   AND question_tier = ?
-                 FOR UPDATE
-                """, Long.class, projectId, Date.valueOf(batchDate), normalizedTier);
-        if (lockId == null) {
-            throw new IllegalStateException("Poll retention slice lock row not found");
-        }
+        sliceLockService.lockSlice(projectId, batchDate, normalizedTier);
         Integer purged = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
                   FROM data_retention_purged_slice
