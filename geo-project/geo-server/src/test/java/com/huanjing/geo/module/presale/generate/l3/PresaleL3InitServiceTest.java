@@ -163,7 +163,7 @@ class PresaleL3InitServiceTest {
     }
 
     @Test
-    void derive_withNarrativeProfile_keepsFindingTiersAndTakeawaysSameOrderAndCount() throws Exception {
+    void derive_withNarrativeProfile_keepsTakeawaysNarrativeAndFindingIdsMergeable() throws Exception {
         NarrativeProfile profile = profile(List.of(
                 tier(NarrativeProfile.FindingSource.DERIVED, "RECO_ABSENT", "RECO_ABSENT",
                         NarrativeProfile.FindingTierLevel.T1, 1, Map.of("recommendation_rate", 12)),
@@ -172,28 +172,43 @@ class PresaleL3InitServiceTest {
                 tier(NarrativeProfile.FindingSource.DERIVED, "SENTIMENT_THIN", "SENTIMENT_THIN",
                         NarrativeProfile.FindingTierLevel.T2, 3, Map.of("neutral_share", 86))
         ), false, NarrativeProfile.Band.MIDDLE);
+        List<OptimizationFinding> findings = List.of(
+                OptimizationFinding.builder()
+                        .findingId("F001")
+                        .ruleCode(RuleCodes.RULE_PLATFORM_DEPTH_SHALLOW)
+                        .priority(OptimizationFinding.Priority.LOW)
+                        .category("平台扩展")
+                        .evidenceData(Map.of())
+                        .build(),
+                OptimizationFinding.builder()
+                        .findingId("F002")
+                        .ruleCode(RuleCodes.RULE_LONG_TAIL_SCENE_GAP)
+                        .priority(OptimizationFinding.Priority.LOW)
+                        .category("内容建设")
+                        .evidenceData(Map.of())
+                        .build()
+        );
 
-        String editableJson = service.derive(buildRawJson(), buildComputedJson(List.of(), profile));
+        String editableJson = service.derive(buildRawJson(), buildComputedJson(findings, profile));
         EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
 
         assertEquals(3, editable.getKeyTakeaways().size());
-        assertEquals(3, editable.getOptimizationFindingsContent().size());
-        assertEquals("NF001", editable.getOptimizationFindingsContent().get(0).getFindingId());
-        assertEquals("NF002", editable.getOptimizationFindingsContent().get(1).getFindingId());
-        assertEquals("NF003", editable.getOptimizationFindingsContent().get(2).getFindingId());
-        assertEquals(editable.getKeyTakeaways().get(0).getTitle(), editable.getOptimizationFindingsContent().get(0).getTitle());
+        assertEquals(2, editable.getOptimizationFindingsContent().size());
+        assertEquals("F001", editable.getOptimizationFindingsContent().get(0).getFindingId());
+        assertEquals("F002", editable.getOptimizationFindingsContent().get(1).getFindingId());
+        assertEquals("平台出现深度待补齐", editable.getOptimizationFindingsContent().get(0).getTitle());
+        assertEquals("长尾场景可持续补齐", editable.getOptimizationFindingsContent().get(1).getTitle());
         assertNotNull(editable.getHeatmapSummary());
         assertEquals("RECO_EMERGING", editable.getHeatmapSummary().getHeatmapPattern());
         assertEquals("推荐入口尚未被稳定打开", editable.getKeyTakeaways().get(0).getTitle());
         String text = narrativeText(editable);
         assertTrue(text.contains("患者"), text);
         assertTrue(text.contains("到诊"), text);
-        assertTrue(text.contains("高价值问题覆盖:8/22"), text);
         assertNoNarrativePlaceholder(editable);
     }
 
     @Test
-    void derive_deduplicatesRepeatedNarrativeFallbackCopies() throws Exception {
+    void derive_deduplicatesRepeatedNarrativeFallbackCopiesWithoutCreatingUnmatchedFindingContent() throws Exception {
         NarrativeProfile profile = profile(List.of(
                 tier(NarrativeProfile.FindingSource.DERIVED, "UNKNOWN_ALPHA", "UNKNOWN_ALPHA",
                         NarrativeProfile.FindingTierLevel.T1, 1, Map.of()),
@@ -208,10 +223,7 @@ class PresaleL3InitServiceTest {
 
         assertEquals(1, editable.getKeyTakeaways().size());
         assertEquals(Integer.valueOf(1), editable.getKeyTakeaways().get(0).getOrderNo());
-        assertEquals(3, editable.getOptimizationFindingsContent().size());
-        assertFalse(Boolean.TRUE.equals(editable.getOptimizationFindingsContent().get(0).getIsHidden()));
-        assertTrue(Boolean.TRUE.equals(editable.getOptimizationFindingsContent().get(1).getIsHidden()));
-        assertTrue(Boolean.TRUE.equals(editable.getOptimizationFindingsContent().get(2).getIsHidden()));
+        assertTrue(editable.getOptimizationFindingsContent().isEmpty());
     }
 
     @Test
@@ -324,11 +336,11 @@ class PresaleL3InitServiceTest {
 
         String text = narrativeText(editable);
         assertTrue(text.contains("运营配置的高价值补位标题"), text);
-        assertTrue(text.contains("8/22 个高价值问题"), text);
+        assertTrue(editable.getOptimizationFindingsContent().isEmpty());
     }
 
     @Test
-    void derive_platformBlindSlot_usesZeroMentionPlatformNames() throws Exception {
+    void derive_platformBlindNarrative_staysInKeyTakeawaysOnly() throws Exception {
         NarrativeProfile profile = profile(List.of(
                 tier(NarrativeProfile.FindingSource.DERIVED, "PLATFORM_BLIND", "PLATFORM_BLIND",
                         NarrativeProfile.FindingTierLevel.T2, 1, Map.of()),
@@ -341,8 +353,8 @@ class PresaleL3InitServiceTest {
         String editableJson = service.derive(buildRawJson(), buildComputedJson(List.of(), profile));
         EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
 
-        assertTrue(narrativeText(editable).contains("待强化平台:豆包、元宝"));
-        assertFalse(narrativeText(editable).contains("待强化平台:待补齐平台"));
+        assertEquals("部分平台仍是可见度盲区", editable.getKeyTakeaways().get(0).getTitle());
+        assertTrue(editable.getOptimizationFindingsContent().isEmpty());
     }
 
     @Test

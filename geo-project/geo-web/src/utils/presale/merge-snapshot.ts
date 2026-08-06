@@ -615,6 +615,30 @@ const FINDING_DISPLAY_TEMPLATES: Record<string, FindingDisplayTemplate> = {
     description:
       '推荐、问题和具体场景问题代表新顾客首次寻找服务机构的主要入口。当前三类场景整体出现率偏低,建议围绕新客常问问题建立内容矩阵,优先提升自然进入答案的概率。',
     evidence: '新顾客入口平均出现率 {{new_customer_avg_rate}}%'
+  },
+  RULE_PLATFORM_DEPTH_SHALLOW: {
+    title: '平台出现深度待补齐',
+    description:
+      '品牌已在部分推荐型高价值场景出现,但仍主要停留在少数平台。代表场景「{{scene_example}}」中,品牌仅在 {{target_platforms}}/{{evaluated_platforms}} 个平台出现。建议把已验证有效的内容资产同步到更多 AI 平台,让出现从点状覆盖变成更稳定的多平台基本盘。',
+    evidence: '浅覆盖场景 {{shallow_scene_count}}/{{hv_reco_total}}'
+  },
+  RULE_LONG_TAIL_SCENE_GAP: {
+    title: '长尾场景可持续补齐',
+    description:
+      '核心高价值入口之外,中低价值问题仍有 {{long_tail_gap}} 个未覆盖场景。这类问题通常不需要抢在第一阶段处理,但适合在后续运营中持续补齐,拓宽 AI 能回答品牌的场景范围。建议优先补真实服务介绍、常见问题解答和可验证案例,避免使用虚构评价或未经证实的承诺。',
+    evidence: '中价值缺口 {{mid_gap}}/{{mid_total}},低价值缺口 {{low_gap}}/{{low_total}}'
+  },
+  RULE_CONTENT_CONSISTENCY_CHECK: {
+    title: '品牌信息一致性建议检查',
+    description:
+      '品牌已在 {{covered_platform_count}}/{{total_platforms}} 个平台出现,但平台间提及率仍有 {{gap_pp}} 个百分点差异。这类轻量差异适合通过一致性检查处理:核对不同平台对服务项目、优势证据和本地信息的描述是否一致。建议以真实资质、真实案例和真实服务流程为基础,统一可被 AI 引用的内容材料。',
+    evidence: '最高 {{strong_mention_rate}}% / 最低 {{weak_mention_rate}}%(差距 {{gap_pp}} pp)'
+  },
+  RULE_PERIODIC_RETEST_MONITORING: {
+    title: '周期复测与变化预警',
+    description:
+      'AI 回答、竞品在场和平台收录会持续变化。订阅期可持续执行{{service_action}},跟踪{{monitoring_focus}}。这不是当前诊断出的缺陷,而是后续持续运营的交付价值:定期发现变化,及时调整内容与平台动作。',
+    evidence: '{{service_action}}: {{monitoring_focus}}'
   }
 };
 

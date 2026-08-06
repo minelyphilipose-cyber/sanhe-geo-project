@@ -82,9 +82,9 @@ public class PresaleL3InitService {
             List<KeyTakeaway> keyTakeaways = narrativeFindings == null
                     ? buildKeyTakeaways(computed)
                     : buildKeyTakeaways(narrativeFindings);
-            List<FindingContent> findingContents = narrativeFindings == null
-                    ? buildFindingContents(computed)
-                    : buildFindingContents(narrativeFindings);
+            // optimization_findings_content is the editable projection of L2 findings and must
+            // preserve their Fxxx IDs. Narrative NFxxx items belong to key_takeaways only.
+            List<FindingContent> findingContents = buildFindingContents(computed);
             editable.setKeyTakeaways(deduplicateKeyTakeaways(keyTakeaways));
             editable.setOptimizationFindingsContent(hideDuplicateFindingContents(findingContents));
             editable.setPhaseDescriptions(buildPhaseDescriptions(computed));
@@ -546,21 +546,6 @@ public class PresaleL3InitService {
                         "建议持续跟踪不同 AI 平台上的品牌出现和表达差异,避免单个平台波动影响整体判断。",
                         "平台表现待持续观察", 3)
         );
-    }
-
-    private List<FindingContent> buildFindingContents(List<RenderedNarrativeFinding> findings) {
-        List<FindingContent> out = new ArrayList<>();
-        for (RenderedNarrativeFinding finding : findings) {
-            out.add(FindingContent.builder()
-                    .findingId(finding.findingId())
-                    .title(finding.title())
-                    .description(finding.description())
-                    .evidenceText(finding.evidenceText())
-                    .sortOrder(finding.sortOrder())
-                    .isHidden(false)
-                    .build());
-        }
-        return out;
     }
 
     private List<FindingContent> buildFindingContents(ComputedSnapshotDTO computed) {
