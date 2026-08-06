@@ -20,6 +20,7 @@ import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
+import com.huanjing.geo.module.dispatch.websearch.enums.UsageScene;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -89,7 +90,7 @@ public class PresaleLlmPromptQuestionService {
         if (missingTotal > 0) {
             warnings.add("已生成 " + generated.size() + " 条，还差 " + missingTotal + " 条，请手动补齐或重新生成");
         }
-        LlmPromptQuestionGenerateVO response = buildResponse(req.getTotalCount(), targetCounts, generated, missingAfter, warnings);
+        LlmPromptQuestionGenerateVO response = buildResponse(req.getTotalCount(), targetCounts, generated, missingAfter, warnings, req);
         log.info("LLM question generation completed, requestedTotal={}, generatedTotal={}, missingTotal={}, costMs={}",
                 req.getTotalCount(), generated.size(), missingTotal, System.currentTimeMillis() - startedAt);
         return response;
@@ -168,7 +169,6 @@ public class PresaleLlmPromptQuestionService {
         }
         Map<PresalePromptCategoryCode, Integer> acceptedCounts = new EnumMap<>(PresalePromptCategoryCode.class);
         List<LlmPromptQuestionDraftRequest> accepted = new ArrayList<>();
-        Set<String> generatedKeys = new LinkedHashSet<>();
         for (LlmPromptQuestionDraftRequest item : parsed) {
             if (item == null || item.getCategoryCode() == null) {
                 continue;
@@ -178,27 +178,13 @@ public class PresaleLlmPromptQuestionService {
                 continue;
             }
             item.setPromptContent(validator.normalizeQuestionText(item.getPromptContent()));
-            if (isProblemQuestionWithTargetBrand(item, req.getBrandName())) {
-                continue;
-            }
             if (!validator.validateQuestionOnly(item).isEmpty()) {
-                continue;
-            }
-            String key = validator.dedupKey(item.getCategoryCode(), item.getPromptContent());
-            if (existingKeys.contains(key) || !generatedKeys.add(key)) {
                 continue;
             }
             accepted.add(item);
             acceptedCounts.merge(item.getCategoryCode(), 1, Integer::sum);
         }
         return accepted;
-    }
-
-    private boolean isProblemQuestionWithTargetBrand(LlmPromptQuestionDraftRequest item, String brandName) {
-        return item.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
-                && StringUtils.hasText(brandName)
-                && StringUtils.hasText(item.getPromptContent())
-                && item.getPromptContent().contains(brandName.trim());
     }
 
     private String invokeOnce(String userPrompt) throws Exception {
@@ -268,10 +254,16 @@ public class PresaleLlmPromptQuestionService {
         List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(
                 new LambdaQueryWrapper<AiPlatformConfig>()
                         .eq(AiPlatformConfig::getEnabled, true)
-                        .eq(AiPlatformConfig::getEnabledForPresale, true)
+                        .eq(AiPlatformConfig::getEnabledForPresaleQuestionGeneration, true)
+                        .eq(AiPlatformConfig::getUsageScene, UsageScene.STANDARD_CHAT.name())
+                        .eq(AiPlatformConfig::getDegraded, false)
+                        .and(wrapper -> wrapper.isNull(AiPlatformConfig::getCurrentHealthStatus)
+                                .or().ne(AiPlatformConfig::getCurrentHealthStatus, "high_failure"))
                         .isNotNull(AiPlatformConfig::getLowModelId)
                         .apply("TRIM(low_model_id) <> ''")
+                        .orderByAsc(AiPlatformConfig::getPriorityLevel)
                         .orderByAsc(AiPlatformConfig::getPlatformCode)
+                        .last("LIMIT 2")
         );
         if (configs == null || configs.isEmpty()) {
             throw new BizException(400, "LLM 问题生成失败，请检查 AI 平台配置");
@@ -298,6 +290,7 @@ public class PresaleLlmPromptQuestionService {
                 safe(req.getBrandName()),
                 safe(req.getIndustry()),
                 safe(req.getIndustryRole()),
+                formatRepresentedBrands(req.getRepresentedBrands()),
                 safe(req.getRegion()),
                 safe(req.getUserType()),
                 safe(req.getUserDemand()),
@@ -346,6 +339,14 @@ public class PresaleLlmPromptQuestionService {
         return String.join("\n", lines);
     }
 
+    private String formatRepresentedBrands(List<String> representedBrands) {
+        if (representedBrands == null || representedBrands.isEmpty()) {
+            return "无";
+        }
+        return representedBrands.stream().filter(StringUtils::hasText).map(String::trim).distinct()
+                .reduce((left, right) -> left + "、" + right).orElse("无");
+    }
+
     private List<LlmPromptQuestionDraftRequest> parseQuestions(String rawText) {
         String text = stripMarkdownCodeFence(rawText);
         try {
@@ -381,6 +382,15 @@ public class PresaleLlmPromptQuestionService {
                                                       List<LlmPromptQuestionDraftRequest> generated,
                                                       Map<PresalePromptCategoryCode, Integer> missingCounts,
                                                       List<String> warnings) {
+        return buildResponse(requestedTotal, requestedCounts, generated, missingCounts, warnings, null);
+    }
+
+    private LlmPromptQuestionGenerateVO buildResponse(Integer requestedTotal,
+                                                      Map<PresalePromptCategoryCode, Integer> requestedCounts,
+                                                      List<LlmPromptQuestionDraftRequest> generated,
+                                                      Map<PresalePromptCategoryCode, Integer> missingCounts,
+                                                      List<String> warnings,
+                                                      LlmPromptQuestionGenerateRequest req) {
         LlmPromptQuestionGenerateVO vo = new LlmPromptQuestionGenerateVO();
         vo.setRequestedTotal(requestedTotal);
         vo.setGeneratedTotal(generated.size());
@@ -388,17 +398,26 @@ public class PresaleLlmPromptQuestionService {
         vo.setRequestedCategoryCounts(requestedCounts);
         vo.setGeneratedCategoryCounts(countByCategory(generated));
         vo.setMissingCategoryCounts(missingCounts);
-        vo.setQuestions(generated.stream().map(this::toVO).toList());
+        vo.setQuestions(generated.stream().map(item -> toVO(item, req)).toList());
         vo.setWarnings(warnings);
         return vo;
     }
 
-    private LlmPromptQuestionDraftVO toVO(LlmPromptQuestionDraftRequest item) {
+    private LlmPromptQuestionDraftVO toVO(LlmPromptQuestionDraftRequest item, LlmPromptQuestionGenerateRequest req) {
         LlmPromptQuestionDraftVO vo = new LlmPromptQuestionDraftVO();
         vo.setCategoryCode(item.getCategoryCode());
         vo.setCategoryLabel(item.getCategoryCode().getDisplayName());
         vo.setPromptContent(item.getPromptContent());
         vo.setHasCompetitorVar(item.getPromptContent().contains("{competitor}"));
+        if (req != null) {
+            LlmPromptQuestionDraftValidator.QuestionQuality quality = validator.validateQuality(0, item,
+                    req.getBrandName(), req.getRegion(), req.getRepresentedBrands());
+            vo.setQualityErrors(quality.errors().stream().map(LlmPromptQuestionDraftValidator.ValidationError::message).toList());
+            vo.setQualityWarnings(quality.warnings());
+        } else {
+            vo.setQualityErrors(List.of());
+            vo.setQualityWarnings(List.of());
+        }
         return vo;
     }
 

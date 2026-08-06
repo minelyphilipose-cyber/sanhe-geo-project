@@ -96,6 +96,7 @@ public class AiPlatformConfigService {
                 req.getConcurrencyLimit(),
                 req.getEnabled(),
                 req.getEnabledForPresale(),
+                req.getEnabledForPresaleQuestionGeneration(),
                 req.getPresaleEvaluateEnabled(),
                 req.getEnabledForGeoQuestion(),
                 req.getEnabledForQuestionPoll(),
@@ -164,6 +165,7 @@ public class AiPlatformConfigService {
                 req.getConcurrencyLimit(),
                 req.getEnabled(),
                 req.getEnabledForPresale(),
+                req.getEnabledForPresaleQuestionGeneration(),
                 req.getPresaleEvaluateEnabled(),
                 req.getEnabledForGeoQuestion(),
                 req.getEnabledForQuestionPoll(),
@@ -301,6 +303,7 @@ public class AiPlatformConfigService {
             Integer concurrencyLimit,
             Boolean enabled,
             Boolean enabledForPresale,
+            Boolean enabledForPresaleQuestionGeneration,
             Boolean presaleEvaluateEnabled,
             Boolean enabledForGeoQuestion,
             Boolean enabledForQuestionPoll,
@@ -362,6 +365,14 @@ public class AiPlatformConfigService {
         if (Boolean.TRUE.equals(enabledForGeoQuestion)) {
             if (!Boolean.TRUE.equals(enabled)) {
                 throw new BizException(400, "platform must be enabled when enabling GEO question generation");
+            }
+        }
+        if (Boolean.TRUE.equals(enabledForPresaleQuestionGeneration)) {
+            if (scene != UsageScene.STANDARD_CHAT) {
+                throw new BizException(400, "presale question generation requires usage_scene=STANDARD_CHAT");
+            }
+            if (!Boolean.TRUE.equals(enabled) || !StringUtils.hasText(lowModelId)) {
+                throw new BizException(400, "enabled platform and low_model_id are required for presale question generation");
             }
         }
         if (Boolean.TRUE.equals(enabledForQuestionPoll) && !Boolean.TRUE.equals(enabled)) {
@@ -538,6 +549,7 @@ public class AiPlatformConfigService {
         entity.setConcurrencyLimit(req.getConcurrencyLimit() != null ? req.getConcurrencyLimit() : 1);
         entity.setEnabled(req.getEnabled());
         entity.setEnabledForPresale(req.getEnabledForPresale() != null ? req.getEnabledForPresale() : true);
+        entity.setEnabledForPresaleQuestionGeneration(Boolean.TRUE.equals(req.getEnabledForPresaleQuestionGeneration()));
         entity.setPresaleEvaluateEnabled(Boolean.TRUE.equals(req.getPresaleEvaluateEnabled()));
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : false);
         entity.setEnabledForGeoQuestion(Boolean.TRUE.equals(req.getEnabledForGeoQuestion()));
@@ -591,6 +603,8 @@ public class AiPlatformConfigService {
         entity.setConcurrencyLimit(req.getConcurrencyLimit() != null ? req.getConcurrencyLimit() : entity.getConcurrencyLimit());
         entity.setEnabled(req.getEnabled());
         entity.setEnabledForPresale(req.getEnabledForPresale() != null ? req.getEnabledForPresale() : entity.getEnabledForPresale());
+        entity.setEnabledForPresaleQuestionGeneration(req.getEnabledForPresaleQuestionGeneration() != null
+                ? req.getEnabledForPresaleQuestionGeneration() : entity.getEnabledForPresaleQuestionGeneration());
         entity.setPresaleEvaluateEnabled(Boolean.TRUE.equals(req.getPresaleEvaluateEnabled()));
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : entity.getEnabledForArticle());
         entity.setEnabledForGeoQuestion(req.getEnabledForGeoQuestion() != null ? req.getEnabledForGeoQuestion() : entity.getEnabledForGeoQuestion());
@@ -630,6 +644,7 @@ public class AiPlatformConfigService {
         snapshot.put("concurrencyLimit", entity.getConcurrencyLimit());
         snapshot.put("enabled", entity.getEnabled());
         snapshot.put("enabledForPresale", entity.getEnabledForPresale());
+        snapshot.put("enabledForPresaleQuestionGeneration", entity.getEnabledForPresaleQuestionGeneration());
         snapshot.put("presaleEvaluateEnabled", entity.getPresaleEvaluateEnabled());
         snapshot.put("enabledForArticle", entity.getEnabledForArticle());
         snapshot.put("enabledForGeoQuestion", entity.getEnabledForGeoQuestion());

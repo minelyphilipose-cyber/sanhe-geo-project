@@ -33,9 +33,10 @@ public final class AnalyzePromptTemplates {
             2) top_keywords[].keyword 必须是非空短词/短语。
             3) top_keywords[].sentiment 只能是 POSITIVE/NEUTRAL/NEGATIVE。
             4) negative_evidence.has_negative=false 时,negative_evidence.snippet 必须为 null。
-            5) 客户行业和客户身份只用于理解与消歧,不能代替目标品牌的实际提及证据。
-            6) 代理品牌是客户代理/经销的上游品牌,不是目标品牌,也不是竞品。
-            7) 若回答仅提到代理品牌,却未提到目标品牌或客户主体,则 is_mentioned 必须为 false；代理品牌也不得写入 mentioned_competitors。
+            5) is_mentioned 表示回答是否正向提及了与原始问题意图相匹配的客户业务主体，不新增其他提及指标。
+            6) 普通客户：客户品牌/主体被正向提及或推荐才可为 true。
+            7) 若客户为代理商/经销商且存在代理品牌：品牌、产品、方案、选购类问题中，代理品牌被正向推荐即可为 true；客户主体作为该品牌有效渠道被推荐也可为 true。本地服务、渠道、门店、交付类问题中，必须推荐客户主体；仅提及代理品牌必须为 false。
+            8) 代理品牌不是竞品，不得写入 mentioned_competitors；无关品牌或不符合原始问题意图的提及不得算作 true。
             """;
 
     public static final String USER_TEMPLATE = """

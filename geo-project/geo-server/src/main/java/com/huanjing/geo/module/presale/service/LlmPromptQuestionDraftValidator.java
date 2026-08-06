@@ -78,6 +78,53 @@ public class LlmPromptQuestionDraftValidator {
         return snapshots;
     }
 
+    public List<PresaleReportVersionPromptTemplate> validateAndBuildSnapshots(
+            LlmPromptQuestionPlanRequest plan,
+            List<LlmPromptQuestionDraftRequest> questions,
+            Long reportId,
+            Long reportVersionId,
+            LocalDateTime createdAt,
+            String brandName,
+            String region,
+            List<String> representedBrands) {
+        List<ValidationError> errors = validate(plan, questions, brandName, region, representedBrands);
+        if (!errors.isEmpty()) {
+            throw new BizException(400, "LLM prompt question validation failed", 200, Map.of("errors", errors));
+        }
+        return buildSnapshots(questions, reportId, reportVersionId, createdAt);
+    }
+
+    private List<PresaleReportVersionPromptTemplate> buildSnapshots(
+            List<LlmPromptQuestionDraftRequest> questions,
+            Long reportId,
+            Long reportVersionId,
+            LocalDateTime createdAt) {
+        Map<PresalePromptCategoryCode, Integer> seqByCategory = new EnumMap<>(PresalePromptCategoryCode.class);
+        List<PresaleReportVersionPromptTemplate> snapshots = new ArrayList<>();
+        for (int i = 0; i < questions.size(); i++) {
+            LlmPromptQuestionDraftRequest question = questions.get(i);
+            PresalePromptCategoryCode category = question.getCategoryCode();
+            int seq = seqByCategory.merge(category, 1, Integer::sum);
+            PresaleReportVersionPromptTemplate row = new PresaleReportVersionPromptTemplate();
+            row.setReportId(reportId);
+            row.setReportVersionId(reportVersionId);
+            row.setSourceTemplateId(null);
+            row.setSourcePromptCode(buildSourcePromptCode(category, seq));
+            row.setSourceTemplateVersion("llm_generated");
+            row.setSourceType("llm");
+            row.setCategory(category.getDisplayName());
+            row.setBusinessValue(category.getDefaultBusinessValue());
+            row.setPromptContent(question.getPromptContent().trim());
+            row.setHasCompetitorVar(question.getPromptContent().contains(COMPETITOR_VAR) ? 1 : 0);
+            row.setSortOrderInVersion(i + 1);
+            row.setRemark(null);
+            row.setIsUserAdded(0);
+            row.setCreatedAt(createdAt);
+            snapshots.add(row);
+        }
+        return snapshots;
+    }
+
     public List<ValidationError> validate(LlmPromptQuestionPlanRequest plan,
                                           List<LlmPromptQuestionDraftRequest> questions) {
         List<ValidationError> errors = new ArrayList<>();
@@ -133,6 +180,79 @@ public class LlmPromptQuestionDraftValidator {
             }
         }
         return errors;
+    }
+
+    public List<ValidationError> validate(LlmPromptQuestionPlanRequest plan,
+                                          List<LlmPromptQuestionDraftRequest> questions,
+                                          String brandName,
+                                          String region,
+                                          List<String> representedBrands) {
+        List<ValidationError> errors = validate(plan, questions);
+        if (questions == null) {
+            return errors;
+        }
+        for (int i = 0; i < questions.size(); i++) {
+            errors.addAll(validateQuality(i, questions.get(i), brandName, region, representedBrands).errors());
+        }
+        return errors;
+    }
+
+    public QuestionQuality validateQuality(int index,
+                                           LlmPromptQuestionDraftRequest question,
+                                           String brandName,
+                                           String region,
+                                           List<String> representedBrands) {
+        List<ValidationError> errors = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        if (question == null || question.getCategoryCode() == null || !StringUtils.hasText(question.getPromptContent())) {
+            return new QuestionQuality(errors, warnings);
+        }
+        String content = normalizeQuestionText(question.getPromptContent());
+        int actualLength = content.length() - (question.getCategoryCode() == PresalePromptCategoryCode.COMPARISON
+                ? Math.max(0, COMPETITOR_VAR.length() - 4) : 0);
+        int maxLength = question.getCategoryCode() == PresalePromptCategoryCode.SCENARIO ? 30 : 25;
+        if (actualLength > maxLength) {
+            errors.add(new ValidationError(index, "promptContent", question.getCategoryCode().getDisplayName()
+                    + "问题最多 " + maxLength + " 字，当前 " + actualLength + " 字"));
+        }
+        if (StringUtils.hasText(region) && !containsRegion(content, region)) {
+            errors.add(new ValidationError(index, "promptContent", "问题必须包含明确地域：" + region.trim()));
+        }
+        if (question.getCategoryCode() != PresalePromptCategoryCode.COGNITIVE
+                && question.getCategoryCode() != PresalePromptCategoryCode.COMPARISON) {
+            List<String> forbidden = new ArrayList<>();
+            if (StringUtils.hasText(brandName)) forbidden.add(brandName.trim());
+            if (representedBrands != null) {
+                representedBrands.stream().filter(StringUtils::hasText).map(String::trim).forEach(forbidden::add);
+            }
+            for (String name : forbidden) {
+                if (content.contains(name)) {
+                    errors.add(new ValidationError(index, "promptContent", "该类型问题不能直接出现品牌：" + name));
+                    break;
+                }
+            }
+        }
+        if (!content.endsWith("？") && !content.endsWith("?")) {
+            warnings.add("建议使用自然问句并以问号结尾");
+        }
+        if (question.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
+                && !containsProblemDecisionCue(content)) {
+            warnings.add("问题型建议在顾虑后追问品牌、服务商或更稳妥的选择，避免只得到泛建议");
+        }
+        return new QuestionQuality(errors, warnings);
+    }
+
+    private boolean containsProblemDecisionCue(String content) {
+        return content.contains("哪家") || content.contains("哪些品牌") || content.contains("选什么")
+                || content.contains("怎么选") || content.contains("更稳妥") || content.contains("推荐");
+    }
+
+    private boolean containsRegion(String content, String region) {
+        String normalized = region.replaceAll("\\s+", "").trim();
+        if (content.contains(normalized)) return true;
+        String simplified = normalized.replace("省", "").replace("市", "").replace("自治区", "")
+                .replace("特别行政区", "");
+        return simplified.length() >= 2 && content.contains(simplified);
     }
 
     public List<LlmPromptQuestionDraftRequest> normalizeExistingQuestions(List<LlmPromptQuestionDraftRequest> input) {
@@ -257,5 +377,8 @@ public class LlmPromptQuestionDraftValidator {
     }
 
     public record ValidationError(Integer index, String field, String message) {
+    }
+
+    public record QuestionQuality(List<ValidationError> errors, List<String> warnings) {
     }
 }

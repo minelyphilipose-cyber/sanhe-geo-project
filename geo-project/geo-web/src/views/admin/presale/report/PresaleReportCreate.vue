@@ -480,6 +480,9 @@
                         <el-tag v-if="llmQuestionError(item)" size="small" type="danger">
                           {{ llmQuestionError(item) }}
                         </el-tag>
+                        <el-tag v-else-if="llmQuestionWarning(item)" size="small" type="warning">
+                          {{ llmQuestionWarning(item) }}
+                        </el-tag>
                       </div>
                       <div class="prompt-actions">
                         <el-button size="small" text type="danger" @click="removeLlmQuestion(item.id)">删除</el-button>
@@ -1254,6 +1257,7 @@ function currentBaseSnapshot() {
     brandName: form.brandName.trim(),
     industry: form.industry,
     industryRole: form.industryRole,
+    representedBrands: normalizeRepresentedBrandInputs(form.representedBrands),
     region: form.region.trim(),
     userType: form.userType?.trim() || '',
     userDemand: form.userDemand?.trim() || ''
@@ -1372,7 +1376,9 @@ function validateTemplateSubmit(showMessage: boolean) {
 function llmQuestionError(item: LlmPromptQuestionDraft) {
   const content = item.promptContent.trim()
   if (!content) return '内容不能为空'
-  if (content.length > 1000) return '内容最多 1000 字'
+  const effectiveLength = content.length - (item.categoryCode === 'COMPARISON' ? Math.max(0, '{competitor}'.length - 4) : 0)
+  const maxLength = item.categoryCode === 'SCENARIO' ? 30 : 25
+  if (effectiveLength > maxLength) return `最多 ${maxLength} 字，当前 ${effectiveLength} 字`
   if (item.categoryCode === 'COMPARISON' && !content.includes('{competitor}')) {
     return '必须包含 {competitor}'
   }
@@ -1384,7 +1390,26 @@ function llmQuestionError(item: LlmPromptQuestionDraft) {
   if ((content.includes('{') || content.includes('}')) && extractVariables(content).length === 0) {
     return '不能包含花括号'
   }
+  if (!containsConfiguredRegion(content)) return `必须包含地域：${form.region.trim()}`
+  if (!['COGNITIVE', 'COMPARISON'].includes(item.categoryCode)) {
+    const forbidden = [form.brandName.trim(), ...normalizeRepresentedBrandInputs(form.representedBrands)].filter(Boolean)
+    const matched = forbidden.find((name) => content.includes(name))
+    if (matched) return `不能直接出现品牌：${matched}`
+  }
   return ''
+}
+
+function llmQuestionWarning(item: LlmPromptQuestionDraft) {
+  const content = item.promptContent.trim()
+  return content && !/[？?]$/.test(content) ? '建议使用自然问句并以问号结尾' : ''
+}
+
+function containsConfiguredRegion(content: string) {
+  const region = form.region.trim().replace(/\s+/g, '')
+  if (!region) return true
+  if (content.includes(region)) return true
+  const concise = region.split('特别行政区').join('').split('自治区').join('').split('省').join('').split('市').join('')
+  return concise.length >= 2 && content.includes(concise)
 }
 
 function extractVariables(content: string) {
@@ -1425,6 +1450,7 @@ async function generateLlmQuestions(reset: boolean) {
       brandName: form.brandName.trim(),
       industry: form.industry,
       industryRole: form.industryRole,
+      representedBrands: representedBrandsForSubmit(),
       region: form.region.trim(),
       userType: form.userType?.trim() || undefined,
       userDemand: form.userDemand?.trim() || undefined,

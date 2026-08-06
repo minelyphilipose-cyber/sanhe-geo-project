@@ -110,7 +110,7 @@ class PresaleLlmPromptQuestionServiceTest {
     }
 
     @Test
-    void generate_filtersProblemQuestionsThatMentionTargetBrand() throws Exception {
+    void generate_keepsProblemQuestionsThatMentionTargetBrandAndReturnsQualityErrors() throws Exception {
         AiPlatformConfig platform = platform("aaa", "http://first.example/v1");
         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(platform));
         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
@@ -129,15 +129,32 @@ class PresaleLlmPromptQuestionServiceTest {
         LlmPromptQuestionGenerateVO result = service.generate(problemRequest());
 
         assertEquals(5, result.getGeneratedTotal());
-        assertFalse(result.getQuestions().stream()
-                .anyMatch(q -> q.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
-                        && q.getPromptContent().contains("广州诗帝尼门窗有限公司")));
         assertTrue(result.getQuestions().stream()
                 .anyMatch(q -> q.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
-                        && q.getPromptContent().equals("广州装修选门窗时售后和安装怎么避坑?")));
+                        && q.getPromptContent().contains("广州诗帝尼门窗有限公司")
+                        && q.getQualityErrors().stream().anyMatch(error -> error.contains("不能直接出现品牌"))));
         ArgumentCaptor<LlmCallRequest> promptCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
         verify(llmCallFacade).execute(promptCaptor.capture());
-        assertTrue(promptCaptor.getValue().prompt().contains("PROBLEM 问题型禁止直接提及基础信息中的品牌名称"));
+        assertTrue(promptCaptor.getValue().prompt().contains("问题型禁止出现客户品牌和代理品牌"));
+    }
+
+    @Test
+    void generationPromptRequiresRecommendationAndScenarioToUseIndustryInsteadOfBrand() throws Exception {
+        AiPlatformConfig platform = platform("aaa", "http://first.example/v1");
+        when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(platform));
+        when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
+        when(llmCallFacade.execute(any(LlmCallRequest.class))).thenReturn(LlmCallResult.direct(result("[]", "aaa")));
+
+        try {
+            service.generate(request());
+        } catch (BizException ignored) {
+            // 空结果会产生数量不足提示；本用例只校验提交给模型的规则。
+        }
+
+        ArgumentCaptor<LlmCallRequest> promptCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
+        verify(llmCallFacade).execute(promptCaptor.capture());
+        assertTrue(promptCaptor.getValue().prompt().contains("推荐型和场景型必须以行业、品类或用户需求为主体"));
+        assertTrue(promptCaptor.getValue().prompt().contains("不得出现任何具体品牌名"));
     }
 
     private static LlmPromptQuestionGenerateRequest request() {

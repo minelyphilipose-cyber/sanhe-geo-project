@@ -35,6 +35,7 @@ export function createPlatformConfig(data: {
   concurrencyLimit?: number
   enabled: boolean
   enabledForPresale?: boolean
+  enabledForPresaleQuestionGeneration?: boolean
   presaleEvaluateEnabled?: boolean
   enabledForArticle?: boolean
   enabledForGeoQuestion?: boolean
@@ -76,6 +77,7 @@ export function updatePlatformConfig(id: number, data: {
   concurrencyLimit?: number
   enabled: boolean
   enabledForPresale?: boolean
+  enabledForPresaleQuestionGeneration?: boolean
   presaleEvaluateEnabled?: boolean
   enabledForArticle?: boolean
   enabledForGeoQuestion?: boolean

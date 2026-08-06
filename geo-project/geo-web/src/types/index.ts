@@ -494,6 +494,7 @@ export interface AIPlatformConfigItem {
   concurrencyLimit?: number | null
   enabled: boolean
   enabledForPresale?: boolean
+  enabledForPresaleQuestionGeneration?: boolean
   presaleEvaluateEnabled?: boolean
   enabledForArticle?: boolean
   enabledForGeoQuestion?: boolean

@@ -14,11 +14,36 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class LlmPromptQuestionDraftValidatorTest {
 
     private final LlmPromptQuestionDraftValidator validator = new LlmPromptQuestionDraftValidator();
+
+    @Test
+    void qualityValidationRequiresRegionAndRejectsBrandOutsideCognitiveAndComparison() {
+        LlmPromptQuestionDraftRequest question = question(PresalePromptCategoryCode.RECOMMENDATION,
+                "阜阳宝马哪家值得推荐？");
+
+        LlmPromptQuestionDraftValidator.QuestionQuality quality = validator.validateQuality(
+                0, question, "宝马", "安徽阜阳", List.of("BMW"));
+
+        assertEquals(2, quality.errors().size());
+        assertTrue(quality.errors().stream().anyMatch(error -> error.message().contains("问题必须包含明确地域：安徽阜阳")));
+        assertTrue(quality.errors().stream().anyMatch(error -> error.message().contains("该类型问题不能直接出现品牌：宝马")));
+    }
+
+    @Test
+    void qualityValidationWarnsWhenProblemQuestionOnlyAsksForGenericRiskAdvice() {
+        LlmPromptQuestionDraftRequest question = question(PresalePromptCategoryCode.PROBLEM,
+                "亳州买车会不会遇到质量问题？");
+
+        LlmPromptQuestionDraftValidator.QuestionQuality quality = validator.validateQuality(
+                0, question, "某门店", "亳州", List.of("大众"));
+
+        assertTrue(quality.warnings().stream().anyMatch(warning -> warning.contains("避免只得到泛建议")));
+    }
 
     @Test
     void validate_rejectsComparisonWithoutCompetitorAndNonComparisonWithCompetitor() {

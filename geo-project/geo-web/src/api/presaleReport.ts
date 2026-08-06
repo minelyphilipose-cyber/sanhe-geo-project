@@ -163,6 +163,7 @@ export interface LlmPromptQuestionGenerateRequest {
   brandName: string
   industry: string
   industryRole: string
+  representedBrands?: string[]
   region: string
   userType?: string
   userDemand?: string
@@ -181,6 +182,8 @@ export interface LlmPromptQuestionGenerateVO {
   questions: Array<LlmPromptQuestionDraft & {
     categoryLabel: string
     hasCompetitorVar: boolean
+    qualityErrors?: string[]
+    qualityWarnings?: string[]
   }>
   warnings?: string[]
 }

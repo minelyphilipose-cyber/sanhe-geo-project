@@ -43,6 +43,7 @@ public class AiPlatformConfig {
     private Integer concurrencyLimit;
     private Boolean enabled;
     private Boolean enabledForPresale;
+    private Boolean enabledForPresaleQuestionGeneration;
     private Boolean presaleEvaluateEnabled;
     private Boolean enabledForArticle;
     private Boolean enabledForGeoQuestion;

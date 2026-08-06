@@ -359,6 +359,22 @@
               </div>
               <div class="child-capability-card" :class="{ 'is-master-off': !form.enabled }">
                 <div class="child-capability-info">
+                  <strong title="售前问题生成">售前问题生成</strong>
+                  <span title="用于生成 AI 可见度诊断报告的问题词，仅标准聊天模型可开启">用于生成报告问题词</span>
+                </div>
+                <div class="switch-control">
+                  <span class="switch-status" :class="{ 'is-off': !form.enabled || !form.enabledForPresaleQuestionGeneration }">
+                    {{ form.enabled && form.enabledForPresaleQuestionGeneration ? '启用' : '停用' }}
+                  </span>
+                  <el-switch
+                    :model-value="form.enabled && form.enabledForPresaleQuestionGeneration"
+                    :disabled="!form.enabled || form.usageScene !== 'STANDARD_CHAT'"
+                    @update:model-value="form.enabledForPresaleQuestionGeneration = $event"
+                  />
+                </div>
+              </div>
+              <div class="child-capability-card" :class="{ 'is-master-off': !form.enabled }">
+                <div class="child-capability-info">
                   <strong title="售前评估模型">售前评估模型</strong>
                   <span title="支持报告评估与模型判断">支持报告评估与模型判断</span>
                 </div>
@@ -642,6 +658,7 @@ const form = reactive({
   tpmLimit: 60000,
   enabled: true,
   enabledForPresale: true,
+  enabledForPresaleQuestionGeneration: false,
   enabledForArticle: true,
   enabledForGeoQuestion: true,
   enabledForQuestionPoll: false,
@@ -746,6 +763,7 @@ function resetForm() {
   form.tpmLimit = 60000
   form.enabled = true
   form.enabledForPresale = true
+  form.enabledForPresaleQuestionGeneration = false
   form.enabledForArticle = true
   form.enabledForGeoQuestion = true
   form.enabledForQuestionPoll = false
@@ -865,6 +883,7 @@ function openEdit(row: AIPlatformConfigItem) {
   form.tpmLimit = row.tpmLimit || 60000
   form.enabled = row.enabled
   form.enabledForPresale = row.enabledForPresale ?? true
+  form.enabledForPresaleQuestionGeneration = !!row.enabledForPresaleQuestionGeneration
   form.enabledForArticle = !!row.enabledForArticle
   form.enabledForGeoQuestion = !!row.enabledForGeoQuestion
   form.enabledForQuestionPoll = !!row.enabledForQuestionPoll
@@ -912,6 +931,7 @@ async function submit() {
       tpmLimit: form.tpmLimit,
       enabled: form.enabled,
       enabledForPresale: form.enabledForPresale,
+      enabledForPresaleQuestionGeneration: form.enabledForPresaleQuestionGeneration,
       enabledForArticle: form.enabledForArticle,
       enabledForGeoQuestion: form.enabledForGeoQuestion,
       enabledForQuestionPoll: form.enabledForQuestionPoll,
