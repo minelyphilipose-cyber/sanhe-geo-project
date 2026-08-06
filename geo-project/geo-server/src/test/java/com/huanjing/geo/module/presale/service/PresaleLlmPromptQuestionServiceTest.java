@@ -110,7 +110,7 @@ class PresaleLlmPromptQuestionServiceTest {
     }
 
     @Test
-    void generate_keepsProblemQuestionsThatMentionTargetBrandAndReturnsQualityErrors() throws Exception {
+    void generate_keepsProblemQuestionsThatMentionTargetBrandForManualReview() throws Exception {
         AiPlatformConfig platform = platform("aaa", "http://first.example/v1");
         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(platform));
         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
@@ -131,8 +131,7 @@ class PresaleLlmPromptQuestionServiceTest {
         assertEquals(5, result.getGeneratedTotal());
         assertTrue(result.getQuestions().stream()
                 .anyMatch(q -> q.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
-                        && q.getPromptContent().contains("广州诗帝尼门窗有限公司")
-                        && q.getQualityErrors().stream().anyMatch(error -> error.contains("不能直接出现品牌"))));
+                        && q.getPromptContent().contains("广州诗帝尼门窗有限公司")));
         ArgumentCaptor<LlmCallRequest> promptCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
         verify(llmCallFacade).execute(promptCaptor.capture());
         assertTrue(promptCaptor.getValue().prompt().contains("问题型禁止出现客户品牌和代理品牌"));

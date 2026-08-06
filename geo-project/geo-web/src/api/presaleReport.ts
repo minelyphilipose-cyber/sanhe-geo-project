@@ -182,8 +182,6 @@ export interface LlmPromptQuestionGenerateVO {
   questions: Array<LlmPromptQuestionDraft & {
     categoryLabel: string
     hasCompetitorVar: boolean
-    qualityErrors?: string[]
-    qualityWarnings?: string[]
   }>
   warnings?: string[]
 }

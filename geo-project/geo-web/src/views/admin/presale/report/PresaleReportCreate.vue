@@ -568,7 +568,6 @@ import {
 } from './presaleMarketInput'
 import {
   competitorGroupLength,
-  findDuplicateLlmQuestion,
   REPORT_BRAND_NAME_MAX_LENGTH,
   REPORT_COMPETITOR_GROUP_MAX_LENGTH,
   REPORT_INDUSTRY_ROLE_MAX_LENGTH,
@@ -1343,11 +1342,6 @@ function validateLlmSubmit(showMessage: boolean) {
       break
     }
   }
-  const duplicate = findDuplicateLlmQuestion(llmQuestions.value)
-  if (duplicate) {
-    issues.push(`${categoryLabel(duplicate.categoryCode)}下存在重复问题`)
-  }
-
   if (showMessage && issues.length) {
     ElMessage.warning(issues[0])
   }
@@ -1376,9 +1370,6 @@ function validateTemplateSubmit(showMessage: boolean) {
 function llmQuestionError(item: LlmPromptQuestionDraft) {
   const content = item.promptContent.trim()
   if (!content) return '内容不能为空'
-  const effectiveLength = content.length - (item.categoryCode === 'COMPARISON' ? Math.max(0, '{competitor}'.length - 4) : 0)
-  const maxLength = item.categoryCode === 'SCENARIO' ? 30 : 25
-  if (effectiveLength > maxLength) return `最多 ${maxLength} 字，当前 ${effectiveLength} 字`
   if (item.categoryCode === 'COMPARISON' && !content.includes('{competitor}')) {
     return '必须包含 {competitor}'
   }
@@ -1390,18 +1381,27 @@ function llmQuestionError(item: LlmPromptQuestionDraft) {
   if ((content.includes('{') || content.includes('}')) && extractVariables(content).length === 0) {
     return '不能包含花括号'
   }
-  if (!containsConfiguredRegion(content)) return `必须包含地域：${form.region.trim()}`
-  if (!['COGNITIVE', 'COMPARISON'].includes(item.categoryCode)) {
-    const forbidden = [form.brandName.trim(), ...normalizeRepresentedBrandInputs(form.representedBrands)].filter(Boolean)
-    const matched = forbidden.find((name) => content.includes(name))
-    if (matched) return `不能直接出现品牌：${matched}`
-  }
   return ''
 }
 
-function llmQuestionWarning(item: LlmPromptQuestionDraft) {
+function llmQuestionWarning(item: LlmQuestionDraftItem) {
   const content = item.promptContent.trim()
-  return content && !/[？?]$/.test(content) ? '建议使用自然问句并以问号结尾' : ''
+  if (!content) return ''
+  if (llmQuestions.value.some((candidate) => candidate.id !== item.id
+    && candidate.categoryCode === item.categoryCode
+    && candidate.promptContent.trim() === content)) {
+    return '建议合并或修改重复问题'
+  }
+  if (!containsConfiguredRegion(content)) return `建议包含地域：${form.region.trim()}`
+  const effectiveLength = content.length - (item.categoryCode === 'COMPARISON' ? Math.max(0, '{competitor}'.length - 4) : 0)
+  const maxLength = item.categoryCode === 'SCENARIO' ? 30 : 25
+  if (effectiveLength > maxLength) return `建议控制在 ${maxLength} 字内，当前 ${effectiveLength} 字`
+  if (!['COGNITIVE', 'COMPARISON'].includes(item.categoryCode)) {
+    const forbidden = [form.brandName.trim(), ...normalizeRepresentedBrandInputs(form.representedBrands)].filter(Boolean)
+    const matched = forbidden.find((name) => content.includes(name))
+    if (matched) return `建议不要直接出现品牌：${matched}`
+  }
+  return !/[？?]$/.test(content) ? '建议使用自然问句并以问号结尾' : ''
 }
 
 function containsConfiguredRegion(content: string) {

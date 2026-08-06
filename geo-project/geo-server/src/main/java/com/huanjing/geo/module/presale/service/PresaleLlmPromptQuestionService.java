@@ -29,10 +29,8 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -90,7 +88,7 @@ public class PresaleLlmPromptQuestionService {
         if (missingTotal > 0) {
             warnings.add("已生成 " + generated.size() + " 条，还差 " + missingTotal + " 条，请手动补齐或重新生成");
         }
-        LlmPromptQuestionGenerateVO response = buildResponse(req.getTotalCount(), targetCounts, generated, missingAfter, warnings, req);
+        LlmPromptQuestionGenerateVO response = buildResponse(req.getTotalCount(), targetCounts, generated, missingAfter, warnings);
         log.info("LLM question generation completed, requestedTotal={}, generatedTotal={}, missingTotal={}, costMs={}",
                 req.getTotalCount(), generated.size(), missingTotal, System.currentTimeMillis() - startedAt);
         return response;
@@ -163,10 +161,6 @@ public class PresaleLlmPromptQuestionService {
             throw new BizException(400, "LLM 问题生成失败，请稍后重试");
         }
         List<LlmPromptQuestionDraftRequest> parsed = parseQuestions(rawText);
-        Set<String> existingKeys = new LinkedHashSet<>();
-        for (LlmPromptQuestionDraftRequest item : existing) {
-            existingKeys.add(validator.dedupKey(item.getCategoryCode(), item.getPromptContent()));
-        }
         Map<PresalePromptCategoryCode, Integer> acceptedCounts = new EnumMap<>(PresalePromptCategoryCode.class);
         List<LlmPromptQuestionDraftRequest> accepted = new ArrayList<>();
         for (LlmPromptQuestionDraftRequest item : parsed) {
@@ -382,15 +376,6 @@ public class PresaleLlmPromptQuestionService {
                                                       List<LlmPromptQuestionDraftRequest> generated,
                                                       Map<PresalePromptCategoryCode, Integer> missingCounts,
                                                       List<String> warnings) {
-        return buildResponse(requestedTotal, requestedCounts, generated, missingCounts, warnings, null);
-    }
-
-    private LlmPromptQuestionGenerateVO buildResponse(Integer requestedTotal,
-                                                      Map<PresalePromptCategoryCode, Integer> requestedCounts,
-                                                      List<LlmPromptQuestionDraftRequest> generated,
-                                                      Map<PresalePromptCategoryCode, Integer> missingCounts,
-                                                      List<String> warnings,
-                                                      LlmPromptQuestionGenerateRequest req) {
         LlmPromptQuestionGenerateVO vo = new LlmPromptQuestionGenerateVO();
         vo.setRequestedTotal(requestedTotal);
         vo.setGeneratedTotal(generated.size());
@@ -398,26 +383,17 @@ public class PresaleLlmPromptQuestionService {
         vo.setRequestedCategoryCounts(requestedCounts);
         vo.setGeneratedCategoryCounts(countByCategory(generated));
         vo.setMissingCategoryCounts(missingCounts);
-        vo.setQuestions(generated.stream().map(item -> toVO(item, req)).toList());
+        vo.setQuestions(generated.stream().map(this::toVO).toList());
         vo.setWarnings(warnings);
         return vo;
     }
 
-    private LlmPromptQuestionDraftVO toVO(LlmPromptQuestionDraftRequest item, LlmPromptQuestionGenerateRequest req) {
+    private LlmPromptQuestionDraftVO toVO(LlmPromptQuestionDraftRequest item) {
         LlmPromptQuestionDraftVO vo = new LlmPromptQuestionDraftVO();
         vo.setCategoryCode(item.getCategoryCode());
         vo.setCategoryLabel(item.getCategoryCode().getDisplayName());
         vo.setPromptContent(item.getPromptContent());
         vo.setHasCompetitorVar(item.getPromptContent().contains("{competitor}"));
-        if (req != null) {
-            LlmPromptQuestionDraftValidator.QuestionQuality quality = validator.validateQuality(0, item,
-                    req.getBrandName(), req.getRegion(), req.getRepresentedBrands());
-            vo.setQualityErrors(quality.errors().stream().map(LlmPromptQuestionDraftValidator.ValidationError::message).toList());
-            vo.setQualityWarnings(quality.warnings());
-        } else {
-            vo.setQualityErrors(List.of());
-            vo.setQualityWarnings(List.of());
-        }
         return vo;
     }
 

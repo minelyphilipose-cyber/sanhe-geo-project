@@ -248,10 +248,7 @@ public class PresaleReportService {
                     req.getLlmPromptQuestions(),
                     reportId,
                     versionId,
-                    now,
-                    req.getBrandName(),
-                    req.getRegion(),
-                    req.getRepresentedBrands()
+                    now
             );
         }
         return promptTemplateDraftValidator.validateAndBuildSnapshots(
