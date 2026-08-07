@@ -25,6 +25,7 @@ public class CreateReportRequest {
 
     /** 行业字典 key。Service 层校验是否存在于字典。 */
     @NotBlank(message = "行业不能为空")
+    @Size(max = 50, message = "行业最多 50 字")
     private String industry;
 
     /** 身份字典 key。 */

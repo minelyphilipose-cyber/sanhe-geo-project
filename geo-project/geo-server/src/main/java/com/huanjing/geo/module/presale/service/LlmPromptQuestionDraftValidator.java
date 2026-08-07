@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 @Service
 public class LlmPromptQuestionDraftValidator {
 
-    public static final int MAX_TOTAL_COUNT = 60;
+    public static final int MAX_TOTAL_COUNT = 40;
     public static final int MAX_CATEGORY_COUNT = 30;
     public static final int MIN_COGNITIVE_COUNT = 3;
     public static final int MAX_PROMPT_CONTENT_LENGTH = 1000;

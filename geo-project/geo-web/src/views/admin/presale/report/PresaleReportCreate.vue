@@ -158,9 +158,10 @@
                 <el-input
                   v-model="form.region"
                   placeholder="如:全国"
-                  :maxlength="REPORT_MARKET_LABEL_PAIR_MAX_LENGTH"
+                  maxlength="50"
+                  show-word-limit
                 />
-                <div class="field-counter">地区与行业 {{ marketLabelPairLength }} / {{ REPORT_MARKET_LABEL_PAIR_MAX_LENGTH }}</div>
+                <div class="field-help">完整行业和地区会被保留；报告紧凑版面自动使用展示短名称。</div>
               </el-form-item>
 
               <el-form-item class="form-item span-full" prop="userType">
@@ -323,7 +324,7 @@
               </div>
 
             <el-tabs v-model="activePromptTab" class="prompt-tabs">
-              <el-tab-pane label="模板问题预览" name="template">
+              <el-tab-pane v-if="false" label="模板问题预览" name="template">
                 <div
                   v-for="group in promptGroups"
                   :key="group.category"
@@ -403,7 +404,7 @@
                 <div class="llm-config">
                   <div class="llm-total">
                     <span class="form-label compact">总问题数</span>
-                    <el-input-number v-model="llmPlan.totalCount" :min="1" :max="60" controls-position="right" />
+                    <el-input-number v-model="llmPlan.totalCount" :min="1" :max="40" controls-position="right" />
                   </div>
                   <div class="llm-category-grid">
                     <div v-for="cat in CATEGORY_OPTIONS" :key="cat.code" class="llm-category-input">
@@ -431,12 +432,11 @@
                   <el-button
                     type="primary"
                     :loading="llmGenerating"
-                    :disabled="!canGenerateLlm || (llmQuestions.length > 0 && llmMissingTotal === 0) || llmGenerationIssues.length > 0"
-                    @click="generateLlmQuestions(false)"
+                    :disabled="!canGenerateLlm"
+                    @click="generateLlmQuestions(true)"
                   >
-                    {{ llmQuestions.length ? `补 ${llmMissingTotal} 条` : '生成 LLM 问题' }}
+                    {{ llmQuestions.length ? '重新生成 LLM 问题' : '生成 LLM 问题' }}
                   </el-button>
-                  <el-button :loading="llmGenerating" :disabled="!canGenerateLlm" @click="generateLlmQuestions(true)">重新生成</el-button>
                   <el-button v-if="llmStale" @click="confirmUseStaleLlmQuestions">确认继续使用当前问题</el-button>
                   <span class="llm-count-status" :class="{ danger: llmSubmitIssues.length > 0 }">
                     当前 {{ llmQuestions.length }} / {{ llmPlan.totalCount }}
@@ -560,12 +560,7 @@ import {
 } from '@/api/presaleReport'
 import { calculatePromptScope } from '@/utils/presale/prompt-scope'
 import { createIdempotencyKey } from '@/utils/idempotency'
-import {
-  countMarketLabelPair,
-  REPORT_MARKET_INDUSTRY_LABEL_MAX_LENGTH,
-  REPORT_MARKET_LABEL_PAIR_MAX_LENGTH,
-  resolveMarketIndustryLabel
-} from './presaleMarketInput'
+import { PRESALE_INDUSTRY_OPTIONS } from './presaleIndustryOptions'
 import {
   competitorGroupLength,
   REPORT_BRAND_NAME_MAX_LENGTH,
@@ -621,7 +616,7 @@ const DEFAULT_LLM_CATEGORY_COUNTS: Record<PresalePromptCategoryCode, number> = {
 const ALLOWED_PROMPT_VARIABLES = new Set([
   'competitor'
 ])
-const MAX_LLM_TOTAL_COUNT = 60
+const MAX_LLM_TOTAL_COUNT = 40
 const MAX_LLM_CATEGORY_COUNT = 30
 const MIN_LLM_COGNITIVE_COUNT = 3
 const MAX_LLM_EXISTING_QUESTIONS = 80
@@ -640,7 +635,7 @@ const promptLoading = ref(false)
 const promptLoadFailed = ref(false)
 const promptPanelOpen = ref(false)
 const editingId = ref<number | null>(null)
-const activePromptTab = ref<PromptSourceMode>('template')
+const activePromptTab = ref<PromptSourceMode>('llm')
 const llmGenerating = ref(false)
 const llmStale = ref(false)
 const llmBaseSnapshot = ref('')
@@ -650,8 +645,8 @@ const llmQuestions = ref<LlmQuestionDraftItem[]>([])
 let pendingCreateRequest: { payloadSignature: string; requestId: string } | null = null
 const DEFAULT_USER_DEMAND = '了解品牌在AI搜索中的真实表现。'
 const llmPlan = reactive<LlmPromptQuestionPlan>({
-  totalCount: 0,
-  categoryCounts: emptyCategoryCounts()
+  totalCount: 30,
+  categoryCounts: { ...DEFAULT_LLM_CATEGORY_COUNTS }
 })
 
 const form = reactive<CreateReportForm>({
@@ -751,29 +746,6 @@ function validateBrandFormerNames(_: unknown, value: string[] | undefined, callb
   callback()
 }
 
-function marketIndustryLabel(value: string | undefined) {
-  return resolveMarketIndustryLabel(value, industryOptions)
-}
-
-function validateMarketIndustry(_: unknown, value: string | undefined, callback: (error?: Error) => void) {
-  const industryLabel = marketIndustryLabel(value)
-  if (industryLabel.length > REPORT_MARKET_INDUSTRY_LABEL_MAX_LENGTH) {
-    callback(new Error(`行业名称过长，请控制在 ${REPORT_MARKET_INDUSTRY_LABEL_MAX_LENGTH} 字以内`))
-    return
-  }
-  validateMarketLabelPair(_, value, callback)
-}
-
-function validateMarketLabelPair(_: unknown, __: string | undefined, callback: (error?: Error) => void) {
-  const region = form.region.trim()
-  const industryLabel = marketIndustryLabel(form.industry)
-  if (region && industryLabel && region.length + industryLabel.length > REPORT_MARKET_LABEL_PAIR_MAX_LENGTH) {
-    callback(new Error(`地区与行业合计最多 ${REPORT_MARKET_LABEL_PAIR_MAX_LENGTH} 字，请使用短名称`))
-    return
-  }
-  callback()
-}
-
 const rules: FormRules = {
   brandName: [
     { required: true, message: '品牌名不能为空', trigger: 'blur' },
@@ -781,8 +753,7 @@ const rules: FormRules = {
   ],
   brandFormerNames: [{ validator: validateBrandFormerNames, trigger: 'blur' }],
   industry: [
-    { required: true, message: '请选择行业', trigger: 'change' },
-    { validator: validateMarketIndustry, trigger: 'change' }
+    { required: true, message: '请选择行业', trigger: 'change' }
   ],
   industryRole: [
     { required: true, message: '请选择身份', trigger: 'change' },
@@ -790,28 +761,14 @@ const rules: FormRules = {
   ],
   representedBrands: [{ validator: validateRepresentedBrands, trigger: 'blur' }],
   region: [
-    { required: true, message: '请输入地区', trigger: 'blur' },
-    { validator: validateMarketLabelPair, trigger: 'blur' }
+    { required: true, message: '请输入地区', trigger: 'blur' }
   ],
   userType: [{ max: 50, message: '目标用户最多 50 字', trigger: 'blur' }],
   userDemand: [{ max: 500, message: '客户诉求最多 500 字', trigger: 'blur' }],
   specifiedCompetitors: [{ validator: validateSpecifiedCompetitors, trigger: 'blur' }]
 }
 
-const industryOptions = [
-  { value: 'restaurant', label: '餐饮' },
-  { value: 'education', label: '教培' },
-  { value: 'automotive', label: '汽车' },
-  { value: 'retail', label: '电商零售' },
-  { value: 'finance', label: '金融' },
-  { value: 'tourism', label: '旅游酒店' },
-  { value: 'medical_beauty', label: '医美美容' },
-  { value: 'tech_software', label: 'SaaS 企业软件' }
-]
-
-const marketLabelPairLength = computed(() =>
-  countMarketLabelPair(form.region, marketIndustryLabel(form.industry))
-)
+const industryOptions = PRESALE_INDUSTRY_OPTIONS
 
 const specifiedCompetitorGroupLength = computed(() =>
   competitorGroupLength(form.specifiedCompetitors)
@@ -1119,12 +1076,15 @@ function applyRegenerateDraft(draft: RegenerateDraftVO) {
   if (draft.promptSourceMode === 'llm') {
     activePromptTab.value = 'llm'
     const plan = draft.llmQuestionPlan
-    if (plan) {
+    if (plan && plan.totalCount >= 1 && plan.totalCount <= MAX_LLM_TOTAL_COUNT) {
       llmPlan.totalCount = plan.totalCount
       Object.assign(llmPlan.categoryCounts, {
         ...emptyCategoryCounts(),
         ...plan.categoryCounts
       })
+    } else {
+      llmPlan.totalCount = 30
+      Object.assign(llmPlan.categoryCounts, DEFAULT_LLM_CATEGORY_COUNTS)
     }
     llmQuestions.value = (draft.llmPromptQuestions || []).map((item) => ({
       id: nextLlmQuestionId(),
@@ -1136,22 +1096,11 @@ function applyRegenerateDraft(draft: RegenerateDraftVO) {
     return
   }
 
-  activePromptTab.value = 'template'
-  const previousBySourceId = new Map(
-    (draft.promptTemplates || []).map((item) => [item.sourceTemplateId, item.promptContent])
-  )
-  const previousByPromptCode = new Map(
-    (draft.promptTemplates || [])
-      .filter((item) => item.sourcePromptCode)
-      .map((item) => [item.sourcePromptCode as string, item.promptContent])
-  )
-  promptDrafts.value = promptDrafts.value.map((item) => ({
-    ...item,
-    promptContent:
-      previousBySourceId.get(item.sourceTemplateId) ||
-      previousByPromptCode.get(promptSources.value.find((source) => source.id === item.sourceTemplateId)?.promptCode || '') ||
-      item.promptContent
-  }))
+  // 历史模板报告重新生成时也统一进入 LLM 模式，不复用固定模板问题。
+  activePromptTab.value = 'llm'
+  Object.assign(llmPlan.categoryCounts, DEFAULT_LLM_CATEGORY_COUNTS)
+  llmPlan.totalCount = 30
+  llmQuestions.value = []
 }
 
 function onIndustryChange() {
@@ -1234,21 +1183,9 @@ function createCategoryRecord<T>(factory: () => T): Record<PresalePromptCategory
 }
 
 function applyDefaultLlmPlanFromTemplates() {
-  const counts = emptyCategoryCounts()
-  for (const source of promptSources.value) {
-    const code = CATEGORY_LABEL_TO_CODE[source.category]
-    if (code) {
-      counts[code] += 1
-    }
-  }
-  const hasTemplatePlan = promptSources.value.length > 0
-  Object.assign(llmPlan.categoryCounts, hasTemplatePlan ? counts : DEFAULT_LLM_CATEGORY_COUNTS)
-  llmPlan.totalCount = hasTemplatePlan
-    ? promptSources.value.length
-    : Object.values(DEFAULT_LLM_CATEGORY_COUNTS).reduce((sum, count) => sum + count, 0)
-  if (!hasTemplatePlan) {
-    activePromptTab.value = 'llm'
-  }
+  Object.assign(llmPlan.categoryCounts, DEFAULT_LLM_CATEGORY_COUNTS)
+  llmPlan.totalCount = 30
+  activePromptTab.value = 'llm'
 }
 
 function currentBaseSnapshot() {
@@ -1445,7 +1382,6 @@ async function generateLlmQuestions(reset: boolean) {
     if (reset) {
       llmQuestions.value = []
     }
-    const existingQuestions = reset ? [] : buildLlmPromptQuestions()
     const result = await generateLlmPromptQuestions({
       brandName: form.brandName.trim(),
       industry: form.industry,
@@ -1456,7 +1392,7 @@ async function generateLlmQuestions(reset: boolean) {
       userDemand: form.userDemand?.trim() || undefined,
       totalCount: Number(llmPlan.totalCount || 0),
       categoryCounts: { ...llmPlan.categoryCounts },
-      existingQuestions
+      existingQuestions: []
     })
     llmQuestions.value.push(
       ...result.questions.map((item) => ({

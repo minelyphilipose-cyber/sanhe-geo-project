@@ -48,7 +48,7 @@ class PresaleBenchmarkResolverTest {
         assertThat(result).isNotNull();
         assertThat(result.getIndustry()).isEqualTo("_ALL_");
         assertThat(result.getIndustryRole()).isEqualTo("_ALL_");
-        assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_INDUSTRY);
+        assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_GLOBAL);
     }
 
     @Test
@@ -60,7 +60,7 @@ class PresaleBenchmarkResolverTest {
         assertThat(result).isNotNull();
         assertThat(result.getIndustry()).isEqualTo("_ALL_");
         assertThat(result.getIndustryRole()).isEqualTo("_ALL_");
-        assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_INDUSTRY);
+        assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_GLOBAL);
     }
 
     @Test
@@ -90,7 +90,7 @@ class PresaleBenchmarkResolverTest {
         assertThat(result).isNotNull();
         assertThat(result.getIndustry()).isEqualTo("_ALL_");
         assertThat(result.getIndustryRole()).isEqualTo("_ALL_");
-        assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_INDUSTRY);
+        assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_GLOBAL);
     }
 
     @Test

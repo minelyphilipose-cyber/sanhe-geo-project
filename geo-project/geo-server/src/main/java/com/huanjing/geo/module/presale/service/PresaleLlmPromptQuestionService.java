@@ -295,9 +295,11 @@ public class PresaleLlmPromptQuestionService {
     }
 
     private String resolveSystemPrompt() {
-        return StringUtils.hasText(metaPromptOverride)
-                ? metaPromptOverride.trim()
-                : PresaleLlmPromptQuestionPrompts.SYSTEM_PROMPT;
+        if (!StringUtils.hasText(metaPromptOverride)) {
+            return PresaleLlmPromptQuestionPrompts.SYSTEM_PROMPT;
+        }
+        // 覆盖提示词可保留运营侧原有约束，但不能绕过场景与行业服务的关联规则。
+        return metaPromptOverride.trim() + "\n" + PresaleLlmPromptQuestionPrompts.SCENARIO_GROUNDING_RULE;
     }
 
     private String formatCounts(Map<PresalePromptCategoryCode, Integer> counts) {

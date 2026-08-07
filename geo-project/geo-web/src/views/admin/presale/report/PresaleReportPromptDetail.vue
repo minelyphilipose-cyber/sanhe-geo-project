@@ -114,6 +114,20 @@
               {{ detail.parseView.sentimentText }}
             </el-tag>
           </div>
+          <template v-if="detail.parseView.attributionType">
+            <div class="parse-item">
+              <span class="parse-label">认知归因</span>
+              <el-tag effect="plain">{{ attributionTypeLabel(detail.parseView.attributionType) }}</el-tag>
+            </div>
+            <div class="parse-item">
+              <span class="parse-label">门店主体</span>
+              <span>{{ hitLabel(detail.parseView.targetEntityHit) }}</span>
+            </div>
+            <div class="parse-item">
+              <span class="parse-label">代理品牌 / 关系</span>
+              <span>{{ hitLabel(detail.parseView.representedBrandHit) }} / {{ hitLabel(detail.parseView.targetBrandRelationHit) }}</span>
+            </div>
+          </template>
         </div>
 
         <div class="parse-section">
@@ -254,6 +268,14 @@ function batchText(batchNo: number) {
   if (batchNo === 1) return '认知型 Prompt'
   if (batchNo === 2) return '对比型 Prompt'
   return `BATCH ${batchNo}`
+}
+
+function attributionTypeLabel(value: string) {
+  return ({ DIRECT: '门店直接认知', LINKED: '门店-品牌关联认知', BRAND_ONLY: '仅代理品牌', NONE: '未形成认知' } as Record<string, string>)[value] || value
+}
+
+function hitLabel(value: boolean | null | undefined) {
+  return value == null ? '—' : value ? '命中' : '未命中'
 }
 
 function formatDuration(value: number | null | undefined) {

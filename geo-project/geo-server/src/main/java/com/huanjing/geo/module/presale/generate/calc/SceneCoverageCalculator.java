@@ -12,6 +12,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
+import com.huanjing.geo.module.presale.dto.AttributionMode;
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.generate.PromptJudgeSignalRow;
@@ -76,6 +77,8 @@ public class SceneCoverageCalculator {
         Set<String> effectivePlatforms = new HashSet<>(allPlatforms);
         effectivePlatforms.removeAll(degraded);
         int threshold = (int) Math.ceil(effectivePlatforms.size() / 2.0);
+        boolean dealerAttribution = raw != null && raw.getClientInfo() != null
+                && AttributionMode.fromNullable(raw.getClientInfo().getAttributionMode()) == AttributionMode.DEALER;
 
         List<PresaleReportVersionPromptTemplate> templates = versionPromptTemplateMapper.selectList(
                 new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
@@ -90,6 +93,9 @@ public class SceneCoverageCalculator {
                         .eq(PresaleAiPromptResult::getEffectiveSample, true)
                         .in(PresaleAiPromptResult::getBatchNo, List.of(1, 2))
         );
+        Map<Long, PresaleReportVersionPromptTemplate> templateById = templates.stream()
+                .filter(template -> template.getId() != null)
+                .collect(java.util.stream.Collectors.toMap(PresaleReportVersionPromptTemplate::getId, template -> template));
         List<PromptJudgeSignalRow> judgeSignalRows = aiPromptResultMapper.selectPromptJudgeSignalsByVersionId(versionId);
 
         Map<Long, Set<String>> hitPlatformsByTemplate = new HashMap<>();
@@ -103,7 +109,10 @@ public class SceneCoverageCalculator {
                     && !row.getRequestPromptContent().isBlank()) {
                 renderedPromptByTemplate.putIfAbsent(row.getPromptTemplateId(), row.getRequestPromptContent());
             }
-            if (!Integer.valueOf(1).equals(row.getBatchNo())) {
+            PresaleReportVersionPromptTemplate rowTemplate = templateById.get(row.getPromptTemplateId());
+            if (dealerAttribution
+                    ? !isCanonicalDealerRow(row, rowTemplate)
+                    : !Integer.valueOf(1).equals(row.getBatchNo())) {
                 continue;
             }
             if (!effectivePlatforms.contains(row.getPlatformCode())) {
@@ -127,8 +136,9 @@ public class SceneCoverageCalculator {
                 judgeSignalRows, effectivePlatforms);
 
         Map<PresaleIntentCode, List<TemplateWithCovered>> byIntent = new EnumMap<>(PresaleIntentCode.class);
-        Map<PresaleIntentCode, IntentCoverage> judgeCoverageByIntent = buildJudgeCoverageByIntent(
-                platformIntentCells, effectivePlatforms);
+        Map<PresaleIntentCode, IntentCoverage> judgeCoverageByIntent = dealerAttribution
+                ? Map.of()
+                : buildJudgeCoverageByIntent(platformIntentCells, effectivePlatforms);
         for (PresaleReportVersionPromptTemplate template : templates) {
             if (template.getId() != null && template.getPromptContent() != null && !template.getPromptContent().isBlank()) {
                 renderedPromptByTemplate.putIfAbsent(template.getId(), template.getPromptContent());
@@ -143,10 +153,12 @@ public class SceneCoverageCalculator {
                 continue;
             }
             int hitCount = hitPlatformsByTemplate.getOrDefault(template.getId(), Set.of()).size();
-            boolean covered = isJudgeIntent(intent)
-                    ? isJudgePromptCovered(template.getId(), intent, hitPlatformsByTemplate, judgeSignalsByTemplate)
-                    : isSampleIntentCoveredByPriorityPlatform(template.getId(), doubaoMentionedTemplates)
-                    || hitCount >= threshold;
+            boolean covered = dealerAttribution
+                    ? isDealerPromptCovered(template.getId(), hitPlatformsByTemplate, effectivePlatforms)
+                    : isJudgeIntent(intent)
+                        ? isJudgePromptCovered(template.getId(), intent, hitPlatformsByTemplate, judgeSignalsByTemplate)
+                        : isSampleIntentCoveredByPriorityPlatform(template.getId(), doubaoMentionedTemplates)
+                            || hitCount >= threshold;
             byIntent.get(intent).add(new TemplateWithCovered(template, intent, covered));
         }
 
@@ -249,6 +261,31 @@ public class SceneCoverageCalculator {
                     && !COMPARISON_STANCE_COMPETITOR.equals(resolveJudgeStance(cell));
         }
         return false;
+    }
+
+    private boolean isCanonicalDealerRow(PresaleAiPromptResult row,
+                                         PresaleReportVersionPromptTemplate template) {
+        if (row == null || template == null) {
+            return false;
+        }
+        boolean comparison = PresaleIntentCode.COMPARISON.getLabel().equals(template.getCategory());
+        return comparison ? Integer.valueOf(2).equals(row.getBatchNo()) : Integer.valueOf(1).equals(row.getBatchNo());
+    }
+
+    private boolean isDealerPromptCovered(Long templateId,
+                                          Map<Long, Set<String>> hitPlatformsByTemplate,
+                                          Set<String> effectivePlatforms) {
+        if (templateId == null || effectivePlatforms == null || effectivePlatforms.isEmpty()) {
+            return false;
+        }
+        Set<String> hits = hitPlatformsByTemplate.getOrDefault(templateId, Set.of());
+        int totalWeight = effectivePlatforms.stream().mapToInt(this::platformWeight).sum();
+        int hitWeight = hits.stream().filter(effectivePlatforms::contains).mapToInt(this::platformWeight).sum();
+        return totalWeight > 0 && hitWeight * 2 >= totalWeight;
+    }
+
+    private int platformWeight(String platformCode) {
+        return PRIORITY_PLATFORM_DOUBAO.equalsIgnoreCase(platformCode) ? 2 : 1;
     }
 
     private List<String> reportPlatformCodes(RawSnapshotDTO raw) {

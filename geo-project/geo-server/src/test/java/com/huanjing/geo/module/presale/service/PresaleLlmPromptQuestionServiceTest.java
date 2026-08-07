@@ -25,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.lang.reflect.Field;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -154,6 +155,31 @@ class PresaleLlmPromptQuestionServiceTest {
         verify(llmCallFacade).execute(promptCaptor.capture());
         assertTrue(promptCaptor.getValue().prompt().contains("推荐型和场景型必须以行业、品类或用户需求为主体"));
         assertTrue(promptCaptor.getValue().prompt().contains("不得出现任何具体品牌名"));
+        assertTrue(promptCaptor.getValue().modelConfig().systemPrompt().contains("消费触发点和决策语境"));
+        assertTrue(PresalePromptCategoryCode.SCENARIO.getGenerationGuide().contains("不得为了凑要素跨行业套用"));
+    }
+
+    @Test
+    void generationPromptKeepsScenarioGroundingRuleWhenMetaPromptIsOverridden() throws Exception {
+        Field field = PresaleLlmPromptQuestionService.class.getDeclaredField("metaPromptOverride");
+        field.setAccessible(true);
+        field.set(service, "运营自定义提示词");
+        AiPlatformConfig platform = platform("aaa", "http://first.example/v1");
+        when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(platform));
+        when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
+        when(llmCallFacade.execute(any(LlmCallRequest.class))).thenReturn(LlmCallResult.direct(result("[]", "aaa")));
+
+        try {
+            service.generate(request());
+        } catch (BizException ignored) {
+            // 空结果会产生数量不足提示；本用例只校验提交给模型的系统提示词。
+        }
+
+        ArgumentCaptor<LlmCallRequest> promptCaptor = ArgumentCaptor.forClass(LlmCallRequest.class);
+        verify(llmCallFacade).execute(promptCaptor.capture());
+        String systemPrompt = promptCaptor.getValue().modelConfig().systemPrompt();
+        assertTrue(systemPrompt.startsWith("运营自定义提示词"));
+        assertTrue(systemPrompt.contains("消费触发点和决策语境"));
     }
 
     private static LlmPromptQuestionGenerateRequest request() {

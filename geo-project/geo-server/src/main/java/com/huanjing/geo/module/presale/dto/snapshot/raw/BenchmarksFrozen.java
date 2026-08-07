@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
  * <p>
  * <b>单个聚合对象</b>(非列表)。生成时从 presale_benchmark 按
  * {@code (industry, industry_role)} 精确查询,未命中则回退 {@code (industry, '_ALL_')},
- * 仍未命中报错 BENCHMARK_MISSING。
+ * 再未命中则回退 {@code ('_ALL_', '_ALL_')}；完全缺失时报告正常生成并隐藏比较。
  * </p>
  * <p>
  * <b>匹配等级:</b>match_level 记录本次命中情况:
@@ -36,6 +36,21 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class BenchmarksFrozen {
+
+    /** 是否存在可用于对比的基准。旧快照缺失该字段时前端按存在处理。 */
+    private Boolean available;
+
+    /** 基准记录 ID，便于审计冻结来源。 */
+    @JsonProperty("benchmark_id")
+    private Long benchmarkId;
+
+    /** 基准生效日期。 */
+    @JsonProperty("effective_from")
+    private String effectiveFrom;
+
+    /** 可审计的数据版本标识。 */
+    @JsonProperty("data_version")
+    private String dataVersion;
 
     /** 基准值所属行业。 */
     private String industry;

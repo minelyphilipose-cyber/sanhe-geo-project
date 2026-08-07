@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -71,17 +72,36 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
     }
 
     @Test
+    void query_mimoUsesConfiguredNinetySecondTimeout() throws Exception {
+        AiPlatformConfig row = row();
+        row.setPlatformCode("mimo");
+        row.setTimeoutMs(90_000);
+        row.setMaxRetry(0);
+        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
+        when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
+        when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
+                        "{\"choices\":[{\"message\":{\"content\":\"query ok\"}}]}"));
+
+        invoker.query(new PlatformCallContext(
+                1L, 1, "mimo", 1001L, "", "Acme", 11L, false
+        ), "hello");
+
+        verify(httpClient).postJson(anyString(), anyMap(), anyString(), anyInt(), eq(90_000));
+    }
+
+    @Test
     void analyze_stripsMarkdownFenceAndValidatesJson() throws Exception {
         AiPlatformConfig row = row();
         when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
-                        "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":[{\\\"keyword\\\":\\\"性价比高\\\",\\\"sentiment\\\":\\\"POSITIVE\\\"}],\\\"negative_evidence\\\":{\\\"has_negative\\\":false,\\\"snippet\\\":null}}\\n```\"}}],\"usage\":{\"prompt_tokens\":22,\"completion_tokens\":18}}"));
+                        "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"is_mentioned\\\":true,\\\"target_entity_hit\\\":true,\\\"represented_brand_hit\\\":true,\\\"target_brand_relation_hit\\\":true,\\\"attribution_type\\\":\\\"LINKED\\\",\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":[{\\\"keyword\\\":\\\"性价比高\\\",\\\"sentiment\\\":\\\"POSITIVE\\\"}],\\\"negative_evidence\\\":{\\\"has_negative\\\":false,\\\"snippet\\\":null}}\\n```\"}}],\"usage\":{\"prompt_tokens\":22,\"completion_tokens\":18}}"));
 
         PlatformCallContext ctx = new PlatformCallContext(
                 1L, 1, "kimi", 1002L, "", "Acme",
-                "汽车服务", "授权经销商", List.of("宝马", "MINI"), 11L, false
+                "汽车服务", "授权经销商", List.of("宝马", "MINI"), 11L, false, 1L, "DEALER"
         );
         LlmCallResult result = invoker.analyze(ctx, "问句", "回答");
 

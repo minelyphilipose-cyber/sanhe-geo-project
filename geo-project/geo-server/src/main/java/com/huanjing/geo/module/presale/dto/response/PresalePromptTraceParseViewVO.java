@@ -9,6 +9,10 @@ import java.util.List;
 @Builder
 public class PresalePromptTraceParseViewVO {
     private String mentionedText;
+    private String attributionType;
+    private Boolean targetEntityHit;
+    private Boolean representedBrandHit;
+    private Boolean targetBrandRelationHit;
     private String rankingText;
     private String sentimentText;
     private String sentimentType;

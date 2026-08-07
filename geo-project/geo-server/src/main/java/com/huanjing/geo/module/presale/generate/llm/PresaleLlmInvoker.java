@@ -36,6 +36,14 @@ public interface PresaleLlmInvoker {
             throws LlmInvokeException;
 
     /**
+     * 将手输行业归入报告基准行业。该调用使用独立提示词，不能复用文案词库 bucket 的约束。
+     */
+    default LlmCallResult classifyBenchmarkIndustry(PlatformCallContext ctx, String classificationPrompt)
+            throws LlmInvokeException {
+        return classifyIndustryBucket(ctx, classificationPrompt);
+    }
+
+    /**
      * 阶段 3:Page03 AI 搜索新战场内容生成。
      */
     LlmCallResult marketBattleground(PlatformCallContext ctx, String marketBattlegroundPrompt)

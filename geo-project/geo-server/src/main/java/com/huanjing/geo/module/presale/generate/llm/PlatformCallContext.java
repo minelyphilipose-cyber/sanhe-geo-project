@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.presale.generate.llm;
 
 import java.util.List;
+import com.huanjing.geo.module.presale.dto.AttributionMode;
 
 /**
  * 单次平台调用的上下文。
@@ -29,10 +30,29 @@ public record PlatformCallContext(Long versionId,
                                   List<String> representedBrands,
                                   Long operatorUserId,
                                   boolean operatorIsManager,
-                                  long generationAttempt) {
+                                  long generationAttempt,
+                                  String attributionMode) {
 
     public PlatformCallContext {
         representedBrands = representedBrands == null ? List.of() : List.copyOf(representedBrands);
+        attributionMode = AttributionMode.fromNullable(attributionMode).name();
+    }
+
+    public PlatformCallContext(Long versionId,
+                               Integer batchNo,
+                               String platformCode,
+                               Long promptTemplateId,
+                               String competitorName,
+                               String brandName,
+                               String industry,
+                               String industryRole,
+                               List<String> representedBrands,
+                               Long operatorUserId,
+                               boolean operatorIsManager,
+                               long generationAttempt) {
+        this(versionId, batchNo, platformCode, promptTemplateId, competitorName, brandName,
+                industry, industryRole, representedBrands, operatorUserId, operatorIsManager,
+                generationAttempt, AttributionMode.STANDARD.name());
     }
 
     public PlatformCallContext(Long versionId,
@@ -47,7 +67,8 @@ public record PlatformCallContext(Long versionId,
                                Long operatorUserId,
                                boolean operatorIsManager) {
         this(versionId, batchNo, platformCode, promptTemplateId, competitorName, brandName,
-                industry, industryRole, representedBrands, operatorUserId, operatorIsManager, 0L);
+                industry, industryRole, representedBrands, operatorUserId, operatorIsManager, 0L,
+                AttributionMode.STANDARD.name());
     }
 
     public PlatformCallContext(Long versionId,
@@ -61,7 +82,8 @@ public record PlatformCallContext(Long versionId,
                                Long operatorUserId,
                                boolean operatorIsManager) {
         this(versionId, batchNo, platformCode, promptTemplateId, competitorName, brandName,
-                industry, industryRole, List.of(), operatorUserId, operatorIsManager, 0L);
+                industry, industryRole, List.of(), operatorUserId, operatorIsManager, 0L,
+                AttributionMode.STANDARD.name());
     }
 
     public PlatformCallContext(Long versionId,
@@ -73,6 +95,11 @@ public record PlatformCallContext(Long versionId,
                                Long operatorUserId,
                                boolean operatorIsManager) {
         this(versionId, batchNo, platformCode, promptTemplateId, competitorName, brandName,
-                null, null, List.of(), operatorUserId, operatorIsManager, 0L);
+                null, null, List.of(), operatorUserId, operatorIsManager, 0L,
+                AttributionMode.STANDARD.name());
+    }
+
+    public boolean dealerAttribution() {
+        return AttributionMode.DEALER.name().equals(attributionMode);
     }
 }

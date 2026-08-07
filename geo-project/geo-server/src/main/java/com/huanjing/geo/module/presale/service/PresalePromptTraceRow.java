@@ -15,6 +15,10 @@ public class PresalePromptTraceRow {
     private String competitorName;
     private String requestPromptContent;
     private Integer isMentioned;
+    private Integer targetEntityHit;
+    private Integer representedBrandHit;
+    private Integer targetBrandRelationHit;
+    private String attributionType;
     private Integer ranking;
     private String sentiment;
     private String mentionedCompetitors;

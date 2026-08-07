@@ -9,7 +9,7 @@
       class="viewer-alert"
     >
       <template #title>
-        行业基线匹配级别为 {{ matchLevel }},部分对比数据使用回退基线。
+        {{ benchmarkMatchNotice }}
       </template>
     </el-alert>
 
@@ -155,6 +155,12 @@ const { mergedView } = useMergedView()
 const meta = computed(() => mergedView.value?.meta)
 const isDone = computed(() => meta.value?.generation_status === 'DONE')
 const matchLevel = computed(() => meta.value?.match_level)
+const benchmarkMatchNotice = computed(() => {
+  if (matchLevel.value === 'FALLBACK_INDUSTRY') return '未命中精确角色基准，本报告使用行业通用基准。'
+  if (matchLevel.value === 'FALLBACK_GLOBAL') return '未命中行业基准，本报告使用全局通用基准。'
+  if (matchLevel.value === 'MISSING') return '当前没有可用行业基准，行业对比、差值和比较结论已隐藏。'
+  return '本报告使用回退行业基准。'
+})
 const degradedPlatforms = computed(() => meta.value?.degraded_platforms ?? [])
 const webExcludedCount = computed(
   () =>

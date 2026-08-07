@@ -439,6 +439,13 @@ public class PresaleReportVersionActionService {
         // 状态:派生完成后直接就绪(无需重跑 LLM)
         next.setGenerationStatus(PresaleGenerateStatus.DONE.name());
         next.setQueryWebMode(source.getQueryWebMode());
+        next.setAttributionMode(source.getAttributionMode());
+        next.setMatchedRoleName(source.getMatchedRoleName());
+        next.setRepresentedBrandsSnapshot(source.getRepresentedBrandsSnapshot());
+        next.setBenchmarkIndustryKey(source.getBenchmarkIndustryKey());
+        next.setIndustryClassificationSource(source.getIndustryClassificationSource());
+        next.setIndustryClassificationConfidence(source.getIndustryClassificationConfidence());
+        next.setIndustryClassifierModel(source.getIndustryClassifierModel());
 
         // 事实冻结层字段:继承源版本
         next.setTotalLlmCalls(source.getTotalLlmCalls());

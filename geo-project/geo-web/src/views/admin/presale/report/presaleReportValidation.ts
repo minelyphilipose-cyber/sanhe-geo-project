@@ -16,8 +16,7 @@ const TEMPLATE_ALLOWED_VARIABLES = new Set([
 const BRACED_TOKEN_PATTERN = /\{[^{}]*\}/g
 const VALID_TOKEN_PATTERN = /^\{[a-z_]+\}$/
 const AGENT_ROLE_MARKERS = [
-  '代理', '经销', '分销', '渠道', '授权', '加盟',
-  'dealer', 'agent', 'distributor', 'reseller', 'franchise'
+  '代理', '经销', '渠道', '加盟'
 ]
 
 export interface PromptQuestionLike {
@@ -33,7 +32,7 @@ export function competitorGroupLength(values: string[] | undefined): number {
 }
 
 export function supportsRepresentedBrands(roleKey: string | undefined, roleLabel?: string): boolean {
-  const roleText = `${roleKey || ''} ${roleLabel || ''}`.trim().toLowerCase()
+  const roleText = (roleLabel || roleKey || '').trim().replace(/[ \u3000]/g, '')
   return AGENT_ROLE_MARKERS.some((marker) => roleText.includes(marker))
 }
 

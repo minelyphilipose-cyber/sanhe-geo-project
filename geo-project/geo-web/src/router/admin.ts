@@ -374,6 +374,16 @@ const adminRoutes: RouteRecordRaw = {
       },
     },
     {
+      path: 'presale/report/benchmark-config',
+      name: 'PresaleBenchmarkConfig',
+      component: () => import('@/views/admin/presale/report/PresaleBenchmarkConfig.vue'),
+      meta: {
+        title: '行业基准配置',
+        hidden: true,
+        roles: ['delivery_manager', 'manager', 'super_admin'],
+      },
+    },
+    {
       path: 'presale/report/:id/progress',
       name: 'PresaleReportProgress',
       component: () => import('@/views/admin/presale/report/PresaleReportProgress.vue'),

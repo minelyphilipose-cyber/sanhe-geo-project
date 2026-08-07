@@ -11,12 +11,14 @@
 import type { MatchLevel } from './common';
 import type {
   BenchmarksFrozen,
+  DealerAttributionSummary,
   PlatformBreakdown,
   SentimentDetail,
   TestSummary,
 } from './raw';
 import type {
   IntentBreakdown,
+  DealerAttributionInterpretation,
   NarrativeProfile,
   OptimizationFinding,
   PlatformIntentCell,
@@ -93,6 +95,8 @@ export interface MergedViewDTO {
   industry: string;
   industry_role: string;
   represented_brands?: string[];
+  attribution_mode: 'STANDARD' | 'DEALER';
+  matched_role_name?: string;
   region: string;
   user_demand?: string | null;
 
@@ -102,6 +106,7 @@ export interface MergedViewDTO {
   sentiment_detail: SentimentDetail;
   /** 含 match_level。 */
   benchmarks_frozen: BenchmarksFrozen;
+  dealer_attribution_summary?: DealerAttributionSummary;
 
   // ─── L2 计算结果直出 ───
   scores: Scores;
@@ -121,6 +126,7 @@ export interface MergedViewDTO {
   platform_intent_breakdown: PlatformIntentCell[];
   /** L2 叙事画像。历史报告缺失时由 mergeSnapshot 生成保守 fallback。 */
   narrative_profile: NarrativeProfile;
+  dealer_attribution_interpretation?: DealerAttributionInterpretation;
 
   // ─── L3 文案(已应用默认回退) ───
   report_title: string;

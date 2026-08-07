@@ -135,6 +135,8 @@ export function mergeSnapshot(
     industry: raw.client_info.industry,
     industry_role: raw.client_info.industry_role,
     represented_brands: raw.client_info.represented_brands ?? [],
+    attribution_mode: raw.client_info.attribution_mode ?? 'STANDARD',
+    matched_role_name: raw.client_info.matched_role_name,
     region: raw.client_info.region,
     user_demand: raw.client_info.user_demand ?? null,
 
@@ -143,6 +145,7 @@ export function mergeSnapshot(
     platform_breakdown: platformBreakdown,
     sentiment_detail: raw.sentiment_detail,
     benchmarks_frozen: raw.benchmarks_frozen,
+    dealer_attribution_summary: raw.dealer_attribution_summary,
 
     // L2 计算结果直出
     scores: computed.scores,
@@ -156,6 +159,7 @@ export function mergeSnapshot(
     // 6 个月后评估是否移除此兜底(见 spec §7.4)。
     platform_intent_breakdown: platformIntentBreakdown,
     narrative_profile: narrativeProfile,
+    dealer_attribution_interpretation: computed.dealer_attribution_interpretation,
 
     // L3 文案 + 默认模板回退
     report_title: resolveReportTitle(editable.report_title, raw.client_info),

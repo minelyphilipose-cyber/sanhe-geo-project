@@ -34,7 +34,7 @@
                 <div class="p05-dim-score" :class="{ 'p05-dim-score-green': dim.isGreen }">
                   {{ dim.score }}
                 </div>
-                <div class="p05-dim-avg">均值 {{ dim.avg }}</div>
+                <div class="p05-dim-avg">{{ hasBenchmark ? `均值 ${dim.avg}` : '均值 —' }}</div>
                 <div
                   class="mono p05-dim-delta"
                   :class="dim.delta == null || dim.delta >= 0 ? 'p05-dim-delta-up' : 'p05-dim-delta-down'"
@@ -47,8 +47,10 @@
         </div>
 
         <!-- 行业对比条 -->
-        <div class="p05-compare-wrap">
-          <div class="mono p05-section-label">INDUSTRY COMPARISON</div>
+        <div v-if="hasBenchmark" class="p05-compare-wrap">
+          <div class="mono p05-section-label">
+            INDUSTRY COMPARISON<span v-if="benchmarkScopeLabel"> · {{ benchmarkScopeLabel }}</span>
+          </div>
           <div class="p05-compare-bar">
             <!-- 渐变背景:红→黄→绿 -->
             <!-- 标尺 0 / 50 / 100 -->
@@ -80,8 +82,23 @@
           </div>
         </div>
 
-        <!-- 底部引用块(v1 静态文案,L3 未提供) -->
-        <div class="p05-quote-wrap">
+        <div v-else class="p05-benchmark-missing">
+          当前没有可用行业基准，本页仅展示本次诊断得分，不生成行业领先或落后结论。
+        </div>
+
+        <div v-if="isDealerReport" class="p05-attribution-card">
+          <div class="mono p05-attribution-label">COGNITIVE ATTRIBUTION · 认知归因解读</div>
+          <div class="p05-attribution-metrics">
+            <div v-for="metric in attributionMetrics" :key="metric.label" class="p05-attribution-metric">
+              <strong>{{ metric.value }}</strong>
+              <span>{{ metric.label }}</span>
+            </div>
+          </div>
+          <div class="p05-attribution-text">{{ attributionNarrative }}</div>
+          <div class="p05-attribution-note">仅出现代理品牌的样本不计入门店综合分和问题覆盖。</div>
+        </div>
+
+        <div v-else class="p05-quote-wrap">
           <div class="pull-quote">{{ quoteText }}</div>
         </div>
       </div>
@@ -122,6 +139,18 @@ const mergedView = computed(() => mergedViewRef.value!)
 const showRadarBaselineGap = computed(
   () => mergedView.value.narrative_profile.display_flags?.show_radar_baseline_gap !== false
 )
+const hasBenchmark = computed(() =>
+  mergedView.value.benchmarks_frozen.available !== false &&
+  !!mergedView.value.benchmarks_frozen.industry_avg &&
+  !!mergedView.value.benchmarks_frozen.top1
+)
+const isDealerReport = computed(() => mergedView.value.attribution_mode === 'DEALER')
+const benchmarkScopeLabel = computed(() => {
+  const level = mergedView.value.benchmarks_frozen.match_level
+  if (level === 'FALLBACK_INDUSTRY') return '行业通用基准'
+  if (level === 'FALLBACK_GLOBAL') return '全局通用基准'
+  return ''
+})
 
 // ─── 4 维度对比行 ────────────────────────────────────────
 interface DimRow {
@@ -138,58 +167,62 @@ interface DimRow {
 const dimensionRows = computed<DimRow[]>(() => {
   const scores = mergedView.value.scores
   const avg = mergedView.value.benchmarks_frozen.industry_avg
+  const avgValue = (key: DimRow['key']) => avg?.[key] ?? null
+  const delta = (score: number | null, baseline: number | null) =>
+    score == null || baseline == null ? null : toIntRounded(score - baseline)
   return [
     {
       key: 'mention',
       label: '提及率',
       score: toIntRounded(scores.mention),
-      avg: toIntRounded(avg.mention),
-      delta: toIntRounded(scores.mention - avg.mention),
+      avg: avgValue('mention') == null ? '—' : toIntRounded(avgValue('mention') as number),
+      delta: delta(scores.mention, avgValue('mention')),
       isGreen: false,
       radarScore: toIntRounded(scores.mention),
-      radarAvg: toIntRounded(avg.mention)
+      radarAvg: avgValue('mention') == null ? null : toIntRounded(avgValue('mention') as number)
     },
     {
       key: 'ranking',
       label: '排名得分',
       score: scores.ranking == null ? '—' : toIntRounded(scores.ranking),
-      avg: avg.ranking == null ? '—' : toIntRounded(avg.ranking),
-      delta: scores.ranking == null || avg.ranking == null ? null : toIntRounded(scores.ranking - avg.ranking),
+      avg: avgValue('ranking') == null ? '—' : toIntRounded(avgValue('ranking') as number),
+      delta: delta(scores.ranking, avgValue('ranking')),
       isGreen: false,
-      radarScore: scores.ranking == null || avg.ranking == null ? null : toIntRounded(scores.ranking),
-      radarAvg: scores.ranking == null || avg.ranking == null ? null : toIntRounded(avg.ranking)
+      radarScore: scores.ranking == null ? null : toIntRounded(scores.ranking),
+      radarAvg: avgValue('ranking') == null ? null : toIntRounded(avgValue('ranking') as number)
     },
     {
       key: 'sentiment',
       label: '情感倾向',
       score: toIntRounded(scores.sentiment),
-      avg: toIntRounded(avg.sentiment),
-      delta: toIntRounded(scores.sentiment - avg.sentiment),
+      avg: avgValue('sentiment') == null ? '—' : toIntRounded(avgValue('sentiment') as number),
+      delta: delta(scores.sentiment, avgValue('sentiment')),
       // 情感维度视觉上绿色(对齐原型)
       isGreen: true,
       radarScore: toIntRounded(scores.sentiment),
-      radarAvg: toIntRounded(avg.sentiment)
+      radarAvg: avgValue('sentiment') == null ? null : toIntRounded(avgValue('sentiment') as number)
     },
     {
       key: 'coverage',
       label: '覆盖度',
       score: toIntRounded(scores.coverage),
-      avg: toIntRounded(avg.coverage),
-      delta: toIntRounded(scores.coverage - avg.coverage),
+      avg: avgValue('coverage') == null ? '—' : toIntRounded(avgValue('coverage') as number),
+      delta: delta(scores.coverage, avgValue('coverage')),
       isGreen: false,
       radarScore: toIntRounded(scores.coverage),
-      radarAvg: toIntRounded(avg.coverage)
+      radarAvg: avgValue('coverage') == null ? null : toIntRounded(avgValue('coverage') as number)
     }
   ]
 })
 
 // ─── radar chart option ─────────────────────────────────
 const radarOption = computed<EChartsOption>(() => {
-  const rows = dimensionRows.value.filter((d) => d.radarScore != null && d.radarAvg != null)
+  const rows = dimensionRows.value.filter((d) => d.radarScore != null)
   const indicator = rows.map((d) => ({ name: d.label, max: 100 }))
   const selfData = rows.map((d) => d.radarScore as number)
   const avgData = rows.map((d) => d.radarAvg as number)
-  const legendData = showRadarBaselineGap.value ? ['您的品牌', '行业均值'] : ['您的品牌']
+  const showBaseline = hasBenchmark.value && showRadarBaselineGap.value && rows.every((d) => d.radarAvg != null)
+  const legendData = showBaseline ? ['您的品牌', '行业均值'] : ['您的品牌']
   const seriesData: Array<Record<string, unknown>> = [
     {
       name: '您的品牌',
@@ -199,7 +232,7 @@ const radarOption = computed<EChartsOption>(() => {
       areaStyle: { color: 'rgba(30, 58, 138, 0.15)' }
     }
   ]
-  if (showRadarBaselineGap.value) {
+  if (showBaseline) {
     seriesData.push({
       name: '行业均值',
       value: avgData,
@@ -255,9 +288,9 @@ const radarOption = computed<EChartsOption>(() => {
 // ─── 行业对比条定位 ─────────────────────────────────────
 const overall = computed(() => toIntRounded(mergedView.value.scores.overall))
 const industryAvgOverall = computed(
-  () => toIntRounded(mergedView.value.benchmarks_frozen.industry_avg.overall)
+  () => toIntRounded(mergedView.value.benchmarks_frozen.industry_avg?.overall ?? 0)
 )
-const top1Overall = computed(() => toIntRounded(mergedView.value.benchmarks_frozen.top1.overall))
+const top1Overall = computed(() => toIntRounded(mergedView.value.benchmarks_frozen.top1?.overall ?? 0))
 
 /** 0-100 分数映射为 "XX%" 字符串(CSS left)。边界处夹紧 0-100%。 */
 function toLeftPct(score: number): string {
@@ -276,6 +309,25 @@ const selfLabelClasses = computed(() => ({
 
 // ─── 底部引用文案(静态) ────────────────────────────────
 const quoteText = `本次诊断从提及率、排名得分、情感倾向、覆盖度 4 个维度综合评估品牌可见度。建议优先关注表现偏弱的维度,详见后续分析章节。`
+
+function formatRate(value: number | null | undefined): string {
+  return value == null ? '—' : `${toIntRounded(value)}%`
+}
+
+const attributionMetrics = computed(() => {
+  const summary = mergedView.value.dealer_attribution_summary
+  return [
+    { label: '门店有效命中率', value: formatRate(summary?.dealer_hit_rate) },
+    { label: '代理品牌自然认知率', value: formatRate(summary?.represented_brand_organic_rate) },
+    { label: '品牌认知传递率', value: formatRate(summary?.transfer_rate) },
+    { label: '品牌单独曝光占比', value: formatRate(summary?.brand_only_share) }
+  ]
+})
+
+const attributionNarrative = computed(() =>
+  mergedView.value.dealer_attribution_interpretation?.narrative ||
+  '当前代理品牌与门店关联样本不足，暂不对品牌认知传递程度作明确判断。'
+)
 </script>
 
 <style scoped>
@@ -420,5 +472,58 @@ const quoteText = `本次诊断从提及率、排名得分、情感倾向、覆�
 
 .p05-quote-wrap {
   margin-top: 64px;
+}
+
+.p05-benchmark-missing {
+  margin: 8px 0 28px;
+  padding: 14px 18px;
+  border-left: 3px solid #c8bfa8;
+  background: #f7f3ea;
+  color: #6b6456;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.p05-attribution-card {
+  padding: 20px 24px 18px;
+  border-left: 4px solid #1e3a8a;
+  background: #f2f5f8;
+}
+.p05-attribution-label {
+  margin-bottom: 14px;
+  color: #1e3a8a;
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+.p05-attribution-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+.p05-attribution-metric strong,
+.p05-attribution-metric span {
+  display: block;
+}
+.p05-attribution-metric strong {
+  color: #0b1426;
+  font-family: 'Playfair Display', serif;
+  font-size: 23px;
+}
+.p05-attribution-metric span {
+  margin-top: 3px;
+  color: #6b6456;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.p05-attribution-text {
+  margin-top: 14px;
+  color: #1a2942;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.p05-attribution-note {
+  margin-top: 6px;
+  color: #8a5b13;
+  font-size: 10px;
 }
 </style>

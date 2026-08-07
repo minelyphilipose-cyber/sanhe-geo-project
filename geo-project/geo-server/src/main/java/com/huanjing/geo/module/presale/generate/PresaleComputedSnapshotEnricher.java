@@ -8,6 +8,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.DealerAttributionInterpretation;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.OptimizationFinding;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.DealerAttributionSummary;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.generate.calc.RankingStats;
 import com.huanjing.geo.module.presale.generate.calc.RoiCalculator;
@@ -26,6 +29,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Set;
 
 /**
@@ -88,10 +93,14 @@ public class PresaleComputedSnapshotEnricher {
             RankingStats rankingStats = queryRankingStats(versionId, rawSnapshot);
             var scores = scoresCalculator.compute(rawSnapshot, scenes, rankingStats);
             computedSnapshot.setScores(scores);
+            DealerAttributionInterpretation dealerInterpretation = interpretDealerAttribution(
+                    rawSnapshot.getDealerAttributionSummary());
+            computedSnapshot.setDealerAttributionInterpretation(dealerInterpretation);
 
             // 3) Rule engine (必须在 scores/sceneCoverage 就绪后调用)
             RuleEngineResult ruleResult = ruleEngineExecutor.execute(rawSnapshot, computedSnapshot);
             computedSnapshot.setOptimizationFindings(ruleResult.getFindings());
+            appendDealerFinding(computedSnapshot, rawSnapshot.getDealerAttributionSummary(), dealerInterpretation);
             if (ruleResult.getFindings() == null || ruleResult.getFindings().isEmpty()) {
                 log.warn("No optimization rule triggered for versionId={}, this may indicate a perfect-brand scenario or a rule threshold anomaly",
                         versionId);
@@ -114,6 +123,57 @@ public class PresaleComputedSnapshotEnricher {
         } catch (JsonProcessingException e) {
             throw new BizException(500, "platform_intent_breakdown integrity violated: json parse failed - " + e.getMessage());
         }
+    }
+
+    private DealerAttributionInterpretation interpretDealerAttribution(DealerAttributionSummary summary) {
+        if (summary == null) {
+            return null;
+        }
+        boolean sufficient = value(summary.getOrganicEffectiveSamples()) >= 20
+                && value(summary.getOrganicBrandHits()) >= 5;
+        boolean weakTransfer = sufficient
+                && value(summary.getRepresentedBrandOrganicRate()) >= 30D
+                && value(summary.getRepresentedBrandOrganicRate())
+                    - value(summary.getDealerOrganicHitRate()) >= 15D
+                && value(summary.getTransferRate()) < 50D
+                && value(summary.getBrandOnlyShare()) >= 50D;
+        return DealerAttributionInterpretation.builder()
+                .sampleSufficient(sufficient)
+                .weakTransfer(weakTransfer)
+                .narrative(weakTransfer
+                        ? DealerAttributionInterpretation.WEAK_TRANSFER_COPY
+                        : sufficient
+                            ? DealerAttributionInterpretation.OBSERVATION_COPY
+                            : DealerAttributionInterpretation.INSUFFICIENT_COPY)
+                .build();
+    }
+
+    private void appendDealerFinding(ComputedSnapshotDTO computed,
+                                     DealerAttributionSummary summary,
+                                     DealerAttributionInterpretation interpretation) {
+        if (computed == null || summary == null || interpretation == null
+                || !Boolean.TRUE.equals(interpretation.getWeakTransfer())) {
+            return;
+        }
+        List<OptimizationFinding> findings = new ArrayList<>(computed.getOptimizationFindings() == null
+                ? List.of() : computed.getOptimizationFindings());
+        LinkedHashMap<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("dealer_hit_rate", summary.getDealerHitRate());
+        evidence.put("represented_brand_organic_rate", summary.getRepresentedBrandOrganicRate());
+        evidence.put("transfer_rate", summary.getTransferRate());
+        evidence.put("brand_only_share", summary.getBrandOnlyShare());
+        findings.add(OptimizationFinding.builder()
+                .findingId("F%03d".formatted(findings.size() + 1))
+                .ruleCode("RULE_DEALER_BRAND_TRANSFER_WEAK")
+                .priority(OptimizationFinding.Priority.MEDIUM)
+                .category("关系建设")
+                .evidenceData(evidence)
+                .build());
+        computed.setOptimizationFindings(findings);
+    }
+
+    private double value(Number value) {
+        return value == null ? 0D : value.doubleValue();
     }
 
     private RankingStats queryRankingStats(Long versionId, RawSnapshotDTO rawSnapshot) {

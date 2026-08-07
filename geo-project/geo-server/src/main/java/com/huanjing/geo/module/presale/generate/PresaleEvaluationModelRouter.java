@@ -58,7 +58,8 @@ public class PresaleEvaluationModelRouter {
                 source.representedBrands(),
                 source.operatorUserId(),
                 source.operatorIsManager(),
-                source.generationAttempt()
+                source.generationAttempt(),
+                source.attributionMode()
         );
     }
 

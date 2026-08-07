@@ -9,5 +9,9 @@ public enum MatchLevel {
     /** 精确命中 (industry, industry_role)。 */
     EXACT,
     /** 回退到 (industry, '_ALL_') 行业级兜底,前端需展示回退警示条。 */
-    FALLBACK_INDUSTRY
+    FALLBACK_INDUSTRY,
+    /** 回退到 (_ALL_, '_ALL_') 全局通用基准。 */
+    FALLBACK_GLOBAL,
+    /** 没有任何可用基准；报告继续生成但不展示比较结论。 */
+    MISSING
 }

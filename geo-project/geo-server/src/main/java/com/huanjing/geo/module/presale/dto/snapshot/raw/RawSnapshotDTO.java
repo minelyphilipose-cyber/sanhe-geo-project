@@ -70,4 +70,8 @@ public class RawSnapshotDTO {
      */
     @JsonProperty("benchmarks_frozen")
     private BenchmarksFrozen benchmarksFrozen;
+
+    /** 经销商回答认知归因汇总；普通报告为空。 */
+    @JsonProperty("dealer_attribution_summary")
+    private DealerAttributionSummary dealerAttributionSummary;
 }

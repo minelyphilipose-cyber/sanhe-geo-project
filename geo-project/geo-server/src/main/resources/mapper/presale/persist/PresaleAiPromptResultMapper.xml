@@ -6,25 +6,31 @@
         INSERT INTO presale_ai_prompt_result (
             version_id, batch_no, platform_code, prompt_template_id, competitor_name,
             query_call_id, analyze_call_id, effective_sample, request_prompt_content,
-            is_mentioned, ranking, sentiment, mentioned_competitors, scene_advantages,
+            is_mentioned, target_entity_hit, represented_brand_hit, target_brand_relation_hit, attribution_type,
+            ranking, sentiment, mentioned_competitors, scene_advantages,
             top_keywords_json, negative_evidence_json
         )
         SELECT
             #{row.versionId}, #{row.batchNo}, #{row.platformCode}, #{row.promptTemplateId}, #{row.competitorName},
-            #{row.queryCallId}, #{row.analyzeCallId}, #{row.effectiveSample}, #{row.requestPromptContent},
-            #{row.isMentioned}, #{row.ranking}, #{row.sentiment}, #{row.mentionedCompetitors}, #{row.sceneAdvantages},
+            #{row.queryCallId}, #{row.analyzeCallId}, COALESCE(#{row.effectiveSample}, TRUE), #{row.requestPromptContent},
+            #{row.isMentioned}, #{row.targetEntityHit}, #{row.representedBrandHit}, #{row.targetBrandRelationHit}, #{row.attributionType},
+            #{row.ranking}, #{row.sentiment}, #{row.mentionedCompetitors}, #{row.sceneAdvantages},
             #{row.topKeywordsJson}, #{row.negativeEvidenceJson}
         FROM presale_report_version v
         WHERE v.id = #{row.versionId}
           AND v.generation_status = 'RUNNING'
           AND v.generation_attempt = #{generationAttempt}
         ON DUPLICATE KEY UPDATE
-            id = LAST_INSERT_ID(id),
+            id = LAST_INSERT_ID(presale_ai_prompt_result.id),
             query_call_id = VALUES(query_call_id),
             analyze_call_id = VALUES(analyze_call_id),
             effective_sample = VALUES(effective_sample),
             request_prompt_content = VALUES(request_prompt_content),
             is_mentioned = VALUES(is_mentioned),
+            target_entity_hit = VALUES(target_entity_hit),
+            represented_brand_hit = VALUES(represented_brand_hit),
+            target_brand_relation_hit = VALUES(target_brand_relation_hit),
+            attribution_type = VALUES(attribution_type),
             ranking = VALUES(ranking),
             sentiment = VALUES(sentiment),
             mentioned_competitors = VALUES(mentioned_competitors),

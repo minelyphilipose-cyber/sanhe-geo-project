@@ -15,6 +15,7 @@ export interface ReportVersionMetaVO {
   versionNo: number
   generationStatus: 'INIT' | 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED'
   generationStage?:
+    | 'BENCHMARK_INDUSTRY'
     | 'BATCH1'
     | 'JUDGE_COGNITIVE'
     | 'COMPETITOR_EXTRACT'
@@ -239,6 +240,10 @@ export interface PresalePromptTraceQueryRequest {
 
 export interface PresalePromptTraceParseViewVO {
   mentionedText: string
+  attributionType?: 'DIRECT' | 'LINKED' | 'BRAND_ONLY' | 'NONE' | null
+  targetEntityHit?: boolean | null
+  representedBrandHit?: boolean | null
+  targetBrandRelationHit?: boolean | null
   rankingText: string
   sentimentText: string
   sentimentType: string

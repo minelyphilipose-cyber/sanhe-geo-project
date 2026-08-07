@@ -32,6 +32,9 @@ describe('presale report validation', () => {
   it('shows represented brands for dealer and custom agent roles only', () => {
     expect(supportsRepresentedBrands('dealer', '经销商')).toBe(true)
     expect(supportsRepresentedBrands('custom_role', '汽车品牌代理商')).toBe(true)
+    expect(supportsRepresentedBrands('dealer')).toBe(false)
+    expect(supportsRepresentedBrands('distributor', 'distributor')).toBe(false)
+    expect(supportsRepresentedBrands('custom_role', '区域　渠 道 合作商')).toBe(true)
     expect(supportsRepresentedBrands('service_provider', '服务商')).toBe(false)
   })
 })

@@ -30,6 +30,7 @@ export interface RawSnapshotDTO {
   group_scene_advantages?: string[];
   sentiment_detail: SentimentDetail;
   benchmarks_frozen: BenchmarksFrozen;
+  dealer_attribution_summary?: DealerAttributionSummary;
 }
 
 /**
@@ -61,6 +62,8 @@ export interface ClientInfo {
   industry_role: string;
   /** 代理/经销类客户代理的上游品牌，仅用于归属消歧。 */
   represented_brands?: string[];
+  attribution_mode?: 'STANDARD' | 'DEALER';
+  matched_role_name?: string;
   region: string;
   /** 可为 null 或省略(v1.2 变更为可选)。 */
   user_demand?: string | null;
@@ -189,18 +192,36 @@ export interface NegativeEvidence {
  * - FALLBACK_INDUSTRY: 回退到 (industry, '_ALL_'),此时 industry_role 字段值为 "_ALL_"
  */
 export interface BenchmarksFrozen {
-  industry: string;
+  available?: boolean;
+  benchmark_id?: number;
+  effective_from?: string;
+  data_version?: string;
+  industry?: string;
   /** 回退时为 "_ALL_"。 */
-  industry_role: string;
+  industry_role?: string;
   match_level: MatchLevel;
-  industry_avg: ScoreSet;
-  top1: ScoreSet;
+  industry_avg?: ScoreSet;
+  top1?: ScoreSet;
   /** 行业 Top10 综合分阈值。 */
-  top10_score: number;
-  confidence_level: ConfidenceLevel;
-  source: BenchmarkSource;
-  sample_size: number;
-  industry_ranking: IndustryRanking;
+  top10_score?: number;
+  confidence_level?: ConfidenceLevel;
+  source?: BenchmarkSource;
+  sample_size?: number;
+  industry_ranking?: IndustryRanking;
+}
+
+export interface DealerAttributionSummary {
+  effective_samples: number;
+  dealer_hit_rate?: number | null;
+  direct_rate?: number | null;
+  linked_rate?: number | null;
+  represented_brand_organic_rate?: number | null;
+  dealer_organic_hit_rate?: number | null;
+  represented_brand_prompted_rate?: number | null;
+  transfer_rate?: number | null;
+  brand_only_share?: number | null;
+  organic_effective_samples: number;
+  organic_brand_hits: number;
 }
 
 export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW';

@@ -36,6 +36,10 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "r.competitor_name AS competitorName, " +
             "r.request_prompt_content AS requestPromptContent, " +
             "r.is_mentioned AS isMentioned, " +
+            "r.target_entity_hit AS targetEntityHit, " +
+            "r.represented_brand_hit AS representedBrandHit, " +
+            "r.target_brand_relation_hit AS targetBrandRelationHit, " +
+            "r.attribution_type AS attributionType, " +
             "r.ranking AS ranking, " +
             "r.sentiment AS sentiment, " +
             "r.mentioned_competitors AS mentionedCompetitors, " +

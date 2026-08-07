@@ -581,7 +581,9 @@ const CalculationCardView = defineComponent({
 
 .calc-row {
   display: grid;
-  grid-template-columns: 130px 1fr;
+  /* 数值列固定起点，长行业说明只在左列换行，不会挤压或贴近数值。 */
+  grid-template-columns: minmax(0, 180px) minmax(150px, 1fr);
+  column-gap: 28px;
   align-items: baseline;
   color: #1a2942;
   font-size: 13px;
@@ -590,7 +592,17 @@ const CalculationCardView = defineComponent({
 .calc-row .k,
 .calc-row .v {
   min-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.calc-row .k {
+  max-height: 38px;
   overflow: hidden;
+  line-height: 1.45;
+}
+
+.calc-row .v {
+  white-space: nowrap;
 }
 
 .calc-row.total {

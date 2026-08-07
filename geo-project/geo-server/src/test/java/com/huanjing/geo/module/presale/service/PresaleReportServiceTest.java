@@ -20,6 +20,7 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,12 +34,14 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.doAnswer;
 
 @ExtendWith(MockitoExtension.class)
 class PresaleReportServiceTest {
@@ -74,6 +77,10 @@ class PresaleReportServiceTest {
     private PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
     @Mock
     private PresaleWebReadinessChecker webReadinessChecker;
+    @Mock
+    private SysDictItemMapper sysDictItemMapper;
+    @Mock
+    private PresaleBenchmarkIndustryClassifier benchmarkIndustryClassifier;
 
     private PresaleReportService service;
 
@@ -94,11 +101,16 @@ class PresaleReportServiceTest {
                 llmPromptQuestionDraftValidator,
                 partnerPresaleReportQuotaService,
                 webReadinessChecker,
-                new ObjectMapper()
+                new ObjectMapper(),
+                sysDictItemMapper,
+                benchmarkIndustryClassifier
         );
         lenient().when(webReadinessChecker.checkConfiguredMode())
                 .thenReturn(new PresaleWebExecutionContext(PresaleQueryWebMode.OFF, Map.of()));
         lenient().when(webReadinessChecker.configuredMode()).thenReturn(PresaleQueryWebMode.OFF);
+        lenient().when(benchmarkIndustryClassifier.classifyDirectlyOrDefer(any()))
+                .thenReturn(new PresaleBenchmarkIndustryClassifier.Classification(
+                        "restaurant", "DIRECT", "HIGH", null));
     }
 
     @Test
@@ -157,6 +169,41 @@ class PresaleReportServiceTest {
 
         assertEquals(400, ex.getCode());
         verify(reportMapper, never()).insert(any());
+    }
+
+    @Test
+    void createReport_defersManualIndustryClassificationUntilBackgroundGeneration() {
+        CreateReportRequest req = createRequest();
+        req.setIndustry("spa休闲会所");
+        when(currentUserService.requireCurrentUser()).thenReturn(user());
+        when(partnerPresaleReportQuotaService.reserveIfPartner(any(), any()))
+                .thenReturn(new PartnerPresaleReportQuotaService.Reservation(
+                        false, null, null, null, null, null, null, null
+                ));
+        when(benchmarkIndustryClassifier.classifyDirectlyOrDefer("spa休闲会所"))
+                .thenReturn(new PresaleBenchmarkIndustryClassifier.Classification(null, "PENDING", null, null));
+        when(promptTemplateDraftValidator.validateAndBuildSnapshots(any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of());
+        doAnswer(invocation -> {
+            invocation.getArgument(0, PresaleReport.class).setId(REPORT_ID);
+            return 1;
+        }).when(reportMapper).insert(any(PresaleReport.class));
+        doAnswer(invocation -> {
+            invocation.getArgument(0, com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion.class)
+                    .setId(REPORT_ID + 1);
+            return 1;
+        }).when(versionMapper).insert(any(com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion.class));
+
+        Long reportId = service.createReport(req);
+
+        assertEquals(REPORT_ID, reportId);
+        ArgumentCaptor<com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion> versionCaptor =
+                ArgumentCaptor.forClass(com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion.class);
+        verify(versionMapper).insert(versionCaptor.capture());
+        assertEquals("PENDING", versionCaptor.getValue().getIndustryClassificationSource());
+        assertNull(versionCaptor.getValue().getBenchmarkIndustryKey());
+        verify(benchmarkIndustryClassifier).classifyDirectlyOrDefer("spa休闲会所");
+        verify(benchmarkIndustryClassifier, never()).classify(any(), any(), any(Boolean.class));
     }
 
     @Test

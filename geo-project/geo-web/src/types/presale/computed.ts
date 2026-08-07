@@ -37,6 +37,13 @@ export interface ComputedSnapshotDTO {
    * 报告叙事画像。新生成报告由 L2 确定性计算写入;历史报告可能缺失。
    */
   narrative_profile?: NarrativeProfile;
+  dealer_attribution_interpretation?: DealerAttributionInterpretation;
+}
+
+export interface DealerAttributionInterpretation {
+  weak_transfer: boolean;
+  sample_sufficient: boolean;
+  narrative: string;
 }
 
 export interface ComputedSnapshotMeta {

@@ -43,6 +43,14 @@ public class ClientInfo {
     @JsonProperty("represented_brands")
     private List<String> representedBrands;
 
+    /** STANDARD / DEALER；旧快照缺失时按 STANDARD。 */
+    @JsonProperty("attribution_mode")
+    private String attributionMode;
+
+    /** 创建版本时冻结的中文角色名称。 */
+    @JsonProperty("matched_role_name")
+    private String matchedRoleName;
+
     /** 区域(如"北京市")。v1.2 必填业务字段。 */
     private String region;
 

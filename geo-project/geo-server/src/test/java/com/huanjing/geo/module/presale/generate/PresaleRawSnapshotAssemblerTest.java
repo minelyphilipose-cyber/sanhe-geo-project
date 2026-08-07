@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -91,7 +92,7 @@ class PresaleRawSnapshotAssemblerTest {
             List<String> candidates = inv.getArgument(1);
             return candidates.stream().filter(rawName::equals).findFirst();
         });
-        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class))).thenReturn(benchmark());
 
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(
@@ -155,7 +156,7 @@ class PresaleRawSnapshotAssemblerTest {
 
         mockCommonCounts(2L, 1L, 4L, 3L);
         mockEnabledPlatforms(platform("kimi", "Kimi"));
-        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class))).thenReturn(benchmark());
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(1L, 1, 1, "POSITIVE", null, null)),
                 List.of(promptResult(2L, null, null, "POSITIVE", null, null))
@@ -175,7 +176,7 @@ class PresaleRawSnapshotAssemblerTest {
         PresaleReportVersion version = version();
 
         mockCommonCounts(1L, 0L, 2L, 2L);
-        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class))).thenReturn(benchmark());
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(1L, 1, 1, "POSITIVE", null, null)),
                 List.of(promptResult(2L, 1, 1, "POSITIVE", null, null))
@@ -202,7 +203,7 @@ class PresaleRawSnapshotAssemblerTest {
 
         mockCommonCounts(3L, 0L, 6L, 6L);
         mockEnabledPlatforms(platform("doubao", "豆包"), platform("kimi", "Kimi"));
-        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class))).thenReturn(benchmark());
 
         PresaleReportVersionPromptTemplate recommendation = template(101L, "推荐型");
         PresaleReportVersionPromptTemplate cognitive = template(102L, "认知型");
@@ -242,7 +243,7 @@ class PresaleRawSnapshotAssemblerTest {
         mockEnabledPlatforms(platform("kimi", "Kimi"));
         when(competitorAggregator.aggregateBatch1MentionStats(1001L, List.of("Acme")))
                 .thenReturn(new PresaleCompetitorAggregator.Batch1MentionStats(Map.of(), Map.of(), 4));
-        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class))).thenReturn(benchmark());
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
 
         String json = assembler.assembleWithCompetitorStats(
@@ -274,7 +275,7 @@ class PresaleRawSnapshotAssemblerTest {
 
         mockCommonCounts(2L, 1L, 6L, 6L);
         mockEnabledPlatforms(platform("bing_copilot", "Bing Copilot"), platform("kimi", "Kimi"));
-        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class))).thenReturn(benchmark());
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(1L, 1, 1, "POSITIVE", null, null)),
                 List.of(promptResult(2L, 1, 1, "POSITIVE", null, null)),
@@ -306,7 +307,7 @@ class PresaleRawSnapshotAssemblerTest {
                 platform("p3", "P3"),
                 platform("p4", "P4")
         );
-        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class))).thenReturn(benchmark());
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(1L, 1, 1, "POSITIVE", null, null)),
                 List.of(promptResult(2L, 1, 1, "POSITIVE", null, null)),
@@ -335,7 +336,7 @@ class PresaleRawSnapshotAssemblerTest {
                 List.of(promptResult(1L, 1, 1, "POSITIVE", null, null)),
                 List.of(promptResult(2L, null, null, "POSITIVE", null, null))
         );
-        when(benchmarkResolver.resolve("科技", "CTO"))
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class)))
                 .thenThrow(new IllegalStateException("BENCHMARK_MISSING"));
 
         assertThrows(IllegalStateException.class, () ->
@@ -350,7 +351,7 @@ class PresaleRawSnapshotAssemblerTest {
 
         mockCommonCounts(1L, 0L, 4L, 4L);
         mockEnabledPlatforms(platform("kimi", "Kimi"));
-        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class))).thenReturn(benchmark());
 
         LocalDateTime t1 = LocalDateTime.of(2026, 4, 23, 10, 0);
         LocalDateTime t2 = LocalDateTime.of(2026, 4, 23, 10, 5);
@@ -418,7 +419,7 @@ class PresaleRawSnapshotAssemblerTest {
 
         mockCommonCounts(1L, 0L, 2L, 2L);
         mockEnabledPlatforms(platform("kimi", "Kimi"));
-        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(benchmarkResolver.resolve(eq("科技"), eq("CTO"), any(java.time.LocalDate.class))).thenReturn(benchmark());
 
         PresaleAiPromptResult sentimentOnly = promptResultWithSentimentPayload(1L, "NEUTRAL",
                 "[]", "{}", null, 101L, "kimi", "问句1", LocalDateTime.now());

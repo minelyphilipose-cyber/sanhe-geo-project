@@ -23,7 +23,7 @@
             <div class="mono p04-card-label">OVERALL SCORE</div>
             <div class="metric-hero p04-overall-number">{{ overallScoreRounded }}</div>
             <div class="p04-overall-unit">/ 100</div>
-            <div class="p04-overall-compare">
+            <div v-if="hasBenchmark" class="p04-overall-compare">
               <div class="p04-overall-delta">
                 <span v-if="overallDelta >= 0" class="tick">↑</span>
                 <span v-else class="cross">↓</span>
@@ -37,6 +37,7 @@
                 本品牌无排名数据,综合得分按提及/情感/覆盖三维归一加权；行业均值与 Top1 为四维基准,跨维度比较仅供参考。
               </div>
             </div>
+            <div v-else class="p04-overall-compare">当前无可用行业基准，仅展示本次诊断得分。</div>
           </div>
 
           <!-- 4 维度 metric card -->
@@ -145,16 +146,22 @@ const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
 const DOUBAO_PLATFORM_CODE = 'doubao'
 const DOUBAO_WEIGHT = 2
+const hasBenchmark = computed(() =>
+  mergedView.value.benchmarks_frozen.available !== false &&
+  !!mergedView.value.benchmarks_frozen.industry_avg
+)
 
 // ─── overall 维度 ────────────────────────────────────────
 const overallDelta = computed(() => {
-  return mergedView.value.scores.overall - mergedView.value.benchmarks_frozen.industry_avg.overall
+  return hasBenchmark.value
+    ? mergedView.value.scores.overall - (mergedView.value.benchmarks_frozen.industry_avg?.overall ?? 0)
+    : 0
 })
 /** 差值绝对值,模板里作为主行"高于/低于 N 分"的 N。 */
 const overallDeltaAbs = computed(() => toIntRounded(Math.abs(overallDelta.value)))
 const overallScoreRounded = computed(() => toIntRounded(mergedView.value.scores.overall))
 const industryAvgOverallRounded = computed(() =>
-  toIntRounded(mergedView.value.benchmarks_frozen.industry_avg.overall)
+  toIntRounded(mergedView.value.benchmarks_frozen.industry_avg?.overall ?? 0)
 )
 
 type BandGroup = 'low' | 'middle' | 'high'
@@ -184,6 +191,7 @@ const advantageText = computed(() => {
 })
 
 const overallSubtitle = computed(() => {
+  if (!hasBenchmark.value) return '当前无可用行业基准'
   if (bandGroup.value === 'low') {
     return `AI 还没有稳定认识你（行业均值 ${industryAvgOverallRounded.value}）`
   }

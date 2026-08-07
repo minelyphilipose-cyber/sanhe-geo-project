@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.presale.generate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.module.presale.service.PresaleBenchmarkIndustryClassifier;
 import com.huanjing.geo.module.partner.service.PartnerPresaleReportQuotaService;
 import com.huanjing.geo.module.presale.generate.l3.PresaleL3InitService;
 import com.huanjing.geo.module.presale.generate.l3.PresalePage03DoubaoService;
@@ -117,6 +118,8 @@ class PresaleGenerateQuestionConcurrencyTest {
     private PresaleWebReadinessChecker webReadinessChecker;
     @Mock
     private PresaleWebQueryInvoker webQueryInvoker;
+    @Mock
+    private PresaleBenchmarkIndustryClassifier benchmarkIndustryClassifier;
 
     private PresaleGenerateOrchestrator orchestrator;
 
@@ -148,6 +151,7 @@ class PresaleGenerateQuestionConcurrencyTest {
                 sampleStatisticsService,
                 webReadinessChecker,
                 webQueryInvoker,
+                benchmarkIndustryClassifier,
                 new ObjectMapper(),
                 directExecutor
         );

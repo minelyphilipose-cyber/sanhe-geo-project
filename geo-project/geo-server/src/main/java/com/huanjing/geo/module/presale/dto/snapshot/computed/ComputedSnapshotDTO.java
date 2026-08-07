@@ -64,6 +64,10 @@ public class ComputedSnapshotDTO {
     @JsonProperty("roi_simulation")
     private RoiSimulation roiSimulation;
 
+    /** 经销商认知传递的确定性解释；普通报告为空。 */
+    @JsonProperty("dealer_attribution_interpretation")
+    private DealerAttributionInterpretation dealerAttributionInterpretation;
+
     /** 场景覆盖三档容器。 */
     @Data
     @Builder

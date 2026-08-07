@@ -629,6 +629,11 @@ class PresaleGenerateOrchestratorTest {
                 .filter(c -> CallStatus.SKIPPED_DEGRADED.name().equals(c.getCallStatus()))
                 .count();
         assertEquals(0L, skippedCount);
+
+        ArgumentCaptor<PresaleAiPromptResult> resultCaptor = ArgumentCaptor.forClass(PresaleAiPromptResult.class);
+        verify(aiPromptResultMapper, atLeastOnce()).insert(resultCaptor.capture());
+        assertTrue(resultCaptor.getAllValues().stream()
+                .allMatch(row -> Boolean.TRUE.equals(row.getEffectiveSample())));
     }
 
     @Test
@@ -1511,6 +1516,7 @@ class PresaleGenerateOrchestratorTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals("batch1 {brand}", row.getRequestPromptContent());
+        assertEquals(Boolean.TRUE, row.getEffectiveSample());
     }
 
     @Test

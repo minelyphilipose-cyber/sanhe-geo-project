@@ -43,6 +43,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PresaleL3InitService {
 
+    private static final String RULE_DEALER_BRAND_TRANSFER_WEAK = "RULE_DEALER_BRAND_TRANSFER_WEAK";
+
     private static final Map<String, String> RULE_TITLE_MAP = buildRuleTitleMap();
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{([a-z_]+)}");
     /**
@@ -102,14 +104,15 @@ public class PresaleL3InitService {
                                                    String brandName,
                                                    Integer platformCount) {
         Double overall = requireOverallScore(computed);
-        Double industryAvgOverall = requireIndustryAvgOverall(raw);
+        Double industryAvgOverall = industryAvgOverall(raw);
         int roundedOverall = textFormatter.roundToInt(overall);
-        int delta = textFormatter.roundToInt(overall - industryAvgOverall);
-        String deltaLabel = classifyDelta(delta);
+        Integer delta = industryAvgOverall == null ? null : textFormatter.roundToInt(overall - industryAvgOverall);
+        String deltaLabel = delta == null ? null : classifyDelta(delta);
         String industry = requireIndustry(raw);
 
-        String headline = brandName + " 在 " + industry + " 行业综合得分 "
-                + roundedOverall + " 分," + deltaLabel;
+        String headline = industryAvgOverall == null
+                ? brandName + " 综合得分 " + roundedOverall + " 分"
+                : brandName + " 在 " + industry + " 行业综合得分 " + roundedOverall + " 分," + deltaLabel;
 
         String paragraph;
         int findingCount = computed == null || computed.getOptimizationFindings() == null
@@ -686,13 +689,11 @@ public class PresaleL3InitService {
         return value;
     }
 
-    private Double requireIndustryAvgOverall(RawSnapshotDTO raw) {
-        Double value = raw == null || raw.getBenchmarksFrozen() == null || raw.getBenchmarksFrozen().getIndustryAvg() == null
+    private Double industryAvgOverall(RawSnapshotDTO raw) {
+        return raw == null || raw.getBenchmarksFrozen() == null
+                || Boolean.FALSE.equals(raw.getBenchmarksFrozen().getAvailable())
+                || raw.getBenchmarksFrozen().getIndustryAvg() == null
                 ? null : raw.getBenchmarksFrozen().getIndustryAvg().getOverall();
-        if (value == null) {
-            throw new BizException(500, "L3 init failed: missing raw.benchmarks_frozen.industry_avg.overall");
-        }
-        return value;
     }
 
     private IntentBreakdown resolveTopCoverageIntent(ComputedSnapshotDTO computed) {
@@ -920,6 +921,7 @@ public class PresaleL3InitService {
         map.put(RuleCodes.RULE_LONG_TAIL_SCENE_GAP, "长尾场景可持续补齐");
         map.put(RuleCodes.RULE_CONTENT_CONSISTENCY_CHECK, "品牌信息一致性建议检查");
         map.put(RuleCodes.RULE_PERIODIC_RETEST_MONITORING, "周期复测与变化预警");
+        map.put(RULE_DEALER_BRAND_TRANSFER_WEAK, "建立代理品牌与本门店的稳定关联");
         return map;
     }
 
@@ -1064,6 +1066,13 @@ public class PresaleL3InitService {
                         "AI 回答、竞品在场和平台收录会持续变化。订阅期可持续执行{service_action},跟踪{monitoring_focus}。" +
                                 "这不是当前诊断出的缺陷,而是后续持续运营的交付价值:定期发现变化,及时调整内容与平台动作。",
                         "{service_action}: {monitoring_focus}"
+                )),
+                Map.entry(RULE_DEALER_BRAND_TRANSFER_WEAK, new RuleFindingTemplate(
+                        "建立代理品牌与本门店的稳定关联",
+                        "代理品牌自然认知率为 {represented_brand_organic_rate}%,门店有效命中率为 {dealer_hit_rate}%," +
+                                "品牌认知传递率为 {transfer_rate}%,品牌单独曝光占比为 {brand_only_share}%。" +
+                                "建议围绕授权关系、规范门店名称、地址、服务范围及代理品牌关系建设一致、可验证的公开内容。",
+                        "门店命中 {dealer_hit_rate}% / 品牌自然认知 {represented_brand_organic_rate}% / 传递 {transfer_rate}%"
                 ))
         );
     }

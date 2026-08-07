@@ -37,6 +37,7 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.presale.service.PresaleBenchmarkIndustryClassifier;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -92,6 +93,7 @@ public class PresaleGenerateOrchestrator {
     private static final long PROGRESS_UPDATE_THROTTLE_MS = 1000L;
 
     private static final String STAGE_BATCH1 = "BATCH1";
+    private static final String STAGE_BENCHMARK_INDUSTRY = "BENCHMARK_INDUSTRY";
     private static final String STAGE_COMPETITOR_EXTRACT = "COMPETITOR_EXTRACT";
     private static final String STAGE_BATCH2 = "BATCH2";
     private static final String STAGE_JUDGE_COGNITIVE = "JUDGE_COGNITIVE";
@@ -145,6 +147,7 @@ public class PresaleGenerateOrchestrator {
     private final PresaleSampleStatisticsService sampleStatisticsService;
     private final PresaleWebReadinessChecker webReadinessChecker;
     private final PresaleWebQueryInvoker webQueryInvoker;
+    private final PresaleBenchmarkIndustryClassifier benchmarkIndustryClassifier;
     private final ObjectMapper objectMapper;
     private final Executor platformExecutor;
     private final Map<Long, AtomicLong> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
@@ -204,6 +207,7 @@ public class PresaleGenerateOrchestrator {
                                        PresaleSampleStatisticsService sampleStatisticsService,
                                        PresaleWebReadinessChecker webReadinessChecker,
                                        PresaleWebQueryInvoker webQueryInvoker,
+                                       PresaleBenchmarkIndustryClassifier benchmarkIndustryClassifier,
                                        ObjectMapper objectMapper,
                                        @Qualifier("presalePlatformExecutor") Executor platformExecutor) {
         this.versionMapper = versionMapper;
@@ -230,6 +234,7 @@ public class PresaleGenerateOrchestrator {
         this.sampleStatisticsService = sampleStatisticsService;
         this.webReadinessChecker = webReadinessChecker;
         this.webQueryInvoker = webQueryInvoker;
+        this.benchmarkIndustryClassifier = benchmarkIndustryClassifier;
         this.objectMapper = objectMapper;
         this.platformExecutor = Objects.requireNonNull(platformExecutor, "presalePlatformExecutor must not be null");
     }
@@ -391,11 +396,58 @@ public class PresaleGenerateOrchestrator {
         lastProgressUpdateAtByVersion.remove(versionId);
         stageTimingByVersion.remove(versionId);
         modelSnapshotByPlatformCode.clear();
+        if (!resolveDeferredBenchmarkIndustry(run, operatorUserId, isManager)) {
+            return;
+        }
         if (mockEnabled) {
             runMockFlow(run);
             return;
         }
         runRealFullFlow(run, operatorUserId, isManager);
+    }
+
+    /**
+     * Manual industry input is intentionally classified after the report is visible to the user.
+     * The resulting key is persisted before any snapshot assembly, so one version still has one
+     * immutable benchmark-industry decision.
+     */
+    private boolean resolveDeferredBenchmarkIndustry(PresaleGenerationRun run,
+                                                     Long operatorUserId,
+                                                     boolean isManager) {
+        PresaleReportVersion version = versionMapper.selectById(run.versionId());
+        if (version == null) {
+            markFailed(run, FAILURE_CATEGORY_CONFIG_MISSING, "CONFIG_MISSING: version not found for industry classification");
+            return false;
+        }
+        PresaleBenchmarkIndustryClassifier.Classification pending =
+                new PresaleBenchmarkIndustryClassifier.Classification(
+                        version.getBenchmarkIndustryKey(),
+                        version.getIndustryClassificationSource(),
+                        version.getIndustryClassificationConfidence(),
+                        version.getIndustryClassifierModel());
+        if (!benchmarkIndustryClassifier.requiresDeferredClassification(pending)) {
+            return true;
+        }
+
+        PresaleReport report = reportMapper.selectById(version.getReportId());
+        if (report == null) {
+            markFailed(run, FAILURE_CATEGORY_CONFIG_MISSING, "CONFIG_MISSING: report not found for industry classification");
+            return false;
+        }
+        enterStage(run, STAGE_BENCHMARK_INDUSTRY, "classify benchmark industry");
+        PresaleBenchmarkIndustryClassifier.Classification classification =
+                benchmarkIndustryClassifier.classify(report.getIndustry(), operatorUserId, isManager);
+        ensureGenerationStillRunning(run, STAGE_BENCHMARK_INDUSTRY);
+
+        PresaleReportVersion update = new PresaleReportVersion();
+        update.setId(run.versionId());
+        update.setBenchmarkIndustryKey(classification.benchmarkIndustryKey());
+        update.setIndustryClassificationSource(classification.source());
+        update.setIndustryClassificationConfidence(classification.confidence());
+        update.setIndustryClassifierModel(classification.modelId());
+        update.setUpdatedAt(LocalDateTime.now());
+        updateVersionForRun(update, run, "presale.version.freezeBenchmarkIndustry");
+        return true;
     }
 
     private int safeMaxConcurrentReports() {
@@ -979,7 +1031,8 @@ public class PresaleGenerateOrchestrator {
                 parseRepresentedBrands(report),
                 operatorUserId,
                 isManager,
-                run.attempt()
+                run.attempt(),
+                report.getAttributionMode()
         );
         String renderedPrompt = promptTemplateRenderer.render(
                 template.getPromptContent(),
@@ -1239,7 +1292,8 @@ public class PresaleGenerateOrchestrator {
                 parseRepresentedBrands(report),
                 operatorUserId,
                 isManager,
-                run.attempt()
+                run.attempt(),
+                report.getAttributionMode()
         );
         String renderedPrompt = promptTemplateRenderer.render(
                 template.getPromptContent(),
@@ -2622,8 +2676,13 @@ public class PresaleGenerateOrchestrator {
         row.setCompetitorName(competitorName);
         row.setQueryCallId(queryCallId);
         row.setAnalyzeCallId(null);
+        row.setEffectiveSample(Boolean.TRUE);
         row.setRequestPromptContent(requestPromptContent);
         row.setIsMentioned(null);
+        row.setTargetEntityHit(null);
+        row.setRepresentedBrandHit(null);
+        row.setTargetBrandRelationHit(null);
+        row.setAttributionType(null);
         row.setRanking(null);
         row.setSentiment(null);
         row.setMentionedCompetitors(null);
@@ -2651,8 +2710,20 @@ public class PresaleGenerateOrchestrator {
             row.setCompetitorName(competitorName);
             row.setQueryCallId(queryCallId);
             row.setAnalyzeCallId(null);
+            row.setEffectiveSample(Boolean.TRUE);
             row.setRequestPromptContent(requestPromptContent);
-            row.setIsMentioned(node.get("is_mentioned").asBoolean() ? 1 : 0);
+            if (node.has("target_entity_hit")) {
+                boolean targetHit = node.get("target_entity_hit").asBoolean();
+                boolean representedHit = node.get("represented_brand_hit").asBoolean();
+                boolean relationHit = node.get("target_brand_relation_hit").asBoolean();
+                row.setTargetEntityHit(targetHit ? 1 : 0);
+                row.setRepresentedBrandHit(representedHit ? 1 : 0);
+                row.setTargetBrandRelationHit(relationHit ? 1 : 0);
+                row.setAttributionType(relationHit ? "LINKED" : targetHit ? "DIRECT" : representedHit ? "BRAND_ONLY" : "NONE");
+                row.setIsMentioned(targetHit || relationHit ? 1 : 0);
+            } else {
+                row.setIsMentioned(node.get("is_mentioned").asBoolean() ? 1 : 0);
+            }
             row.setRanking(node.get("ranking") == null || node.get("ranking").isNull() ? null : node.get("ranking").asInt());
             row.setSentiment(node.get("sentiment").asText());
             row.setMentionedCompetitors(objectMapper.writeValueAsString(node.get("mentioned_competitors")));

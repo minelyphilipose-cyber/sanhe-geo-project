@@ -34,7 +34,7 @@ public class PresaleReportVersion {
      * 对应 {@link com.huanjing.geo.module.presale.generate.PresaleGenerateStatus}。
      */
     private String generationStatus;
-    /** 生成子阶段(BATCH1/COMPETITOR_EXTRACT/BATCH2/L1_AGGREGATE/L2_COMPUTE/L3_INIT)。 */
+    /** 生成子阶段(BENCHMARK_INDUSTRY/BATCH1/COMPETITOR_EXTRACT/BATCH2/L1_AGGREGATE/L2_COMPUTE/L3_INIT)。 */
     private String generationStage;
 
     /**
@@ -45,6 +45,27 @@ public class PresaleReportVersion {
 
     /** Version-level QUERY contract mode, fixed when a generation run starts. */
     private String queryWebMode;
+
+    /** 当前版本冻结的主体归因模式。旧版本为空时按 STANDARD。 */
+    private String attributionMode;
+
+    /** 当前版本冻结的中文角色名称。 */
+    private String matchedRoleName;
+
+    /** 当前版本冻结的代理品牌 JSON 数组。 */
+    private String representedBrandsSnapshot;
+
+    /** 用于行业基准匹配的标准行业 key；手输行业在生成首阶段由 LLM 仅归类一次。 */
+    private String benchmarkIndustryKey;
+
+    /** DIRECT / PENDING / LLM / FALLBACK。 */
+    private String industryClassificationSource;
+
+    /** HIGH / MEDIUM / LOW。 */
+    private String industryClassificationConfidence;
+
+    /** LLM 分类实际使用的模型 ID；非 LLM 分类时为空。 */
+    private String industryClassifierModel;
 
     /** 总 LLM 调用数,v1.2 契约 11×30×2 = 660。 */
     private Integer totalLlmCalls;

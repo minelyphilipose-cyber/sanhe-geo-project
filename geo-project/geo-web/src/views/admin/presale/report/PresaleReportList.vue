@@ -10,6 +10,7 @@
       <div class="header-right admin-page-actions">
         <el-button v-if="canManagePage03Config" @click="goPage03Config">PAGE03 配置</el-button>
         <el-button v-if="canManagePage03Config" @click="goNarrativeConfig">诊断文案配置</el-button>
+        <el-button v-if="canManagePage03Config" @click="goBenchmarkConfig">行业基准配置</el-button>
         <el-button v-if="canCreateReportPermission" type="primary" :icon="Plus" @click="goCreate">新建报告</el-button>
       </div>
     </div>
@@ -258,6 +259,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Search, Loading, Lock } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { PRESALE_INDUSTRY_OPTIONS } from './presaleIndustryOptions'
 import {
   deleteReport,
   deriveVersion,
@@ -283,18 +285,7 @@ const canManagePage03Config = computed(() =>
   userStore.hasRole(['delivery_manager', 'manager', 'super_admin'])
 )
 
-// TODO: 这两份字典应该从 sys_dict_item(presale_industry / presale_industry_role)动态加载
-// v1 先写死,P1·F·1·b 补全字典加载逻辑
-const industryOptions = [
-  { value: 'restaurant', label: '餐饮' },
-  { value: 'education', label: '教培' },
-  { value: 'automotive', label: '汽车' },
-  { value: 'retail', label: '电商零售' },
-  { value: 'finance', label: '金融' },
-  { value: 'tourism', label: '旅游酒店' },
-  { value: 'medical_beauty', label: '医美美容' },
-  { value: 'tech_software', label: 'SaaS 企业软件' }
-]
+const industryOptions = PRESALE_INDUSTRY_OPTIONS
 const roleOptions = [
   { value: 'chain_brand', label: '连锁品牌' },
   { value: 'single_store', label: '单店' },
@@ -448,6 +439,10 @@ function goPage03Config() {
 
 function goNarrativeConfig() {
   router.push('/admin/presale/report/narrative-config')
+}
+
+function goBenchmarkConfig() {
+  router.push('/admin/presale/report/benchmark-config')
 }
 
 function goDetail(row: ReportListItemVO) {

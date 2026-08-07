@@ -63,7 +63,8 @@ class PresaleL3InitServiceTest {
             RuleCodes.RULE_PLATFORM_DEPTH_SHALLOW,
             RuleCodes.RULE_LONG_TAIL_SCENE_GAP,
             RuleCodes.RULE_CONTENT_CONSISTENCY_CHECK,
-            RuleCodes.RULE_PERIODIC_RETEST_MONITORING
+            RuleCodes.RULE_PERIODIC_RETEST_MONITORING,
+            "RULE_DEALER_BRAND_TRANSFER_WEAK"
     );
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -418,6 +419,49 @@ class PresaleL3InitServiceTest {
         assertEquals(3, editable.getMarketBattleground().getMarketCard().getPlatforms().size());
         assertEquals(4, editable.getMarketBattleground().getNationalCard().getRows().size());
         assertEquals(4, editable.getMarketBattleground().getRegionalCard().getRows().size());
+    }
+
+    @Test
+    void page03_usesFrozenBenchmarkIndustryShortNameForManualIndustry() {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("示例门店")
+                        .industry("新能源汽车销售、维修及保险服务")
+                        .industryRole("门店")
+                        .region("中华人民共和国北京市海淀区中关村街道")
+                        .build())
+                .benchmarksFrozen(BenchmarksFrozen.builder().industry("automotive").build())
+                .build();
+
+        MarketBattleground market = l3Defaults.normalize(new EditableContentDTO(), raw, null)
+                .getMarketBattleground();
+
+        assertTrue(market.getNationalCard().getLabel().contains("汽车经销"));
+        assertTrue(market.getRegionalCard().getLabel().contains("汽车经销"));
+        assertFalse(market.getRegionalCard().getLabel().contains("新能源汽车销售、维修及保险服务"));
+        assertTrue(market.getNationalCard().getLabel().length() <= 36);
+        assertTrue(market.getRegionalCard().getLabel().length() <= 36);
+    }
+
+    @Test
+    void page03_compactsUnclassifiedManualIndustryAcrossAllFixedLayoutFields() {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("示例门店")
+                        .industry("高端新能源汽车销售维修保险金融综合服务")
+                        .industryRole("门店")
+                        .region("中华人民共和国北京市海淀区中关村街道")
+                        .build())
+                .benchmarksFrozen(BenchmarksFrozen.builder().industry("_ALL_").build())
+                .build();
+
+        MarketBattleground market = l3Defaults.normalize(new EditableContentDTO(), raw, null)
+                .getMarketBattleground();
+
+        assertTrue(market.getNationalCard().getSubtitle().length() <= 28);
+        assertTrue(market.getNationalCard().getRows().get(2).getLabel().length() <= 18);
+        assertTrue(market.getRegionalCard().getRows().get(0).getLabel().length() <= 18);
+        assertTrue(market.getRegionalCard().getLabel().length() <= 36);
     }
 
     @Test

@@ -81,7 +81,12 @@
             </div>
           </div>
           <div class="p02-scope-note">
-            我们把这些问题分别提交给多个 AI 平台,统计 AI 是否提到你、如何描述你,并对品牌了解和竞品比较类回答做进一步判断。
+            <template v-if="isDealerReport">
+              本报告仅将 AI 有效提到门店主体，或明确建立门店与代理品牌关系的回答计入门店成绩；仅出现代理品牌的样本不计入门店综合分和问题覆盖。
+            </template>
+            <template v-else>
+              我们把这些问题分别提交给多个 AI 平台,统计 AI 是否提到你、如何描述你,并对品牌了解和竞品比较类回答做进一步判断。
+            </template>
           </div>
         </div>
 
@@ -125,6 +130,7 @@ const industryRoleLabel = computed(() =>
 const representedBrandsText = computed(() =>
   (mergedView.value.represented_brands || []).filter(Boolean).join('、')
 )
+const isDealerReport = computed(() => mergedView.value.attribution_mode === 'DEALER')
 
 const brandSubText = computed(() => {
   // 未来若 MergedViewDTO 补 brand_name_en / legal_entity,从那里读;现阶段返回空串

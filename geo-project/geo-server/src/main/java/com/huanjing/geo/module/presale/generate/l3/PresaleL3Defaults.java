@@ -27,6 +27,7 @@ import java.util.regex.Pattern;
 public class PresaleL3Defaults {
 
     private static final int MARKET_NARRATIVE_QUESTION_MAX_LENGTH = 34;
+    private static final int CALCULATION_CARD_LABEL_MAX_LENGTH = 36;
 
     private final ObjectMapper objectMapper;
     private final PresalePage03MarketConfigService page03MarketConfigService;
@@ -128,7 +129,9 @@ public class PresaleL3Defaults {
                 ? "本地" : raw.getClientInfo().getRegion();
         String industry = raw == null || raw.getClientInfo() == null
                 ? null : raw.getClientInfo().getIndustry();
-        IndustryProfile profile = resolveIndustryProfile(industry);
+        IndustryProfile profile = resolveIndustryProfile(industry, benchmarkIndustryKey(raw));
+        String displayRegion = compactText(region, 12);
+        String displayIndustry = compactText(profile.industryLabel(), 12);
         PresalePage03MarketConfig config = page03MarketConfigService.getConfig();
         MarketScale scale = estimateMarketScale(region, profile, config);
 
@@ -155,29 +158,29 @@ public class PresaleL3Defaults {
                         .platformSuffix(config.getPlatformSuffix())
                         .build())
                 .nationalCard(MarketBattleground.CalculationCard.builder()
-                        .label("NATIONAL · 全国" + profile.industryLabel() + "每天")
+                        .label(nationalCardLabel(displayIndustry))
                         .valuePrefix("约")
                         .value(scale.nationalValue())
                         .unit(scale.nationalUnit())
-                        .subtitle("条 / 天 · " + profile.industryLabel() + "相关 AI 提问")
+                        .subtitle("条 / 天 · " + displayIndustry + "相关 AI 提问")
                         .calculationLabel("CALCULATION · 推导口径")
                         .rows(List.of(
                                 calcRow("日均提问总量", "约 " + config.getDailyQuestionTotalValue() + config.getDailyQuestionTotalUnit() + " / 天", false),
                                 calcRow(profile.parentCategory() + "类占比", profile.parentShareRange(), false),
-                                calcRow(profile.industryLabel() + "占比", profile.industryShareRange(), false),
+                                calcRow(displayIndustry + "占比", profile.industryShareRange(), false),
                                 calcRow("中枢值", scale.nationalTotalText(), true)
                         ))
                         .build())
                 .bridgeText(MarketBattlegroundValidator.BRIDGE_TEXT)
                 .regionalCard(MarketBattleground.CalculationCard.builder()
-                        .label("REGIONAL · " + region + profile.industryLabel() + "每天")
+                        .label(regionalCardLabel(displayRegion, displayIndustry))
                         .valuePrefix("约")
                         .value(scale.regionalValue())
                         .unit(scale.regionalUnit())
                         .subtitle("条 / 天 · " + region + "消费者向 AI 提问")
                         .calculationLabel("CALCULATION · 推导口径")
                         .rows(List.of(
-                                calcRow("全国" + profile.industryLabel() + "日提问", scale.nationalTotalText(), false),
+                                calcRow("全国" + displayIndustry + "日提问", scale.nationalTotalText(), false),
                                 calcRow(region + "占比", scale.regionShareText(), false),
                                 calcRow("数据来源", config.getPage03DataSource(), false),
                                 calcRow("区域日提问", scale.regionalTotalText(), true)
@@ -196,8 +199,14 @@ public class PresaleL3Defaults {
                 .build();
     }
 
-    private IndustryProfile resolveIndustryProfile(String industry) {
-        String key = industry == null ? "" : industry.trim().toLowerCase();
+    /**
+     * Page03 只使用紧凑展示行业名：优先读取已冻结的行业归档 key，归档缺失时才使用客户原始输入。
+     * 原始行业名仍保留在 raw snapshot 中，供问题生成、行业基准和审计使用。
+     */
+    private IndustryProfile resolveIndustryProfile(String industry, String benchmarkIndustryKey) {
+        String key = benchmarkIndustryKey == null || benchmarkIndustryKey.isBlank() || "_ALL_".equals(benchmarkIndustryKey)
+                ? (industry == null ? "" : industry.trim().toLowerCase())
+                : benchmarkIndustryKey.trim().toLowerCase();
         return switch (key) {
             case "medical_beauty", "medical_beauty_hospital", "医美", "医疗美容" ->
                     new IndustryProfile("医美", "生活/美容", "约 0.8% - 2.0%", "约 12% - 25%",
@@ -220,13 +229,56 @@ public class PresaleL3Defaults {
             case "auto_service", "汽车服务" ->
                     new IndustryProfile("汽车服务", "生活/出行", "约 1.0% - 2.5%", "约 12% - 25%",
                             List.of("汽车保养哪家门店靠谱？", "修车选哪家性价比高？", "洗美养护推荐哪家店？"));
-            case "automotive" -> genericIndustryProfile("汽车");
-            case "retail" -> genericIndustryProfile("电商零售");
-            case "finance" -> genericIndustryProfile("金融");
+            case "automotive" -> genericIndustryProfile("汽车经销");
+            case "new_energy_vehicle" -> genericIndustryProfile("新能源汽车");
+            case "auto_aftermarket" -> genericIndustryProfile("汽车后市场");
+            case "real_estate" -> genericIndustryProfile("房产中介");
+            case "home_appliance" -> genericIndustryProfile("智能家居");
+            case "furniture_home" -> genericIndustryProfile("家具家居");
+            case "healthcare" -> genericIndustryProfile("医疗服务");
+            case "pharma_health" -> genericIndustryProfile("医药健康");
+            case "food_beverage" -> genericIndustryProfile("食品饮料");
+            case "alcohol_tea" -> genericIndustryProfile("酒类茶叶");
+            case "retail" -> genericIndustryProfile("商超零售");
+            case "ecommerce" -> genericIndustryProfile("电商零售");
+            case "beauty_care" -> genericIndustryProfile("美妆个护");
+            case "fashion_jewelry" -> genericIndustryProfile("服饰珠宝");
+            case "finance" -> genericIndustryProfile("金融保险");
+            case "tech_software" -> genericIndustryProfile("企业软件");
+            case "marketing_services" -> genericIndustryProfile("营销公关");
+            case "logistics" -> genericIndustryProfile("物流供应链");
             case "tourism" -> genericIndustryProfile("旅游酒店");
-            case "tech_software" -> genericIndustryProfile("SaaS 企业软件");
+            case "hr_recruitment" -> genericIndustryProfile("人力资源");
             default -> genericIndustryProfile(isBlank(industry) ? "本地服务" : industry);
         };
+    }
+
+    private String benchmarkIndustryKey(RawSnapshotDTO raw) {
+        if (raw == null || raw.getBenchmarksFrozen() == null) return null;
+        return raw.getBenchmarksFrozen().getIndustry();
+    }
+
+    private String nationalCardLabel(String industry) {
+        String prefix = "NATIONAL · 全国";
+        return prefix + compactText(industry, CALCULATION_CARD_LABEL_MAX_LENGTH - prefix.length() - 2) + "每天";
+    }
+
+    private String regionalCardLabel(String region, String industry) {
+        String prefix = "REGIONAL · ";
+        int available = CALCULATION_CARD_LABEL_MAX_LENGTH - prefix.length() - 2;
+        int regionLimit = Math.min(10, Math.max(4, available / 2));
+        String compactRegion = compactText(region, regionLimit);
+        String compactIndustry = compactText(industry, Math.max(4, available - compactRegion.length()));
+        return prefix + compactRegion + compactIndustry + "每天";
+    }
+
+    /** Page03 是固定高度版面；仅对展示副本做可见截断，绝不回写客户的原始行业或地区。 */
+    private String compactText(String value, int maxLength) {
+        String text = value == null ? "" : value.trim().replaceAll("\\s+", "");
+        if (text.length() <= maxLength) return text;
+        String simplified = text.replaceFirst("(?:相关)?(?:行业|服务)$", "");
+        if (!simplified.isBlank() && simplified.length() <= maxLength) return simplified;
+        return text.substring(0, Math.max(1, maxLength - 1)) + "…";
     }
 
     private IndustryProfile genericIndustryProfile(String industryLabel) {

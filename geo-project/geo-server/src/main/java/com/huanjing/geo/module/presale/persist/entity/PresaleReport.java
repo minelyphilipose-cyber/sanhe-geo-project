@@ -36,6 +36,12 @@ public class PresaleReport {
     /** 代理/经销类客户所代理的品牌 JSON 数组；不作为目标品牌提及。 */
     private String representedBrands;
 
+    /** STANDARD / DEALER。创建时按中文角色名称与代理品牌冻结。 */
+    private String attributionMode;
+
+    /** 创建时解析出的中文角色名称，避免后续字典变更影响身份口径。 */
+    private String matchedRoleName;
+
     private String region;
 
     /** 客户诉求,可选。 */

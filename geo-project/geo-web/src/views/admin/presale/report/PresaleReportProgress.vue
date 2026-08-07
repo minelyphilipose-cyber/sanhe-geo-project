@@ -32,7 +32,8 @@
         <div class="status-text">
           <div class="status-main">{{ statusText }}</div>
           <div v-if="version" class="status-sub">
-            已完成 {{ version.completedLlmCalls ?? 0 }} / {{ version.totalLlmCalls ?? 0 }} 次 LLM 调用
+            <template v-if="isClassifyingIndustry">正在为手输行业匹配报告基准，仅调用一次</template>
+            <template v-else>已完成 {{ version.completedLlmCalls ?? 0 }} / {{ version.totalLlmCalls ?? 0 }} 次 LLM 调用</template>
           </div>
         </div>
       </div>
@@ -152,6 +153,9 @@ const isRunning = computed(
 )
 const isDone = computed(() => version.value?.generationStatus === 'DONE')
 const isFailed = computed(() => version.value?.generationStatus === 'FAILED')
+const isClassifyingIndustry = computed(
+  () => version.value?.generationStage === 'BENCHMARK_INDUSTRY'
+)
 const webCoverage = computed(() => {
   const planned = version.value?.plannedWebQueryCount ?? 0
   if (planned <= 0) return 0
@@ -167,6 +171,7 @@ const webExcludedCount = computed(
 
 const statusText = computed(() => {
   if (!version.value) return '加载中...'
+  if (isClassifyingIndustry.value) return '正在归档行业信息'
   if (isRunning.value) return '正在生成 AI 可见度诊断报告'
   if (isDone.value) return '生成完成,即将跳转详情页'
   if (isFailed.value) return '生成失败'
@@ -185,6 +190,7 @@ const percentage = computed(() => {
 })
 
 const stageOrder = [
+  'BENCHMARK_INDUSTRY',
   'BATCH1',
   'JUDGE_COGNITIVE',
   'COMPETITOR_EXTRACT',
@@ -227,6 +233,11 @@ function legacyState(start: number, end: number): 'done' | 'running' | 'pending'
 const stages = computed(() => {
   const useStage = resolveKnownStage() !== null
   return [
+    {
+      name: '行业归档',
+      desc: '为手输行业匹配报告基准',
+      state: useStage ? stageState('BENCHMARK_INDUSTRY') : 'pending'
+    },
     {
       name: '第一批调用',
       desc: `${version.value?.batch1CompletedCalls ?? 0} / ${version.value?.batch1TotalCalls ?? 0}`,

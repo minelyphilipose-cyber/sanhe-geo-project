@@ -14,6 +14,8 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.SamplePrompt;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.SentimentDetail;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.DealerAttributionSummary;
+import com.huanjing.geo.module.presale.dto.AttributionMode;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptJudgeResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
@@ -137,10 +139,11 @@ public class PresaleRawSnapshotAssembler {
                     .map(PresaleCompetitorAggregator.ExtractedCompetitor::name)
                     .toList();
             RawMeta meta = buildMeta(report, version);
-            ClientInfo clientInfo = buildClientInfo(report);
+            ClientInfo clientInfo = buildClientInfo(report, version);
             List<AiPlatformConfig> fixedReportPlatforms = normalizeReportPlatforms(reportPlatforms);
             List<PlatformBreakdown> platformBreakdown = buildPlatformBreakdown(
-                    versionId, degradedPlatforms, fixedReportPlatforms);
+                    versionId, degradedPlatforms, fixedReportPlatforms,
+                    version != null && AttributionMode.fromNullable(version.getAttributionMode()) == AttributionMode.DEALER);
             TestSummary testSummary = buildTestSummary(versionId, degradedPlatforms, extractedCompetitorDisplayNames, platformBreakdown);
             List<Competitor> competitors = buildCompetitors(versionId, report, extractedCompetitors);
             List<String> specifiedCompetitors = parseSpecifiedCompetitors(report);
@@ -148,7 +151,12 @@ public class PresaleRawSnapshotAssembler {
             List<SamplePrompt> samplePrompts = buildSamplePrompts(versionId);
             SentimentDetail sentimentDetail = buildSentimentDetail(versionId, fixedReportPlatforms);
             BenchmarksFrozen benchmarksFrozen = benchmarkResolver.resolve(
-                    report.getIndustry(), report.getIndustryRole());
+                    benchmarkIndustryKey(report, version), report.getIndustryRole(),
+                    version != null && version.getCreatedAt() != null
+                            ? version.getCreatedAt().toLocalDate()
+                            : null);
+            DealerAttributionSummary dealerAttributionSummary = buildDealerAttributionSummary(
+                    versionId, version, degradedPlatforms);
 
             RawSnapshotDTO raw = RawSnapshotDTO.builder()
                     .meta(meta)
@@ -162,6 +170,7 @@ public class PresaleRawSnapshotAssembler {
                     .samplePrompts(samplePrompts)
                     .sentimentDetail(sentimentDetail)
                     .benchmarksFrozen(benchmarksFrozen)
+                    .dealerAttributionSummary(dealerAttributionSummary)
                     .build();
             return objectMapper.writeValueAsString(raw);
         } catch (BizException ex) {
@@ -175,6 +184,14 @@ public class PresaleRawSnapshotAssembler {
             log.error("L1 aggregate unexpected error, versionId={}", versionId, ex);
             throw new BizException(500, "L1 aggregate failed: " + ex.getMessage());
         }
+    }
+
+    private String benchmarkIndustryKey(PresaleReport report, PresaleReportVersion version) {
+        if (version != null && version.getBenchmarkIndustryKey() != null
+                && !version.getBenchmarkIndustryKey().isBlank()) {
+            return version.getBenchmarkIndustryKey();
+        }
+        return report.getIndustry();
     }
 
     private RawMeta buildMeta(PresaleReport report, PresaleReportVersion version) {
@@ -203,17 +220,109 @@ public class PresaleRawSnapshotAssembler {
         return (int) seconds;
     }
 
-    private ClientInfo buildClientInfo(PresaleReport report) {
+    private ClientInfo buildClientInfo(PresaleReport report, PresaleReportVersion version) {
+        String attributionMode = version == null ? report.getAttributionMode() : version.getAttributionMode();
+        String matchedRoleName = version == null ? report.getMatchedRoleName() : version.getMatchedRoleName();
+        String representedBrandsJson = version != null && version.getRepresentedBrandsSnapshot() != null
+                ? version.getRepresentedBrandsSnapshot() : report.getRepresentedBrands();
         return ClientInfo.builder()
                 .brandName(report.getBrandName())
                 .brandFormerNames(parseBrandFormerNames(report))
                 .industry(report.getIndustry())
                 .industryRole(report.getIndustryRole())
                 .representedBrands(emptyToNull(parseJsonStringArray(
-                        report.getRepresentedBrands(), "represented_brands", report.getId())))
+                        representedBrandsJson, "represented_brands", report.getId())))
+                .attributionMode(AttributionMode.fromNullable(attributionMode).name())
+                .matchedRoleName(matchedRoleName)
                 .region(report.getRegion())
                 .userDemand(report.getUserDemand())
                 .build();
+    }
+
+    private DealerAttributionSummary buildDealerAttributionSummary(Long versionId,
+                                                                    PresaleReportVersion version,
+                                                                    Set<String> degradedPlatforms) {
+        if (version == null || AttributionMode.fromNullable(version.getAttributionMode()) != AttributionMode.DEALER) {
+            return null;
+        }
+        List<String> representedBrands = parseJsonStringArray(version.getRepresentedBrandsSnapshot(),
+                "represented_brands_snapshot", version.getReportId());
+        if (representedBrands.isEmpty()) {
+            return null;
+        }
+        Map<Long, PresaleReportVersionPromptTemplate> templates = versionPromptTemplateMapper.selectList(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId))
+                .stream().collect(Collectors.toMap(PresaleReportVersionPromptTemplate::getId, item -> item));
+        Set<String> degraded = degradedPlatforms == null ? Set.of() : degradedPlatforms;
+        List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
+                new LambdaQueryWrapper<PresaleAiPromptResult>()
+                        .eq(PresaleAiPromptResult::getVersionId, versionId)
+                        .eq(PresaleAiPromptResult::getEffectiveSample, true)
+                        .isNotNull(PresaleAiPromptResult::getAttributionType));
+        List<PresaleAiPromptResult> effective = (rows == null ? List.<PresaleAiPromptResult>of() : rows).stream()
+                .filter(row -> !degraded.contains(row.getPlatformCode()))
+                .filter(row -> isCanonicalAttributionRow(row, templates.get(row.getPromptTemplateId())))
+                .toList();
+        int total = effective.size();
+        int direct = countType(effective, "DIRECT");
+        int linked = countType(effective, "LINKED");
+        int brandOnly = countType(effective, "BRAND_ONLY");
+        int brandHits = (int) effective.stream().filter(row -> Integer.valueOf(1).equals(row.getRepresentedBrandHit())).count();
+        List<PresaleAiPromptResult> organic = effective.stream()
+                .filter(row -> !containsRepresentedBrand(row.getRequestPromptContent(), representedBrands))
+                .toList();
+        List<PresaleAiPromptResult> prompted = effective.stream()
+                .filter(row -> containsRepresentedBrand(row.getRequestPromptContent(), representedBrands))
+                .toList();
+        int organicBrandHits = (int) organic.stream()
+                .filter(row -> Integer.valueOf(1).equals(row.getRepresentedBrandHit())).count();
+        int organicDealerHits = (int) organic.stream()
+                .filter(row -> "DIRECT".equals(row.getAttributionType()) || "LINKED".equals(row.getAttributionType()))
+                .count();
+        int promptedBrandHits = (int) prompted.stream()
+                .filter(row -> Integer.valueOf(1).equals(row.getRepresentedBrandHit())).count();
+        return DealerAttributionSummary.builder()
+                .effectiveSamples(total)
+                .dealerHitRate(rate(direct + linked, total))
+                .directRate(rate(direct, total))
+                .linkedRate(rate(linked, total))
+                .representedBrandOrganicRate(rate(organicBrandHits, organic.size()))
+                .dealerOrganicHitRate(rate(organicDealerHits, organic.size()))
+                .representedBrandPromptedRate(rate(promptedBrandHits, prompted.size()))
+                .transferRate(rate(linked, brandHits))
+                .brandOnlyShare(rate(brandOnly, brandHits))
+                .organicEffectiveSamples(organic.size())
+                .organicBrandHits(organicBrandHits)
+                .build();
+    }
+
+    private boolean isCanonicalAttributionRow(PresaleAiPromptResult row,
+                                               PresaleReportVersionPromptTemplate template) {
+        if (template == null) {
+            return false;
+        }
+        boolean comparison = CATEGORY_COMPARISON.equals(template.getCategory());
+        return comparison ? Integer.valueOf(2).equals(row.getBatchNo()) : Integer.valueOf(1).equals(row.getBatchNo());
+    }
+
+    private int countType(List<PresaleAiPromptResult> rows, String type) {
+        return (int) rows.stream().filter(row -> type.equals(row.getAttributionType())).count();
+    }
+
+    private boolean containsRepresentedBrand(String prompt, List<String> representedBrands) {
+        if (prompt == null || prompt.isBlank()) {
+            return false;
+        }
+        String normalizedPrompt = prompt.replace(" ", "").replace("　", "").toLowerCase();
+        return representedBrands.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> value.replace(" ", "").replace("　", "").toLowerCase())
+                .anyMatch(normalizedPrompt::contains);
+    }
+
+    private Double rate(int numerator, int denominator) {
+        return denominator == 0 ? null : numerator * 100.0 / denominator;
     }
 
     private List<String> emptyToNull(List<String> values) {
@@ -470,7 +579,8 @@ public class PresaleRawSnapshotAssembler {
 
     private List<PlatformBreakdown> buildPlatformBreakdown(Long versionId,
                                                            Set<String> degradedPlatforms,
-                                                           List<AiPlatformConfig> platforms) {
+                                                           List<AiPlatformConfig> platforms,
+                                                           boolean dealerAttribution) {
         Map<Long, String> categoryByTemplateId = loadVersionTemplateCategoryMap(versionId);
         Set<String> safeDegraded = degradedPlatforms == null ? Set.of() : degradedPlatforms;
         List<PlatformBreakdown> out = new ArrayList<>();
@@ -519,13 +629,16 @@ public class PresaleRawSnapshotAssembler {
                     .filter(r -> Integer.valueOf(1).equals(r.getRanking()))
                     .count();
 
-            int positive = (int) sampleRows.stream()
+            List<PresaleAiPromptResult> sentimentRows = dealerAttribution
+                    ? sampleRows.stream().filter(r -> Integer.valueOf(1).equals(r.getIsMentioned())).toList()
+                    : sampleRows;
+            int positive = (int) sentimentRows.stream()
                     .filter(r -> "POSITIVE".equals(r.getSentiment()))
                     .count();
-            int neutral = (int) sampleRows.stream()
+            int neutral = (int) sentimentRows.stream()
                     .filter(r -> "NEUTRAL".equals(r.getSentiment()))
                     .count();
-            int negative = (int) sampleRows.stream()
+            int negative = (int) sentimentRows.stream()
                     .filter(r -> "NEGATIVE".equals(r.getSentiment()))
                     .count();
 

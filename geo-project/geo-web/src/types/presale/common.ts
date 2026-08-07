@@ -11,7 +11,7 @@
  * 基准值匹配等级。
  * Schema v1.2 $.raw_snapshot.benchmarks_frozen.match_level
  */
-export type MatchLevel = 'EXACT' | 'FALLBACK_INDUSTRY';
+export type MatchLevel = 'EXACT' | 'FALLBACK_INDUSTRY' | 'FALLBACK_GLOBAL' | 'MISSING';
 
 /**
  * 五维评分集。

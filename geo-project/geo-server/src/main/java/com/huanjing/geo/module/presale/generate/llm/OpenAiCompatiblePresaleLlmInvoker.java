@@ -24,6 +24,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
 
     private static final String DEFAULT_QUERY_SYSTEM_PROMPT = "You are a GEO (Generative Engine Optimization) monitoring assistant.";
     private static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+    private static final String MIMO_PLATFORM_CODE = "mimo";
+    private static final int MIMO_REQUEST_TIMEOUT_MAX_MS = 90_000;
     private static final String PLATFORM_WENXIN = "wenxin";
     private static final double WENXIN_MIN_JUDGE_TEMPERATURE = 0.1D;
 
@@ -101,13 +103,15 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         );
         LlmCallResult result = invokeWithRetry(
                 ctx,
-                AnalyzePromptTemplates.SYSTEM_INSTRUCTION,
+                ctx.dealerAttribution()
+                        ? AnalyzePromptTemplates.DEALER_SYSTEM_INSTRUCTION
+                        : AnalyzePromptTemplates.SYSTEM_INSTRUCTION,
                 userPrompt,
                 0.1D,
                 true,
                 "presale:ANALYZE"
         );
-        validateAnalyzeJson(result.rawResponse());
+        validateAnalyzeJson(result.rawResponse(), ctx.dealerAttribution());
         return result;
     }
 
@@ -151,6 +155,20 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
     }
 
     @Override
+    public LlmCallResult classifyBenchmarkIndustry(PlatformCallContext ctx, String classificationPrompt)
+            throws LlmInvokeException {
+        return invokeWithRetry(
+                ctx,
+                BenchmarkIndustryClassificationPromptTemplates.SYSTEM_INSTRUCTION,
+                safe(classificationPrompt),
+                0D,
+                true,
+                "presale:BENCHMARK_INDUSTRY_CLASSIFY",
+                true
+        );
+    }
+
+    @Override
     public LlmCallResult marketBattleground(PlatformCallContext ctx, String marketBattlegroundPrompt)
             throws LlmInvokeException {
         return invokeWithRetry(
@@ -169,8 +187,21 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                                           double temperature,
                                           boolean normalizeJsonOutput,
                                           String feature) throws LlmInvokeException {
+        return invokeWithRetry(ctx, systemPrompt, userPrompt, temperature, normalizeJsonOutput, feature, false);
+    }
+
+    private LlmCallResult invokeWithRetry(PlatformCallContext ctx,
+                                          String systemPrompt,
+                                          String userPrompt,
+                                          double temperature,
+                                          boolean normalizeJsonOutput,
+                                          String feature,
+                                          boolean usePrimaryModel) throws LlmInvokeException {
         AiPlatformConfig config = requireConfig(ctx.platformCode());
-        String modelId = resolvePresaleModelId(config);
+        String modelId = usePrimaryModel ? config.getModelId() : resolvePresaleModelId(config);
+        if (!StringUtils.hasText(modelId)) {
+            throw new LlmInvokeException("Invalid primary model_id for platform: " + ctx.platformCode());
+        }
         String apiKey = platformCredentialService.resolveApiKey(
                 config.getPlatformCode(), config.getPrimaryKeyRef(), config.getApiKey()
         );
@@ -194,7 +225,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                     Math.max(1, normalize(config.getRateLimitQps(), llmProperties.getRateLimitQps())),
                     null,
                     normalizeJsonOutput,
-                    LlmModelConfig.MAX_REQUEST_TIMEOUT_MS,
+                    requestTimeoutMaxMs(config),
                     feature,
                     config.getConcurrencyLimit()
             );
@@ -218,7 +249,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         }
     }
 
-    private void validateAnalyzeJson(String responseText) throws AnalyzeParseException {
+    private void validateAnalyzeJson(String responseText, boolean dealerAttribution) throws AnalyzeParseException {
         try {
             JsonNode root = objectMapper.readTree(responseText);
             if (!root.has("is_mentioned") || !root.get("is_mentioned").isBoolean()) {
@@ -244,6 +275,9 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
             }
             validateTopKeywords(root.get("top_keywords"));
             validateNegativeEvidence(root.get("negative_evidence"));
+            if (dealerAttribution) {
+                validateDealerAttribution(root);
+            }
         } catch (AnalyzeParseException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -324,6 +358,48 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
             return platform.getModelId();
         }
         return null;
+    }
+
+    private void validateDealerAttribution(JsonNode root) throws AnalyzeParseException {
+        boolean target = requiredBoolean(root, "target_entity_hit");
+        boolean represented = requiredBoolean(root, "represented_brand_hit");
+        boolean relation = requiredBoolean(root, "target_brand_relation_hit");
+        boolean mentioned = root.get("is_mentioned").asBoolean();
+        if (relation && (!target || !represented)) {
+            throw new AnalyzeParseException("target_brand_relation_hit requires target and represented brand facts");
+        }
+        if (mentioned != (target || relation)) {
+            throw new AnalyzeParseException("is_mentioned is inconsistent with dealer attribution facts");
+        }
+        JsonNode typeNode = root.get("attribution_type");
+        if (typeNode == null || !typeNode.isTextual()) {
+            throw new AnalyzeParseException("analyze output attribution_type must be string");
+        }
+        String expected = relation ? "LINKED" : target ? "DIRECT" : represented ? "BRAND_ONLY" : "NONE";
+        if (!expected.equals(typeNode.asText())) {
+            throw new AnalyzeParseException("attribution_type is inconsistent with dealer attribution facts");
+        }
+        if (!target && !relation && root.has("ranking") && !root.get("ranking").isNull()) {
+            throw new AnalyzeParseException("dealer ranking must be null without target hit");
+        }
+        if (!target && !relation
+                && (!root.has("sentiment") || !"NEUTRAL".equals(root.get("sentiment").asText()))) {
+            throw new AnalyzeParseException("dealer sentiment must be NEUTRAL without target hit");
+        }
+    }
+
+    private boolean requiredBoolean(JsonNode root, String field) throws AnalyzeParseException {
+        JsonNode value = root.get(field);
+        if (value == null || !value.isBoolean()) {
+            throw new AnalyzeParseException("analyze output missing boolean " + field);
+        }
+        return value.asBoolean();
+    }
+
+    private int requestTimeoutMaxMs(AiPlatformConfig config) {
+        return config != null && MIMO_PLATFORM_CODE.equalsIgnoreCase(config.getPlatformCode())
+                ? MIMO_REQUEST_TIMEOUT_MAX_MS
+                : LlmModelConfig.MAX_REQUEST_TIMEOUT_MS;
     }
 
     private String resolveModelDisplayName(AiPlatformConfig config, String modelId) {

@@ -3,6 +3,7 @@ package com.huanjing.geo.module.presale.generate.calc;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.ClientInfo;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
@@ -22,6 +23,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -41,6 +43,38 @@ class SceneCoverageCalculatorTest {
     private AiPlatformConfigMapper aiPlatformConfigMapper;
     @Mock
     private PresaleCompetitorAggregator competitorAggregator;
+
+    @Test
+    void dealerCoverageUsesWeightedHalfThresholdAndExcludesBrandOnlyRows() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        List<AiPlatformConfig> platforms = IntStream.range(0, 100)
+                .mapToObj(i -> platform("p" + i))
+                .toList();
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms);
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(901L, "P901", "推荐型", "49 percent uncovered"),
+                template(902L, "P902", "推荐型", "50 percent covered")
+        ));
+        List<PresaleAiPromptResult> rows = new java.util.ArrayList<>();
+        IntStream.range(0, 49).forEach(i -> rows.add(row(901L, "p" + i, 1, 1, null, null, null)));
+        IntStream.range(0, 50).forEach(i -> rows.add(row(902L, "p" + i, 1, 1, null, null, null)));
+        // 代理品牌单独曝光在持久化口径中 is_mentioned=0，不得进入门店覆盖分子。
+        rows.add(row(901L, "p49", 1, 0, null, null, null));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(rows);
+
+        RawSnapshotDTO raw = raw(List.of(), List.of());
+        raw.setClientInfo(ClientInfo.builder().attributionMode("DEALER").build());
+        SceneAndIntentResult result = calculator.compute(9001L, raw, Map.of(
+                "RECOMMENDATION", 2, "COMPARISON", 0, "INQUIRY", 0, "COGNITIVE", 0, "SCENARIO", 0
+        ));
+
+        assertEquals(1, result.sceneCoverage().getHighValue().getCovered());
+        assertEquals(List.of("50 percent covered"), result.sceneCoverage().getHighValue().getCoveredQueries()
+                .stream().map(item -> item.getPromptContent()).toList());
+        assertEquals(List.of("49 percent uncovered"), result.sceneCoverage().getHighValue().getMissingQueries()
+                .stream().map(item -> item.getPromptContent()).toList());
+    }
 
     @Test
     void happyPath_sceneCoverageAndIntentBreakdownAreConsistent() {

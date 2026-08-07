@@ -32,6 +32,8 @@ class PresaleGenerationAttemptFenceContractTest {
         assertCurrentRunGuard(callSql);
         assertCurrentRunGuard(resultSql);
         assertTrue(resultSql.contains("ON DUPLICATE KEY UPDATE"));
+        assertTrue(resultSql.contains("LAST_INSERT_ID(presale_ai_prompt_result.id)"));
+        assertTrue(resultSql.contains("COALESCE(#{row.effectiveSample}, TRUE)"));
         assertTrue(resultSql.contains("query_call_id = VALUES(query_call_id)"));
         assertTrue(resultSql.contains("analyze_call_id = VALUES(analyze_call_id)"));
     }

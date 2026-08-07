@@ -10,6 +10,7 @@ import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
 import com.huanjing.geo.module.presale.export.service.PresaleExportStatuses;
 import com.huanjing.geo.module.presale.dto.PromptSourceMode;
+import com.huanjing.geo.module.presale.dto.AttributionMode;
 import com.huanjing.geo.module.presale.PresaleAgentRoleRules;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleReportInputLimits;
@@ -41,6 +42,8 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
+import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -102,6 +105,8 @@ public class PresaleReportService {
     private final PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
     private final PresaleWebReadinessChecker webReadinessChecker;
     private final ObjectMapper objectMapper;
+    private final SysDictItemMapper sysDictItemMapper;
+    private final PresaleBenchmarkIndustryClassifier benchmarkIndustryClassifier;
     @Value("${presale.prompt.active-version:v2}")
     private String activePromptTemplateVersion;
 
@@ -119,7 +124,9 @@ public class PresaleReportService {
                                 LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator,
                                 PartnerPresaleReportQuotaService partnerPresaleReportQuotaService,
                                 PresaleWebReadinessChecker webReadinessChecker,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper,
+                                SysDictItemMapper sysDictItemMapper,
+                                PresaleBenchmarkIndustryClassifier benchmarkIndustryClassifier) {
         this.reportMapper = reportMapper;
         this.versionMapper = versionMapper;
         this.exportMapper = exportMapper;
@@ -135,6 +142,8 @@ public class PresaleReportService {
         this.partnerPresaleReportQuotaService = partnerPresaleReportQuotaService;
         this.webReadinessChecker = webReadinessChecker;
         this.objectMapper = objectMapper;
+        this.sysDictItemMapper = sysDictItemMapper;
+        this.benchmarkIndustryClassifier = benchmarkIndustryClassifier;
     }
 
     /**
@@ -149,8 +158,11 @@ public class PresaleReportService {
         Long userId = currentUser.getId();
         validateBaseInputLimits(req);
         List<String> brandFormerNames = normalizeBrandFormerNames(req.getBrandFormerNames(), req.getBrandName());
+        String matchedRoleName = resolveIndustryRoleName(req.getIndustryRole());
         List<String> representedBrands = normalizeRepresentedBrands(
-                req.getRepresentedBrands(), req.getIndustryRole(), req.getBrandName());
+                req.getRepresentedBrands(), matchedRoleName, req.getBrandName());
+        AttributionMode attributionMode = PresaleAgentRoleRules.isDealerMode(matchedRoleName, representedBrands)
+                ? AttributionMode.DEALER : AttributionMode.STANDARD;
         List<String> specifiedCompetitors = normalizeSpecifiedCompetitors(
                 req.getSpecifiedCompetitors(), req.getBrandName(), brandFormerNames, representedBrands);
         // REQUIRED readiness must fail before quota reservation or any report/version write.
@@ -161,6 +173,10 @@ public class PresaleReportService {
         if (reservation.existingReportId() != null) {
             return reservation.existingReportId();
         }
+        // Only dictionary-exact industries are resolved in this request. Manual industry input is
+        // classified once by the generation worker after the report ID is available to the client.
+        PresaleBenchmarkIndustryClassifier.Classification industryClassification =
+                benchmarkIndustryClassifier.classifyDirectlyOrDefer(req.getIndustry());
         LocalDateTime now = LocalDateTime.now();
 
         PresaleReport report = new PresaleReport();
@@ -169,6 +185,8 @@ public class PresaleReportService {
         report.setIndustry(req.getIndustry());
         report.setIndustryRole(req.getIndustryRole());
         report.setRepresentedBrands(toJsonArray(representedBrands, "代理品牌序列化失败"));
+        report.setAttributionMode(attributionMode.name());
+        report.setMatchedRoleName(matchedRoleName);
         report.setRegion(req.getRegion());
         report.setUserDemand(req.getUserDemand());
         report.setUserType(req.getUserType());
@@ -185,6 +203,13 @@ public class PresaleReportService {
         version.setVersionNo(1);
         version.setGenerationStatus(PresaleGenerateStatus.QUEUED.name());
         version.setQueryWebMode(queryWebMode.name());
+        version.setAttributionMode(attributionMode.name());
+        version.setMatchedRoleName(matchedRoleName);
+        version.setRepresentedBrandsSnapshot(toJsonArray(representedBrands, "代理品牌序列化失败"));
+        version.setBenchmarkIndustryKey(industryClassification.benchmarkIndustryKey());
+        version.setIndustryClassificationSource(industryClassification.source());
+        version.setIndustryClassificationConfidence(industryClassification.confidence());
+        version.setIndustryClassifierModel(industryClassification.modelId());
         version.setTotalLlmCalls(0);
         version.setCompletedLlmCalls(0);
         version.setBatch1TotalCalls(0);
@@ -731,7 +756,7 @@ public class PresaleReportService {
     }
 
     private List<String> normalizeRepresentedBrands(List<String> input,
-                                                    String industryRole,
+                                                    String industryRoleName,
                                                     String brandName) {
         if (input == null || input.isEmpty()) {
             return List.of();
@@ -743,7 +768,7 @@ public class PresaleReportService {
         if (values.isEmpty()) {
             return List.of();
         }
-        if (!PresaleAgentRoleRules.supportsRepresentedBrands(industryRole)) {
+        if (!PresaleAgentRoleRules.supportsRepresentedBrands(industryRoleName)) {
             throw new BizException(400, "仅代理商、经销商等渠道身份可以填写代理品牌");
         }
         if (values.size() > PresaleReportInputLimits.REPRESENTED_BRAND_MAX_COUNT) {
@@ -765,6 +790,22 @@ public class PresaleReportService {
             }
         }
         return values;
+    }
+
+    private String resolveIndustryRoleName(String industryRole) {
+        if (industryRole == null || industryRole.isBlank()) {
+            return "";
+        }
+        List<SysDictItem> rows = sysDictItemMapper.selectList(new LambdaQueryWrapper<SysDictItem>()
+                .eq(SysDictItem::getDictType, "presale_industry_role")
+                .eq(SysDictItem::getDictKey, industryRole.trim())
+                .eq(SysDictItem::getEnabled, true)
+                .last("LIMIT 1"));
+        if (rows == null || rows.isEmpty() || rows.get(0).getDictValue() == null
+                || rows.get(0).getDictValue().isBlank()) {
+            return industryRole.trim();
+        }
+        return rows.get(0).getDictValue().trim();
     }
 
     private void validateBaseInputLimits(CreateReportRequest req) {

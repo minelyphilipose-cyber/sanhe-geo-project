@@ -515,6 +515,10 @@ public class PresalePromptTraceService {
     private PresalePromptTraceParseViewVO toParseView(PresalePromptTraceRow row) {
         return PresalePromptTraceParseViewVO.builder()
                 .mentionedText(row.getIsMentioned() == null ? "未识别" : row.getIsMentioned() == 1 ? "已提及" : "未提及")
+                .attributionType(row.getAttributionType())
+                .targetEntityHit(toBoolean(row.getTargetEntityHit()))
+                .representedBrandHit(toBoolean(row.getRepresentedBrandHit()))
+                .targetBrandRelationHit(toBoolean(row.getTargetBrandRelationHit()))
                 .rankingText(row.getRanking() == null ? "未给出排名" : "第 " + row.getRanking() + " 位")
                 .sentimentText(sentimentText(row.getSentiment()))
                 .sentimentType(sentimentType(row.getSentiment()))
@@ -523,6 +527,10 @@ public class PresalePromptTraceService {
                 .topKeywords(readKeywords(row.getTopKeywordsJson()))
                 .negativeEvidence(readNegativeEvidence(row.getNegativeEvidenceJson()))
                 .build();
+    }
+
+    private Boolean toBoolean(Integer value) {
+        return value == null ? null : value == 1;
     }
 
     private List<String> readTextArray(String json) {
