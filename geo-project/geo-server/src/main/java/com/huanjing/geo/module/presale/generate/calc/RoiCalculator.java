@@ -14,6 +14,7 @@ public class RoiCalculator {
     private static final PhaseContribution HIGH_CONTRIBUTION = new PhaseContribution(2.0, 3.0);
     private static final PhaseContribution MEDIUM_CONTRIBUTION = new PhaseContribution(1.0, 2.0);
     private static final PhaseContribution LOW_CONTRIBUTION = new PhaseContribution(0.5, 1.0);
+    private static final int PHASE3_ONGOING_ACTION_COUNT = 3;
 
     public RoiSimulation compute(Double overallScore, List<OptimizationFinding> findings) {
         double current = overallScore == null ? 0.0 : overallScore;
@@ -42,9 +43,12 @@ public class RoiCalculator {
                 phase3Total, LOW_CONTRIBUTION);
 
         List<RoiSimulation.RoiPhase> phases = List.of(
-                buildPhase(1, "M1", phase1Range, phase1Total),
-                buildPhase(2, "M2-3", phase2Range, phase2Total),
-                buildPhase(3, "M4-6", phase3Range, phase3Total)
+                buildPhase(1, "M1", phase1Range, phase1Total, 0),
+                buildPhase(2, "M2-3", phase2Range, phase2Total, 0),
+                // M4-6 is an ongoing verification and expansion cycle even when all current
+                // findings were already addressed in the first two stages. These actions do not
+                // create an ungrounded score uplift.
+                buildPhase(3, "M4-6", phase3Range, phase3Total, PHASE3_ONGOING_ACTION_COUNT)
         );
 
         double targetLow = phase3Range.targetLow();
@@ -67,7 +71,11 @@ public class RoiCalculator {
                 .build();
     }
 
-    private RoiSimulation.RoiPhase buildPhase(int phaseNo, String durationLabel, PhaseRange range, int plannedCount) {
+    private RoiSimulation.RoiPhase buildPhase(int phaseNo,
+                                              String durationLabel,
+                                              PhaseRange range,
+                                              int plannedCount,
+                                              int ongoingActionCount) {
         return RoiSimulation.RoiPhase.builder()
                 .phaseNo(phaseNo)
                 .durationLabel(durationLabel)
@@ -81,6 +89,7 @@ public class RoiCalculator {
                 .completedOptimizationCount(0)
                 .totalOptimizationCount(plannedCount)
                 .plannedOptimizationCount(plannedCount)
+                .ongoingActionCount(ongoingActionCount)
                 .build();
     }
 

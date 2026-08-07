@@ -735,13 +735,16 @@ function renderDefaultPhaseTitle(phase: RoiPhase): string {
     case 2:
       return planned > 0 ? `内容深化阶段,推进${planned}项优化` : '内容深化阶段';
     case 3:
-      return planned > 0 ? `持续优化阶段,跟进${planned}项优化` : '巩固·监测阶段';
+      return planned > 0 ? `验证与持续扩张阶段,跟进${planned}项优化` : '验证与持续扩张阶段';
     default:
       return `阶段 ${phase.phase_no}`;
   }
 }
 
 function renderDefaultPhaseDescription(phase: RoiPhase): string {
+  if (phase.phase_no === 3) {
+    return 'M4 完成同题复测，验证前期整改是否被模型稳定识别；M5 补充未覆盖或新增高价值场景；M6 复盘竞品、平台与行业变化，形成下一周期优先级。';
+  }
   const planned = phase.planned_optimization_count ?? phase.total_optimization_count ?? 0;
   const target = phase.target_score_low != null && phase.target_score_high != null
     ? `${toIntRounded(phase.target_score_low)}-${toIntRounded(phase.target_score_high)} 分`

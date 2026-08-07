@@ -306,8 +306,8 @@ const priorityPlanDisplay = computed(() => {
   const phases = roi.value.phases
   const p1 = phases[0]?.planned_optimization_count ?? phases[0]?.total_optimization_count ?? 0
   const p2 = phases[1]?.planned_optimization_count ?? phases[1]?.total_optimization_count ?? 0
-  const p3 = phases[2]?.planned_optimization_count ?? phases[2]?.total_optimization_count ?? 0
-  return `P1 ${p1} · P2 ${p2} · P3 ${p3}`
+  const p3 = phases[2]?.ongoing_action_count ?? 3
+  return `P1 ${p1}项整改 · P2 ${p2}项整改 · P3 ${p3}项持续动作`
 })
 
 const opportunityLabel = computed(() => {
@@ -425,19 +425,13 @@ const phaseTeasers = computed<PhaseTeaser[]>(() => {
   return mergedView.value.merged_phases.map((mp) => ({
     phase_no: mp.phase.phase_no,
     duration_label: mp.phase.duration_label,
-    title: displayPhaseTitle(mp.phase.phase_no, mp.title, mp.phase.planned_optimization_count ?? mp.phase.total_optimization_count ?? 0),
+    title: mp.title,
     target_score: mp.phase.target_score,
     target_score_low: mp.phase.target_score_low,
     target_score_high: mp.phase.target_score_high
   }))
 })
 
-function displayPhaseTitle(phaseNo: number, title: string, plannedCount: number): string {
-  if (phaseNo === 3 && plannedCount <= 0 && valueFrame.value !== 'defend') {
-    return '持续优化观察'
-  }
-  return title
-}
 
 function formatScoreRange(
   low: number | null | undefined,
@@ -500,13 +494,14 @@ const roiLineOption = computed<EChartsOption>(() => {
         const mp = phases[idx - 1]
         if (!mp) return `<div>${p.name}</div><div>${toIntRounded(Number(p.value))}</div>`
         const planned = mp.phase.planned_optimization_count ?? mp.phase.total_optimization_count ?? 0
+        const ongoing = mp.phase.ongoing_action_count ?? 3
         const range = formatScoreRange(mp.phase.target_score_low, mp.phase.target_score_high, mp.phase.target_score)
         const uplift = formatScoreRange(mp.phase.uplift_from_previous_low, mp.phase.uplift_from_previous_high, mp.phase.uplift_from_previous)
         return [
-          `<div>${p.name} · ${displayPhaseTitle(mp.phase.phase_no, mp.title, planned)}</div>`,
+          `<div>${p.name} · ${mp.title}</div>`,
           `<div>目标区间:${range}</div>`,
-          `<div>${planned > 0 ? `较上阶段提升:${uplift}` : '较上阶段提升:不报分'}</div>`,
-          `<div>本阶段计划优化项:${planned} 项</div>`
+          `<div>${planned > 0 ? `较上阶段提升:${uplift}` : mp.phase.phase_no === 3 ? '分数变化:以复测结果为准' : '较上阶段提升:不报分'}</div>`,
+          `<div>${mp.phase.phase_no === 3 ? `本阶段持续动作:${ongoing} 项` : `本阶段计划优化项:${planned} 项`}</div>`
         ].join('')
       }
     },

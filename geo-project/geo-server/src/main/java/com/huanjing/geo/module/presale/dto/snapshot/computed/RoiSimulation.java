@@ -105,6 +105,9 @@ public class RoiSimulation {
         /** Presale 场景展示用:本阶段计划优化项数。 */
         @JsonProperty("planned_optimization_count")
         private Integer plannedOptimizationCount;
+        /** 持续经营行动数；不计入整改项数，也不参与分数提升测算。 */
+        @JsonProperty("ongoing_action_count")
+        private Integer ongoingActionCount;
     }
 
     @Data

@@ -174,6 +174,8 @@ export interface RoiPhase {
   completed_optimization_count: number;
   total_optimization_count: number;
   planned_optimization_count?: number | null;
+  /** 持续经营行动数；不计入分数提升测算。 */
+  ongoing_action_count?: number | null;
 }
 
 export interface RoiCaseStudyRange {

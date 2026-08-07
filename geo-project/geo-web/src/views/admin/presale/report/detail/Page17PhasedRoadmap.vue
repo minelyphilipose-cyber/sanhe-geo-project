@@ -46,9 +46,9 @@
                 </div>
               </div>
               <div class="p17-stat">
-                <div class="mono p17-stat-label">计划项数</div>
+                <div class="mono p17-stat-label">{{ phaseActionLabel(item) }}</div>
                 <div class="display-serif p17-stat-value p17-stat-ink">
-                  {{ plannedCount(item) }}
+                  {{ phaseActionDisplay(item) }}
                 </div>
               </div>
             </div>
@@ -82,7 +82,7 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  *     - 描述 = merged_phases[i].description
  *     - TARGET SCORE = phase.target_score_low/high
  *     - 预期提升 = phase.uplift_from_previous_low/high
- *     - 计划项数 = phase.planned_optimization_count
+ *     - 阶段行动 = 整改项 + 持续经营动作；持续经营动作不计入分数测算
  *
  * 视觉约定:
  *   - 前 N-1 阶段 TARGET SCORE 用 primary(蓝),最后一阶段用 accent(橙)表示"最终目标"
@@ -140,12 +140,13 @@ interface Step {
   projection_enabled?: boolean | null
   total_optimization_count: number
   planned_optimization_count?: number | null
+  ongoing_action_count?: number | null
 }
 
 const steps = computed<Step[]>(() => {
   return mergedView.value.merged_phases.map<Step>((mp) => ({
     phase_no: mp.phase.phase_no,
-    title: displayPhaseTitle(mp.phase.phase_no, mp.title, mp.phase.planned_optimization_count ?? mp.phase.total_optimization_count ?? 0),
+    title: mp.title,
     description: mp.description,
     duration_label: mp.phase.duration_label,
     target_score: mp.phase.target_score,
@@ -156,16 +157,10 @@ const steps = computed<Step[]>(() => {
     uplift_from_previous_high: mp.phase.uplift_from_previous_high,
     projection_enabled: mp.phase.projection_enabled ?? (mp.phase.total_optimization_count ?? 0) > 0,
     total_optimization_count: mp.phase.total_optimization_count,
-    planned_optimization_count: mp.phase.planned_optimization_count
+    planned_optimization_count: mp.phase.planned_optimization_count,
+    ongoing_action_count: mp.phase.ongoing_action_count
   }))
 })
-
-function displayPhaseTitle(phaseNo: number, title: string, plannedCount: number): string {
-  if (phaseNo === 3 && plannedCount <= 0 && valueFrame.value !== 'defend') {
-    return '持续优化观察'
-  }
-  return title
-}
 
 /**
  * duration_label 形态转换:
@@ -180,8 +175,15 @@ function formatDuration(label: string): string {
   return label
 }
 
-function plannedCount(item: Step): string {
-  return `${item.planned_optimization_count ?? item.total_optimization_count ?? 0}`
+function phaseActionLabel(item: Step): string {
+  return item.phase_no === 3 ? '阶段行动' : '计划优化项'
+}
+
+function phaseActionDisplay(item: Step): string {
+  const planned = item.planned_optimization_count ?? item.total_optimization_count ?? 0
+  if (item.phase_no !== 3) return `${planned}`
+  const ongoing = item.ongoing_action_count ?? 3
+  return planned > 0 ? `${ongoing}+${planned}` : `${ongoing}`
 }
 
 function formatTargetRange(item: Step): string {
@@ -194,8 +196,7 @@ function formatTargetRange(item: Step): string {
 
 function formatUplift(item: Step): string {
   if (!item.projection_enabled) {
-    if (item.phase_no !== 3) return '不报分'
-    return valueFrame.value === 'defend' ? '巩固·监测' : '持续观察'
+    return item.phase_no === 3 ? '以复测为准' : '不报分'
   }
   const low = item.uplift_from_previous_low ?? item.uplift_from_previous
   const high = item.uplift_from_previous_high ?? item.uplift_from_previous

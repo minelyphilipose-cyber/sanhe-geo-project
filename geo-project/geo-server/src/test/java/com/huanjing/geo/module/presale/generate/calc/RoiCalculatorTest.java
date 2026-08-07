@@ -31,6 +31,7 @@ class RoiCalculatorTest {
             assertEquals(0.0, phase.getUpliftFromPreviousHigh(), 0.0001);
             assertFalse(phase.getProjectionEnabled());
         }
+        assertEquals(3, roi.getPhases().get(2).getOngoingActionCount());
     }
 
     @Test
@@ -72,6 +73,21 @@ class RoiCalculatorTest {
 
         assertTrue(roi.getPhases().get(0).getProjectionEnabled());
         assertTrue(roi.getPhases().get(2).getProjectionEnabled());
+    }
+
+    @Test
+    void phaseThreeKeepsOngoingActionsWhenNoLowPriorityFindingsRemain() {
+        var roi = calculator.compute(40.0, List.of(
+                finding(OptimizationFinding.Priority.HIGH),
+                finding(OptimizationFinding.Priority.MEDIUM)
+        ));
+
+        var phase3 = roi.getPhases().get(2);
+        assertEquals(0, phase3.getPlannedOptimizationCount());
+        assertEquals(3, phase3.getOngoingActionCount());
+        assertFalse(phase3.getProjectionEnabled());
+        assertEquals(0.0, phase3.getUpliftFromPreviousLow(), 0.0001);
+        assertEquals(0.0, phase3.getUpliftFromPreviousHigh(), 0.0001);
     }
 
     @Test
