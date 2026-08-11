@@ -168,7 +168,7 @@
       </section>
 
       <section>
-        <p class="hint">首次部署或更换机器时生成一次性配对码，在后台自媒体分发弹窗中输入即可完成绑定。</p>
+        <p class="hint">首次部署或更换机器时生成一次性配对码，在生产后台“个人中心 > 本地助手”中输入即可完成绑定。</p>
         <div class="grid">
           <div>
             <label for="helperName">助手名称</label>
@@ -408,7 +408,7 @@
           appendLog({
             pairingCode: result.pairingCode,
             expiresAt: result.expiresAt,
-            next: '请把配对码输入后台自媒体分发弹窗'
+            next: '请把配对码输入生产后台“个人中心 > 本地助手”'
           })
           startPairingPolling()
         } catch (error) {

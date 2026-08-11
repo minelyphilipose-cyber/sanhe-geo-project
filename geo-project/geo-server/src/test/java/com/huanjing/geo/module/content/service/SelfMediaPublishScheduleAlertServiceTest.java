@@ -54,7 +54,7 @@ class SelfMediaPublishScheduleAlertServiceTest {
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
         row.setNextAttemptAt(now.minusMinutes(10));
         when(alertMapper.selectOpenByScheduleId(1L)).thenReturn(List.of());
-        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of());
+        when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), eq(now))).thenReturn(List.of());
 
         int changed = service.reconcile(row, now);
 

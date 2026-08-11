@@ -227,8 +227,8 @@
                 <span>最近在线：{{ session.lastSeenAt ? formatDateTime(session.lastSeenAt) : '-' }}</span>
                 <span>有效期至：{{ session.expiresAt ? formatDateTime(session.expiresAt) : '-' }}</span>
               </div>
-              <el-tag size="small" :type="session.status === 'active' ? 'success' : 'info'" round>
-                {{ session.status === 'active' ? '已绑定' : session.status }}
+              <el-tag size="small" :type="isLocalAgentSessionUsable(session) ? 'success' : 'info'" round>
+                {{ localAgentSessionStatusLabel(session) }}
               </el-tag>
               <el-button
                 size="small"
@@ -259,6 +259,7 @@ import {
   revokeLocalAgentSession,
   type LocalAgentSession,
 } from '@/api/localAgent'
+import { isLocalAgentSessionUsable, localAgentSessionStatusLabel } from '@/api/localAgentSessionState'
 import {
   getLocalHelperAdspowerSettings,
   updateLocalHelperAdspowerSettings,
@@ -345,7 +346,7 @@ const subjectValue = computed(() => {
 const avatarLetter = computed(() => (userStore.displayName || 'U').charAt(0).toUpperCase())
 const showAvatarImage = computed(() => !!userStore.avatarUrl && !avatarLoadFailed.value)
 const primaryLocalAgentSession = computed(() =>
-  localAgentSessions.value.find((session) => session.status === 'active') || null,
+  localAgentSessions.value.find((session) => isLocalAgentSessionUsable(session)) || null,
 )
 
 const profileRules: FormRules = {

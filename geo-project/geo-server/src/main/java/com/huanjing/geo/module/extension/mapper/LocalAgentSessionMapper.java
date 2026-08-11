@@ -36,9 +36,11 @@ public interface LocalAgentSessionMapper extends BaseMapper<LocalAgentSession> {
             FROM local_agent_session
             WHERE operator_id = #{operatorId}
               AND status = 'active'
+              AND expires_at > #{now}
             ORDER BY last_seen_at DESC, updated_at DESC
             """)
-    List<LocalAgentSession> selectActiveByOperatorId(@Param("operatorId") Long operatorId);
+    List<LocalAgentSession> selectActiveByOperatorId(@Param("operatorId") Long operatorId,
+                                                     @Param("now") LocalDateTime now);
 
     @Select("""
             SELECT COUNT(1)
@@ -128,6 +130,20 @@ public interface LocalAgentSessionMapper extends BaseMapper<LocalAgentSession> {
     int touchActive(@Param("id") Long id,
                     @Param("lastSeenAt") LocalDateTime lastSeenAt,
                     @Param("userAgent") String userAgent);
+
+    @Update("""
+            UPDATE local_agent_session
+            SET expires_at = #{renewedExpiresAt},
+                updated_at = #{now}
+            WHERE id = #{id}
+              AND status = 'active'
+              AND expires_at > #{now}
+              AND expires_at <= #{renewBefore}
+            """)
+    int renewActiveExpiry(@Param("id") Long id,
+                          @Param("now") LocalDateTime now,
+                          @Param("renewBefore") LocalDateTime renewBefore,
+                          @Param("renewedExpiresAt") LocalDateTime renewedExpiresAt);
 
     @Update("""
             UPDATE local_agent_session

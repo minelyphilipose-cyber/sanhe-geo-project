@@ -766,7 +766,8 @@ class BrowserEnvironmentServiceTest {
 
     @Test
     void selfMediaAutomationReadinessReturnsReadyWhenAllRuntimeLinksAreHealthy() {
-        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of(localAgentSession()));
+        when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), any(LocalDateTime.class)))
+                .thenReturn(List.of(localAgentSession()));
         when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(extensionSession()));
         when(environmentMapper.selectList(any())).thenReturn(List.of(environment()));
         when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of(account("阜阳全屋智能家居", "toutiao")));
@@ -791,7 +792,8 @@ class BrowserEnvironmentServiceTest {
     void selfMediaAutomationReadinessReportsDisabledEnvironmentSeparatelyFromMissingConfig() {
         BrowserEnvironment disabled = environment();
         disabled.setStatus(BrowserEnvironmentConstants.ENV_STATUS_DISABLED);
-        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of(localAgentSession()));
+        when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), any(LocalDateTime.class)))
+                .thenReturn(List.of(localAgentSession()));
         when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(extensionSession()));
         when(environmentMapper.selectList(any())).thenReturn(List.of(disabled));
         when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of());
@@ -808,7 +810,8 @@ class BrowserEnvironmentServiceTest {
         extensionProperties.getEnv().setExpectedVersion("0.1.0");
         ExtensionSession outdated = extensionSession();
         outdated.setExtensionVersion("0.0.9");
-        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of(localAgentSession()));
+        when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), any(LocalDateTime.class)))
+                .thenReturn(List.of(localAgentSession()));
         when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(outdated));
         when(environmentMapper.selectList(any())).thenReturn(List.of(environment()));
         when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of(account("阜阳全屋智能家居", "toutiao")));
@@ -836,7 +839,8 @@ class BrowserEnvironmentServiceTest {
         matching.setEnvironmentKey("geo_b");
         matching.setProviderProfileId("profile-1");
         matching.setLastSeenAt(LocalDateTime.now().minusMinutes(2));
-        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of(localAgentSession()));
+        when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), any(LocalDateTime.class)))
+                .thenReturn(List.of(localAgentSession()));
         when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(otherEnvironment, matching));
         when(environmentMapper.selectList(any())).thenReturn(List.of(environment()));
         when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of(account("阜阳全屋智能家居", "toutiao")));
@@ -852,7 +856,8 @@ class BrowserEnvironmentServiceTest {
 
     @Test
     void selfMediaAutomationReadinessIssueProvidesActionKey() {
-        when(localAgentSessionMapper.selectActiveByOperatorId(99L)).thenReturn(List.of());
+        when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), any(LocalDateTime.class)))
+                .thenReturn(List.of());
         when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of());
         when(environmentMapper.selectList(any())).thenReturn(List.of());
         when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of());

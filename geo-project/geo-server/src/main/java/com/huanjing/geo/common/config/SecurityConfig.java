@@ -89,6 +89,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/v1/local-agent/pairing-intents").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/local-agent/pairings/claim").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/local-agent/runtime-status").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/local-agent/session/status").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/local-agent/self-media-schedules/platforms").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/local-agent/self-media-schedules/claim-next").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/local-agent/self-media-schedules/publish-checks/claim-next").permitAll()

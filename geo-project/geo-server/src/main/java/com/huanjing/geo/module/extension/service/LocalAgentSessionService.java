@@ -46,6 +46,7 @@ import java.util.regex.Pattern;
 public class LocalAgentSessionService {
     private static final int PAIRING_TTL_SECONDS = 300;
     private static final int SESSION_TTL_DAYS = 30;
+    private static final int SESSION_RENEW_THRESHOLD_DAYS = 7;
     private static final String TOKEN_PREFIX = "helper.";
     private static final String HELPER_ACCESS_PREFIX = "helper.session.";
     private static final String HMAC_ALGORITHM = "HmacSHA256";
@@ -144,7 +145,7 @@ public class LocalAgentSessionService {
 
     public List<LocalAgentSessionVO> listActiveSessions() {
         SysUser operator = currentUserService.requireCurrentUser();
-        return sessionMapper.selectActiveByOperatorId(operator.getId()).stream()
+        return sessionMapper.selectActiveByOperatorId(operator.getId(), now()).stream()
                 .map(LocalAgentSessionVO::from)
                 .toList();
     }
@@ -166,7 +167,7 @@ public class LocalAgentSessionService {
             session = requireActiveSessionById(request.localAgentSessionId());
             requireSessionOwner(session, extensionSession.getOperatorId());
         } else {
-            session = sessionMapper.selectActiveByOperatorId(extensionSession.getOperatorId()).stream()
+            session = sessionMapper.selectActiveByOperatorId(extensionSession.getOperatorId(), now()).stream()
                     .filter(item -> item.getLastSeenAt() != null)
                     .findFirst()
                     .orElseThrow(() -> new BizException(404, "未找到当前账号已配对的本地助手会话"));
@@ -217,8 +218,35 @@ public class LocalAgentSessionService {
         if (!constantTimeEquals(signature, expected)) {
             throw new BizException(401, "local helper signature invalid");
         }
-        sessionMapper.touchActive(sessionId, now(), userAgent);
+        LocalDateTime verifiedAt = now();
+        sessionMapper.touchActive(sessionId, verifiedAt, userAgent);
+        renewActiveSessionIfDue(session, verifiedAt);
         return session;
+    }
+
+    private void renewActiveSessionIfDue(LocalAgentSession session, LocalDateTime verifiedAt) {
+        LocalDateTime renewBefore = verifiedAt.plusDays(SESSION_RENEW_THRESHOLD_DAYS);
+        if (session.getExpiresAt().isAfter(renewBefore)) {
+            return;
+        }
+        LocalDateTime renewedExpiresAt = verifiedAt.plusDays(SESSION_TTL_DAYS);
+        int updated = sessionMapper.renewActiveExpiry(
+                session.getId(),
+                verifiedAt,
+                renewBefore,
+                renewedExpiresAt
+        );
+        if (updated > 0) {
+            session.setExpiresAt(renewedExpiresAt);
+            return;
+        }
+        LocalAgentSession latest = sessionMapper.selectById(session.getId());
+        if (latest != null
+                && "active".equals(latest.getStatus())
+                && latest.getExpiresAt() != null
+                && latest.getExpiresAt().isAfter(verifiedAt)) {
+            session.setExpiresAt(latest.getExpiresAt());
+        }
     }
 
     private LocalAgentSignResponse signRequestForSession(LocalAgentSession session,

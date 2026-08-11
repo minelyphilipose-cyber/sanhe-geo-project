@@ -48,6 +48,10 @@ class SecurityConfigLocalAgentTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(400))
                     .andExpect(jsonPath("$.message").value("helper access is required"));
+            mockMvc.perform(get("/api/v1/local-agent/session/status"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(400))
+                    .andExpect(jsonPath("$.message").value("helper access is required"));
         }
     }
 
@@ -102,6 +106,11 @@ class SecurityConfigLocalAgentTest {
 
         @PostMapping("/api/v1/local-agent/runtime-status")
         R<Void> runtimeStatus() {
+            throw new BizException(400, "helper access is required");
+        }
+
+        @GetMapping("/api/v1/local-agent/session/status")
+        R<Void> localAgentSessionStatus() {
             throw new BizException(400, "helper access is required");
         }
 

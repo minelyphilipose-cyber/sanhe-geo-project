@@ -286,7 +286,7 @@ public class SelfMediaPublishScheduleAlertService {
             return true;
         }
         LocalDateTime minSeenAt = now.minusMinutes(Math.max(helperOfflineMinutes, 1));
-        List<LocalAgentSession> sessions = localAgentSessionMapper.selectActiveByOperatorId(operatorId);
+        List<LocalAgentSession> sessions = localAgentSessionMapper.selectActiveByOperatorId(operatorId, now);
         if (sessions == null || sessions.isEmpty()) {
             return false;
         }

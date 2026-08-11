@@ -31,6 +31,12 @@ import {
   buildFailedBrowserObservationMetrics,
   summarizeBrowserProcessMetrics,
 } from './browser-observation-metrics.js'
+import {
+  hasRuntimeSessionCredentials,
+  isLocalAgentSessionExpiredError,
+  isRuntimeSessionExpired,
+  isRuntimeSessionUsable,
+} from './local-agent-session-state.js'
 
 const CONFIG_PATH = new URL('../config.local.json', import.meta.url)
 const EXAMPLE_CONFIG_PATH = new URL('../config.example.json', import.meta.url)
@@ -69,6 +75,7 @@ const PUPPETEER_PAGE_GOTO_TIMEOUT_MS = 75_000
 const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
 const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
 const LOCAL_AGENT_RUNTIME_STATUS_HEARTBEAT_MS = 60_000
+const LOCAL_AGENT_SESSION_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000
 const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
 const TERMINAL_SCHEDULE_CLAIM_ERROR_CODES = new Set([
   'SCHEDULE_EXECUTOR_MISMATCH',
@@ -132,6 +139,8 @@ let schedulePlatformCursor = 0
 let machineIdCache = null
 let localAgentRuntimeStatusInFlight = false
 let lastLocalAgentRuntimeStatus = null
+let localAgentSessionRefreshInFlight = false
+let lastLocalAgentSessionRefreshStatus = null
 let lastAdspowerApiStatus = { ok: false, checkedAt: null, error: null }
 let lastBrowserObservationStatus = null
 
@@ -947,7 +956,7 @@ async function probeAdspowerApi(config) {
 }
 
 async function reportLocalAgentRuntimeStatus(config, options = {}) {
-  if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) {
+  if (!isRuntimeSessionUsable(runtimeSession)) {
     return { ok: false, skipped: true, reason: 'not_paired' }
   }
   if (localAgentRuntimeStatusInFlight && !options.force) {
@@ -1010,6 +1019,7 @@ async function reportLocalAgentRuntimeStatus(config, options = {}) {
     }
     return { ok: true, status }
   } catch (error) {
+    await markRuntimeSessionExpired(error)
     lastLocalAgentRuntimeStatus = {
       at: nowIso(),
       ok: false,
@@ -1475,7 +1485,7 @@ async function handlePairingStatus(req, res, config) {
   if (!pendingPairing?.pairingCode) {
     sendJson(req, res, config, 200, {
       ok: true,
-      paired: Boolean(runtimeSession?.sessionId && runtimeSession?.hmacSecret),
+      paired: isRuntimeSessionUsable(runtimeSession),
       pending: false,
       session: publicSession(),
     })
@@ -1499,6 +1509,7 @@ async function handlePairingStatus(req, res, config) {
       hmacSecret: data.hmacSecret,
       expiresAt: data.expiresAt,
       pairedAt: nowIso(),
+      sessionExpiredAt: null,
     }
     await saveRuntimeSession(runtimeSession)
     reportLocalAgentRuntimeStatus(config, { reason: 'paired', force: true }).catch(() => null)
@@ -1519,14 +1530,52 @@ async function handlePairingStatus(req, res, config) {
 }
 
 function publicSession() {
-  if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return null
+  if (!hasRuntimeSessionCredentials(runtimeSession)) return null
   return {
     sessionId: runtimeSession.sessionId,
     brandId: runtimeSession.brandId,
     operatorId: runtimeSession.operatorId,
     pairedAt: runtimeSession.pairedAt,
     expiresAt: runtimeSession.expiresAt,
+    expired: isRuntimeSessionExpired(runtimeSession),
+    requiresPairing: isRuntimeSessionExpired(runtimeSession),
   }
+}
+
+async function markRuntimeSessionExpired(error) {
+  if (!isLocalAgentSessionExpiredError(error) || !runtimeSession) return false
+  const firstDetection = !runtimeSession.sessionExpiredAt
+  runtimeSession = {
+    ...runtimeSession,
+    sessionExpiredAt: runtimeSession.sessionExpiredAt || nowIso(),
+  }
+  await saveRuntimeSession(runtimeSession).catch(() => null)
+  if (firstDetection) {
+    console.error('GEO local agent pairing expired: 请在生产后台「个人中心 > 本地助手」重新配对')
+  }
+  return true
+}
+
+async function refreshLocalAgentSessionStatus(config) {
+  if (!hasRuntimeSessionCredentials(runtimeSession)) {
+    return { ok: false, skipped: true, reason: 'not_paired' }
+  }
+  const data = await signedTrustedBackendRequest(config, '/api/v1/local-agent/session/status', { method: 'GET' })
+  if (data?.sessionId && Number(data.sessionId) !== Number(runtimeSession.sessionId)) {
+    const error = new Error('backend returned a different local agent session')
+    error.statusCode = 409
+    throw error
+  }
+  if (data?.expiresAt) {
+    const changed = runtimeSession.expiresAt !== data.expiresAt || runtimeSession.sessionExpiredAt
+    runtimeSession = {
+      ...runtimeSession,
+      expiresAt: data.expiresAt,
+      sessionExpiredAt: null,
+    }
+    if (changed) await saveRuntimeSession(runtimeSession)
+  }
+  return { ok: true, sessionId: runtimeSession.sessionId, expiresAt: runtimeSession.expiresAt || null }
 }
 
 async function handleProfiles(req, res, config) {
@@ -5776,7 +5825,7 @@ async function route(req, res, config) {
       version: packageInfo.version,
       buildRevision: packageInfo.buildRevision,
       time: nowIso(),
-      paired: Boolean(runtimeSession?.sessionId && runtimeSession?.hmacSecret),
+      paired: isRuntimeSessionUsable(runtimeSession),
       session: publicSession(),
       activeProfile: config.activeProfile,
       activeProfileLabel: config.activeProfileLabel,
@@ -5810,6 +5859,11 @@ async function route(req, res, config) {
       runtimeStatus: {
         last: lastLocalAgentRuntimeStatus,
         adspowerApi: lastAdspowerApiStatus,
+      },
+      sessionRefresh: {
+        inFlight: localAgentSessionRefreshInFlight,
+        last: lastLocalAgentSessionRefreshStatus,
+        intervalMs: LOCAL_AGENT_SESSION_REFRESH_INTERVAL_MS,
       },
       browserLifecycle: {
         helperBootId: HELPER_BOOT_ID,
@@ -5915,7 +5969,7 @@ function startSchedulePoller(config) {
   const intervalMs = Number(config.selfMediaSchedulePollIntervalMs || 10_000)
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) return
   const tick = () => {
-    if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return
+    if (!isRuntimeSessionUsable(runtimeSession)) return
     if (schedulePollInFlight) {
       lastSchedulePollStatus = {
         at: nowIso(),
@@ -5948,8 +6002,9 @@ function startSchedulePoller(config) {
           probeAdspower: false,
         }).catch(() => null)
       })
-      .catch((error) => {
+      .catch(async (error) => {
         browserRuntimeErrorCounter.record(error)
+        const sessionExpired = await markRuntimeSessionExpired(error)
         lastSchedulePollStatus = {
           at: nowIso(),
           ok: false,
@@ -5961,7 +6016,7 @@ function startSchedulePoller(config) {
           lastErrorCode: 'SCHEDULE_POLL_FAILED',
           lastErrorMessage: error.message,
         }).catch(() => null)
-        console.error('GEO self-media schedule poll failed:', error.message)
+        if (!sessionExpired) console.error('GEO self-media schedule poll failed:', error.message)
       })
       .finally(() => {
         schedulePollInFlight = false
@@ -5975,7 +6030,7 @@ function startScheduleHeartbeat(config) {
   const intervalMs = Number(config.selfMediaScheduleHeartbeatIntervalMs || SCHEDULE_HEARTBEAT_INTERVAL_MS)
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) return
   const tick = () => {
-    if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return
+    if (!isRuntimeSessionUsable(runtimeSession)) return
     if (scheduleHeartbeatInFlight) {
       lastScheduleHeartbeatStatus = {
         at: nowIso(),
@@ -5995,13 +6050,14 @@ function startScheduleHeartbeat(config) {
           failed: result.failed,
         }
       })
-      .catch((error) => {
+      .catch(async (error) => {
+        const sessionExpired = await markRuntimeSessionExpired(error)
         lastScheduleHeartbeatStatus = {
           at: nowIso(),
           ok: false,
           error: error.message,
         }
-        console.error('GEO self-media schedule heartbeat failed:', error.message)
+        if (!sessionExpired) console.error('GEO self-media schedule heartbeat failed:', error.message)
       })
       .finally(() => {
         scheduleHeartbeatInFlight = false
@@ -6013,11 +6069,35 @@ function startScheduleHeartbeat(config) {
 
 function startLocalAgentRuntimeStatusReporter(config) {
   const tick = (reason, force = false) => {
-    if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return
+    if (!isRuntimeSessionUsable(runtimeSession)) return
     reportLocalAgentRuntimeStatus(config, { reason, force }).catch(() => null)
   }
   setTimeout(() => tick('startup', true), 2_000).unref?.()
   setInterval(() => tick('heartbeat'), LOCAL_AGENT_RUNTIME_STATUS_HEARTBEAT_MS).unref?.()
+}
+
+function startLocalAgentSessionRefresher(config) {
+  const tick = () => {
+    if (!hasRuntimeSessionCredentials(runtimeSession) || localAgentSessionRefreshInFlight) return
+    localAgentSessionRefreshInFlight = true
+    refreshLocalAgentSessionStatus(config)
+      .then((result) => {
+        lastLocalAgentSessionRefreshStatus = { at: nowIso(), ...result }
+      })
+      .catch(async (error) => {
+        await markRuntimeSessionExpired(error)
+        lastLocalAgentSessionRefreshStatus = {
+          at: nowIso(),
+          ok: false,
+          error: String(error?.message || error || '').slice(0, 500),
+        }
+      })
+      .finally(() => {
+        localAgentSessionRefreshInFlight = false
+      })
+  }
+  setTimeout(tick, 250).unref?.()
+  setInterval(tick, LOCAL_AGENT_SESSION_REFRESH_INTERVAL_MS).unref?.()
 }
 
 async function pollSelfMediaSchedules(config) {
@@ -6128,6 +6208,7 @@ function normalizePlatformList(raw) {
   return Array.from(new Set(platforms))
 }
 
+startLocalAgentSessionRefresher(config)
 startSchedulePoller(config)
 startScheduleHeartbeat(config)
 startLocalAgentRuntimeStatusReporter(config)

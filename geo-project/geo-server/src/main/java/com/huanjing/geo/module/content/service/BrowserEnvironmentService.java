@@ -82,8 +82,7 @@ public class BrowserEnvironmentService {
         LocalDateTime now = LocalDateTime.now();
         List<SelfMediaAutomationReadinessVO.Issue> issues = new ArrayList<>();
 
-        LocalAgentSession localAgent = localAgentSessionMapper.selectActiveByOperatorId(operator.getId()).stream()
-                .filter(item -> item.getExpiresAt() != null && item.getExpiresAt().isAfter(now))
+        LocalAgentSession localAgent = localAgentSessionMapper.selectActiveByOperatorId(operator.getId(), now).stream()
                 .findFirst()
                 .orElse(null);
         SelfMediaAutomationReadinessVO.LocalAgent localAgentStatus = new SelfMediaAutomationReadinessVO.LocalAgent(

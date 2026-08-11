@@ -16,10 +16,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,6 +35,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -180,6 +185,90 @@ class LocalAgentSessionServiceTest {
         assertEquals(403, ex.getCode());
     }
 
+    @Test
+    void listSessionsOnlyRequestsUnexpiredActiveRows() {
+        when(currentUserService.requireCurrentUser()).thenReturn(operator(20L));
+        when(sessionMapper.selectActiveByOperatorId(eq(20L), any(LocalDateTime.class)))
+                .thenReturn(List.of(activeSession(9L, 20L)));
+
+        var sessions = service.listActiveSessions();
+
+        assertEquals(1, sessions.size());
+        verify(sessionMapper).selectActiveByOperatorId(eq(20L), any(LocalDateTime.class));
+    }
+
+    @Test
+    void verifiedSignedRequestRenewsSessionInsideThreshold() throws Exception {
+        LocalAgentSession session = activeSession(9L, 20L);
+        session.setExpiresAt(LocalDateTime.now().plusDays(1));
+        when(sessionMapper.selectById(9L)).thenReturn(session);
+        when(redisStore.tryLock(anyString(), anyString(), any())).thenReturn(true);
+        when(sessionMapper.renewActiveExpiry(eq(9L), any(), any(), any())).thenReturn(1);
+
+        SignedRequest request = signedRequest(session, "/api/v1/local-agent/session/status");
+        LocalAgentSession verified = service.verifySignedRequest(
+                "GET",
+                request.path(),
+                EMPTY_BODY_HASH,
+                request.helperAccess(),
+                request.timestamp(),
+                request.nonce(),
+                request.signature(),
+                "test-agent"
+        );
+
+        ArgumentCaptor<LocalDateTime> renewedExpiry = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(sessionMapper).renewActiveExpiry(eq(9L), any(), any(), renewedExpiry.capture());
+        assertTrue(renewedExpiry.getValue().isAfter(LocalDateTime.now().plusDays(29)));
+        assertEquals(renewedExpiry.getValue(), verified.getExpiresAt());
+    }
+
+    @Test
+    void verifiedSignedRequestDoesNotRenewSessionOutsideThreshold() throws Exception {
+        LocalAgentSession session = activeSession(9L, 20L);
+        session.setExpiresAt(LocalDateTime.now().plusDays(8));
+        when(sessionMapper.selectById(9L)).thenReturn(session);
+        when(redisStore.tryLock(anyString(), anyString(), any())).thenReturn(true);
+
+        SignedRequest request = signedRequest(session, "/api/v1/local-agent/session/status");
+        service.verifySignedRequest(
+                "GET",
+                request.path(),
+                EMPTY_BODY_HASH,
+                request.helperAccess(),
+                request.timestamp(),
+                request.nonce(),
+                request.signature(),
+                "test-agent"
+        );
+
+        verify(sessionMapper, never()).renewActiveExpiry(any(), any(), any(), any());
+    }
+
+    @Test
+    void expiredSignedSessionIsRejectedBeforeReplayLockOrRenewal() {
+        LocalAgentSession session = activeSession(9L, 20L);
+        session.setExpiresAt(LocalDateTime.now().minusSeconds(1));
+        when(sessionMapper.selectById(9L)).thenReturn(session);
+
+        BizException ex = assertThrows(BizException.class, () -> service.verifySignedRequest(
+                "GET",
+                "/api/v1/local-agent/session/status",
+                EMPTY_BODY_HASH,
+                "helper.session.9",
+                String.valueOf(System.currentTimeMillis() / 1_000),
+                "expired-session-nonce",
+                "unused-signature",
+                "test-agent"
+        ));
+
+        assertEquals(401, ex.getCode());
+        assertEquals("local agent session expired", ex.getMessage());
+        verify(redisStore, never()).tryLock(anyString(), anyString(), any());
+        verify(sessionMapper, never()).touchActive(any(), any(), any());
+        verify(sessionMapper, never()).renewActiveExpiry(any(), any(), any(), any());
+    }
+
     private SysUser operator(Long id) {
         SysUser user = new SysUser();
         user.setId(id);
@@ -194,5 +283,27 @@ class LocalAgentSessionServiceTest {
         session.setHmacSecret("test-secret");
         session.setExpiresAt(LocalDateTime.now().plusDays(1));
         return session;
+    }
+
+    private SignedRequest signedRequest(LocalAgentSession session, String path) throws Exception {
+        String timestamp = String.valueOf(System.currentTimeMillis() / 1_000);
+        String nonce = "nonce-" + System.nanoTime();
+        String helperAccess = "helper.session." + session.getId();
+        String canonical = "GET\n" + path + "\n" + EMPTY_BODY_HASH + "\n"
+                + timestamp + "\n" + nonce + "\n" + helperAccess;
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(session.getHmacSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        String signature = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+        return new SignedRequest(path, helperAccess, timestamp, nonce, signature);
+    }
+
+    private record SignedRequest(
+            String path,
+            String helperAccess,
+            String timestamp,
+            String nonce,
+            String signature
+    ) {
     }
 }

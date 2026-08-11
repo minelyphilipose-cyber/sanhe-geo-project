@@ -27,6 +27,7 @@ import com.huanjing.geo.module.extension.dto.LocalAgentSelfMediaSchedulePlatform
 import com.huanjing.geo.module.extension.dto.LocalAgentRuntimeStatusReportRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentRuntimeStatusVO;
 import com.huanjing.geo.module.extension.dto.LocalAgentSessionVO;
+import com.huanjing.geo.module.extension.dto.LocalAgentSessionStatusResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignResponse;
 import com.huanjing.geo.module.extension.entity.LocalAgentSession;
@@ -108,6 +109,12 @@ public class LocalAgentController {
             HttpServletRequest request) {
         LocalAgentSession session = verifySignedRequest(request);
         return R.ok(runtimeStatusService.reportLocalAgent(session, body));
+    }
+
+    @GetMapping("/session/status")
+    public R<LocalAgentSessionStatusResponse> currentSessionStatus(HttpServletRequest request) {
+        LocalAgentSession session = verifySignedRequest(request);
+        return R.ok(new LocalAgentSessionStatusResponse(session.getId(), session.getExpiresAt()));
     }
 
     @PostMapping("/sessions/{sessionId}/revoke")
