@@ -10,7 +10,7 @@
 - `80`: HTTP，用于证书签发和跳转
 - `443`: HTTPS
 
-不要公网开放 MySQL `3306`、Redis `6379`、MinIO `9000/9001`。
+不要公网开放 MySQL `3306`、Redis `6379`。
 
 安装基础依赖：
 
@@ -44,7 +44,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 备案完成前，临时使用服务器公网 IP 作为 HTTP 入口：
 
 - 主系统入口：`http://119.45.154.127`
-- 文件访问路径：`http://119.45.154.127/oss/`
+- 对象文件由腾讯云 COS 提供，应用不再代理生产 MinIO。
 
 当前阶段不签发 HTTPS 证书。域名备案完成后，再切回 `https://www.huanjingaigeo.com` 并执行 Certbot。
 
@@ -68,8 +68,14 @@ chmod 600 .env
 必须替换所有 `replace-with-*`。重点项：
 
 - `APP_PUBLIC_URL=http://119.45.154.127`
-- `MINIO_PUBLIC_URL=http://119.45.154.127/oss`
-- `MINIO_PUBLIC_ENDPOINT=http://119.45.154.127/oss`
+- `GEO_STORAGE_PROVIDER=cos`
+- `GEO_STORAGE_READ_FALLBACK_TO_MINIO=false`
+- `GEO_STORAGE_MIGRATION_EXECUTE_ENABLED=false`
+- `COS_REGION`
+- `COS_BUCKET`
+- `COS_INTERNAL_ENDPOINT`
+- `COS_SECRET_ID`
+- `COS_SECRET_KEY`
 - `JWT_SECRET`
 - `DISPATCH_API_KEY_AES_SECRET`
 - `MP_CREDENTIAL_AES_SECRET`
@@ -77,8 +83,8 @@ chmod 600 .env
 - `MYSQL_ROOT_PASSWORD`
 - `MYSQL_PASSWORD`
 - `REDIS_PASSWORD`
-- `MINIO_ROOT_PASSWORD`
-- `MINIO_APP_SECRET_KEY`
+- `MINIO_APP_ACCESS_KEY`（当前后端兼容配置绑定仍需要，不代表生产启用 MinIO）
+- `MINIO_APP_SECRET_KEY`（当前后端兼容配置绑定仍需要，不代表生产启用 MinIO）
 - 微信开放平台相关 `WECHAT_*`
 - 抖音开放平台相关 `DOUYIN_*`
 - 媒体特价接口相关 `MEITITEJIA_*`
@@ -92,7 +98,7 @@ openssl rand -hex 32
 
 ## 4. 启动部署
 
-首次部署或升级：
+首次部署或升级使用生产 `docker-compose.yml`：
 
 ```bash
 bash scripts/deploy.sh
@@ -131,10 +137,9 @@ Docker volumes 是生产数据核心：
 
 - `geo-project_mysql-data`
 - `geo-project_redis-data`
-- `geo-project_minio-data`
 - `geo-project_presale-exports`
 
-升级前建议先做数据库备份，并确认 MinIO 数据卷已纳入云硬盘快照或文件级备份。
+升级前建议先做数据库备份，并确认 COS 的生命周期和备份策略符合业务要求。
 
 ## 7. 常用运维命令
 

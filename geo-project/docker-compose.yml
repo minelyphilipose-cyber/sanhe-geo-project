@@ -50,57 +50,6 @@ services:
     mem_limit: ${REDIS_MEM_LIMIT:-512m}
     cpus: ${REDIS_CPUS:-0.5}
 
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    container_name: geo-minio
-    restart: unless-stopped
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_SERVER_URL: ${MINIO_SERVER_URL}
-      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL}
-      TZ: ${TZ:-Asia/Shanghai}
-    command: server /data --console-address ":9001"
-    expose:
-      - "9000"
-      - "9001"
-    ports:
-      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 20s
-    mem_limit: ${MINIO_MEM_LIMIT:-1g}
-    cpus: ${MINIO_CPUS:-1.0}
-
-  minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
-    container_name: geo-minio-init
-    restart: "no"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET: ${MINIO_BUCKET}
-      MINIO_APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY}
-      MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY}
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
-        mc mb --ignore-existing "local/$${MINIO_BUCKET}"
-        mc admin user add local "$${MINIO_APP_ACCESS_KEY}" "$${MINIO_APP_SECRET_KEY}" || true
-        mc admin policy attach local readwrite --user "$${MINIO_APP_ACCESS_KEY}"
-        mc anonymous set download "local/$${MINIO_BUCKET}"
-
   geo-server:
     image: sanhe-geo/geo-server:${IMAGE_TAG}
     build:
@@ -117,7 +66,6 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       MYSQL_HOST: mysql
       REDIS_HOST: redis
-      MINIO_INTERNAL_ENDPOINT: http://minio:9000
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS}
       TZ: ${TZ:-Asia/Shanghai}
       LOG_HOME: /app/logs
@@ -126,10 +74,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
     expose:
       - "8080"
     volumes:
@@ -173,6 +117,5 @@ services:
 volumes:
   mysql-data:
   redis-data:
-  minio-data:
   geo-server-logs:
   presale-exports:

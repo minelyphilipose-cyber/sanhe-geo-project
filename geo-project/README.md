@@ -8,17 +8,16 @@
 geo-project/
 ├── geo-web/        # 前端 Vue3 + Vite + Element Plus + Tailwind
 ├── geo-server/     # 后端 Spring Boot 3 + MyBatis-Plus + MySQL + Redis
-└── docker-compose.yml
+└── docker-compose.yml  # 生产容器编排：COS，不启动 MinIO
 ```
 
 ## 快速启动
 
-### 1. 启动基础设施
-```bash
-docker-compose up -d mysql redis minio
-```
+本地开发不依赖 Docker。请先确认 MySQL、Redis 和 MinIO 均可从本机
+访问；`dev` profile 默认使用 MinIO，具体连接地址见
+`geo-server/src/main/resources/application-dev.yml`。
 
-### 2. 启动后端
+### 1. 启动后端
 ```bash
 cd geo-server
 mvn spring-boot:run -Dspring-boot.run.profiles=dev
@@ -32,7 +31,7 @@ python tools/brand-geo-site-mock-server.py
 
 dev 配置默认请求 `http://127.0.0.1:18080/api/v1/content`,验收清单见 `docs/phase2a-brand-geo-site-acceptance.md`。
 
-### 3. 启动前端
+### 2. 启动前端
 ```bash
 cd geo-web
 npm install
@@ -42,6 +41,15 @@ npm run dev
 访问 http://localhost:3000
 
 默认管理员账号: admin / admin123
+
+### 3. 生产容器部署
+
+生产环境由 `.env` 设置 `GEO_STORAGE_PROVIDER=cos`，只使用
+`docker-compose.yml`：
+
+```bash
+docker compose --env-file .env -f docker-compose.yml up -d
+```
 
 ## 自媒体分发 v1 文档
 
