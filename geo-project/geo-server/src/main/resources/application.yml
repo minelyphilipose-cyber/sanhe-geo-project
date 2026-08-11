@@ -276,8 +276,8 @@ geo:
       region: ${COS_REGION:ap-nanjing}
       bucket: ${COS_BUCKET:geo-files-1422803602}
       endpoint: ${COS_INTERNAL_ENDPOINT:cos.ap-nanjing.myqcloud.com}
-      secret-id: ${COS_SECRET_ID:AKIDUDrTnyymOo1OZZM2Zu20pfKm3A8xc8Tc}
-      secret-key: ${COS_SECRET_KEY:0pUzIRqmjgR8uZ1IMEuOgleUErxypV0L}
+      secret-id: ${COS_SECRET_ID:__REQUIRED_COS_SECRET_ID__}
+      secret-key: ${COS_SECRET_KEY:__REQUIRED_COS_SECRET_KEY__}
   security:
     init-admin-password:
       enabled: ${GEO_INIT_ADMIN_PASSWORD_ENABLED:false}
