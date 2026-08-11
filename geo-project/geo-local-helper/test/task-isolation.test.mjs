@@ -306,6 +306,16 @@ test('helper emergency build revision targets the deployed extension', () => {
   assert.match(serviceWorker, /EXTENSION_HELPER_BUILD_MISMATCH/)
 })
 
+test('extension heartbeat uses a persistent MV3 alarm', () => {
+  const manifest = JSON.parse(readProjectFile('geo-env-extension/manifest.json'))
+  const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
+
+  assert.ok(manifest.permissions.includes('alarms'))
+  assert.match(serviceWorker, /chrome\.alarms\.create\(RUNTIME_STATUS_HEARTBEAT_ALARM/)
+  assert.match(serviceWorker, /chrome\.alarms\.onAlarm\.addListener/)
+  assert.doesNotMatch(serviceWorker, /setInterval\([\s\S]+RUNTIME_STATUS_HEARTBEAT/)
+})
+
 test('Puppeteer preserves the real AdsPower window viewport', () => {
   const server = readProjectFile('geo-local-helper/src/server.js')
 

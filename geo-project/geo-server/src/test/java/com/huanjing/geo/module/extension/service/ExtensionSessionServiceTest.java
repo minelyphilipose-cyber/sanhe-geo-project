@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.EXTENSION_UNAUTHORIZED;
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.EXTENSION_DENIED;
@@ -128,18 +129,34 @@ class ExtensionSessionServiceTest {
     }
 
     @Test
-    void slidingRenewRotatesTokenWhenNearExpiry() {
+    void slidingRenewExtendsTheExistingSessionWithoutRotatingToken() {
         ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "geo_b", "profile-1", null, "1.2.3", "ua");
         ExtensionSession session = sessionFromInsert(response.token());
         session.setId(1L);
-        session.setExpiresAt(LocalDateTime.now().plusHours(12));
+        session.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(12));
         when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
+        when(sessionMapper.renewActiveExpiry(eq(1L), any(), any(), any())).thenReturn(1);
 
         ExtensionTokenRefreshResponse refresh = service.validateAndMaybeRenew(response.token(), "1.2.4", "ua2");
 
         assertTrue(refresh.renewed());
-        assertTrue(refresh.token().startsWith("ext."));
-        verify(sessionMapper).revokeActive(any(), any(), any());
+        assertNull(refresh.token());
+        assertEquals(1L, refresh.sessionId());
+        assertTrue(refresh.expiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC).plusDays(6)));
+        verify(sessionMapper).renewActiveExpiry(eq(1L), any(), any(), eq(refresh.expiresAt()));
+        verify(sessionMapper, never()).revokeActive(any(), any(), any());
+    }
+
+    @Test
+    void expiredSessionIsRejectedByEveryAuthenticatedEndpoint() {
+        ExtensionSession session = session();
+        session.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).minusSeconds(1));
+        when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
+
+        BizException ex = assertThrows(BizException.class, () -> service.requireActiveSession("ext.token"));
+
+        assertEquals(EXTENSION_UNAUTHORIZED, ex.getCode());
+        assertEquals("extension token expired", ex.getMessage());
     }
 
     @Test

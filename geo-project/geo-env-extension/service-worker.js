@@ -39,7 +39,8 @@ const autoPollTabUpdatedAtByKey = new Map()
 const bindIntentInFlight = new Set()
 let douyinImageTextStateWriteChain = Promise.resolve()
 const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
-const RUNTIME_STATUS_HEARTBEAT_MS = 60 * 1000
+const RUNTIME_STATUS_HEARTBEAT_ALARM = 'geo-runtime-status-heartbeat'
+const RUNTIME_STATUS_HEARTBEAT_MINUTES = 1
 const HELPER_SIGNING_CONTEXT_CACHE_MS = 10 * 1000
 const HELPER_SIGNATURE_CLOCK_WARNING_SECONDS = 240
 const extensionSessionRefreshInFlight = new Map()
@@ -364,9 +365,17 @@ function scheduleRuntimeStatusHeartbeat() {
   setTimeout(() => {
     reportRuntimeStatus({ reason: 'startup', runtimeStage: 'extension_seen', force: true }).catch(() => null)
   }, 1500)
-  setInterval(() => {
+  const ensureAlarm = () => chrome.alarms.create(RUNTIME_STATUS_HEARTBEAT_ALARM, {
+    delayInMinutes: RUNTIME_STATUS_HEARTBEAT_MINUTES,
+    periodInMinutes: RUNTIME_STATUS_HEARTBEAT_MINUTES,
+  })
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== RUNTIME_STATUS_HEARTBEAT_ALARM) return
     reportRuntimeStatus({ reason: 'heartbeat', runtimeStage: 'extension_seen' }).catch(() => null)
-  }, RUNTIME_STATUS_HEARTBEAT_MS)
+  })
+  chrome.runtime.onStartup.addListener(() => ensureAlarm().catch(() => null))
+  chrome.runtime.onInstalled.addListener(() => ensureAlarm().catch(() => null))
+  ensureAlarm().catch(() => null)
 }
 
 function requestBodyText(init = {}) {

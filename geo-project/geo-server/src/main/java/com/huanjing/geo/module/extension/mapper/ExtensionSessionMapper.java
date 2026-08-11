@@ -55,4 +55,19 @@ public interface ExtensionSessionMapper extends BaseMapper<ExtensionSession> {
             @Param("extensionVersion") String extensionVersion,
             @Param("userAgent") String userAgent
     );
+
+    @Update("""
+            UPDATE extension_session
+            SET expires_at = #{renewedExpiresAt}
+            WHERE id = #{id}
+              AND status = 'active'
+              AND expires_at > #{now}
+              AND expires_at <= #{renewBefore}
+            """)
+    int renewActiveExpiry(
+            @Param("id") Long id,
+            @Param("now") LocalDateTime now,
+            @Param("renewBefore") LocalDateTime renewBefore,
+            @Param("renewedExpiresAt") LocalDateTime renewedExpiresAt
+    );
 }

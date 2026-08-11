@@ -12,6 +12,7 @@
   },
   "permissions": [
     "storage",
+    "alarms",
     "tabs",
     "debugger",
     "scripting"

@@ -150,9 +150,6 @@ public class ExtensionSessionService {
                 : session.getExtensionVersion();
         versionService.requireSupported("chrome", effectiveVersion);
         LocalDateTime now = now();
-        if (!session.getExpiresAt().isAfter(now)) {
-            throw new BizException(EXTENSION_UNAUTHORIZED, "extension token expired");
-        }
         sessionMapper.touchActive(session.getId(), now, extensionVersion, userAgent);
 
         LocalDateTime renewThreshold = now.plusDays(properties.getLongToken().getSlideRenewThresholdDays());
@@ -161,19 +158,26 @@ public class ExtensionSessionService {
             return new ExtensionTokenRefreshResponse(null, false, session.getExpiresAt(), session.getId());
         }
 
-        sessionMapper.revokeActive(session.getId(), now, session.getOperatorId());
-        ExtensionBindResponse renewed = doCreateBoundSession(
-                session.getBrandId(),
-                session.getOperatorId(),
-                session.getInstallId(),
-                session.getEnvironmentKey(),
-                session.getProviderProfileId(),
-                null,
-                StringUtils.hasText(extensionVersion) ? extensionVersion : session.getExtensionVersion(),
-                userAgent
+        LocalDateTime renewedExpiresAt = now.plusDays(properties.getLongToken().getTtlDays());
+        int renewed = sessionMapper.renewActiveExpiry(
+                session.getId(),
+                now,
+                renewThreshold,
+                renewedExpiresAt
         );
-        auditTokenRefresh(session, true, renewed.expiresAt(), renewed.sessionId());
-        return new ExtensionTokenRefreshResponse(renewed.token(), true, renewed.expiresAt(), renewed.sessionId());
+        if (renewed == 0) {
+            ExtensionSession latest = sessionMapper.selectById(session.getId());
+            if (latest == null
+                    || !"active".equals(latest.getStatus())
+                    || latest.getExpiresAt() == null
+                    || !latest.getExpiresAt().isAfter(now)) {
+                throw new BizException(EXTENSION_UNAUTHORIZED, "extension token invalid");
+            }
+            renewedExpiresAt = latest.getExpiresAt();
+        }
+        boolean expiryExtended = renewed > 0;
+        auditTokenRefresh(session, expiryExtended, renewedExpiresAt, session.getId());
+        return new ExtensionTokenRefreshResponse(null, expiryExtended, renewedExpiresAt, session.getId());
     }
 
     public List<ExtensionSessionVO> listActiveByBrand(Long brandId) {
@@ -277,6 +281,9 @@ public class ExtensionSessionService {
         String computed = HashSupport.saltedSha256Hex(session.getTokenSalt(), plaintextToken);
         if (!HashSupport.constantTimeEqualsHex(session.getTokenHash(), computed)) {
             throw new BizException(EXTENSION_UNAUTHORIZED, "extension token invalid");
+        }
+        if (session.getExpiresAt() == null || !session.getExpiresAt().isAfter(now())) {
+            throw new BizException(EXTENSION_UNAUTHORIZED, "extension token expired");
         }
         return session;
     }
