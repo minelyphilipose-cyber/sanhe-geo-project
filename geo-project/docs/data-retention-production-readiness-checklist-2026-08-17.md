@@ -12,7 +12,7 @@
 - 同一工作树本轮复跑 V133 5/5、switch 37/37、coordinator 71/71、website 72/72、poll 86/86、WP8/MySQL 60/60，全部 0 failure、0 error、0 skipped；
 - Article archive/purge 新增真实 MySQL 8 + MinIO Required profile，1/1 通过；该结果只覆盖本地开发 provider，生产使用 COS，不能用 MinIO 证据替代 COS 验收；
 - 后端 package 与前端 production build 通过；
-- migration location 共 368 个唯一版本，扫描 83 个 Git refs 未发现 V354～V368 竞争版本；
+- migration location 共 368 个唯一版本；最新提交前扫描 67 个 Git refs 和 6 个 worktree，未发现 V354～V368 竞争版本；
 - V132.1 只存在于 test resources 的 V133 spike，不在正式 migration location；
 - 运营提供的生产 history 截图显示当前最高成功版本为 V353，V133 行为 Success；
 - 发布范围已决定为全部未发布内容共发，数据库将从 V353 顺序执行 V354～V368；
@@ -49,15 +49,17 @@ V133 = Success
 负责人：研发；审批人：技术负责人。
 
 - [x] 决定 V355～V358、V360～V363、V365 与 retention 共发；生产将从 V353 顺序执行 V354～V368；
-- [ ] 把全部未发布 Java、前端、migration、运营影响和测试纳入同一候选；
-- [ ] 从当前大型 dirty worktree 形成可审查 commit，禁止 `git add .`；
-- [ ] 逐 hunk 复核 `pom.xml`、`application.yml`、`AdminLayout.vue`、`router/admin.ts`；
-- [ ] 排除 `node_modules`、`target`、logs、deploy tar、凭据和本地临时文件；
-- [ ] 记录 commit SHA、构建制品 SHA-256、368 个 migration 的 path/length/SHA-256/Flyway checksum；
+- [x] 把全部未发布 Java、前端、migration、运营影响和测试纳入同一候选；
+- [x] 从当前大型 dirty worktree 按 self-media、retention、admin、docs 和 COS gate 分批形成可审查 commit，未使用 `git add .`；
+- [x] 逐 hunk 复核 `pom.xml`、`application.yml`、`AdminLayout.vue`、`router/admin.ts`；
+- [x] 排除 `node_modules`、`target`、logs、deploy tar、凭据和本地临时文件；
+- [ ] 记录最终 commit SHA 和构建制品 SHA-256；
+- [x] 生成 368 行 migration manifest，包含 path/length/SHA-256/Flyway checksum；V133、V340、V353 checksum 与生产截图一致；
 - [ ] 从该 commit 运行 `scripts/data-retention-required-check.ps1`，结果必须与本地记录一致；
-- [ ] 再次扫描全部 refs/worktree，确认没有 migration version 冲突；
-- [ ] 所有默认写门仍为 `false`。
-- [ ] 增加生产等价的 Article MySQL + COS Required profile；使用专用测试 bucket/prefix，覆盖 COS 写入、readback SHA-256、stat、数据库正文 purge、对象保留和精确清理；
+- [x] 再次扫描 67 个 Git refs 和 6 个 worktree，确认 V354～V368 没有 migration version 冲突；
+- [x] 所有默认写门仍为 `false`。
+- [x] 增加生产等价的 Article MySQL + COS Required profile；使用专用测试 bucket/prefix，覆盖 COS 写入、readback SHA-256、stat、数据库正文 purge、对象保留、审计、精确清理和 404 mapping；
+- [ ] 使用临时 COS 凭据和 `geo-retention-it/` 专用前缀运行 `scripts/data-retention-required-check.ps1 -IncludeCos`，结果必须 0 skipped；当前仅完成编译验证，不能标记 COS 验收通过；
 
 Gate 0 输出：唯一 commit、唯一后端制品、唯一前端制品、migration manifest、测试报告。不满足时不得创建生产 migration 变更单。
 

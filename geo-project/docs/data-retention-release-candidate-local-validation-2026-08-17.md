@@ -2,7 +2,7 @@
 
 > 日期：2026-08-17
 >
-> 状态：本地候选边界、Required 回归与 Article MySQL/MinIO 验收完成；尚未暂存、提交或形成生产制品
+> 状态：本地候选已分批提交；migration manifest 与 Article MySQL/COS Required 入口已实现；唯一制品和真实 COS 实跑待完成
 >
 > 安全基线：所有 execute、dynamic enable-write、detail-cleanup 默认值保持 `false`
 
@@ -20,15 +20,25 @@
 
 ```text
 branch = codex/sprint3-spike-article-list-trigger
-head = 981307b02cec4922f795348df0a59d1b0a5075a0
+baseline head = 981307b02cec4922f795348df0a59d1b0a5075a0
 status entries before this validation = 223
 untracked paths matched by retention keyword = 44
 working-tree Flyway version count = 368
-Git refs scanned = 83
+Git refs scanned before this validation = 83
 V354..V368 competing migration name/version = 0
 ```
 
 当前 worktree 同时包含 retention、自媒体认证治理、扩展运行时、系统告警、前端页面和生成缓存等修改。禁止用整树 `git add .`、reset、checkout 或批量覆盖整理发布候选。
+
+候选已按职责形成以下可审查提交；不把本地生成缓存或既有 deploy tar 纳入候选：
+
+```text
+58d252472ce6bcb423606863ecfc995a6ad76cf0  feat(self-media): strengthen runtime auth governance
+4588867cdae6f4d086434a2259c57937dc8a8471  feat(retention): implement governed cleanup lifecycle
+d3b814574304c1f45b37001a06442b1bb882c1c5  feat(admin): add auth and retention operations consoles
+ff50ad665cde045d10592b51b26cd90c9a088e2b  docs(retention): record specs and release gates
+803f518f5126288cca43075a6768fff7556bf1f7  test(retention): add COS release gate
+```
 
 ## 3. 发布候选边界
 
@@ -179,6 +189,10 @@ V368__data_retention_detail_cleanup_readiness.sql                d119d26566d8575
 
 生产对象存储实际为 COS。上述 MinIO 结果只证明 Article 业务资格、数据库 mutation、对象抽象接口和 readback/checksum 协议在本地开发 provider 上成立；它没有覆盖 `CosObjectStorageAdapter` 的真实腾讯 COS SDK、region、bucket、endpoint、IAM 权限、stat 和错误码。生产 Article 准入必须另有专用 COS bucket/prefix 的 Required 证据，不能引用本节替代。
 
+Gate 0 已新增 `retention-article-cos-it`。该 profile 使用真实 `CosObjectStorageAdapter`、隔离 MySQL 测试库和调用方提供的专用 COS bucket/prefix，覆盖 put、readback SHA-256、stat/ETag、仅清空数据库正文、对象保留、审计记录、精确测试前缀清理及删除后的 404 mapping。测试只接受 `geo-retention-it/` 下的相对前缀，并在其下生成 `run-<32 hex>/`；清理逻辑拒绝 bucket 根、业务前缀、绝对路径、反斜杠和 `..`。
+
+当前 Codex 进程没有注入 COS 或外部 MySQL Required 环境变量，因此本轮只能确认该测试编译成功并在非 Required 模式明确 skipped；这不是 COS 通过证据。必须由运维提供专用测试 prefix 和临时凭据后，以 `scripts/data-retention-required-check.ps1 -IncludeCos` 得到 0 skipped 的结果，Gate 0 才能关闭。
+
 ## 7. 可复现命令与环境契约
 
 Required profiles 只读取下列环境变量，不在文档、日志或源码写入凭据：
@@ -196,16 +210,29 @@ RETENTION_MINIO_IT_ENDPOINT
 RETENTION_MINIO_IT_ACCESS_KEY
 RETENTION_MINIO_IT_SECRET_KEY
 RETENTION_MINIO_IT_REGION     # 可选，默认 us-east-1
+RETENTION_COS_IT_REGION
+RETENTION_COS_IT_BUCKET
+RETENTION_COS_IT_ENDPOINT     # 可选
+RETENTION_COS_IT_SECRET_ID
+RETENTION_COS_IT_SECRET_KEY
+RETENTION_COS_IT_PREFIX       # 必须位于 geo-retention-it/ 下
 ```
 
-执行顺序固定为：package → V133 → switch → coordinator → website → poll → MySQL/WP8 → Article/MinIO → frontend build → mechanical checks。新增 Article profile 会自建自清理随机资源；其他 Required profile 延续既有随机数据库与 Redis DB 15 隔离协议。统一入口为 `scripts/data-retention-required-check.ps1`。
+本地执行顺序固定为：package → V133 → switch → coordinator → website → poll → MySQL/WP8 → Article/MinIO → frontend build → mechanical checks。统一入口为 `scripts/data-retention-required-check.ps1`；不带 `-IncludeCos` 时脚本会明确警告 COS 未覆盖，不能据此关闭生产 Gate 0。完整 Gate 0 使用 `scripts/data-retention-required-check.ps1 -IncludeCos`，在 Article/MinIO 后追加 Article/COS。新增 COS profile 只清理随机 run prefix，不删除 bucket；其他 Required profile 延续既有随机数据库、随机 MinIO bucket 与 Redis DB 15 隔离协议。
+
+`scripts/generate-migration-manifest.ps1` 会固定扫描 368 个正式 versioned migration，并输出 path、bytes、SHA-256 与 Flyway 9.22.3 兼容 checksum。当前 manifest SHA-256 为 `35e85aa08f813d8f17064c568c1010d417a2cb8d1c47bb60c5d966cb6b7b6e14`；其中 V133=`971462112`、V340=`258457011`、V353=`-1211774692`，与生产 history 截图逐项一致。
+
+提交前重新扫描当前 67 个 Git refs 和 6 个 worktree，V354～V368 未出现同版本不同 migration 文件名。`application.yml` 中 retention scheduler、各 domain execute、dynamic enable-write、detail cleanup、report freeze 和 storage migration execute 的默认值均再次确认保持 `false`。
 
 ## 8. 当前结论与下一门禁
 
-前三项本地工作已经闭环：
+以下本地工作已经闭环：
 
 1. 大型 dirty worktree 中的 retention 候选边界、跨模块 writer/guard 和 migration 共发依赖已固定；
 2. 同一源码完成 WP2～WP8 Required 回归，全部 0 failure、0 error、0 skipped；
 3. Article archive/purge 已取得真实 MySQL 8 + MinIO mutation 证据。
+4. 候选已按职责分批提交，node_modules、target、日志、deploy tar 和凭据未进入提交；
+5. 368 行 migration manifest 与生产截图中的三个已知 Flyway checksum 已交叉验证；
+6. 真实 COS Required profile 和 fail-closed 统一入口已实现并完成编译验证。
 
-这仍不是生产发布批准。共发范围已经决定，下一步是把全部未发布内容形成可审查的干净 commit/制品，并完成全应用回归；随后才能执行匿名生产克隆、生产 migration 单独审批、WP8 readiness、canary 与逐域 enable。所有 execute、detail-cleanup 与 enable-write 默认值继续保持 `false`。
+这仍不是生产发布批准，且 Gate 0 尚未关闭。剩余本地门禁是：从最终 commit 的干净 worktree 生成唯一后端/前端制品及 SHA-256；使用显式外部 MySQL/Redis/MinIO/COS 环境运行 `-IncludeCos` 全矩阵并取得 0 skipped 报告。之后才能进入生产只读 history 导出、匿名生产克隆、生产 migration 单独审批、WP8 readiness、canary 与逐域 enable。所有 execute、detail-cleanup 与 enable-write 默认值继续保持 `false`。
