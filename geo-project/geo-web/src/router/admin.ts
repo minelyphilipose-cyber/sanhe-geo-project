@@ -189,7 +189,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'monitoring/account-auth-health',
       name: 'AccountAuthHealth',
       component: () => import('@/views/admin/content/AccountAuthHealth.vue'),
-      meta: { title: '账号授权健康', icon: 'Warning', permissions: ['content.read'] },
+      meta: { title: '账号授权健康', icon: 'Warning', permissions: ['self-media.auth-health.read', 'content.read'] },
     },
     {
       path: 'content/execution',
@@ -460,6 +460,12 @@ const adminRoutes: RouteRecordRaw = {
       name: 'ActivityLogs',
       component: () => import('@/views/admin/system/ActivityLogs.vue'),
       meta: { title: '操作日志', icon: 'Document', permissions: ['user.manage'] },
+    },
+    {
+      path: 'data-retention-acceptance',
+      name: 'DataRetentionAcceptance',
+      component: () => import('@/views/admin/system/DataRetentionAcceptance.vue'),
+      meta: { title: '数据保留验收', icon: 'DataAnalysis', roles: ['super_admin'], permissions: ['data.retention.switch.read'] },
     },
     {
       path: 'model-diagnostics',

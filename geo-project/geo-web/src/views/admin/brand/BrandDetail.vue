@@ -98,7 +98,7 @@
       </div>
     </el-card>
 
-    <el-card v-if="canUpdateBrand" class="admin-table-card">
+    <el-card class="admin-table-card">
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -320,7 +320,7 @@
       </div>
     </el-card>
 
-    <el-card class="admin-table-card">
+    <el-card ref="officialSelfMediaAccountSectionRef" class="admin-table-card">
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -347,7 +347,13 @@
         :closable="false"
         title="官方 API 账号通过平台授权保存凭证；授权有效时文章可直接发送到客户对应平台账号。"
       />
-      <el-table v-loading="selfMediaAccountsLoading" :data="officialApiSelfMediaAccounts" border empty-text="当前客户尚未授权官方 API 自媒体账号">
+      <el-table
+        v-loading="selfMediaAccountsLoading"
+        :data="officialApiSelfMediaAccounts"
+        :row-class-name="selfMediaAccountRowClassName"
+        border
+        empty-text="当前客户尚未授权官方 API 自媒体账号"
+      >
         <el-table-column prop="platform" label="平台" width="120">
           <template #default="{ row }">{{ selfMediaPlatformLabel(row.platform) }}</template>
         </el-table-column>
@@ -423,7 +429,7 @@
       </el-table>
     </el-card>
 
-    <el-card v-if="canUpdateBrand" class="admin-table-card">
+    <el-card ref="selfMediaAccountSectionRef" class="admin-table-card">
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -479,7 +485,13 @@
           ? `当前默认环境：${browserEnvironmentOptionLabel(defaultBrowserEnvironment)}。新增账号将自动绑定该环境，绑定后需在对应平台完成登录，环境内扩展会自动上报登录状态。`
           : '请先配置并启用品牌 AdsPower 浏览器环境；新增账号后需要绑定环境并完成平台登录，扩展自动上报登录状态后才能分发。'"
       />
-      <el-table v-loading="selfMediaAccountsLoading" :data="environmentSelfMediaAccounts" border empty-text="当前客户尚未配置需要指纹浏览器登录的自媒体账号">
+      <el-table
+        v-loading="selfMediaAccountsLoading"
+        :data="environmentSelfMediaAccounts"
+        :row-class-name="selfMediaAccountRowClassName"
+        border
+        empty-text="当前客户尚未配置需要指纹浏览器登录的自媒体账号"
+      >
         <el-table-column prop="platform" label="平台" width="110">
           <template #default="{ row }">{{ selfMediaPlatformLabel(row.platform) }}</template>
         </el-table-column>
@@ -492,7 +504,7 @@
               </el-tag>
             </div>
             <div v-if="row.platformAccountId" class="table-subtext">
-              {{ row.platform === 'baijiahao' ? '百家号 ID / app_id' : '平台账号 ID' }}：{{ row.platformAccountId }}
+              {{ row.platform === 'baijiahao' ? '百家号 ID / app_id' : '参考 ID（不作为登录匹配依据）' }}：{{ row.platformAccountId }}
             </div>
           </template>
         </el-table-column>
@@ -530,10 +542,19 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="最近健康验证" min-width="220">
+        <el-table-column label="最近确认已登录" min-width="220">
           <template #default="{ row }">
-            <div>{{ formatDateTimeSeconds(row.lastLoginVerifiedAt || browserEnvironmentLastReportTime(row)) }}</div>
-            <div v-if="row.lastLoginVerifiedAt" class="table-subtext">
+            <div>
+              {{ formatDateTimeSeconds(row.lastLoginVerifiedAt || browserEnvironmentLastReportTime(row)) }}
+            </div>
+            <div v-if="row.lastLoginVerificationResult === 'success' && row.lastLoginVerifiedAt" class="table-subtext">
+              {{ loginVerificationMethodLabel(row.lastLoginVerificationMethod) }}
+            </div>
+            <div
+              v-if="row.lastLoginVerificationResult === 'failed' && row.lastLoginVerificationCheckedAt"
+              class="table-subtext table-error-text"
+            >
+              最近检测失败：{{ formatDateTimeSeconds(row.lastLoginVerificationCheckedAt) }} ·
               {{ loginVerificationMethodLabel(row.lastLoginVerificationMethod) }}
             </div>
             <div
@@ -554,10 +575,11 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="canUpdateBrand" label="操作" width="320" fixed="right">
+        <el-table-column v-if="canUpdateBrand || canVerifySelfMediaLogin" label="操作" width="320" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openSelfMediaAccountEdit(row)">编辑</el-button>
+            <el-button v-if="canUpdateBrand" link type="primary" @click="openSelfMediaAccountEdit(row)">编辑</el-button>
             <el-button
+              v-if="canVerifySelfMediaLogin"
               link
               type="primary"
               :loading="loginVerificationAccountId === row.id"
@@ -565,8 +587,11 @@
             >
               验证登录状态
             </el-button>
+            <el-button v-if="canVerifySelfMediaLogin" link type="info" @click="showLoginObservationTimeline(row)">
+              登录记录
+            </el-button>
             <el-button
-              v-if="!browserEnvironmentAccountOf(row)"
+              v-if="canUpdateBrand && !browserEnvironmentAccountOf(row)"
               link
               type="primary"
               @click="openEnvironmentBindingDialog(row)"
@@ -574,7 +599,7 @@
               绑定环境
             </el-button>
             <el-button
-              v-if="browserEnvironmentAccountOf(row)"
+              v-if="canUpdateBrand && browserEnvironmentAccountOf(row)"
               link
               type="warning"
               @click="resetEnvironmentAccountIdentity(row)"
@@ -582,7 +607,7 @@
               重置校验
             </el-button>
             <el-button
-              v-if="browserEnvironmentAccountOf(row)"
+              v-if="canUpdateBrand && browserEnvironmentAccountOf(row)"
               link
               type="danger"
               @click="unbindEnvironmentAccount(row)"
@@ -590,7 +615,7 @@
               解绑
             </el-button>
             <el-button
-              v-if="!browserEnvironmentAccountOf(row)"
+              v-if="canUpdateBrand && !browserEnvironmentAccountOf(row)"
               link
               type="danger"
               @click="deleteSelfMediaAccountRecord(row)"
@@ -1347,6 +1372,50 @@
         <el-button type="primary" :loading="perspectiveConfigSaving" @click="submitPerspectiveConfig">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="loginSyncProgressVisible" title="同步品牌环境登录状态" width="640px">
+      <el-alert
+        type="info"
+        show-icon
+        :closable="false"
+        title="扩展会在各平台身份页加载完成后自动上报；账号名称是身份校验依据，平台账号 ID 仅用于诊断。"
+      />
+      <div class="login-sync-progress-list">
+        <div v-for="item in loginSyncProgress" :key="item.key" class="login-sync-progress-item">
+          <div>
+            <strong>{{ item.label }}</strong>
+            <small>{{ item.message }}</small>
+          </div>
+          <el-tag size="small" :type="loginSyncProgressTag(item.status)">{{ loginSyncProgressLabel(item.status) }}</el-tag>
+        </div>
+      </div>
+      <template #footer>
+        <el-button :disabled="loginStatusSyncing" @click="loginSyncProgressVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="loginObservationVisible" title="登录状态观察记录" width="760px">
+      <el-alert type="info" show-icon :closable="false" title="观察失败不等于账号退出；只有明确登录页或真实发布登录失败才进入运营登录处理。" />
+      <el-timeline v-loading="loginObservationLoading" class="login-observation-timeline">
+        <el-timeline-item
+          v-for="item in loginObservations"
+          :key="item.id"
+          :timestamp="formatDateTimeSeconds(item.createdAt)"
+          :type="item.authoritative ? (item.observationResult === 'login_confirmed' ? 'success' : 'danger') : 'info'"
+        >
+          <div class="login-observation-title">
+            <strong>{{ loginObservationResultLabel(item.observationResult) }}</strong>
+            <el-tag size="small" :type="item.authoritative ? 'warning' : 'info'">
+              {{ item.authoritative ? '可信事实' : '仅观察' }}
+            </el-tag>
+          </div>
+          <div class="table-subtext">来源：{{ loginObservationSourceLabel(item.reportSource) }} · 账号：{{ item.actualAccountName || '-' }}</div>
+          <div v-if="item.resultMessage" class="table-subtext">{{ item.resultMessage }}</div>
+          <div v-if="item.extensionVersion" class="table-subtext">扩展 {{ item.extensionVersion }} / 协议 {{ item.protocolVersion || '-' }}</div>
+        </el-timeline-item>
+      </el-timeline>
+      <template #footer><el-button @click="loginObservationVisible = false">关闭</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1420,8 +1489,8 @@ import {
   type LocalHelperExtensionStatus,
 } from '@/api/localHelper'
 import { getPublishSites } from '@/api/publishSite'
-import { createSelfMediaLoginVerification, getSelfMediaLoginVerification } from '@/api/selfMediaAuthHealth'
-import type { Brand, BrandOffering, PublishSite, SelfMediaAccount, SelfMediaAccountPlatformOption, WechatMenuConfig } from '@/types'
+import { createSelfMediaLoginVerification, getSelfMediaLoginObservations, getSelfMediaLoginVerification } from '@/api/selfMediaAuthHealth'
+import type { Brand, BrandOffering, PublishSite, SelfMediaAccount, SelfMediaAccountPlatformOption, SelfMediaLoginObservation, WechatMenuConfig } from '@/types'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import CityNameSelect from '@/components/ui/CityNameSelect.vue'
@@ -1440,6 +1509,12 @@ const brandId = Number(route.params.id)
 const hasValidId = Number.isFinite(brandId) && brandId > 0
 
 const canUpdateBrand = computed(() => !userStore.isSales && userStore.hasPermission('brand.update'))
+const canVerifySelfMediaLogin = computed(() => !userStore.isSales && userStore.hasPermission([
+  'self-media.auth-health.verify',
+  'company.update',
+  'brand.update',
+]))
+const canReadSelfMediaLoginContext = computed(() => canUpdateBrand.value || canVerifySelfMediaLogin.value)
 const canDeleteBrand = computed(() => !userStore.isSales && userStore.hasPermission('brand.delete'))
 const canCreateProject = computed(() => !userStore.isSales && userStore.hasPermission('project.create'))
 
@@ -1484,6 +1559,8 @@ const subjectPoolDraftIndustries = ref<string[]>([])
 const subjectPoolDraftItems = ref<ThirdPartySubjectPoolItem[]>([])
 const subjectPoolManualAddIds = ref<number[]>([])
 const coverableIndustriesFieldRef = ref<any>(null)
+const officialSelfMediaAccountSectionRef = ref<any>(null)
+const selfMediaAccountSectionRef = ref<any>(null)
 const selfMediaAccounts = ref<SemiAutoSelfMediaAccount[]>([])
 const wechatMenuConfigs = ref<Record<number, WechatMenuConfig | null>>({})
 const wechatMenuInitializingId = ref<number | null>(null)
@@ -1510,8 +1587,20 @@ const extensionBindCode = ref<ExtensionBindCode | null>(null)
 const extensionBindCodeLoading = ref(false)
 const extensionEnvironmentOpening = ref(false)
 const loginStatusSyncing = ref(false)
+const loginSyncProgressVisible = ref(false)
+const loginSyncProgress = ref<Array<{
+  key: string
+  platform: string
+  label: string
+  accountIds: number[]
+  status: 'pending' | 'opening' | 'waiting' | 'succeeded' | 'failed'
+  message: string
+}>>([])
 const checkingSelfMediaAccountId = ref<number | null>(null)
 const loginVerificationAccountId = ref<number | null>(null)
+const loginObservationVisible = ref(false)
+const loginObservationLoading = ref(false)
+const loginObservations = ref<SelfMediaLoginObservation[]>([])
 const environmentBindingVisible = ref(false)
 const environmentBindingSaving = ref(false)
 const environmentBindingTargetAccount = ref<SemiAutoSelfMediaAccount | null>(null)
@@ -1528,6 +1617,12 @@ const brandFormRef = ref<FormInstance>()
 const offeringFormRef = ref<FormInstance>()
 const selfMediaAccountFormRef = ref<FormInstance>()
 const perspectiveConfigFormRef = ref<FormInstance>()
+
+const routeTargetSelfMediaAccountId = computed(() => {
+  const raw = Array.isArray(route.query.accountId) ? route.query.accountId[0] : route.query.accountId
+  const accountId = Number(raw)
+  return Number.isFinite(accountId) && accountId > 0 ? accountId : null
+})
 
 const brandForm = reactive({
   brandName: '',
@@ -2167,7 +2262,9 @@ function browserEnvironmentLoginStatusTagType(account: SelfMediaAccount) {
 
 function browserEnvironmentLastReportTime(account: SelfMediaAccount) {
   const binding = browserEnvironmentAccountOf(account)
-  return binding?.lastVerifiedAt || binding?.lastLoginSeenAt || null
+  // lastVerifiedAt includes failed/login-required diagnostics; only lastLoginSeenAt is a
+  // successful observation of the bound platform identity and may be shown as a login fact.
+  return binding?.lastLoginSeenAt || null
 }
 
 function browserEnvironmentLoginStatusReason(account: SelfMediaAccount) {
@@ -2188,9 +2285,15 @@ function browserEnvironmentLoginStatusIsProblem(account: SelfMediaAccount) {
 function cookieCredentialRiskLabel(account: SelfMediaAccount) {
   if (!account.cookieCredentialStatus || account.cookieCredentialStatus === 'none') return '未采集'
   if (account.cookieCredentialStatus === 'expired') return '已过期'
-  if (!account.cookieCredentialExpiresAt) return '未记录到期'
+  const estimated = account.cookieCredentialExpirySource === 'platform_policy'
+  if (!account.cookieCredentialExpiresAt) return estimated ? '参考周期未知' : '未记录到期'
   const days = daysUntil(account.cookieCredentialExpiresAt)
-  if (days === null) return '到期未知'
+  if (days === null) return estimated ? '参考周期未知' : '到期未知'
+  if (estimated) {
+    if (days < 0) return '已超过参考周期'
+    if (days <= 7) return '建议尽快复验'
+    return '参考期内'
+  }
   if (days < 0) return '已过期'
   if (days <= 3) return '即将到期'
   if (days <= 7) return '临期'
@@ -2203,16 +2306,20 @@ function cookieCredentialRiskTag(account: SelfMediaAccount): 'success' | 'warnin
   if (!account.cookieCredentialExpiresAt) return 'info'
   const days = daysUntil(account.cookieCredentialExpiresAt)
   if (days === null) return 'info'
+  if (account.cookieCredentialExpirySource === 'platform_policy') {
+    return days <= 7 ? 'warning' : 'success'
+  }
   if (days < 0) return 'danger'
   if (days <= 7) return 'warning'
   return 'success'
 }
 
 function authRiskLabel(status?: string | null) {
-  if (status === 'normal') return '正常'
+  if (status === 'normal') return '参考周期内'
   if (status === 'reverify_due_soon') return '即将需要复验'
   if (status === 'reverify_overdue') return '复验超期'
   if (status === 'credential_missing') return '待验证登录'
+  if (status === 'login_verification_failed') return '最近检测失败'
   if (status === 'monitoring_disabled') return '未启用监控'
   return '暂无足够信息'
 }
@@ -2220,12 +2327,13 @@ function authRiskLabel(status?: string | null) {
 function authRiskTag(status?: string | null): 'success' | 'warning' | 'danger' | 'info' {
   if (status === 'normal') return 'success'
   if (status === 'reverify_due_soon' || status === 'reverify_overdue') return 'warning'
+  if (status === 'login_verification_failed') return 'danger'
   if (status === 'credential_missing') return 'warning'
   return 'info'
 }
 
 function authHealthBlocker(account: SelfMediaAccount) {
-  if (account.authRiskStatus !== 'credential_missing') return ''
+  if (!['credential_missing', 'login_verification_failed'].includes(String(account.authRiskStatus || ''))) return ''
   if (account.lastLoginVerificationWarning) return account.lastLoginVerificationWarning
   const binding = browserEnvironmentAccountOf(account)
   if (!binding) return '尚未绑定指纹浏览器环境'
@@ -2246,6 +2354,7 @@ function authHealthBlocker(account: SelfMediaAccount) {
 function loginVerificationMethodLabel(method?: string | null) {
   if (method === 'system_triggered_identity_check') return '来源：主动验证'
   if (method === 'extension_passive_identity_report') return '来源：扩展可信上报'
+  if (method === 'publish_task_identity_failure') return '来源：发布任务检测'
   return '来源：登录健康记录'
 }
 
@@ -2708,9 +2817,9 @@ async function load() {
       loadSelfMediaAccountContext(),
       loadPerspectiveConfigs(),
       loadSubjectPool(),
-      canUpdateBrand.value ? loadBrowserEnvironments() : Promise.resolve(),
-      canUpdateBrand.value ? loadExtensionSessions() : Promise.resolve(),
-      canUpdateBrand.value ? loadAutomationReadiness() : Promise.resolve(),
+      canReadSelfMediaLoginContext.value ? loadBrowserEnvironments() : Promise.resolve(),
+      canReadSelfMediaLoginContext.value ? loadExtensionSessions() : Promise.resolve(),
+      canReadSelfMediaLoginContext.value ? loadAutomationReadiness() : Promise.resolve(),
     ])
   } catch {
     brand.value = null
@@ -3037,6 +3146,20 @@ async function syncBrowserEnvironmentLoginStatus() {
     return
   }
   loginStatusSyncing.value = true
+  const groupedAccounts = new Map<string, typeof accounts>()
+  accounts.forEach((account) => {
+    const key = account.platform === 'zhihu' ? `${account.platform}:${account.accountIdentity}` : account.platform
+    groupedAccounts.set(key, [...(groupedAccounts.get(key) || []), account])
+  })
+  loginSyncProgress.value = [...groupedAccounts.entries()].map(([key, rows]) => ({
+    key,
+    platform: rows[0].platform,
+    label: selfMediaPlatformLabel(rows[0].platform),
+    accountIds: rows.map((row) => Number(row.browserEnvironmentAccountId)).filter((id) => Number.isFinite(id)),
+    status: 'pending',
+    message: '等待打开平台身份页',
+  }))
+  loginSyncProgressVisible.value = true
   try {
     const openedLoginPages = new Set<string>()
     const openFailures: string[] = []
@@ -3046,6 +3169,11 @@ async function syncBrowserEnvironmentLoginStatus() {
         : account.platform
       if (openedLoginPages.has(loginPageKey)) continue
       openedLoginPages.add(loginPageKey)
+      const progress = loginSyncProgress.value.find((item) => item.key === loginPageKey)
+      if (progress) {
+        progress.status = 'opening'
+        progress.message = '正在打开平台身份页'
+      }
       try {
         await openLocalHelperEnvironment(localHelperClientConfig(), {
           environmentKey: environment.environmentKey,
@@ -3053,10 +3181,18 @@ async function syncBrowserEnvironmentLoginStatus() {
           environmentName: environment.name || environment.environmentKey,
           url: account.loginUrl,
         })
+        if (progress) {
+          progress.status = 'waiting'
+          progress.message = '页面已打开，等待扩展上报'
+        }
       } catch (error) {
         const platformName = selfMediaPlatformLabel(account.platform)
         const message = error instanceof Error ? error.message : String(error || '')
         openFailures.push(`${platformName}：${message || '打开失败'}`)
+        if (progress) {
+          progress.status = 'failed'
+          progress.message = message || '平台身份页打开失败'
+        }
       }
       await delay(2200)
     }
@@ -3071,11 +3207,41 @@ async function syncBrowserEnvironmentLoginStatus() {
       loadSelfMediaAccounts(),
       refreshExtensionBindingStatus(),
     ])
+    loginSyncProgress.value.forEach((progress) => {
+      if (progress.status === 'failed') return
+      const relatedAccounts = environmentSelfMediaAccounts.value.filter((account) =>
+        progress.accountIds.includes(Number(browserEnvironmentAccountOf(account)?.id)))
+      const loggedInCount = relatedAccounts.filter((account) => browserEnvironmentAccountOf(account)?.loginStatus === 'logged_in').length
+      if (relatedAccounts.length > 0 && loggedInCount === relatedAccounts.length) {
+        progress.status = 'succeeded'
+        progress.message = `已确认 ${loggedInCount} 个账号登录状态`
+      } else {
+        progress.status = 'waiting'
+        progress.message = loggedInCount > 0
+          ? `已确认 ${loggedInCount}/${relatedAccounts.length} 个账号，其余可稍后刷新查看`
+          : '暂未收到上报，可保持页面打开后稍后刷新'
+      }
+    })
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '同步 AdsPower 登录状态失败')
   } finally {
     loginStatusSyncing.value = false
   }
+}
+
+function loginSyncProgressLabel(status: string) {
+  if (status === 'pending') return '等待中'
+  if (status === 'opening') return '正在打开'
+  if (status === 'waiting') return '等待上报'
+  if (status === 'succeeded') return '已确认'
+  return '失败'
+}
+
+function loginSyncProgressTag(status: string): 'success' | 'warning' | 'danger' | 'info' {
+  if (status === 'succeeded') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'opening' || status === 'waiting') return 'warning'
+  return 'info'
 }
 
 function normalizeSelfMediaPlatformForLogin(value?: string | null) {
@@ -3286,9 +3452,13 @@ async function loadSelfMediaAccounts() {
     const { data } = await getSelfMediaAccountsByBrand(brandId)
     const accounts = data.data as SemiAutoSelfMediaAccount[]
     selfMediaAccounts.value = accounts
-    if (canUpdateBrand.value) {
+    if (canReadSelfMediaLoginContext.value) {
       await loadBrowserEnvironmentAccounts(accounts)
-      await loadWechatMenuConfigs(accounts)
+      if (canUpdateBrand.value) {
+        await loadWechatMenuConfigs(accounts)
+      } else {
+        wechatMenuConfigs.value = {}
+      }
     } else {
       browserEnvironmentAccounts.value = {}
       wechatMenuConfigs.value = {}
@@ -3362,18 +3532,15 @@ async function verifySelfMediaLogin(account: SemiAutoSelfMediaAccount) {
     })
     ElMessage.info('已打开平台身份页，正在验证当前登录账号…')
     let current = verification
-    for (let attempt = 0; attempt < 30; attempt += 1) {
+    const expiresAt = verification.expiresAt ? Date.parse(verification.expiresAt) : Date.now() + 300_000
+    for (let attempt = 0; attempt < 180 && Date.now() <= expiresAt + 5000; attempt += 1) {
       if (!['pending', 'running'].includes(current.status)) break
       await delay(2000)
       const response = await getSelfMediaLoginVerification(brandId, account.id, verification.id)
       current = response.data.data
     }
     if (current.status === 'succeeded') {
-      if (current.resultCode === 'SUCCESS_WITH_ID_WARNING') {
-        ElMessage.warning(current.resultMessage || '登录状态正常，但平台账号 ID 与系统记录不同')
-      } else {
-        ElMessage.success('登录状态验证成功')
-      }
+      ElMessage.success('登录状态验证成功')
       await Promise.all([loadSelfMediaAccounts(), loadAutomationReadiness({ silent: true })])
       return
     }
@@ -3385,14 +3552,61 @@ async function verifySelfMediaLogin(account: SemiAutoSelfMediaAccount) {
   }
 }
 
+async function showLoginObservationTimeline(account: SemiAutoSelfMediaAccount) {
+  loginObservationVisible.value = true
+  loginObservationLoading.value = true
+  try {
+    const { data } = await getSelfMediaLoginObservations(brandId, account.id)
+    loginObservations.value = data.data || []
+  } finally {
+    loginObservationLoading.value = false
+  }
+}
+
+function loginObservationResultLabel(result?: string | null) {
+  return ({
+    login_confirmed: '已确认登录', technical_failure: '技术检测未完成', identity_mismatch: '账号名称待核对',
+    login_required: '明确进入登录页',
+  } as Record<string, string>)[String(result || '')] || result || '未知观察结果'
+}
+
+function loginObservationSourceLabel(source?: string | null) {
+  return ({
+    passive_page_observation: '页面被动观察', verification_task: '后台复验任务', operator_check: '运营手工检查',
+    publish_task_failure: '真实发布任务', operator_confirmed_logged_out: '运营确认退出',
+  } as Record<string, string>)[String(source || '')] || source || '-'
+}
+
+function selfMediaAccountRowClassName({ row }: { row: SemiAutoSelfMediaAccount }) {
+  return row.id === routeTargetSelfMediaAccountId.value ? 'is-route-target-account' : ''
+}
+
+async function focusRouteTargetSelfMediaAccount() {
+  const accountId = routeTargetSelfMediaAccountId.value
+  if (!accountId || route.query.tab !== 'self-media') return
+  const account = selfMediaAccounts.value.find((item) => item.id === accountId)
+  if (!account) {
+    ElMessage.warning('未找到对应自媒体账号，请确认账号是否仍存在')
+    return
+  }
+  await nextTick()
+  const sectionRef = isOfficialApiSelfMediaPlatform(account.platform)
+    ? officialSelfMediaAccountSectionRef.value
+    : selfMediaAccountSectionRef.value
+  const section = sectionRef?.$el as HTMLElement | undefined
+  section?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
 function loginVerificationFailureMessage(code?: string | null) {
   const messages: Record<string, string> = {
     ENVIRONMENT_OFFLINE: '请先打开绑定的指纹浏览器环境',
     ENVIRONMENT_BUSY: '当前环境正在执行发布任务，请稍后重试',
-    LOGIN_REQUIRED: '当前平台尚未完成登录，请登录后重新验证',
-    ACCOUNT_NAME_MISMATCH: '当前登录账号名称与系统记录不一致',
-    IDENTITY_UNREADABLE: '请进入平台账号主页或创作者中心后重新验证',
-    MULTIPLE_IDENTITIES: '读取到多个账号身份，请确认当前环境只登录一个账号',
+    LOGIN_PAGE_CONFIRMED: '平台已明确进入登录页，请运营进入账号环境处理',
+    LOGIN_REQUIRED: '当前登录状态尚未确认，请先由运营内部核对',
+    LOGIN_STATE_UNCONFIRMED: '当前页面未形成可信登录结论，请先由运营内部核对',
+    ACCOUNT_NAME_MISMATCH: '读取账号名称与系统记录不同，请运营核对，无需立即联系客户',
+    IDENTITY_UNREADABLE: '未读取到身份，可能是页面结构变化，请先排查识别器',
+    MULTIPLE_IDENTITIES: '读取到多个账号身份，请运营内部核对当前环境',
     PLATFORM_MISMATCH: '当前页面平台与目标平台不一致',
     ENVIRONMENT_MISMATCH: '验证结果不是来自账号绑定的指纹浏览器环境',
     TIMEOUT: '本次验证超时，账号状态未发生变化',
@@ -3887,6 +4101,11 @@ watch(
   },
 )
 
+watch(
+  () => [route.query.tab, route.query.accountId],
+  () => focusRouteTargetSelfMediaAccount(),
+)
+
 onMounted(async () => {
   if (!hasValidId) {
     ElMessage.error('品牌参数无效')
@@ -3894,6 +4113,7 @@ onMounted(async () => {
   }
   await dictStore.ensureLoaded()
   await load()
+  await focusRouteTargetSelfMediaAccount()
 })
 </script>
 
@@ -3906,6 +4126,11 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+:deep(.el-table__row.is-route-target-account > td.el-table__cell) {
+  background: #eff6ff !important;
+  box-shadow: inset 0 1px #93c5fd, inset 0 -1px #93c5fd;
 }
 
 .brand-section-bar {
@@ -4087,6 +4312,34 @@ onMounted(async () => {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.login-sync-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.login-sync-progress-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-extra-light);
+}
+
+.login-sync-progress-item strong,
+.login-sync-progress-item small {
+  display: block;
+}
+
+.login-sync-progress-item small {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
 }
 
 .subject-pool-wrap {

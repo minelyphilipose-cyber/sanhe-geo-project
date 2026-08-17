@@ -102,6 +102,7 @@
           <div class="table-subtitle">按时间、级别、状态和项目追踪告警处置进度。</div>
         </div>
         <div class="chips">
+          <el-switch v-if="!userStore.isPartner" v-model="snoozedOnly" active-text="查看已暂缓" @change="loadSystemTodos" />
           <span class="chip chip-muted">总计 {{ page.total }}</span>
           <span class="chip chip-danger">待处理 {{ openCount }}</span>
           <span class="chip chip-success">已处理 {{ resolvedCount }}</span>
@@ -214,6 +215,12 @@
                       {{ scope.row.readAt ? '已读' : '未读' }}
                     </el-tag>
                     <el-tag v-if="isSpecialIndustryTodo(scope.row)" size="small" type="warning" effect="plain">特殊行业</el-tag>
+                    <el-tag v-if="scope.row.claimedBy && !isSelfMediaAccountHealthTodo(scope.row)" size="small" :type="isSystemTodoClaimedByMe(scope.row) ? 'success' : 'warning'" effect="plain">
+                      {{ isSystemTodoClaimedByMe(scope.row) ? '我已认领' : '其他运营处理中' }}
+                    </el-tag>
+                    <el-tag v-if="Number(scope.row.occurrenceCount || 0) > 1" size="small" type="warning" effect="plain">
+                      已发生 {{ scope.row.occurrenceCount }} 次
+                    </el-tag>
                   </div>
                 </div>
               </div>
@@ -249,13 +256,24 @@
               </el-popover>
             </template>
           </el-table-column>
-          <el-table-column label="操作" :width="userStore.isPartner ? 160 : 190" fixed="right">
+          <el-table-column label="操作" :width="userStore.isPartner ? 160 : 230" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openSystemTodoDetail(scope.row)">详情</el-button>
               <el-button v-if="canProcessSystemTodo(scope.row)" link type="primary" @click="openSystemTodo(scope.row)">去处理</el-button>
+              <el-button v-if="canClaimSystemTodo(scope.row)" link type="success" @click="claimSystemTodo(scope.row)">认领</el-button>
               <span v-else class="todo-action-hint">{{ systemTodoActionHint(scope.row) }}</span>
+              <el-dropdown v-if="scope.row.autoResolveOnly && !isSelfMediaWorkOrderTodo(scope.row)" trigger="click" @command="(hours: number) => snoozeSystemTodo(scope.row, hours)">
+                <el-button link type="warning">稍后提醒</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item :command="4">4 小时后</el-dropdown-item>
+                    <el-dropdown-item :command="24">明天再提醒</el-dropdown-item>
+                    <el-dropdown-item :command="72">3 天后</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
               <el-button
-                v-if="!userStore.isPartner"
+                v-if="!userStore.isPartner && !scope.row.autoResolveOnly"
                 link
                 type="success"
                 :disabled="!canResolveSystemAlert"
@@ -460,7 +478,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { getDispatchAlert, getDispatchAlerts, resolveDispatchAlert, type DispatchAlertQuery } from '@/api/dispatch'
-import { getMySystemAlertTodos, getMySystemAlertUnreadCount, markSystemAlertRead, resolveSystemAlert } from '@/api/systemAlert'
+import { claimSystemAlert, getMySystemAlertTodos, getMySystemAlertUnreadCount, markSystemAlertRead, resolveSystemAlert, snoozeSystemAlert } from '@/api/systemAlert'
 import type { DispatchAlertItem, SystemAlertTodoItem } from '@/types'
 import { useUserStore } from '@/stores/user'
 
@@ -478,6 +496,7 @@ const page = reactive({ current: 1, size: 20, total: 0 })
 const systemRows = ref<SystemAlertTodoItem[]>([])
 const systemPage = reactive({ current: 1, size: 20, total: 0 })
 const systemUnreadTotal = ref(0)
+const snoozedOnly = ref(false)
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detailRow = ref<DispatchAlertItem | null>(null)
@@ -711,6 +730,7 @@ async function loadSystemTodos() {
         current: systemPage.current,
         size: systemPage.size,
         includeResolved: userStore.isPartner,
+        snoozedOnly: snoozedOnly.value,
       }),
       userStore.isPartner ? getMySystemAlertUnreadCount() : Promise.resolve(null),
     ])
@@ -788,6 +808,22 @@ function isPartnerCompanyEntryReturnedTodo(row: SystemAlertTodoItem) {
   return row.alertType === 'partner_company_entry_returned'
 }
 
+function isSelfMediaAccountHealthTodo(row: SystemAlertTodoItem) {
+  return row.alertType === 'SELF_MEDIA_ACCOUNT_AUTH_HEALTH'
+}
+
+function isSelfMediaWorkOrderTodo(row: SystemAlertTodoItem) {
+  return isSelfMediaAccountHealthTodo(row) || row.alertType === 'SELF_MEDIA_AUTH_WORK_ORDER_FOLLOW_UP'
+}
+
+function isSystemTodoClaimedByMe(row: SystemAlertTodoItem) {
+  return Boolean(row.claimedBy) && Number(row.claimedBy) === Number(userStore.userInfo?.id || 0)
+}
+
+function canClaimSystemTodo(row: SystemAlertTodoItem) {
+  return !userStore.isPartner && !row.claimedBy && !isSelfMediaWorkOrderTodo(row)
+}
+
 function partnerStartRequestProjectName(row: SystemAlertTodoItem) {
   const context = systemTodoContext(row)
   const contextProjectName = contextValue(context, 'projectName')
@@ -810,6 +846,10 @@ function systemTodoSourceLabel(row: SystemAlertTodoItem) {
     project_start_request: '项目启动工单',
     partner_workflow: '合伙人协作',
     special_industry_compliance: '特殊行业合规',
+    self_media_account_health: '账号授权健康',
+    self_media_auth_work_order: '账号登录待办跟进',
+    self_media_identity_parser: '平台身份识别监控',
+    forum_cookie_health: '论坛凭据健康',
   }
   const source = row.source || row.alertType || ''
   return map[source] || source || '-'
@@ -859,6 +899,7 @@ function systemTodoActionRoles(row: SystemAlertTodoItem) {
 }
 
 function canProcessSystemTodo(row: SystemAlertTodoItem) {
+  if (!isSelfMediaAccountHealthTodo(row) && row.claimedBy && !isSystemTodoClaimedByMe(row)) return false
   const roles = systemTodoActionRoles(row)
   if (roles.length === 0) return true
   const currentRole = userStore.role
@@ -866,11 +907,13 @@ function canProcessSystemTodo(row: SystemAlertTodoItem) {
 }
 
 function systemTodoActionHint(row: SystemAlertTodoItem) {
+  if (isSelfMediaWorkOrderTodo(row)) return '请进入账号登录待办处理'
+  if (row.claimedBy) return isSystemTodoClaimedByMe(row) ? '我已认领' : '其他运营处理中'
   if (isPartnerStartRequestRejectedTodo(row)) return '待合伙人负责人处理'
   const context = systemTodoContext(row)
   const actionRoleText = contextValue(context, 'actionRoleText')
   if (actionRoleText) return `待${actionRoleText}处理`
-  return '无需处理'
+  return '待认领'
 }
 
 function specialIndustryActionLabel(action: unknown) {
@@ -974,6 +1017,12 @@ function systemDetailContextText(row: SystemAlertTodoItem) {
 function normalizedSystemTodoRoute(row: SystemAlertTodoItem) {
   const context = systemTodoContext(row)
   const path = typeof context.route === 'string' ? context.route : ''
+  if (isSelfMediaWorkOrderTodo(row)) {
+    const brandId = contextValue(context, 'brandId')
+    return brandId
+      ? { path: '/admin/monitoring/account-auth-health', query: { brandId } }
+      : { path: '/admin/monitoring/account-auth-health' }
+  }
   if (isPartnerStartRequestRejectedTodo(row)) {
     const companyId = contextValue(context, 'companyId')
     if (userStore.role === 'partner' && companyId) {
@@ -1048,6 +1097,19 @@ async function resolveSystemTodo(row: SystemAlertTodoItem) {
   ElMessage.success('已标记处理')
   await loadSystemTodos()
   window.dispatchEvent(new CustomEvent('system-alert-count-changed'))
+}
+
+async function snoozeSystemTodo(row: SystemAlertTodoItem, hours: number) {
+  await snoozeSystemAlert(row.id, hours)
+  ElMessage.success(hours === 24 ? '将在明天重新提醒' : `将在 ${hours} 小时后重新提醒`)
+  await loadSystemTodos()
+  window.dispatchEvent(new CustomEvent('system-alert-count-changed'))
+}
+
+async function claimSystemTodo(row: SystemAlertTodoItem) {
+  await claimSystemAlert(row.id)
+  ElMessage.success('待办已认领')
+  await loadSystemTodos()
 }
 
 function startAutoRefresh() {

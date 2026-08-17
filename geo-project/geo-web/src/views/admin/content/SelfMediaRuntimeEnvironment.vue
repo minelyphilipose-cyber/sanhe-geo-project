@@ -80,7 +80,7 @@
       <div class="metric-panel" :class="pageStats.accountIssues ? 'is-danger' : 'is-success'">
         <span>账号准入异常</span>
         <strong>{{ pageStats.accountIssues }}</strong>
-        <small>登录状态以 verified 为准</small>
+        <small>登录状态以 logged_in 为准</small>
       </div>
     </section>
 
@@ -127,6 +127,7 @@
                 </el-tag>
               </div>
               <span>{{ formatTime(row.extension?.lastSeenAt) }}</span>
+              <span>{{ platformLabel(row.extension?.platform || row.platform) }} · {{ loginStatusLabel(row.extension?.loginStatus) }}</span>
             </div>
           </template>
         </el-table-column>
@@ -214,6 +215,9 @@
             <span>Install ID</span><strong class="mono">{{ activeRow.extension?.installId || '-' }}</strong>
             <span>版本</span><strong>{{ activeRow.extension?.extensionVersion || '-' }}</strong>
             <span>协议</span><strong>{{ activeRow.extension?.protocolVersion || '-' }}</strong>
+            <span>上报平台</span><strong>{{ platformLabel(activeRow.extension?.platform || activeRow.platform) }}</strong>
+            <span>运行态登录</span><strong>{{ loginStatusLabel(activeRow.extension?.loginStatus) }}</strong>
+            <span>识别账号</span><strong>{{ activeRow.extension?.detectedAccountName || '-' }}</strong>
             <span>最近上报</span><strong>{{ formatTime(activeRow.extension?.lastSeenAt) }}</strong>
             <span>阶段</span><strong>{{ stageLabel(activeRow.extension?.runtimeStage) }}</strong>
             <span>阶段信息</span><strong>{{ activeRow.extension?.runtimeStageMessage || '-' }}</strong>
@@ -323,7 +327,7 @@ const pageStats = computed(() => {
   const ready = records.value.filter((item) => item.readiness?.ready).length
   const extensionSeen = records.value.filter((item) => Boolean(item.extension?.lastSeenAt)).length
   const helperSeen = records.value.filter((item) => Boolean(item.helper?.lastSeenAt)).length
-  const accountIssues = records.value.filter((item) => item.loginStatus !== 'verified').length
+  const accountIssues = records.value.filter((item) => !isLoginReady(item.loginStatus)).length
   return {
     ready,
     blocked: records.value.length - ready,
@@ -408,9 +412,13 @@ function loginStatusLabel(status?: string | null) {
   return status ? map[status] || status : '-'
 }
 
+function isLoginReady(status?: string | null) {
+  return status === 'logged_in' || status === 'verified'
+}
+
 function loginStatusTone(status?: string | null): TagTone {
-  if (status === 'verified') return 'success'
-  if (status === 'logged_in' || status === 'unknown') return 'warning'
+  if (isLoginReady(status)) return 'success'
+  if (status === 'unknown') return 'warning'
   if (status === 'mismatch' || status === 'expired') return 'danger'
   return 'info'
 }

@@ -85,7 +85,7 @@
             title="以下时间只用于安排账号复验和运营提醒，不会直接判定登录失效，也不会自动停止发布。"
           />
           <div v-if="authHealthPolicyLoading" class="self-media-check-loading">正在加载授权健康策略...</div>
-          <el-form v-else-if="authHealthPolicy" class="auth-health-form" label-position="top">
+          <el-form v-else-if="authHealthPolicy" class="auth-health-form" label-position="top" :disabled="!canManageAuthHealthPolicy">
             <div class="auth-health-group">
               <div class="auth-health-group-title">风险监控</div>
               <el-form-item>
@@ -93,7 +93,7 @@
                 <el-switch v-model="authHealthPolicy.enabled" />
               </el-form-item>
               <el-form-item>
-                <template #label><span class="field-label">建议复验周期 <el-tooltip content="例如设置14天，最近验证成功后第14天建议再次确认登录状态。"><el-icon><QuestionFilled /></el-icon></el-tooltip></span></template>
+                <template #label><span class="field-label">建议复验周期 <el-tooltip content="从最近一次验证成功起计算；抖音、小红书默认30天，其他平台默认90天，可按运营经验调整。"><el-icon><QuestionFilled /></el-icon></el-tooltip></span></template>
                 <el-input-number v-model="authHealthPolicy.reverifyIntervalDays" :min="1" :max="365" />
                 <span class="field-unit">天</span>
                 <div class="field-help">最近一次可信验证后，经过该周期建议再次验证。</div>
@@ -136,7 +136,8 @@
               </el-form-item>
             </div>
             <div class="auth-health-actions">
-              <el-button type="primary" :loading="authHealthPolicySaving" @click="saveAuthHealthPolicy">保存设置</el-button>
+              <el-button v-if="canManageAuthHealthPolicy" type="primary" :loading="authHealthPolicySaving" @click="saveAuthHealthPolicy">保存设置</el-button>
+              <el-tag v-else type="info">只读</el-tag>
             </div>
           </el-form>
         </section>
@@ -200,9 +201,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, QuestionFilled } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
+import { useUserStore } from '@/stores/user'
 import { getDouyinCapability, getWechatMpCapability } from '@/api/content'
 import { getPublishSites, testPublishSite } from '@/api/publishSite'
-import { getSelfMediaAuthHealthPolicy, updateSelfMediaAuthHealthPolicy } from '@/api/selfMediaAuthHealth'
+import { getSelfMediaAuthHealthPolicy, previewSelfMediaAuthHealthPolicyImpact, updateSelfMediaAuthHealthPolicy } from '@/api/selfMediaAuthHealth'
 import type { DouyinCapability, DouyinReadinessCheck, PublishSite, SelfMediaAuthHealthPolicy, WechatMpCapability, WechatReadinessCheck } from '@/types'
 
 interface BoardInfo {
@@ -234,6 +236,7 @@ interface PlatformDetail {
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 const loading = ref(false)
 const testing = ref(false)
 const selfMediaCapabilityLoading = ref(false)
@@ -249,7 +252,13 @@ const staticPlatforms: PlatformDetail[] = [
   staticPlatform('toutiao', '今日头条', '头', 'toutiao', '自媒体平台'),
   staticPlatform('zhihu', '知乎', '知', 'zhihu', '自媒体平台'),
   staticPlatform('wechat', '公众号', '微', 'wechat', '自媒体平台'),
-  staticPlatform('douyin', '抖音图文', '抖', 'douyin', '自媒体平台'),
+  {
+    ...staticPlatform('douyin', '抖音图文', '抖', 'douyin', '自媒体平台'),
+    autoPublish: true,
+    integrationLabel: '指纹浏览器自动发布',
+    executor: 'ads_power_automation',
+    remark: 'OAuth 已停用，统一使用指纹浏览器登录与自动发布',
+  },
   staticPlatform('baijiahao', '百家号', '百', 'media', '自媒体平台'),
   staticPlatform('xiaohongshu', '小红书', '红', 'xiaohongshu', '自媒体平台'),
   staticPlatform('netease', '网易', '网', 'media', '自媒体平台'),
@@ -283,7 +292,17 @@ const selfMediaReadinessChecks = computed<Array<WechatReadinessCheck | DouyinRea
   return []
 })
 const selfMediaReadinessSummary = computed(() => readinessSummary(selfMediaReadinessChecks.value))
-const authHealthPolicyVisible = computed(() => ['toutiao', 'xiaohongshu', 'zhihu', 'baijiahao', 'douyin'].includes(routeCode.value))
+const canReadAuthHealthPolicy = computed(() => userStore.hasPermission([
+  'self-media.auth-health.read',
+  'company.read',
+  'content.read',
+]))
+const canManageAuthHealthPolicy = computed(() => userStore.hasPermission([
+  'self-media.auth-health.policy-manage',
+  'company.update',
+]))
+const authHealthPolicyVisible = computed(() => canReadAuthHealthPolicy.value
+  && ['toutiao', 'xiaohongshu', 'zhihu', 'baijiahao', 'douyin'].includes(routeCode.value))
 
 function staticPlatform(code: string, name: string, logoText: string, logoClass: string, categoryName: string): PlatformDetail {
   return {
@@ -406,6 +425,17 @@ async function saveAuthHealthPolicy() {
     return
   }
   try {
+    const { data: impactResponse } = await previewSelfMediaAuthHealthPolicyImpact(
+      routeCode.value, policy.reverifyIntervalDays, policy.warningDays,
+    )
+    const impact = impactResponse.data
+    if (impact) {
+      await ElMessageBox.confirm(
+        `当前 ${impact.activeAccountCount} 个启用账号；保存后预计复验超期 ${impact.projectedOverdueCount} 个、即将复验 ${impact.projectedDueSoonCount} 个，新增超期 ${impact.newlyOverdueCount} 个。${impact.customerImpact}`,
+        '确认策略影响',
+        { confirmButtonText: '继续保存', cancelButtonText: '返回调整', type: impact.newlyOverdueCount > 0 ? 'warning' : 'info' },
+      )
+    }
     const { value } = await ElMessageBox.prompt('请简要说明本次策略调整原因', '保存授权健康策略', {
       confirmButtonText: '保存',
       cancelButtonText: '取消',

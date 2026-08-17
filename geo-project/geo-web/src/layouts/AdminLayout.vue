@@ -85,10 +85,11 @@ const sidebarGroups: MenuGroup[] = [
     menus: [
       { path: '/admin/monitoring/tasks', name: 'MonitoringTasks', title: '调度监控', icon: 'Monitor', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'dispatch.task.replay.dead_letter'] },
       { path: '/admin/monitoring/self-media-automation', name: 'SelfMediaAutomationOverview', title: '自媒体自动化', icon: 'DataLine', permissions: ['content.read'] },
-      { path: '/admin/monitoring/account-auth-health', name: 'AccountAuthHealth', title: '账号授权健康', icon: 'Warning', permissions: ['content.read'] },
+      { path: '/admin/monitoring/account-auth-health', name: 'AccountAuthHealth', title: '账号授权健康', icon: 'Warning', permissions: ['self-media.auth-health.read', 'content.read'] },
       { path: '/admin/monitoring/platforms', name: 'PlatformHealth', title: '平台健康', icon: 'Cpu', permissions: ['content.read', 'delivery.overview.read', 'user.manage'] },
       { path: '/admin/alerts', name: 'AlertCenter', title: '告警中心', icon: 'Bell', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'system.alert.resolve'], badgeCount: 0 },
       { path: '/admin/activity-logs', name: 'ActivityLogs', title: '操作日志', icon: 'Document', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['user.manage'] },
+      { path: '/admin/data-retention-acceptance', name: 'DataRetentionAcceptance', title: '数据保留验收', icon: 'DataAnalysis', roles: ['super_admin'], permissions: ['data.retention.switch.read'] },
       { path: '/admin/model-diagnostics', name: 'ModelDiagnosticConsole', title: '大模型诊断台', icon: 'ChatDotRound', permissions: ['ai.platform.diagnose'] },
     ],
   },

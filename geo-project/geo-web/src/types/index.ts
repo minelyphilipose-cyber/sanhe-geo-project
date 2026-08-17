@@ -755,6 +755,13 @@ export interface SystemAlertTodoItem {
   isResolved?: boolean
   resolvedAt?: string | null
   readAt?: string | null
+  snoozedUntil?: string | null
+  claimedBy?: number | null
+  claimedAt?: string | null
+  operationNote?: string | null
+  occurrenceCount?: number | null
+  lastOccurredAt?: string | null
+  autoResolveOnly?: boolean
   createdAt: string
 }
 
@@ -1531,11 +1538,12 @@ export interface SelfMediaAccount {
   cookieCredentialIdentityName?: string | null
   cookieCredentialIdentityMessage?: string | null
   lastLoginVerifiedAt?: string | null
+  lastLoginVerificationCheckedAt?: string | null
   lastLoginVerificationResult?: string | null
   lastLoginVerificationMethod?: string | null
   lastLoginVerificationWarning?: string | null
   recommendedReverifyAt?: string | null
-  authRiskStatus?: 'normal' | 'reverify_due_soon' | 'reverify_overdue' | 'credential_missing' | 'unknown' | 'monitoring_disabled' | string | null
+  authRiskStatus?: 'normal' | 'reverify_due_soon' | 'reverify_overdue' | 'credential_missing' | 'login_verification_failed' | 'unknown' | 'monitoring_disabled' | string | null
   recommendedReverifySource?: string | null
   authRiskWarningStartAt?: string | null
   credentialCandidateSuperseded?: boolean | null
@@ -1574,6 +1582,26 @@ export interface SelfMediaLoginVerification {
   requestedAt: string
   reportedAt?: string | null
   expiresAt: string
+}
+
+export interface SelfMediaLoginObservation {
+  id: number
+  brandId: number
+  selfMediaAccountId: number
+  browserEnvironmentId?: number | null
+  loginVerificationId?: number | null
+  platform: string
+  reportSource: string
+  observationResult: string
+  resultCode?: string | null
+  resultMessage?: string | null
+  actualAccountName?: string | null
+  currentUrl?: string | null
+  extensionVersion?: string | null
+  protocolVersion?: string | null
+  authoritative: boolean
+  operatorId?: number | null
+  createdAt: string
 }
 
 export interface WechatMenuConfig {
@@ -1865,6 +1893,9 @@ export interface SelfMediaRuntimeEnvironment {
     installId?: string | null
     extensionVersion?: string | null
     protocolVersion?: string | null
+    platform?: string | null
+    loginStatus?: string | null
+    detectedAccountName?: string | null
     lastSeenAt?: string | null
     runtimeStage?: string | null
     runtimeStageMessage?: string | null
@@ -1972,8 +2003,10 @@ export interface AccountAuthHealthOverview {
   generatedAt: string
   summary: AccountAuthHealthSummary
   riskItems: AccountAuthHealthRiskItem[]
+  brandEnvironments: AccountAuthHealthBrandEnvironment[]
   alertGroups: AccountAuthHealthAlertGroup[]
   trendBuckets: AccountAuthHealthTrendBucket[]
+  latestScans: AccountAuthHealthScanBatch[]
 }
 
 export interface AccountAuthHealthSummary {
@@ -1987,6 +2020,9 @@ export interface AccountAuthHealthSummary {
   highPriorityCount: number
   dueInSevenDays: number
   dueInThirtyDays: number
+  explicitLoginIssueCount: number
+  reverifyOverdueCount: number
+  referenceWindowNormalCount: number
 }
 
 export interface AccountAuthHealthRiskItem {
@@ -2002,14 +2038,56 @@ export interface AccountAuthHealthRiskItem {
   ownerUserId?: number | null
   ownerName?: string | null
   riskStatus: 'normal' | 'expiring' | 'expired' | 'missing' | 'unknown' | string
+  loginFactStatus: string
+  reverifyStatus: string
   severity?: string | null
+  browserEnvironmentId?: number | null
+  environmentKey?: string | null
+  environmentName?: string | null
+  environmentStatus?: string | null
   expiresAt?: string | null
   daysUntilExpiry?: number | null
   expirySource?: string | null
   expirySourceLabel?: string | null
+  lastLoginVerifiedAt?: string | null
+  lastLoginCheckedAt?: string | null
+  lastLoginCheckResult?: string | null
   actionRoute?: string | null
   actionLabel?: string | null
   actionHint?: string | null
+}
+
+export interface AccountAuthHealthBrandEnvironment {
+  brandId: number
+  brandName?: string | null
+  companyName?: string | null
+  ownerUserId?: number | null
+  ownerName?: string | null
+  browserEnvironmentId?: number | null
+  environmentKey?: string | null
+  environmentName?: string | null
+  environmentStatus?: string | null
+  accountCount: number
+  confirmedLoginCount: number
+  loginIssueCount: number
+  unverifiedCount: number
+  reverifyOverdueCount: number
+  reverifyDueSoonCount: number
+  lastLoginSeenAt?: string | null
+  actionRoute?: string | null
+}
+
+export interface AccountAuthHealthScanBatch {
+  id: number
+  scanType: string
+  status: string
+  startedAt?: string | null
+  finishedAt?: string | null
+  totalCount?: number | null
+  successCount?: number | null
+  failureCount?: number | null
+  skippedCount?: number | null
+  errorSummary?: string | null
 }
 
 export interface AccountAuthHealthAlertGroup {

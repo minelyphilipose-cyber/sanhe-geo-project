@@ -6,6 +6,7 @@ export interface SystemAlertTodoQuery {
   size?: number
   includeResolved?: boolean
   unreadOnly?: boolean
+  snoozedOnly?: boolean
 }
 
 export function getMySystemAlertTodos(params?: SystemAlertTodoQuery) {
@@ -18,6 +19,14 @@ export function resolveSystemAlert(id: number) {
 
 export function markSystemAlertRead(id: number) {
   return request.post<R<void>>(`/system/alerts/${id}/read`)
+}
+
+export function snoozeSystemAlert(id: number, hours: number) {
+  return request.post<R<void>>(`/system/alerts/${id}/snooze`, { hours })
+}
+
+export function claimSystemAlert(id: number) {
+  return request.post<R<void>>(`/system/alerts/${id}/claim`)
 }
 
 export function getMySystemAlertUnreadCount() {

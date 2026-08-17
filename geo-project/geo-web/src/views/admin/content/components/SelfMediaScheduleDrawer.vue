@@ -259,6 +259,9 @@
           />
           <div class="schedule-diagnostics-actions">
             <el-button v-if="canHandleMaterials(diagnosticsRow)" type="primary" @click="handleMaterials(diagnosticsRow)">处理素材</el-button>
+            <el-button v-if="isLoginIdentityFailure(diagnosticsRow)" type="primary" @click="openLoginVerification(diagnosticsRow)">
+              去验证登录
+            </el-button>
             <el-button v-if="canRetryNow(diagnosticsRow)" @click="retryNow(diagnosticsRow)">立即重试</el-button>
             <el-button v-if="canRepublish(diagnosticsRow)" type="warning" @click="republish(diagnosticsRow)">重新发布</el-button>
             <el-button v-if="diagnosticsRow && canRecheck(diagnosticsRow)" @click="recheck(diagnosticsRow)">重新检测结果</el-button>
@@ -370,6 +373,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Refresh, Search } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
@@ -402,6 +406,8 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   openArticle: [articleId: number]
 }>()
+
+const router = useRouter()
 
 const visible = computed({
   get: () => props.modelValue,
@@ -1680,6 +1686,24 @@ async function retryNow(row: SelfMediaPublishSchedule | null) {
       throw error
     }
   }
+}
+
+function isLoginIdentityFailure(row: SelfMediaPublishSchedule | null) {
+  const failureCode = String(row?.failureCode || '').trim().toUpperCase()
+  return failureCode === 'LOGIN_REQUIRED' || failureCode === 'ACCOUNT_MISMATCH'
+}
+
+async function openLoginVerification(row: SelfMediaPublishSchedule | null) {
+  if (!row?.brandId || !row.selfMediaAccountId) return
+  diagnosticsVisible.value = false
+  visible.value = false
+  await router.push({
+    path: `/admin/brands/${row.brandId}`,
+    query: {
+      tab: 'self-media',
+      accountId: String(row.selfMediaAccountId),
+    },
+  })
 }
 
 async function republish(row: SelfMediaPublishSchedule | null) {
