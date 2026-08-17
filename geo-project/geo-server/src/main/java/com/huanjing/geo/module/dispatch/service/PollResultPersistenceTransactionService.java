@@ -45,8 +45,11 @@ public class PollResultPersistenceTransactionService {
         if (existing == null) {
             pollResultMapper.insert(result);
         } else {
+            requireImmutableIdentity(existing, result);
             result.setId(existing.getId());
-            pollResultMapper.updateById(result);
+            if (pollResultMapper.updateBusinessProjection(result) != 1) {
+                throw new IllegalStateException("Poll result changed while updating its business projection");
+            }
         }
 
         String itemStatus = "completed".equals(result.getStatus()) ? "completed" : "failed";
@@ -118,6 +121,21 @@ public class PollResultPersistenceTransactionService {
             result.setTriggerType(TRIGGER_TYPE_SCHEDULED);
         } else {
             result.setTriggerType(result.getTriggerType().trim());
+        }
+    }
+
+    private void requireImmutableIdentity(PollResult existing, PollResult update) {
+        if (!Objects.equals(existing.getBatchId(), update.getBatchId())
+                || !Objects.equals(existing.getProjectId(), update.getProjectId())
+                || !Objects.equals(existing.getBatchDate(), update.getBatchDate())
+                || !Objects.equals(existing.getQuestionTier(), update.getQuestionTier())
+                || !Objects.equals(existing.getKeywordResultId(), update.getKeywordResultId())
+                || !Objects.equals(existing.getKeywordTextSnapshot(), update.getKeywordTextSnapshot())
+                || !Objects.equals(existing.getPlatformId(), update.getPlatformId())
+                || !Objects.equals(existing.getPlatformCode(), update.getPlatformCode())
+                || !Objects.equals(existing.getChannelCode(), update.getChannelCode())
+                || !Objects.equals(existing.getBatchNo(), update.getBatchNo())) {
+            throw new IllegalStateException("Poll result immutable identity changed during upsert");
         }
     }
 

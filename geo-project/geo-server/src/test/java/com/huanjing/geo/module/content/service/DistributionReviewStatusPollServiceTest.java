@@ -69,7 +69,8 @@ class DistributionReviewStatusPollServiceTest {
         LambdaUpdateWrapper<DistributionTask> wrapper = capturedUpdate();
         assertThat(wrapper.getParamNameValuePairs().values())
                 .contains("published", "article-1", "https://mp.weixin.qq.com/s/article-1", 3);
-        assertThat(wrapper.getSqlSet()).contains("platform_article_id", "published_url", "finished_at");
+        assertThat(wrapper.getSqlSet()).contains(
+                "platform_article_id", "published_url", "finished_at", "payload_purged_at");
     }
 
     @Test

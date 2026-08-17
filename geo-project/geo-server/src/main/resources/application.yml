@@ -233,6 +233,16 @@ semi-auto:
           - img
 
 geo:
+  self-media-account-health:
+    observation-retention-days: ${SELF_MEDIA_LOGIN_OBSERVATION_RETENTION_DAYS:180}
+    observation-cleanup-batch-size: ${SELF_MEDIA_LOGIN_OBSERVATION_CLEANUP_BATCH_SIZE:1000}
+    observation-cleanup-max-batches: ${SELF_MEDIA_LOGIN_OBSERVATION_CLEANUP_MAX_BATCHES:20}
+    observation-cleanup-cron: "${SELF_MEDIA_LOGIN_OBSERVATION_CLEANUP_CRON:0 35 4 * * *}"
+    identity-circuit:
+      window-minutes: ${SELF_MEDIA_IDENTITY_CIRCUIT_WINDOW_MINUTES:15}
+      minimum-samples: ${SELF_MEDIA_IDENTITY_CIRCUIT_MINIMUM_SAMPLES:10}
+      failure-ratio-threshold: ${SELF_MEDIA_IDENTITY_CIRCUIT_FAILURE_RATIO_THRESHOLD:0.6}
+      minimum-affected-brands: ${SELF_MEDIA_IDENTITY_CIRCUIT_MINIMUM_AFFECTED_BRANDS:3}
   self-media-runtime:
     gate:
       platforms:
@@ -264,6 +274,29 @@ geo:
       execute-enabled: ${GEO_RETENTION_ARTICLE_PURGE_EXECUTE_ENABLED:false}
     poll-results:
       execute-enabled: ${GEO_RETENTION_POLL_RESULTS_EXECUTE_ENABLED:false}
+    execute:
+      mutation-timeout-seconds: ${GEO_RETENTION_MUTATION_TIMEOUT_SECONDS:120}
+      max-run-seconds: ${GEO_RETENTION_MAX_RUN_SECONDS:3600}
+      max-deferred-retries-per-domain: ${GEO_RETENTION_MAX_DEFERRED_RETRIES_PER_DOMAIN:20}
+      max-mutation-transactions: ${GEO_RETENTION_MAX_MUTATION_TRANSACTIONS:20}
+      max-candidate-items: ${GEO_RETENTION_MAX_CANDIDATE_ITEMS:100000}
+    dynamic-switch:
+      enable-write-enabled: ${GEO_RETENTION_DYNAMIC_SWITCH_ENABLE_WRITE_ENABLED:false}
+      reconciler-enabled: ${GEO_RETENTION_DYNAMIC_SWITCH_RECONCILER_ENABLED:true}
+      reconcile-operator-user-id: ${GEO_RETENTION_DYNAMIC_SWITCH_RECONCILE_OPERATOR_USER_ID:0}
+      reconcile-initial-delay-ms: ${GEO_RETENTION_DYNAMIC_SWITCH_RECONCILE_INITIAL_DELAY_MS:30000}
+      reconcile-fixed-delay-ms: ${GEO_RETENTION_DYNAMIC_SWITCH_RECONCILE_FIXED_DELAY_MS:30000}
+      reconcile-batch-size: ${GEO_RETENTION_DYNAMIC_SWITCH_RECONCILE_BATCH_SIZE:100}
+    detail-cleanup:
+      enabled: ${GEO_RETENTION_DETAIL_CLEANUP_ENABLED:false}
+      cron: "${GEO_RETENTION_DETAIL_CLEANUP_CRON:0 15 2 * * *}"
+      max-operations-per-run: ${GEO_RETENTION_DETAIL_CLEANUP_MAX_OPERATIONS:20}
+      max-operationless-runs-per-run: ${GEO_RETENTION_DETAIL_CLEANUP_MAX_OPERATIONLESS_RUNS:20}
+      max-attempts-per-operation: ${GEO_RETENTION_DETAIL_CLEANUP_MAX_ATTEMPTS_PER_OPERATION:1000}
+      max-operationless-attempts-per-run: ${GEO_RETENTION_DETAIL_CLEANUP_MAX_OPERATIONLESS_ATTEMPTS_PER_RUN:1000}
+      max-run-seconds: ${GEO_RETENTION_DETAIL_CLEANUP_MAX_RUN_SECONDS:3600}
+      lock-key: ${GEO_RETENTION_DETAIL_CLEANUP_LOCK_KEY:geo:retention:detail-cleanup:lock}
+      lock-ttl-seconds: ${GEO_RETENTION_DETAIL_CLEANUP_LOCK_TTL_SECONDS:7200}
     report-freeze:
       enabled: ${GEO_RETENTION_REPORT_FREEZE_ENABLED:false}
       cron: "${GEO_RETENTION_REPORT_FREEZE_CRON:0 40 2 * * *}"
@@ -531,7 +564,7 @@ geo:
       allow-prerelease: ${EXTENSION_VERSION_ALLOW_PRERELEASE:false}
     env:
       # Readiness prompt only. Keep empty to disable outdated-version warnings.
-      expected-version: ${GEO_ENV_EXTENSION_EXPECTED_VERSION:0.2.3}
+      expected-version: ${GEO_ENV_EXTENSION_EXPECTED_VERSION:0.2.4}
 
 presale:
   query-web:

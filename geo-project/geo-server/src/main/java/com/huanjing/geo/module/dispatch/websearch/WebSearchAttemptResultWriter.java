@@ -17,7 +17,8 @@ import com.huanjing.geo.module.dispatch.websearch.enums.ResultCode;
 import com.huanjing.geo.module.dispatch.websearch.model.WebSearchCitation;
 import com.huanjing.geo.module.dispatch.websearch.model.WebSearchResponse;
 import com.huanjing.geo.module.dispatch.websearch.model.WebSearchSource;
-import lombok.RequiredArgsConstructor;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceWriteService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -29,7 +30,6 @@ import java.util.List;
 import java.util.Set;
 
 @Service
-@RequiredArgsConstructor
 public class WebSearchAttemptResultWriter {
 
     private final PollInvocationAttemptMapper attemptMapper;
@@ -37,12 +37,45 @@ public class WebSearchAttemptResultWriter {
     private final PollCitationMapper citationMapper;
     private final PollResultClassifier classifier;
     private final ObjectMapper objectMapper;
+    private final PollRetentionSliceWriteService retentionSliceWriteService;
+
+    @Autowired
+    public WebSearchAttemptResultWriter(PollInvocationAttemptMapper attemptMapper,
+                                        PollSearchSourceMapper sourceMapper,
+                                        PollCitationMapper citationMapper,
+                                        PollResultClassifier classifier,
+                                        ObjectMapper objectMapper,
+                                        PollRetentionSliceWriteService retentionSliceWriteService) {
+        this.attemptMapper = attemptMapper;
+        this.sourceMapper = sourceMapper;
+        this.citationMapper = citationMapper;
+        this.classifier = classifier;
+        this.objectMapper = objectMapper;
+        this.retentionSliceWriteService = retentionSliceWriteService;
+    }
+
+    WebSearchAttemptResultWriter(PollInvocationAttemptMapper attemptMapper,
+                                 PollSearchSourceMapper sourceMapper,
+                                 PollCitationMapper citationMapper,
+                                 PollResultClassifier classifier,
+                                 ObjectMapper objectMapper) {
+        this(attemptMapper, sourceMapper, citationMapper, classifier, objectMapper, null);
+    }
 
     @Transactional
     public ResultCode writeSuccess(PollInvocationAttempt attempt,
                                    WebSearchResponse response,
                                    Set<String> brandNames,
                                    LocalDateTime now) {
+        if (retentionSliceWriteService == null) return writeSuccessLocked(attempt, response, brandNames, now);
+        return retentionSliceWriteService.executeByAttemptId(attempt.getId(),
+                () -> writeSuccessLocked(attempt, response, brandNames, now));
+    }
+
+    private ResultCode writeSuccessLocked(PollInvocationAttempt attempt,
+                                          WebSearchResponse response,
+                                          Set<String> brandNames,
+                                          LocalDateTime now) {
         List<String> normalizedBrands = normalizeBrandNames(brandNames);
         List<PollSearchSource> persistedSources = persistSources(attempt.getId(), response.sources(), normalizedBrands, now);
         boolean brandInSearch = persistedSources.stream().anyMatch(
@@ -85,6 +118,21 @@ public class WebSearchAttemptResultWriter {
                              String errorCode,
                              String errorMessage,
                              LocalDateTime now) {
+        if (retentionSliceWriteService == null) {
+            writeFailureLocked(attempt, category, errorCode, errorMessage, now);
+            return;
+        }
+        retentionSliceWriteService.executeByAttemptId(attempt.getId(), () -> {
+            writeFailureLocked(attempt, category, errorCode, errorMessage, now);
+            return null;
+        });
+    }
+
+    private void writeFailureLocked(PollInvocationAttempt attempt,
+                                    ErrorCategory category,
+                                    String errorCode,
+                                    String errorMessage,
+                                    LocalDateTime now) {
         PollInvocationAttempt update = new PollInvocationAttempt();
         update.setId(attempt.getId());
         update.setCallStatus("FAILED");

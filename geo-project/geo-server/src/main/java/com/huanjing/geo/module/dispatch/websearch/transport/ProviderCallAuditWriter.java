@@ -6,6 +6,7 @@ import com.huanjing.geo.module.dispatch.mapper.PollProviderCallMapper;
 import com.huanjing.geo.module.dispatch.websearch.enums.ErrorCategory;
 import com.huanjing.geo.module.dispatch.websearch.enums.ProviderCallStatus;
 import com.huanjing.geo.module.dispatch.websearch.model.WebSearchRequest;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceWriteService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -19,9 +20,15 @@ public class ProviderCallAuditWriter {
 
     private final PollProviderCallMapper mapper;
     private final PollPayloadProtector payloadProtector;
+    private final PollRetentionSliceWriteService retentionSliceWriteService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PollProviderCall start(WebSearchRequest request, String requestBody, LocalDateTime startedAt) {
+        return retentionSliceWriteService.executeByAttemptId(request.attemptId(),
+                () -> startLocked(request, requestBody, startedAt));
+    }
+
+    private PollProviderCall startLocked(WebSearchRequest request, String requestBody, LocalDateTime startedAt) {
         PollProviderCall call = new PollProviderCall();
         call.setAttemptId(request.attemptId());
         call.setCallType("MODEL_RESPONSE");
@@ -53,6 +60,19 @@ public class ProviderCallAuditWriter {
                         String usageJson,
                         LocalDateTime completedAt,
                         long latencyMs) {
+        retentionSliceWriteService.executeByProviderCallId(callId, () -> {
+            succeedLocked(callId, httpStatus, responseBody, providerRequestId, usageJson, completedAt, latencyMs);
+            return null;
+        });
+    }
+
+    private void succeedLocked(Long callId,
+                               int httpStatus,
+                               String responseBody,
+                               String providerRequestId,
+                               String usageJson,
+                               LocalDateTime completedAt,
+                               long latencyMs) {
         PollProviderCall update = baseCompletion(callId, completedAt, latencyMs);
         update.setStatus(ProviderCallStatus.SUCCEEDED.name());
         update.setHttpStatus(httpStatus);
@@ -73,6 +93,20 @@ public class ProviderCallAuditWriter {
                      String errorMessage,
                      LocalDateTime completedAt,
                      long latencyMs) {
+        retentionSliceWriteService.executeByProviderCallId(callId, () -> {
+            failLocked(callId, httpStatus, responseBody, category, errorCode, errorMessage, completedAt, latencyMs);
+            return null;
+        });
+    }
+
+    private void failLocked(Long callId,
+                            Integer httpStatus,
+                            String responseBody,
+                            ErrorCategory category,
+                            String errorCode,
+                            String errorMessage,
+                            LocalDateTime completedAt,
+                            long latencyMs) {
         PollProviderCall update = baseCompletion(callId, completedAt, latencyMs);
         update.setStatus(ProviderCallStatus.FAILED.name());
         update.setHttpStatus(httpStatus);

@@ -14,6 +14,7 @@ import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceWriteService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -52,6 +53,7 @@ public class DispatchPollAggregationService {
     private final ProjectMapper projectMapper;
     private final PollSummaryRecomputeService pollSummaryRecomputeService;
     private final DispatchAlertService dispatchAlertService;
+    private final PollRetentionSliceWriteService retentionSliceWriteService;
 
     public void tryAggregateBatch(Long batchId) {
         if (batchId == null) {
@@ -98,13 +100,23 @@ public class DispatchPollAggregationService {
                         .last("LIMIT " + Math.max(limit, 1))
         );
         for (PollBatch batch : staleBatches) {
-            batch.setStatus(BATCH_STATUS_FAILED);
-            pollBatchMapper.updateById(batch);
+            retentionSliceWriteService.executeByBatchId(batch.getId(), () -> {
+                batch.setStatus(BATCH_STATUS_FAILED);
+                pollBatchMapper.updateById(batch);
+                return null;
+            });
         }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void aggregateBatchIfReady(Long batchId) {
+        retentionSliceWriteService.executeByBatchId(batchId, () -> {
+            aggregateBatchIfReadyLocked(batchId);
+            return null;
+        });
+    }
+
+    private void aggregateBatchIfReadyLocked(Long batchId) {
         PollBatch batch = pollBatchMapper.selectByIdForUpdate(batchId);
         if (batch == null || batch.getFinishedAt() != null) {
             return;

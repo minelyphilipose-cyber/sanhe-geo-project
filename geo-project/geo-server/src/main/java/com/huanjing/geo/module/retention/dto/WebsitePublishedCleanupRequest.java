@@ -8,4 +8,7 @@ public class WebsitePublishedCleanupRequest {
     private Integer limit;
     private Long cursorArticleId;
     private String reason;
+    private String triggerId;
+    private String approvalRef;
+    private String ticketRef;
 }

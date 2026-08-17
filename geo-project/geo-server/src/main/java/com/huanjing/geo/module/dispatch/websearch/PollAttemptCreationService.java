@@ -49,6 +49,9 @@ public class PollAttemptCreationService {
         if (result == null || result.getDeletedAt() != null) {
             throw new BizException(404, "Poll result not found: " + draft.getPollResultId());
         }
+        if (!sameSlice(identity, result)) {
+            throw new BizException(409, "Poll result slice identity changed while acquiring retention fence");
+        }
 
         draft.setId(null);
         draft.setAttemptNo(attemptMapper.selectMaxAttemptNo(result.getId()) + 1);
@@ -87,7 +90,7 @@ public class PollAttemptCreationService {
         }
         result.setRetryChainStatus(RetryChainStatus.RUNNING.name());
         result.setVersion(nextVersion(result.getVersion()));
-        if (pollResultMapper.updateById(result) != 1) {
+        if (pollResultMapper.updateExecutionProjection(result) != 1) {
             throw new BizException(409, "Poll result changed while creating an invocation attempt");
         }
         return draft;
@@ -123,5 +126,12 @@ public class PollAttemptCreationService {
 
     private long nextVersion(Long version) {
         return version == null ? 1L : version + 1L;
+    }
+
+    private boolean sameSlice(PollResult left, PollResult right) {
+        return Objects.equals(left.getId(), right.getId())
+                && Objects.equals(left.getProjectId(), right.getProjectId())
+                && Objects.equals(left.getBatchDate(), right.getBatchDate())
+                && Objects.equals(left.getQuestionTier(), right.getQuestionTier());
     }
 }

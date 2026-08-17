@@ -15,6 +15,9 @@ public class DataRetentionProperties {
     private PollResults pollResults = new PollResults();
     private ContentUrlRewrite contentUrlRewrite = new ContentUrlRewrite();
     private ExecutePromotion executePromotion = new ExecutePromotion();
+    private Execute execute = new Execute();
+    private DynamicSwitch dynamicSwitch = new DynamicSwitch();
+    private DetailCleanup detailCleanup = new DetailCleanup();
 
     @Data
     public static class Scheduler {
@@ -65,5 +68,37 @@ public class DataRetentionProperties {
         private boolean requirePerfectReconciliation = true;
         private boolean requireNoP0Alerts = true;
         private boolean requireDualApproval = true;
+    }
+
+    @Data
+    public static class Execute {
+        private int mutationTimeoutSeconds = 120;
+        private int maxRunSeconds = 3600;
+        private int maxDeferredRetriesPerDomain = 20;
+        private int maxMutationTransactions = 20;
+        private long maxCandidateItems = 100000L;
+    }
+
+    @Data
+    public static class DynamicSwitch {
+        private boolean enableWriteEnabled = false;
+        private boolean reconcilerEnabled = true;
+        private long reconcileOperatorUserId = 0L;
+        private long reconcileInitialDelayMs = 30000L;
+        private long reconcileFixedDelayMs = 30000L;
+        private int reconcileBatchSize = 100;
+    }
+
+    @Data
+    public static class DetailCleanup {
+        private boolean enabled = false;
+        private String cron = "0 15 2 * * *";
+        private int maxOperationsPerRun = 20;
+        private int maxOperationlessRunsPerRun = 20;
+        private int maxAttemptsPerOperation = 1000;
+        private int maxOperationlessAttemptsPerRun = 1000;
+        private int maxRunSeconds = 3600;
+        private String lockKey = "geo:retention:detail-cleanup:lock";
+        private long lockTtlSeconds = 7200L;
     }
 }

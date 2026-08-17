@@ -28,6 +28,7 @@ public interface PollBatchShardItemMapper extends BaseMapper<PollBatchShardItem>
                 last_error = NULL
             WHERE id = #{itemId}
               AND status = 'pending'
+              AND poll_result_id IS NULL
             """)
     int stageResultSnapshot(@Param("itemId") Long itemId,
                             @Param("snapshotJson") String snapshotJson,
@@ -42,6 +43,7 @@ public interface PollBatchShardItemMapper extends BaseMapper<PollBatchShardItem>
                 result_snapshot_at = NULL
             WHERE id = #{itemId}
               AND status = 'pending'
+              AND poll_result_id IS NULL
             """)
     int markResultProjected(@Param("itemId") Long itemId,
                             @Param("pollResultId") Long pollResultId,

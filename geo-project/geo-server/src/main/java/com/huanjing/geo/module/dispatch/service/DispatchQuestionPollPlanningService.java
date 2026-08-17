@@ -21,7 +21,7 @@ import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
-import com.huanjing.geo.module.retention.service.PollRetentionSliceLockService;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceGuardService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import lombok.RequiredArgsConstructor;
@@ -63,7 +63,7 @@ public class DispatchQuestionPollPlanningService {
     private final ObjectMapper objectMapper;
     private final DispatchProperties dispatchProperties;
     private final ObjectProvider<DispatchTaskService> dispatchTaskServiceProvider;
-    private final PollRetentionSliceLockService retentionSliceLockService;
+    private final PollRetentionSliceGuardService retentionSliceGuardService;
 
     @Transactional
     public PollBatch planProjectTierPoll(Project project,
@@ -172,6 +172,9 @@ public class DispatchQuestionPollPlanningService {
         int shardCountPerPlatform = (int) Math.ceil(selected.size() / (double) shardSize);
         int totalShardCount = shardCountPerPlatform * platforms.size();
 
+        // The permanent marker check must precede the first write to this slice.
+        retentionSliceGuardService.lockAndRequireWritable(project.getId(), batchDate, questionTier);
+
         PollBatch batch = existing == null ? new PollBatch() : existing;
         batch.setDispatchTaskId(null);
         batch.setProjectId(project.getId());
@@ -203,8 +206,6 @@ public class DispatchQuestionPollPlanningService {
             pollBatchMapper.updateById(batch);
         }
 
-        // Establish the fence before shard tasks become visible after this transaction commits.
-        retentionSliceLockService.lockSlice(project.getId(), batchDate, questionTier);
         List<DispatchTask> shardTasks = createShardsAndTasks(batch, project, windowStart, batchDate, batchNo,
                 questionTier, platforms, selected, shardSize);
 

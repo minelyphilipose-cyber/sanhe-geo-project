@@ -1,6 +1,5 @@
 package com.huanjing.geo.module.retention.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.storage.ObjectStorageService;
 import com.huanjing.geo.module.content.dto.ArticleArchiveDryRunRequest;
 import com.huanjing.geo.module.content.dto.ArticleArchiveDryRunResponse;
@@ -11,15 +10,20 @@ import com.huanjing.geo.module.content.service.ArticleRetentionDryRunService;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunRequest;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunResponse;
 import com.huanjing.geo.module.dispatch.service.PollSummaryRecomputeService;
-import com.huanjing.geo.module.dispatch.websearch.purge.PollAuditPurgeService;
 import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardEntityJudgeService;
+import com.huanjing.geo.module.retention.audit.canonical.DataRetentionCanonicalEncoder;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionCompatibilityContract;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionAttemptContext;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionRunContext;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RunReplayStatus;
+import com.huanjing.geo.module.retention.audit.service.DataRetentionP0AuditService;
 import com.huanjing.geo.module.retention.config.DataRetentionProperties;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -66,26 +70,15 @@ class RetentionExecutionFloorTest {
         PollRetentionDryRunRequest pollRequest = new PollRetentionDryRunRequest();
         pollRequest.setHotRetentionDays(1);
         pollRequest.setReason("retention floor test");
-        PollRetentionDryRunResponse poll = new PollRetentionDryRunService(
-                jdbcTemplate,
-                mock(TransactionTemplate.class),
-                mock(PollRetentionSliceLockService.class),
-                mock(CurrentUserService.class),
-                auditService,
-                mock(PollAuditPurgeService.class),
-                mock(PollSummaryRecomputeService.class),
-                mock(MobileDashboardEntityJudgeService.class),
-                properties,
-                new ObjectMapper()
-        ).runScheduled(pollRequest, false, 1L);
+        PollRetentionDryRunService pollService = pollDryRunService(jdbcTemplate, properties);
+        assertThrows(com.huanjing.geo.common.exception.BizException.class,
+                () -> pollService.runScheduled(pollRequest, false, 1L));
 
         assertEquals(90, archive.getMinPublishedAgeDays());
         assertEquals(90, purge.getRetentionDays());
         assertEquals(24, purge.getArchiveGraceHours());
-        assertEquals(14, poll.getHotRetentionDays());
         assertFalse(archive.getSimulationOnly());
         assertFalse(purge.getSimulationOnly());
-        assertFalse(poll.getSimulationOnly());
     }
 
     @Test
@@ -117,18 +110,8 @@ class RetentionExecutionFloorTest {
 
         PollRetentionDryRunRequest pollRequest = new PollRetentionDryRunRequest();
         pollRequest.setHotRetentionDays(1);
-        PollRetentionDryRunResponse poll = new PollRetentionDryRunService(
-                jdbcTemplate,
-                mock(TransactionTemplate.class),
-                mock(PollRetentionSliceLockService.class),
-                mock(CurrentUserService.class),
-                auditService,
-                mock(PollAuditPurgeService.class),
-                mock(PollSummaryRecomputeService.class),
-                mock(MobileDashboardEntityJudgeService.class),
-                properties,
-                new ObjectMapper()
-        ).runScheduled(pollRequest, true, 1L);
+        PollRetentionDryRunResponse poll = pollDryRunService(jdbcTemplate, properties)
+                .runScheduled(pollRequest, true, 1L);
 
         assertEquals(1, archive.getMinPublishedAgeDays());
         assertEquals(1, purge.getRetentionDays());
@@ -152,18 +135,7 @@ class RetentionExecutionFloorTest {
                 auditService,
                 properties
         );
-        PollRetentionDryRunService pollPurge = new PollRetentionDryRunService(
-                jdbcTemplate,
-                mock(TransactionTemplate.class),
-                mock(PollRetentionSliceLockService.class),
-                mock(CurrentUserService.class),
-                auditService,
-                mock(PollAuditPurgeService.class),
-                mock(PollSummaryRecomputeService.class),
-                mock(MobileDashboardEntityJudgeService.class),
-                properties,
-                new ObjectMapper()
-        );
+        PollRetentionDryRunService pollPurge = pollDryRunService(jdbcTemplate, properties);
 
         assertThrows(com.huanjing.geo.common.exception.BizException.class,
                 () -> articlePurge.runScheduled(new ArticleBodyPurgeRequest(), false));
@@ -183,6 +155,21 @@ class RetentionExecutionFloorTest {
         DataRetentionRunAuditService auditService = mock(DataRetentionRunAuditService.class);
         when(auditService.startRun(anyString(), anyString(), any(), any(), any())).thenReturn(1L);
         return auditService;
+    }
+
+    private PollRetentionDryRunService pollDryRunService(JdbcTemplate jdbcTemplate,
+                                                         DataRetentionProperties properties) {
+        DataRetentionP0AuditService typedAudit = mock(DataRetentionP0AuditService.class);
+        RetentionCompatibilityContract contract = new RetentionCompatibilityContract(
+                "poll_results", 1, new byte[32], "poll-results-v2");
+        when(typedAudit.startRun(any())).thenReturn(new RetentionRunContext(1L,
+                "00000000-0000-0000-0000-000000000001", "scheduler", "dry_run", contract,
+                "test", "test", RunReplayStatus.CREATED, "running", Instant.now()));
+        when(typedAudit.createOperationlessAttempt(any(), any()))
+                .thenReturn(mock(RetentionAttemptContext.class));
+        return new PollRetentionDryRunService(jdbcTemplate, mock(CurrentUserService.class),
+                mock(PollSummaryRecomputeService.class), mock(MobileDashboardEntityJudgeService.class),
+                properties, typedAudit, new DataRetentionCanonicalEncoder());
     }
 
     private DataRetentionProperties executeEnabledProperties() {

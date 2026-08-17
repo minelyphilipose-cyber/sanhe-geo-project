@@ -39,6 +39,9 @@ public class PollResultProjectionService {
         if (attempt == null) {
             throw new BizException(404, "Invocation attempt not found: " + attemptId);
         }
+        if (!Objects.equals(identityAttempt.getPollResultId(), attempt.getPollResultId())) {
+            throw new BizException(409, "Invocation attempt parent changed while acquiring retention fence");
+        }
         AttemptStatus status = parseTerminalStatus(attempt);
         if (attempt.getFinalizedAt() != null) {
             return;
@@ -47,6 +50,9 @@ public class PollResultProjectionService {
         PollResult result = pollResultMapper.selectByIdForUpdate(attempt.getPollResultId());
         if (result == null || result.getDeletedAt() != null) {
             throw new BizException(404, "Poll result not found: " + attempt.getPollResultId());
+        }
+        if (!sameSlice(identityResult, result)) {
+            throw new BizException(409, "Poll result slice identity changed while acquiring retention fence");
         }
         if (attemptMapper.markFinalized(attemptId, finalizedAt) != 1) {
             throw new BizException(409, "Invocation attempt was finalized concurrently: " + attemptId);
@@ -66,7 +72,7 @@ public class PollResultProjectionService {
             promoteEffectiveResultWhenEligible(result, attempt, status);
         }
         result.setVersion(nextVersion(result.getVersion()));
-        if (pollResultMapper.updateById(result) != 1) {
+        if (pollResultMapper.updateExecutionProjection(result) != 1) {
             throw new BizException(409, "Poll result projection changed concurrently");
         }
     }
@@ -115,5 +121,12 @@ public class PollResultProjectionService {
 
     private long nextVersion(Long version) {
         return version == null ? 1L : version + 1L;
+    }
+
+    private boolean sameSlice(PollResult left, PollResult right) {
+        return Objects.equals(left.getId(), right.getId())
+                && Objects.equals(left.getProjectId(), right.getProjectId())
+                && Objects.equals(left.getBatchDate(), right.getBatchDate())
+                && Objects.equals(left.getQuestionTier(), right.getQuestionTier());
     }
 }

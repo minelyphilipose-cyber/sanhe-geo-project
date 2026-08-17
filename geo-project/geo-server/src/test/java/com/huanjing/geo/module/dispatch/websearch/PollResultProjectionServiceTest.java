@@ -40,7 +40,7 @@ class PollResultProjectionServiceTest {
         service.finalizeAttempt(9L, true, LocalDateTime.of(2026, 7, 14, 11, 0));
 
         ArgumentCaptor<PollResult> captor = ArgumentCaptor.forClass(PollResult.class);
-        verify(pollResultMapper).updateById(captor.capture());
+        verify(pollResultMapper).updateExecutionProjection(captor.capture());
         assertThat(captor.getValue().getEffectiveAttemptId()).isEqualTo(4L);
         assertThat(captor.getValue().getExecutionFinalized()).isTrue();
     }
@@ -60,7 +60,7 @@ class PollResultProjectionServiceTest {
         service.finalizeAttempt(9L, true, LocalDateTime.of(2026, 7, 14, 11, 0));
 
         ArgumentCaptor<PollResult> captor = ArgumentCaptor.forClass(PollResult.class);
-        verify(pollResultMapper).updateById(captor.capture());
+        verify(pollResultMapper).updateExecutionProjection(captor.capture());
         assertThat(captor.getValue().getEffectiveAttemptId()).isEqualTo(9L);
         assertThat(captor.getValue().getConfirmedCitationExposure()).isTrue();
     }
@@ -74,7 +74,7 @@ class PollResultProjectionServiceTest {
         service.finalizeAttempt(9L, false, LocalDateTime.of(2026, 7, 14, 11, 0));
 
         ArgumentCaptor<PollResult> captor = ArgumentCaptor.forClass(PollResult.class);
-        verify(pollResultMapper).updateById(captor.capture());
+        verify(pollResultMapper).updateExecutionProjection(captor.capture());
         assertThat(captor.getValue().getEffectiveAttemptId()).isEqualTo(4L);
         assertThat(captor.getValue().getExecutionFinalized()).isFalse();
         assertThat(captor.getValue().getRetryChainStatus()).isEqualTo("SEARCH_RETRY_PENDING");
@@ -86,7 +86,7 @@ class PollResultProjectionServiceTest {
         when(attemptMapper.selectByIdForUpdate(attempt.getId())).thenReturn(attempt);
         when(pollResultMapper.selectByIdForUpdate(result.getId())).thenReturn(result);
         when(attemptMapper.markFinalized(any(), any())).thenReturn(1);
-        when(pollResultMapper.updateById(any())).thenReturn(1);
+        when(pollResultMapper.updateExecutionProjection(any())).thenReturn(1);
     }
 
     private PollInvocationAttempt terminalAttempt(Long id, String resultCode) {

@@ -22,6 +22,9 @@ public class PollAuditPurgeRun {
     private LocalDateTime auditCommittedAt;
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;
+    private Long retentionRunId;
+    private String operationId;
+    private String retentionDomain;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

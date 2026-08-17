@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.sql.Date;
 import java.time.LocalDate;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
@@ -27,7 +28,7 @@ public class PollRetentionSliceGuardService {
         if (projectId == null || batchDate == null || questionTier == null || questionTier.isBlank()) {
             throw new IllegalArgumentException("poll retention slice identity is incomplete");
         }
-        String normalizedTier = questionTier.trim().toUpperCase();
+        String normalizedTier = questionTier.trim().toUpperCase(Locale.ROOT);
         sliceLockService.lockSlice(projectId, batchDate, normalizedTier);
         Integer purged = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)

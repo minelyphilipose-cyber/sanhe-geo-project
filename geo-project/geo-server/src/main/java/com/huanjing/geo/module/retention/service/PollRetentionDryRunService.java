@@ -1,35 +1,43 @@
 package com.huanjing.geo.module.retention.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunRequest;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunResponse;
 import com.huanjing.geo.module.dispatch.dto.PollRetentionDryRunSliceVO;
 import com.huanjing.geo.module.dispatch.service.PollSummaryRecomputeService;
-import com.huanjing.geo.module.dispatch.websearch.purge.PollAuditPurgeService;
-import com.huanjing.geo.module.dispatch.websearch.purge.PollPurgeRequest;
 import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardAiPlatformCatalog;
 import com.huanjing.geo.module.mobiledashboard.service.MobileDashboardEntityJudgeService;
 import com.huanjing.geo.module.retention.config.DataRetentionProperties;
+import com.huanjing.geo.module.retention.audit.canonical.DataRetentionCanonicalEncoder;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.AttemptStatus;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.AttemptType;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionAttemptCommand;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionAttemptContext;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionAttemptResult;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionCompatibilityContract;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionRunContext;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionRunStartCommand;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RunBusinessSummary;
+import com.huanjing.geo.module.retention.audit.service.DataRetentionP0AuditService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.sql.Date;
 import java.time.LocalDate;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class PollRetentionDryRunService {
 
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
@@ -37,32 +45,56 @@ public class PollRetentionDryRunService {
     private static final int DEFAULT_STUCK_BATCH_SEAL_DAYS = 7;
     private static final int DEFAULT_LIMIT = 100;
     private static final int MAX_LIMIT = 1_000;
+    private static final int MAX_PAGES = 1_000;
 
     private final JdbcTemplate jdbcTemplate;
-    private final TransactionTemplate transactionTemplate;
-    private final PollRetentionSliceLockService sliceLockService;
     private final CurrentUserService currentUserService;
-    private final DataRetentionRunAuditService auditService;
-    private final PollAuditPurgeService pollAuditPurgeService;
     private final PollSummaryRecomputeService pollSummaryRecomputeService;
     private final MobileDashboardEntityJudgeService mobileDashboardEntityJudgeService;
     private final DataRetentionProperties retentionProperties;
-    private final ObjectMapper objectMapper;
+    private final DataRetentionP0AuditService typedAudit;
+    private final DataRetentionCanonicalEncoder canonicalEncoder;
+    private final Clock clock;
+
+    @Autowired
+    public PollRetentionDryRunService(JdbcTemplate jdbcTemplate,
+                                      CurrentUserService currentUserService,
+                                      PollSummaryRecomputeService pollSummaryRecomputeService,
+                                      MobileDashboardEntityJudgeService mobileDashboardEntityJudgeService,
+                                      DataRetentionProperties retentionProperties,
+                                      DataRetentionP0AuditService typedAudit,
+                                      DataRetentionCanonicalEncoder canonicalEncoder) {
+        this(jdbcTemplate, currentUserService, pollSummaryRecomputeService, mobileDashboardEntityJudgeService,
+                retentionProperties, typedAudit, canonicalEncoder, Clock.systemUTC());
+    }
+
+    PollRetentionDryRunService(JdbcTemplate jdbcTemplate,
+                               CurrentUserService currentUserService,
+                               PollSummaryRecomputeService pollSummaryRecomputeService,
+                               MobileDashboardEntityJudgeService mobileDashboardEntityJudgeService,
+                               DataRetentionProperties retentionProperties,
+                               DataRetentionP0AuditService typedAudit,
+                               DataRetentionCanonicalEncoder canonicalEncoder,
+                               Clock clock) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.currentUserService = currentUserService;
+        this.pollSummaryRecomputeService = pollSummaryRecomputeService;
+        this.mobileDashboardEntityJudgeService = mobileDashboardEntityJudgeService;
+        this.retentionProperties = retentionProperties;
+        this.typedAudit = typedAudit;
+        this.canonicalEncoder = canonicalEncoder;
+        this.clock = clock;
+    }
 
     public PollRetentionDryRunResponse dryRun(PollRetentionDryRunRequest request) {
         currentUserService.ensurePermission("dispatch.task.release");
         Long requestedBy = currentUserService.requireCurrentUser().getId();
-        return run(request, true, requestedBy);
+        return runTypedDryRun(request, requestedBy, 1);
     }
 
     public PollRetentionDryRunResponse purge(PollRetentionDryRunRequest request) {
         currentUserService.ensurePermission("dispatch.task.release");
-        Long requestedBy = currentUserService.requireCurrentUser().getId();
-        if (!retentionProperties.getPollResults().isExecuteEnabled()) {
-            throw new BizException(403,
-                    "Poll result purge execute is disabled by geo.retention.poll-results.execute-enabled");
-        }
-        return run(request, false, requestedBy);
+        throw new BizException(409, "Poll purge mutation is only available through the execute coordinator");
     }
 
     public PollRetentionDryRunResponse runScheduled(PollRetentionDryRunRequest request,
@@ -72,88 +104,133 @@ public class PollRetentionDryRunService {
             throw new BizException(403,
                     "Poll result purge execute is disabled by geo.retention.poll-results.execute-enabled");
         }
-        return run(request, dryRun, requestedBy);
+        if (!dryRun) {
+            throw new BizException(409, "Scheduled poll mutation is only available through the execute coordinator");
+        }
+        return runTypedDryRun(request, requestedBy, 1);
     }
 
-    private PollRetentionDryRunResponse run(PollRetentionDryRunRequest request,
-                                            boolean dryRun,
-                                            long requestedBy) {
-        PollRetentionDryRunRequest safeRequest = request == null ? new PollRetentionDryRunRequest() : request;
-        if (!dryRun && !StringUtils.hasText(safeRequest.getReason())) {
-            throw new BizException(400, "reason is required for poll result purge");
+    public PollRetentionDryRunResponse runScheduledDryRun(PollRetentionDryRunRequest request,
+                                                           int maxPages,
+                                                           long requestedBy) {
+        if (requestedBy <= 0 || maxPages < 1 || maxPages > MAX_PAGES) {
+            throw new IllegalArgumentException("Poll scheduled dry-run policy is invalid");
         }
-        int requestedHotRetentionDays =
-                normalizePositive(safeRequest.getHotRetentionDays(), DEFAULT_HOT_RETENTION_DAYS);
-        boolean simulationOnly = dryRun && requestedHotRetentionDays < DEFAULT_HOT_RETENTION_DAYS;
-        int hotRetentionDays = dryRun
-                ? requestedHotRetentionDays
-                : Math.max(requestedHotRetentionDays, DEFAULT_HOT_RETENTION_DAYS);
-        int stuckBatchSealDays = normalizePositive(safeRequest.getStuckBatchSealDays(), DEFAULT_STUCK_BATCH_SEAL_DAYS);
-        int limit = normalizeLimit(safeRequest.getLimit());
-        String questionTier = normalizeTierFilter(safeRequest.getQuestionTier());
-        LocalDate today = LocalDate.now(BUSINESS_ZONE);
-        LocalDate cutoffDate = today.minusDays(hotRetentionDays);
-        LocalDate startDate = safeRequest.getStartDate();
-        LocalDate endDate = safeRequest.getEndDate() == null || safeRequest.getEndDate().isAfter(cutoffDate)
-                ? cutoffDate
-                : safeRequest.getEndDate();
-        if (startDate != null && endDate != null && endDate.isBefore(startDate)) {
-            throw new BizException(400, "No poll retention candidates: endDate is before startDate after hot-window clamp");
+        return runTypedDryRun(request, requestedBy, maxPages);
+    }
+
+    private PollRetentionDryRunResponse runTypedDryRun(PollRetentionDryRunRequest request,
+                                                        long requestedBy,
+                                                        int maxPages) {
+        PollRetentionDryRunRequest safe = request == null ? new PollRetentionDryRunRequest() : request;
+        int requestedHotDays = normalizePositive(safe.getHotRetentionDays(), DEFAULT_HOT_RETENTION_DAYS);
+        int stuckDays = normalizePositive(safe.getStuckBatchSealDays(), DEFAULT_STUCK_BATCH_SEAL_DAYS);
+        int limit = normalizeLimit(safe.getLimit());
+        String tier = normalizeTierFilter(safe.getQuestionTier());
+        LocalDate today = LocalDate.now(clock.withZone(BUSINESS_ZONE));
+        LocalDate cutoff = today.minusDays(requestedHotDays);
+        LocalDate start = safe.getStartDate();
+        LocalDate end = safe.getEndDate() == null || safe.getEndDate().isAfter(cutoff) ? cutoff : safe.getEndDate();
+        if (start != null && start.isAfter(end)) {
+            throw new BizException(400, "No poll retention candidates after hot-window clamp");
         }
+        Cursor cursor = normalizeCursor(safe);
+        Instant startedAt = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        var fingerprint = canonicalEncoder.pollFingerprint(requestedHotDays, stuckDays);
+        RetentionCompatibilityContract contract = new RetentionCompatibilityContract(
+                "poll_results", DataRetentionCanonicalEncoder.SCHEMA_VERSION, fingerprint.sha256(),
+                DataRetentionCanonicalEncoder.POLL_POLICY_VERSION);
+        Map<String, Object> scope = new LinkedHashMap<>();
+        scope.put("effectiveConfig", canonicalEncoder.pollEffectiveConfig(requestedHotDays, stuckDays));
+        scope.put("configFingerprintSchemaVersion", contract.configFingerprintSchemaVersion());
+        scope.put("configFingerprint", DataRetentionCanonicalEncoder.hex(contract.configFingerprint()));
+        scope.put("dryRunSchemaVersion", 1);
+        scope.put("pageLimit", limit);
+        scope.put("maxPages", maxPages);
+        scope.put("projectId", safe.getProjectId());
+        scope.put("questionTier", tier);
+        scope.put("effectiveStartDate", start == null ? null : start.toString());
+        scope.put("effectiveEndDate", end.toString());
+        scope.put("startsAfterCursor", cursor != null);
+        RetentionRunContext run = typedAudit.startRun(new RetentionRunStartCommand(
+                UUID.randomUUID().toString(), maxPages == 1 ? "manual" : "scheduler", "dry_run", requestedBy,
+                normalizeReason(safe.getReason()), null, null, contract, scope, start, end, startedAt));
 
         PollRetentionDryRunResponse response = new PollRetentionDryRunResponse();
-        response.setDryRun(dryRun);
-        response.setSimulationOnly(simulationOnly);
-        response.setProjectId(safeRequest.getProjectId());
-        response.setStartDate(startDate);
-        response.setEndDate(endDate);
-        response.setQuestionTier(questionTier);
-        response.setHotRetentionDays(hotRetentionDays);
-        response.setStuckBatchSealDays(stuckBatchSealDays);
+        response.setRetentionRunId(run.runId());
+        response.setDryRun(true);
+        response.setSimulationOnly(requestedHotDays < DEFAULT_HOT_RETENTION_DAYS);
+        response.setProjectId(safe.getProjectId());
+        response.setStartDate(start);
+        response.setEndDate(end);
+        response.setQuestionTier(tier);
+        response.setHotRetentionDays(requestedHotDays);
+        response.setStuckBatchSealDays(stuckDays);
         response.setLimit(limit);
-        response.setReason(normalizeReason(safeRequest.getReason()));
-        response.setCutoffDate(cutoffDate);
-
-        Long runId = auditService.startRun("poll_results", dryRun ? "dry_run" : "execute",
-                startDate, endDate, startMetrics(response));
-        response.setRetentionRunId(runId);
+        response.setReason(normalizeReason(safe.getReason()));
+        response.setCutoffDate(cutoff);
+        Long predecessor = null;
+        long warnings = 0;
         try {
-            Cursor cursor = normalizeCursor(safeRequest);
-            List<CandidateSlice> loaded = loadCandidateSlices(
-                    safeRequest.getProjectId(), startDate, endDate, questionTier, cursor, limit + 1);
-            boolean hasMore = loaded.size() > limit;
-            List<CandidateSlice> candidates = hasMore ? loaded.subList(0, limit) : loaded;
-            response.setHasMore(hasMore);
-            if (hasMore && !candidates.isEmpty()) {
-                CandidateSlice last = candidates.get(candidates.size() - 1);
-                response.setNextCursorBatchDate(last.batchDate());
-                response.setNextCursorProjectId(last.projectId());
-                response.setNextCursorQuestionTier(last.questionTier());
-            }
-            for (CandidateSlice candidate : candidates) {
-                PollRetentionDryRunSliceVO slice = evaluateSliceWithLock(candidate, today, stuckBatchSealDays);
-                slice.setAction(Boolean.TRUE.equals(slice.getEligible()) ? "purge_poll_detail" : "blocked");
-                slice.setResult(Boolean.TRUE.equals(slice.getEligible()) ? "pending" : "blocked");
-                if (!dryRun && Boolean.TRUE.equals(slice.getEligible())) {
-                    purgeSlice(candidate, slice, today, stuckBatchSealDays, runId, requestedBy,
-                            safeRequest.getReason());
+            for (int page = 1; page <= maxPages; page++) {
+                RetentionAttemptContext attempt = typedAudit.createOperationlessAttempt(run,
+                        new RetentionAttemptCommand(UUID.randomUUID().toString(), AttemptType.PAGE,
+                                predecessor, predecessor, Map.of("dryRunPageSchemaVersion", 1,
+                                "pageNumber", page, "pageLimit", limit)));
+                typedAudit.markAttemptRunning(attempt.attemptId());
+                List<CandidateSlice> loaded;
+                try {
+                    loaded = loadCandidateSlices(safe.getProjectId(), start, end, tier, cursor, limit + 1);
+                    boolean hasMore = loaded.size() > limit;
+                    List<CandidateSlice> candidates = hasMore ? loaded.subList(0, limit) : loaded;
+                    for (CandidateSlice candidate : candidates) {
+                        PollRetentionDryRunSliceVO slice = evaluateSlice(candidate, today, stuckDays);
+                        slice.setAction(Boolean.TRUE.equals(slice.getEligible()) ? "purge_poll_detail" : "blocked");
+                        slice.setResult(Boolean.TRUE.equals(slice.getEligible()) ? "pending" : "blocked");
+                        response.getSlices().add(slice);
+                    }
+                    long pageSkipped = response.getSlices().stream()
+                            .skip(response.getSlices().size() - candidates.size())
+                            .filter(slice -> !Boolean.TRUE.equals(slice.getEligible()))
+                            .count();
+                    long pageWarnings = response.getSlices().stream()
+                            .skip(response.getSlices().size() - candidates.size())
+                            .mapToLong(slice -> slice.getWarnings().size())
+                            .sum();
+                    warnings += pageWarnings;
+                    typedAudit.completeAttempt(attempt.attemptId(), new RetentionAttemptResult(
+                            AttemptStatus.SUCCEEDED, candidates.size(), 0, pageSkipped, pageWarnings,
+                            Map.of("dryRunPageSchemaVersion", 1, "pageNumber", page, "hasMore", hasMore),
+                            null, null, clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MILLIS)));
+                    predecessor = attempt.attemptId();
+                    response.setHasMore(hasMore);
+                    if (!hasMore || candidates.isEmpty()) break;
+                    CandidateSlice last = candidates.get(candidates.size() - 1);
+                    cursor = new Cursor(last.batchDate(), last.projectId(), last.questionTier());
+                    response.setNextCursorBatchDate(last.batchDate());
+                    response.setNextCursorProjectId(last.projectId());
+                    response.setNextCursorQuestionTier(last.questionTier());
+                } catch (RuntimeException failure) {
+                    warnings++;
+                    typedAudit.completeAttempt(attempt.attemptId(), new RetentionAttemptResult(
+                            AttemptStatus.FAILED, 0, 0, 0, 1,
+                            Map.of("dryRunPageSchemaVersion", 1, "pageNumber", page),
+                            "POLL_DRY_RUN_FAILED", "Poll dry-run page read failed",
+                            clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MILLIS)));
+                    throw failure;
                 }
-                response.getSlices().add(slice);
             }
+        } catch (RuntimeException failure) {
             summarize(response);
-            long affected = dryRun
-                    ? response.getPollResultRows()
-                    : response.getDeletedRows().getOrDefault("poll_results", 0L);
-            String runStatus = response.getFailedSlices() > 0 ? "failed" : "succeeded";
-            auditService.finishRun(runId, runStatus, response.getCandidateSlices(), affected,
-                    response.getBlockedSlices(), response.getWarningCount(), metrics(response),
-                    response.getFailedSlices() > 0 ? "One or more poll retention slices failed" : null);
-            return response;
-        } catch (Exception ex) {
-            auditService.finishRun(runId, "failed", response.getCandidateSlices(), response.getPollResultRows(),
-                    response.getBlockedSlices(), response.getWarningCount() + 1, metrics(response), ex.getMessage());
-            throw ex;
+            typedAudit.finishRun(run.runId(), new RunBusinessSummary(response.getCandidateSlices(), 0,
+                    response.getBlockedSlices(), warnings, Map.of("dryRunSchemaVersion", 1, "failed", true)));
+            throw failure;
         }
+        summarize(response);
+        typedAudit.finishRun(run.runId(), new RunBusinessSummary(response.getCandidateSlices(), 0,
+                response.getBlockedSlices(), warnings, Map.of("dryRunSchemaVersion", 1,
+                "hasMore", Boolean.TRUE.equals(response.getHasMore()))));
+        return response;
     }
 
     private List<CandidateSlice> loadCandidateSlices(Long projectId,
@@ -224,152 +301,25 @@ public class PollRetentionDryRunService {
         ), args.toArray());
     }
 
-    private PollRetentionDryRunSliceVO evaluateSliceWithLock(CandidateSlice candidate,
-                                                             LocalDate today,
-                                                             int stuckBatchSealDays) {
-        return transactionTemplate.execute(status -> {
-            lockSliceForUpdate(candidate.projectId(), candidate.batchDate(), candidate.questionTier());
-            PollRetentionDryRunSliceVO slice = new PollRetentionDryRunSliceVO();
-            slice.setProjectId(candidate.projectId());
-            slice.setBatchDate(candidate.batchDate());
-            slice.setQuestionTier(candidate.questionTier());
-            slice.setPollResultRows(countPollResults(candidate));
-            slice.setLatestLiveResultRows(countLatestLiveResults(candidate));
-            slice.setShardRows(countShards(candidate));
-            slice.setShardItemRows(countShardItems(candidate));
-            applyDetailCounts(slice, candidate);
-            applyPurgedGate(slice, candidate);
-            applyBatchSealGate(slice, candidate, today, stuckBatchSealDays);
-            applyReconciliationGate(slice, candidate);
-            applyEntityJudgeReconciliationGate(slice, candidate);
-            applyStaticGates(slice);
-            slice.setEligible(slice.getBlockedReasons().isEmpty());
-            return slice;
-        });
-    }
-
-    private void purgeSlice(CandidateSlice candidate,
-                            PollRetentionDryRunSliceVO responseSlice,
-                            LocalDate today,
-                            int stuckBatchSealDays,
-                            Long retentionRunId,
-                            Long requestedBy,
-                            String reason) {
-        Map<String, Long> deletedRows = new LinkedHashMap<>();
-        PollPurgeRequest auditRequest = new PollPurgeRequest(
-                candidate.projectId(),
-                requestedBy,
-                reason,
-                toJson(Map.of(
-                        "projectId", candidate.projectId(),
-                        "batchDate", candidate.batchDate(),
-                        "questionTier", candidate.questionTier(),
-                        "retentionRunId", retentionRunId
-                )));
-        try {
-            Long purgeAuditRunId = pollAuditPurgeService.execute(auditRequest, () -> {
-                PollRetentionDryRunSliceVO refreshed =
-                        evaluateSliceWithLock(candidate, today, stuckBatchSealDays);
-                if (!Boolean.TRUE.equals(refreshed.getEligible())) {
-                    throw new BizException(409,
-                            "Poll retention slice is no longer eligible: "
-                                    + String.join(",", refreshed.getBlockedReasons()));
-                }
-                deleteSliceRows(candidate, refreshed, retentionRunId, deletedRows);
-                return toJson(deletedRows);
-            });
-            responseSlice.setPurgeAuditRunId(purgeAuditRunId);
-            responseSlice.setDeletedRows(new LinkedHashMap<>(deletedRows));
-            responseSlice.setResult("purged");
-        } catch (Exception ex) {
-            responseSlice.setResult("failed");
-            responseSlice.setErrorMessage(trimError(ex.getMessage()));
-        }
-    }
-
-    private void deleteSliceRows(CandidateSlice candidate,
-                                 PollRetentionDryRunSliceVO refreshed,
-                                 Long retentionRunId,
-                                 Map<String, Long> deletedRows) {
-        List<Long> purgeableResultIds = loadPurgeablePollResultIds(candidate);
-        long expectedPurgeableRows = Math.max(0L,
-                refreshed.getPollResultRows() - refreshed.getLatestLiveResultRows());
-        if (purgeableResultIds.size() != expectedPurgeableRows) {
-            throw new BizException(409, "Poll result latest projection changed during purge");
-        }
-        for (int offset = 0; offset < purgeableResultIds.size(); offset += 500) {
-            List<Long> ids = purgeableResultIds.subList(
-                    offset, Math.min(offset + 500, purgeableResultIds.size()));
-            deletePollResultChunk(ids, deletedRows);
-        }
-        Object[] args = sliceArgs(candidate);
-        deletedRows.put("poll_batch_shard_items", (long) jdbcTemplate.update("""
-                DELETE i
-                  FROM poll_batch_shard_items i
-                  JOIN poll_batch_shards s ON s.id = i.shard_id
-                 WHERE s.project_id = ?
-                   AND s.batch_date = ?
-                   AND s.question_tier = ?
-                """, args));
-        deletedRows.put("poll_batch_shards", (long) jdbcTemplate.update("""
-                DELETE FROM poll_batch_shards
-                 WHERE project_id = ?
-                   AND batch_date = ?
-                   AND question_tier = ?
-                """, args));
-        long pollResultsDeleted = deletedRows.getOrDefault("poll_results", 0L);
-        if (pollResultsDeleted != expectedPurgeableRows) {
-            throw new BizException(409, "Poll result row count changed during purge");
-        }
-        jdbcTemplate.update("""
-                INSERT INTO data_retention_purged_slice (
-                  domain, project_id, batch_date, question_tier, status,
-                  retention_run_id, metrics_json
-                ) VALUES ('poll_results', ?, ?, ?, 'purged', ?, ?)
-                """, candidate.projectId(), Date.valueOf(candidate.batchDate()), candidate.questionTier(),
-                retentionRunId, toJson(deletedRows));
-    }
-
-    private List<Long> loadPurgeablePollResultIds(CandidateSlice candidate) {
-        return jdbcTemplate.queryForList("""
-                SELECT pr.id
-                  FROM poll_results pr
-                 WHERE pr.project_id = ?
-                   AND pr.batch_date = ?
-                   AND pr.question_tier = ?
-                   AND (
-                        COALESCE(pr.status, '') <> 'completed'
-                        OR EXISTS (
-                           SELECT 1
-                             FROM poll_results newer
-                            WHERE newer.project_id = pr.project_id
-                              AND newer.question_tier = pr.question_tier
-                              AND newer.status = 'completed'
-                               AND %s
-                              AND (
-                                    (pr.keyword_result_id IS NOT NULL
-                                     AND newer.keyword_result_id = pr.keyword_result_id)
-                                 OR (pr.keyword_result_id IS NULL
-                                     AND newer.keyword_result_id IS NULL
-                                     AND LOWER(TRIM(COALESCE(newer.keyword_text_snapshot, '')))
-                                         = LOWER(TRIM(COALESCE(pr.keyword_text_snapshot, ''))))
-                              )
-                              AND (
-                                    newer.batch_date > pr.batch_date
-                                 OR (newer.batch_date = pr.batch_date
-                                     AND COALESCE(newer.updated_at, newer.created_at)
-                                         > COALESCE(pr.updated_at, pr.created_at))
-                                 OR (newer.batch_date = pr.batch_date
-                                     AND COALESCE(newer.updated_at, newer.created_at)
-                                         = COALESCE(pr.updated_at, pr.created_at)
-                                     AND newer.id > pr.id)
-                              )
-                        )
-                   )
-                 ORDER BY pr.id ASC
-                """.formatted(latestResultChannelMatchSql("newer", "pr")),
-                Long.class, candidate.projectId(), Date.valueOf(candidate.batchDate()),
-                candidate.questionTier());
+    private PollRetentionDryRunSliceVO evaluateSlice(CandidateSlice candidate,
+                                                     LocalDate today,
+                                                     int stuckBatchSealDays) {
+        PollRetentionDryRunSliceVO slice = new PollRetentionDryRunSliceVO();
+        slice.setProjectId(candidate.projectId());
+        slice.setBatchDate(candidate.batchDate());
+        slice.setQuestionTier(candidate.questionTier());
+        slice.setPollResultRows(countPollResults(candidate));
+        slice.setLatestLiveResultRows(countLatestLiveResults(candidate));
+        slice.setShardRows(countShards(candidate));
+        slice.setShardItemRows(countShardItems(candidate));
+        applyDetailCounts(slice, candidate);
+        applyPurgedGate(slice, candidate);
+        applyBatchSealGate(slice, candidate, today, stuckBatchSealDays);
+        applyReconciliationGate(slice, candidate);
+        applyEntityJudgeReconciliationGate(slice, candidate);
+        applyStaticGates(slice);
+        slice.setEligible(slice.getBlockedReasons().isEmpty());
+        return slice;
     }
 
     static String latestResultChannelMatchSql(String newerAlias, String currentAlias) {
@@ -381,56 +331,6 @@ public class PollRetentionDryRunService {
     private static String rawChannelSql(String alias) {
         return "COALESCE(NULLIF(TRIM(" + alias + ".channel_code), ''), "
                 + alias + ".platform_code)";
-    }
-
-    private void deletePollResultChunk(List<Long> ids, Map<String, Long> deletedRows) {
-        if (ids.isEmpty()) {
-            return;
-        }
-        String placeholders = String.join(", ", ids.stream().map(ignored -> "?").toList());
-        Object[] args = ids.toArray();
-        mergeDeleted(deletedRows, "poll_citations", jdbcTemplate.update("""
-                DELETE c
-                  FROM poll_citations c
-                  JOIN poll_invocation_attempts a ON a.id = c.attempt_id
-                 WHERE a.poll_result_id IN (%s)
-                """.formatted(placeholders), args));
-        mergeDeleted(deletedRows, "poll_search_sources", jdbcTemplate.update("""
-                DELETE s
-                  FROM poll_search_sources s
-                  JOIN poll_invocation_attempts a ON a.id = s.attempt_id
-                 WHERE a.poll_result_id IN (%s)
-                """.formatted(placeholders), args));
-        mergeDeleted(deletedRows, "poll_provider_calls", jdbcTemplate.update("""
-                DELETE c
-                  FROM poll_provider_calls c
-                  JOIN poll_invocation_attempts a ON a.id = c.attempt_id
-                 WHERE a.poll_result_id IN (%s)
-                """.formatted(placeholders), args));
-        mergeDeleted(deletedRows, "poll_invocation_attempts", jdbcTemplate.update("""
-                DELETE FROM poll_invocation_attempts
-                 WHERE poll_result_id IN (%s)
-                """.formatted(placeholders), args));
-        mergeDeleted(deletedRows, "poll_result_entity_judge", jdbcTemplate.update("""
-                DELETE FROM poll_result_entity_judge
-                 WHERE poll_result_id IN (%s)
-                """.formatted(placeholders), args));
-        mergeDeleted(deletedRows, "poll_results", jdbcTemplate.update("""
-                DELETE FROM poll_results
-                 WHERE id IN (%s)
-                """.formatted(placeholders), args));
-    }
-
-    private void mergeDeleted(Map<String, Long> deletedRows, String table, int count) {
-        deletedRows.merge(table, (long) count, Long::sum);
-    }
-
-    private Object[] sliceArgs(CandidateSlice candidate) {
-        return new Object[]{
-                candidate.projectId(),
-                Date.valueOf(candidate.batchDate()),
-                candidate.questionTier()
-        };
     }
 
     private void applyPurgedGate(PollRetentionDryRunSliceVO slice, CandidateSlice candidate) {
@@ -685,10 +585,6 @@ public class PollRetentionDryRunService {
         return args.toArray();
     }
 
-    private void lockSliceForUpdate(Long projectId, LocalDate batchDate, String questionTier) {
-        sliceLockService.lockSlice(projectId, batchDate, questionTier);
-    }
-
     private void summarize(PollRetentionDryRunResponse response) {
         response.setCandidateSlices(response.getSlices().size());
         response.setEligibleSlices((int) response.getSlices().stream().filter(slice -> Boolean.TRUE.equals(slice.getEligible())).count());
@@ -723,60 +619,6 @@ public class PollRetentionDryRunService {
             slice.getDeletedRows().forEach((table, count) -> deletedRows.merge(table, count, Long::sum));
         }
         response.setDeletedRows(deletedRows);
-    }
-
-    private Map<String, Object> startMetrics(PollRetentionDryRunResponse response) {
-        Map<String, Object> metrics = new LinkedHashMap<>();
-        metrics.put("projectId", response.getProjectId());
-        metrics.put("simulationOnly", response.getSimulationOnly());
-        if (response.getReason() != null) {
-            metrics.put("reason", response.getReason());
-        }
-        metrics.put("questionTier", response.getQuestionTier());
-        metrics.put("hotRetentionDays", response.getHotRetentionDays());
-        metrics.put("stuckBatchSealDays", response.getStuckBatchSealDays());
-        metrics.put("cutoffDate", response.getCutoffDate());
-        metrics.put("limit", response.getLimit());
-        metrics.put("hasMore", response.getHasMore());
-        metrics.put("nextCursorBatchDate", response.getNextCursorBatchDate());
-        metrics.put("nextCursorProjectId", response.getNextCursorProjectId());
-        metrics.put("nextCursorQuestionTier", response.getNextCursorQuestionTier());
-        return metrics;
-    }
-
-    private Map<String, Object> metrics(PollRetentionDryRunResponse response) {
-        Map<String, Object> metrics = startMetrics(response);
-        metrics.put("candidateSlices", response.getCandidateSlices());
-        metrics.put("eligibleSlices", response.getEligibleSlices());
-        metrics.put("blockedSlices", response.getBlockedSlices());
-        metrics.put("warningCount", response.getWarningCount());
-        metrics.put("pollResultRows", response.getPollResultRows());
-        metrics.put("shardRows", response.getShardRows());
-        metrics.put("shardItemRows", response.getShardItemRows());
-        metrics.put("invocationAttemptRows", response.getInvocationAttemptRows());
-        metrics.put("providerCallRows", response.getProviderCallRows());
-        metrics.put("searchSourceRows", response.getSearchSourceRows());
-        metrics.put("citationRows", response.getCitationRows());
-        metrics.put("entityJudgeRows", response.getEntityJudgeRows());
-        metrics.put("purgedSlices", response.getPurgedSlices());
-        metrics.put("failedSlices", response.getFailedSlices());
-        metrics.put("deletedRows", response.getDeletedRows());
-        return metrics;
-    }
-
-    private String toJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException ex) {
-            throw new BizException("Failed to serialize poll retention metrics", ex);
-        }
-    }
-
-    private String trimError(String message) {
-        if (message == null) {
-            return null;
-        }
-        return message.length() <= 500 ? message : message.substring(0, 500);
     }
 
     private String normalizeReason(String reason) {

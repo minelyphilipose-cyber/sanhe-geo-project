@@ -12,6 +12,7 @@ import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceWriteService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -50,6 +51,7 @@ class DispatchPollAggregationServiceTest {
         ProjectMapper projectMapper = mock(ProjectMapper.class);
         PollSummaryRecomputeService summaryService = mock(PollSummaryRecomputeService.class);
         DispatchAlertService alertService = mock(DispatchAlertService.class);
+        PollRetentionSliceWriteService writes = directWrites();
 
         DispatchPollAggregationService service = new DispatchPollAggregationService(
                 batchMapper,
@@ -59,7 +61,8 @@ class DispatchPollAggregationServiceTest {
                 mock(StringRedisTemplate.class),
                 projectMapper,
                 summaryService,
-                alertService
+                alertService,
+                writes
         );
 
         LocalDate batchDate = LocalDate.of(2026, 7, 16);
@@ -158,6 +161,7 @@ class DispatchPollAggregationServiceTest {
         ProjectMapper projectMapper = mock(ProjectMapper.class);
         PollSummaryRecomputeService summaryService = mock(PollSummaryRecomputeService.class);
         DispatchAlertService alertService = mock(DispatchAlertService.class);
+        PollRetentionSliceWriteService writes = directWrites();
         DispatchPollAggregationService service = new DispatchPollAggregationService(
                 batchMapper,
                 shardMapper,
@@ -166,7 +170,8 @@ class DispatchPollAggregationServiceTest {
                 mock(StringRedisTemplate.class),
                 projectMapper,
                 summaryService,
-                alertService
+                alertService,
+                writes
         );
 
         PollBatch batch = new PollBatch();
@@ -206,6 +211,13 @@ class DispatchPollAggregationServiceTest {
         verify(dailyStatMapper, never()).updateById(any());
         verifyNoInteractions(summaryService);
         verifyNoInteractions(alertService);
+    }
+
+    private static PollRetentionSliceWriteService directWrites() {
+        PollRetentionSliceWriteService writes = mock(PollRetentionSliceWriteService.class);
+        when(writes.executeByBatchId(any(), any())).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(1)).get());
+        return writes;
     }
 
     private static PollResult completedResult(long id) {

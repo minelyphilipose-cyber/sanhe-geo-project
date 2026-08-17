@@ -1,193 +1,156 @@
 package com.huanjing.geo.module.retention.service;
 
-import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.module.retention.config.DataRetentionProperties;
+import com.huanjing.geo.module.retention.audit.canonical.DataRetentionCanonicalEncoder;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.AttemptStatus;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionAttemptCommand;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionAttemptContext;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionAttemptResult;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionRunContext;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionRunStartCommand;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RunBusinessSummary;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RunReplayStatus;
+import com.huanjing.geo.module.retention.audit.service.DataRetentionP0AuditService;
+import com.huanjing.geo.module.retention.dto.WebsitePublishedCleanupRequest;
+import com.huanjing.geo.module.retention.website.WebsiteRetentionDryRunReader;
+import com.huanjing.geo.module.retention.website.WebsiteRetentionDryRunReader.DryRunCandidate;
+import com.huanjing.geo.module.retention.website.WebsiteRetentionDryRunReader.DryRunPage;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.TransactionCallback;
-import org.springframework.transaction.support.TransactionTemplate;
 
-import java.sql.ResultSet;
-import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class WebsitePublishedContentCleanupServiceTest {
+    private static final Instant NOW = Instant.parse("2026-08-14T02:00:00Z");
 
-    private JdbcTemplate jdbcTemplate;
-    private TransactionTemplate transactionTemplate;
-    private DataRetentionRunAuditService auditService;
-    private DataRetentionProperties properties;
+    private WebsiteRetentionDryRunReader reader;
+    private DataRetentionP0AuditService audit;
+    private CurrentUserService currentUserService;
     private WebsitePublishedContentCleanupService service;
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate = mock(JdbcTemplate.class);
-        transactionTemplate = mock(TransactionTemplate.class);
-        auditService = mock(DataRetentionRunAuditService.class);
-        properties = new DataRetentionProperties();
-        when(auditService.startRun(anyString(), anyString(), any(), any(), any())).thenReturn(71L);
-        service = new WebsitePublishedContentCleanupService(
-                jdbcTemplate,
-                transactionTemplate,
-                auditService,
-                properties,
-                mock(CurrentUserService.class)
-        );
+        reader = mock(WebsiteRetentionDryRunReader.class);
+        audit = mock(DataRetentionP0AuditService.class);
+        currentUserService = mock(CurrentUserService.class);
+        service = new WebsitePublishedContentCleanupService(reader, audit,
+                new DataRetentionCanonicalEncoder(), currentUserService,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        SysUser operator = new SysUser();
+        operator.setId(9L);
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(audit.startRun(any())).thenAnswer(invocation -> run(invocation.getArgument(0)));
+        AtomicLong attemptIds = new AtomicLong(70L);
+        when(audit.createOperationlessAttempt(any(), any())).thenAnswer(invocation -> {
+            RetentionRunContext run = invocation.getArgument(0);
+            RetentionAttemptCommand command = invocation.getArgument(1);
+            long attemptId = attemptIds.incrementAndGet();
+            return new RetentionAttemptContext(attemptId, run.runId(), null,
+                    (int) (attemptId - 70L), (int) (attemptId - 70L), command.attemptType(),
+                    AttemptStatus.PREPARED, command.attemptRequestId());
+        });
     }
 
     @Test
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    void dryRunRequiresOwnedTargetSuccessfulTaskEvidenceAndNoActiveWork() throws Exception {
-        stubSingleCandidate();
+    void manualDryRunUsesTypedRunAndOperationlessPageWithoutPersistingResponseEvidence() {
+        when(reader.readPage(any(), eq(null), eq(100))).thenReturn(new DryRunPage(
+                List.of(candidate(101L, 4096L)), false, 101L));
 
         WebsitePublishedContentCleanupService.CleanupBatchResult result =
-                service.runScheduled(24, 100, null, true, "scheduled dry run");
+                service.dryRun(new WebsitePublishedCleanupRequest());
 
         assertTrue(result.dryRun());
+        assertEquals(71L, result.retentionRunId());
         assertEquals(1, result.candidateCount());
-        assertEquals("pending", result.items().get(0).result());
-        assertEquals(2, result.items().get(0).bodyRowCount());
+        assertEquals(101L, result.items().get(0).articleId());
         assertEquals(4096L, result.items().get(0).bodyBytes());
-        verify(transactionTemplate, never()).execute(any());
+        ArgumentCaptor<RetentionRunStartCommand> start = ArgumentCaptor.forClass(RetentionRunStartCommand.class);
+        verify(audit).startRun(start.capture());
+        assertEquals("dry_run", start.getValue().mode());
+        assertEquals("manual", start.getValue().triggerSource());
+        assertEquals(9L, start.getValue().requestedBy());
+        assertFalse(start.getValue().scope().toString().contains("101"));
+        assertFalse(start.getValue().scope().toString().contains("4096"));
 
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowMapper.class), any(Object[].class));
-        String sql = sqlCaptor.getValue();
-        assertTrue(sql.contains("'brand_geo_site','industry_site','forum_site'"));
-        assertTrue(sql.contains("r.publish_status = 'distributed'"));
-        assertTrue(sql.contains("r.source_type = 'distribution_task'"));
-        assertTrue(sql.contains("evidence_dt.status IN ('submitted','confirmed','published')"));
-        assertFalse(sql.contains("url_quality"));
-        assertFalse(sql.contains("duplicate_r"));
-        assertFalse(sql.contains("published_url"));
-        assertTrue(sql.contains("a.status IN ('distributed', 'published')"));
-        assertTrue(sql.contains("a.status = 'deleted'"));
-        assertTrue(sql.contains("purged_v.content_purged_at IS NOT NULL"));
-        assertTrue(sql.contains("purged_dt.payload_purged_at IS NOT NULL"));
-        assertTrue(sql.contains("active_dt.status NOT IN"));
-        assertTrue(sql.contains("active_sm.status NOT IN"));
-        assertFalse(sql.contains("published_url_pending','distributed"));
+        ArgumentCaptor<RetentionAttemptCommand> attempt = ArgumentCaptor.forClass(RetentionAttemptCommand.class);
+        verify(audit).createOperationlessAttempt(any(), attempt.capture());
+        assertEquals("page", attempt.getValue().attemptType().databaseValue());
+        assertFalse(attempt.getValue().domainScope().toString().contains("101"));
+        ArgumentCaptor<RetentionAttemptResult> completed = ArgumentCaptor.forClass(RetentionAttemptResult.class);
+        verify(audit).completeAttempt(eq(71L), completed.capture());
+        assertEquals(AttemptStatus.SUCCEEDED, completed.getValue().status());
+        assertEquals(1, completed.getValue().candidateCount());
+        assertEquals(0, completed.getValue().affectedCount());
+        assertFalse(completed.getValue().metrics().toString().contains("4096"));
+        ArgumentCaptor<RunBusinessSummary> summary = ArgumentCaptor.forClass(RunBusinessSummary.class);
+        verify(audit).finishRun(eq(71L), summary.capture());
+        assertEquals(1, summary.getValue().candidateCount());
+        assertEquals(0, summary.getValue().affectedCount());
     }
 
     @Test
-    void retentionHoursCannotGoBelowTwentyFourHours() throws Exception {
-        stubSingleCandidate();
+    void schedulerPaginatesInsideOneTypedRunAndChainsExpectedLatestAttempt() {
+        when(reader.readPage(any(), eq(null), eq(1))).thenReturn(
+                new DryRunPage(List.of(candidate(101L, 10L)), true, 101L));
+        when(reader.readPage(any(), eq(101L), eq(1))).thenReturn(
+                new DryRunPage(List.of(candidate(102L, 20L)), false, 102L));
 
-        WebsitePublishedContentCleanupService.CleanupBatchResult result =
-                service.runScheduled(0, 100, null, true, "retention floor");
+        WebsitePublishedContentCleanupService.CleanupBatchResult result = service.runScheduledDryRun(
+                24, 1, 2, "scheduled dry-run", 19L);
 
-        assertEquals(24, result.retentionHours());
+        assertEquals(2, result.candidateCount());
+        assertFalse(result.hasMore());
+        verify(audit).startRun(any());
+        ArgumentCaptor<RetentionAttemptCommand> attempts = ArgumentCaptor.forClass(RetentionAttemptCommand.class);
+        verify(audit, times(2)).createOperationlessAttempt(any(), attempts.capture());
+        assertNull(attempts.getAllValues().get(0).expectedLatestAttemptId());
+        assertEquals(71L, attempts.getAllValues().get(1).expectedLatestAttemptId());
+        verify(audit).finishRun(eq(71L), any());
     }
 
     @Test
-    void executeIsProtectedByIndependentFeatureGate() {
-        BizException error = assertThrows(BizException.class,
-                () -> service.runScheduled(24, 100, null, false, "execute"));
+    void pageReadFailurePersistsFailedTypedAttemptAndFinishesFailedRun() {
+        when(reader.readPage(any(), eq(null), eq(100))).thenThrow(new IllegalStateException("db unavailable"));
 
-        assertEquals(403, error.getCode());
+        assertThrows(IllegalStateException.class,
+                () -> service.runScheduledDryRun(24, 100, 1, "scheduled dry-run", 19L));
+
+        ArgumentCaptor<RetentionAttemptResult> completed = ArgumentCaptor.forClass(RetentionAttemptResult.class);
+        verify(audit).completeAttempt(eq(71L), completed.capture());
+        assertEquals(AttemptStatus.FAILED, completed.getValue().status());
+        assertEquals("WEBSITE_DRY_RUN_FAILED", completed.getValue().stableErrorCode());
+        assertFalse(completed.getValue().errorMessage().contains("db unavailable"));
+        ArgumentCaptor<RunBusinessSummary> summary = ArgumentCaptor.forClass(RunBusinessSummary.class);
+        verify(audit).finishRun(eq(71L), summary.capture());
+        assertEquals(1, summary.getValue().warningCount());
     }
 
-    @Test
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    void executePurgesBodiesAndSuccessfulPayloadsThenSoftDeletesDraft() throws Exception {
-        properties.getWebsitePublishedCleanup().setExecuteEnabled(true);
-        stubSingleCandidate();
-        when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
-            TransactionCallback callback = invocation.getArgument(0);
-            return callback.doInTransaction(mock(TransactionStatus.class));
-        });
-        when(jdbcTemplate.queryForList(anyString(), eq(Long.class), any(Object[].class)))
-                .thenReturn(List.of(101L));
-        when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(Object[].class)))
-                .thenReturn(1);
-        when(jdbcTemplate.update(anyString(), any(Object[].class)))
-                .thenReturn(2, 1, 1, 1);
-
-        WebsitePublishedContentCleanupService.CleanupBatchResult result =
-                service.runScheduled(24, 100, null, false, "website publication completed");
-
-        assertEquals(1, result.cleanedCount());
-        assertEquals(2, result.bodyRows());
-        assertEquals(1, result.payloadRows());
-        assertEquals(1, result.publishRecordRows());
-        assertEquals("cleaned", result.items().get(0).result());
-
-        ArgumentCaptor<String> updateSql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate, org.mockito.Mockito.times(4))
-                .update(updateSql.capture(), any(Object[].class));
-        String allUpdates = String.join("\n", updateSql.getAllValues());
-        assertTrue(allUpdates.contains("content_markdown = NULL"));
-        assertTrue(allUpdates.contains("payload_purged_at = CURRENT_TIMESTAMP"));
-        assertTrue(allUpdates.contains("raw_response = NULL"));
-        assertTrue(allUpdates.contains("status = 'deleted'"));
-        String payloadUpdate = updateSql.getAllValues().get(1);
-        assertTrue(payloadUpdate.contains("distribution_tasks.status IN ('submitted','confirmed','published')"));
-        assertFalse(payloadUpdate.contains("FROM distribution_tasks evidence_dt"));
+    private static RetentionRunContext run(RetentionRunStartCommand command) {
+        return new RetentionRunContext(71L, command.triggerId(), command.triggerSource(), command.mode(),
+                command.compatibilityContract(), "test", "test", RunReplayStatus.CREATED, "running", NOW);
     }
 
-    @Test
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    void executeSkipsWhenEligibilityChangesAfterCandidateScan() throws Exception {
-        properties.getWebsitePublishedCleanup().setExecuteEnabled(true);
-        stubSingleCandidate();
-        when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
-            TransactionCallback callback = invocation.getArgument(0);
-            return callback.doInTransaction(mock(TransactionStatus.class));
-        });
-        when(jdbcTemplate.queryForList(anyString(), eq(Long.class), any(Object[].class)))
-                .thenReturn(List.of(101L));
-        when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(Object[].class)))
-                .thenReturn(0);
-
-        WebsitePublishedContentCleanupService.CleanupBatchResult result =
-                service.runScheduled(24, 100, null, false, "website publication completed");
-
-        assertEquals(0, result.cleanedCount());
-        assertEquals(1, result.skippedCount());
-        assertEquals("skipped", result.items().get(0).result());
-        verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
-    }
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private void stubSingleCandidate() throws Exception {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
-                .thenAnswer(invocation -> {
-                    String sql = invocation.getArgument(0);
-                    RowMapper mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    if (sql.contains("AS effective_published_at")) {
-                        when(rs.getTimestamp("effective_published_at"))
-                                .thenReturn(Timestamp.valueOf(LocalDateTime.now().minusDays(2)));
-                        return List.of(mapper.mapRow(rs, 0));
-                    }
-                    when(rs.getLong("article_id")).thenReturn(101L);
-                    when(rs.getLong("project_id")).thenReturn(202L);
-                    when(rs.getString("article_status")).thenReturn("distributed");
-                    when(rs.getTimestamp("last_published_at"))
-                            .thenReturn(Timestamp.valueOf(LocalDateTime.now().minusDays(2)));
-                    when(rs.getInt("body_row_count")).thenReturn(2);
-                    when(rs.getLong("body_bytes")).thenReturn(4096L);
-                    when(rs.getInt("payload_row_count")).thenReturn(1);
-                    when(rs.getLong("payload_bytes")).thenReturn(1024L);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
+    private static DryRunCandidate candidate(long articleId, long bodyBytes) {
+        return new DryRunCandidate(articleId, 202L, "distributed",
+                LocalDateTime.of(2026, 8, 12, 10, 0), 2, bodyBytes, 1, 1024L);
     }
 }

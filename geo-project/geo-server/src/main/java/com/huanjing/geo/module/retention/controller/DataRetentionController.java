@@ -24,6 +24,11 @@ import com.huanjing.geo.module.retention.service.ObjectStorageRetentionDryRunSer
 import com.huanjing.geo.module.retention.service.PollRetentionDryRunService;
 import com.huanjing.geo.module.retention.service.DataRetentionSlimDryRunService;
 import com.huanjing.geo.module.retention.service.WebsitePublishedContentCleanupService;
+import com.huanjing.geo.module.retention.execute.DataRetentionExecuteCommandFactory;
+import com.huanjing.geo.module.retention.execute.DataRetentionExecuteCoordinator;
+import com.huanjing.geo.module.retention.execute.model.DataRetentionExecutionModels.RetentionExecutionResult;
+import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.service.CurrentUserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,6 +50,9 @@ public class DataRetentionController {
     private final ObjectStorageRetentionDryRunService objectStorageRetentionDryRunService;
     private final ObjectStorageMigrationService objectStorageMigrationService;
     private final ContentUrlRewriteService contentUrlRewriteService;
+    private final DataRetentionExecuteCoordinator executeCoordinator;
+    private final DataRetentionExecuteCommandFactory executeCommandFactory;
+    private final CurrentUserService currentUserService;
 
     @PostMapping("/slim/dry-run")
     public R<DataRetentionSlimDryRunResponse> slimDryRun(@RequestBody DataRetentionSlimDryRunRequest request) {
@@ -81,10 +89,11 @@ public class DataRetentionController {
     }
 
     @PostMapping("/articles/website-published/cleanup")
-    public R<WebsitePublishedContentCleanupService.CleanupBatchResult> websitePublishedCleanup(
+    public R<RetentionExecutionResult> websitePublishedCleanup(
             @RequestBody WebsitePublishedCleanupRequest request) {
-        return R.ok(websitePublishedContentCleanupService.cleanup(
-                request == null ? new WebsitePublishedCleanupRequest() : request));
+        WebsitePublishedCleanupRequest safe = request == null ? new WebsitePublishedCleanupRequest() : request;
+        SysUser operator = currentUserService.requireCurrentUser();
+        return R.ok(executeCoordinator.execute(executeCommandFactory.manualWebsite(safe, operator.getId())));
     }
 
     @PostMapping("/poll-results/dry-run")
@@ -93,9 +102,17 @@ public class DataRetentionController {
     }
 
     @PostMapping("/poll-results")
-    public R<PollRetentionDryRunResponse> pollResultsPurge(@RequestBody PollRetentionDryRunRequest request) {
-        return R.ok(pollRetentionDryRunService.purge(
-                request == null ? new PollRetentionDryRunRequest() : request));
+    public R<RetentionExecutionResult> pollResultsPurge(@RequestBody PollRetentionDryRunRequest request) {
+        PollRetentionDryRunRequest safe = request == null ? new PollRetentionDryRunRequest() : request;
+        SysUser operator = currentUserService.requireCurrentUser();
+        return R.ok(executeCoordinator.execute(executeCommandFactory.manualPoll(safe, operator.getId())));
+    }
+
+    @PostMapping("/poll-results/canary")
+    public R<RetentionExecutionResult> pollResultsCanary(@RequestBody PollRetentionDryRunRequest request) {
+        PollRetentionDryRunRequest safe = request == null ? new PollRetentionDryRunRequest() : request;
+        SysUser operator = currentUserService.requireCurrentUser();
+        return R.ok(executeCoordinator.execute(executeCommandFactory.canaryPoll(safe, operator.getId())));
     }
 
     @PostMapping("/object-storage/orphans/dry-run")

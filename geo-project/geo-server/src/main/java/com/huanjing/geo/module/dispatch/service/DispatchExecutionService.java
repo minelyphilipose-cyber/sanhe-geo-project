@@ -931,27 +931,6 @@ public class DispatchExecutionService {
         return config == null ? null : config.getModelId();
     }
 
-    private void upsertPollResult(PollResult result) {
-        withTransientDbRetry("upsert poll result", () -> {
-            LambdaQueryWrapper<PollResult> wrapper = new LambdaQueryWrapper<PollResult>()
-                    .eq(PollResult::getProjectId, result.getProjectId())
-                    .eq(PollResult::getPlatformId, result.getPlatformId())
-                    .eq(PollResult::getBatchDate, result.getBatchDate())
-                    .eq(PollResult::getBatchNo, result.getBatchNo())
-                    .eq(PollResult::getQuestionTier, result.getQuestionTier())
-                    .last("LIMIT 1");
-            wrapper.eq(PollResult::getKeywordResultId, result.getKeywordResultId());
-            PollResult existing = pollResultMapper.selectOne(wrapper);
-            if (existing == null) {
-                pollResultMapper.insert(result);
-                return null;
-            }
-            result.setId(existing.getId());
-            pollResultMapper.updateById(result);
-            return null;
-        });
-    }
-
     private <T> T withTransientDbRetry(String operation, Supplier<T> action) {
         try {
             return action.get();

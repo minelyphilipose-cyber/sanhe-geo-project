@@ -17,4 +17,7 @@ public class PollRetentionDryRunRequest {
     private Integer stuckBatchSealDays;
     private Integer limit;
     private String reason;
+    private String triggerId;
+    private String approvalRef;
+    private String ticketRef;
 }

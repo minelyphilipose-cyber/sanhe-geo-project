@@ -275,6 +275,7 @@ public class ContentDistributionService {
         task.setStatus("submitted");
         task.setPublishedUrl(publishedUrl.trim());
         task.setResponsePayload(jsonColumnPayload(responsePayload));
+        task.setPayloadPurgedAt(null);
         task.setErrorMessage(null);
         task.setFinishedAt(LocalDateTime.now());
         distributionTaskMapper.updateById(task);
@@ -495,6 +496,7 @@ public class ContentDistributionService {
         task.setStatus(submitResult.isSuccess() ? "submitted" : "failed");
         task.setRequestPayload(jsonColumnPayload(submitResult.getRequestPayload()));
         task.setResponsePayload(jsonColumnPayload(submitResult.getResponseBody()));
+        task.setPayloadPurgedAt(null);
         task.setPublishedUrl(submitResult.getPublishedUrl());
         task.setErrorMessage(submitResult.isSuccess() ? null : trimError(submitResult.getErrorMessage()));
         task.setFinishedAt(LocalDateTime.now());
@@ -1048,6 +1050,7 @@ public class ContentDistributionService {
         task.setDispatchMode("SEMI_AUTO");
         task.setStatus("token_issued");
         task.setFillPayload(fillPayload);
+        task.setPayloadPurgedAt(null);
         task.setFillTokenIssuedAt(issuedAt);
         task.setLockedUntil(null);
         applyEnvironmentInfo(task, environmentBinding);

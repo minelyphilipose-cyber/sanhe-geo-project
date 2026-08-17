@@ -156,7 +156,9 @@ public class DistributionReviewStatusPollService {
                 .set(DistributionTask::getReviewCheckCount, nextCount)
                 .set(DistributionTask::getReviewLockedUntil, null);
         if (StringUtils.hasText(safeResult.rawResponse())) {
-            wrapper.set(DistributionTask::getResponsePayload, JsonColumnPayloads.normalize(objectMapper, safeResult.rawResponse()));
+            wrapper.set(DistributionTask::getResponsePayload,
+                            JsonColumnPayloads.normalize(objectMapper, safeResult.rawResponse()))
+                    .set(DistributionTask::getPayloadPurgedAt, null);
         }
         if (StringUtils.hasText(safeResult.platformArticleId())) {
             wrapper.set(DistributionTask::getPlatformArticleId, safeResult.platformArticleId());

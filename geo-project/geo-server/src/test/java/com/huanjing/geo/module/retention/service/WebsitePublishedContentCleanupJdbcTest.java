@@ -1,17 +1,22 @@
 package com.huanjing.geo.module.retention.service;
 
-import com.huanjing.geo.module.retention.config.DataRetentionProperties;
+import com.huanjing.geo.module.retention.audit.canonical.DataRetentionCanonicalEncoder;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.AttemptStatus;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionAttemptCommand;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionAttemptContext;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionRunContext;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RetentionRunStartCommand;
+import com.huanjing.geo.module.retention.audit.model.DataRetentionAuditModels.RunReplayStatus;
+import com.huanjing.geo.module.retention.audit.service.DataRetentionP0AuditService;
+import com.huanjing.geo.module.retention.website.WebsiteRetentionDryRunReader;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -28,15 +33,18 @@ class WebsitePublishedContentCleanupJdbcTest {
         jdbcTemplate.execute("DROP ALL OBJECTS");
         createSchema();
 
-        DataRetentionRunAuditService auditService = mock(DataRetentionRunAuditService.class);
-        when(auditService.startRun(anyString(), anyString(), any(), any(), any())).thenReturn(91L);
-        DataRetentionProperties properties = new DataRetentionProperties();
-        properties.getWebsitePublishedCleanup().setExecuteEnabled(true);
+        DataRetentionP0AuditService auditService = mock(DataRetentionP0AuditService.class);
+        when(auditService.startRun(any())).thenAnswer(invocation -> run(invocation.getArgument(0)));
+        when(auditService.createOperationlessAttempt(any(), any())).thenAnswer(invocation -> {
+            RetentionRunContext run = invocation.getArgument(0);
+            RetentionAttemptCommand command = invocation.getArgument(1);
+            return new RetentionAttemptContext(92L, run.runId(), null, 1, 1,
+                    command.attemptType(), AttemptStatus.PREPARED, command.attemptRequestId());
+        });
         service = new WebsitePublishedContentCleanupService(
-                jdbcTemplate,
-                new TransactionTemplate(new DataSourceTransactionManager(dataSource)),
+                new WebsiteRetentionDryRunReader(jdbcTemplate),
                 auditService,
-                properties,
+                new DataRetentionCanonicalEncoder(),
                 mock(CurrentUserService.class)
         );
     }
@@ -89,78 +97,32 @@ class WebsitePublishedContentCleanupJdbcTest {
         insertArticle(114L, "distributed", "forum_site", null, "missing", "failed");
 
         WebsitePublishedContentCleanupService.CleanupBatchResult dryRun =
-                service.runScheduled(0, 100, null, true, "jdbc dry run");
+                service.runScheduledDryRun(0, 100, 1, "jdbc dry run", 9L);
 
         assertEquals(24, dryRun.retentionHours());
-        assertEquals(7, dryRun.candidateCount());
+        assertEquals(8, dryRun.candidateCount());
         assertEquals(101L, dryRun.items().get(0).articleId());
         assertEquals(103L, dryRun.items().get(1).articleId());
         assertEquals(107L, dryRun.items().get(2).articleId());
-        assertEquals(110L, dryRun.items().get(3).articleId());
-        assertEquals(111L, dryRun.items().get(4).articleId());
-        assertEquals(112L, dryRun.items().get(5).articleId());
-        assertEquals(113L, dryRun.items().get(6).articleId());
+        assertEquals(109L, dryRun.items().get(3).articleId());
+        assertEquals(110L, dryRun.items().get(4).articleId());
+        assertEquals(111L, dryRun.items().get(5).articleId());
+        assertEquals(112L, dryRun.items().get(6).articleId());
+        assertEquals(113L, dryRun.items().get(7).articleId());
 
-        WebsitePublishedContentCleanupService.CleanupBatchResult executed =
-                service.runScheduled(0, 100, null, false, "jdbc execute");
-
-        assertEquals(7, executed.cleanedCount());
-        assertEquals("deleted", jdbcTemplate.queryForObject(
+        assertEquals("distributed", jdbcTemplate.queryForObject(
                 "SELECT status FROM article_draft WHERE id = 101", String.class));
-        assertEquals(0, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM article_draft_version
-                 WHERE article_id = 101 AND content_markdown IS NOT NULL
-                """, Integer.class));
-        assertEquals(0, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM distribution_tasks
-                 WHERE article_id = 101
-                   AND (request_payload IS NOT NULL OR fill_payload IS NOT NULL OR response_payload IS NOT NULL)
-                """, Integer.class));
-        assertEquals(1, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM article_publish_record
-                 WHERE article_id = 101
-                   AND publish_status = 'distributed'
-                   AND published_url IS NULL
-                """, Integer.class));
-        assertEquals("distributed", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 102", String.class));
-        assertEquals("deleted", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 103", String.class));
-        assertEquals("distributed", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 104", String.class));
-        assertEquals("approved", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 105", String.class));
-        assertEquals("unpublished", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 106", String.class));
-        assertEquals("deleted", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 107", String.class));
-        assertEquals("distributed", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 108", String.class));
-        assertEquals("deleted", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 111", String.class));
-        assertEquals("deleted", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 112", String.class));
-        assertEquals("deleted", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 113", String.class));
-        assertEquals("distributed", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 114", String.class));
-        assertEquals("deleted", jdbcTemplate.queryForObject(
-                "SELECT status FROM article_draft WHERE id = 109", String.class));
         assertEquals(1, jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM article_draft_version
-                 WHERE article_id = 109
+                 WHERE article_id = 101
                    AND content_markdown IS NOT NULL
                 """, Integer.class));
-        assertEquals(0, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM article_draft_version
-                 WHERE article_id = 110
-                   AND content_markdown IS NOT NULL
-                """, Integer.class));
-        assertEquals(7, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM article_draft_version
-                 WHERE article_id IN (102, 104, 105, 106, 108, 109, 114)
-                   AND content_markdown IS NOT NULL
-                """, Integer.class));
+    }
+
+    private static RetentionRunContext run(RetentionRunStartCommand command) {
+        return new RetentionRunContext(91L, command.triggerId(), command.triggerSource(), command.mode(),
+                command.compatibilityContract(), "test", "test", RunReplayStatus.CREATED,
+                "running", command.startedAt());
     }
 
     private void insertArticle(long articleId,
@@ -245,6 +207,21 @@ class WebsitePublishedContentCleanupJdbcTest {
                     id BIGINT PRIMARY KEY,
                     article_id BIGINT NOT NULL,
                     status VARCHAR(32) NOT NULL
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE data_retention_failure_active_key (
+                    domain VARCHAR(64), business_key VARCHAR(128)
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE data_retention_batch_item (
+                    operation_id VARCHAR(36), domain VARCHAR(64), business_key BIGINT
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE data_retention_operation (
+                    operation_id VARCHAR(36), outcome_status VARCHAR(32)
                 )
                 """);
     }

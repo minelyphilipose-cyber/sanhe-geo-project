@@ -7,7 +7,8 @@ import com.huanjing.geo.module.dispatch.entity.PollBatchShardItem;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
-import lombok.RequiredArgsConstructor;
+import com.huanjing.geo.module.retention.service.PollRetentionSliceWriteService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 
 @Service
-@RequiredArgsConstructor
 public class DispatchPollShardPersistenceService {
 
     static final String SHARD_STATUS_READY = "ready";
@@ -27,6 +27,31 @@ public class DispatchPollShardPersistenceService {
     private final PollResultPersistenceTransactionService resultPersistenceTransactionService;
     private final PollDatabaseWriteRetryService databaseWriteRetryService;
     private final ObjectMapper objectMapper;
+    private final PollRetentionSliceWriteService retentionSliceWriteService;
+
+    @Autowired
+    public DispatchPollShardPersistenceService(PollBatchShardMapper pollBatchShardMapper,
+                                               PollBatchShardItemMapper pollBatchShardItemMapper,
+                                               PollResultPersistenceTransactionService resultPersistenceTransactionService,
+                                               PollDatabaseWriteRetryService databaseWriteRetryService,
+                                               ObjectMapper objectMapper,
+                                               PollRetentionSliceWriteService retentionSliceWriteService) {
+        this.pollBatchShardMapper = pollBatchShardMapper;
+        this.pollBatchShardItemMapper = pollBatchShardItemMapper;
+        this.resultPersistenceTransactionService = resultPersistenceTransactionService;
+        this.databaseWriteRetryService = databaseWriteRetryService;
+        this.objectMapper = objectMapper;
+        this.retentionSliceWriteService = retentionSliceWriteService;
+    }
+
+    DispatchPollShardPersistenceService(PollBatchShardMapper pollBatchShardMapper,
+                                        PollBatchShardItemMapper pollBatchShardItemMapper,
+                                        PollResultPersistenceTransactionService resultPersistenceTransactionService,
+                                        PollDatabaseWriteRetryService databaseWriteRetryService,
+                                        ObjectMapper objectMapper) {
+        this(pollBatchShardMapper, pollBatchShardItemMapper, resultPersistenceTransactionService,
+                databaseWriteRetryService, objectMapper, null);
+    }
 
     public PollResult ensurePollResult(PollResult result) {
         return databaseWriteRetryService.execute(
@@ -36,6 +61,11 @@ public class DispatchPollShardPersistenceService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PollBatchShard markShardRunning(Long shardId, Long taskId) {
+        if (retentionSliceWriteService == null) return markShardRunningLocked(shardId, taskId);
+        return retentionSliceWriteService.executeByShardId(shardId, () -> markShardRunningLocked(shardId, taskId));
+    }
+
+    private PollBatchShard markShardRunningLocked(Long shardId, Long taskId) {
         PollBatchShard shard = pollBatchShardMapper.selectByIdForUpdate(shardId);
         if (shard == null) {
             return null;
@@ -93,6 +123,17 @@ public class DispatchPollShardPersistenceService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markShardCompleted(Long shardId) {
+        if (retentionSliceWriteService == null) {
+            markShardCompletedLocked(shardId);
+            return;
+        }
+        retentionSliceWriteService.executeByShardId(shardId, () -> {
+            markShardCompletedLocked(shardId);
+            return null;
+        });
+    }
+
+    private void markShardCompletedLocked(Long shardId) {
         PollBatchShard shard = pollBatchShardMapper.selectByIdForUpdate(shardId);
         if (shard == null) {
             return;
@@ -117,6 +158,17 @@ public class DispatchPollShardPersistenceService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markShardResourceWaiting(Long shardId, String error) {
+        if (retentionSliceWriteService == null) {
+            markShardResourceWaitingLocked(shardId, error);
+            return;
+        }
+        retentionSliceWriteService.executeByShardId(shardId, () -> {
+            markShardResourceWaitingLocked(shardId, error);
+            return null;
+        });
+    }
+
+    private void markShardResourceWaitingLocked(Long shardId, String error) {
         PollBatchShard shard = pollBatchShardMapper.selectByIdForUpdate(shardId);
         if (shard == null || SHARD_STATUS_COMPLETED.equals(shard.getStatus())) {
             return;
@@ -129,6 +181,11 @@ public class DispatchPollShardPersistenceService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Long markShardFailed(Long shardId, String error) {
+        if (retentionSliceWriteService == null) return markShardFailedLocked(shardId, error);
+        return retentionSliceWriteService.executeByShardId(shardId, () -> markShardFailedLocked(shardId, error));
+    }
+
+    private Long markShardFailedLocked(Long shardId, String error) {
         PollBatchShard shard = pollBatchShardMapper.selectByIdForUpdate(shardId);
         if (shard == null || SHARD_STATUS_COMPLETED.equals(shard.getStatus())) {
             return shard == null ? null : shard.getBatchId();
