@@ -473,5 +473,26 @@
                 </plugins>
             </build>
         </profile>
+        <profile>
+            <id>retention-article-cos-it</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/ArticleArchivePurgeCosPrefixContractTest.java</include>
+                                <include>**/ArticleArchivePurgeMysqlCosIntegrationTest.java</include>
+                            </includes>
+                            <failIfNoTests>true</failIfNoTests>
+                            <systemPropertyVariables>
+                                <retention.article-cos-it.required>true</retention.article-cos-it.required>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 </project>

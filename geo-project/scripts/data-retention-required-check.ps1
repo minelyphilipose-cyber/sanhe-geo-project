@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$IncludeCos
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -43,9 +45,19 @@ function Invoke-Checked {
     'RETENTION_MINIO_IT_SECRET_KEY'
 ) | ForEach-Object { Require-EnvironmentValue $_ }
 
+if ($IncludeCos) {
+    @(
+        'RETENTION_COS_IT_REGION',
+        'RETENTION_COS_IT_BUCKET',
+        'RETENTION_COS_IT_SECRET_ID',
+        'RETENTION_COS_IT_SECRET_KEY',
+        'RETENTION_COS_IT_PREFIX'
+    ) | ForEach-Object { Require-EnvironmentValue $_ }
+}
+
 Invoke-Checked 'backend package' $serverRoot { mvn -DskipTests package }
 
-@(
+$profiles = @(
     'retention-v133-it',
     'retention-switch-it',
     'retention-coordinator-it',
@@ -53,7 +65,14 @@ Invoke-Checked 'backend package' $serverRoot { mvn -DskipTests package }
     'retention-poll-it',
     'retention-mysql-it',
     'retention-article-minio-it'
-) | ForEach-Object {
+)
+if ($IncludeCos) {
+    $profiles += 'retention-article-cos-it'
+} else {
+    Write-Warning 'COS Required profile was not requested; production Gate 0 remains open.'
+}
+
+$profiles | ForEach-Object {
     $profile = $_
     Invoke-Checked $profile $serverRoot { mvn "-P$profile" test }
 }
@@ -87,4 +106,8 @@ if ($formatErrors.Count -gt 0) {
     throw ($formatErrors -join [Environment]::NewLine)
 }
 
-Write-Host 'All data retention Required checks passed.'
+if ($IncludeCos) {
+    Write-Host 'All data retention Gate 0 Required checks, including COS, passed.'
+} else {
+    Write-Host 'All local data retention Required checks passed; COS was not included.'
+}
