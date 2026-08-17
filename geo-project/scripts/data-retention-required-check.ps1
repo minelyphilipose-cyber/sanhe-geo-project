@@ -77,6 +77,7 @@ $profiles | ForEach-Object {
     Invoke-Checked $profile $serverRoot { mvn "-P$profile" test }
 }
 
+Invoke-Checked 'frontend dependency install' $webRoot { npm ci }
 Invoke-Checked 'frontend production build' $webRoot { npm run build }
 Invoke-Checked 'git diff check' $projectRoot { git diff --check }
 
