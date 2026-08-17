@@ -220,7 +220,7 @@ RETENTION_COS_IT_PREFIX       # 必须位于 geo-retention-it/ 下
 
 本地执行顺序固定为：package → V133 → switch → coordinator → website → poll → MySQL/WP8 → Article/MinIO → frontend build → mechanical checks。统一入口为 `scripts/data-retention-required-check.ps1`；不带 `-IncludeCos` 时脚本会明确警告 COS 未覆盖，不能据此关闭生产 Gate 0。完整 Gate 0 使用 `scripts/data-retention-required-check.ps1 -IncludeCos`，在 Article/MinIO 后追加 Article/COS。新增 COS profile 只清理随机 run prefix，不删除 bucket；其他 Required profile 延续既有随机数据库、随机 MinIO bucket 与 Redis DB 15 隔离协议。
 
-`scripts/generate-migration-manifest.ps1` 会固定扫描 368 个正式 versioned migration，并输出 path、bytes、SHA-256 与 Flyway 9.22.3 兼容 checksum。当前 manifest SHA-256 为 `35e85aa08f813d8f17064c568c1010d417a2cb8d1c47bb60c5d966cb6b7b6e14`；其中 V133=`971462112`、V340=`258457011`、V353=`-1211774692`，与生产 history 截图逐项一致。
+`scripts/generate-migration-manifest.ps1` 会固定扫描 368 个正式 versioned migration，并输出 path、canonical bytes、SHA-256 与 Flyway 9.22.3 兼容 checksum。为消除 Windows `autocrlf` 差异，bytes/SHA-256 按有效 UTF-8、保留原 BOM、统一 LF 的 canonical bytes 计算；Flyway checksum 仍按 Flyway 9.22.3 的逐行算法计算。当前 manifest SHA-256 为 `0f0c8a9bc89a0804ad121058e8b39dd91f1b8a0b72b071c814e72b5186a70d22`；其中 V133=`971462112`、V340=`258457011`、V353=`-1211774692`，与生产 history 截图逐项一致。
 
 提交前重新扫描当前 67 个 Git refs 和 6 个 worktree，V354～V368 未出现同版本不同 migration 文件名。`application.yml` 中 retention scheduler、各 domain execute、dynamic enable-write、detail cleanup、report freeze 和 storage migration execute 的默认值均再次确认保持 `false`。
 

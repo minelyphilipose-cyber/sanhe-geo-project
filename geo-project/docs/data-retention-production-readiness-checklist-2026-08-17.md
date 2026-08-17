@@ -54,7 +54,7 @@ V133 = Success
 - [x] 逐 hunk 复核 `pom.xml`、`application.yml`、`AdminLayout.vue`、`router/admin.ts`；
 - [x] 排除 `node_modules`、`target`、logs、deploy tar、凭据和本地临时文件；
 - [ ] 记录最终 commit SHA 和构建制品 SHA-256；
-- [x] 生成 368 行 migration manifest，包含 path/length/SHA-256/Flyway checksum；V133、V340、V353 checksum 与生产截图一致；
+- [x] 生成 368 行 migration manifest，包含 path、LF-canonical length/SHA-256 和 Flyway checksum；V133、V340、V353 checksum 与生产截图一致；
 - [ ] 从该 commit 运行 `scripts/data-retention-required-check.ps1`，结果必须与本地记录一致；
 - [x] 再次扫描 67 个 Git refs 和 6 个 worktree，确认 V354～V368 没有 migration version 冲突；
 - [x] 所有默认写门仍为 `false`。

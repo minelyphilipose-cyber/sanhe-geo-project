@@ -1,11 +1,16 @@
 [CmdletBinding()]
 param(
-    [string]$OutputPath
+    [string]$OutputPath,
+    [string]$ProjectRoot
 )
 
 $ErrorActionPreference = 'Stop'
 
-$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+} else {
+    $projectRoot = (Resolve-Path $ProjectRoot).Path
+}
 $migrationRoot = Join-Path $projectRoot 'geo-server/src/main/resources/db/migration'
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path $projectRoot 'docs/data-retention-migration-manifest-2026-08-17.csv'
@@ -62,17 +67,26 @@ public static class FlywayCompatibleChecksum
 '@
 }
 
-function Get-Sha256 {
+function Get-CanonicalMigrationBytes {
     param([Parameter(Mandatory = $true)][string]$Path)
+
+    $raw = [System.IO.File]::ReadAllBytes($Path)
+    $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+    try {
+        $text = $strictUtf8.GetString($raw)
+    } catch {
+        throw "Migration is not valid UTF-8: $Path"
+    }
+    $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    return ,([System.Text.UTF8Encoding]::new($false).GetBytes($normalized))
+}
+
+function Get-Sha256 {
+    param([Parameter(Mandatory = $true)][byte[]]$Bytes)
 
     $algorithm = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $stream = [System.IO.File]::OpenRead($Path)
-        try {
-            return (($algorithm.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '')
-        } finally {
-            $stream.Dispose()
-        }
+        return (($algorithm.ComputeHash($Bytes) | ForEach-Object { $_.ToString('x2') }) -join '')
     } finally {
         $algorithm.Dispose()
     }
@@ -95,13 +109,14 @@ $migrations = @(
             throw "Migration is outside the project root: $migrationPath"
         }
         $relativePath = $migrationPath.Substring($projectRoot.Length + 1).Replace('\', '/')
+        $canonicalBytes = [byte[]](Get-CanonicalMigrationBytes -Path $_.FullName)
         [PSCustomObject]@{
             SortVersion = $sortKey
             Version = $version
             Description = $description
             Path = $relativePath
-            Bytes = $_.Length
-            Sha256 = Get-Sha256 -Path $_.FullName
+            Bytes = $canonicalBytes.Length
+            Sha256 = Get-Sha256 -Bytes $canonicalBytes
             FlywayChecksum = [FlywayCompatibleChecksum]::Calculate($_.FullName)
         }
     } | Sort-Object SortVersion
