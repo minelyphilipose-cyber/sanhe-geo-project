@@ -110,12 +110,12 @@ public final class SelfMediaPublishFailureCodes {
             entry("COVER_UPLOAD_TIMEOUT", "封面上传超时", true, "检查封面素材和平台上传状态，等待自动重试。"),
             entry("EDITOR_NOT_READY", "编辑器未就绪", true, "检查平台页面加载状态，等待自动重试。"),
             entry("EDITOR_NOT_FOUND", "编辑器未找到", true, "检查页面是否进入正确编辑页，等待自动重试。"),
-            entry("LOGIN_REQUIRED", "平台账号未登录", false, "打开绑定环境完成平台登录后重新创建排期。"),
+            entry("LOGIN_REQUIRED", "平台账号未登录", true, "打开绑定环境完成平台登录并验证成功后，返回原排期点击立即重试。", "OPEN_BRAND_SELF_MEDIA_ACCOUNTS", "验证登录", "navigate"),
             entry("FILL_FAILED", "页面填充失败", false, "查看扩展诊断信息后修复页面适配或人工处理。"),
             entry("MATERIAL_IMAGE_UNAVAILABLE", "素材图片不可用", false, "打开文章检查封面和正文图片，替换已删除或无法访问的素材后点击立即重试。", "OPEN_ARTICLE_MATERIALS", "处理素材", "navigate"),
             entry("PUBLIC_MATERIAL_NOT_FOUND", "素材公开链接失效", false, "素材已删除或公开链接已失效。打开文章替换封面/正文图片后点击立即重试。", "OPEN_ARTICLE_MATERIALS", "处理素材", "navigate"),
             entry("FILL_TOKEN_USED_OR_EXPIRED", "填充令牌已使用或过期", false, "重新领取任务或重新创建排期。"),
-            entry("ACCOUNT_MISMATCH", "平台账号不一致", false, "切换到排期绑定的自媒体账号后重新创建排期。"),
+            entry("ACCOUNT_MISMATCH", "平台账号不一致", true, "在绑定环境切换到系统账号名称对应的账号并验证成功后，返回原排期点击立即重试。", "OPEN_BRAND_SELF_MEDIA_ACCOUNTS", "核对登录账号", "navigate"),
             entry("IDENTITY_EXPECTATION_MISSING", "缺少账号校验信息", false, "补全自媒体账号名称；所有平台统一按账号名称校验。"),
             entry("SELF_MEDIA_ACCOUNT_NOT_FOUND", "自媒体账号不存在", false, "检查品牌自媒体账号是否已删除。"),
             entry("SELF_MEDIA_ACCOUNT_INACTIVE", "自媒体账号未启用", false, "启用账号或更换账号后重新创建排期。"),
@@ -176,22 +176,22 @@ public final class SelfMediaPublishFailureCodes {
     }
 
     public static boolean isScheduleExecutionRetryable(String code) {
-        return StringUtils.hasText(code) && SCHEDULE_EXECUTION_RETRYABLE_CODES.contains(code.trim());
+        return StringUtils.hasText(code) && SCHEDULE_EXECUTION_RETRYABLE_CODES.contains(normalize(code));
     }
 
     public static boolean isPostSubmissionVerificationFailure(String code) {
         return StringUtils.hasText(code)
-                && POST_SUBMISSION_VERIFICATION_CODES.contains(code.trim().toUpperCase());
+                && POST_SUBMISSION_VERIFICATION_CODES.contains(normalize(code));
     }
 
     public static boolean isLocalAgentPublishCheckTerminalFailure(String code) {
         return StringUtils.hasText(code)
-                && LOCAL_AGENT_PUBLISH_CHECK_TERMINAL_CODES.contains(code.trim().toUpperCase());
+                && LOCAL_AGENT_PUBLISH_CHECK_TERMINAL_CODES.contains(normalize(code));
     }
 
     public static boolean isLocalAgentPublishCheckInfrastructureFailure(String code) {
         return StringUtils.hasText(code)
-                && LOCAL_AGENT_PUBLISH_CHECK_INFRASTRUCTURE_CODES.contains(code.trim().toUpperCase());
+                && LOCAL_AGENT_PUBLISH_CHECK_INFRASTRUCTURE_CODES.contains(normalize(code));
     }
 
     public static Boolean retryable(String code) {
@@ -244,7 +244,7 @@ public final class SelfMediaPublishFailureCodes {
         String text = message == null ? "" : message;
         Matcher matcher = EXPLICIT_CODE_PATTERN.matcher(text);
         if (matcher.find()) {
-            return matcher.group(1);
+            return normalize(matcher.group(1));
         }
         if (containsAny(text, "渠道额度", "额度用完", "额度不足")) {
             return "CHANNEL_QUOTA_EXHAUSTED";
@@ -304,11 +304,21 @@ public final class SelfMediaPublishFailureCodes {
         return "FILL_FAILED";
     }
 
+    public static String normalize(String code) {
+        if (!StringUtils.hasText(code)) return null;
+        String normalized = code.trim().toUpperCase();
+        return switch (normalized) {
+            case "COOKIE_MISSING", "COOKIE_EXPIRED", "ACCOUNT_LOGIN_REQUIRED", "ENVIRONMENT_LOGIN_REQUIRED" -> "LOGIN_REQUIRED";
+            case "ACCOUNT_NAME_MISMATCH", "LOGIN_STATUS_MISMATCH", "ENVIRONMENT_ACCOUNT_MISMATCH" -> "ACCOUNT_MISMATCH";
+            default -> normalized;
+        };
+    }
+
     private static FailureMetadata metadata(String code) {
         if (!StringUtils.hasText(code)) {
             return null;
         }
-        return METADATA.get(code.trim());
+        return METADATA.get(normalize(code));
     }
 
     private static Map.Entry<String, FailureMetadata> entry(String code, String label, boolean retryable, String actionHint) {

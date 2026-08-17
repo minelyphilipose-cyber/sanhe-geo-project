@@ -16,6 +16,25 @@ public interface BrowserEnvironmentMapper extends BaseMapper<BrowserEnvironment>
             SELECT *
             FROM browser_environment
             WHERE brand_id = #{brandId}
+              AND deleted_at IS NULL
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            """)
+    BrowserEnvironment selectActiveByBrandId(@Param("brandId") Long brandId);
+
+    @Update("""
+            UPDATE browser_environment
+            SET last_error_code = NULL,
+                last_error_message = NULL
+            WHERE id = #{id}
+              AND deleted_at IS NULL
+            """)
+    int clearRuntimeErrors(@Param("id") Long id);
+
+    @Select("""
+            SELECT *
+            FROM browser_environment
+            WHERE brand_id = #{brandId}
               AND provider = #{provider}
               AND (environment_key = #{environmentKey} OR provider_profile_id = #{providerProfileId})
             ORDER BY (deleted_at IS NULL) DESC, id ASC

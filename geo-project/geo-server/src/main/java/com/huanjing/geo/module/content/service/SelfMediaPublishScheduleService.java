@@ -2613,6 +2613,7 @@ public class SelfMediaPublishScheduleService {
                 row.setNextAttemptAt(null);
             }
             scheduleMapper.updateById(row);
+            recordPublishTaskLoginFailure(row);
             syncArticleForScheduleState(row);
             if (SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED.equals(normalize(row.getStatus()))) {
                 refundScheduleQuotaIfPresent(row);
@@ -3436,6 +3437,7 @@ public class SelfMediaPublishScheduleService {
             row.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
         }
         scheduleMapper.updateById(row);
+        recordPublishTaskLoginFailure(row);
         syncArticleForScheduleState(row);
         if (SelfMediaPublishScheduleConstants.STATUS_FILLING.equals(normalize(expectedRunningStatus))) {
             refundDistributionQuotaIfPresent(row);
@@ -3680,12 +3682,33 @@ public class SelfMediaPublishScheduleService {
         if (!actionDecision(row).canRetryExecution()) {
             fail("SCHEDULE_STATUS_NOT_RETRYABLE", "当前排期阶段不允许立即重试");
         }
+        requireRecoveredLoginBeforeRetry(row);
         return queueScheduleExecutionRetry(
                 row,
                 "MANUAL_RETRY_REQUESTED",
                 "已人工触发立即重试",
                 false
         );
+    }
+
+    private void recordPublishTaskLoginFailure(SelfMediaPublishSchedule row) {
+        if (row == null || row.getSelfMediaAccountId() == null) {
+            return;
+        }
+        browserEnvironmentService.recordPublishTaskLoginFailure(
+                row.getSelfMediaAccountId(), row.getFailureCode(), row.getFailureMessage());
+    }
+
+    private void requireRecoveredLoginBeforeRetry(SelfMediaPublishSchedule row) {
+        String failureCode = row == null ? null : SelfMediaPublishFailureCodes.normalize(row.getFailureCode());
+        if (failureCode == null || !Set.of("LOGIN_REQUIRED", "ACCOUNT_MISMATCH").contains(failureCode)) {
+            return;
+        }
+        SelfMediaAccount account = selfMediaAccountMapper.selectById(row.getSelfMediaAccountId());
+        if (account == null || account.getDeletedAt() != null) {
+            fail("SELF_MEDIA_ACCOUNT_NOT_FOUND", "自媒体账号不存在");
+        }
+        browserEnvironmentService.validateForTaskCreation(account, true);
     }
 
     @Transactional
@@ -5447,7 +5470,7 @@ public class SelfMediaPublishScheduleService {
 
     private String trimFailureCode(String value, String fallback) {
         String text = StringUtils.hasText(value) ? value.trim() : fallback;
-        return truncate(text, FAILURE_CODE_MAX_LENGTH);
+        return truncate(SelfMediaPublishFailureCodes.normalize(text), FAILURE_CODE_MAX_LENGTH);
     }
 
     private String truncate(String value, int maxLength) {

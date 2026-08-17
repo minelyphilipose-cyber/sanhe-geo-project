@@ -13,7 +13,7 @@ public record ExtensionTaskPublishReportRequest(
         @Size(max = 256)
         String detectedText,
         @Size(max = 64)
-        @Pattern(regexp = "COOKIE_MISSING|LOGIN_REQUIRED|PAGE_CHANGED|FILL_FAILED|PUBLISH_BUTTON_NOT_FOUND|TASK_EXPIRED|UNKNOWN")
+        @Pattern(regexp = "COOKIE_MISSING|LOGIN_REQUIRED|ACCOUNT_MISMATCH|PAGE_CHANGED|FILL_FAILED|PUBLISH_BUTTON_NOT_FOUND|TASK_EXPIRED|UNKNOWN")
         String errorCode,
         @Size(max = 512)
         String errorMessage

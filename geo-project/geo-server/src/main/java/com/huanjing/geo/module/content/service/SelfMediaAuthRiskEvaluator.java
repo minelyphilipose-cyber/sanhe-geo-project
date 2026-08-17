@@ -20,6 +20,12 @@ public class SelfMediaAuthRiskEvaluator {
 
     public Evaluation evaluate(Input input) {
         SelfMediaAuthHealthPolicy policy = input.policy();
+        if (latestCheckIsFailed(input)) {
+            return new Evaluation("login_verification_failed", input.lastLoginVerifiedAt(), "last_verification",
+                    null, null, null, null, "latest_login_check", null, false,
+                    input.cookieDeclaredExpiresAt(), expired(input.cookieDeclaredExpiresAt(), input.now()),
+                    List.of("LATEST_LOGIN_CHECK_FAILED"));
+        }
         if (policy == null || !Boolean.TRUE.equals(policy.getEnabled())) {
             return new Evaluation("monitoring_disabled", null, null, null, null, null, null, null, null,
                     false, null, null, List.of("MONITORING_DISABLED"));
@@ -57,6 +63,15 @@ public class SelfMediaAuthRiskEvaluator {
         if (expired(input.cookieDeclaredExpiresAt(), input.now())) reasons.add("COOKIE_DECLARED_EXPIRY_PASSED");
         return new Evaluation(status, base.time(), base.source(), periodic, credential.time(), credential.source(),
                 selected.time(), selected.source(), warningStart, superseded, input.cookieDeclaredExpiresAt(), expired(input.cookieDeclaredExpiresAt(), input.now()), reasons);
+    }
+
+    private boolean latestCheckIsFailed(Input input) {
+        if (!"failed".equalsIgnoreCase(input.lastLoginVerificationResult())) {
+            return false;
+        }
+        return input.lastLoginVerificationCheckedAt() == null
+                || input.lastLoginVerifiedAt() == null
+                || !input.lastLoginVerificationCheckedAt().isBefore(input.lastLoginVerifiedAt());
     }
 
     private Base verificationBase(Input input) {
@@ -103,7 +118,20 @@ public class SelfMediaAuthRiskEvaluator {
                         LocalDateTime lastLoginVerifiedAt,
                         LocalDateTime credentialCapturedAt,
                         LocalDateTime cookieDeclaredExpiresAt,
-                        LocalDateTime accountBoundAt) {
+                        LocalDateTime accountBoundAt,
+                        String lastLoginVerificationResult,
+                        LocalDateTime lastLoginVerificationCheckedAt) {
+        public Input(SelfMediaAuthHealthPolicy policy,
+                     LocalDateTime now,
+                     boolean credentialRequired,
+                     boolean credentialPresent,
+                     LocalDateTime lastLoginVerifiedAt,
+                     LocalDateTime credentialCapturedAt,
+                     LocalDateTime cookieDeclaredExpiresAt,
+                     LocalDateTime accountBoundAt) {
+            this(policy, now, credentialRequired, credentialPresent, lastLoginVerifiedAt, credentialCapturedAt,
+                    cookieDeclaredExpiresAt, accountBoundAt, null, null);
+        }
     }
 
     public record Evaluation(String riskStatus,

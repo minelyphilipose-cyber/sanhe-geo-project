@@ -87,7 +87,7 @@ public class SelfMediaRuntimeStatusService {
         row.setDetectedPlatform(platform);
         row.setDetectedAccountName(limit(request.detectedAccountName(), 255));
         row.setDetectedPlatformAccountId(limit(request.detectedPlatformAccountId(), 128));
-        row.setLoginStatus(limit(firstText(request.loginStatus(), "unknown"), 32));
+        row.setLoginStatus(limit(resolveRuntimeLoginStatus(request.loginStatus(), account), 32));
         row.setRuntimeStage(limit(request.runtimeStage(), 64));
         row.setRuntimeStageAt(request.runtimeStageAt());
         row.setRuntimeStageMessage(limit(request.runtimeStageMessage(), 512));
@@ -227,16 +227,31 @@ public class SelfMediaRuntimeStatusService {
         try {
             extensionRuntimeStatusMapper.insert(row);
         } catch (DuplicateKeyException ex) {
-            extensionRuntimeStatusMapper.updateByProviderProfileIdAndInstallId(row);
-            ExtensionRuntimeStatus current = extensionRuntimeStatusMapper.selectOne(new LambdaQueryWrapper<ExtensionRuntimeStatus>()
-                    .eq(ExtensionRuntimeStatus::getProviderProfileId, row.getProviderProfileId())
-                    .eq(ExtensionRuntimeStatus::getInstallId, row.getInstallId())
-                    .last("LIMIT 1"));
+            extensionRuntimeStatusMapper.updateByProviderProfileIdInstallIdAndPlatform(row);
+            ExtensionRuntimeStatus current =
+                    extensionRuntimeStatusMapper.selectByProviderProfileIdInstallIdAndPlatform(row);
             if (current != null) {
                 row.setId(current.getId());
                 row.setCreatedAt(current.getCreatedAt());
             }
         }
+    }
+
+    private String resolveRuntimeLoginStatus(String reportedStatus, BrowserEnvironmentAccount account) {
+        String reported = normalizeLoginStatus(reportedStatus);
+        if (StringUtils.hasText(reported) && !"unknown".equals(reported)) {
+            return reported;
+        }
+        String boundStatus = normalizeLoginStatus(account == null ? null : account.getLoginStatus());
+        return StringUtils.hasText(boundStatus) ? boundStatus : "unknown";
+    }
+
+    private String normalizeLoginStatus(String status) {
+        if (!StringUtils.hasText(status)) {
+            return null;
+        }
+        String normalized = status.trim().toLowerCase(Locale.ROOT);
+        return "verified".equals(normalized) ? "logged_in" : normalized;
     }
 
     private void upsertLocalAgent(LocalAgentRuntimeStatus row) {

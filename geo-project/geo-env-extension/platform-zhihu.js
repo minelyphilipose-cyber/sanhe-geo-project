@@ -173,7 +173,7 @@
       findUploadedCoverFileRow: (dialog) => findUploadedCoverFileRow(dialog, deps),
       publishArticle: (platform, context) => publishArticle(platform, context, deps),
       waitForDraftReadyBeforePublish: (platform) => waitForDraftReadyBeforePublish(platform, deps),
-      waitForPublishAttemptOutcome: (platform, context) => waitForPublishAttemptOutcome(platform, context, deps),
+      waitForPublishAttemptOutcome: (platform, context, initialButton) => waitForPublishAttemptOutcome(platform, context, initialButton, deps),
       findPublishButton: () => findPublishButton(deps),
       clickPublishAction: (el, platform) => clickPublishAction(el, platform, deps),
       hasPublishProgressSignal: () => hasPublishProgressSignal(deps),
@@ -956,6 +956,7 @@
     await closeCoverFileChooserIfOpen(platform, deps)
     await waitForDraftReadyBeforePublish(platform, deps)
     let lastBlocked = null
+    let lastUnconfirmed = null
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       window.scrollTo(0, document.body.scrollHeight)
       await requireDependency(deps.delay, 'delay')(600)
@@ -976,15 +977,8 @@
         continue
       }
 
-      const confirm = findPublishConfirmButton(button, deps)
-      if (confirm) {
-        updateStage(deps, 'submitting_publish')
-        await clickPublishAction(confirm, platform, deps)
-        await requireDependency(deps.delay, 'delay')(1200)
-      }
-
       updateStage(deps, 'verifying_publish_result')
-      const outcome = await waitForPublishAttemptOutcome(platform, context, deps)
+      const outcome = await waitForPublishAttemptOutcome(platform, context, button, deps)
       if (outcome?.verified) {
         return {
           published: true,
@@ -998,6 +992,16 @@
         await waitForDraftReadyBeforePublish(platform, deps)
         continue
       }
+      if (outcome?.unconfirmed) {
+        lastUnconfirmed = outcome
+        if (!outcome.confirmClicked && outcome.editorStillOpen && outcome.publishButtonVisible && attempt < 3) {
+          continue
+        }
+        break
+      }
+    }
+    if (lastUnconfirmed) {
+      throw new Error(`知乎发布后未检测到完成状态；${describeWith(deps)}`)
     }
     throw new Error(`知乎发布被草稿加载阻塞：${lastBlocked?.message || '多次点击发布后仍提示草稿加载中'}；${describeWith(deps)}`)
   }
@@ -1014,8 +1018,9 @@
     throw new Error(`知乎草稿加载未完成，暂不发布：${latest?.message || '仍检测到草稿加载弹窗'}；${describeWith(deps)}`)
   }
 
-  async function waitForPublishAttemptOutcome(platform, context = {}, deps) {
+  async function waitForPublishAttemptOutcome(platform, context = {}, initialButton, deps) {
     const deadline = Date.now() + 20000
+    let confirmClicked = false
     while (Date.now() < deadline) {
       const verified = verifyPublishSubmitted(context, deps)
       if (verified) return verified
@@ -1023,9 +1028,25 @@
       if (dialog) {
         return closeDraftLoadingDialog(dialog, platform, deps)
       }
+      if (!confirmClicked) {
+        const confirm = findPublishConfirmButton(initialButton, deps)
+        if (confirm) {
+          updateStage(deps, 'submitting_publish')
+          await clickPublishAction(confirm, platform, deps)
+          confirmClicked = true
+          updateStage(deps, 'verifying_publish_result')
+        }
+      }
       await requireDependency(deps.delay, 'delay')(300)
     }
-    throw new Error(`知乎发布后未检测到完成状态；${describeWith(deps)}`)
+    const text = normalizeDomText(document.body?.innerText || '', deps)
+    return {
+      verified: false,
+      unconfirmed: true,
+      confirmClicked,
+      editorStillOpen: isEditorStillOpen(text, deps),
+      publishButtonVisible: Boolean(findPublishButton(deps)),
+    }
   }
 
   function findPublishButton(deps) {
@@ -1057,8 +1078,8 @@
 
   function findPublishConfirmButton(initialButton, deps) {
     const buttons = requireDependency(deps.collectVisibleActionElements, 'collectVisibleActionElements')()
-      .filter((item) => !initialButton || item.el !== initialButton)
       .filter((item) => item.text === '发布' || item.text === '确认发布' || item.text === '继续发布')
+      .filter((item) => !initialButton || item.el !== initialButton || item.text !== '发布')
       .sort((left, right) => right.rect.top - left.rect.top)
     return buttons[0]?.el || null
   }

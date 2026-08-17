@@ -35,12 +35,14 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
@@ -82,7 +84,8 @@ class BrowserEnvironmentServiceTest {
                 mock(BrandAccessService.class),
                 currentUserService,
                 extensionProperties,
-                loginVerificationService
+                loginVerificationService,
+                mock(SelfMediaLoginObservationService.class)
         );
     }
 
@@ -160,6 +163,85 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
+    void legacyPassiveLoginRequiredPreservesExistingLoggedInBinding() {
+        BrowserEnvironmentAccount row = binding(null, "三和口腔", BrowserEnvironmentConstants.LOGIN_LOGGED_IN);
+        LocalDateTime lastVerifiedAt = LocalDateTime.now().minusDays(2);
+        LocalDateTime lastLoginSeenAt = LocalDateTime.now().minusDays(2);
+        row.setLastVerifiedAt(lastVerifiedAt);
+        row.setLastLoginSeenAt(lastLoginSeenAt);
+        SelfMediaAccount account = account("三和口腔");
+        when(environmentAccountMapper.selectById(30L)).thenReturn(row);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account);
+
+        service.reportLoginStatusForExtension(30L, new BrowserEnvironmentLoginStatusRequest(
+                "geo_b", 10L, "toutiao", null, null,
+                BrowserEnvironmentConstants.LOGIN_REQUIRED, "IDENTITY_UNREADABLE", "selector miss"), 99L);
+
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, row.getLoginStatus());
+        assertEquals(lastVerifiedAt, row.getLastVerifiedAt());
+        assertEquals(lastLoginSeenAt, row.getLastLoginSeenAt());
+        assertEquals("PASSIVE_LOGIN_UNCONFIRMED", row.getLastErrorCode());
+        assertTrue(row.getLastErrorMessage().contains("已保留原登录状态"));
+        verify(environmentAccountMapper).updateById(row);
+        verify(environmentAccountMapper).updateNullableLoginErrors(
+                30L, "PASSIVE_LOGIN_UNCONFIRMED", row.getLastErrorMessage());
+        verify(loginVerificationService, never()).recordTrustedPassiveHealthReport(any(), any(), any());
+    }
+
+    @Test
+    void verificationTaskExplicitLoginPageCanDowngradeBinding() {
+        BrowserEnvironmentAccount row = binding(null, "三和口腔", BrowserEnvironmentConstants.LOGIN_LOGGED_IN);
+        when(environmentAccountMapper.selectById(30L)).thenReturn(row);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("三和口腔"));
+
+        service.reportLoginStatusForExtension(30L, new BrowserEnvironmentLoginStatusRequest(
+                "geo_b", 10L, "toutiao", null, null,
+                BrowserEnvironmentConstants.LOGIN_REQUIRED, "LOGIN_PAGE_CONFIRMED", "平台明确要求登录",
+                88L, false, "verification_task", "https://sso.toutiao.com/login", "0.2.5", "1"), 99L);
+
+        assertEquals(BrowserEnvironmentConstants.LOGIN_REQUIRED, row.getLoginStatus());
+        assertEquals("LOGIN_PAGE_CONFIRMED", row.getLastErrorCode());
+        verify(loginVerificationService, never()).recordTrustedPassiveHealthReport(any(), any(), any());
+        verify(loginVerificationService).completeFromLoginReport(eq(88L), eq(row), any(), any(),
+                eq(BrowserEnvironmentConstants.LOGIN_REQUIRED));
+    }
+
+    @Test
+    void clientClaimedAuthorityWithoutVerifiedLoginPageCannotDowngradeBinding() {
+        BrowserEnvironmentAccount row = binding(null, "三和口腔", BrowserEnvironmentConstants.LOGIN_LOGGED_IN);
+        when(environmentAccountMapper.selectById(30L)).thenReturn(row);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("三和口腔"));
+
+        service.reportLoginStatusForExtension(30L, new BrowserEnvironmentLoginStatusRequest(
+                "geo_b", 10L, "toutiao", null, null,
+                BrowserEnvironmentConstants.LOGIN_REQUIRED, "LOGIN_PAGE_CONFIRMED", "客户端声称已退出",
+                88L, true, "verification_task", "https://mp.toutiao.com/profile_v4/index",
+                "0.2.5", "1"), 99L);
+
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, row.getLoginStatus());
+        assertEquals("PASSIVE_LOGIN_UNCONFIRMED", row.getLastErrorCode());
+        verify(loginVerificationService).completeFromLoginReport(eq(88L), eq(row), any(), any(),
+                eq(BrowserEnvironmentConstants.LOGIN_REQUIRED));
+    }
+
+    @Test
+    void publishTaskLoginFailureUpdatesBindingAndHealthFact() {
+        BrowserEnvironmentAccount row = binding(null, "三和口腔", BrowserEnvironmentConstants.LOGIN_LOGGED_IN);
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L)).thenReturn(row);
+
+        service.recordPublishTaskLoginFailure(10L, "ACCOUNT_MISMATCH", "当前登录账号不一致");
+
+        assertEquals(BrowserEnvironmentConstants.LOGIN_MISMATCH, row.getLoginStatus());
+        assertEquals("ACCOUNT_MISMATCH", row.getLastErrorCode());
+        assertEquals("当前登录账号不一致", row.getLastErrorMessage());
+        verify(environmentAccountMapper).updateById(row);
+        verify(loginVerificationService).recordPublishTaskLoginFailure(10L, "当前登录账号不一致");
+    }
+
+    @Test
     void reportLoginStatusByBrandAndPlatformUsesSelfMediaAccountIdWhenProvided() {
         BrowserEnvironmentAccount row = binding(null, "jnhbdxh", BrowserEnvironmentConstants.LOGIN_UNKNOWN, "zhihu");
         when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L)).thenReturn(row);
@@ -180,6 +262,53 @@ class BrowserEnvironmentServiceTest {
         ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
         verify(environmentAccountMapper).updateById(captor.capture());
         assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, captor.getValue().getLoginStatus());
+    }
+
+    @Test
+    void reportLoginStatusByBrandAndPlatformUsesEnvironmentKeyBeforeBrandWideIdentityMatching() {
+        BrowserEnvironmentAccount target = binding(null, "jnhbdxh", BrowserEnvironmentConstants.LOGIN_UNKNOWN, "zhihu");
+        when(environmentAccountMapper.selectActiveByEnvironmentKeyAndPlatform("geo_b", "zhihu"))
+                .thenReturn(List.of(target));
+        when(environmentAccountMapper.selectById(30L)).thenReturn(target);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("jnhbdxh", "zhihu"));
+
+        service.reportLoginStatusForExtensionByBrandAndPlatform(1L,
+                new com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest(
+                        null,
+                        "zhihu",
+                        null,
+                        "jnhbdxh",
+                        BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                        null,
+                        null,
+                        null,
+                        "geo_b"
+                ), 99L);
+
+        verify(environmentAccountMapper, never()).selectAllActiveByBrandIdAndPlatform(any(), any());
+        verify(environmentAccountMapper).updateById(target);
+    }
+
+    @Test
+    void expiredActiveVerificationFallsBackToTrustedPassiveSuccess() {
+        BrowserEnvironmentAccount row = binding(null, "三和口腔", BrowserEnvironmentConstants.LOGIN_UNKNOWN);
+        SelfMediaAccount account = account("三和口腔");
+        BrowserEnvironmentLoginStatusRequest request = new BrowserEnvironmentLoginStatusRequest(
+                "geo_b", 10L, "toutiao", null, "三和口腔",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN, null, null, 88L);
+        when(environmentAccountMapper.selectById(30L)).thenReturn(row);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account);
+        when(loginVerificationService.completeFromLoginReport(
+                88L, row, account, request, BrowserEnvironmentConstants.LOGIN_LOGGED_IN)).thenReturn(false);
+
+        service.reportLoginStatusForExtension(30L, request, 99L);
+
+        ArgumentCaptor<BrowserEnvironmentLoginStatusRequest> passiveRequest =
+                ArgumentCaptor.forClass(BrowserEnvironmentLoginStatusRequest.class);
+        verify(loginVerificationService).recordTrustedPassiveHealthReport(eq(row), eq(account), passiveRequest.capture());
+        assertNull(passiveRequest.getValue().loginVerificationId());
     }
 
     @Test
@@ -277,15 +406,15 @@ class BrowserEnvironmentServiceTest {
 
     @Test
     void reportLoginStatus_mismatchCanRecoverToLoggedInWhenIdentityMatchesExpected() {
-        when(environmentAccountMapper.selectById(30L)).thenReturn(binding("expected", "name", BrowserEnvironmentConstants.LOGIN_MISMATCH));
+        when(environmentAccountMapper.selectById(30L)).thenReturn(binding("random-system-id", "name", BrowserEnvironmentConstants.LOGIN_MISMATCH));
         when(environmentMapper.selectById(20L)).thenReturn(environment());
-        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("name", "toutiao", "another-random-system-id"));
 
         service.reportLoginStatus(30L, new BrowserEnvironmentLoginStatusRequest(
                 "geo_b",
                 10L,
                 "toutiao",
-                "expected",
+                "real-platform-id",
                 "name",
                 BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
                 null,
@@ -295,6 +424,8 @@ class BrowserEnvironmentServiceTest {
         ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
         verify(environmentAccountMapper).updateById(captor.capture());
         assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, captor.getValue().getLoginStatus());
+        assertNull(captor.getValue().getLastErrorCode());
+        assertNull(captor.getValue().getLastErrorMessage());
     }
 
     @Test
@@ -463,6 +594,19 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
+    void validateForTaskCreation_strictModeTreatsMissingLegacyStatusAsUnknown() {
+        BrowserEnvironmentAccount binding = binding(null, "三合星链-小编",
+                BrowserEnvironmentConstants.LOGIN_UNKNOWN);
+        binding.setLoginStatus(null);
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L)).thenReturn(binding);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+
+        BrowserEnvironmentAccount response = service.validateForTaskCreation(account("三合星链-小编"));
+
+        assertSame(binding, response);
+    }
+
+    @Test
     void validateForTaskCreation_relaxedModeAllowsUnknownLoginStatus() {
         when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
                 .thenReturn(binding(null, "三合星链-小编", BrowserEnvironmentConstants.LOGIN_UNKNOWN));
@@ -474,14 +618,16 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
-    void validateForTaskCreation_strictModeAllowsMismatchLoginStatus() {
+    void validateForTaskCreation_strictModeRejectsMismatchLoginStatus() {
         when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
                 .thenReturn(binding(null, "三合星链-小编", BrowserEnvironmentConstants.LOGIN_MISMATCH));
         when(environmentMapper.selectById(20L)).thenReturn(environment());
 
-        BrowserEnvironmentAccount response = service.validateForTaskCreation(account("三合星链-小编"));
+        BizException ex = assertThrows(BizException.class,
+                () -> service.validateForTaskCreation(account("三合星链-小编")));
 
-        assertEquals(BrowserEnvironmentConstants.LOGIN_MISMATCH, response.getLoginStatus());
+        assertEquals(BrowserEnvironmentConstants.ERR_ENVIRONMENT_ACCOUNT_MISMATCH,
+                ((java.util.Map<?, ?>) ex.getData()).get("code"));
     }
 
     @Test
@@ -493,6 +639,46 @@ class BrowserEnvironmentServiceTest {
         BrowserEnvironmentAccount response = service.validateForTaskCreation(account("三合星链-小编"), false);
 
         assertEquals(BrowserEnvironmentConstants.LOGIN_MISMATCH, response.getLoginStatus());
+    }
+
+    @Test
+    void validateForTaskCreation_strictModeRejectsOtherExplicitLoginFailures() {
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        java.util.Map<String, String> expectedCodes = java.util.Map.of(
+                BrowserEnvironmentConstants.LOGIN_REQUIRED,
+                BrowserEnvironmentConstants.ERR_ENVIRONMENT_LOGIN_REQUIRED,
+                BrowserEnvironmentConstants.LOGIN_EXPIRED,
+                BrowserEnvironmentConstants.ERR_ENVIRONMENT_LOGIN_EXPIRED,
+                BrowserEnvironmentConstants.LOGIN_ERROR,
+                BrowserEnvironmentConstants.ERR_ENVIRONMENT_LOGIN_ERROR
+        );
+        for (var entry : expectedCodes.entrySet()) {
+            when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                    .thenReturn(binding(null, "三合星链-小编", entry.getKey()));
+
+            BizException ex = assertThrows(BizException.class,
+                    () -> service.validateForTaskCreation(account("三合星链-小编")));
+
+            assertEquals(entry.getValue(), ((java.util.Map<?, ?>) ex.getData()).get("code"));
+        }
+    }
+
+    @Test
+    void validateForTaskCreation_relaxedModeAllowsAllExplicitLoginFailuresForScheduling() {
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        for (String status : List.of(
+                BrowserEnvironmentConstants.LOGIN_REQUIRED,
+                BrowserEnvironmentConstants.LOGIN_EXPIRED,
+                BrowserEnvironmentConstants.LOGIN_MISMATCH,
+                BrowserEnvironmentConstants.LOGIN_ERROR)) {
+            when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                    .thenReturn(binding(null, "三合星链-小编", status));
+
+            BrowserEnvironmentAccount response =
+                    service.validateForTaskCreation(account("三合星链-小编"), false);
+
+            assertEquals(status, response.getLoginStatus());
+        }
     }
 
     @Test
@@ -696,6 +882,55 @@ class BrowserEnvironmentServiceTest {
         verify(environmentMapper).restoreDeletedById(20L);
         verify(environmentMapper).updateById(existing);
         verify(environmentMapper, times(0)).insert(any(BrowserEnvironment.class));
+    }
+
+    @Test
+    void createEnvironmentUpdatesExistingBrandEnvironmentInsteadOfCreatingSecondEnvironment() {
+        BrowserEnvironment existing = environment();
+        BrowserEnvironmentAccount binding = binding(null, "现有账号", BrowserEnvironmentConstants.LOGIN_LOGGED_IN);
+        when(environmentMapper.selectActiveByBrandId(1L)).thenReturn(existing);
+        when(environmentAccountMapper.selectList(any())).thenReturn(List.of(binding));
+
+        var response = service.createEnvironment(new BrowserEnvironmentCreateRequest(
+                1L,
+                BrowserEnvironmentConstants.PROVIDER_ADSPOWER,
+                "geo_new",
+                "profile-new",
+                "新环境名称",
+                null
+        ));
+
+        assertEquals(20L, response.id());
+        assertEquals("geo_new", existing.getEnvironmentKey());
+        assertEquals("profile-new", existing.getProviderProfileId());
+        assertEquals("新环境名称", existing.getName());
+        verify(environmentMapper).updateById(existing);
+        verify(environmentMapper, never()).insert(any(BrowserEnvironment.class));
+        verify(environmentMapper, never()).selectOldestByIdentityIncludingDeleted(any(), any(), any(), any());
+        verify(environmentAccountMapper).update(eq(null), any());
+        verify(loginVerificationService).invalidateAccountHealth(
+                eq(10L),
+                eq(SelfMediaLoginVerificationService.METHOD_BINDING_INVALIDATED),
+                any());
+    }
+
+    @Test
+    void createEnvironmentKeepsLoginFactsWhenRuntimeIdentityIsUnchanged() {
+        BrowserEnvironment existing = environment();
+        when(environmentMapper.selectActiveByBrandId(1L)).thenReturn(existing);
+
+        service.createEnvironment(new BrowserEnvironmentCreateRequest(
+                1L,
+                BrowserEnvironmentConstants.PROVIDER_ADSPOWER,
+                existing.getEnvironmentKey(),
+                existing.getProviderProfileId(),
+                "仅修改显示名称",
+                null
+        ));
+
+        verify(environmentMapper).updateById(existing);
+        verify(environmentAccountMapper, never()).selectList(any());
+        verify(loginVerificationService, never()).invalidateAccountHealth(any(), any(), any());
     }
 
     @Test

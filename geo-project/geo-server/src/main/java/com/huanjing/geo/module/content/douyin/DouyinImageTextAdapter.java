@@ -26,7 +26,6 @@ import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -34,7 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 @Slf4j
-@Service
+@Deprecated(forRemoval = false)
 @RequiredArgsConstructor
 public class DouyinImageTextAdapter implements AutoSelfMediaAdapter {
     public static final String PLATFORM = "douyin";

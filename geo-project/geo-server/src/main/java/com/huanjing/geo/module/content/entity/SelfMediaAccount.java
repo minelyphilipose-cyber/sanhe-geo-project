@@ -37,6 +37,7 @@ public class SelfMediaAccount {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String lastAuthError;
     private LocalDateTime lastLoginVerifiedAt;
+    private LocalDateTime lastLoginVerificationCheckedAt;
     private String lastLoginVerificationResult;
     private String lastLoginVerificationMethod;
     private String lastLoginVerificationWarning;

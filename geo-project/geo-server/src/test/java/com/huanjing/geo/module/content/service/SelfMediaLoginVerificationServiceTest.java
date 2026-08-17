@@ -15,6 +15,7 @@ import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.LocalDateTime;
 
@@ -26,6 +27,7 @@ class SelfMediaLoginVerificationServiceTest {
     private SelfMediaAccountMapper accountMapper;
     private SelfMediaAuthHealthPolicyService policyService;
     private SystemAlertService alertService;
+    private ApplicationEventPublisher eventPublisher;
     private SelfMediaLoginVerificationService service;
 
     @BeforeEach
@@ -34,6 +36,7 @@ class SelfMediaLoginVerificationServiceTest {
         accountMapper = mock(SelfMediaAccountMapper.class);
         policyService = mock(SelfMediaAuthHealthPolicyService.class);
         alertService = mock(SystemAlertService.class);
+        eventPublisher = mock(ApplicationEventPublisher.class);
         service = new SelfMediaLoginVerificationService(
                 verificationMapper,
                 accountMapper,
@@ -42,12 +45,13 @@ class SelfMediaLoginVerificationServiceTest {
                 mock(BrandAccessService.class),
                 mock(CurrentUserService.class),
                 policyService,
-                alertService
+                alertService,
+                eventPublisher
         );
     }
 
     @Test
-    void matchingNameWithDifferentIdSucceedsWithWarning() {
+    void matchingNameWithDifferentIdSucceedsWithoutWarning() {
         SelfMediaLoginVerification verification = verification("三和口腔", "old-id");
         SelfMediaAccount account = account();
         BrowserEnvironmentAccount binding = binding();
@@ -63,17 +67,24 @@ class SelfMediaLoginVerificationServiceTest {
                 BrowserEnvironmentConstants.LOGIN_LOGGED_IN);
 
         assertEquals("succeeded", verification.getStatus());
-        assertEquals("SUCCESS_WITH_ID_WARNING", verification.getResultCode());
+        assertEquals("SUCCESS", verification.getResultCode());
+        assertEquals("登录状态验证成功", verification.getResultMessage());
+        assertEquals("new-id", verification.getActualPlatformAccountId());
         assertEquals("success", account.getLastLoginVerificationResult());
+        assertNull(account.getLastLoginVerificationWarning());
         assertNotNull(account.getLastLoginVerifiedAt());
+        assertEquals(account.getLastLoginVerifiedAt(), account.getLastLoginVerificationCheckedAt());
         assertNotNull(account.getRecommendedReverifyAt());
         verify(alertService).resolveOpenByDedupeKeyPrefix("self_media_auth:10:", null);
     }
 
     @Test
-    void differentNameDoesNotRestoreAccount() {
+    void identityMismatchIsInconclusiveAndPreservesLastTrustedLoginFact() {
         SelfMediaLoginVerification verification = verification("三和口腔", null);
         SelfMediaAccount account = account();
+        LocalDateTime lastSuccess = LocalDateTime.now().minusDays(2);
+        account.setLastLoginVerifiedAt(lastSuccess);
+        account.setLastLoginVerificationResult("success");
         when(verificationMapper.selectById(1L)).thenReturn(verification);
 
         service.completeFromLoginReport(1L, binding(), account,
@@ -81,15 +92,21 @@ class SelfMediaLoginVerificationServiceTest {
                         "其他账号", BrowserEnvironmentConstants.LOGIN_LOGGED_IN, null, null, 1L),
                 BrowserEnvironmentConstants.LOGIN_MISMATCH);
 
-        assertEquals("failed", verification.getStatus());
+        assertEquals("inconclusive", verification.getStatus());
         assertEquals("ACCOUNT_NAME_MISMATCH", verification.getResultCode());
-        assertNull(account.getLastLoginVerifiedAt());
-        verify(accountMapper, never()).updateById(any());
+        assertEquals(lastSuccess, account.getLastLoginVerifiedAt());
+        assertEquals("success", account.getLastLoginVerificationResult());
+        assertEquals(SelfMediaLoginVerificationService.METHOD_SYSTEM_TRIGGERED,
+                account.getLastLoginVerificationMethod());
+        assertNotNull(account.getLastLoginVerificationCheckedAt());
+        assertTrue(account.getLastLoginVerificationWarning().contains("其他账号"));
+        verify(accountMapper).updateById(account);
     }
 
     @Test
     void trustedPassiveReportCreatesHealthFactWithoutCookieCredential() {
         SelfMediaAccount account = account();
+        account.setPlatformAccountId("random-id-saved-by-system");
         account.setLastLoginVerificationWarning("扩展读取到多个账号身份");
         SelfMediaAuthHealthPolicy policy = new SelfMediaAuthHealthPolicy();
         policy.setEnabled(true);
@@ -97,7 +114,7 @@ class SelfMediaLoginVerificationServiceTest {
         when(policyService.findPolicy("toutiao")).thenReturn(policy);
 
         boolean recorded = service.recordTrustedPassiveHealthReport(binding(), account,
-                new BrowserEnvironmentLoginStatusRequest("env-1", 10L, "toutiao", null,
+                new BrowserEnvironmentLoginStatusRequest("env-1", 10L, "toutiao", "actual-platform-id",
                         " 三和口腔 ", BrowserEnvironmentConstants.LOGIN_LOGGED_IN, null, null));
 
         assertTrue(recorded);
@@ -122,14 +139,13 @@ class SelfMediaLoginVerificationServiceTest {
 
         assertFalse(recorded);
         assertNull(account.getLastLoginVerifiedAt());
-        assertEquals(SelfMediaLoginVerificationService.METHOD_EXTENSION_PASSIVE,
-                account.getLastLoginVerificationMethod());
-        assertTrue(account.getLastLoginVerificationWarning().contains("头条/三和口腔"));
-        verify(accountMapper).updateById(account);
+        assertNull(account.getLastLoginVerificationMethod());
+        assertNull(account.getLastLoginVerificationWarning());
+        verify(accountMapper, never()).updateById(any());
     }
 
     @Test
-    void unreadablePassiveIdentityStoresActionableBlocker() {
+    void unreadablePassiveIdentityDoesNotCreateFailedHealthFact() {
         SelfMediaAccount account = account();
 
         boolean recorded = service.recordTrustedPassiveHealthReport(binding(), account,
@@ -137,9 +153,69 @@ class SelfMediaLoginVerificationServiceTest {
                         null, "error", "IDENTITY_UNREADABLE", "selector miss"));
 
         assertFalse(recorded);
+        assertNull(account.getLastLoginVerificationResult());
+        assertNull(account.getLastLoginVerificationCheckedAt());
+        assertNull(account.getLastLoginVerificationWarning());
+        verify(accountMapper, never()).updateById(any());
+    }
+
+    @Test
+    void passiveLoginRequiredPreservesExistingSuccessfulHealthFact() {
+        SelfMediaAccount account = account();
+        LocalDateTime lastSuccess = LocalDateTime.now().minusDays(3);
+        account.setLastLoginVerifiedAt(lastSuccess);
+        account.setLastLoginVerificationResult("success");
+        account.setRecommendedReverifyAt(LocalDateTime.now().plusDays(11));
+
+        boolean recorded = service.recordTrustedPassiveHealthReport(binding(), account,
+                new BrowserEnvironmentLoginStatusRequest("env-1", 10L, "toutiao", null,
+                        null, BrowserEnvironmentConstants.LOGIN_REQUIRED, null, null));
+
+        assertFalse(recorded);
+        assertEquals(lastSuccess, account.getLastLoginVerifiedAt());
+        assertEquals("success", account.getLastLoginVerificationResult());
+        assertNull(account.getLastLoginVerificationCheckedAt());
+        assertNotNull(account.getRecommendedReverifyAt());
+        assertNull(account.getLastLoginVerificationWarning());
+        verify(accountMapper, never()).updateById(any());
+        verify(accountMapper, never()).updateNullableLoginHealthFields(any(), any(), any());
+    }
+
+    @Test
+    void invalidatingOneAccountDoesNotTouchAnyOtherProductionAccount() {
+        service.invalidateAccountHealth(
+                10L,
+                SelfMediaLoginVerificationService.METHOD_BINDING_INVALIDATED,
+                "指纹浏览器环境已解绑"
+        );
+
+        verify(accountMapper).invalidateLoginHealth(
+                eq(10L), any(LocalDateTime.class),
+                eq(SelfMediaLoginVerificationService.METHOD_BINDING_INVALIDATED),
+                eq("指纹浏览器环境已解绑"));
+        verify(accountMapper, never()).selectList(any());
+        verify(alertService).resolveOpenByDedupeKeyPrefix("self_media_auth:10:", null);
+        verify(eventPublisher).publishEvent(any(com.huanjing.geo.module.content.event.SelfMediaAuthHealthChangedEvent.class));
+    }
+
+    @Test
+    void publishTaskLoginFailureBecomesLatestHealthDiagnostic() {
+        SelfMediaAccount account = account();
+        LocalDateTime previousSuccess = LocalDateTime.now().minusDays(2);
+        account.setLastLoginVerifiedAt(previousSuccess);
+        when(accountMapper.selectById(10L)).thenReturn(account);
+
+        service.recordPublishTaskLoginFailure(10L, "平台发布页要求重新登录");
+
+        assertEquals(previousSuccess, account.getLastLoginVerifiedAt());
         assertEquals("failed", account.getLastLoginVerificationResult());
-        assertTrue(account.getLastLoginVerificationWarning().contains("未读取到唯一账号名称"));
-        verify(accountMapper).updateById(account);
+        assertEquals(SelfMediaLoginVerificationService.METHOD_PUBLISH_TASK_FAILURE,
+                account.getLastLoginVerificationMethod());
+        assertEquals("平台发布页要求重新登录", account.getLastLoginVerificationWarning());
+        assertNull(account.getRecommendedReverifyAt());
+        verify(accountMapper).updateNullableLoginHealthFields(
+                eq(10L), eq("平台发布页要求重新登录"), isNull());
+        verify(eventPublisher).publishEvent(any(com.huanjing.geo.module.content.event.SelfMediaAuthHealthChangedEvent.class));
     }
 
     private SelfMediaLoginVerification verification(String name, String id) {

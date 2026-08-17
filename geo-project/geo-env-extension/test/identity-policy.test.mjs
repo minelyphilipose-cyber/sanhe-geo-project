@@ -55,3 +55,30 @@ test('non-toutiao identity also ignores ids when names match', () => {
   assert.equal(result.matched, true)
   assert.equal(result.method, 'accountName')
 })
+
+test('identity requires one unique account name even when one candidate matches', () => {
+  const evaluate = loadPolicy()
+  const result = evaluate({
+    platform: 'douyin',
+    expectedName: '目标账号',
+    expectedId: 'random-system-id',
+    currentNames: ['目标账号', '其他账号'],
+    currentIds: ['actual-platform-id'],
+  })
+
+  assert.equal(result.matched, false)
+  assert.equal(result.code, 'MULTIPLE_IDENTITIES')
+})
+
+test('identity name comparison normalizes unicode case and whitespace', () => {
+  const evaluate = loadPolicy()
+  const result = evaluate({
+    platform: 'zhihu',
+    expectedName: '  ＡＢＣ   账号 ',
+    currentNames: ['abc 账号'],
+    currentIds: ['unrelated-id'],
+  })
+
+  assert.equal(result.matched, true)
+  assert.equal(result.method, 'accountName')
+})

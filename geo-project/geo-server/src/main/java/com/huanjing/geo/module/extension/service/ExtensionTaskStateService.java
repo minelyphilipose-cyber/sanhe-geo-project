@@ -510,7 +510,7 @@ public class ExtensionTaskStateService {
         if (error instanceof Map<?, ?> errorMap) {
             Object code = errorMap.get("code");
             if (code != null && StringUtils.hasText(String.valueOf(code))) {
-                return String.valueOf(code).trim();
+                return SelfMediaPublishFailureCodes.normalize(String.valueOf(code));
             }
         }
         return classifyFailureKind(message);

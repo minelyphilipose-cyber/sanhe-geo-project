@@ -53,6 +53,9 @@ class SelfMediaAccountHealthAlertServiceTest {
     private SelfMediaPlatformScheduleAdapterRouter platformRouter;
     private SystemAlertService systemAlertService;
     private AccountAuthRiskScanBatchMapper scanBatchMapper;
+    private SelfMediaAuthHealthPolicyService authHealthPolicyService;
+    private SelfMediaLoginObservationService loginObservationService;
+    private SelfMediaAuthWorkOrderService authWorkOrderService;
     private SelfMediaAccountHealthAlertService service;
 
     @BeforeAll
@@ -81,20 +84,35 @@ class SelfMediaAccountHealthAlertServiceTest {
                 companyMapper,
                 platformRouter,
                 systemAlertService,
-                policyService(),
+                authHealthPolicyService = policyService(),
                 new SelfMediaAuthRiskEvaluator(),
-                scanBatchMapper
+                scanBatchMapper,
+                loginObservationService = mock(SelfMediaLoginObservationService.class),
+                authWorkOrderService = mock(SelfMediaAuthWorkOrderService.class)
         );
         ReflectionTestUtils.setField(service, "scanLimit", 500);
         ReflectionTestUtils.setField(service, "credentialExpiringDays", 7);
         ReflectionTestUtils.setField(service, "defaultCookieValidDays", 30);
         ReflectionTestUtils.setField(service, "cookiePlatformValidDays", "toutiao:30");
+        ReflectionTestUtils.setField(service, "identityCircuitWindowMinutes", 15);
+        ReflectionTestUtils.setField(service, "identityCircuitMinimumSamples", 10);
+        ReflectionTestUtils.setField(service, "identityCircuitFailureRatioThreshold", 0.6D);
+        ReflectionTestUtils.setField(service, "identityCircuitMinimumAffectedBrands", 3);
+        when(loginObservationService.platformCircuitStatus(any(), any(Integer.class), any(Integer.class),
+                any(Double.class), any(Integer.class))).thenAnswer(invocation ->
+                new SelfMediaLoginObservationService.PlatformCircuitStatus(
+                        invocation.getArgument(0), false, 0, 0, 0, 0D,
+                        LocalDateTime.now().minusMinutes(15), LocalDateTime.now()));
         when(platformRouter.contracts()).thenReturn(List.of(
-                contract("douyin", "抖音图文", SelfMediaPlatformPublishChannel.OFFICIAL_API),
+                contract("wechat_mp", "微信公众号", SelfMediaPlatformPublishChannel.OFFICIAL_API),
+                contract("douyin", "抖音图文", SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION),
                 contract("toutiao", "今日头条", SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION)
         ));
         when(platformRouter.contract("douyin")).thenReturn(Optional.of(
-                contract("douyin", "抖音图文", SelfMediaPlatformPublishChannel.OFFICIAL_API)
+                contract("douyin", "抖音图文", SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION)
+        ));
+        when(platformRouter.contract("wechat_mp")).thenReturn(Optional.of(
+                contract("wechat_mp", "微信公众号", SelfMediaPlatformPublishChannel.OFFICIAL_API)
         ));
         when(platformRouter.contract("toutiao")).thenReturn(Optional.of(
                 contract("toutiao", "今日头条", SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION)
@@ -113,20 +131,38 @@ class SelfMediaAccountHealthAlertServiceTest {
         service.scanOnce();
 
         ArgumentCaptor<Map<String, Object>> contextCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(systemAlertService).createRecipientAlert(
+        verify(systemAlertService).createOrRefreshRecipientAlert(
                 eq("SELF_MEDIA_ACCOUNT_AUTH_HEALTH"),
                 eq("high"),
                 eq("self_media_account_health"),
-                eq("客户「三和医疗」品牌「三和口腔」的抖音图文账号「测试抖音」官方 API 长期授权已过期 1 天，请立即更新账号信息"),
+                eq("客户「三和医疗」品牌「三和口腔」的微信公众号账号「测试公众号」官方 API 长期授权已过期 1 天，请立即更新账号信息"),
                 contextCaptor.capture(),
                 eq(99L),
                 eq(null),
                 eq("self_media_auth:11:OFFICIAL_CREDENTIAL_EXPIRED")
         );
         assertEquals("OFFICIAL_CREDENTIAL_EXPIRED", contextCaptor.getValue().get("issueCode"));
+        verify(authWorkOrderService).reopenResolvedForBrand(eq(10L), any());
         assertEquals("三和医疗", contextCaptor.getValue().get("companyName"));
         assertEquals("三和口腔", contextCaptor.getValue().get("brandName"));
-        assertEquals("/admin/brands/10?tab=self-media&accountId=11", contextCaptor.getValue().get("route"));
+        assertEquals("/admin/monitoring/account-auth-health?brandId=10", contextCaptor.getValue().get("route"));
+    }
+
+    @Test
+    void disabledOfficialAccountResolvesExistingAlertsWithoutReopeningWorkOrder() {
+        SelfMediaAccount account = officialAccount();
+        account.setStatus("disabled");
+        account.setRefreshTokenExpiresAt(LocalDateTime.now().minusDays(1));
+        when(accountMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(account));
+        when(brandMapper.selectBatchIds(List.of(10L))).thenReturn(List.of(brand()));
+        when(companyMapper.selectBatchIds(List.of(20L))).thenReturn(List.of(company(99L)));
+
+        service.scanOnce();
+
+        verify(systemAlertService).resolveOpenByDedupeKeyPrefix("self_media_auth:11:", null);
+        verify(systemAlertService, never()).createOrRefreshRecipientAlert(
+                any(), any(), any(), any(), any(), any(), any(), any());
+        verify(authWorkOrderService, never()).reopenResolvedForBrand(any(), any());
     }
 
     @Test
@@ -141,7 +177,7 @@ class SelfMediaAccountHealthAlertServiceTest {
 
         service.scanOnce();
 
-        verify(systemAlertService).createRecipientAlert(
+        verify(systemAlertService).createOrRefreshRecipientAlert(
                 eq("SELF_MEDIA_ACCOUNT_AUTH_HEALTH"),
                 eq("warn"),
                 eq("self_media_account_health"),
@@ -151,6 +187,7 @@ class SelfMediaAccountHealthAlertServiceTest {
                 eq(null),
                 eq("self_media_auth:12:ACCOUNT_REVERIFY_OVERDUE")
         );
+        verify(authWorkOrderService, never()).reopenResolvedForBrand(any(), any());
     }
 
     @Test
@@ -166,7 +203,7 @@ class SelfMediaAccountHealthAlertServiceTest {
         service.scanOnce();
 
         ArgumentCaptor<Map<String, Object>> contextCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(systemAlertService).createRecipientAlert(
+        verify(systemAlertService).createOrRefreshRecipientAlert(
                 eq("SELF_MEDIA_ACCOUNT_AUTH_HEALTH"),
                 eq("warn"),
                 eq("self_media_account_health"),
@@ -205,8 +242,154 @@ class SelfMediaAccountHealthAlertServiceTest {
         service.scanOnce();
 
         verify(systemAlertService).resolveOpenByDedupeKeyPrefix("self_media_auth:12:", null);
-        verify(systemAlertService, never()).createRecipientAlert(
+        verify(systemAlertService, never()).createOrRefreshRecipientAlert(
                 any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void disabledAlertSwitchKeepsRiskCalculationButDoesNotCreateAlert() {
+        SelfMediaAccount account = cookieAccount();
+        SelfMediaAuthHealthPolicy policy = new SelfMediaAuthHealthPolicy();
+        policy.setPlatformCode("toutiao");
+        policy.setEnabled(true);
+        policy.setAlertEnabled(false);
+        policy.setReverifyIntervalDays(30);
+        policy.setWarningDays(7);
+        when(authHealthPolicyService.findPolicy("toutiao")).thenReturn(policy);
+        when(accountMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(account));
+        when(brandMapper.selectBatchIds(List.of(10L))).thenReturn(List.of(brand()));
+        when(companyMapper.selectBatchIds(List.of(20L))).thenReturn(List.of(company(99L)));
+
+        service.scanOnce();
+
+        verify(accountMapper).updateNullableRecommendedReverifyAt(eq(12L), eq(null));
+        verify(systemAlertService).resolveOpenByDedupeKeyPrefix("self_media_auth:12:", null);
+        verify(systemAlertService, never()).createOrRefreshRecipientAlert(
+                any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void douyinFingerprintAccountDoesNotRequireOAuthTokens() {
+        SelfMediaAccount account = cookieAccount();
+        account.setPlatform("douyin");
+        account.setAccountName("测试抖音");
+        account.setLastLoginVerifiedAt(LocalDateTime.now().minusDays(1));
+        when(accountMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(account));
+        when(brandMapper.selectBatchIds(List.of(10L))).thenReturn(List.of(brand()));
+        when(companyMapper.selectBatchIds(List.of(20L))).thenReturn(List.of(company(99L)));
+
+        service.scanOnce();
+
+        verify(systemAlertService).resolveOpenByDedupeKeyPrefix("self_media_auth:12:", null);
+        verify(systemAlertService, never()).createOrRefreshRecipientAlert(
+                any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void latestFailedLoginCheckCreatesHighAlertDespiteHistoricalSuccess() {
+        SelfMediaAccount account = cookieAccount();
+        account.setRecommendedReverifyAt(LocalDateTime.now().plusDays(13));
+        account.setLastLoginVerifiedAt(LocalDateTime.now().minusDays(1));
+        account.setLastLoginVerificationCheckedAt(LocalDateTime.now().minusMinutes(5));
+        account.setLastLoginVerificationResult("failed");
+        account.setLastLoginVerificationMethod(SelfMediaLoginVerificationService.METHOD_SYSTEM_TRIGGERED);
+        account.setLastLoginVerificationWarning("平台身份页未确认登录");
+        SelfMediaCookieCredential credential = credential(account.getId());
+        credential.setCapturedAt(LocalDateTime.now().minusDays(1));
+        when(accountMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(account));
+        when(credentialMapper.selectActiveMetaByAccountIds(List.of(12L))).thenReturn(List.of(credential));
+        when(brandMapper.selectBatchIds(List.of(10L))).thenReturn(List.of(brand()));
+        when(companyMapper.selectBatchIds(List.of(20L))).thenReturn(List.of(company(99L)));
+
+        service.scanOnce();
+
+        verify(systemAlertService).createOrRefreshRecipientAlert(
+                eq("SELF_MEDIA_ACCOUNT_AUTH_HEALTH"),
+                eq("high"),
+                eq("self_media_account_health"),
+                eq("客户「三和医疗」品牌「三和口腔」的今日头条账号「测试头条」平台身份页未确认登录；请由运营人员进入账号环境完成登录处理，需要扫码或凭据时再联系客户配合"),
+                any(),
+                eq(99L),
+                eq(null),
+                eq("self_media_auth:12:ACCOUNT_LOGIN_VERIFICATION_FAILED")
+        );
+        verify(accountMapper).updateNullableRecommendedReverifyAt(eq(12L), eq(null));
+        verify(authWorkOrderService).reopenResolvedForBrand(eq(10L), any());
+    }
+
+    @Test
+    void refreshAccountAlertCreatesFailureAlertWithoutWaitingForBatchScan() {
+        SelfMediaAccount account = cookieAccount();
+        account.setLastLoginVerificationCheckedAt(LocalDateTime.now());
+        account.setLastLoginVerificationResult("failed");
+        account.setLastLoginVerificationWarning("当前平台尚未完成登录");
+        when(accountMapper.selectById(12L)).thenReturn(account);
+        when(brandMapper.selectBatchIds(List.of(10L))).thenReturn(List.of(brand()));
+        when(companyMapper.selectBatchIds(List.of(20L))).thenReturn(List.of(company(99L)));
+
+        service.refreshAccountAlert(12L);
+
+        verify(systemAlertService).createOrRefreshRecipientAlert(
+                eq("SELF_MEDIA_ACCOUNT_AUTH_HEALTH"),
+                eq("high"),
+                eq("self_media_account_health"),
+                eq("客户「三和医疗」品牌「三和口腔」的今日头条账号「测试头条」当前平台尚未完成登录；请由运营人员进入账号环境完成登录处理，需要扫码或凭据时再联系客户配合"),
+                any(), eq(99L), eq(null),
+                eq("self_media_auth:12:ACCOUNT_LOGIN_VERIFICATION_FAILED")
+        );
+        verify(scanBatchMapper, never()).insert(any());
+    }
+
+    @Test
+    void scanUsesConfiguredPolicyRoleWhenBrandHasNoAssignedRecipient() {
+        SelfMediaAccount account = cookieAccount();
+        SelfMediaAuthHealthPolicy policy = new SelfMediaAuthHealthPolicy();
+        policy.setPlatformCode("toutiao");
+        policy.setEnabled(true);
+        policy.setAlertEnabled(true);
+        policy.setReverifyIntervalDays(30);
+        policy.setWarningDays(7);
+        policy.setDefaultRecipientRole("manager");
+        when(authHealthPolicyService.findPolicy("toutiao")).thenReturn(policy);
+        when(accountMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(account));
+        when(brandMapper.selectBatchIds(List.of(10L))).thenReturn(List.of(brand()));
+        when(companyMapper.selectBatchIds(List.of(20L))).thenReturn(List.of(company(null)));
+
+        service.scanOnce();
+
+        verify(systemAlertService).createOrRefreshRecipientAlert(
+                eq("SELF_MEDIA_ACCOUNT_AUTH_HEALTH"),
+                eq("warn"),
+                eq("self_media_account_health"),
+                any(), any(), eq(null), eq("manager"),
+                eq("self_media_auth:12:COOKIE_CREDENTIAL_MISSING")
+        );
+    }
+
+    @Test
+    void scanKeepsConcreteOwnerAheadOfConfiguredPolicyRole() {
+        SelfMediaAccount account = cookieAccount();
+        SelfMediaAuthHealthPolicy policy = new SelfMediaAuthHealthPolicy();
+        policy.setPlatformCode("toutiao");
+        policy.setEnabled(true);
+        policy.setAlertEnabled(true);
+        policy.setReverifyIntervalDays(30);
+        policy.setWarningDays(7);
+        policy.setDefaultRecipientRole("manager");
+        when(authHealthPolicyService.findPolicy("toutiao")).thenReturn(policy);
+        when(accountMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(account));
+        when(brandMapper.selectBatchIds(List.of(10L))).thenReturn(List.of(brand()));
+        when(companyMapper.selectBatchIds(List.of(20L))).thenReturn(List.of(company(99L)));
+
+        service.scanOnce();
+
+        verify(systemAlertService).createOrRefreshRecipientAlert(
+                eq("SELF_MEDIA_ACCOUNT_AUTH_HEALTH"),
+                eq("warn"),
+                eq("self_media_account_health"),
+                any(), any(), eq(99L), eq(null),
+                eq("self_media_auth:12:COOKIE_CREDENTIAL_MISSING")
+        );
     }
 
     @Test
@@ -239,9 +422,9 @@ class SelfMediaAccountHealthAlertServiceTest {
         when(accountMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(first, second));
         when(brandMapper.selectBatchIds(List.of(10L))).thenReturn(List.of(brand()));
         when(companyMapper.selectBatchIds(List.of(20L))).thenReturn(List.of(company(99L)));
-        when(platformRouter.contract("douyin"))
+        when(platformRouter.contract("wechat_mp"))
                 .thenThrow(new RuntimeException("single account failure"))
-                .thenReturn(Optional.of(contract("douyin", "抖音图文", SelfMediaPlatformPublishChannel.OFFICIAL_API)));
+                .thenReturn(Optional.of(contract("wechat_mp", "微信公众号", SelfMediaPlatformPublishChannel.OFFICIAL_API)));
 
         assertEquals(1, service.scanOnce());
 
@@ -258,9 +441,9 @@ class SelfMediaAccountHealthAlertServiceTest {
         SelfMediaAccount account = new SelfMediaAccount();
         account.setId(11L);
         account.setBrandId(10L);
-        account.setPlatform("douyin");
-        account.setAccountName("测试抖音");
-        account.setPlatformAccountId("douyin-open-id");
+        account.setPlatform("wechat_mp");
+        account.setAccountName("测试公众号");
+        account.setPlatformAccountId("wechat-app-id");
         account.setStatus("active");
         account.setRefreshTokenCipher("cipher");
         return account;
@@ -290,6 +473,7 @@ class SelfMediaAccountHealthAlertServiceTest {
         SelfMediaAuthHealthPolicy policy = new SelfMediaAuthHealthPolicy();
         policy.setPlatformCode("toutiao");
         policy.setEnabled(true);
+        policy.setAlertEnabled(true);
         policy.setReverifyIntervalDays(30);
         policy.setWarningDays(7);
         policy.setCredentialReferenceDays(30);

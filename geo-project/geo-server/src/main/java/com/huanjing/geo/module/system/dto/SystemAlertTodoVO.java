@@ -15,5 +15,12 @@ public class SystemAlertTodoVO {
     private Boolean isResolved;
     private LocalDateTime resolvedAt;
     private LocalDateTime readAt;
+    private LocalDateTime snoozedUntil;
+    private Long claimedBy;
+    private LocalDateTime claimedAt;
+    private String operationNote;
+    private Integer occurrenceCount;
+    private LocalDateTime lastOccurredAt;
+    private Boolean autoResolveOnly;
     private LocalDateTime createdAt;
 }

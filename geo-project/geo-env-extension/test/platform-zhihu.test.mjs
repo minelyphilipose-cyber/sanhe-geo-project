@@ -143,3 +143,102 @@ test('does not treat unrelated page text as the Zhihu publish-success modal', ()
 
   assert.equal(platform.detectPublishSuccessModal({ isVisibleElement: () => true }), null)
 })
+
+test('waits for a delayed Zhihu publish confirmation and clicks it once', async () => {
+  let now = 0
+  let polls = 0
+  let confirmClicks = 0
+  const initialButton = { id: 'initial' }
+  const confirmButton = { id: 'confirm' }
+  const document = {
+    body: { innerText: '发布设置' },
+  }
+  const platform = loadPlatform({
+    document,
+    Date: { now: () => now },
+  })
+  const adapter = platform.createDomAdapter({
+    delay: async (ms) => { now += ms },
+    waitForCondition: async (predicate) => predicate(),
+    normalizeText: (value) => String(value || '').replace(/\s+/g, ''),
+    collectVisibleActionElements: () => {
+      polls += 1
+      return polls < 3
+        ? [{ el: initialButton, text: '发布', rect: { top: 900, left: 800 }, disabled: false }]
+        : [
+            { el: initialButton, text: '发布', rect: { top: 900, left: 800 }, disabled: false },
+            { el: confirmButton, text: '确认发布', rect: { top: 500, left: 600 }, disabled: false },
+          ]
+    },
+    findVisibleTextElement: () => null,
+    clickTrustedActionOnce: async (button) => {
+      assert.equal(button, confirmButton)
+      confirmClicks += 1
+    },
+    readIdentity: () => ({ accountIds: [], accountNames: [], profileUrls: [], diagnostics: '' }),
+    describeLastTrustedClick: () => '-',
+  })
+
+  const outcome = await adapter.waitForPublishAttemptOutcome('zhihu', {}, initialButton)
+
+  assert.equal(confirmClicks, 1)
+  assert.equal(outcome.unconfirmed, true)
+  assert.equal(outcome.confirmClicked, true)
+})
+
+test('accepts a reused publish button when Zhihu changes it to confirmation text', () => {
+  const reusedButton = { id: 'reused' }
+  const platform = loadPlatform()
+  const adapter = platform.createDomAdapter({
+    collectVisibleActionElements: () => [
+      { el: reusedButton, text: '确认发布', rect: { top: 500, left: 600 }, disabled: false },
+    ],
+  })
+
+  assert.equal(adapter.findPublishConfirmButton(reusedButton), reusedButton)
+})
+
+test('retries the primary publish action only when no confirmation was submitted', async () => {
+  let now = 0
+  let publishClicks = 0
+  const publishButton = {
+    textContent: '发布',
+    isConnected: true,
+    closest: () => null,
+    scrollIntoView: () => {},
+  }
+  publishButton.closest = () => publishButton
+  const document = {
+    body: { innerText: '发布设置', scrollHeight: 1200 },
+    documentElement: {},
+    querySelectorAll: () => [],
+    querySelector: () => null,
+  }
+  const platform = loadPlatform({
+    document,
+    window: { scrollTo: () => {} },
+    Date: { now: () => now },
+  })
+  const adapter = platform.createDomAdapter({
+    delay: async (ms) => { now += ms },
+    waitForCondition: async (predicate) => predicate(),
+    normalizeText: (value) => String(value || '').replace(/\s+/g, ''),
+    collectVisibleActionElements: () => [
+      { el: publishButton, text: '发布', rect: { top: 900, left: 800 }, disabled: false },
+    ],
+    findVisibleTextElement: () => null,
+    clickTrustedActionOnce: async (button) => {
+      assert.equal(button, publishButton)
+      publishClicks += 1
+    },
+    readIdentity: () => ({ accountIds: [], accountNames: [], profileUrls: [], diagnostics: '' }),
+    describeLastTrustedClick: () => '-',
+    describeSettings: () => 'test',
+  })
+
+  await assert.rejects(
+    adapter.publishArticle('zhihu', {}),
+    /知乎发布后未检测到完成状态/,
+  )
+  assert.equal(publishClicks, 3)
+})

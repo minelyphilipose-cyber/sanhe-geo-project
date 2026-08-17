@@ -54,7 +54,7 @@ public class SelfMediaRuntimeReadinessService {
             if (extension.getLastSeenAt() == null || extension.getLastSeenAt().isBefore(extensionFreshAfter)) {
                 blockedReasons.add(EXTENSION_STALE);
             }
-            if (!"verified".equalsIgnoreCase(extension.getLoginStatus())) {
+            if (!isLoginVerified(extension.getLoginStatus())) {
                 blockedReasons.add(ACCOUNT_NOT_VERIFIED);
             }
             if (versionBelow(
@@ -98,6 +98,10 @@ public class SelfMediaRuntimeReadinessService {
             return RuntimeReadinessResult.ready(extensionId, helperId);
         }
         return RuntimeReadinessResult.blocked(blockedReasons, extensionId, helperId, properties.getGate().getRetryAfterSeconds());
+    }
+
+    private boolean isLoginVerified(String loginStatus) {
+        return "logged_in".equalsIgnoreCase(loginStatus) || "verified".equalsIgnoreCase(loginStatus);
     }
 
     private ExtensionRuntimeStatus latestExtension(RuntimeReadinessQuery query) {

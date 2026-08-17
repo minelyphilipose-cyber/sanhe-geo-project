@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.2.3'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.2.5'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -3231,9 +3231,8 @@ function douyinEditorSelectors() {
 }
 
 function verifyExpectedPlatformIdentity(payload, platform) {
-  const expectedName = normalizeAccountName(payload.expectedAccountName)
+  const expectedName = String(payload.expectedAccountName || '').trim()
   const expectedId = normalizeAccountId(payload.expectedPlatformAccountId)
-  if (!expectedName && !expectedId) return { method: 'skipped', message: '' }
 
   const identity = readPlatformIdentity(platform)
   if (!identity.implemented) {
@@ -3255,9 +3254,7 @@ function verifyExpectedPlatformIdentity(payload, platform) {
   }
   return {
     method: decision.method,
-    message: decision.method === 'platformAccountId'
-      ? `账号校验通过(ID=${payload.expectedPlatformAccountId})`
-      : `账号校验通过(名称=${payload.expectedAccountName})`,
+    message: `账号校验通过(名称=${payload.expectedAccountName})`,
     currentAccountIds: identity.accountIds,
     currentAccountNames: identity.accountNames,
   }

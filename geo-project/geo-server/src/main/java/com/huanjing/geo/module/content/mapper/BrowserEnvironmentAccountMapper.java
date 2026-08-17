@@ -36,6 +36,28 @@ public interface BrowserEnvironmentAccountMapper extends BaseMapper<BrowserEnvir
                                   @Param("errorCode") String errorCode,
                                   @Param("errorMessage") String errorMessage);
 
+    @Update("""
+            UPDATE browser_environment_account
+            SET platform = #{platform},
+                expected_account_name = #{expectedAccountName},
+                expected_platform_account_id = NULL,
+                login_status = 'unknown',
+                last_verified_at = NULL,
+                last_login_seen_at = NULL,
+                last_error_code = NULL,
+                last_error_message = NULL,
+                updated_by = #{updatedBy},
+                updated_at = #{updatedAt}
+            WHERE self_media_account_id = #{selfMediaAccountId}
+              AND deleted_at IS NULL
+            """)
+    int invalidateActiveBindingAfterAccountIdentityChange(
+            @Param("selfMediaAccountId") Long selfMediaAccountId,
+            @Param("platform") String platform,
+            @Param("expectedAccountName") String expectedAccountName,
+            @Param("updatedBy") Long updatedBy,
+            @Param("updatedAt") java.time.LocalDateTime updatedAt);
+
     @Select("""
             SELECT bea.*
             FROM browser_environment_account bea

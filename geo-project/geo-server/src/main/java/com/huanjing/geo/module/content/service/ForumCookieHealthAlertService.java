@@ -50,6 +50,15 @@ public class ForumCookieHealthAlertService {
 
     public int scanOnce() {
         AccountAuthRiskScanBatch batch = startBatch();
+        try {
+            return scanOnce(batch);
+        } catch (Exception ex) {
+            finishBatch(batch, 0, 0, 1, "扫描启动失败:" + ex.getMessage());
+            throw ex;
+        }
+    }
+
+    private int scanOnce(AccountAuthRiskScanBatch batch) {
         List<PublishSite> sites = loadSites();
         LocalDateTime now = LocalDateTime.now();
         int changed = 0;

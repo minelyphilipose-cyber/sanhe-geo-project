@@ -102,6 +102,46 @@ class SelfMediaAuthRiskEvaluatorTest {
         assertTrue(result.riskReasonCodes().contains("CREDENTIAL_NOT_STORED_NON_BLOCKING"));
     }
 
+    @Test
+    void latestFailedCheckOverridesHistoricalSuccessfulVerification() {
+        SelfMediaAuthHealthPolicy policy = policy("periodic_only", 14, 3, null);
+        var input = new SelfMediaAuthRiskEvaluator.Input(policy, now, true, true,
+                now.minusDays(1), now.minusDays(5), null, now.minusDays(30),
+                "failed", now.minusMinutes(10));
+
+        var result = evaluator.evaluate(input);
+
+        assertEquals("login_verification_failed", result.riskStatus());
+        assertNull(result.recommendedReverifyAt());
+        assertTrue(result.riskReasonCodes().contains("LATEST_LOGIN_CHECK_FAILED"));
+    }
+
+    @Test
+    void successfulLatestCheckContinuesToUseLastSuccessTime() {
+        SelfMediaAuthHealthPolicy policy = policy("periodic_only", 14, 3, null);
+        var input = new SelfMediaAuthRiskEvaluator.Input(policy, now, true, true,
+                now.minusDays(1), now.minusDays(5), null, now.minusDays(30),
+                "success", now.minusDays(1));
+
+        var result = evaluator.evaluate(input);
+
+        assertEquals("normal", result.riskStatus());
+        assertEquals(now.plusDays(13), result.recommendedReverifyAt());
+    }
+
+    @Test
+    void newerSuccessfulTimestampWinsOverStaleFailedResult() {
+        SelfMediaAuthHealthPolicy policy = policy("periodic_only", 14, 3, null);
+        var input = new SelfMediaAuthRiskEvaluator.Input(policy, now, true, true,
+                now.minusMinutes(5), now.minusDays(5), null, now.minusDays(30),
+                "failed", now.minusHours(1));
+
+        var result = evaluator.evaluate(input);
+
+        assertEquals("normal", result.riskStatus());
+        assertEquals(now.plusDays(13).plusHours(23).plusMinutes(55), result.recommendedReverifyAt());
+    }
+
     private SelfMediaAuthRiskEvaluator.Input input(SelfMediaAuthHealthPolicy policy,
                                                    LocalDateTime verifiedAt,
                                                    LocalDateTime capturedAt,

@@ -5,6 +5,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.credential.audit.CredentialAuditHook;
 import com.huanjing.geo.module.content.credential.crypto.CookieCryptoService;
 import com.huanjing.geo.module.content.credential.crypto.CookieCryptoService.CookieEncryptionContext;
+import com.huanjing.geo.module.content.credential.SelfMediaLoginValidityReference;
 import com.huanjing.geo.module.content.credential.dto.CookieCredentialCaptureCommand;
 import com.huanjing.geo.module.content.credential.dto.CookieCredentialMeta;
 import com.huanjing.geo.module.content.credential.dto.CookieCredentialPlaintext;
@@ -99,7 +100,7 @@ public class CredentialVaultService {
         credential.setCapturedBy(command.capturedBy());
         credential.setCapturedAt(now);
         credential.setValidFrom(now);
-        credential.setExpiresAt(now.plusDays(defaultCookieValidDays(account.getPlatform())));
+        credential.setExpiresAt(now.plusDays(SelfMediaLoginValidityReference.estimatedDays(account.getPlatform())));
         credential.setExpirySource("platform_policy");
         credential.setCreatedAt(now);
         credentialMapper.insert(credential);
@@ -284,10 +285,4 @@ public class CredentialVaultService {
         return meta;
     }
 
-    private long defaultCookieValidDays(String platform) {
-        if ("xiaohongshu".equalsIgnoreCase(String.valueOf(platform))) {
-            return 7;
-        }
-        return 30;
-    }
 }

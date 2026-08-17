@@ -2981,6 +2981,30 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void retryNowForLoginFailureRequiresRecoveredBindingAndReusesOriginalSchedule() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        row.setId(121L);
+        row.setSelfMediaAccountId(10L);
+        row.setFailureCode("LOGIN_REQUIRED");
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        row.setLockedUntil(LocalDateTime.now().minusMinutes(1));
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setId(10L);
+        account.setBrandId(8L);
+        account.setPlatform("toutiao");
+        account.setAccountName("三和口腔");
+        when(scheduleMapper.selectById(121L)).thenReturn(row);
+        when(accountMapper.selectById(10L)).thenReturn(account);
+
+        SelfMediaPublishScheduleVO response = service.retryNow(121L);
+
+        assertEquals(121L, response.getId());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PENDING, response.getStatus());
+        verify(browserEnvironmentService).validateForTaskCreation(account, true);
+        verify(scheduleMapper).updateById(row);
+    }
+
+    @Test
     void retryNowRefreshesCurrentBrowserEnvironmentBinding() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
         row.setId(118L);
@@ -3618,6 +3642,28 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(nextAttemptAt, response.getNextAttemptAt());
         assertEquals("EDITOR_NOT_FOUND", response.getFailureCode());
         verify(environmentLockService).release(98L);
+    }
+
+    @Test
+    void markClaimFailedBackwritesLoginFailureToAccountHealth() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        row.setId(198L);
+        row.setSelfMediaAccountId(10L);
+        row.setAttemptCount(1);
+        row.setMaxAttempts(1);
+        when(scheduleMapper.selectById(198L)).thenReturn(row);
+
+        service.markClaimFailed(
+                198L,
+                SelfMediaPublishScheduleConstants.STATUS_FILLING,
+                "LOGIN_REQUIRED",
+                "平台发布页要求重新登录",
+                null,
+                null
+        );
+
+        verify(browserEnvironmentService).recordPublishTaskLoginFailure(
+                10L, "LOGIN_REQUIRED", "平台发布页要求重新登录");
     }
 
     @Test

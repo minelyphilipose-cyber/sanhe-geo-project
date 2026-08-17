@@ -26,6 +26,10 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class SystemAlertService {
 
+    private static final Set<String> AUTO_RESOLVE_ONLY_ALERT_TYPES = Set.of(
+            "SELF_MEDIA_ACCOUNT_AUTH_HEALTH", "FORUM_COOKIE_AUTH_HEALTH",
+            "SELF_MEDIA_IDENTITY_PARSER_HEALTH", "SELF_MEDIA_AUTH_WORK_ORDER_FOLLOW_UP");
+
     private final SystemAlertMapper systemAlertMapper;
     private final CurrentUserService currentUserService;
 
@@ -129,6 +133,9 @@ public class SystemAlertService {
                     .eq(SystemAlert::getDedupeKey, normalizedDedupeKey)
                     .last("LIMIT 1"));
             if (existing != null) {
+                boolean wasOpen = !Boolean.TRUE.equals(existing.getIsResolved());
+                LocalDateTime previousReadAt = existing.getReadAt();
+                LocalDateTime previousSnoozedUntil = existing.getSnoozedUntil();
                 populateRecipientAlert(
                         existing,
                         alertType,
@@ -140,6 +147,10 @@ public class SystemAlertService {
                         recipientRole,
                         normalizedDedupeKey
                 );
+                if (wasOpen) {
+                    existing.setReadAt(previousReadAt);
+                    existing.setSnoozedUntil(previousSnoozedUntil);
+                }
                 systemAlertMapper.updateById(existing);
                 return;
             }
@@ -169,6 +180,9 @@ public class SystemAlertService {
             if (existing == null) {
                 throw duplicate;
             }
+            boolean wasOpen = !Boolean.TRUE.equals(existing.getIsResolved());
+            LocalDateTime previousReadAt = existing.getReadAt();
+            LocalDateTime previousSnoozedUntil = existing.getSnoozedUntil();
             populateRecipientAlert(
                     existing,
                     alertType,
@@ -180,15 +194,25 @@ public class SystemAlertService {
                     recipientRole,
                     normalizedDedupeKey
             );
+            if (wasOpen) {
+                existing.setReadAt(previousReadAt);
+                existing.setSnoozedUntil(previousSnoozedUntil);
+            }
             systemAlertMapper.updateById(existing);
         }
     }
 
-    public Page<SystemAlertTodoVO> myTodos(long current, long size, boolean includeResolved, boolean unreadOnly) {
+    public Page<SystemAlertTodoVO> myTodos(long current, long size, boolean includeResolved,
+                                           boolean unreadOnly, boolean snoozedOnly) {
         SysUser user = currentUserService.requireCurrentUser();
         LambdaQueryWrapper<SystemAlert> wrapper = visibleAlertWrapper(user);
-        if (!includeResolved) {
+        if (snoozedOnly) {
+            wrapper.eq(SystemAlert::getIsResolved, false)
+                    .gt(SystemAlert::getSnoozedUntil, LocalDateTime.now());
+        } else if (!includeResolved) {
             wrapper.eq(SystemAlert::getIsResolved, false);
+            wrapper.and(scope -> scope.isNull(SystemAlert::getSnoozedUntil)
+                    .or().le(SystemAlert::getSnoozedUntil, LocalDateTime.now()));
         }
         if (unreadOnly) {
             wrapper.isNull(SystemAlert::getReadAt);
@@ -200,10 +224,16 @@ public class SystemAlertService {
         return result;
     }
 
+    public Page<SystemAlertTodoVO> myTodos(long current, long size, boolean includeResolved, boolean unreadOnly) {
+        return myTodos(current, size, includeResolved, unreadOnly, false);
+    }
+
     public long myUnreadCount() {
         SysUser user = currentUserService.requireCurrentUser();
         return systemAlertMapper.selectCount(visibleAlertWrapper(user)
-                .isNull(SystemAlert::getReadAt));
+                .isNull(SystemAlert::getReadAt)
+                .and(scope -> scope.isNull(SystemAlert::getSnoozedUntil)
+                        .or().le(SystemAlert::getSnoozedUntil, LocalDateTime.now())));
     }
 
     public void markRead(Long alertId) {
@@ -233,10 +263,53 @@ public class SystemAlertService {
                 && !Objects.equals(alert.getRecipientUserId(), user.getId())) {
             throw new BizException(403, "No permission: system.alert.resolve");
         }
+        if (alert.getAlertType() != null && AUTO_RESOLVE_ONLY_ALERT_TYPES.contains(alert.getAlertType())) {
+            throw new BizException(409, "账号健康待办需由系统检测恢复后自动关闭，可先选择稍后提醒");
+        }
         alert.setIsResolved(true);
         alert.setResolvedBy(user.getId());
         alert.setResolvedAt(LocalDateTime.now());
         systemAlertMapper.updateById(alert);
+    }
+
+    public void snooze(Long alertId, int hours) {
+        SysUser user = currentUserService.requireCurrentUser();
+        SystemAlert alert = systemAlertMapper.selectOne(visibleAlertWrapper(user)
+                .eq(SystemAlert::getId, alertId)
+                .eq(SystemAlert::getIsResolved, false)
+                .last("LIMIT 1"));
+        if (alert == null) throw new BizException(404, "待办不存在或已恢复");
+        if (hours < 1 || hours > 168) throw new BizException(400, "稍后提醒时间需在 1 至 168 小时之间");
+        alert.setSnoozedUntil(LocalDateTime.now().plusHours(hours));
+        alert.setReadAt(LocalDateTime.now());
+        systemAlertMapper.updateById(alert);
+    }
+
+    public void claim(Long alertId) {
+        SysUser user = currentUserService.requireCurrentUser();
+        SystemAlert alert = requireVisibleOpenAlert(alertId, user);
+        if ("SELF_MEDIA_ACCOUNT_AUTH_HEALTH".equals(alert.getAlertType())
+                || "SELF_MEDIA_AUTH_WORK_ORDER_FOLLOW_UP".equals(alert.getAlertType())) {
+            throw new BizException(409, "请前往账号授权健康工单认领并处理");
+        }
+        if (alert.getClaimedBy() != null && !Objects.equals(alert.getClaimedBy(), user.getId())) {
+            throw new BizException(409, "该待办已由其他运营人员认领");
+        }
+        if (alert.getClaimedBy() == null) {
+            LocalDateTime now = LocalDateTime.now();
+            if (systemAlertMapper.claimIfUnowned(alertId, user.getId(), now) == 0) {
+                throw new BizException(409, "该待办已由其他运营人员认领");
+            }
+        }
+    }
+
+    private SystemAlert requireVisibleOpenAlert(Long alertId, SysUser user) {
+        SystemAlert alert = systemAlertMapper.selectOne(visibleAlertWrapper(user)
+                .eq(SystemAlert::getId, alertId)
+                .eq(SystemAlert::getIsResolved, false)
+                .last("LIMIT 1"));
+        if (alert == null) throw new BizException(404, "待办不存在或已恢复");
+        return alert;
     }
 
     public void resolveOpenByDedupeKey(String dedupeKey, Long resolvedBy) {
@@ -330,6 +403,9 @@ public class SystemAlertService {
         alert.setResolvedBy(null);
         alert.setResolvedAt(null);
         alert.setReadAt(null);
+        alert.setSnoozedUntil(null);
+        alert.setOccurrenceCount(alert.getOccurrenceCount() == null ? 1 : alert.getOccurrenceCount() + 1);
+        alert.setLastOccurredAt(LocalDateTime.now());
     }
 
     private SystemAlertTodoVO toTodoVO(SystemAlert alert) {
@@ -343,7 +419,20 @@ public class SystemAlertService {
         vo.setIsResolved(Boolean.TRUE.equals(alert.getIsResolved()));
         vo.setResolvedAt(alert.getResolvedAt());
         vo.setReadAt(alert.getReadAt());
+        vo.setSnoozedUntil(alert.getSnoozedUntil());
+        vo.setClaimedBy(alert.getClaimedBy());
+        vo.setClaimedAt(alert.getClaimedAt());
+        vo.setOperationNote(alert.getOperationNote());
+        vo.setOccurrenceCount(alert.getOccurrenceCount());
+        vo.setLastOccurredAt(alert.getLastOccurredAt());
+        vo.setAutoResolveOnly(alert.getAlertType() != null && AUTO_RESOLVE_ONLY_ALERT_TYPES.contains(alert.getAlertType()));
         vo.setCreatedAt(alert.getCreatedAt());
         return vo;
+    }
+
+    private String limit(String value, int max) {
+        if (!StringUtils.hasText(value)) return null;
+        String text = value.trim();
+        return text.length() > max ? text.substring(0, max) : text;
     }
 }

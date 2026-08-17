@@ -1,7 +1,7 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.2.3'
-const EXTENSION_BUILD_REVISION = '20260803.1'
+const EXTENSION_VERSION = '0.2.5'
+const EXTENSION_BUILD_REVISION = '20260813.4'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
 const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/graphic/articles'
 const XIAOHONGSHU_MANAGE_URL = 'https://creator.xiaohongshu.com/new/note-manager'
@@ -399,12 +399,15 @@ async function helperSigningContext(config, options = {}) {
   if (!health?.paired || !Number.isFinite(sessionId) || sessionId <= 0) {
     throw new Error('本地助手尚未与后台配对，请先完成本地助手配对')
   }
-  if (health?.version !== EXTENSION_VERSION || health?.buildRevision !== EXTENSION_BUILD_REVISION) {
+  const helperProtocolVersion = String(health?.protocolVersion || '1')
+  const helperCapabilities = health?.capabilities || {}
+  const compatibleBuild = helperProtocolVersion === '1'
+    && helperCapabilities.extensionRequestSigning !== false
+  if (!compatibleBuild) {
     const error = new Error(
-      `扩展与本地助手构建不一致：扩展=${EXTENSION_VERSION}/${EXTENSION_BUILD_REVISION}，`
-      + `助手=${health?.version || '-'}/${health?.buildRevision || '-'}，请同步更新后重试`,
+      `扩展与本地助手协议不兼容：扩展协议=1，助手协议=${helperProtocolVersion}，请更新本地助手后重试`,
     )
-    error.code = 'EXTENSION_HELPER_BUILD_MISMATCH'
+    error.code = 'EXTENSION_HELPER_PROTOCOL_MISMATCH'
     throw error
   }
   const context = {
@@ -1088,6 +1091,28 @@ async function autoReportLoginStatusFromTab(config, session, tabId, options = {}
   const requestedPlatform = normalizePlatform(options.platform)
   const originalTab = await chrome.tabs.get(tabId).catch(() => null)
   const platform = requestedPlatform || inferPlatformFromUrl(originalTab?.url)
+  if (options.loginVerificationId && platform && isExplicitLoginPageUrl(originalTab?.url)) {
+    const environmentKey = options.environmentKey || await resolveLoginReportEnvironmentKey(config, session, platform)
+    if (!environmentKey) {
+      await appendEventLog({ type: 'login_report', ok: false, platform, error: '明确登录页上报失败：未解析到环境标识' })
+      return null
+    }
+    const status = await reportLoginStatus({ ...config, environmentKey }, session, {
+      environmentAccountId: options.environmentAccountId || null,
+      environmentKey,
+      selfMediaAccountId: options.selfMediaAccountId || null,
+      platform,
+      identity: { accountIds: [], accountNames: [], diagnostics: `平台已跳转登录页：${originalTab?.url || '-'}` },
+      loginVerificationId: options.loginVerificationId,
+      reportSource: 'verification_task',
+      currentUrl: originalTab?.url || null,
+      forcedLoginStatus: 'login_required',
+      forcedErrorCode: 'LOGIN_PAGE_CONFIRMED',
+      forcedErrorMessage: '后台复验任务打开的平台页面已明确跳转到登录页',
+    })
+    await appendEventLog({ type: 'login_report', ok: true, platform, environmentKey, status: status?.loginStatus || 'login_required' })
+    return status
+  }
   const tab = await resolveLoginReportTab(originalTab, platform)
   if (!platform || !isAllowedLoginReportUrl(platform, tab?.url)) {
     const reason = originalTab
@@ -1123,7 +1148,17 @@ async function autoReportLoginStatusFromTab(config, session, tabId, options = {}
     await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: 'content-script 未返回身份诊断，正在上报阻塞信息' })
   }
   if (!identityHasCandidates(identity)) {
-    await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: `身份读取未通过，正在上报诊断：${identity.diagnostics || '-'}` })
+    await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: `身份读取未通过，已保留后台原登录状态：${identity.diagnostics || '-'}` })
+  }
+  if (!identityHasSingleCandidate(identity) && !options.loginVerificationId) {
+    await appendEventLog({
+      type: 'login_report',
+      ok: false,
+      platform,
+      environmentKey,
+      error: '普通被动检测未读取到唯一账号名称，本次不发送负向登录状态',
+    })
+    return null
   }
   const status = await reportLoginStatus(reportConfig, session, {
     environmentAccountId: options.environmentAccountId || null,
@@ -1132,6 +1167,8 @@ async function autoReportLoginStatusFromTab(config, session, tabId, options = {}
     platform,
     identity,
     loginVerificationId: options.loginVerificationId || null,
+    reportSource: options.loginVerificationId ? 'verification_task' : 'passive_page_observation',
+    currentUrl: tab.url || null,
   })
   await appendEventLog({ type: 'login_report', ok: true, platform, environmentKey, status: status?.loginStatus || '-' })
   return status
@@ -2837,7 +2874,7 @@ async function reportActiveTabLoginStatus() {
   }, { frameId: 0 })
   if (!response?.ok) throw new Error(response?.error || '读取平台账号身份失败')
   const identity = response.result?.identity || null
-  if (!identityHasCandidates(identity)) {
+  if (!identityHasSingleCandidate(identity)) {
     throw new Error(`未读取到平台账号身份，请打开${platformReportPageHint(platform)}后重试；${identity?.diagnostics || ''}`)
   }
   const reportConfig = { ...config, environmentKey }
@@ -2847,15 +2884,27 @@ async function reportActiveTabLoginStatus() {
     selfMediaAccountId: null,
     platform,
     identity,
+    reportSource: 'operator_check',
+    currentUrl: tab.url || null,
   })
   await appendEventLog({ type: 'login_report', ok: true, platform, environmentKey, status: status?.loginStatus || '-' })
   return { platform, environmentKey, detectedIdentity: identity, backendStatus: status }
 }
 
 function identityHasCandidates(identity) {
-  const accountIds = firstArray(identity?.accountIds, identity?.currentAccountIds)
   const accountNames = firstArray(identity?.accountNames, identity?.currentAccountNames)
-  return accountIds.length > 0 || accountNames.length > 0
+  return accountNames.length > 0
+}
+
+function identityHasSingleCandidate(identity) {
+  const accountNames = firstArray(identity?.accountNames, identity?.currentAccountNames)
+  return accountNames.length === 1
+}
+
+function isExplicitLoginPageUrl(value) {
+  const url = String(value || '').toLowerCase()
+  return Boolean(url) && (/\/(login|signin)(\/|\?|#|$)/.test(url)
+    || url.includes('passport') || url.includes('/sso/'))
 }
 
 async function readIdentityFromTab(tabId, platform, options = {}) {
@@ -2868,9 +2917,8 @@ async function readIdentityFromTab(tabId, platform, options = {}) {
     if (response?.ok) {
       const identity = response.result?.identity || null
       lastIdentity = identity
-      const accountIds = firstArray(identity?.accountIds, identity?.currentAccountIds)
       const accountNames = firstArray(identity?.accountNames, identity?.currentAccountNames)
-      if (accountIds.length || accountNames.length) return identity
+      if (accountNames.length) return identity
     }
     await delay(700)
   }
@@ -2978,16 +3026,20 @@ async function reportLoginStatus(config, session, report) {
   const accountNames = firstArray(identity.accountNames, identity.currentAccountNames)
   let identityErrorCode = null
   let identityErrorMessage = null
-  if (accountIds.length > 1 || accountNames.length > 1) {
+  if (accountNames.length > 1) {
     identityErrorCode = 'MULTIPLE_IDENTITIES'
-    identityErrorMessage = `读取到多个候选平台账号身份；${identity.diagnostics || ''}`
+    identityErrorMessage = `读取到多个候选平台账号名称；${identity.diagnostics || ''}`
   }
-  const hasIdentity = !identityErrorCode && (accountIds.length > 0 || accountNames.length > 0)
+  const hasIdentity = !identityErrorCode && accountNames.length === 1
   const brandId = session?.brandId || report.brandId || config.brandId || null
   // 自动登录上报没有任务级绑定上下文时交由品牌+平台+账号名称路由，
   // 不得回退到扩展配置中的历史绑定 ID，否则环境重绑后会命中旧环境记录。
   const environmentAccountId = report.environmentAccountId || null
-  const selfMediaAccountId = report.selfMediaAccountId || config.selfMediaAccountId || null
+  // A caller can explicitly pass null to request environment/name-based routing. Do not replace
+  // that null with a stale account id retained in the extension's advanced configuration.
+  const selfMediaAccountId = Object.prototype.hasOwnProperty.call(report, 'selfMediaAccountId')
+    ? report.selfMediaAccountId
+    : config.selfMediaAccountId || null
   const path = environmentAccountId
     ? `/api/v1/extension/browser-environment-accounts/${environmentAccountId}/login-status`
     : brandId
@@ -2998,10 +3050,15 @@ async function reportLoginStatus(config, session, report) {
     platform: report.platform,
     actualPlatformAccountId: accountIds[0] || null,
     actualAccountName: accountNames[0] || null,
-    loginStatus: hasIdentity ? 'logged_in' : identityErrorCode ? 'error' : 'login_required',
-    errorCode: hasIdentity ? null : (identityErrorCode || 'IDENTITY_UNREADABLE'),
-    errorMessage: hasIdentity ? null : (identityErrorMessage || identity.diagnostics || '未读取到平台账号身份'),
+    loginStatus: report.forcedLoginStatus || (hasIdentity ? 'logged_in' : identityErrorCode ? 'error' : 'login_required'),
+    errorCode: report.forcedErrorCode || (hasIdentity ? null : (identityErrorCode || 'IDENTITY_UNREADABLE')),
+    errorMessage: report.forcedErrorMessage || (hasIdentity ? null : (identityErrorMessage || identity.diagnostics || '未读取到平台账号名称')),
     loginVerificationId: report.loginVerificationId || null,
+    authoritative: false,
+    reportSource: report.reportSource || 'passive_page_observation',
+    currentUrl: report.currentUrl || null,
+    extensionVersion: EXTENSION_VERSION,
+    protocolVersion: '1',
   }
   if (report.environmentKey) {
     body.environmentKey = report.environmentKey
@@ -3201,8 +3258,7 @@ async function resolveIdentityPrecheckTabId(candidateTabId, platform, requiresPr
 }
 
 function requiresIdentityPrecheck(task) {
-  if (!IDENTITY_PRECHECK_PLATFORMS.has(task.platform)) return false
-  return Boolean(task.expectedAccountName || task.expectedPlatformAccountId)
+  return IDENTITY_PRECHECK_PLATFORMS.has(task.platform)
 }
 
 function assertExpectedIdentityPresent(payload) {
@@ -3234,12 +3290,12 @@ async function runSelfTest() {
       ok: Boolean(health?.ok),
       detail: `paired=${Boolean(health?.paired)}, version=${health?.version || '-'}, build=${health?.buildRevision || '-'}`,
     })
-    const compatibleBuild = health?.version === EXTENSION_VERSION
-      && health?.buildRevision === EXTENSION_BUILD_REVISION
+    const compatibleBuild = String(health?.protocolVersion || '1') === '1'
+      && health?.capabilities?.extensionRequestSigning !== false
     checks.push({
-      name: 'extension_helper_build_match',
+      name: 'extension_helper_protocol_compatible',
       ok: compatibleBuild,
-      detail: `extension=${EXTENSION_VERSION}/${EXTENSION_BUILD_REVISION}, helper=${health?.version || '-'}/${health?.buildRevision || '-'}`,
+      detail: `extensionProtocol=1, helperProtocol=${health?.protocolVersion || '1'}, helper=${health?.version || '-'}/${health?.buildRevision || '-'}`,
     })
   } catch (error) {
     checks.push({
@@ -3416,7 +3472,9 @@ function isToutiaoArticlePreviewUrl(url) {
 
 function isZhihuCreatorCenterUrl(url) {
   return (url.hostname === 'www.zhihu.com' || url.hostname === 'zhihu.com')
-    && url.pathname.startsWith('/creator/')
+    && (url.pathname === '/creator'
+      || url.pathname === '/creator/'
+      || url.pathname.startsWith('/creator/'))
 }
 
 function isZhihuIdentityUrl(url) {

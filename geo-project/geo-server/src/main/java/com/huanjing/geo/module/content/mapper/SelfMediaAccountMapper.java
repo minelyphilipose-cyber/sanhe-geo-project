@@ -49,6 +49,32 @@ public interface SelfMediaAccountMapper extends BaseMapper<SelfMediaAccount> {
                                         @Param("warning") String warning,
                                         @Param("recommendedReverifyAt") LocalDateTime recommendedReverifyAt);
 
+    @Update("""
+            UPDATE self_media_account
+            SET recommended_reverify_at = #{recommendedReverifyAt}
+            WHERE id = #{id}
+              AND deleted_at IS NULL
+            """)
+    int updateNullableRecommendedReverifyAt(@Param("id") Long id,
+                                            @Param("recommendedReverifyAt") LocalDateTime recommendedReverifyAt);
+
+    @Update("""
+            UPDATE self_media_account
+            SET last_login_verified_at = NULL,
+                last_login_verification_checked_at = #{checkedAt},
+                last_login_verification_result = 'failed',
+                last_login_verification_method = #{method},
+                last_login_verification_warning = #{warning},
+                recommended_reverify_at = NULL,
+                updated_at = #{checkedAt}
+            WHERE id = #{id}
+              AND deleted_at IS NULL
+            """)
+    int invalidateLoginHealth(@Param("id") Long id,
+                              @Param("checkedAt") LocalDateTime checkedAt,
+                              @Param("method") String method,
+                              @Param("warning") String warning);
+
     @Select("""
             SELECT id, brand_id, platform, platform_account_id, account_name, account_identity, status, auth_mode,
                    scope_json, refresh_token_cipher, credential_key_version, avatar_url, qrcode_url,

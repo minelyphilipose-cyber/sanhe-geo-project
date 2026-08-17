@@ -27,7 +27,8 @@ class SelfMediaAccountControllerTest {
         WechatMpAuthorizationService wechatAuthorizationService = mock(WechatMpAuthorizationService.class);
         DouyinAuthorizationService douyinAuthorizationService = mock(DouyinAuthorizationService.class);
         when(douyinAuthorizationService.capability())
-                .thenReturn(new DouyinCapabilityVO(true, "mock", null, false, null, "desc", List.of()));
+                .thenReturn(new DouyinCapabilityVO(true, "fingerprint_browser", null, false, null,
+                        "抖音 OAuth 已停用；当前使用指纹浏览器自动发布。", List.of()));
         SelfMediaAccountController controller = new SelfMediaAccountController(
                 selfMediaAccountService,
                 brandService,
@@ -35,14 +36,15 @@ class SelfMediaAccountControllerTest {
                 wechatAuthorizationService,
                 douyinAuthorizationService,
                 mock(PartnerFeatureAccessGuard.class),
-                mock(com.huanjing.geo.module.content.service.SelfMediaLoginVerificationService.class)
+                mock(com.huanjing.geo.module.content.service.SelfMediaLoginVerificationService.class),
+                mock(com.huanjing.geo.module.content.service.SelfMediaLoginObservationService.class)
         );
 
         var response = controller.douyinCapability();
 
         assertEquals(0, response.getCode());
         assertTrue(response.getData().isEnabled());
-        assertEquals("mock", response.getData().getMode());
+        assertEquals("fingerprint_browser", response.getData().getMode());
         assertNull(response.getData().getDisabledReason());
     }
 }

@@ -27,6 +27,7 @@ public class SelfMediaAccountVO {
     private String cookieCredentialIdentityName;
     private String cookieCredentialIdentityMessage;
     private LocalDateTime lastLoginVerifiedAt;
+    private LocalDateTime lastLoginVerificationCheckedAt;
     private String lastLoginVerificationResult;
     private String lastLoginVerificationMethod;
     private String lastLoginVerificationWarning;
@@ -52,6 +53,7 @@ public class SelfMediaAccountVO {
         vo.setLastAuthCheckedAt(account.getLastAuthCheckedAt());
         vo.setLastAuthError(account.getLastAuthError());
         vo.setLastLoginVerifiedAt(account.getLastLoginVerifiedAt());
+        vo.setLastLoginVerificationCheckedAt(account.getLastLoginVerificationCheckedAt());
         vo.setLastLoginVerificationResult(account.getLastLoginVerificationResult());
         vo.setLastLoginVerificationMethod(account.getLastLoginVerificationMethod());
         vo.setLastLoginVerificationWarning(account.getLastLoginVerificationWarning());

@@ -35,6 +35,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -56,6 +57,7 @@ public class SelfMediaAccountService {
     private final SelfMediaAccountPlatformEligibilityService platformEligibilityService;
     private final SelfMediaAuthHealthPolicyService authHealthPolicyService;
     private final SelfMediaAuthRiskEvaluator authRiskEvaluator;
+    private final SelfMediaLoginVerificationService loginVerificationService;
 
     public WechatMpCapabilityVO capability() {
         String reason = openPlatformProperties.isDraftDistributionEnabled()
@@ -229,13 +231,26 @@ public class SelfMediaAccountService {
         if (platformAccountIdExistsForOther(request.platform(), platformAccountId, account.getId())) {
             throw new BizException(400, "self media account already exists");
         }
+        String previousPlatform = account.getPlatform();
+        String previousAccountName = account.getAccountName();
         account.setPlatform(request.platform());
         account.setPlatformAccountId(platformAccountId);
         account.setAccountName(request.accountName().trim());
         account.setAccountIdentity(normalizeAccountIdentity(request.platform(), request.accountIdentity()));
         account.setStatus(normalizeStatus(request.status()));
-        account.setUpdatedAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        account.setUpdatedAt(now);
         selfMediaAccountMapper.updateById(account);
+        if (!Objects.equals(previousPlatform, account.getPlatform())
+                || !Objects.equals(previousAccountName, account.getAccountName())) {
+            browserEnvironmentAccountMapper.invalidateActiveBindingAfterAccountIdentityChange(
+                    account.getId(), account.getPlatform(), account.getAccountName(), operator.getId(), now);
+            loginVerificationService.invalidateAccountHealth(
+                    account.getId(),
+                    SelfMediaLoginVerificationService.METHOD_ACCOUNT_IDENTITY_CHANGED,
+                    "账号名称或平台已修改，请在指纹浏览器中重新确认并验证登录状态"
+            );
+        }
         return toVoWithCredentialStatus(account);
     }
 
@@ -371,7 +386,9 @@ public class SelfMediaAccountService {
                 account.getLastLoginVerifiedAt(),
                 credential == null ? null : credential.capturedAt(),
                 declaredExpiry,
-                account.getCreatedAt()
+                account.getCreatedAt(),
+                account.getLastLoginVerificationResult(),
+                account.getLastLoginVerificationCheckedAt()
         ));
         vo.setAuthRiskStatus(risk.riskStatus());
         vo.setRecommendedReverifyAt(risk.recommendedReverifyAt());

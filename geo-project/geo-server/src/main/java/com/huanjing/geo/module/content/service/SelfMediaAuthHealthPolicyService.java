@@ -6,7 +6,10 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.dto.SelfMediaAuthHealthPolicyUpdateRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaAuthHealthPolicyVO;
+import com.huanjing.geo.module.content.dto.SelfMediaAuthHealthPolicyImpactVO;
 import com.huanjing.geo.module.content.entity.SelfMediaAuthHealthPolicy;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.entity.SelfMediaAuthHealthPolicyAudit;
 import com.huanjing.geo.module.content.mapper.SelfMediaAuthHealthPolicyAuditMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAuthHealthPolicyMapper;
@@ -20,14 +23,18 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class SelfMediaAuthHealthPolicyService {
 
+    private static final Set<String> ALLOWED_RECIPIENT_ROLES = Set.of("delivery_manager", "manager");
+
     private final SelfMediaAuthHealthPolicyMapper policyMapper;
     private final SelfMediaAuthHealthPolicyAuditMapper auditMapper;
     private final CurrentUserService currentUserService;
+    private final SelfMediaAccountMapper accountMapper;
 
     public SelfMediaAuthHealthPolicy requirePolicy(String platform) {
         String normalized = normalizePlatform(platform);
@@ -46,17 +53,49 @@ public class SelfMediaAuthHealthPolicyService {
     }
 
     public SelfMediaAuthHealthPolicyVO get(String platform) {
-        requirePermission("self-media.auth-health.read", "company.read");
+        requireAnyPermission("self-media.auth-health.read", "company.read", "content.read");
         return SelfMediaAuthHealthPolicyVO.from(requirePolicy(platform));
     }
 
     public List<SelfMediaAuthHealthPolicyAudit> audits(String platform) {
-        requirePermission("self-media.auth-health.audit", "company.update");
+        requireAnyPermission("self-media.auth-health.audit", "company.update");
         SelfMediaAuthHealthPolicy policy = requirePolicy(platform);
         return auditMapper.selectList(new LambdaQueryWrapper<SelfMediaAuthHealthPolicyAudit>()
                 .eq(SelfMediaAuthHealthPolicyAudit::getPolicyId, policy.getId())
                 .orderByDesc(SelfMediaAuthHealthPolicyAudit::getChangedAt)
                 .last("LIMIT 100"));
+    }
+
+    public SelfMediaAuthHealthPolicyImpactVO previewImpact(String platform, int reverifyIntervalDays, int warningDays) {
+        requireAnyPermission("self-media.auth-health.read", "company.read", "content.read");
+        String normalized = normalizePlatform(platform);
+        LocalDateTime now = LocalDateTime.now();
+        List<SelfMediaAccount> accounts = accountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getPlatform, normalized)
+                .eq(SelfMediaAccount::getStatus, "active")
+                .isNull(SelfMediaAccount::getDeletedAt));
+        int currentOverdue = 0;
+        int projectedOverdue = 0;
+        int projectedDueSoon = 0;
+        int newlyOverdue = 0;
+        for (SelfMediaAccount account : accounts) {
+            if (account.getRecommendedReverifyAt() != null && !account.getRecommendedReverifyAt().isAfter(now)) {
+                currentOverdue++;
+            }
+            LocalDateTime base = account.getLastLoginVerifiedAt() != null
+                    ? account.getLastLoginVerifiedAt() : account.getCreatedAt();
+            if (base == null) continue;
+            LocalDateTime projected = base.plusDays(Math.max(reverifyIntervalDays, 1));
+            if (!projected.isAfter(now)) {
+                projectedOverdue++;
+                if (account.getRecommendedReverifyAt() == null || account.getRecommendedReverifyAt().isAfter(now)) newlyOverdue++;
+            } else if (!projected.minusDays(Math.max(warningDays, 0)).isAfter(now)) {
+                projectedDueSoon++;
+            }
+        }
+        return new SelfMediaAuthHealthPolicyImpactVO(normalized, accounts.size(), currentOverdue,
+                projectedOverdue, projectedDueSoon, newlyOverdue,
+                "仅调整内部复验计划与告警，不会修改登录事实，也不会要求客户重新登录");
     }
 
     @Transactional
@@ -104,6 +143,10 @@ public class SelfMediaAuthHealthPolicyService {
         if (!SelfMediaAuthRiskEvaluator.MODES.contains(request.credentialExpiryMode())) {
             throw new BizException(400, "不支持的到期参考方式");
         }
+        String recipientRole = trimToNull(request.defaultRecipientRole());
+        if (recipientRole != null && !ALLOWED_RECIPIENT_ROLES.contains(recipientRole.toLowerCase(Locale.ROOT))) {
+            throw new BizException(400, "默认处理角色仅支持 delivery_manager 或 manager");
+        }
     }
 
     private String normalizePlatform(String value) {
@@ -117,10 +160,11 @@ public class SelfMediaAuthHealthPolicyService {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    private void requirePermission(String permission, String legacyPermission) {
-        if (!currentUserService.hasPermission(permission)
-                && !currentUserService.hasPermission(legacyPermission)) {
-            throw new BizException(403, "No permission: " + permission);
+    private void requireAnyPermission(String permission, String... compatiblePermissions) {
+        if (currentUserService.hasPermission(permission)) return;
+        for (String compatiblePermission : compatiblePermissions) {
+            if (currentUserService.hasPermission(compatiblePermission)) return;
         }
+        throw new BizException(403, "No permission: " + permission);
     }
 }

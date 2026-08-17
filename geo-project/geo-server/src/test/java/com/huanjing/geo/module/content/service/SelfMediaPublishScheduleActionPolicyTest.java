@@ -97,6 +97,19 @@ class SelfMediaPublishScheduleActionPolicyTest {
         assertTrue(decision.availableActions().isEmpty());
     }
 
+    @Test
+    void loginFailureKeepsOriginalScheduleRetryAvailable() {
+        SelfMediaPublishSchedule row = row(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        row.setFailureCode("LOGIN_REQUIRED");
+
+        SelfMediaPublishScheduleActionPolicy.Decision decision = decide(row, true);
+
+        assertEquals(SelfMediaPublishScheduleActionPolicy.PHASE_SCHEDULE_EXECUTION, decision.phase());
+        assertTrue(decision.canRetryExecution());
+        assertFalse(decision.canRepublish());
+    }
+
     private SelfMediaPublishScheduleActionPolicy.Decision decide(SelfMediaPublishSchedule row,
                                                                   boolean supportsPublishCheck) {
         return SelfMediaPublishScheduleActionPolicy.evaluate(row, supportsPublishCheck, now);

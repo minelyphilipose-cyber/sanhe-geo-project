@@ -600,6 +600,21 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
+    void failNormalizesLegacyCookieMissingToLoginRequired() {
+        stubTask("filling");
+        when(taskMapper.markSemiAutoFailed(eq(30L), eq("LOGIN_REQUIRED"), any(), any())).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
+        Map<String, Object> request = Map.of(
+                "error", Map.of("code", "COOKIE_MISSING", "message", "Cookie missing")
+        );
+
+        service.fail(30L, 99L, 7L, request);
+
+        verify(selfMediaPublishScheduleService).markDistributionTaskScheduleFailed(
+                eq(30L), eq("LOGIN_REQUIRED"), eq("Cookie missing"), any(String.class), eq(null));
+    }
+
+    @Test
     void reclaimTokenIssuedStaleTaskReturnsItToTokenIssuedWithFreshIssuedAt() {
         DistributionTask task = task("token_issued");
         task.setFillTokenIssuedAt(LocalDateTime.now().minusMinutes(20));

@@ -7,6 +7,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.content.credential.entity.SelfMediaCookieCredential;
 import com.huanjing.geo.module.content.dto.AccountAuthHealthOverviewVO;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.entity.AccountAuthRiskScanBatch;
+import com.huanjing.geo.module.content.entity.BrowserEnvironment;
+import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
+import com.huanjing.geo.module.content.mapper.AccountAuthRiskScanBatchMapper;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaCookieCredentialMapper;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
@@ -53,6 +59,9 @@ public class AccountAuthHealthOverviewService {
     private static final Set<String> BRAND_OPERATOR_ROLES = Set.of("PRIMARY", "SECONDARY");
 
     private final SelfMediaAccountMapper selfMediaAccountMapper;
+    private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
+    private final BrowserEnvironmentMapper browserEnvironmentMapper;
+    private final AccountAuthRiskScanBatchMapper scanBatchMapper;
     private final SelfMediaCookieCredentialMapper credentialMapper;
     private final SelfMediaPlatformScheduleAdapterRouter platformRouter;
     private final BrandMapper brandMapper;
@@ -68,10 +77,10 @@ public class AccountAuthHealthOverviewService {
     @Value("${geo.self-media-account-health.credential-expiring-days:7}")
     private int selfMediaExpiringDays;
 
-    @Value("${geo.self-media-account-health.cookie-valid-days:30}")
+    @Value("${geo.self-media-account-health.cookie-valid-days:90}")
     private int defaultSelfMediaCookieValidDays;
 
-    @Value("${geo.self-media-account-health.cookie-platform-valid-days:toutiao:30,baijiahao:30,zhihu:30,xiaohongshu:7}")
+    @Value("${geo.self-media-account-health.cookie-platform-valid-days:douyin:30,xiaohongshu:30,toutiao:90,baijiahao:90,zhihu:90}")
     private String cookiePlatformValidDays;
 
     @Value("${geo.forum-cookie-health.credential-expiring-days:7}")
@@ -91,12 +100,15 @@ public class AccountAuthHealthOverviewService {
                 .thenComparing(AccountAuthHealthOverviewVO.RiskItem::displayName, Comparator.nullsLast(String::compareTo)));
 
         List<AccountAuthHealthOverviewVO.AlertGroup> alertGroups = alertGroups();
+        List<AccountAuthHealthOverviewVO.BrandEnvironmentGroup> brandEnvironments = brandEnvironmentGroups(items);
         return new AccountAuthHealthOverviewVO(
                 now,
                 summary(items, alertGroups),
                 items,
+                brandEnvironments,
                 alertGroups,
-                trendBuckets(items, now.toLocalDate(), 14)
+                trendBuckets(items, now.toLocalDate(), 14),
+                latestScans()
         );
     }
 
@@ -128,10 +140,23 @@ public class AccountAuthHealthOverviewService {
                 .toList());
         Map<String, SelfMediaPlatformCapabilityContract> contractByPlatform = platformRouter.contracts().stream()
                 .collect(Collectors.toMap(SelfMediaPlatformCapabilityContract::platform, Function.identity(), (first, ignored) -> first));
+        Map<Long, BrowserEnvironmentAccount> bindingByAccountId = browserEnvironmentAccountMapper.selectList(
+                        new LambdaQueryWrapper<BrowserEnvironmentAccount>()
+                                .in(BrowserEnvironmentAccount::getSelfMediaAccountId, accountIds)
+                                .isNull(BrowserEnvironmentAccount::getDeletedAt))
+                .stream()
+                .collect(Collectors.toMap(BrowserEnvironmentAccount::getSelfMediaAccountId, Function.identity(), (first, ignored) -> first));
+        List<Long> environmentIds = bindingByAccountId.values().stream()
+                .map(BrowserEnvironmentAccount::getBrowserEnvironmentId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, BrowserEnvironment> environmentById = environmentIds.isEmpty() ? Map.of()
+                : browserEnvironmentMapper.selectBatchIds(environmentIds).stream()
+                .collect(Collectors.toMap(BrowserEnvironment::getId, Function.identity(), (first, ignored) -> first));
 
         List<AccountAuthHealthOverviewVO.RiskItem> result = new ArrayList<>();
         for (SelfMediaAccount account : accounts) {
             BrandContext brandContext = brandContexts.get(account.getBrandId());
+            BrowserEnvironmentAccount binding = bindingByAccountId.get(account.getId());
+            BrowserEnvironment environment = binding == null ? null : environmentById.get(binding.getBrowserEnvironmentId());
             Expiry expiry = selfMediaExpiry(account, credentialByAccountId.get(account.getId()), contractByPlatform.get(account.getPlatform()));
             Risk risk;
             if ("COOKIE".equalsIgnoreCase(account.getAuthMode())) {
@@ -141,11 +166,13 @@ public class AccountAuthHealthOverviewService {
                         .contains(String.valueOf(credential.getExpirySource())) ? credential.getExpiresAt() : null;
                 var evaluated = authRiskEvaluator.evaluate(new SelfMediaAuthRiskEvaluator.Input(policy, now, true,
                         credential != null, account.getLastLoginVerifiedAt(), credential == null ? null : credential.getCapturedAt(),
-                        declaredExpiry, account.getCreatedAt()));
+                        declaredExpiry, account.getCreatedAt(), account.getLastLoginVerificationResult(),
+                        account.getLastLoginVerificationCheckedAt()));
                 expiry = new Expiry(evaluated.recommendedReverifyAt(), evaluated.recommendedReverifySource(),
                         "credential_missing".equals(evaluated.riskStatus()), "unknown".equals(evaluated.riskStatus()));
                 risk = new Risk(evaluated.riskStatus(),
-                        "reverify_overdue".equals(evaluated.riskStatus()) ? "warn"
+                        "login_verification_failed".equals(evaluated.riskStatus()) ? "high"
+                                : "reverify_overdue".equals(evaluated.riskStatus()) ? "warn"
                                 : "credential_missing".equals(evaluated.riskStatus()) ? "warn" : "info",
                         evaluated.recommendedReverifyAt() == null ? null
                                 : ChronoUnit.DAYS.between(now.toLocalDate(), evaluated.recommendedReverifyAt().toLocalDate()));
@@ -165,13 +192,22 @@ public class AccountAuthHealthOverviewService {
                     brandContext == null ? null : brandContext.ownerUserId(),
                     brandContext == null ? null : brandContext.ownerName(),
                     risk.status(),
+                    loginFactStatus(account, binding, contractByPlatform.get(account.getPlatform())),
+                    reverifyStatus(risk.status()),
                     risk.severity(),
+                    environment == null ? null : environment.getId(),
+                    environment == null ? null : environment.getEnvironmentKey(),
+                    environment == null ? null : environment.getName(),
+                    environment == null ? null : environment.getStatus(),
                     expiry.expiresAt(),
                     risk.daysUntilExpiry(),
                     expiry.source(),
                     expirySourceLabel(expiry.source()),
+                    account.getLastLoginVerifiedAt(),
+                    account.getLastLoginVerificationCheckedAt(),
+                    account.getLastLoginVerificationResult(),
                     "/admin/brands/" + account.getBrandId() + "?tab=self-media&accountId=" + account.getId(),
-                    risk.actionLabel("重新登录"),
+                    risk.actionLabel("内部核对"),
                     selfMediaActionHint(risk.status(), expiry.source())
             ));
         }
@@ -242,15 +278,110 @@ public class AccountAuthHealthOverviewService {
                 null,
                 "manager",
                 risk.status(),
+                "not_applicable",
+                reverifyStatus(risk.status()),
                 risk.severity(),
+                null,
+                null,
+                null,
+                null,
                 expiresAt,
                 days,
                 expirySource,
                 expirySourceLabel(expirySource),
+                null,
+                null,
+                null,
                 "/admin/settings/publish-sites?siteId=" + site.getId(),
                 risk.actionLabel("更新 Cookie"),
                 forumActionHint(risk.status())
         );
+    }
+
+    private String loginFactStatus(SelfMediaAccount account,
+                                   BrowserEnvironmentAccount binding,
+                                   SelfMediaPlatformCapabilityContract contract) {
+        if (contract != null && contract.publishChannel() == SelfMediaPlatformPublishChannel.OFFICIAL_API) {
+            return StringUtils.hasText(account.getRefreshTokenCipher()) ? "official_authorized" : "authorization_missing";
+        }
+        if (binding == null) return "unbound";
+        if ("failed".equalsIgnoreCase(account.getLastLoginVerificationResult())
+                && (account.getLastLoginVerificationCheckedAt() == null || account.getLastLoginVerifiedAt() == null
+                || !account.getLastLoginVerificationCheckedAt().isBefore(account.getLastLoginVerifiedAt()))) {
+            return hasExplicitLoginFailure(account) ? "verification_failed" : "unverified";
+        }
+        return switch (String.valueOf(binding.getLoginStatus())) {
+            case "logged_in" -> "confirmed_logged_in";
+            case "mismatch" -> "account_mismatch";
+            case "expired", "login_required" -> "login_required";
+            case "error" -> "environment_error";
+            default -> "unverified";
+        };
+    }
+
+    private String reverifyStatus(String riskStatus) {
+        return switch (String.valueOf(riskStatus)) {
+            case "normal" -> "within_reference_window";
+            case "reverify_due_soon", "expiring" -> "due_soon";
+            case "reverify_overdue", "expired" -> "overdue";
+            case "monitoring_disabled" -> "monitoring_disabled";
+            default -> "unknown";
+        };
+    }
+
+    private boolean hasExplicitLoginFailure(SelfMediaAccount account) {
+        return StringUtils.hasText(account.getLastLoginVerificationMethod())
+                && Set.of(SelfMediaLoginVerificationService.METHOD_SYSTEM_TRIGGERED,
+                        SelfMediaLoginVerificationService.METHOD_PUBLISH_TASK_FAILURE)
+                .contains(account.getLastLoginVerificationMethod());
+    }
+
+    private List<AccountAuthHealthOverviewVO.BrandEnvironmentGroup> brandEnvironmentGroups(
+            List<AccountAuthHealthOverviewVO.RiskItem> items) {
+        Map<Long, List<AccountAuthHealthOverviewVO.RiskItem>> grouped = items.stream()
+                .filter(item -> "self_media".equals(item.targetType()) && item.brandId() != null)
+                .collect(Collectors.groupingBy(AccountAuthHealthOverviewVO.RiskItem::brandId, LinkedHashMap::new, Collectors.toList()));
+        return grouped.values().stream().map(rows -> {
+            AccountAuthHealthOverviewVO.RiskItem first = rows.get(0);
+            AccountAuthHealthOverviewVO.RiskItem environmentRow = rows.stream()
+                    .filter(row -> row.browserEnvironmentId() != null)
+                    .findFirst()
+                    .orElse(first);
+            LocalDateTime lastLoginSeenAt = rows.stream().map(AccountAuthHealthOverviewVO.RiskItem::lastLoginVerifiedAt)
+                    .filter(Objects::nonNull).max(LocalDateTime::compareTo).orElse(null);
+            return new AccountAuthHealthOverviewVO.BrandEnvironmentGroup(
+                    first.brandId(), first.brandName(), first.companyName(), first.ownerUserId(), first.ownerName(),
+                    environmentRow.browserEnvironmentId(), environmentRow.environmentKey(),
+                    StringUtils.hasText(environmentRow.environmentName())
+                            ? environmentRow.environmentName() : environmentRow.environmentKey(),
+                    environmentRow.environmentStatus(),
+                    rows.size(),
+                    (int) rows.stream().filter(row -> row.loginFactStatus() != null
+                            && Set.of("confirmed_logged_in", "official_authorized").contains(row.loginFactStatus())).count(),
+                    (int) rows.stream().filter(this::requiresLoginHandling).count(),
+                    (int) rows.stream().filter(row -> row.loginFactStatus() != null
+                            && Set.of("unverified", "unbound").contains(row.loginFactStatus())).count(),
+                    (int) rows.stream().filter(row -> "overdue".equals(row.reverifyStatus())).count(),
+                    (int) rows.stream().filter(row -> "due_soon".equals(row.reverifyStatus())).count(),
+                    lastLoginSeenAt,
+                    "/admin/brands/" + first.brandId() + "?tab=self-media");
+        }).sorted(Comparator
+                .comparingInt(AccountAuthHealthOverviewVO.BrandEnvironmentGroup::loginIssueCount).reversed()
+                .thenComparing(AccountAuthHealthOverviewVO.BrandEnvironmentGroup::brandName, Comparator.nullsLast(String::compareTo)))
+                .toList();
+    }
+
+    private List<AccountAuthHealthOverviewVO.ScanBatch> latestScans() {
+        List<AccountAuthRiskScanBatch> rows = scanBatchMapper.selectList(
+                new LambdaQueryWrapper<AccountAuthRiskScanBatch>()
+                        .orderByDesc(AccountAuthRiskScanBatch::getStartedAt, AccountAuthRiskScanBatch::getId)
+                        .last("LIMIT 20"));
+        Map<String, AccountAuthRiskScanBatch> latestByType = new LinkedHashMap<>();
+        for (AccountAuthRiskScanBatch row : rows) latestByType.putIfAbsent(row.getScanType(), row);
+        return latestByType.values().stream().map(row -> new AccountAuthHealthOverviewVO.ScanBatch(
+                row.getId(), row.getScanType(), row.getStatus(), row.getStartedAt(), row.getFinishedAt(),
+                row.getTotalCount(), row.getSuccessCount(), row.getFailureCount(), row.getSkippedCount(), row.getErrorSummary()
+        )).toList();
     }
 
     private List<ForumCredentialHealth> forumCredentialHealth(PublishSite site) {
@@ -312,11 +443,14 @@ public class AccountAuthHealthOverviewService {
         int high = 0;
         int due7 = 0;
         int due30 = 0;
+        int explicitLoginIssues = 0;
+        int reverifyOverdue = 0;
+        int referenceWindowNormal = 0;
         for (AccountAuthHealthOverviewVO.RiskItem item : items) {
             switch (String.valueOf(item.riskStatus())) {
                 case "normal" -> normal++;
                 case "expiring", "reverify_due_soon" -> expiring++;
-                case "expired", "reverify_overdue" -> expired++;
+                case "expired", "reverify_overdue", "login_verification_failed" -> expired++;
                 case "missing", "credential_missing" -> missing++;
                 default -> unknown++;
             }
@@ -329,6 +463,15 @@ public class AccountAuthHealthOverviewService {
             if (item.daysUntilExpiry() != null && item.daysUntilExpiry() >= 0 && item.daysUntilExpiry() <= 30) {
                 due30++;
             }
+            if (requiresLoginHandling(item)) {
+                explicitLoginIssues++;
+            }
+            if ("reverify_overdue".equals(item.riskStatus())) {
+                reverifyOverdue++;
+            }
+            if ("self_media".equals(item.targetType()) && "normal".equals(item.riskStatus())) {
+                referenceWindowNormal++;
+            }
         }
         return new AccountAuthHealthOverviewVO.Summary(
                 items.size(),
@@ -340,14 +483,20 @@ public class AccountAuthHealthOverviewService {
                 alertGroups.stream().mapToInt(AccountAuthHealthOverviewVO.AlertGroup::count).sum(),
                 high,
                 due7,
-                due30
+                due30,
+                explicitLoginIssues,
+                reverifyOverdue,
+                referenceWindowNormal
         );
     }
 
     private List<AccountAuthHealthOverviewVO.AlertGroup> alertGroups() {
         List<SystemAlert> alerts = systemAlertMapper.selectList(new LambdaQueryWrapper<SystemAlert>()
-                .in(SystemAlert::getAlertType, List.of("SELF_MEDIA_ACCOUNT_AUTH_HEALTH", "FORUM_COOKIE_AUTH_HEALTH"))
+                .in(SystemAlert::getAlertType, List.of("SELF_MEDIA_ACCOUNT_AUTH_HEALTH", "FORUM_COOKIE_AUTH_HEALTH",
+                        "SELF_MEDIA_IDENTITY_PARSER_HEALTH"))
                 .eq(SystemAlert::getIsResolved, false)
+                .and(scope -> scope.isNull(SystemAlert::getSnoozedUntil)
+                        .or().le(SystemAlert::getSnoozedUntil, LocalDateTime.now()))
                 .orderByDesc(SystemAlert::getCreatedAt));
         Map<String, MutableAlertGroup> groups = new LinkedHashMap<>();
         for (SystemAlert alert : alerts) {
@@ -535,6 +684,7 @@ public class AccountAuthHealthOverviewService {
             case "last_verification" -> "最近登录验证";
             case "credential_capture" -> "凭据采集时间";
             case "credential_reference" -> "平台参考周期";
+            case "latest_login_check" -> "最近登录检测";
             case "cookie_declared_expiry" -> "Cookie 声明时间";
             case "account_binding" -> "账号绑定时间";
             default -> "未记录来源";
@@ -547,6 +697,9 @@ public class AccountAuthHealthOverviewService {
         }
         if ("credential_missing".equals(status)) {
             return "尚无可信登录健康记录；可同步已登录环境，或在品牌详情中验证登录状态。";
+        }
+        if ("login_verification_failed".equals(status)) {
+            return "平台已形成明确登录失败事实，请由运营进入绑定环境完成登录并重新核验。";
         }
         if ("reverify_overdue".equals(status)) {
             return "已超过建议复验时间，请在品牌详情中验证当前登录状态。";
@@ -569,6 +722,13 @@ public class AccountAuthHealthOverviewService {
         return "当前授权可用，来源：" + expirySourceLabel(source) + "。";
     }
 
+    private boolean requiresLoginHandling(AccountAuthHealthOverviewVO.RiskItem item) {
+        if (item == null || !"self_media".equals(item.targetType())) return false;
+        return "login_required".equals(item.loginFactStatus())
+                || "verification_failed".equals(item.loginFactStatus())
+                || "expired".equals(item.riskStatus());
+    }
+
     private String forumActionHint(String status) {
         if ("missing".equals(status)) {
             return "站点缺少论坛 Cookie 或账号凭据，请在发布站点配置中更新。";
@@ -587,7 +747,7 @@ public class AccountAuthHealthOverviewService {
 
     private int riskRank(String riskStatus) {
         return switch (String.valueOf(riskStatus)) {
-            case "expired" -> 0;
+            case "expired", "login_verification_failed" -> 0;
             case "reverify_overdue" -> 0;
             case "missing", "credential_missing" -> 1;
             case "expiring", "reverify_due_soon" -> 2;
@@ -619,6 +779,7 @@ public class AccountAuthHealthOverviewService {
             return switch (status) {
                 case "expired" -> "立即" + verb;
                 case "reverify_overdue" -> "立即复验";
+                case "login_verification_failed" -> "内部核对";
                 case "missing" -> "补充凭据";
                 case "credential_missing" -> "验证登录";
                 case "expiring", "reverify_due_soon" -> "提前复验";
@@ -668,22 +829,33 @@ public class AccountAuthHealthOverviewService {
                     count,
                     latestCreatedAt,
                     alertGroupTitle(targetType, issueCode),
-                    sampleMessage,
+                    alertGroupSampleMessage(issueCode, sampleMessage),
                     actionRoute,
                     "forum".equals(targetType) ? "处理论坛凭据" : "处理自媒体账号"
             );
         }
     }
 
-    private String alertGroupTitle(String targetType, String issueCode) {
+    static String alertGroupSampleMessage(String issueCode, String message) {
+        if ("COOKIE_CREDENTIAL_MISSING".equals(issueCode) && message != null) {
+            return message.replace(
+                    "平台 Cookie 登录凭据缺失或已失效",
+                    "尚无可信登录健康记录，请在绑定的指纹浏览器环境确认并上报当前登录状态"
+            );
+        }
+        return message;
+    }
+
+    static String alertGroupTitle(String targetType, String issueCode) {
         return switch (issueCode) {
             case "COOKIE_CREDENTIAL_EXPIRED" -> "自媒体登录已过期";
             case "COOKIE_CREDENTIAL_EXPIRING" -> "自媒体登录临近到期";
-            case "COOKIE_CREDENTIAL_MISSING" -> "自媒体 Cookie 缺失";
+            case "COOKIE_CREDENTIAL_MISSING" -> "自媒体登录状态待验证";
             case "OFFICIAL_CREDENTIAL_EXPIRED" -> "官方授权已过期";
             case "OFFICIAL_CREDENTIAL_EXPIRING" -> "官方授权临近到期";
             case "ACCOUNT_REVERIFY_OVERDUE" -> "自媒体账号复验超期";
             case "ACCOUNT_REVERIFY_DUE_SOON" -> "自媒体账号即将需要复验";
+            case "SELF_MEDIA_IDENTITY_PARSER_HEALTH" -> "平台身份识别器异常";
             case "FORUM_COOKIE_EXPIRED" -> "论坛 Cookie 已过期";
             case "FORUM_COOKIE_EXPIRING" -> "论坛 Cookie 临近到期";
             case "FORUM_COOKIE_MISSING" -> "论坛 Cookie 缺失";

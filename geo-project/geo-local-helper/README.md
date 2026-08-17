@@ -157,13 +157,16 @@ window.open(`http://127.0.0.1:17891/#backendToken=${encodeURIComponent(JSON.pars
 
 如果已经有后台任务 ID，也可以只填“已有任务 ID”，点击“仅启动已有任务”。
 
-选择后台账号后，本地助手会把该账号记录上的 `platformAccountId` 写入本地任务的 `expectedPlatformAccountId`，并把账号名称写入 `expectedAccountName`。环境内 PoC 扩展领取任务后，会在填充前做账号一致性校验：
+选择后台账号后，本地助手会把该账号记录上的 `platformAccountId` 写入本地任务的 `expectedPlatformAccountId`，并把账号名称写入 `expectedAccountName`。环境内 PoC 扩展领取任务后，会在填充前做账号一致性校验。账号名称是唯一的身份判定依据；`platformAccountId` 可能是历史随机值，只用于诊断留痕或拼接平台必须的页面参数，不参与一致性判定，也不会因不一致产生告警：
 
-- 今日头条：优先比对平台账号 ID，名称作为 PoC 兜底。
-- 知乎：探测账号名称、`urlToken`、`id`，当前主要按名称校验。
-- 小红书：读取创作后台顶部账号名称，当前按名称校验。
+- 今日头条：读取并比对平台账号名称。
+- 知乎：读取并比对平台账号名称；`urlToken`、`id` 仅用于诊断。
+- 小红书：读取并比对创作后台顶部账号名称。
+- 百家号、抖音：同样按平台账号名称判定。
 
 账号不一致时，任务会失败并留在本地助手里等待按任务 ID 重置重试，不会 ack 后台。
+
+旧接口未传 `selfMediaAccountId` 时，只能按“平台 + 账号名称”定位；若仍有多个候选账号，必须补传系统账号主键，不再使用 `platformAccountId` 猜测。
 
 本地任务以 `taskId` 为唯一标识保存。同一环境可以排多个任务，环境内扩展按创建时间领取当前环境下最早的 `pending/requeued` 任务；领取后任务进入 `claimed`，超时未完成会自动回退为 `requeued`。
 

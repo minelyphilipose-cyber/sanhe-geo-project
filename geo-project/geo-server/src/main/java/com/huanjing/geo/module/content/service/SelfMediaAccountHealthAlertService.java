@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.content.credential.entity.SelfMediaCookieCredential;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.AccountAuthRiskScanBatch;
+import com.huanjing.geo.module.content.entity.SelfMediaAuthHealthPolicy;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaCookieCredentialMapper;
 import com.huanjing.geo.module.content.mapper.AccountAuthRiskScanBatchMapper;
@@ -26,6 +27,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -44,7 +46,10 @@ public class SelfMediaAccountHealthAlertService {
     private static final String FALLBACK_RECIPIENT_ROLE = "delivery_manager";
     private static final String AUTH_MODE_COOKIE = "COOKIE";
     private static final String STATUS_ACTIVE = "active";
+    private static final Set<String> ALLOWED_FALLBACK_RECIPIENT_ROLES = Set.of("delivery_manager", "manager");
     private static final List<String> BRAND_OPERATOR_ROLES = List.of("PRIMARY", "SECONDARY");
+    private static final Set<String> LOGIN_WORK_ORDER_ISSUE_CODES = Set.of(
+            "ACCOUNT_LOGIN_VERIFICATION_FAILED", "OFFICIAL_CREDENTIAL_EXPIRED");
     private static final Set<String> ALL_ISSUE_CODES = Set.of(
             "OFFICIAL_CREDENTIAL_MISSING",
             "OFFICIAL_CREDENTIAL_EXPIRED",
@@ -53,6 +58,8 @@ public class SelfMediaAccountHealthAlertService {
             "COOKIE_CREDENTIAL_MISSING",
             "COOKIE_CREDENTIAL_EXPIRED",
             "COOKIE_CREDENTIAL_EXPIRING",
+            "ACCOUNT_LOGIN_VERIFICATION_FAILED",
+            "ACCOUNT_INTERNAL_DIAGNOSIS_REQUIRED",
             "ACCOUNT_REVERIFY_OVERDUE",
             "ACCOUNT_REVERIFY_DUE_SOON"
     );
@@ -67,6 +74,8 @@ public class SelfMediaAccountHealthAlertService {
     private final SelfMediaAuthHealthPolicyService authHealthPolicyService;
     private final SelfMediaAuthRiskEvaluator authRiskEvaluator;
     private final AccountAuthRiskScanBatchMapper scanBatchMapper;
+    private final SelfMediaLoginObservationService loginObservationService;
+    private final SelfMediaAuthWorkOrderService authWorkOrderService;
 
     @Value("${geo.self-media-account-health.scan-limit:500}")
     private int scanLimit;
@@ -74,14 +83,36 @@ public class SelfMediaAccountHealthAlertService {
     @Value("${geo.self-media-account-health.credential-expiring-days:7}")
     private int credentialExpiringDays;
 
-    @Value("${geo.self-media-account-health.cookie-valid-days:30}")
+    @Value("${geo.self-media-account-health.cookie-valid-days:90}")
     private int defaultCookieValidDays;
 
-    @Value("${geo.self-media-account-health.cookie-platform-valid-days:toutiao:30,baijiahao:30,zhihu:30,xiaohongshu:7}")
+    @Value("${geo.self-media-account-health.cookie-platform-valid-days:douyin:30,xiaohongshu:30,toutiao:90,baijiahao:90,zhihu:90}")
     private String cookiePlatformValidDays;
+
+    @Value("${geo.self-media-account-health.identity-circuit.window-minutes:15}")
+    private int identityCircuitWindowMinutes;
+
+    @Value("${geo.self-media-account-health.identity-circuit.minimum-samples:10}")
+    private int identityCircuitMinimumSamples;
+
+    @Value("${geo.self-media-account-health.identity-circuit.failure-ratio-threshold:0.6}")
+    private double identityCircuitFailureRatioThreshold;
+
+    @Value("${geo.self-media-account-health.identity-circuit.minimum-affected-brands:3}")
+    private int identityCircuitMinimumAffectedBrands;
 
     public int scanOnce() {
         AccountAuthRiskScanBatch batch = startBatch();
+        try {
+            return scanOnce(batch);
+        } catch (Exception ex) {
+            finishBatch(batch, 0, 0, 1, "扫描启动失败:" + ex.getMessage());
+            throw ex;
+        }
+    }
+
+    private int scanOnce(AccountAuthRiskScanBatch batch) {
+        evaluateIdentityCircuits();
         List<SelfMediaAccount> accounts = loadMonitoredAccounts();
         if (accounts.isEmpty()) {
             finishBatch(batch, 0, 0, 0, null);
@@ -95,11 +126,12 @@ public class SelfMediaAccountHealthAlertService {
         int succeeded = 0;
         int failed = 0;
         List<String> errors = new ArrayList<>();
+        Set<Long> workOrderCheckedBrands = new HashSet<>();
         for (SelfMediaAccount account : accounts) {
             try {
                 HealthIssue issue = detectIssue(account, credentialsByAccountId.get(account.getId()), now);
                 BrandContext brandContext = brandContextByBrandId.getOrDefault(account.getBrandId(), BrandContext.fallback());
-                changed += reconcile(account, issue, brandContext);
+                changed += reconcile(account, issue, brandContext, workOrderCheckedBrands);
                 succeeded++;
             } catch (Exception ex) {
                 failed++;
@@ -109,6 +141,28 @@ public class SelfMediaAccountHealthAlertService {
         batch.setLastScannedId(accounts.get(accounts.size() - 1).getId());
         finishBatch(batch, accounts.size(), succeeded, failed, String.join("; ", errors));
         return changed;
+    }
+
+    private void evaluateIdentityCircuits() {
+        monitoredPlatforms().forEach(this::platformCircuitOpen);
+    }
+
+    public int refreshAccountAlert(Long accountId) {
+        if (accountId == null) {
+            return 0;
+        }
+        SelfMediaAccount account = accountMapper.selectById(accountId);
+        if (account == null || account.getDeletedAt() != null) {
+            systemAlertService.resolveOpenByDedupeKeyPrefix("self_media_auth:" + accountId + ":", null);
+            return 1;
+        }
+        SelfMediaCookieCredential credential = AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())
+                ? loadCookieCredentials(List.of(account)).get(accountId)
+                : null;
+        BrandContext brandContext = loadBrandContexts(List.of(account))
+                .getOrDefault(account.getBrandId(), BrandContext.fallback());
+        HealthIssue issue = detectIssue(account, credential, LocalDateTime.now());
+        return reconcile(account, issue, brandContext, new HashSet<>());
     }
 
     private List<SelfMediaAccount> loadMonitoredAccounts() {
@@ -254,12 +308,26 @@ public class SelfMediaAccountHealthAlertService {
                 ? credential.getExpiresAt() : null;
         var risk = authRiskEvaluator.evaluate(new SelfMediaAuthRiskEvaluator.Input(policy, now, true, credential != null,
                 account.getLastLoginVerifiedAt(), credential == null ? null : credential.getCapturedAt(),
-                declaredExpiry, account.getCreatedAt()));
+                declaredExpiry, account.getCreatedAt(), account.getLastLoginVerificationResult(),
+                account.getLastLoginVerificationCheckedAt()));
         account.setRecommendedReverifyAt(risk.recommendedReverifyAt());
         account.setUpdatedAt(now);
         accountMapper.updateById(account);
+        // BaseMapper skips null fields; explicitly clear a stale recommendation after a failed or disabled check.
+        accountMapper.updateNullableRecommendedReverifyAt(account.getId(), risk.recommendedReverifyAt());
         if ("credential_missing".equals(risk.riskStatus())) {
             return issue("COOKIE_CREDENTIAL_MISSING", "warn", "尚无可信登录健康记录，请验证当前登录状态");
+        }
+        if ("login_verification_failed".equals(risk.riskStatus())) {
+            String detail = StringUtils.hasText(account.getLastLoginVerificationWarning())
+                    ? account.getLastLoginVerificationWarning().trim()
+                    : "最近一次登录检测未通过";
+            if (platformCircuitOpen(account.getPlatform())) {
+                return issue("ACCOUNT_INTERNAL_DIAGNOSIS_REQUIRED", "warn",
+                        detail + "；当前平台身份识别异常率较高，请由运营人员完成内部技术排查");
+            }
+            return issue("ACCOUNT_LOGIN_VERIFICATION_FAILED", "high",
+                    detail + "；请由运营人员进入账号环境完成登录处理，需要扫码或凭据时再联系客户配合");
         }
         long daysUntil = risk.recommendedReverifyAt() == null ? 0 : daysUntil(now, risk.recommendedReverifyAt());
         if ("reverify_overdue".equals(risk.riskStatus())) {
@@ -273,7 +341,19 @@ public class SelfMediaAccountHealthAlertService {
         return null;
     }
 
+    private boolean platformCircuitOpen(String platform) {
+        return loginObservationService.platformCircuitStatus(
+                platform,
+                identityCircuitWindowMinutes,
+                identityCircuitMinimumSamples,
+                identityCircuitFailureRatioThreshold,
+                identityCircuitMinimumAffectedBrands).open();
+    }
+
     private HealthIssue detectOfficialApiIssue(SelfMediaAccount account, LocalDateTime now) {
+        if ("disabled".equalsIgnoreCase(account.getStatus())) {
+            return null;
+        }
         if (!STATUS_ACTIVE.equalsIgnoreCase(account.getStatus())) {
             return issue("OFFICIAL_ACCOUNT_INACTIVE", "high", "官方 API 授权账号未启用或已失效");
         }
@@ -320,28 +400,68 @@ public class SelfMediaAccountHealthAlertService {
                 .orElse(false);
     }
 
-    private int reconcile(SelfMediaAccount account, HealthIssue issue, BrandContext brandContext) {
+    private int reconcile(SelfMediaAccount account,
+                          HealthIssue issue,
+                          BrandContext brandContext,
+                          Set<Long> workOrderCheckedBrands) {
         String prefix = dedupePrefix(account);
+        var policy = authHealthPolicyService.findPolicy(account.getPlatform());
+        if (policy != null && Boolean.FALSE.equals(policy.getAlertEnabled())) {
+            systemAlertService.resolveOpenByDedupeKeyPrefix(prefix, null);
+            return 1;
+        }
         if (issue == null) {
             systemAlertService.resolveOpenByDedupeKeyPrefix(prefix, null);
             return 1;
+        }
+        Long brandId = account.getBrandId();
+        if (brandId != null && shouldOpenLoginWorkOrder(account, issue)
+                && workOrderCheckedBrands.add(brandId)) {
+            authWorkOrderService.reopenResolvedForBrand(brandId, message(account, issue, brandContext));
         }
         for (String issueCode : ALL_ISSUE_CODES) {
             if (!issueCode.equals(issue.code())) {
                 systemAlertService.resolveOpenByDedupeKey(prefix + issueCode, null);
             }
         }
-        systemAlertService.createRecipientAlert(
+        BrandContext recipient = applyPolicyFallbackRecipient(brandContext, policy);
+        systemAlertService.createOrRefreshRecipientAlert(
                 ALERT_TYPE,
                 issue.severity(),
                 SOURCE,
                 message(account, issue, brandContext),
                 context(account, issue, brandContext),
-                brandContext.recipientUserId(),
-                brandContext.recipientRole(),
+                recipient.recipientUserId(),
+                recipient.recipientRole(),
                 prefix + issue.code()
         );
         return 1;
+    }
+
+    private boolean shouldOpenLoginWorkOrder(SelfMediaAccount account, HealthIssue issue) {
+        if (account == null || issue == null || !LOGIN_WORK_ORDER_ISSUE_CODES.contains(issue.code())) return false;
+        if ("OFFICIAL_CREDENTIAL_EXPIRED".equals(issue.code())) return true;
+        String verificationMethod = account.getLastLoginVerificationMethod();
+        return "ACCOUNT_LOGIN_VERIFICATION_FAILED".equals(issue.code())
+                && StringUtils.hasText(verificationMethod)
+                && Set.of(SelfMediaLoginVerificationService.METHOD_SYSTEM_TRIGGERED,
+                        SelfMediaLoginVerificationService.METHOD_PUBLISH_TASK_FAILURE)
+                .contains(verificationMethod);
+    }
+
+    private BrandContext applyPolicyFallbackRecipient(BrandContext brandContext,
+                                                      SelfMediaAuthHealthPolicy policy) {
+        if (brandContext.recipientUserId() != null) {
+            return brandContext;
+        }
+        String configuredRole = policy == null ? null : policy.getDefaultRecipientRole();
+        String normalizedRole = StringUtils.hasText(configuredRole)
+                ? configuredRole.trim().toLowerCase(Locale.ROOT)
+                : null;
+        String recipientRole = ALLOWED_FALLBACK_RECIPIENT_ROLES.contains(normalizedRole)
+                ? normalizedRole
+                : FALLBACK_RECIPIENT_ROLE;
+        return new BrandContext(null, recipientRole, brandContext.companyName(), brandContext.brandName());
     }
 
     private AccountAuthRiskScanBatch startBatch() {
@@ -396,7 +516,11 @@ public class SelfMediaAccountHealthAlertService {
         context.put("daysUntilExpiry", issue.daysUntilExpiry());
         context.put("lastAuthCheckedAt", account.getLastAuthCheckedAt());
         context.put("lastAuthError", account.getLastAuthError());
-        context.put("route", "/admin/brands/" + account.getBrandId() + "?tab=self-media&accountId=" + account.getId());
+        context.put("lastLoginVerifiedAt", account.getLastLoginVerifiedAt());
+        context.put("lastLoginVerificationCheckedAt", account.getLastLoginVerificationCheckedAt());
+        context.put("lastLoginVerificationResult", account.getLastLoginVerificationResult());
+        context.put("lastLoginVerificationWarning", account.getLastLoginVerificationWarning());
+        context.put("route", "/admin/monitoring/account-auth-health?brandId=" + account.getBrandId());
         return context;
     }
 

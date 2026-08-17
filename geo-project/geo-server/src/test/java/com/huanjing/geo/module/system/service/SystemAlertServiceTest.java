@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -190,9 +191,11 @@ class SystemAlertServiceTest {
     @Test
     void createOrRefreshRecipientAlertUpdatesOpenDedupeKey() {
         SystemAlert existing = new SystemAlert();
+        LocalDateTime readAt = LocalDateTime.now().minusHours(1);
         existing.setId(12L);
         existing.setDedupeKey("llm_capacity:hunyuan:active_peak");
         existing.setIsResolved(false);
+        existing.setReadAt(readAt);
         existing.setMessage("旧告警");
         when(systemAlertMapper.selectOne(any())).thenReturn(existing);
 
@@ -215,10 +218,100 @@ class SystemAlertServiceTest {
         assertEquals("critical", updated.getSeverity());
         assertEquals("混元 active peak 持续顶格", updated.getMessage());
         assertEquals("super_admin", updated.getRecipientRole());
+        assertEquals(readAt, updated.getReadAt());
         cn.hutool.json.JSONObject context = JSONUtil.parseObj(updated.getContextJson());
         assertEquals("decision", context.getStr("category"));
         assertEquals(5, context.getInt("threshold"));
         verify(systemAlertMapper, never()).insert(any());
+    }
+
+    @Test
+    void resolveRejectsActiveAccountHealthAlertUntilSystemDetectsRecovery() {
+        SystemAlert existing = new SystemAlert();
+        existing.setId(12L);
+        existing.setAlertType("SELF_MEDIA_ACCOUNT_AUTH_HEALTH");
+        existing.setIsResolved(false);
+        existing.setRecipientUserId(7L);
+        when(systemAlertMapper.selectOne(any())).thenReturn(existing);
+
+        BizException error = assertThrows(BizException.class, () -> systemAlertService.resolve(12L));
+
+        assertEquals(409, error.getCode());
+        verify(systemAlertMapper, never()).updateById(any());
+    }
+
+    @Test
+    void claimRejectsTakingOverAnotherOperatorsOpenAlert() {
+        SystemAlert existing = new SystemAlert();
+        existing.setId(12L);
+        existing.setIsResolved(false);
+        existing.setClaimedBy(99L);
+        when(systemAlertMapper.selectOne(any())).thenReturn(existing);
+
+        BizException error = assertThrows(BizException.class, () -> systemAlertService.claim(12L));
+
+        assertEquals(409, error.getCode());
+        verify(systemAlertMapper, never()).updateById(any());
+    }
+
+    @Test
+    void claimUsesAtomicUnownedUpdate() {
+        SystemAlert existing = new SystemAlert();
+        existing.setId(12L);
+        existing.setIsResolved(false);
+        when(systemAlertMapper.selectOne(any())).thenReturn(existing);
+        when(systemAlertMapper.claimIfUnowned(eq(12L), eq(7L), any(LocalDateTime.class))).thenReturn(1);
+
+        systemAlertService.claim(12L);
+
+        verify(systemAlertMapper).claimIfUnowned(eq(12L), eq(7L), any(LocalDateTime.class));
+    }
+
+    @Test
+    void identityParserIncidentCannotBeManuallyClosed() {
+        SystemAlert existing = new SystemAlert();
+        existing.setId(12L);
+        existing.setAlertType("SELF_MEDIA_IDENTITY_PARSER_HEALTH");
+        existing.setIsResolved(false);
+        existing.setRecipientUserId(7L);
+        when(systemAlertMapper.selectOne(any())).thenReturn(existing);
+
+        BizException error = assertThrows(BizException.class, () -> systemAlertService.resolve(12L));
+
+        assertEquals(409, error.getCode());
+        verify(systemAlertMapper, never()).updateById(any());
+    }
+
+    @Test
+    void selfMediaAccountHealthAlertUsesWorkOrderInsteadOfSeparateClaim() {
+        SystemAlert existing = new SystemAlert();
+        existing.setId(12L);
+        existing.setAlertType("SELF_MEDIA_ACCOUNT_AUTH_HEALTH");
+        existing.setIsResolved(false);
+        existing.setRecipientUserId(7L);
+        when(systemAlertMapper.selectOne(any())).thenReturn(existing);
+
+        BizException error = assertThrows(BizException.class, () -> systemAlertService.claim(12L));
+
+        assertEquals(409, error.getCode());
+        verify(systemAlertMapper, never()).claimIfUnowned(any(), any(), any());
+    }
+
+    @Test
+    void snoozeHidesAccountHealthAlertTemporarilyWithoutResolvingIt() {
+        SystemAlert existing = new SystemAlert();
+        existing.setId(12L);
+        existing.setAlertType("SELF_MEDIA_ACCOUNT_AUTH_HEALTH");
+        existing.setIsResolved(false);
+        existing.setRecipientUserId(1L);
+        when(systemAlertMapper.selectOne(any())).thenReturn(existing);
+
+        systemAlertService.snooze(12L, 24);
+
+        assertEquals(false, existing.getIsResolved());
+        assertNotNull(existing.getReadAt());
+        assertNotNull(existing.getSnoozedUntil());
+        verify(systemAlertMapper).updateById(existing);
     }
 
     @Test

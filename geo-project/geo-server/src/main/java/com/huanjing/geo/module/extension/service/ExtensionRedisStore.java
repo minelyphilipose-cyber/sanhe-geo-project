@@ -39,6 +39,14 @@ public class ExtensionRedisStore {
                     return 0
                     """, Long.class);
 
+    private static final DefaultRedisScript<Long> RENEW_LOCK_SCRIPT =
+            new DefaultRedisScript<>("""
+                    if redis.call('GET', KEYS[1]) == ARGV[1] then
+                        return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+                    end
+                    return 0
+                    """, Long.class);
+
     private static final DefaultRedisScript<Long> COMPARE_AND_SET_WITH_TTL_SCRIPT =
             new DefaultRedisScript<>("""
                     if redis.call('GET', KEYS[1]) == ARGV[1] then
@@ -79,6 +87,12 @@ public class ExtensionRedisStore {
     public boolean releaseLock(String key, String value) {
         Long released = stringRedisTemplate.execute(RELEASE_LOCK_SCRIPT, List.of(key), value);
         return released != null && released > 0;
+    }
+
+    public boolean renewLock(String key, String value, Duration ttl) {
+        Long renewed = stringRedisTemplate.execute(
+                RENEW_LOCK_SCRIPT, List.of(key), value, String.valueOf(ttl.toMillis()));
+        return renewed != null && renewed > 0;
     }
 
     public boolean compareAndSet(String key, String expectedValue, String newValue, Duration ttl) {

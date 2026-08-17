@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
 import com.huanjing.geo.module.content.mapper.BrowserEnvironmentMapper;
+import com.huanjing.geo.module.content.entity.BrowserEnvironment;
+import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.extension.dto.ExtensionRuntimeStatusReportRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentRuntimeStatusReportRequest;
 import com.huanjing.geo.module.extension.entity.ExtensionSession;
@@ -27,6 +29,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class SelfMediaRuntimeStatusServiceTest {
 
@@ -146,6 +149,47 @@ class SelfMediaRuntimeStatusServiceTest {
         assertEquals(409, ex.getHttpStatus());
         assertEquals("EXTENSION_SESSION_PROVIDER_MISMATCH", ((Map<?, ?>) ex.getData()).get("code"));
         verify(extensionRuntimeStatusMapper, never()).insert(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void heartbeatUnknownStatusInheritsLoggedInStateFromPlatformBinding() {
+        BrowserEnvironmentMapper environmentMapper = mock(BrowserEnvironmentMapper.class);
+        BrowserEnvironmentAccountMapper accountMapper = mock(BrowserEnvironmentAccountMapper.class);
+        service = new SelfMediaRuntimeStatusService(
+                extensionRuntimeStatusMapper,
+                localAgentRuntimeStatusMapper,
+                localAgentBrowserMetricSampleMapper,
+                environmentMapper,
+                accountMapper,
+                new ObjectMapper()
+        );
+        BrowserEnvironment environment = new BrowserEnvironment();
+        environment.setId(20L);
+        environment.setBrandId(2L);
+        environment.setEnvironmentKey("geo_b");
+        environment.setProviderProfileId("profile-1");
+        BrowserEnvironmentAccount account = new BrowserEnvironmentAccount();
+        account.setId(30L);
+        account.setBrandId(2L);
+        account.setBrowserEnvironmentId(20L);
+        account.setPlatform("zhihu");
+        account.setLoginStatus("logged_in");
+        when(environmentMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(environment);
+        when(accountMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(account);
+        ExtensionSession session = new ExtensionSession();
+        session.setExtensionVersion("0.2.5");
+        session.setBrandId(2L);
+
+        service.reportExtension(session, new ExtensionRuntimeStatusReportRequest(
+                "install-1", "geo_b", "profile-1", "zhihu", "0.2.5", "1",
+                "https://www.zhihu.com/creator", "zhihu", "jnhbdxh", null,
+                "unknown", "extension_seen", null, null, null, null, null, null));
+
+        ArgumentCaptor<com.huanjing.geo.module.extension.entity.ExtensionRuntimeStatus> captor =
+                ArgumentCaptor.forClass(com.huanjing.geo.module.extension.entity.ExtensionRuntimeStatus.class);
+        verify(extensionRuntimeStatusMapper).insert(captor.capture());
+        assertEquals("logged_in", captor.getValue().getLoginStatus());
+        assertEquals("zhihu", captor.getValue().getDetectedPlatform());
     }
 
     @Test

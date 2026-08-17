@@ -68,7 +68,8 @@ class SelfMediaAccountServiceTest {
                 currentUserService,
                 platformEligibilityService,
                 mock(SelfMediaAuthHealthPolicyService.class),
-                new SelfMediaAuthRiskEvaluator()
+                new SelfMediaAuthRiskEvaluator(),
+                mock(SelfMediaLoginVerificationService.class)
         );
 
         SysUser operator = new SysUser();
@@ -178,7 +179,8 @@ class SelfMediaAccountServiceTest {
                 currentUserService,
                 mock(SelfMediaAccountPlatformEligibilityService.class),
                 mock(SelfMediaAuthHealthPolicyService.class),
-                new SelfMediaAuthRiskEvaluator()
+                new SelfMediaAuthRiskEvaluator(),
+                mock(SelfMediaLoginVerificationService.class)
         );
 
         WechatMpCapabilityVO capability = capabilityService.capability();

@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 class SelfMediaRuntimeReadinessServiceTest {
 
     @Test
-    void loggedInWithoutVerifiedStillBlocksFillReadiness() {
+    void loggedInIsAcceptedAsCurrentVerifiedLoginState() {
         ExtensionRuntimeStatusMapper extensionMapper = mock(ExtensionRuntimeStatusMapper.class);
         LocalAgentRuntimeStatusMapper helperMapper = mock(LocalAgentRuntimeStatusMapper.class);
         SelfMediaRuntimeProperties properties = new SelfMediaRuntimeProperties();
@@ -46,8 +46,8 @@ class SelfMediaRuntimeReadinessServiceTest {
 
         RuntimeReadinessResult result = service.evaluate(query);
 
-        assertFalse(result.ready());
-        assertTrue(result.blockedReasons().contains(SelfMediaRuntimeReadinessService.ACCOUNT_NOT_VERIFIED));
+        assertTrue(result.ready());
+        assertFalse(result.blockedReasons().contains(SelfMediaRuntimeReadinessService.ACCOUNT_NOT_VERIFIED));
     }
 
     @Test

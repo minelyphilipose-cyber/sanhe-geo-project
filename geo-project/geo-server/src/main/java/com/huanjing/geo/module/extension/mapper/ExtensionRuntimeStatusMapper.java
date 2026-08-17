@@ -38,8 +38,27 @@ public interface ExtensionRuntimeStatusMapper extends BaseMapper<ExtensionRuntim
                 updated_at = #{row.updatedAt}
             WHERE provider_profile_id = #{row.providerProfileId}
               AND install_id = #{row.installId}
+              AND runtime_platform_key = COALESCE(
+                    NULLIF(LOWER(TRIM(#{row.detectedPlatform})), ''),
+                    NULLIF(LOWER(TRIM(#{row.platform})), ''),
+                    '__unknown__'
+                  )
             """)
-    int updateByProviderProfileIdAndInstallId(@Param("row") ExtensionRuntimeStatus row);
+    int updateByProviderProfileIdInstallIdAndPlatform(@Param("row") ExtensionRuntimeStatus row);
+
+    @Select("""
+            SELECT *
+            FROM extension_runtime_status
+            WHERE provider_profile_id = #{row.providerProfileId}
+              AND install_id = #{row.installId}
+              AND runtime_platform_key = COALESCE(
+                    NULLIF(LOWER(TRIM(#{row.detectedPlatform})), ''),
+                    NULLIF(LOWER(TRIM(#{row.platform})), ''),
+                    '__unknown__'
+                  )
+            LIMIT 1
+            """)
+    ExtensionRuntimeStatus selectByProviderProfileIdInstallIdAndPlatform(@Param("row") ExtensionRuntimeStatus row);
 
     @Select("""
             SELECT *

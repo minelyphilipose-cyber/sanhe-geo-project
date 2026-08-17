@@ -250,6 +250,18 @@ test('extension distinguishes backend security failures and recovers login repor
   )
 })
 
+test('legacy helper account resolution never uses platform account id as identity', () => {
+  const server = readProjectFile('geo-local-helper/src/server.js')
+  const start = server.indexOf('async function resolveSelfMediaAccount')
+  const end = server.indexOf('\nfunction normalizeSelfMediaAccount', start)
+  const resolver = server.slice(start, end)
+
+  assert.match(resolver, /normalizeIdentityAccountName\(body\.accountName \|\| body\.expectedAccountName\)/)
+  assert.match(resolver, /IDENTITY_EXPECTATION_MISSING/)
+  assert.match(resolver, /candidates\.length !== 1/)
+  assert.doesNotMatch(resolver, /body\.platformAccountId/)
+})
+
 test('baijiahao login reporting reads the current account page structure', () => {
   const contentScript = readProjectFile('geo-env-extension/content-script.js')
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
@@ -290,20 +302,24 @@ test('baijiahao login reporting reads the current account page structure', () =>
   )
 })
 
-test('helper emergency build revision targets the deployed extension', () => {
+test('helper and extension expose a rolling-upgrade compatible protocol', () => {
   const manifest = JSON.parse(readProjectFile('geo-env-extension/manifest.json'))
   const helperPackage = JSON.parse(readProjectFile('geo-local-helper/package.json'))
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
   const contentScript = readProjectFile('geo-env-extension/content-script.js')
 
   assert.equal(manifest.version, helperPackage.version)
-  assert.equal(manifest.version, '0.2.3')
+  assert.equal(manifest.version, '0.2.5')
   assert.match(
     manifest.version_name,
     new RegExp(`${helperPackage.version.replaceAll('.', '\\.')}.+${helperPackage.buildRevision.replaceAll('.', '\\.')}`),
   )
   assert.match(contentScript, new RegExp(`GEO_ENV_CONTENT_SCRIPT_VERSION = '${helperPackage.version.replaceAll('.', '\\.')}'`))
-  assert.match(serviceWorker, /EXTENSION_HELPER_BUILD_MISMATCH/)
+  assert.match(serviceWorker, /EXTENSION_HELPER_PROTOCOL_MISMATCH/)
+  assert.match(serviceWorker, /helperProtocolVersion === '1'/)
+  const helperServer = readProjectFile('geo-local-helper/src/server.js')
+  assert.match(helperServer, /protocolVersion: '1'/)
+  assert.match(helperServer, /rollingUpgrade: true/)
 })
 
 test('extension heartbeat uses a persistent MV3 alarm', () => {

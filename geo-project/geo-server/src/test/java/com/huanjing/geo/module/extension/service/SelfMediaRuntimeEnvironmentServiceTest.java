@@ -62,6 +62,8 @@ class SelfMediaRuntimeEnvironmentServiceTest {
         assertTrue(readyPage.getRecords().get(0).readiness().ready());
         assertEquals("brand_latest_helper", readyPage.getRecords().get(0).readiness().scope());
         assertEquals(100L, readyPage.getRecords().get(0).helper().sessionId());
+        assertEquals("toutiao", readyPage.getRecords().get(0).extension().platform());
+        assertEquals("verified", readyPage.getRecords().get(0).extension().loginStatus());
         assertEquals(
                 4,
                 readyPage.getRecords().get(0).helper().resourceMetrics()

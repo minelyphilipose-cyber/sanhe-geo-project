@@ -6,6 +6,8 @@ import com.huanjing.geo.module.content.dto.SelfMediaLoginVerificationVO;
 import com.huanjing.geo.module.content.service.SelfMediaAccountPlatformEligibilityService;
 import com.huanjing.geo.module.content.service.SelfMediaAccountService;
 import com.huanjing.geo.module.content.service.SelfMediaLoginVerificationService;
+import com.huanjing.geo.module.content.service.SelfMediaLoginObservationService;
+import com.huanjing.geo.module.content.dto.SelfMediaLoginObservationVO;
 import com.huanjing.geo.module.content.vo.DouyinAuthUrlVO;
 import com.huanjing.geo.module.content.vo.DouyinCapabilityVO;
 import com.huanjing.geo.module.content.vo.SelfMediaAccountPlatformOptionVO;
@@ -35,6 +37,7 @@ public class SelfMediaAccountController {
     private final DouyinAuthorizationService douyinAuthorizationService;
     private final PartnerFeatureAccessGuard partnerFeatureAccessGuard;
     private final SelfMediaLoginVerificationService loginVerificationService;
+    private final SelfMediaLoginObservationService loginObservationService;
 
     @GetMapping("/self-media-accounts/wechat/capability")
     public R<WechatMpCapabilityVO> capability() {
@@ -111,6 +114,14 @@ public class SelfMediaAccountController {
                                                                 @PathVariable Long verificationId) {
         ensureInternalSelfMediaAccountAccess();
         return R.ok(loginVerificationService.get(brandId, id, verificationId));
+    }
+
+    @GetMapping("/brands/{brandId}/self-media-accounts/{id}/login-observations")
+    public R<List<SelfMediaLoginObservationVO>> loginObservations(@PathVariable Long brandId,
+                                                                  @PathVariable Long id,
+                                                                  @RequestParam(defaultValue = "30") int limit) {
+        ensureInternalSelfMediaAccountAccess();
+        return R.ok(loginObservationService.listForAccount(brandId, id, limit));
     }
 
     @DeleteMapping("/self-media-accounts/{id}/cookie-credential")

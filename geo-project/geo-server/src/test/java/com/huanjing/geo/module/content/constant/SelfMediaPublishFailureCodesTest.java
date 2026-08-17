@@ -74,4 +74,13 @@ class SelfMediaPublishFailureCodesTest {
         assertEquals("重新校验",
                 SelfMediaPublishFailureCodes.actionLabel("PUBLISH_RESULT_CHECK_HELPER_FAILED"));
     }
+
+    @Test
+    void loginFailureAliasesNormalizeBeforeEnteringScheduleAndHealthFlows() {
+        assertEquals("LOGIN_REQUIRED", SelfMediaPublishFailureCodes.normalize("COOKIE_MISSING"));
+        assertEquals("LOGIN_REQUIRED", SelfMediaPublishFailureCodes.normalize("environment_login_required"));
+        assertEquals("ACCOUNT_MISMATCH", SelfMediaPublishFailureCodes.normalize("ACCOUNT_NAME_MISMATCH"));
+        assertEquals("ACCOUNT_MISMATCH", SelfMediaPublishFailureCodes.normalize("LOGIN_STATUS_MISMATCH"));
+        assertEquals("平台账号未登录", SelfMediaPublishFailureCodes.label("COOKIE_MISSING"));
+    }
 }

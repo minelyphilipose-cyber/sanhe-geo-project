@@ -21,6 +21,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
 
 import static com.huanjing.geo.module.content.credential.CredentialErrorCodes.CREDENTIAL_INTEGRITY_VIOLATION;
@@ -98,10 +99,36 @@ class CredentialVaultServiceTest {
         assertNotNull(inserted.getCookieIvBase64());
         assertNotEquals("[{\"name\":\"sessionid\",\"value\":\"secret\"}]", inserted.getCookiesCiphertext());
         assertTrue(inserted.getEncryptedDek().contains("ciphertextBase64"));
+        assertEquals("platform_policy", inserted.getExpirySource());
+        assertEquals(90, Duration.between(inserted.getCapturedAt(), inserted.getExpiresAt()).toDays());
 
         verify(accountMapper).update(eq(null), any());
         verify(brandAccessService).requireBrandAccess(10L, 99L, BrandAccessAction.MANAGE);
         verify(auditHook).onCredentialStored(any());
+    }
+
+    @Test
+    void capturedDouyinCredentialUsesThirtyDayEstimateOnly() {
+        SelfMediaAccount account = account();
+        account.setPlatform("douyin");
+        when(accountMapper.lockById(20L)).thenReturn(20L);
+        when(accountMapper.selectById(20L)).thenReturn(account);
+        when(credentialMapper.selectLatestByAccountIdForUpdate(20L)).thenReturn(null);
+
+        credentialVaultService.storeCapturedCookies(new CookieCredentialCaptureCommand(
+                20L,
+                "[{\"name\":\"sessionid\",\"value\":\"secret\"}]",
+                "Mozilla/5.0",
+                null,
+                null,
+                99L
+        ));
+
+        ArgumentCaptor<SelfMediaCookieCredential> captor = ArgumentCaptor.forClass(SelfMediaCookieCredential.class);
+        verify(credentialMapper).insert(captor.capture());
+        SelfMediaCookieCredential inserted = captor.getValue();
+        assertEquals("platform_policy", inserted.getExpirySource());
+        assertEquals(30, Duration.between(inserted.getCapturedAt(), inserted.getExpiresAt()).toDays());
     }
 
     @Test

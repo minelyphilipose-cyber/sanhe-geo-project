@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
+import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountCreateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountUpdateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest;
@@ -63,6 +64,7 @@ public class BrowserEnvironmentService {
     private final CurrentUserService currentUserService;
     private final ExtensionProperties extensionProperties;
     private final SelfMediaLoginVerificationService loginVerificationService;
+    private final SelfMediaLoginObservationService loginObservationService;
     private static final Set<String> SEMI_AUTO_PLATFORMS = Set.of("toutiao", "baijiahao", "zhihu", "xiaohongshu");
 
     public List<BrowserEnvironmentVO> listEnvironments(Long brandId) {
@@ -303,6 +305,32 @@ public class BrowserEnvironmentService {
         String provider = normalizeProvider(request.provider());
         String environmentKey = requireTrimmed(request.environmentKey(), "environmentKey is required");
         String providerProfileId = requireTrimmed(request.providerProfileId(), "providerProfileId is required");
+        BrowserEnvironment brandEnvironment = environmentMapper.selectActiveByBrandId(request.brandId());
+        if (brandEnvironment != null) {
+            boolean runtimeIdentityChanged = !Objects.equals(brandEnvironment.getProvider(), provider)
+                    || !Objects.equals(brandEnvironment.getEnvironmentKey(), environmentKey)
+                    || !Objects.equals(brandEnvironment.getProviderProfileId(), providerProfileId);
+            brandEnvironment.setProvider(provider);
+            brandEnvironment.setEnvironmentKey(environmentKey);
+            brandEnvironment.setProviderProfileId(providerProfileId);
+            brandEnvironment.setName(trimToNull(request.name()));
+            brandEnvironment.setStatus(BrowserEnvironmentConstants.ENV_STATUS_ACTIVE);
+            brandEnvironment.setLastErrorCode(null);
+            brandEnvironment.setLastErrorMessage(null);
+            brandEnvironment.setUpdatedBy(operator.getId());
+            brandEnvironment.setUpdatedAt(now);
+            try {
+                environmentMapper.updateById(brandEnvironment);
+                environmentMapper.clearRuntimeErrors(brandEnvironment.getId());
+            } catch (DuplicateKeyException ex) {
+                throw duplicateEnvironmentException();
+            }
+            if (runtimeIdentityChanged) {
+                invalidateEnvironmentBindingsAfterRuntimeIdentityChange(brandEnvironment.getId(), operator.getId(), now);
+            }
+            bindEnvironmentToLocalAgent(brandEnvironment.getId(), request.localAgentSessionId(), operator, now);
+            return BrowserEnvironmentVO.from(brandEnvironment);
+        }
         BrowserEnvironment existing = environmentMapper.selectOldestByIdentityIncludingDeleted(
                 request.brandId(), provider, environmentKey, providerProfileId);
         if (existing != null) {
@@ -345,6 +373,7 @@ public class BrowserEnvironmentService {
         SysUser operator = currentUserService.requireCurrentUser();
         BrowserEnvironment row = requireEnvironment(id);
         brandAccessService.requireBrandAccess(row.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
+        String previousProviderProfileId = row.getProviderProfileId();
         if (StringUtils.hasText(request.providerProfileId())) {
             row.setProviderProfileId(request.providerProfileId().trim());
         }
@@ -367,8 +396,41 @@ public class BrowserEnvironmentService {
         } catch (DuplicateKeyException ex) {
             throw duplicateEnvironmentException();
         }
+        if (!Objects.equals(previousProviderProfileId, row.getProviderProfileId())) {
+            invalidateEnvironmentBindingsAfterRuntimeIdentityChange(row.getId(), operator.getId(), row.getUpdatedAt());
+        }
         bindEnvironmentToLocalAgent(row.getId(), request.localAgentSessionId(), operator, row.getUpdatedAt());
         return BrowserEnvironmentVO.from(row);
+    }
+
+    private void invalidateEnvironmentBindingsAfterRuntimeIdentityChange(Long browserEnvironmentId,
+                                                                          Long operatorId,
+                                                                          LocalDateTime now) {
+        List<BrowserEnvironmentAccount> bindings = environmentAccountMapper.selectList(
+                new LambdaQueryWrapper<BrowserEnvironmentAccount>()
+                        .eq(BrowserEnvironmentAccount::getBrowserEnvironmentId, browserEnvironmentId)
+                        .isNull(BrowserEnvironmentAccount::getDeletedAt));
+        if (bindings.isEmpty()) {
+            return;
+        }
+        environmentAccountMapper.update(null, new LambdaUpdateWrapper<BrowserEnvironmentAccount>()
+                .eq(BrowserEnvironmentAccount::getBrowserEnvironmentId, browserEnvironmentId)
+                .isNull(BrowserEnvironmentAccount::getDeletedAt)
+                .set(BrowserEnvironmentAccount::getLoginStatus, BrowserEnvironmentConstants.LOGIN_REQUIRED)
+                .set(BrowserEnvironmentAccount::getLastVerifiedAt, null)
+                .set(BrowserEnvironmentAccount::getLastLoginSeenAt, null)
+                .set(BrowserEnvironmentAccount::getLastErrorCode, "ENVIRONMENT_RUNTIME_IDENTITY_CHANGED")
+                .set(BrowserEnvironmentAccount::getLastErrorMessage, "品牌指纹浏览器实例已变更，请重新验证登录状态")
+                .set(BrowserEnvironmentAccount::getUpdatedBy, operatorId)
+                .set(BrowserEnvironmentAccount::getUpdatedAt, now));
+        bindings.stream()
+                .map(BrowserEnvironmentAccount::getSelfMediaAccountId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .forEach(accountId -> loginVerificationService.invalidateAccountHealth(
+                        accountId,
+                        SelfMediaLoginVerificationService.METHOD_BINDING_INVALIDATED,
+                        "品牌指纹浏览器实例已变更，请重新验证登录状态"));
     }
 
     private void bindEnvironmentToLocalAgent(Long browserEnvironmentId,
@@ -417,6 +479,7 @@ public class BrowserEnvironmentService {
                 .set(BrowserEnvironment::getUpdatedAt, now)
                 .set(BrowserEnvironment::getDeletedAt, now));
         environmentMapper.disableLocalAgentBinding(id, now);
+        invalidateEnvironmentBindingsAfterRuntimeIdentityChange(id, operator.getId(), now);
     }
 
     public List<BrowserEnvironmentAccountVO> listEnvironmentAccounts(Long brandId, String platform) {
@@ -469,6 +532,11 @@ public class BrowserEnvironmentService {
         } else {
             environmentAccountMapper.updateById(row);
         }
+        loginVerificationService.invalidateAccountHealth(
+                account.getId(),
+                SelfMediaLoginVerificationService.METHOD_BINDING_INVALIDATED,
+                "账号已绑定到新的指纹浏览器环境，请重新验证登录状态"
+        );
         return BrowserEnvironmentAccountVO.from(row, environment);
     }
 
@@ -497,6 +565,8 @@ public class BrowserEnvironmentService {
         SysUser operator = currentUserService.requireCurrentUser();
         BrowserEnvironmentAccount row = requireEnvironmentAccount(id);
         brandAccessService.requireBrandAccess(row.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
+        String previousExpectedAccountName = row.getExpectedAccountName();
+        String previousLoginStatus = row.getLoginStatus();
         if (request.expectedAccountName() != null) {
             row.setExpectedAccountName(trimToNull(request.expectedAccountName()));
         }
@@ -509,6 +579,16 @@ public class BrowserEnvironmentService {
         row.setUpdatedBy(operator.getId());
         row.setUpdatedAt(LocalDateTime.now());
         environmentAccountMapper.updateById(row);
+        if (!Objects.equals(previousExpectedAccountName, row.getExpectedAccountName())
+                || (StringUtils.hasText(request.loginStatus())
+                && BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(previousLoginStatus)
+                && !BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(row.getLoginStatus()))) {
+            loginVerificationService.invalidateAccountHealth(
+                    row.getSelfMediaAccountId(),
+                    SelfMediaLoginVerificationService.METHOD_BINDING_INVALIDATED,
+                    "指纹浏览器账号绑定信息已变更，请重新验证登录状态"
+            );
+        }
         return toAccountVO(row);
     }
 
@@ -524,6 +604,11 @@ public class BrowserEnvironmentService {
                 .set(BrowserEnvironmentAccount::getUpdatedBy, operator.getId())
                 .set(BrowserEnvironmentAccount::getUpdatedAt, now)
                 .set(BrowserEnvironmentAccount::getDeletedAt, now));
+        loginVerificationService.invalidateAccountHealth(
+                row.getSelfMediaAccountId(),
+                SelfMediaLoginVerificationService.METHOD_BINDING_INVALIDATED,
+                "指纹浏览器环境已解绑，请重新绑定并验证登录状态"
+        );
     }
 
     @Transactional
@@ -539,6 +624,11 @@ public class BrowserEnvironmentService {
         row.setUpdatedBy(operator.getId());
         row.setUpdatedAt(LocalDateTime.now());
         environmentAccountMapper.updateById(row);
+        loginVerificationService.invalidateAccountHealth(
+                row.getSelfMediaAccountId(),
+                SelfMediaLoginVerificationService.METHOD_BINDING_INVALIDATED,
+                "登录状态已被人工标记为过期，请重新登录并验证"
+        );
         return toAccountVO(row);
     }
 
@@ -571,6 +661,11 @@ public class BrowserEnvironmentService {
                 .set(BrowserEnvironmentAccount::getLastErrorMessage, null)
                 .set(BrowserEnvironmentAccount::getUpdatedBy, operator.getId())
                 .set(BrowserEnvironmentAccount::getUpdatedAt, now));
+        loginVerificationService.invalidateAccountHealth(
+                row.getSelfMediaAccountId(),
+                SelfMediaLoginVerificationService.METHOD_BINDING_INVALIDATED,
+                "登录身份已重置，请重新确认账号身份并验证登录状态"
+        );
         return toAccountVO(row);
     }
 
@@ -637,12 +732,16 @@ public class BrowserEnvironmentService {
             fail("PLATFORM_REQUIRED", "平台不能为空");
         }
         brandAccessService.requireBrandAccess(brandId, operatorId, BrandAccessAction.OPERATE);
+        String reportedEnvironmentKey = trimToNull(request.environmentKey());
         if (request.selfMediaAccountId() != null) {
             BrowserEnvironmentAccount row = environmentAccountMapper.selectActiveBySelfMediaAccountId(request.selfMediaAccountId());
             if (row == null || !brandId.equals(row.getBrandId()) || !platformEquivalent(platform, row.getPlatform())) {
                 fail("ENVIRONMENT_ACCOUNT_BINDING_NOT_FOUND", "未找到指定自媒体账号对应的环境账号绑定");
             }
             BrowserEnvironment environment = requireEnvironment(row.getBrowserEnvironmentId());
+            if (reportedEnvironmentKey != null && !environmentIdentityMatches(environment, reportedEnvironmentKey)) {
+                fail("BROWSER_ENVIRONMENT_KEY_MISMATCH", "上报环境与自媒体账号绑定的指纹浏览器环境不一致");
+            }
             BrowserEnvironmentLoginStatusRequest normalizedRequest = new BrowserEnvironmentLoginStatusRequest(
                     environment.getEnvironmentKey(),
                     request.selfMediaAccountId(),
@@ -652,11 +751,18 @@ public class BrowserEnvironmentService {
                     request.loginStatus(),
                     request.errorCode(),
                     request.errorMessage(),
-                    request.loginVerificationId()
+                    request.loginVerificationId(),
+                    request.authoritative(),
+                    request.reportSource(),
+                    request.currentUrl(),
+                    request.extensionVersion(),
+                    request.protocolVersion()
             );
             return reportLoginStatusForOperator(row.getId(), normalizedRequest, operatorId, true);
         }
-        BrowserEnvironmentAccount target = resolveBrandPlatformReportTarget(brandId, platform, request);
+        BrowserEnvironmentAccount target = reportedEnvironmentKey == null
+                ? resolveBrandPlatformReportTarget(brandId, platform, request)
+                : resolveEnvironmentScopedBrandReportTarget(brandId, platform, reportedEnvironmentKey, request);
         if (target == null) {
             fail("BRAND_PLATFORM_BINDING_NOT_FOUND", "未找到品牌与平台对应的环境账号绑定");
         }
@@ -670,9 +776,40 @@ public class BrowserEnvironmentService {
                 request.loginStatus(),
                 request.errorCode(),
                 request.errorMessage(),
-                request.loginVerificationId()
+                request.loginVerificationId(),
+                request.authoritative(),
+                request.reportSource(),
+                request.currentUrl(),
+                request.extensionVersion(),
+                request.protocolVersion()
         );
         return reportLoginStatusForOperator(target.getId(), normalizedRequest, operatorId, true);
+    }
+
+    private BrowserEnvironmentAccount resolveEnvironmentScopedBrandReportTarget(
+            Long brandId,
+            String platform,
+            String environmentKey,
+            BrowserEnvironmentBrandLoginStatusRequest request) {
+        List<BrowserEnvironmentAccount> rows = selectActiveByEnvironmentKeyAndEquivalentPlatform(environmentKey, platform)
+                .stream()
+                .filter(row -> Objects.equals(brandId, row.getBrandId()))
+                .toList();
+        if (rows.isEmpty()) {
+            return null;
+        }
+        if (rows.size() == 1) {
+            return rows.get(0);
+        }
+        String actualName = trimToNull(request.actualAccountName());
+        List<BrowserEnvironmentAccount> matched = rows.stream()
+                .filter(row -> reportIdentityMatches(row, actualName))
+                .toList();
+        if (matched.size() == 1) {
+            return matched.get(0);
+        }
+        fail("ENVIRONMENT_PLATFORM_BINDING_AMBIGUOUS", "同一环境与平台存在多个账号绑定，请改用自媒体账号ID上报");
+        return null;
     }
 
     private BrowserEnvironmentAccount resolveBrandPlatformReportTarget(Long brandId,
@@ -754,6 +891,19 @@ public class BrowserEnvironmentService {
         validateStatusReportOwnership(row, environment, account, request);
         String incoming = normalizeLoginStatus(request.loginStatus());
         String target = resolveReportedStatus(row, incoming, request, account);
+        boolean authoritativeNegative = hasServerAuthoritativeNegativeEvidence(request);
+        loginObservationService.record(row, environment, account, request,
+                observationResult(target, authoritativeNegative),
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(target) || authoritativeNegative,
+                operatorId);
+        if (isNonAuthoritativeExtensionFailure(trustedExtensionReport, request, target)) {
+            if (request.loginVerificationId() != null) {
+                loginVerificationService.completeFromLoginReport(
+                        request.loginVerificationId(), row, account, request, target);
+            }
+            recordPassiveLoginDiagnostic(row, request, target, operatorId);
+            return BrowserEnvironmentAccountVO.from(row, environment);
+        }
         assertTransitionAllowed(row.getLoginStatus(), target);
         LocalDateTime now = LocalDateTime.now();
         row.setLoginStatus(target);
@@ -770,11 +920,96 @@ public class BrowserEnvironmentService {
         environmentAccountMapper.updateNullableLoginErrors(
                 row.getId(), row.getLastErrorCode(), row.getLastErrorMessage());
         if (request.loginVerificationId() != null) {
-            loginVerificationService.completeFromLoginReport(request.loginVerificationId(), row, account, request, target);
-        } else if (trustedExtensionReport) {
+            boolean completed = loginVerificationService.completeFromLoginReport(
+                    request.loginVerificationId(), row, account, request, target);
+            if (!completed && trustedExtensionReport
+                    && BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(target)) {
+                loginVerificationService.recordTrustedPassiveHealthReport(
+                        row, account, withoutVerificationId(request));
+            }
+        } else if (trustedExtensionReport && BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(target)) {
             loginVerificationService.recordTrustedPassiveHealthReport(row, account, request);
         }
         return BrowserEnvironmentAccountVO.from(row, environment);
+    }
+
+    private boolean isNonAuthoritativeExtensionFailure(boolean trustedExtensionReport,
+                                                        BrowserEnvironmentLoginStatusRequest request,
+                                                        String resolvedStatus) {
+        return trustedExtensionReport
+                && !hasServerAuthoritativeNegativeEvidence(request)
+                && !BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(resolvedStatus);
+    }
+
+    private boolean hasServerAuthoritativeNegativeEvidence(BrowserEnvironmentLoginStatusRequest request) {
+        if (request.loginVerificationId() == null) return false;
+        String errorCode = trimToNull(request.errorCode());
+        if (!"LOGIN_PAGE_CONFIRMED".equals(errorCode) && !"LOGIN_REQUIRED".equals(errorCode)) return false;
+        String url = trimToNull(request.currentUrl());
+        if (url == null) return false;
+        try {
+            java.net.URI uri = java.net.URI.create(url);
+            String host = String.valueOf(uri.getHost()).toLowerCase(Locale.ROOT);
+            String path = String.valueOf(uri.getPath()).toLowerCase(Locale.ROOT);
+            return host.contains("passport") || host.startsWith("sso.") || host.contains(".sso.")
+                    || path.equals("/login") || path.startsWith("/login/")
+                    || path.equals("/signin") || path.startsWith("/signin/");
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    private String observationResult(String resolvedStatus, boolean authoritativeNegative) {
+        if (BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(resolvedStatus)) return "login_confirmed";
+        if (!authoritativeNegative) {
+            return BrowserEnvironmentConstants.LOGIN_MISMATCH.equals(resolvedStatus)
+                    ? "identity_mismatch" : "technical_failure";
+        }
+        return BrowserEnvironmentConstants.LOGIN_MISMATCH.equals(resolvedStatus)
+                ? "identity_mismatch" : "login_required";
+    }
+
+    private void recordPassiveLoginDiagnostic(BrowserEnvironmentAccount row,
+                                              BrowserEnvironmentLoginStatusRequest request,
+                                              String resolvedStatus,
+                                              Long operatorId) {
+        String diagnosticCode = switch (resolvedStatus) {
+            case BrowserEnvironmentConstants.LOGIN_MISMATCH -> "PASSIVE_ACCOUNT_MISMATCH";
+            case BrowserEnvironmentConstants.LOGIN_EXPIRED -> "PASSIVE_LOGIN_EXPIRED";
+            case BrowserEnvironmentConstants.LOGIN_REQUIRED -> "PASSIVE_LOGIN_UNCONFIRMED";
+            default -> "PASSIVE_IDENTITY_UNREADABLE";
+        };
+        String detail = sanitizeErrorMessage(request.errorMessage());
+        if (!StringUtils.hasText(detail) && BrowserEnvironmentConstants.LOGIN_MISMATCH.equals(resolvedStatus)) {
+            detail = "页面读取账号“" + String.valueOf(trimToNull(request.actualAccountName())) + "”与系统账号不一致";
+        }
+        row.setLastErrorCode(diagnosticCode);
+        row.setLastErrorMessage("被动页面检测暂未形成可信负向结论，已保留原登录状态"
+                + (StringUtils.hasText(detail) ? "；" + detail : ""));
+        row.setUpdatedBy(operatorId);
+        row.setUpdatedAt(LocalDateTime.now());
+        environmentAccountMapper.updateById(row);
+        environmentAccountMapper.updateNullableLoginErrors(
+                row.getId(), row.getLastErrorCode(), row.getLastErrorMessage());
+    }
+
+    private BrowserEnvironmentLoginStatusRequest withoutVerificationId(BrowserEnvironmentLoginStatusRequest request) {
+        return new BrowserEnvironmentLoginStatusRequest(
+                request.environmentKey(),
+                request.selfMediaAccountId(),
+                request.platform(),
+                request.actualPlatformAccountId(),
+                request.actualAccountName(),
+                request.loginStatus(),
+                request.errorCode(),
+                request.errorMessage(),
+                null,
+                false,
+                request.reportSource(),
+                request.currentUrl(),
+                request.extensionVersion(),
+                request.protocolVersion()
+        );
     }
 
     public BrowserEnvironmentAccountVO getBySelfMediaAccount(Long selfMediaAccountId) {
@@ -819,6 +1054,36 @@ public class BrowserEnvironmentService {
         return environmentAccountMapper.selectActiveBySelfMediaAccountId(selfMediaAccountId);
     }
 
+    @Transactional
+    public void recordPublishTaskLoginFailure(Long selfMediaAccountId,
+                                              String failureCode,
+                                              String failureMessage) {
+        String normalizedFailureCode = SelfMediaPublishFailureCodes.normalize(failureCode);
+        String loginStatus = switch (normalizedFailureCode == null ? "" : normalizedFailureCode) {
+            case "LOGIN_REQUIRED" -> BrowserEnvironmentConstants.LOGIN_REQUIRED;
+            case "ACCOUNT_MISMATCH" -> BrowserEnvironmentConstants.LOGIN_MISMATCH;
+            default -> null;
+        };
+        if (loginStatus == null || selfMediaAccountId == null) {
+            return;
+        }
+        BrowserEnvironmentAccount row = environmentAccountMapper.selectActiveBySelfMediaAccountId(selfMediaAccountId);
+        if (row == null) {
+            loginVerificationService.recordPublishTaskLoginFailure(selfMediaAccountId, failureMessage);
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        row.setLoginStatus(loginStatus);
+        row.setLastVerifiedAt(now);
+        row.setLastErrorCode(normalizedFailureCode);
+        row.setLastErrorMessage(sanitizeErrorMessage(failureMessage));
+        row.setUpdatedAt(now);
+        environmentAccountMapper.updateById(row);
+        environmentAccountMapper.updateNullableLoginErrors(
+                row.getId(), row.getLastErrorCode(), row.getLastErrorMessage());
+        loginVerificationService.recordPublishTaskLoginFailure(selfMediaAccountId, failureMessage);
+    }
+
     public BrowserEnvironment getEnvironmentForBinding(BrowserEnvironmentAccount binding) {
         if (binding == null) return null;
         return requireEnvironment(binding.getBrowserEnvironmentId());
@@ -838,7 +1103,33 @@ public class BrowserEnvironmentService {
         if (!StringUtils.hasText(binding.getExpectedAccountName())) {
             applyAccountIdentityExpectation(binding, account);
         }
+        if (requireLoggedIn) {
+            rejectExplicitLoginFailure(binding.getLoginStatus());
+        }
         return binding;
+    }
+
+    private void rejectExplicitLoginFailure(String loginStatus) {
+        String status = StringUtils.hasText(loginStatus)
+                ? normalizeLoginStatus(loginStatus)
+                : BrowserEnvironmentConstants.LOGIN_UNKNOWN;
+        switch (status) {
+            case BrowserEnvironmentConstants.LOGIN_REQUIRED ->
+                    fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_LOGIN_REQUIRED,
+                            "平台账号需要重新登录，请打开指纹浏览器完成登录后再发布");
+            case BrowserEnvironmentConstants.LOGIN_EXPIRED ->
+                    fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_LOGIN_EXPIRED,
+                            "平台登录已过期，请重新登录并同步状态后再发布");
+            case BrowserEnvironmentConstants.LOGIN_MISMATCH ->
+                    fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_ACCOUNT_MISMATCH,
+                            "当前登录账号与系统绑定账号不一致，请确认账号或重置账号校验");
+            case BrowserEnvironmentConstants.LOGIN_ERROR ->
+                    fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_LOGIN_ERROR,
+                            "平台登录状态检测异常，请打开指纹浏览器重新同步后再发布");
+            default -> {
+                // unknown is intentionally compatible with historical production bindings.
+            }
+        }
     }
 
     private void applyAccountIdentityExpectation(BrowserEnvironmentAccount binding, SelfMediaAccount account) {

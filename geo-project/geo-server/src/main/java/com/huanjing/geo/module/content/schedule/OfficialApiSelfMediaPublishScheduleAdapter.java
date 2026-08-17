@@ -361,6 +361,7 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         task.setFinishedAt(now);
         task.setRequestPayload(jsonColumn(result.getRequestPayload()));
         task.setResponsePayload(jsonColumn(result.getResponseBody()));
+        task.setPayloadPurgedAt(null);
         task.setExternalStatus(result.getExternalStatus());
         task.setReviewStatus(result.getReviewStatus());
         task.setReviewFeedback(result.getReviewFeedback());
@@ -395,6 +396,7 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         next.setExternalStatus(status.externalStatus());
         next.setReviewFeedback(status.reviewFeedback());
         next.setResponsePayload(jsonColumn(status.rawResponse()));
+        next.setPayloadPurgedAt(null);
         next.setReviewCheckedAt(LocalDateTime.now());
         next.setReviewCheckCount((next.getReviewCheckCount() == null ? 0 : next.getReviewCheckCount()) + 1);
         next.setReviewLockedUntil(null);

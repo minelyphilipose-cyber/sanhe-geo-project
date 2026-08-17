@@ -11,7 +11,12 @@ public record BrowserEnvironmentLoginStatusRequest(
         @NotBlank String loginStatus,
         String errorCode,
         String errorMessage,
-        Long loginVerificationId
+        Long loginVerificationId,
+        Boolean authoritative,
+        String reportSource,
+        String currentUrl,
+        String extensionVersion,
+        String protocolVersion
 ) {
     public BrowserEnvironmentLoginStatusRequest(String environmentKey,
                                                 Long selfMediaAccountId,
@@ -22,6 +27,34 @@ public record BrowserEnvironmentLoginStatusRequest(
                                                 String errorCode,
                                                 String errorMessage) {
         this(environmentKey, selfMediaAccountId, platform, actualPlatformAccountId, actualAccountName,
-                loginStatus, errorCode, errorMessage, null);
+                loginStatus, errorCode, errorMessage, null, null, null, null, null, null);
+    }
+
+    public BrowserEnvironmentLoginStatusRequest(String environmentKey,
+                                                Long selfMediaAccountId,
+                                                String platform,
+                                                String actualPlatformAccountId,
+                                                String actualAccountName,
+                                                String loginStatus,
+                                                String errorCode,
+                                                String errorMessage,
+                                                Long loginVerificationId) {
+        this(environmentKey, selfMediaAccountId, platform, actualPlatformAccountId, actualAccountName,
+                loginStatus, errorCode, errorMessage, loginVerificationId, null, null, null, null, null);
+    }
+
+    public BrowserEnvironmentLoginStatusRequest(String environmentKey,
+                                                Long selfMediaAccountId,
+                                                String platform,
+                                                String actualPlatformAccountId,
+                                                String actualAccountName,
+                                                String loginStatus,
+                                                String errorCode,
+                                                String errorMessage,
+                                                Long loginVerificationId,
+                                                Boolean authoritative) {
+        this(environmentKey, selfMediaAccountId, platform, actualPlatformAccountId, actualAccountName,
+                loginStatus, errorCode, errorMessage, loginVerificationId, authoritative,
+                null, null, null, null);
     }
 }

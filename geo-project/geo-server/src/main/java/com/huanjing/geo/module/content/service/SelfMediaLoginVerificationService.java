@@ -11,6 +11,7 @@ import com.huanjing.geo.module.content.entity.BrowserEnvironment;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaLoginVerification;
+import com.huanjing.geo.module.content.event.SelfMediaAuthHealthChangedEvent;
 import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
 import com.huanjing.geo.module.content.mapper.BrowserEnvironmentMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
@@ -21,6 +22,7 @@ import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -34,10 +36,16 @@ import java.util.Objects;
 @Service
 @RequiredArgsConstructor
 public class SelfMediaLoginVerificationService {
+    private static final List<String> TECHNICAL_RESULT_CODES = List.of(
+            "IDENTITY_UNREADABLE", "MULTIPLE_IDENTITIES", "DOM_CHANGED", "SCRIPT_TIMEOUT",
+            "ENVIRONMENT_MISMATCH", "PLATFORM_MISMATCH", "ACCOUNT_NAME_MISMATCH");
     private static final List<String> OPEN_STATUSES = List.of("pending", "running");
-    private static final int TTL_SECONDS = 60;
+    private static final int TTL_SECONDS = 300;
     public static final String METHOD_SYSTEM_TRIGGERED = "system_triggered_identity_check";
     public static final String METHOD_EXTENSION_PASSIVE = "extension_passive_identity_report";
+    public static final String METHOD_BINDING_INVALIDATED = "browser_binding_invalidated";
+    public static final String METHOD_ACCOUNT_IDENTITY_CHANGED = "account_identity_changed";
+    public static final String METHOD_PUBLISH_TASK_FAILURE = "publish_task_identity_failure";
 
     private final SelfMediaLoginVerificationMapper verificationMapper;
     private final SelfMediaAccountMapper accountMapper;
@@ -47,11 +55,12 @@ public class SelfMediaLoginVerificationService {
     private final CurrentUserService currentUserService;
     private final SelfMediaAuthHealthPolicyService policyService;
     private final SystemAlertService systemAlertService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public SelfMediaLoginVerificationVO create(Long brandId, Long accountId) {
         SysUser operator = currentUserService.requireCurrentUser();
-        requirePermission("self-media.auth-health.verify", "company.update");
+        requireAnyPermission("self-media.auth-health.verify", "company.update", "brand.update");
         brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.MANAGE);
         SelfMediaAccount account = requireAccount(accountId);
         if (!Objects.equals(brandId, account.getBrandId())) throw new BizException(404, "未找到品牌下的自媒体账号");
@@ -92,7 +101,7 @@ public class SelfMediaLoginVerificationService {
 
     public SelfMediaLoginVerificationVO get(Long brandId, Long accountId, Long verificationId) {
         SysUser operator = currentUserService.requireCurrentUser();
-        requirePermission("self-media.auth-health.read", "company.read");
+        requireAnyPermission("self-media.auth-health.read", "company.read");
         brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.READ);
         SelfMediaLoginVerification row = requireVerification(verificationId);
         if (!Objects.equals(brandId, row.getBrandId()) || !Objects.equals(accountId, row.getSelfMediaAccountId())) {
@@ -105,61 +114,62 @@ public class SelfMediaLoginVerificationService {
     }
 
     @Transactional
-    public void completeFromLoginReport(Long verificationId,
-                                        BrowserEnvironmentAccount binding,
-                                        SelfMediaAccount account,
-                                        BrowserEnvironmentLoginStatusRequest request,
-                                        String reportedStatus) {
-        if (verificationId == null) return;
+    public boolean completeFromLoginReport(Long verificationId,
+                                           BrowserEnvironmentAccount binding,
+                                           SelfMediaAccount account,
+                                           BrowserEnvironmentLoginStatusRequest request,
+                                           String reportedStatus) {
+        if (verificationId == null) return false;
         SelfMediaLoginVerification row = requireVerification(verificationId);
         LocalDateTime now = LocalDateTime.now();
-        if (!OPEN_STATUSES.contains(row.getStatus())) return;
+        if (!OPEN_STATUSES.contains(row.getStatus())) return false;
         if (!row.getExpiresAt().isAfter(now)) {
             markTimeout(row);
-            return;
+            return false;
         }
         if (!Objects.equals(row.getBrowserEnvironmentAccountId(), binding.getId())
                 || !Objects.equals(row.getSelfMediaAccountId(), account.getId())) {
-            finishFailure(row, "ENVIRONMENT_MISMATCH", "验证结果不是来自账号绑定的指纹浏览器环境", request, now);
-            return;
+            finishInconclusive(row, null, "ENVIRONMENT_MISMATCH", "验证结果不是来自账号绑定的指纹浏览器环境", request, now);
+            return false;
         }
         if (!Objects.equals(canonicalPlatform(row.getPlatform()), canonicalPlatform(request.platform()))) {
-            finishFailure(row, "PLATFORM_MISMATCH", "验证结果平台与目标平台不一致", request, now);
-            return;
+            finishInconclusive(row, null, "PLATFORM_MISMATCH", "验证结果平台与目标平台不一致", request, now);
+            return false;
         }
         if (!BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(request.loginStatus())) {
             String errorCode = trimToNull(request.errorCode());
             if ("MULTIPLE_IDENTITIES".equals(errorCode)) {
-                finishFailure(row, "MULTIPLE_IDENTITIES", "读取到多个平台账号身份，请确认当前环境只登录一个账号", request, now);
+                finishInconclusive(row, account, "MULTIPLE_IDENTITIES", "读取到多个平台账号身份，需要运营内部核对", request, now);
             } else if ("IDENTITY_UNREADABLE".equals(errorCode)) {
-                finishFailure(row, "IDENTITY_UNREADABLE", "未读取到当前平台账号名称", request, now);
+                finishInconclusive(row, account, "IDENTITY_UNREADABLE", "未读取到当前平台账号名称，可能是页面结构变化", request, now);
+            } else if (TECHNICAL_RESULT_CODES.contains(errorCode)) {
+                finishInconclusive(row, account, errorCode, "平台页面检测未形成可信登录结论", request, now);
+            } else if (isExplicitLoginPageFailure(errorCode, request.currentUrl())) {
+                finishFailure(row, account, "LOGIN_PAGE_CONFIRMED", "平台明确进入登录页，需运营确认后再联系客户", request, now);
             } else {
-                finishFailure(row, "LOGIN_REQUIRED", "当前平台尚未完成登录", request, now);
+                finishInconclusive(row, account, "LOGIN_STATE_UNCONFIRMED", "当前页面未形成可信登录结论，需要运营内部复核", request, now);
             }
-            return;
+            return false;
         }
         String actualName = trimToNull(request.actualAccountName());
         if (actualName == null) {
-            finishFailure(row, "IDENTITY_UNREADABLE", "未读取到当前平台账号名称", request, now);
-            return;
+            finishInconclusive(row, account, "IDENTITY_UNREADABLE", "未读取到当前平台账号名称，可能是页面结构变化", request, now);
+            return false;
         }
         if (!normalizeName(row.getExpectedAccountName()).equals(normalizeName(actualName))) {
-            finishFailure(row, "ACCOUNT_NAME_MISMATCH",
-                    "当前登录账号为“" + actualName + "”，系统绑定账号为“" + row.getExpectedAccountName() + "”",
+            finishInconclusive(row, account, "ACCOUNT_NAME_MISMATCH",
+                    "读取账号为“" + actualName + "”，与系统记录“" + row.getExpectedAccountName() + "”不同，需要运营核对",
                     request, now);
-            return;
+            return false;
         }
-        boolean idWarning = StringUtils.hasText(row.getExpectedPlatformAccountId())
-                && StringUtils.hasText(request.actualPlatformAccountId())
-                && !row.getExpectedPlatformAccountId().trim().equals(request.actualPlatformAccountId().trim());
-        String warning = idWarning ? "平台账号 ID 与系统记录不同，建议后续核对账号资料" : null;
         row.setStatus("succeeded");
-        row.setResultCode(idWarning ? "SUCCESS_WITH_ID_WARNING" : "SUCCESS");
-        row.setResultMessage(idWarning ? warning : "登录状态验证成功");
+        row.setResultCode("SUCCESS");
+        row.setResultMessage("登录状态验证成功");
         applyReport(row, request, now);
         verificationMapper.updateById(row);
 
-        applySuccessfulHealthFact(account, warning, METHOD_SYSTEM_TRIGGERED, now);
+        applySuccessfulHealthFact(account, null, METHOD_SYSTEM_TRIGGERED, now);
+        return true;
     }
 
     @Transactional
@@ -171,54 +181,48 @@ public class SelfMediaLoginVerificationService {
             return false;
         }
         if (!BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(request.loginStatus())) {
-            recordPassiveHealthDiagnostic(account, passiveFailureMessage(request));
             return false;
         }
         String actualName = trimToNull(request.actualAccountName());
         if (!StringUtils.hasText(account.getAccountName())) {
-            recordPassiveHealthDiagnostic(account, "系统账号名称为空，请先编辑账号名称");
             return false;
         }
         if (actualName == null) {
-            recordPassiveHealthDiagnostic(account, "扩展未读取到唯一账号名称，请确认身份页已完全加载");
             return false;
         }
         if (!normalizeName(account.getAccountName()).equals(normalizeName(actualName))) {
-            recordPassiveHealthDiagnostic(account,
-                    "系统账号“" + account.getAccountName().trim() + "”与扩展读取账号“" + actualName + "”不一致");
             return false;
         }
-        boolean idWarning = StringUtils.hasText(account.getPlatformAccountId())
-                && StringUtils.hasText(request.actualPlatformAccountId())
-                && !account.getPlatformAccountId().trim().equals(request.actualPlatformAccountId().trim());
-        String warning = idWarning ? "平台账号 ID 与系统记录不同，登录名称已确认一致" : null;
-        applySuccessfulHealthFact(account, warning, METHOD_EXTENSION_PASSIVE, LocalDateTime.now());
+        applySuccessfulHealthFact(account, null, METHOD_EXTENSION_PASSIVE, LocalDateTime.now());
         return true;
     }
 
-    private String passiveFailureMessage(BrowserEnvironmentLoginStatusRequest request) {
-        String code = trimToNull(request.errorCode());
-        if ("MULTIPLE_IDENTITIES".equals(code)) {
-            return "扩展读取到多个账号身份，请确认当前环境的该平台只登录一个账号";
+    public void invalidateAccountHealth(Long accountId, String method, String warning) {
+        if (accountId == null) {
+            return;
         }
-        if ("IDENTITY_UNREADABLE".equals(code)) {
-            return "扩展未读取到唯一账号名称，请确认身份页已完全加载";
-        }
-        if (BrowserEnvironmentConstants.LOGIN_REQUIRED.equals(request.loginStatus())) {
-            return "平台身份页未确认登录，请在指纹浏览器中完成登录后重新同步";
-        }
-        String message = sanitize(request.errorMessage());
-        return message == null ? "扩展登录健康上报未通过，请重新同步登录状态" : message;
+        accountMapper.invalidateLoginHealth(
+                accountId,
+                LocalDateTime.now(),
+                StringUtils.hasText(method) ? method.trim() : METHOD_BINDING_INVALIDATED,
+                StringUtils.hasText(warning) ? warning.trim() : "账号登录绑定已发生变化，请重新验证登录状态"
+        );
+        systemAlertService.resolveOpenByDedupeKeyPrefix("self_media_auth:" + accountId + ":", null);
+        publishHealthChanged(accountId);
     }
 
-    private void recordPassiveHealthDiagnostic(SelfMediaAccount account, String message) {
-        account.setLastLoginVerificationWarning(message);
-        if (account.getLastLoginVerifiedAt() == null) {
-            account.setLastLoginVerificationResult("failed");
-            account.setLastLoginVerificationMethod(METHOD_EXTENSION_PASSIVE);
+    public void recordPublishTaskLoginFailure(Long accountId, String message) {
+        if (accountId == null) {
+            return;
         }
-        account.setUpdatedAt(LocalDateTime.now());
-        accountMapper.updateById(account);
+        SelfMediaAccount account = accountMapper.selectById(accountId);
+        if (account == null || account.getDeletedAt() != null) {
+            return;
+        }
+        String warning = StringUtils.hasText(message)
+                ? sanitize(message)
+                : "发布任务检测到平台登录状态异常，请重新登录并验证";
+        applyFailedHealthFact(account, warning, METHOD_PUBLISH_TASK_FAILURE, LocalDateTime.now());
     }
 
     private void applySuccessfulHealthFact(SelfMediaAccount account,
@@ -226,6 +230,7 @@ public class SelfMediaLoginVerificationService {
                                            String method,
                                            LocalDateTime verifiedAt) {
         account.setLastLoginVerifiedAt(verifiedAt);
+        account.setLastLoginVerificationCheckedAt(verifiedAt);
         account.setLastLoginVerificationResult("success");
         account.setLastLoginVerificationMethod(method);
         account.setLastLoginVerificationWarning(warning);
@@ -240,13 +245,75 @@ public class SelfMediaLoginVerificationService {
         systemAlertService.resolveOpenByDedupeKeyPrefix("self_media_auth:" + account.getId() + ":", null);
     }
 
-    private void finishFailure(SelfMediaLoginVerification row, String code, String message,
+    private void finishFailure(SelfMediaLoginVerification row,
+                               SelfMediaAccount account,
+                               String code,
+                               String message,
                                BrowserEnvironmentLoginStatusRequest request, LocalDateTime now) {
         row.setStatus("failed");
         row.setResultCode(code);
         row.setResultMessage(message);
         applyReport(row, request, now);
         verificationMapper.updateById(row);
+        if (account != null) {
+            applyFailedHealthFact(account, message, METHOD_SYSTEM_TRIGGERED, now);
+        }
+    }
+
+    private void finishInconclusive(SelfMediaLoginVerification row,
+                                    SelfMediaAccount account,
+                                    String code,
+                                    String message,
+                                    BrowserEnvironmentLoginStatusRequest request,
+                                    LocalDateTime now) {
+        row.setStatus("inconclusive");
+        row.setResultCode(code);
+        row.setResultMessage(message);
+        applyReport(row, request, now);
+        verificationMapper.updateById(row);
+        if (account != null) {
+            applyInconclusiveHealthCheck(account, message, now);
+        }
+    }
+
+    private void applyInconclusiveHealthCheck(SelfMediaAccount account,
+                                              String message,
+                                              LocalDateTime checkedAt) {
+        account.setLastLoginVerificationCheckedAt(checkedAt);
+        account.setLastLoginVerificationMethod(METHOD_SYSTEM_TRIGGERED);
+        account.setLastLoginVerificationWarning(message);
+        account.setUpdatedAt(checkedAt);
+        accountMapper.updateById(account);
+        accountMapper.updateNullableLoginHealthFields(
+                account.getId(), message, account.getRecommendedReverifyAt());
+    }
+
+    private boolean isExplicitLoginPageFailure(String errorCode, String currentUrl) {
+        if ("LOGIN_PAGE_CONFIRMED".equals(errorCode)) return true;
+        if (!StringUtils.hasText(currentUrl)) return false;
+        String url = currentUrl.toLowerCase(Locale.ROOT);
+        return ("LOGIN_REQUIRED".equals(errorCode) || "login_required".equalsIgnoreCase(errorCode))
+                && (url.contains("/login") || url.contains("/signin")
+                || url.contains("passport") || url.contains("sso"));
+    }
+
+    private void applyFailedHealthFact(SelfMediaAccount account,
+                                       String message,
+                                       String method,
+                                       LocalDateTime checkedAt) {
+        account.setLastLoginVerificationCheckedAt(checkedAt);
+        account.setLastLoginVerificationResult("failed");
+        account.setLastLoginVerificationMethod(method);
+        account.setLastLoginVerificationWarning(message);
+        account.setRecommendedReverifyAt(null);
+        account.setUpdatedAt(checkedAt);
+        accountMapper.updateById(account);
+        accountMapper.updateNullableLoginHealthFields(account.getId(), message, null);
+        publishHealthChanged(account.getId());
+    }
+
+    private void publishHealthChanged(Long accountId) {
+        eventPublisher.publishEvent(new SelfMediaAuthHealthChangedEvent(accountId));
     }
 
     private void applyReport(SelfMediaLoginVerification row, BrowserEnvironmentLoginStatusRequest request, LocalDateTime now) {
@@ -310,10 +377,11 @@ public class SelfMediaLoginVerificationService {
         return sanitized.length() > 512 ? sanitized.substring(0, 512) : sanitized;
     }
 
-    private void requirePermission(String permission, String legacyPermission) {
-        if (!currentUserService.hasPermission(permission)
-                && !currentUserService.hasPermission(legacyPermission)) {
-            throw new BizException(403, "No permission: " + permission);
+    private void requireAnyPermission(String permission, String... compatiblePermissions) {
+        if (currentUserService.hasPermission(permission)) return;
+        for (String compatiblePermission : compatiblePermissions) {
+            if (currentUserService.hasPermission(compatiblePermission)) return;
         }
+        throw new BizException(403, "No permission: " + permission);
     }
 }

@@ -3,6 +3,9 @@ package com.huanjing.geo.module.system.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.system.dto.SystemAlertTodoVO;
+import com.huanjing.geo.module.system.dto.SystemAlertSnoozeRequest;
+import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.RequestBody;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,8 +26,9 @@ public class SystemAlertController {
     public R<Page<SystemAlertTodoVO>> myTodos(@RequestParam(defaultValue = "1") long current,
                                               @RequestParam(defaultValue = "20") long size,
                                               @RequestParam(defaultValue = "false") boolean includeResolved,
-                                              @RequestParam(defaultValue = "false") boolean unreadOnly) {
-        return R.ok(systemAlertService.myTodos(current, size, includeResolved, unreadOnly));
+                                              @RequestParam(defaultValue = "false") boolean unreadOnly,
+                                              @RequestParam(defaultValue = "false") boolean snoozedOnly) {
+        return R.ok(systemAlertService.myTodos(current, size, includeResolved, unreadOnly, snoozedOnly));
     }
 
     @GetMapping("/my-unread-count")
@@ -43,4 +47,17 @@ public class SystemAlertController {
         systemAlertService.resolve(id);
         return R.ok();
     }
+
+    @PostMapping("/{id}/snooze")
+    public R<Void> snooze(@PathVariable Long id, @Valid @RequestBody SystemAlertSnoozeRequest request) {
+        systemAlertService.snooze(id, request.hours());
+        return R.ok();
+    }
+
+    @PostMapping("/{id}/claim")
+    public R<Void> claim(@PathVariable Long id) {
+        systemAlertService.claim(id);
+        return R.ok();
+    }
+
 }

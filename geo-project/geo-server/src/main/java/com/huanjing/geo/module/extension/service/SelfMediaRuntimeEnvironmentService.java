@@ -180,6 +180,9 @@ public class SelfMediaRuntimeEnvironmentService {
                 extension.getInstallId(),
                 extension.getExtensionVersion(),
                 extension.getProtocolVersion(),
+                firstText(extension.getDetectedPlatform(), extension.getPlatform()),
+                extension.getLoginStatus(),
+                extension.getDetectedAccountName(),
                 extension.getLastSeenAt(),
                 extension.getRuntimeStage(),
                 extension.getRuntimeStageMessage(),
@@ -229,6 +232,15 @@ public class SelfMediaRuntimeEnvironmentService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String firstText(String... values) {
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private boolean equalsIgnoreCase(String left, String right) {

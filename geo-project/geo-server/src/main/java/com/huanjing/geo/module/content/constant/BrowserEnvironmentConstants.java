@@ -18,6 +18,8 @@ public final class BrowserEnvironmentConstants {
 
     public static final String ERR_ENVIRONMENT_DISABLED = "ENVIRONMENT_DISABLED";
     public static final String ERR_ENVIRONMENT_LOGIN_REQUIRED = "ENVIRONMENT_LOGIN_REQUIRED";
+    public static final String ERR_ENVIRONMENT_LOGIN_EXPIRED = "ENVIRONMENT_LOGIN_EXPIRED";
+    public static final String ERR_ENVIRONMENT_LOGIN_ERROR = "ENVIRONMENT_LOGIN_ERROR";
     public static final String ERR_ENVIRONMENT_ACCOUNT_MISMATCH = "ENVIRONMENT_ACCOUNT_MISMATCH";
     public static final String ERR_IDENTITY_EXPECTATION_MISSING = "IDENTITY_EXPECTATION_MISSING";
 

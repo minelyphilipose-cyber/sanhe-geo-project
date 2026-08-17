@@ -4410,18 +4410,35 @@ async function resolveSelfMediaAccount(body) {
     return normalizeSelfMediaAccount(matchedById || { id: directId })
   }
 
-  const matched = (accounts || []).find((account) => {
-    if (body.platform && account.platform !== body.platform) return false
-    if (body.platformAccountId && account.platformAccountId !== body.platformAccountId) return false
-    return account.status === 'active'
-  })
-  if (!matched?.id) {
-    const error = new Error('no matching active self media account')
-    error.statusCode = 404
-    error.details = { accounts, platform: body.platform, platformAccountId: body.platformAccountId }
+  const expectedAccountName = normalizeIdentityAccountName(body.accountName || body.expectedAccountName)
+  if (!expectedAccountName) {
+    const error = new Error('accountName or expectedAccountName is required when selfMediaAccountId is absent')
+    error.statusCode = 400
+    error.code = 'IDENTITY_EXPECTATION_MISSING'
     throw error
   }
-  return normalizeSelfMediaAccount(matched)
+  const candidates = (accounts || []).filter((account) => {
+    if (body.platform && account.platform !== body.platform) return false
+    if (account.status !== 'active') return false
+    return normalizeIdentityAccountName(account.accountName || account.nickname || account.name) === expectedAccountName
+  })
+  if (candidates.length !== 1 || !candidates[0]?.id) {
+    const error = new Error(candidates.length > 1
+      ? 'multiple active self media accounts match; provide selfMediaAccountId'
+      : 'no matching active self media account')
+    error.statusCode = candidates.length > 1 ? 409 : 404
+    error.details = { accounts, platform: body.platform, accountName: body.accountName || body.expectedAccountName || null }
+    throw error
+  }
+  return normalizeSelfMediaAccount(candidates[0])
+}
+
+function normalizeIdentityAccountName(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
 }
 
 function normalizeSelfMediaAccount(account) {
@@ -5824,6 +5841,11 @@ async function route(req, res, config) {
       service: packageInfo.name,
       version: packageInfo.version,
       buildRevision: packageInfo.buildRevision,
+      protocolVersion: '1',
+      capabilities: {
+        extensionRequestSigning: true,
+        rollingUpgrade: true,
+      },
       time: nowIso(),
       paired: isRuntimeSessionUsable(runtimeSession),
       session: publicSession(),
