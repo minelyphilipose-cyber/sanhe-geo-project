@@ -91,6 +91,7 @@ const SELF_MEDIA_SCHEDULE_PLATFORMS_CACHE_MS = 60_000
 const SCHEDULE_POLL_BLOCK_LOG_INTERVAL_MS = 5 * 60 * 1000
 const EXTENSION_BIND_INTENT_TTL_MS = 2 * 60 * 1000
 const ADSPOWER_BROWSER_SESSION_CACHE_MS = 2 * 60 * 1000
+const ADSPOWER_CDP_REFRESH_RETRY_DELAY_MS = 800
 const ADSPOWER_RATE_LIMIT_RETRY_DELAYS_MS = [800, 1600, 2400]
 const BROWSER_OBSERVATION_INTERVAL_MS = 60_000
 const GEO_ENV_EXTENSION_NAME = 'GEO 自媒体助手'
@@ -1646,6 +1647,11 @@ function cachedAdspowerBrowserSession(providerProfileId) {
   return cached.data
 }
 
+function invalidateAdspowerBrowserSession(providerProfileId) {
+  const key = adspowerSessionCacheKey(providerProfileId)
+  if (key) adspowerBrowserSessions.delete(key)
+}
+
 async function startAdspowerBrowser(config, providerProfileId, options = {}) {
   const key = adspowerSessionCacheKey(providerProfileId)
   if (!key) {
@@ -1653,7 +1659,7 @@ async function startAdspowerBrowser(config, providerProfileId, options = {}) {
     error.statusCode = 400
     throw error
   }
-  if (options.forceRefresh) adspowerBrowserSessions.delete(key)
+  if (options.forceRefresh) invalidateAdspowerBrowserSession(key)
   const cached = cachedAdspowerBrowserSession(key)
   if (cached) return cached
 
@@ -4244,7 +4250,7 @@ async function handleOpenEnvironment(req, res, config) {
     body.providerProfileId,
     body.environmentName,
   )
-  const data = await startAdspowerBrowser(config, environment.providerProfileId)
+  let data = await startAdspowerBrowser(config, environment.providerProfileId)
   const observationContext = {
     browserEnvironmentId: body.browserEnvironmentId,
     environmentKey: environment.environmentKey,
@@ -4254,13 +4260,37 @@ async function handleOpenEnvironment(req, res, config) {
     lastTaskActivityAt: null,
   }
   scheduleBrowserObservation(config, observationContext, data)
-  const openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url, {
+  const openContext = {
     ...observationContext,
     ownership: 'operator',
     resourceOrigin: 'operator_open',
     resourceType: 'operator_tab',
     backendReportState: 'not_applicable',
-  })
+  }
+  let openResult
+  try {
+    openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url, openContext)
+  } catch (error) {
+    if (!isStaleAdspowerBrowserSessionError(error)) throw error
+
+    browserRuntimeErrorCounter.record(error, environment.providerProfileId)
+    data = await startAdspowerBrowser(config, environment.providerProfileId, { forceRefresh: true })
+    rememberObservedBrowserEnvironment(observationContext, data)
+    scheduleBrowserObservation(config, observationContext, data)
+    await delay(ADSPOWER_CDP_REFRESH_RETRY_DELAY_MS)
+    try {
+      openResult = await openUrlWithPuppeteer(config, data?.ws?.puppeteer, body.url, openContext)
+    } catch (retryError) {
+      if (!isStaleAdspowerBrowserSessionError(retryError)) throw retryError
+
+      invalidateAdspowerBrowserSession(environment.providerProfileId)
+      retryError.statusCode ||= 502
+      retryError.code ||= 'ADSPOWER_BROWSER_SESSION_UNAVAILABLE'
+      retryError.details ||= { reason: 'adspower_browser_session_unavailable' }
+      retryError.message = `AdsPower 浏览器调试连接不可用，已自动刷新并重试；请确认环境已正常启动后再次同步：${retryError.message}`
+      throw retryError
+    }
+  }
   const extensionStatus = await inspectGeoEnvExtension(data?.ws?.puppeteer).catch((error) => ({
     installed: false,
     detected: false,

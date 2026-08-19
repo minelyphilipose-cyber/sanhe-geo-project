@@ -488,6 +488,9 @@ test('toutiao cover selection and post-submit timeout cannot fall back to republ
 
 test('AdsPower extension status refreshes a stale dynamic DevTools endpoint once', () => {
   const server = readProjectFile('geo-local-helper/src/server.js')
+  const operatorOpenHandler = server.match(
+    /async function handleOpenEnvironment[\s\S]+?(?=\nasync function handleAdspowerExtensionStatus)/,
+  )?.[0] || ''
 
   assert.match(
     server,
@@ -503,6 +506,16 @@ test('AdsPower extension status refreshes a stale dynamic DevTools endpoint once
     server,
     /handleAdspowerExtensionStatus[\s\S]+isStaleAdspowerBrowserSessionError\(error\)[\s\S]+startAdspowerBrowser\(config, environment\.providerProfileId, \{ forceRefresh: true \}\)[\s\S]+inspectGeoEnvExtension/,
     'extension status must discard the cached session, obtain the current dynamic port, and retry once',
+  )
+  assert.match(
+    operatorOpenHandler,
+    /openUrlWithPuppeteer[\s\S]+isStaleAdspowerBrowserSessionError\(error\)[\s\S]+startAdspowerBrowser\(config, environment\.providerProfileId, \{ forceRefresh: true \}\)[\s\S]+ADSPOWER_CDP_REFRESH_RETRY_DELAY_MS[\s\S]+openUrlWithPuppeteer/,
+    'operator login synchronization must refresh a stale dynamic port and retry opening the identity page once',
+  )
+  assert.match(
+    operatorOpenHandler,
+    /catch \(retryError\)[\s\S]+invalidateAdspowerBrowserSession\(environment\.providerProfileId\)[\s\S]+ADSPOWER_BROWSER_SESSION_UNAVAILABLE/,
+    'a failed operator retry must evict the refreshed endpoint so later platforms do not reuse it',
   )
   assert.match(
     server,

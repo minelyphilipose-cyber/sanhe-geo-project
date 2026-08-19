@@ -1,7 +1,7 @@
 {
   "name": "geo-local-helper",
   "version": "0.2.5",
-  "buildRevision": "20260813.4",
+  "buildRevision": "20260819.1",
   "private": true,
   "type": "module",
   "scripts": {
