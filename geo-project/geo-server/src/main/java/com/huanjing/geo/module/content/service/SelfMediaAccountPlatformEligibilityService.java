@@ -59,7 +59,7 @@ public class SelfMediaAccountPlatformEligibilityService {
                                                         CompanyPackageBinding binding,
                                                         ChannelQuotaSnapshotItem quota) {
         SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
-                scheduleCapabilityService.readiness(scheduleCapabilityPlatform(platform));
+                scheduleCapabilityService.automaticPublishReadiness(scheduleCapabilityPlatform(platform));
         boolean quotaEnabled = quota != null && quota.isEnabled() && quota.getQuotaLimit() > 0;
         boolean scheduleReady = readiness.ready();
 

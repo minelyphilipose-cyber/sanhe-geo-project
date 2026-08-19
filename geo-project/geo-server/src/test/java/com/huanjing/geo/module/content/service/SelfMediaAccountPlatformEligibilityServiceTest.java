@@ -42,11 +42,11 @@ class SelfMediaAccountPlatformEligibilityServiceTest {
                 ]
                 """);
         when(bindingService.activeBinding(20L)).thenReturn(binding);
-        when(scheduleCapabilityService.readiness(anyString()))
+        when(scheduleCapabilityService.automaticPublishReadiness(anyString()))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(false, "PLATFORM_CAPABILITY_UNVERIFIED", "平台定时发布能力尚未完成验证", null));
-        when(scheduleCapabilityService.readiness("toutiao"))
+        when(scheduleCapabilityService.automaticPublishReadiness("toutiao"))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
-        when(scheduleCapabilityService.readiness("baijiahao"))
+        when(scheduleCapabilityService.automaticPublishReadiness("baijiahao"))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
 
         var options = service.listByBrand(10L);
@@ -71,11 +71,11 @@ class SelfMediaAccountPlatformEligibilityServiceTest {
                 ]
                 """);
         when(bindingService.activeBinding(20L)).thenReturn(binding);
-        when(scheduleCapabilityService.readiness(anyString()))
+        when(scheduleCapabilityService.automaticPublishReadiness(anyString()))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(false, "PLATFORM_CAPABILITY_UNVERIFIED", "平台定时发布能力尚未完成验证", null));
-        when(scheduleCapabilityService.readiness("wechat_mp"))
+        when(scheduleCapabilityService.automaticPublishReadiness("wechat_mp"))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
-        when(scheduleCapabilityService.readiness("douyin"))
+        when(scheduleCapabilityService.automaticPublishReadiness("douyin"))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
 
         var options = service.listByBrand(10L);
@@ -89,12 +89,33 @@ class SelfMediaAccountPlatformEligibilityServiceTest {
     }
 
     @Test
+    void allowsPackagedDouyinWhenAdsPowerAutomaticPublishIsReadyButNativeScheduleIsNot() {
+        CompanyPackageBinding binding = activeBinding("""
+                [{"channelCode":"self_media:douyin","periodType":"week","quotaLimit":2,"enabled":true}]
+                """);
+        when(bindingService.activeBinding(20L)).thenReturn(binding);
+        when(scheduleCapabilityService.automaticPublishReadiness(anyString()))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(false, "PLATFORM_CAPABILITY_UNVERIFIED", "平台自动发布能力尚未完成验证", null));
+        when(scheduleCapabilityService.automaticPublishReadiness("douyin"))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(scheduleCapabilityService.readiness("douyin"))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(false, "PLATFORM_SCHEDULE_UNSUPPORTED", "平台契约声明不支持原生定时发布", null));
+
+        var options = service.listByBrand(10L);
+
+        var douyin = options.stream().filter(item -> "douyin".equals(item.getPlatform())).findFirst().orElseThrow();
+        assertTrue(douyin.getQuotaEnabled());
+        assertTrue(douyin.getScheduleReady());
+        assertTrue(douyin.getEligible());
+    }
+
+    @Test
     void requireEligibleRejectsPlatformOutsideIntersection() {
         CompanyPackageBinding binding = activeBinding("""
                 [{"channelCode":"self_media:baijiahao","periodType":"week","quotaLimit":2,"enabled":true}]
                 """);
         when(bindingService.activeBinding(20L)).thenReturn(binding);
-        when(scheduleCapabilityService.readiness(anyString()))
+        when(scheduleCapabilityService.automaticPublishReadiness(anyString()))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(false, "PLATFORM_CAPABILITY_UNVERIFIED", "平台定时发布能力尚未完成验证", null));
 
         var ex = org.junit.jupiter.api.Assertions.assertThrows(
