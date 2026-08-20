@@ -53,16 +53,7 @@ public interface PollResultMapper extends BaseMapper<PollResult> {
                    judge_risk_reason = #{value.judgeRiskReason}, judge_model = #{value.judgeModel},
                    judge_at = #{value.judgeAt}, judge_error = #{value.judgeError},
                    record_type = #{value.recordType}, detail_json = #{value.detailJson},
-                   latest_attempt_id = #{value.latestAttemptId}, effective_attempt_id = #{value.effectiveAttemptId},
-                   latest_attempt_status = #{value.latestAttemptStatus},
-                   execution_finalized = #{value.executionFinalized}, retry_chain_status = #{value.retryChainStatus},
-                   result_code = #{value.resultCode}, search_requested = #{value.searchRequested},
-                   search_triggered = #{value.searchTriggered}, search_status = #{value.searchStatus},
-                   brand_in_search = #{value.brandInSearch}, brand_in_answer = #{value.brandInAnswer},
-                   citation_confidence = #{value.citationConfidence},
-                   confirmed_citation_exposure = #{value.confirmedCitationExposure},
-                   version = #{value.version}, deleted_at = #{value.deletedAt}, deleted_by = #{value.deletedBy},
-                   delete_reason = #{value.deleteReason}, updated_at = CURRENT_TIMESTAMP
+                   updated_at = CURRENT_TIMESTAMP
              WHERE id = #{value.id}
             """)
     int updateBusinessProjection(@Param("value") PollResult value);
