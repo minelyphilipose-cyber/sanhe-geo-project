@@ -3,6 +3,8 @@ package com.huanjing.geo.module.project.controller;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaAutoScheduleRequest;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleConfigRequest;
+import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleItemActionRequest;
+import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleItemUpdateRequest;
 import com.huanjing.geo.module.content.service.BusinessCalendarService;
 import com.huanjing.geo.module.content.service.ProjectSelfMediaScheduleService;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchVO;
@@ -108,6 +110,56 @@ public class ProjectController {
                                                                                  @PathVariable String targetMonth) {
         ensureInternalSelfMediaScheduleAccess();
         return R.ok(projectSelfMediaScheduleService.getBatchDetail(id, targetMonth));
+    }
+
+    @PutMapping("/{id}/self-media-schedule-items/{itemId}")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> updateSelfMediaScheduleItem(
+            @PathVariable Long id,
+            @PathVariable Long itemId,
+            @Valid @RequestBody ProjectSelfMediaScheduleItemUpdateRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(projectSelfMediaScheduleService.updatePlanItem(id, itemId, request));
+    }
+
+    @PostMapping("/{id}/self-media-schedule-items/{itemId}/cancel")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> cancelSelfMediaScheduleItem(
+            @PathVariable Long id,
+            @PathVariable Long itemId,
+            @RequestBody(required = false) ProjectSelfMediaScheduleItemActionRequest request) {
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(projectSelfMediaScheduleService.cancelPlanItem(id, itemId, request));
+    }
+
+    @PostMapping("/{id}/self-media-schedule-items/{itemId}/generate-now")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> generateSelfMediaScheduleItemNow(
+            @PathVariable Long id,
+            @PathVariable Long itemId) {
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(projectSelfMediaScheduleService.generatePlanItemNow(id, itemId));
+    }
+
+    @PostMapping("/{id}/self-media-schedule-batches/{targetMonth}/pause")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> pauseSelfMediaScheduleBatch(
+            @PathVariable Long id,
+            @PathVariable String targetMonth) {
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(projectSelfMediaScheduleService.pauseBatch(id, targetMonth));
+    }
+
+    @PostMapping("/{id}/self-media-schedule-batches/{targetMonth}/resume")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> resumeSelfMediaScheduleBatch(
+            @PathVariable Long id,
+            @PathVariable String targetMonth) {
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(projectSelfMediaScheduleService.resumeBatch(id, targetMonth));
+    }
+
+    @PostMapping("/{id}/self-media-schedule-batches/{targetMonth}/recalculate-pending")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> recalculateSelfMediaScheduleBatchPendingItems(
+            @PathVariable Long id,
+            @PathVariable String targetMonth) {
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(projectSelfMediaScheduleService.recalculatePendingItems(id, targetMonth));
     }
 
     @GetMapping("/{id:\\d+}/self-media-schedule-calendar-status")

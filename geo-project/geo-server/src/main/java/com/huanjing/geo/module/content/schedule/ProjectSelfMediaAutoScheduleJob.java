@@ -24,6 +24,12 @@ public class ProjectSelfMediaAutoScheduleJob {
     private int progressLimit;
     @Value("${geo.self-media.auto-schedule.job.compensation-limit:20}")
     private int compensationLimit;
+    @Value("${geo.self-media.auto-schedule.job.generation-alert-limit:100}")
+    private int generationAlertLimit;
+    @Value("${geo.self-media.auto-schedule.job.quota-reconcile-limit:100}")
+    private int quotaReconcileLimit;
+    @Value("${geo.self-media.auto-schedule.job.schedule-failure-quota-timeout-hours:72}")
+    private int scheduleFailureQuotaTimeoutHours;
     @Value("${geo.self-media.auto-schedule.job.pre-schedule-window-hours:96}")
     private int preScheduleWindowHours;
     @Value("${geo.self-media.auto-schedule.job.month-start-window-hours:40}")
@@ -106,6 +112,32 @@ public class ProjectSelfMediaAutoScheduleJob {
             }
         } catch (Exception ex) {
             log.warn("project self-media auto schedule progress failed error={}", ex.getMessage());
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${geo.self-media.auto-schedule.job.generation-alert-poll-ms:300000}")
+    public void monitorDelayedGenerationRisk() {
+        try {
+            int alerted = projectSelfMediaScheduleService.monitorAtRiskDelayedGeneration(generationAlertLimit);
+            projectSelfMediaScheduleService.refreshOperationalMetrics();
+            if (alerted > 0) {
+                log.info("project self-media delayed generation risk monitored alerted={}", alerted);
+            }
+        } catch (Exception ex) {
+            log.warn("project self-media delayed generation risk monitor failed error={}", ex.getMessage());
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${geo.self-media.auto-schedule.job.quota-reconcile-poll-ms:600000}")
+    public void reconcilePlanQuotaReservations() {
+        try {
+            int reconciled = projectSelfMediaScheduleService.reconcilePlanQuotaReservations(
+                    quotaReconcileLimit, scheduleFailureQuotaTimeoutHours);
+            if (reconciled > 0) {
+                log.info("project self-media plan quota reservations reconciled={}", reconciled);
+            }
+        } catch (Exception ex) {
+            log.warn("project self-media plan quota reconciliation failed error={}", ex.getMessage());
         }
     }
 

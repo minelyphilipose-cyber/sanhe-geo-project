@@ -4,12 +4,16 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationBatch;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 
 @Mapper
 public interface BatchArticleGenerationBatchMapper extends BaseMapper<BatchArticleGenerationBatch> {
+
+    @Select("SELECT * FROM batch_article_generation_batch WHERE idempotency_key = #{idempotencyKey} LIMIT 1")
+    BatchArticleGenerationBatch selectByIdempotencyKey(@Param("idempotencyKey") String idempotencyKey);
 
     @Update("""
             UPDATE batch_article_generation_batch

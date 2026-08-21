@@ -548,6 +548,34 @@
         </div>
         <div class="auto-schedule-detail-actions">
           <el-button
+            v-if="['planned', 'processing'].includes(selfMediaBatchDetail?.batch?.status || '')"
+            size="small"
+            plain
+            :loading="selfMediaPlanActionLoading"
+            @click="pauseSelfMediaPlanBatch"
+          >
+            暂停批次
+          </el-button>
+          <el-button
+            v-if="selfMediaBatchDetail?.batch?.status === 'paused'"
+            size="small"
+            type="primary"
+            plain
+            :loading="selfMediaPlanActionLoading"
+            @click="resumeSelfMediaPlanBatch"
+          >
+            恢复批次
+          </el-button>
+          <el-button
+            v-if="selfMediaDetailItems.some((item) => item.planItemStatus === 'planned')"
+            size="small"
+            plain
+            :loading="selfMediaPlanActionLoading"
+            @click="recalculateSelfMediaPendingPlans"
+          >
+            重算待生成时间
+          </el-button>
+          <el-button
             v-if="selfMediaDetailRetryableCount > 0"
             size="small"
             type="primary"
@@ -632,7 +660,8 @@
           <template #default="{ row }">
             <div class="detail-plan-cell">
               <strong>{{ row.generationTopic || row.articleTitle || '等待生成文章' }}</strong>
-              <small>{{ articleTypeLabel(row.generationArticleType) }}</small>
+              <small v-if="row.promptTemplateName">模板：{{ row.promptTemplateName }}</small>
+              <small v-else>{{ articleTypeLabel(row.generationArticleType) }}</small>
             </div>
           </template>
         </el-table-column>
@@ -681,7 +710,7 @@
               </el-button>
               <strong v-else>文章生成后自动创建排期</strong>
               <small>
-                {{ compactDateTime(row.plannedPublishAt) }}
+                处理 {{ compactDateTime(row.plannedExecutionAt) }} / 发布 {{ compactDateTime(row.plannedPublishAt) }}
                 <template v-if="row.queueKind"> / {{ scheduleQueueLabel(row.queueKind) }}</template>
               </small>
             </div>
@@ -695,10 +724,25 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
+            <el-dropdown
+              v-if="row.planItemId && row.planItemStatus === 'planned'"
+              trigger="click"
+              :disabled="selfMediaPlanActionLoading"
+              @command="handleSelfMediaPlanCommand(row, $event)"
+            >
+              <el-button link type="primary">计划操作</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="edit">修改计划</el-dropdown-item>
+                  <el-dropdown-item command="generate">立即生成</el-dropdown-item>
+                  <el-dropdown-item command="cancel" divided>取消计划</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button
-              v-if="canRetrySelfMediaDetailRow(row)"
+              v-else-if="canRetrySelfMediaDetailRow(row)"
               link
               type="primary"
               :loading="selfMediaScheduleRetryingId === retryingRowKey(row)"
@@ -711,6 +755,41 @@
         </el-table-column>
       </el-table>
     </el-drawer>
+
+    <el-dialog v-model="selfMediaPlanEditVisible" title="修改待生成计划" width="520px">
+      <el-form label-position="top">
+        <el-form-item label="自媒体账号">
+          <el-select v-model="selfMediaPlanEditForm.selfMediaAccountId" style="width: 100%">
+            <el-option
+              v-for="account in activeSelfMediaAccounts"
+              :key="account.id"
+              :label="selfMediaAccountLabel(account)"
+              :value="account.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="处理时间">
+          <el-date-picker
+            v-model="selfMediaPlanEditForm.plannedExecutionAt"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="发布时间">
+          <el-date-picker
+            v-model="selfMediaPlanEditForm.plannedPublishAt"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="selfMediaPlanEditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="selfMediaPlanActionLoading" @click="saveSelfMediaPlanItem">保存</el-button>
+      </template>
+    </el-dialog>
 
     <el-drawer
       v-model="selfMediaArticlePreviewVisible"
@@ -1018,7 +1097,9 @@ import { useDictStore } from '@/stores/dict'
 import {
   deleteProject,
   deleteKeywordGroup,
+  cancelProjectSelfMediaScheduleItem,
   createProjectSelfMediaAutoSchedule,
+  generateProjectSelfMediaScheduleItemNow,
   getProjectChannelAllocationQuota,
   getProjectDetail,
   getProjectSelfMediaScheduleBatch,
@@ -1029,15 +1110,19 @@ import {
   getKeywordGroupQuestions,
   importProjectKeywordGroup,
   markProjectSelfMediaScheduleBatchAbnormalManualRequired,
+  pauseProjectSelfMediaScheduleBatch,
   previewProjectSelfMediaAutoSchedule,
+  recalculateProjectSelfMediaSchedulePendingItems,
   rescheduleProjectSelfMediaScheduleBatchAbnormalNextMonth,
   retryProjectSelfMediaScheduleBatchAbnormalSchedules,
   retryProjectSelfMediaScheduleBatchFailedItems,
+  resumeProjectSelfMediaScheduleBatch,
   updateKeywordGroupQuestion,
   updateProjectKeywordQuestionPolling,
   updateProject,
   updateProjectChannelAllocations,
   updateProjectSelfMediaScheduleConfig,
+  updateProjectSelfMediaScheduleItem,
   updateProjectStatus,
 } from '@/api/project'
 import type {
@@ -1142,6 +1227,14 @@ const selfMediaPreviewLoading = ref(false)
 const selfMediaScheduleCreating = ref(false)
 const selfMediaDetailVisible = ref(false)
 const selfMediaDetailLoading = ref(false)
+const selfMediaPlanActionLoading = ref(false)
+const selfMediaPlanEditVisible = ref(false)
+const selfMediaPlanEditingItem = ref<ProjectSelfMediaScheduleBatchDetailItem | null>(null)
+const selfMediaPlanEditForm = reactive({
+  selfMediaAccountId: null as number | null,
+  plannedExecutionAt: '',
+  plannedPublishAt: '',
+})
 const selfMediaRetryFailedLoading = ref(false)
 const selfMediaRetryAbnormalLoading = ref(false)
 const selfMediaMarkManualLoading = ref(false)
@@ -1321,7 +1414,11 @@ const selfMediaDetailScheduledCount = computed(() =>
   selfMediaDetailItems.value.filter((item) => !!item.scheduleId && item.scheduleStatus !== 'rejected').length,
 )
 const selfMediaDetailWaitingCount = computed(() =>
-  selfMediaDetailItems.value.filter((item) => !item.articleId && item.generationStatus !== 'failed').length,
+  selfMediaDetailItems.value.filter((item) =>
+    !item.articleId
+      && item.generationStatus !== 'failed'
+      && !['cancelled', 'skipped'].includes(item.planItemStatus || ''),
+  ).length,
 )
 const selfMediaDetailFailedGenerationCount = computed(() =>
   selfMediaDetailItems.value.filter((item) => item.generationStatus === 'failed' && !item.scheduleId).length,
@@ -1451,7 +1548,7 @@ const canCreateSelfMediaSchedule = computed(() => {
   if (!activeSelfMediaAccounts.value.length) return false
   if (selfMediaCalendarMissing.value) return false
   const status = selfMediaScheduleBatch.value?.status
-  if (status === 'processing') return false
+  if (status === 'planned' || status === 'processing') return false
   if (selfMediaPreviewHasInsufficientSlots.value) return canDecideSelfMediaScheduleCarryOver.value
   return true
 })
@@ -1470,6 +1567,7 @@ const selfMediaScheduleCreateDisabledReason = computed(() => {
   if (!activeSelfMediaAccounts.value.length) return '当前品牌暂无启用的自媒体账号。'
   if (selfMediaCalendarMissing.value) return '目标年份工作日历缺失，暂不能创建排期。'
   const status = selfMediaScheduleBatch.value?.status
+  if (status === 'planned') return '当前月份已锁定排期时间，文章将在执行当天自动生成。'
   if (status === 'processing') return '当前月份批次正在处理中，请完成后再补充排期。'
   if (selfMediaPreviewHasInsufficientSlots.value && !canDecideSelfMediaScheduleCarryOver.value) {
     return '目标月份可用排期容量不足，请联系交付负责人确认结转补排。'
@@ -1694,6 +1792,8 @@ function articleTypeLabel(value?: string | null) {
 
 function selfMediaBatchStatusLabel(status?: string | null) {
   const labels: Record<string, string> = {
+    planned: '已排期，待当天生成',
+    paused: '已暂停',
     processing: '处理中',
     created: '已创建',
     partial_failed: '部分失败',
@@ -1706,6 +1806,8 @@ function selfMediaBatchStatusLabel(status?: string | null) {
 
 function selfMediaBatchTagType(status?: string | null) {
   if (status === 'created') return 'success'
+  if (status === 'planned') return 'info'
+  if (status === 'paused') return 'warning'
   if (status === 'processing') return 'primary'
   if (status === 'partial_failed') return 'warning'
   if (status === 'failed') return 'danger'
@@ -1715,11 +1817,13 @@ function selfMediaBatchTagType(status?: string | null) {
 
 function generationStatusLabel(status?: string | null) {
   const labels: Record<string, string> = {
+    planned: '待当天生成',
     pending: '待生成',
     queued: '排队中',
     running: '生成中',
     success: '已生成',
     failed: '生成失败',
+    cancelled: '已取消',
   }
   return status ? (labels[status] || status) : '未开始'
 }
@@ -1812,7 +1916,7 @@ function selfMediaDetailProgressText(row: ProjectSelfMediaScheduleBatchDetailIte
   if (row.generationStatus === 'queued' || row.generationStatus === 'pending') {
     return '文章生成任务已入队，后台会自动继续处理'
   }
-  return '等待后台生成文章并创建排期'
+  return '已锁定时间，系统将在处理当天使用最新模板生成文章'
 }
 
 function selfMediaDetailOperatorHint(row: ProjectSelfMediaScheduleBatchDetailItem) {
@@ -1915,6 +2019,128 @@ async function openSelfMediaBatchDetail() {
     selfMediaBatchDetail.value = data.data || null
   } finally {
     selfMediaDetailLoading.value = false
+  }
+}
+
+function applySelfMediaPlanDetail(detail?: ProjectSelfMediaScheduleBatchDetail | null) {
+  selfMediaBatchDetail.value = detail || null
+  selfMediaScheduleBatch.value = detail?.batch || selfMediaScheduleBatch.value
+}
+
+function openSelfMediaPlanEdit(row: ProjectSelfMediaScheduleBatchDetailItem) {
+  selfMediaPlanEditingItem.value = row
+  selfMediaPlanEditForm.selfMediaAccountId = row.selfMediaAccountId || null
+  selfMediaPlanEditForm.plannedExecutionAt = row.plannedExecutionAt || ''
+  selfMediaPlanEditForm.plannedPublishAt = row.plannedPublishAt || ''
+  selfMediaPlanEditVisible.value = true
+}
+
+async function saveSelfMediaPlanItem() {
+  const current = project.value
+  const item = selfMediaPlanEditingItem.value
+  if (!current || !item?.planItemId) return
+  if (!selfMediaPlanEditForm.selfMediaAccountId
+      || !selfMediaPlanEditForm.plannedExecutionAt
+      || !selfMediaPlanEditForm.plannedPublishAt) {
+    ElMessage.warning('请完整填写账号、处理时间和发布时间')
+    return
+  }
+  selfMediaPlanActionLoading.value = true
+  try {
+    const { data } = await updateProjectSelfMediaScheduleItem(current.id, item.planItemId, {
+      selfMediaAccountId: selfMediaPlanEditForm.selfMediaAccountId,
+      plannedExecutionAt: selfMediaPlanEditForm.plannedExecutionAt,
+      plannedPublishAt: selfMediaPlanEditForm.plannedPublishAt,
+    })
+    applySelfMediaPlanDetail(data.data)
+    selfMediaPlanEditVisible.value = false
+    ElMessage.success('待生成计划已更新')
+  } finally {
+    selfMediaPlanActionLoading.value = false
+  }
+}
+
+async function handleSelfMediaPlanCommand(row: ProjectSelfMediaScheduleBatchDetailItem, command: string) {
+  const current = project.value
+  if (!current || !row.planItemId) return
+  if (command === 'edit') {
+    openSelfMediaPlanEdit(row)
+    return
+  }
+  try {
+    if (command === 'generate') {
+      await ElMessageBox.confirm('确认立即生成这篇文章？将使用当前最新模板。', '立即生成', {
+        type: 'warning', confirmButtonText: '立即生成', cancelButtonText: '取消',
+      })
+      selfMediaPlanActionLoading.value = true
+      const { data } = await generateProjectSelfMediaScheduleItemNow(current.id, row.planItemId)
+      applySelfMediaPlanDetail(data.data)
+      ElMessage.success('文章生成已启动')
+    } else if (command === 'cancel') {
+      const { value } = await ElMessageBox.prompt('取消后会释放已预占额度，请填写取消原因。', '取消计划', {
+        type: 'warning', confirmButtonText: '确认取消', cancelButtonText: '返回', inputPlaceholder: '取消原因',
+        inputValidator: (input: string) => input.trim().length > 0 || '请填写取消原因',
+      })
+      selfMediaPlanActionLoading.value = true
+      const { data } = await cancelProjectSelfMediaScheduleItem(current.id, row.planItemId, String(value || '').trim())
+      applySelfMediaPlanDetail(data.data)
+      ElMessage.success('计划已取消，预占额度已释放')
+    }
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  } finally {
+    selfMediaPlanActionLoading.value = false
+  }
+}
+
+async function pauseSelfMediaPlanBatch() {
+  const current = project.value
+  if (!current || !selfMediaScheduleMonth.value) return
+  try {
+    await ElMessageBox.confirm(
+      '暂停后，尚未开始的文章不会继续生成；已经进入生成或排期流程的任务仍会完成。恢复批次后，系统会继续处理未开始的计划。',
+      '暂停自动排期批次',
+      { type: 'warning', confirmButtonText: '确认暂停', cancelButtonText: '取消' },
+    )
+    selfMediaPlanActionLoading.value = true
+    const { data } = await pauseProjectSelfMediaScheduleBatch(current.id, selfMediaScheduleMonth.value)
+    applySelfMediaPlanDetail(data.data)
+    ElMessage.success('批次已暂停')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  } finally {
+    selfMediaPlanActionLoading.value = false
+  }
+}
+
+async function resumeSelfMediaPlanBatch() {
+  const current = project.value
+  if (!current || !selfMediaScheduleMonth.value) return
+  selfMediaPlanActionLoading.value = true
+  try {
+    const { data } = await resumeProjectSelfMediaScheduleBatch(current.id, selfMediaScheduleMonth.value)
+    applySelfMediaPlanDetail(data.data)
+    ElMessage.success('批次已恢复')
+  } finally {
+    selfMediaPlanActionLoading.value = false
+  }
+}
+
+async function recalculateSelfMediaPendingPlans() {
+  const current = project.value
+  if (!current || !selfMediaScheduleMonth.value) return
+  try {
+    await ElMessageBox.confirm('将按当前工作日历和账号能力重新计算所有待生成计划的时间，已生成内容不受影响。', '重算待生成时间', {
+      type: 'warning', confirmButtonText: '确认重算', cancelButtonText: '取消',
+    })
+    selfMediaPlanActionLoading.value = true
+    const { data } = await recalculateProjectSelfMediaSchedulePendingItems(current.id, selfMediaScheduleMonth.value)
+    applySelfMediaPlanDetail(data.data)
+    ElMessage.success('待生成计划时间已重新计算')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  } finally {
+    selfMediaPlanActionLoading.value = false
   }
 }
 
@@ -2244,8 +2470,8 @@ async function createSelfMediaSchedule() {
     }
     await ElMessageBox.confirm(
       supplementMode
-        ? `确认补充 ${selfMediaScheduleMonth.value} 的自媒体自动排期？系统只会按当前剩余额度追加生成文章和发布时间，不会重建已有排期。`
-        : `确认创建 ${selfMediaScheduleMonth.value} 的自媒体自动排期？系统会按剩余额度生成文章，并安排发布时间。`,
+        ? `确认补充 ${selfMediaScheduleMonth.value} 的自媒体自动排期？系统只会按当前剩余额度追加锁定发布时间，不会重建已有排期。`
+        : `确认创建 ${selfMediaScheduleMonth.value} 的自媒体自动排期？系统会先锁定时间和额度，并在处理当天使用最新模板生成文章。`,
       supplementMode ? '补充自动排期' : '创建自动排期',
       { type: 'warning', confirmButtonText: supplementMode ? '确认补排' : '确认创建', cancelButtonText: '取消' },
     )
@@ -2258,7 +2484,7 @@ async function createSelfMediaSchedule() {
     const { data } = await createProjectSelfMediaAutoSchedule(current.id, selfMediaSchedulePayload(), idempotencyKey)
     selfMediaPreview.value = data.data
     const carryOverText = data.data?.carryOverCount ? `，已结转 ${data.data.carryOverCount} 条到 ${data.data.carryOverTargetMonth || '下月'}` : ''
-    ElMessage.success(`${supplementMode ? '补充排期' : '自动排期'}已提交，后台正在生成文章并安排发布时间${carryOverText}`)
+    ElMessage.success(`${supplementMode ? '补充排期' : '自动排期'}已提交，已锁定发布时间，文章将在处理当天生成${carryOverText}`)
     await loadSelfMediaScheduleBatch()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return

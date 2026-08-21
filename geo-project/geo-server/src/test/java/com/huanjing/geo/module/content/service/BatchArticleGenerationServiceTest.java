@@ -38,6 +38,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
@@ -862,6 +863,50 @@ class BatchArticleGenerationServiceTest {
         assertEquals(500L, response.batchId());
         assertThat(executor.commands).hasSize(1);
         verify(llmCallFacade, never()).execute(any());
+    }
+
+    @Test
+    void createSystemBatchReplaysConcurrentIdempotencyCollision() {
+        CapturingExecutor executor = new CapturingExecutor();
+        ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
+        Project project = new Project();
+        project.setId(10L);
+        project.setCompanyId(20L);
+        project.setBrandId(30L);
+        project.setStatus("active");
+        Brand brand = new Brand();
+        brand.setId(30L);
+        when(projectMapper.selectById(10L)).thenReturn(project);
+        when(brandMapper.selectById(30L)).thenReturn(brand);
+        when(perspectiveService.resolve(30L, "self_media", "wechat"))
+                .thenReturn(TemplatePerspectiveService.ResolvedPerspective.customer());
+        ArticlePromptTemplate template = template(101L, "self_media", "wechat", "industry_article",
+                TemplatePerspectiveCodes.CUSTOMER);
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(201L);
+        version.setTemplateId(101L);
+        when(allocationService.allocate(any(), any(), any(), any(), anyInt()))
+                .thenReturn(List.of(new ArticleTemplateAllocationService.AllocatedTemplate(template, version, 1)));
+        BatchArticleGenerationBatch concurrent = new BatchArticleGenerationBatch();
+        concurrent.setId(900L);
+        concurrent.setProjectId(10L);
+        concurrent.setTotalCount(1);
+        concurrent.setStatus("pending");
+        when(batchMapper.selectByIdempotencyKey("plan-key")).thenReturn(null, concurrent);
+        when(batchMapper.insert(any(BatchArticleGenerationBatch.class)))
+                .thenThrow(new DuplicateKeyException("duplicate idempotency key"));
+        BatchArticleGenerateRequest req = new BatchArticleGenerateRequest();
+        req.setProjectId(10L);
+        req.setTopicSource("manual");
+        BatchArticleGenerateRequest.TopicConfig topic = new BatchArticleGenerateRequest.TopicConfig();
+        topic.setTopic("行业观察");
+        topic.setPlatforms(List.of(platform("self_media", "wechat", 1)));
+        req.setTopics(List.of(topic));
+
+        BatchArticleGenerateResponse response = service.createSystemBatch(req, null, "plan-key");
+
+        assertEquals(900L, response.batchId());
+        assertThat(executor.commands).isEmpty();
     }
 
     @Test

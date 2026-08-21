@@ -49,7 +49,40 @@ public interface CompanyChannelQuotaLedgerMapper extends BaseMapper<CompanyChann
     CompanyChannelQuotaLedger selectByBiz(@Param("bizType") String bizType,
                                           @Param("bizId") String bizId);
 
+    @Update("UPDATE company_channel_quota_ledger " +
+            "SET biz_type = 'self_media_schedule', biz_id = #{scheduleId} " +
+            "WHERE biz_type = 'project_self_media_plan' AND biz_id = #{planItemId} AND status = 'reserved'")
+    int transferProjectSelfMediaPlan(@Param("planItemId") String planItemId,
+                                     @Param("scheduleId") String scheduleId);
+
     @Select("SELECT COUNT(1) FROM company_channel_quota_ledger " +
             "WHERE company_id = #{companyId} AND status = 'reserved'")
     long countReservedByCompany(@Param("companyId") Long companyId);
+
+    @Select("""
+            SELECT l.*
+            FROM company_channel_quota_ledger l
+            LEFT JOIN project_self_media_schedule_item i ON i.id = CAST(l.biz_id AS UNSIGNED)
+            LEFT JOIN project_self_media_schedule_batch b ON b.id = i.batch_id
+            WHERE l.biz_type = 'project_self_media_plan' AND l.status = 'reserved'
+              AND l.id > #{afterId}
+              AND (
+                i.id IS NULL
+                OR i.status IN ('cancelled', 'skipped', 'generation_failed')
+                OR b.status IN ('failed', 'skipped')
+                OR (i.status = 'schedule_failed' AND i.updated_at < #{scheduleFailedBefore})
+              )
+            ORDER BY l.id ASC
+            LIMIT #{limit}
+            """)
+    List<CompanyChannelQuotaLedger> selectProjectPlanReconciliationCandidates(
+            @Param("scheduleFailedBefore") LocalDateTime scheduleFailedBefore,
+            @Param("afterId") long afterId,
+            @Param("limit") int limit);
+
+    @Select("""
+            SELECT COUNT(1) FROM company_channel_quota_ledger
+            WHERE biz_type = 'project_self_media_plan' AND status = 'reserved'
+            """)
+    long countReservedProjectPlans();
 }

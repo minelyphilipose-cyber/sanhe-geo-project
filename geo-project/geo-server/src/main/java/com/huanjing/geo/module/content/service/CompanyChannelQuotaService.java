@@ -50,6 +50,7 @@ public class CompanyChannelQuotaService {
     private static final java.time.ZoneId BUSINESS_ZONE = QuotaPeriodResolver.BUSINESS_ZONE;
     private static final String BIZ_TYPE_DISTRIBUTION = "distribution";
     private static final String BIZ_TYPE_SELF_MEDIA_SCHEDULE = "self_media_schedule";
+    private static final String BIZ_TYPE_PROJECT_SELF_MEDIA_PLAN = "project_self_media_plan";
     private static final int RESERVED_TIMEOUT_MINUTES = 30;
     private static final int RESERVED_SCAN_BATCH_SIZE = 200;
     private static final int QUOTA_RESERVE_MAX_ATTEMPTS = 2;
@@ -117,6 +118,22 @@ public class CompanyChannelQuotaService {
             ));
         }
         return reserveForBizBatch(companyId, bizReservations);
+    }
+
+    public CompanyChannelQuotaLedger reserveProjectSelfMediaPlan(Long companyId,
+                                                                 Long projectId,
+                                                                 String platform,
+                                                                 Long planItemId) {
+        if (planItemId == null) {
+            throw new BizException(400, "plan_item_id is required for quota reservation");
+        }
+        return reserveForBiz(
+                companyId,
+                projectId,
+                resolveSelfMediaPlatformChannel(platform),
+                BIZ_TYPE_PROJECT_SELF_MEDIA_PLAN,
+                String.valueOf(planItemId)
+        );
     }
 
     private CompanyChannelQuotaLedger reserveDistributionForChannel(Long companyId,
@@ -305,6 +322,36 @@ public class CompanyChannelQuotaService {
             return;
         }
         releaseUsage(ledger);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void refundProjectSelfMediaPlan(Long planItemId) {
+        CompanyChannelQuotaLedger ledger = updateReservedLedger(
+                BIZ_TYPE_PROJECT_SELF_MEDIA_PLAN,
+                planItemId,
+                "refunded"
+        );
+        if (ledger != null) {
+            releaseUsage(ledger);
+        }
+    }
+
+    @Transactional
+    public void transferProjectSelfMediaPlanReservation(Long planItemId, Long scheduleId) {
+        if (planItemId == null || scheduleId == null) {
+            throw new BizException(400, "plan_item_id and schedule_id are required for quota transfer");
+        }
+        CompanyChannelQuotaLedger existing = findLedger(BIZ_TYPE_SELF_MEDIA_SCHEDULE, scheduleId);
+        if (existing != null) {
+            return;
+        }
+        int transferred = ledgerMapper.transferProjectSelfMediaPlan(
+                String.valueOf(planItemId),
+                String.valueOf(scheduleId)
+        );
+        if (transferred != 1) {
+            throw new BizException(409, "自动排期额度预占不存在或已失效，请重新计算该计划");
+        }
     }
 
     @Transactional

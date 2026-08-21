@@ -24,7 +24,7 @@ public interface ProjectSelfMediaScheduleBatchMapper extends BaseMapper<ProjectS
     @Select("""
             SELECT *
             FROM project_self_media_schedule_batch
-            WHERE status = 'processing'
+            WHERE status IN ('planned', 'processing')
             ORDER BY updated_at ASC, id ASC
             LIMIT #{limit}
             """)

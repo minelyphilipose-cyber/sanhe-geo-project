@@ -235,7 +235,7 @@ public class SelfMediaPublishScheduleService {
         ValidatedRequest validated = validateRequest(request);
         SysUser operator = currentUserService.requireCurrentUser();
         brandAccessService.requireBrandAccess(validated.brandId(), operator.getId(), BrandAccessAction.OPERATE);
-        return createSchedulesInternal(validated, operator.getId(), idempotencyKeyHeader);
+        return createSchedulesInternal(validated, operator.getId(), idempotencyKeyHeader, null);
     }
 
     @Transactional
@@ -246,7 +246,24 @@ public class SelfMediaPublishScheduleService {
         if (operatorId == null || operatorId <= 0) {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
         }
-        return createSchedulesInternal(validated, operatorId, idempotencyKeyHeader);
+        return createSchedulesInternal(validated, operatorId, idempotencyKeyHeader, null);
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleCreateResponse createSystemSchedulesUsingReservedQuota(
+            SelfMediaPublishScheduleCreateRequest request,
+            String idempotencyKeyHeader,
+            Long operatorId,
+            Long planItemId
+    ) {
+        ValidatedRequest validated = validateRequest(request);
+        if (operatorId == null || operatorId <= 0) {
+            fail("INVALID_OPERATOR", "operatorId must be a positive number");
+        }
+        if (planItemId == null || validated.articleIds().size() != 1 || validated.accountIds().size() != 1) {
+            fail("INVALID_PLAN_RESERVATION", "Reserved quota schedule must contain exactly one article and one account");
+        }
+        return createSchedulesInternal(validated, operatorId, idempotencyKeyHeader, planItemId);
     }
 
     @Transactional
@@ -397,8 +414,9 @@ public class SelfMediaPublishScheduleService {
     }
 
     private SelfMediaPublishScheduleCreateResponse createSchedulesInternal(ValidatedRequest validated,
-                                                                          Long operatorId,
-                                                                          String idempotencyKeyHeader) {
+                                                                            Long operatorId,
+                                                                            String idempotencyKeyHeader,
+                                                                            Long reservedPlanItemId) {
         String normalizedPayload = normalizedPayload(validated);
         String requestKey = StringUtils.hasText(idempotencyKeyHeader)
                 ? idempotencyKeyHeader.trim()
@@ -501,8 +519,9 @@ public class SelfMediaPublishScheduleService {
                             null));
                     continue;
                 }
-                SelfMediaPublishScheduleRejectedItemVO quotaRejected = quotaPrecheck.check(articleId, accountId,
-                        publishPlatform);
+                SelfMediaPublishScheduleRejectedItemVO quotaRejected = reservedPlanItemId == null
+                        ? quotaPrecheck.check(articleId, accountId, publishPlatform)
+                        : null;
                 if (quotaRejected != null) {
                     response.getRejectedItems().add(quotaRejected);
                     continue;
@@ -510,12 +529,19 @@ public class SelfMediaPublishScheduleService {
                 SelfMediaPublishSchedule inserted = createScheduleRow(requestRow, operatorId, candidate,
                         plannedCursor, executionCursor, validated.strategy(), false, publishSnapshot);
                 if (inserted != null) {
-                    quotaPrecheck.consume(publishPlatform);
-                    quotaReservations.add(new ScheduleQuotaReservation(
-                            inserted.getId(),
-                            candidate.article().getProjectId(),
-                            inserted.getPlatform()
-                    ));
+                    if (reservedPlanItemId == null) {
+                        quotaPrecheck.consume(publishPlatform);
+                        quotaReservations.add(new ScheduleQuotaReservation(
+                                inserted.getId(),
+                                candidate.article().getProjectId(),
+                                inserted.getPlatform()
+                        ));
+                    } else {
+                        companyChannelQuotaService.transferProjectSelfMediaPlanReservation(
+                                reservedPlanItemId,
+                                inserted.getId()
+                        );
+                    }
                     response.getCreatedSchedules().add(SelfMediaPublishScheduleVO.from(inserted));
                     plannedCursor = plannedCursor.plusMinutes(validated.intervalMinutes());
                     executionCursor = executionCursor.plusMinutes(validated.intervalMinutes());

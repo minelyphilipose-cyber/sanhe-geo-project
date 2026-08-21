@@ -57,6 +57,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
@@ -269,12 +270,18 @@ public class BatchArticleGenerationService {
     public BatchArticleGenerateResponse create(BatchArticleGenerateRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
-        return createInternal(req, operator, true);
+        return createInternal(req, operator, true, null);
     }
 
     public BatchArticleGenerateResponse createSystemBatch(BatchArticleGenerateRequest req, Long operatorId) {
+        return createSystemBatch(req, operatorId, null);
+    }
+
+    public BatchArticleGenerateResponse createSystemBatch(BatchArticleGenerateRequest req,
+                                                          Long operatorId,
+                                                          String idempotencyKey) {
         SysUser operator = operatorId == null ? null : currentUserService.requireById(operatorId);
-        return createInternal(req, operator, false);
+        return createInternal(req, operator, false, idempotencyKey);
     }
 
     public Page<BatchArticleGenerationBatchSummary> page(long current,
@@ -317,8 +324,27 @@ public class BatchArticleGenerationService {
 
     private BatchArticleGenerateResponse createInternal(BatchArticleGenerateRequest req,
                                                         SysUser operator,
-                                                        boolean checkAccess) {
+                                                        boolean checkAccess,
+                                                        String idempotencyKey) {
         Project project = requireActiveProject(req.getProjectId());
+        String normalizedIdempotencyKey = StringUtils.hasText(idempotencyKey) ? idempotencyKey.trim() : null;
+        if (normalizedIdempotencyKey != null) {
+            BatchArticleGenerationBatch existing = batchMapper.selectByIdempotencyKey(normalizedIdempotencyKey);
+            if (existing != null) {
+                if (!Objects.equals(existing.getProjectId(), project.getId())) {
+                    throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST,
+                            "Article generation idempotency key belongs to another project");
+                }
+                return new BatchArticleGenerateResponse(
+                        existing.getId(),
+                        existing.getTotalCount(),
+                        existing.getStatus(),
+                        false,
+                        false,
+                        List.of()
+                );
+            }
+        }
         Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
         if (checkAccess) {
             currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
@@ -352,7 +378,9 @@ public class BatchArticleGenerationService {
         }
         String topicSummary = topics.stream().map(ValidatedTopic::topic).limit(10).reduce((a, b) -> a + "、" + b).orElse("");
 
-        Long batchId = Objects.requireNonNull(transactionTemplate.execute(status -> {
+        Long batchId;
+        try {
+            batchId = Objects.requireNonNull(transactionTemplate.execute(status -> {
             BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
             batch.setProjectId(project.getId());
             batch.setCompanyId(project.getCompanyId());
@@ -367,6 +395,7 @@ public class BatchArticleGenerationService {
             batch.setFailedCount(0);
             batch.setWarningCount(0);
             batch.setStatus(STATUS_PENDING);
+            batch.setIdempotencyKey(normalizedIdempotencyKey);
             batch.setMedicalIndustryCode(topics.stream().map(ValidatedTopic::medicalIndustryCode).filter(StringUtils::hasText).findFirst().orElse(null));
             batch.setCreatedBy(operator == null ? null : operator.getId());
             batchMapper.insert(batch);
@@ -433,7 +462,22 @@ public class BatchArticleGenerationService {
                 }
             }
             return batch.getId();
-        }));
+            }));
+        } catch (DuplicateKeyException ex) {
+            if (normalizedIdempotencyKey == null) {
+                throw ex;
+            }
+            BatchArticleGenerationBatch concurrent = batchMapper.selectByIdempotencyKey(normalizedIdempotencyKey);
+            if (concurrent == null) {
+                throw ex;
+            }
+            if (!Objects.equals(concurrent.getProjectId(), project.getId())) {
+                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST,
+                        "Article generation idempotency key belongs to another project");
+            }
+            return new BatchArticleGenerateResponse(
+                    concurrent.getId(), concurrent.getTotalCount(), concurrent.getStatus(), false, false, List.of());
+        }
 
         submitBatchRunner(batchId);
         boolean allocationChanged = notices.stream().anyMatch(notice -> "auto_allocation_changed".equals(notice.type()));

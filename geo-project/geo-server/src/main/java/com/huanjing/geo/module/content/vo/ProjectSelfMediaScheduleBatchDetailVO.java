@@ -51,6 +51,9 @@ public class ProjectSelfMediaScheduleBatchDetailVO {
 
     @Data
     public static class Item {
+        private Long planItemId;
+        private String planItemStatus;
+        private String promptTemplateName;
         private Long generationBatchId;
         private Long generationTaskId;
         private Long sourceBrandId;
@@ -73,6 +76,7 @@ public class ProjectSelfMediaScheduleBatchDetailVO {
         private String platform;
         private Long scheduleId;
         private String scheduleStatus;
+        private LocalDateTime plannedExecutionAt;
         private LocalDateTime plannedPublishAt;
         private String queueKind;
         private Integer attemptCount;

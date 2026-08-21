@@ -396,6 +396,7 @@ geo:
       include-self-media: ${CONTENT_AUTO_DISTRIBUTION_INCLUDE_SELF_MEDIA:false}
   self-media:
     auto-schedule:
+      article-generation-lead-hours: ${SELF_MEDIA_AUTO_SCHEDULE_ARTICLE_GENERATION_LEAD_HOURS:4}
       job:
         pre-schedule-cron: "${SELF_MEDIA_AUTO_SCHEDULE_PRE_CRON:0 0 2 26 * *}"
         pre-schedule-window-hours: ${SELF_MEDIA_AUTO_SCHEDULE_PRE_WINDOW_HOURS:96}
@@ -404,6 +405,8 @@ geo:
         plan-poll-ms: ${SELF_MEDIA_AUTO_SCHEDULE_PLAN_POLL_MS:60000}
         plan-retry-max-count: ${SELF_MEDIA_AUTO_SCHEDULE_PLAN_RETRY_MAX_COUNT:3}
         plan-running-timeout-minutes: ${SELF_MEDIA_AUTO_SCHEDULE_PLAN_RUNNING_TIMEOUT_MINUTES:120}
+        generation-alert-poll-ms: ${SELF_MEDIA_AUTO_SCHEDULE_GENERATION_ALERT_POLL_MS:300000}
+        generation-alert-limit: ${SELF_MEDIA_AUTO_SCHEDULE_GENERATION_ALERT_LIMIT:100}
   presale-export:
     browser:
       enabled: ${PRESALE_EXPORT_BROWSER_ENABLED:true}

@@ -41,11 +41,11 @@ class MarketBattlegroundValidatorTest {
 
     @ParameterizedTest
     @CsvSource({
-            "automotive, 汽车",
-            "retail, 电商零售",
-            "finance, 金融",
+            "automotive, 汽车经销",
+            "retail, 商超零售",
+            "finance, 金融保险",
             "tourism, 旅游酒店",
-            "tech_software, 'SaaS 企业软件'"
+            "tech_software, 企业软件"
     })
     void defaults_renderConfiguredIndustryCodesAsVisibleLabels(String industryCode, String expectedLabel) throws Exception {
         MarketBattleground market = defaultMarket("亳州", industryCode);

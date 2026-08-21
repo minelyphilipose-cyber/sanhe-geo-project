@@ -159,6 +159,9 @@ export interface ProjectSelfMediaScheduleBatch {
 }
 
 export interface ProjectSelfMediaScheduleBatchDetailItem {
+  planItemId?: number | null
+  planItemStatus?: string | null
+  promptTemplateName?: string | null
   generationBatchId?: number
   generationTaskId?: number
   sourceBrandId?: number | null
@@ -181,6 +184,7 @@ export interface ProjectSelfMediaScheduleBatchDetailItem {
   platform?: string | null
   scheduleId?: number | null
   scheduleStatus?: string | null
+  plannedExecutionAt?: string | null
   plannedPublishAt?: string | null
   queueKind?: string | null
   attemptCount?: number | null
@@ -345,6 +349,34 @@ export function getProjectSelfMediaScheduleBatch(id: number, targetMonth: string
 
 export function getProjectSelfMediaScheduleBatchDetail(id: number, targetMonth: string) {
   return request.get<R<ProjectSelfMediaScheduleBatchDetail | null>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/detail`)
+}
+
+export function updateProjectSelfMediaScheduleItem(id: number, itemId: number, data: {
+  selfMediaAccountId?: number | null
+  plannedExecutionAt: string
+  plannedPublishAt: string
+}) {
+  return request.put<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-items/${itemId}`, data)
+}
+
+export function cancelProjectSelfMediaScheduleItem(id: number, itemId: number, reason?: string) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-items/${itemId}/cancel`, { reason })
+}
+
+export function generateProjectSelfMediaScheduleItemNow(id: number, itemId: number) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-items/${itemId}/generate-now`)
+}
+
+export function pauseProjectSelfMediaScheduleBatch(id: number, targetMonth: string) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/pause`)
+}
+
+export function resumeProjectSelfMediaScheduleBatch(id: number, targetMonth: string) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/resume`)
+}
+
+export function recalculateProjectSelfMediaSchedulePendingItems(id: number, targetMonth: string) {
+  return request.post<R<ProjectSelfMediaScheduleBatchDetail>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/recalculate-pending`)
 }
 
 export function getProjectSelfMediaScheduleCalendarStatus(id: number, targetMonth: string) {

@@ -25,6 +25,8 @@ import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
+import com.huanjing.geo.module.presale.service.PresaleBenchmarkIndustryClassifier;
+import com.huanjing.geo.module.partner.service.PartnerPresaleReportQuotaService;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import org.junit.jupiter.api.Test;
@@ -124,6 +126,10 @@ class PresaleGenerateOrchestratorTest {
     private PresaleJudgeService presaleJudgeService;
     @Mock
     private Executor platformExecutor;
+    @Mock
+    private PartnerPresaleReportQuotaService partnerPresaleReportQuotaService;
+    @Mock
+    private PresaleBenchmarkIndustryClassifier benchmarkIndustryClassifier;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();

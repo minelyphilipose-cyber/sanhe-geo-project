@@ -8,6 +8,9 @@ import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaAutoScheduleRequest;
+import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleItemActionRequest;
+import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleItemUpdateRequest;
+import com.huanjing.geo.module.content.entity.CompanyChannelQuotaLedger;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
@@ -15,6 +18,7 @@ import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleBatch;
 import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleCarryOver;
 import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleConfig;
 import com.huanjing.geo.module.content.entity.ProjectSelfMediaSchedulePlan;
+import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleItem;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
@@ -24,6 +28,9 @@ import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleBatchMappe
 import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleCarryOverMapper;
 import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleConfigMapper;
 import com.huanjing.geo.module.content.mapper.ProjectSelfMediaSchedulePlanMapper;
+import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleItemMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
+import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaLedgerMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
@@ -45,8 +52,10 @@ import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.huanjing.geo.module.system.service.SystemAlertService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
@@ -81,12 +90,14 @@ class ProjectSelfMediaScheduleServiceTest {
     private ProjectSelfMediaScheduleBatchMapper batchMapper;
     private ProjectSelfMediaScheduleCarryOverMapper carryOverMapper;
     private ProjectSelfMediaSchedulePlanMapper planMapper;
+    private ProjectSelfMediaScheduleItemMapper scheduleItemMapper;
     private ArticleDraftMapper articleDraftMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
     private SelfMediaPublishScheduleMapper selfMediaPublishScheduleMapper;
     private SelfMediaPublishScheduleRequestMapper selfMediaPublishScheduleRequestMapper;
     private BatchArticleGenerationTaskMapper generationTaskMapper;
     private KeywordGroupResultMapper keywordGroupResultMapper;
+    private ArticlePromptTemplateMapper promptTemplateMapper;
     private CompanyChannelQuotaService companyChannelQuotaService;
     private SelfMediaPublishAutoScheduleService autoScheduleService;
     private SelfMediaPublishScheduleService scheduleService;
@@ -99,6 +110,9 @@ class ProjectSelfMediaScheduleServiceTest {
     private SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
     private LocalAgentSessionMapper localAgentSessionMapper;
     private CurrentUserService currentUserService;
+    private SystemAlertService systemAlertService;
+    private CompanyChannelQuotaLedgerMapper quotaLedgerMapper;
+    private ProjectSelfMediaScheduleMetrics metrics;
     private ProjectSelfMediaScheduleService service;
 
     @BeforeEach
@@ -109,12 +123,14 @@ class ProjectSelfMediaScheduleServiceTest {
         batchMapper = mock(ProjectSelfMediaScheduleBatchMapper.class);
         carryOverMapper = mock(ProjectSelfMediaScheduleCarryOverMapper.class);
         planMapper = mock(ProjectSelfMediaSchedulePlanMapper.class);
+        scheduleItemMapper = mock(ProjectSelfMediaScheduleItemMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
         selfMediaPublishScheduleMapper = mock(SelfMediaPublishScheduleMapper.class);
         selfMediaPublishScheduleRequestMapper = mock(SelfMediaPublishScheduleRequestMapper.class);
         generationTaskMapper = mock(BatchArticleGenerationTaskMapper.class);
         keywordGroupResultMapper = mock(KeywordGroupResultMapper.class);
+        promptTemplateMapper = mock(ArticlePromptTemplateMapper.class);
         companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         autoScheduleService = mock(SelfMediaPublishAutoScheduleService.class);
         scheduleService = mock(SelfMediaPublishScheduleService.class);
@@ -127,6 +143,18 @@ class ProjectSelfMediaScheduleServiceTest {
         scheduleAdapterRouter = mock(SelfMediaPlatformScheduleAdapterRouter.class);
         localAgentSessionMapper = mock(LocalAgentSessionMapper.class);
         currentUserService = mock(CurrentUserService.class);
+        systemAlertService = mock(SystemAlertService.class);
+        quotaLedgerMapper = mock(CompanyChannelQuotaLedgerMapper.class);
+        metrics = new ProjectSelfMediaScheduleMetrics(new SimpleMeterRegistry());
+        java.util.concurrent.atomic.AtomicLong planItemIds = new java.util.concurrent.atomic.AtomicLong(1000L);
+        doAnswer(invocation -> {
+            ProjectSelfMediaScheduleItem item = invocation.getArgument(0);
+            if (item.getId() == null) {
+                item.setId(planItemIds.incrementAndGet());
+            }
+            return 1;
+        }).when(scheduleItemMapper).insert(any(ProjectSelfMediaScheduleItem.class));
+        when(scheduleItemMapper.claimDueGeneration(any(), anyString(), any(), any())).thenReturn(1);
         SysUser user = new SysUser();
         user.setId(99L);
         when(currentUserService.requireCurrentUser()).thenReturn(user);
@@ -146,12 +174,14 @@ class ProjectSelfMediaScheduleServiceTest {
                 batchMapper,
                 carryOverMapper,
                 planMapper,
+                scheduleItemMapper,
                 articleDraftMapper,
                 selfMediaAccountMapper,
                 selfMediaPublishScheduleMapper,
                 selfMediaPublishScheduleRequestMapper,
                 generationTaskMapper,
                 keywordGroupResultMapper,
+                promptTemplateMapper,
                 autoScheduleService,
                 scheduleService,
                 generationService,
@@ -162,11 +192,81 @@ class ProjectSelfMediaScheduleServiceTest {
                 companyChannelQuotaService,
                 brandAccessService,
                 currentUserService,
+                systemAlertService,
                 localAgentSessionMapper,
-                new ObjectMapper(),
-                scheduleAdapterRouter
+                new ObjectMapper().findAndRegisterModules(),
+                scheduleAdapterRouter,
+                quotaLedgerMapper,
+                metrics
         );
         service.setClock(Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneId.systemDefault()));
+    }
+
+    @Test
+    void updatePlanItemRejectsDateOutsideBusinessCalendar() {
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setId(301L);
+        item.setBatchId(11L);
+        item.setSelfMediaAccountId(41L);
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setId(11L);
+        SelfMediaAccount account = account(41L, "active");
+        account.setPlatform("zhihu");
+        when(scheduleItemMapper.selectById(301L)).thenReturn(item);
+        when(batchMapper.selectById(11L)).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(41L)).thenReturn(account);
+        ProjectSelfMediaScheduleItemUpdateRequest request = new ProjectSelfMediaScheduleItemUpdateRequest();
+        request.setSelfMediaAccountId(41L);
+        request.setPlannedExecutionAt(LocalDateTime.of(2026, 6, 10, 9, 0));
+        request.setPlannedPublishAt(LocalDateTime.of(2026, 6, 10, 10, 0));
+
+        assertThrows(BizException.class, () -> service.updatePlanItem(7L, 301L, request));
+        verify(scheduleItemMapper, never()).updateById(item);
+    }
+
+    @Test
+    void updatePlanItemRejectsAccountDailyLimitConflict() {
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setId(302L);
+        item.setBatchId(11L);
+        item.setSelfMediaAccountId(41L);
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setId(11L);
+        SelfMediaAccount account = account(41L, "active");
+        account.setPlatform("zhihu");
+        when(scheduleItemMapper.selectById(302L)).thenReturn(item);
+        when(batchMapper.selectById(11L)).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(41L)).thenReturn(account);
+        when(scheduleItemMapper.countActivePlanItemsForAccountDay(eq(41L), eq(302L), any(), any()))
+                .thenReturn(1L);
+        ProjectSelfMediaScheduleItemUpdateRequest request = new ProjectSelfMediaScheduleItemUpdateRequest();
+        request.setSelfMediaAccountId(41L);
+        request.setPlannedExecutionAt(LocalDateTime.of(2026, 6, 11, 9, 0));
+        request.setPlannedPublishAt(LocalDateTime.of(2026, 6, 11, 10, 0));
+
+        assertThrows(BizException.class, () -> service.updatePlanItem(7L, 302L, request));
+    }
+
+    @Test
+    void reconcilePlanQuotaReservationsRefundsTerminalAndOrphanCandidates() {
+        CompanyChannelQuotaLedger terminal = new CompanyChannelQuotaLedger();
+        terminal.setId(1L);
+        terminal.setBizId("401");
+        CompanyChannelQuotaLedger orphan = new CompanyChannelQuotaLedger();
+        orphan.setId(2L);
+        orphan.setBizId("999");
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setId(401L);
+        item.setStatus("generation_failed");
+        item.setQuotaReservationStatus("reserved");
+        when(quotaLedgerMapper.selectProjectPlanReconciliationCandidates(any(), eq(0L), eq(10)))
+                .thenReturn(List.of(terminal, orphan));
+        when(scheduleItemMapper.selectById(401L)).thenReturn(item);
+
+        assertEquals(2, service.reconcilePlanQuotaReservations(10, 72));
+        verify(companyChannelQuotaService).refundProjectSelfMediaPlan(401L);
+        verify(companyChannelQuotaService).refundProjectSelfMediaPlan(999L);
+        assertEquals("refunded", item.getQuotaReservationStatus());
     }
 
     @Test
@@ -252,7 +352,7 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals(1, response.getPlannedCount());
         assertEquals(1, response.getCarryOverCount());
         assertEquals("2026-07", response.getCarryOverTargetMonth());
-        verify(generationService).createSystemBatch(any(), eq(99L));
+        verify(generationService, never()).createSystemBatch(any(), any());
         ArgumentCaptor<ProjectSelfMediaScheduleBatch> batchCaptor =
                 ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
         verify(batchMapper).insert(batchCaptor.capture());
@@ -505,7 +605,7 @@ class ProjectSelfMediaScheduleServiceTest {
         var response = service.createForProject(7L, request, "manual");
 
         assertEquals(1, response.getPlannedCount());
-        verify(generationService).createSystemBatch(any(), eq(99L));
+        verify(generationService, never()).createSystemBatch(any(), any());
         ArgumentCaptor<ProjectSelfMediaScheduleBatch> batchCaptor =
                 ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
         verify(batchMapper).insert(batchCaptor.capture());
@@ -560,7 +660,7 @@ class ProjectSelfMediaScheduleServiceTest {
         var response = service.createForProject(7L, request, "manual");
 
         assertEquals(1, response.getPlannedCount());
-        verify(generationService).createSystemBatch(any(), eq(99L));
+        verify(generationService, never()).createSystemBatch(any(), any());
         verify(carryOverMapper, never()).updateById(any(ProjectSelfMediaScheduleCarryOver.class));
     }
 
@@ -644,7 +744,7 @@ class ProjectSelfMediaScheduleServiceTest {
         verify(batchMapper, org.mockito.Mockito.atLeastOnce()).updateById(captor.capture());
         ProjectSelfMediaScheduleBatch updated = captor.getAllValues().get(captor.getAllValues().size() - 1);
         assertEquals(33L, updated.getId());
-        assertEquals("processing", updated.getStatus());
+        assertEquals("planned", updated.getStatus());
         assertEquals(1, updated.getPlannedCount());
         assertEquals(0, updated.getCreatedCount());
         assertEquals(0, updated.getRejectedCount());
@@ -709,10 +809,11 @@ class ProjectSelfMediaScheduleServiceTest {
         ArgumentCaptor<ProjectSelfMediaScheduleBatch> captor = ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
         verify(batchMapper).updateById(captor.capture());
         ProjectSelfMediaScheduleBatch updated = captor.getValue();
-        assertEquals("processing", updated.getStatus());
+        assertEquals("planned", updated.getStatus());
         assertEquals(2, updated.getPlannedCount());
         assertTrue(updated.getRequestPayload().contains("\"generationTaskId\":55"));
-        assertTrue(updated.getRequestPayload().contains("\"generationTaskId\":56"));
+        assertTrue(updated.getRequestPayload().contains("\"generationTaskId\":null"));
+        assertTrue(updated.getRequestPayload().contains("\"selfMediaAccountId\":21"));
         assertTrue(updated.getRequestPayload().contains("\"idempotencyKey\":\"supplement-key\""));
     }
 
@@ -747,6 +848,16 @@ class ProjectSelfMediaScheduleServiceTest {
 
         service.createForProject(7L, request(), "manual");
 
+        verify(generationService, never()).createSystemBatch(any(), any());
+        ArgumentCaptor<ProjectSelfMediaScheduleBatch> batchCaptor =
+                ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
+        verify(batchMapper).insert(batchCaptor.capture());
+        ProjectSelfMediaScheduleBatch plannedBatch = batchCaptor.getValue();
+        plannedBatch.setId(33L);
+        when(batchMapper.selectProcessing(5)).thenReturn(List.of(plannedBatch));
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 11, 5, 0)));
+        service.progressProcessingBatches(5);
+
         ArgumentCaptor<BatchArticleGenerateRequest> captor = ArgumentCaptor.forClass(BatchArticleGenerateRequest.class);
         verify(generationService).createSystemBatch(captor.capture(), eq(99L));
         assertEquals("decision", captor.getValue().getTopics().get(0).getQuestionSceneCode());
@@ -776,6 +887,16 @@ class ProjectSelfMediaScheduleServiceTest {
         when(generationTaskMapper.selectList(any())).thenReturn(List.of(task));
 
         service.createForProject(7L, request(), "manual");
+
+        verify(generationService, never()).createSystemBatch(any(), any());
+        ArgumentCaptor<ProjectSelfMediaScheduleBatch> batchCaptor =
+                ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
+        verify(batchMapper).insert(batchCaptor.capture());
+        ProjectSelfMediaScheduleBatch plannedBatch = batchCaptor.getValue();
+        plannedBatch.setId(33L);
+        when(batchMapper.selectProcessing(5)).thenReturn(List.of(plannedBatch));
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 11, 5, 0)));
+        service.progressProcessingBatches(5);
 
         ArgumentCaptor<BatchArticleGenerateRequest> captor = ArgumentCaptor.forClass(BatchArticleGenerateRequest.class);
         verify(generationService).createSystemBatch(captor.capture(), eq(99L));
@@ -1808,6 +1929,118 @@ class ProjectSelfMediaScheduleServiceTest {
 
         assertEquals(1, processed);
         verify(scheduleService).retryNowSystem(88L, "项目自动排期补偿任务已重新计算安全执行时间并重试");
+    }
+
+    @Test
+    void cancelStoredPlanItemRefundsReservedQuota() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        ProjectSelfMediaScheduleItem item = storedItem();
+        when(scheduleItemMapper.selectById(100L)).thenReturn(item);
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+        when(batchMapper.selectById(33L)).thenReturn(batch);
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+
+        ProjectSelfMediaScheduleItemActionRequest request = new ProjectSelfMediaScheduleItemActionRequest();
+        request.setReason("运营取消");
+        service.cancelPlanItem(7L, 100L, request);
+
+        assertEquals("cancelled", item.getStatus());
+        assertEquals("refunded", item.getQuotaReservationStatus());
+        verify(companyChannelQuotaService).refundProjectSelfMediaPlan(100L);
+    }
+
+    @Test
+    void batchCanBePausedAndResumedWithoutChangingStoredItems() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        ProjectSelfMediaScheduleItem item = storedItem();
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+
+        service.pauseBatch(7L, "2026-06");
+        assertEquals("paused", batch.getStatus());
+
+        service.resumeBatch(7L, "2026-06");
+        assertEquals("planned", batch.getStatus());
+        assertEquals("planned", item.getStatus());
+    }
+
+    @Test
+    void delayedGenerationStartUsesFiniteBackoffAndRefundsAfterThirdFailure() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setGenerationDueAt(LocalDateTime.of(2026, 6, 1, 7, 0));
+        when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'"))
+                .thenThrow(new BizException(70043, "question pool temporarily unavailable"));
+
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            item.setNextGenerationAttemptAt(LocalDateTime.of(2026, 6, 1, 8, 0));
+            service.progressProcessingBatches(5);
+        }
+
+        assertEquals(3, item.getGenerationAttemptCount());
+        assertEquals("generation_failed", item.getStatus());
+        assertEquals("refunded", item.getQuotaReservationStatus());
+        verify(companyChannelQuotaService).refundProjectSelfMediaPlan(100L);
+    }
+
+    @Test
+    void monitorCreatesDeduplicatedRiskAlertForDueStoredItem() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setGenerationDueAt(LocalDateTime.of(2026, 6, 1, 7, 0));
+        when(scheduleItemMapper.selectAtRiskItems(any(), eq(0L), eq(10)))
+                .thenReturn(List.of(item));
+        when(batchMapper.selectById(33L)).thenReturn(batch);
+
+        assertEquals(1, service.monitorAtRiskDelayedGeneration(10));
+
+        verify(systemAlertService).createOrRefreshRecipientAlert(
+                eq("PROJECT_SELF_MEDIA_DELAYED_GENERATION_RISK"),
+                eq("error"),
+                eq("project_self_media_schedule"),
+                anyString(),
+                any(),
+                eq(99L),
+                eq(null),
+                eq("project-self-media-generation-risk-100")
+        );
+    }
+
+    private ProjectSelfMediaScheduleBatch storedBatch() {
+        ProjectSelfMediaScheduleBatch batch = new ProjectSelfMediaScheduleBatch();
+        batch.setId(33L);
+        batch.setProjectId(7L);
+        batch.setBrandId(8L);
+        batch.setCompanyId(6L);
+        batch.setTargetMonth("2026-06");
+        batch.setStatus("planned");
+        batch.setScheduleStrategy("platform_schedule");
+        batch.setCreatedBy(99L);
+        return batch;
+    }
+
+    private ProjectSelfMediaScheduleItem storedItem() {
+        ProjectSelfMediaScheduleItem item = new ProjectSelfMediaScheduleItem();
+        item.setId(100L);
+        item.setBatchId(33L);
+        item.setProjectId(7L);
+        item.setBrandId(8L);
+        item.setCompanyId(6L);
+        item.setSelfMediaAccountId(20L);
+        item.setPlatform("toutiao");
+        item.setStatus("planned");
+        item.setPlannedExecutionAt(LocalDateTime.of(2026, 6, 11, 9, 0));
+        item.setPlannedPublishAt(LocalDateTime.of(2026, 6, 11, 10, 0));
+        item.setGenerationDueAt(LocalDateTime.of(2026, 6, 11, 5, 0));
+        item.setGenerationIdempotencyKey("project-self-media-plan-33-100");
+        item.setGenerationAttemptCount(0);
+        item.setQuotaReservationStatus("reserved");
+        item.setCreatedBy(99L);
+        return item;
     }
 
     private ProjectSelfMediaScheduleBatch processingBatchWithTwoGenerationPlans() {

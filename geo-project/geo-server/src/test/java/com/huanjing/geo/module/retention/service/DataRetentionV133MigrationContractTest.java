@@ -29,7 +29,7 @@ class DataRetentionV133MigrationContractTest {
                     + "V132_1__prepare_article_batch_channel_slot_unique.sql")
             .toAbsolutePath();
     private static final String EXISTING_MANIFEST_SHA256 =
-            "d71f2f1096a97496c4275984a0955fe87e2ae91432e67e3bbcb2b632adc7ccfe";
+            "b5004a39cb3d1a860200556fdf684ffc43628a2098069ec90dbd27beb9e45749";
     private static final String V133_SHA256 =
             "f41035f934d51d1d08eae593b5320ba02588841f2523818c4911bcb254ed3ce2";
 
@@ -43,7 +43,7 @@ class DataRetentionV133MigrationContractTest {
                     .toList();
         }
 
-        assertEquals(368, migrations.size());
+        assertEquals(369, migrations.size());
         StringBuilder manifest = new StringBuilder();
         for (Path migration : migrations) {
             byte[] canonicalBytes = canonicalMigrationBytes(Files.readAllBytes(migration));

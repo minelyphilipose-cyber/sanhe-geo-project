@@ -33,4 +33,5 @@ public class BatchArticleGenerationBatch {
     private LocalDateTime startedAt;
     private LocalDateTime finishedAt;
     private String errorMessage;
+    private String idempotencyKey;
 }
