@@ -34,12 +34,13 @@ public class DispatchProperties {
     private int questionPollMaxShardSize = 20;
     private int questionPollCycleDays = 1;
     private String questionPollModelTier = "primary";
+    private boolean questionPollPreflightEnabled = true;
     private int resourceBusyRetryMinSeconds = 30;
     private int resourceBusyRetryJitterSeconds = 30;
     private int resourceBusyRetryMaxSeconds = 900;
     private int resourceBusyMaxAttempts = 60;
-    private boolean capacityFailureClassificationEnabled = false;
-    private boolean resourceBusyRetryAfterEnabled = false;
+    private boolean capacityFailureClassificationEnabled = true;
+    private boolean resourceBusyRetryAfterEnabled = true;
     private boolean autoContentGenerationEnabled = false;
     private Stagger stagger = new Stagger();
 

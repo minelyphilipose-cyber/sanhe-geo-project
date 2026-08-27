@@ -73,7 +73,7 @@ class DataRetentionDynamicSwitchContractTest {
         assertTrue(metrics.contains("retention_dynamic_switch_redis_latency_ms"));
         assertTrue(metrics.contains("retention_dynamic_switch_requested_count"));
         assertTrue(metrics.contains("retention_dynamic_switch_requested_oldest_age_seconds"));
-        assertTrue(alert.contains("systemAlertService.createAlert"));
+        assertTrue(alert.contains("systemAlertService.createOrRefreshRecipientAlert"));
         assertTrue(alert.contains("DATA_RETENTION_DYNAMIC_SWITCH"));
     }
 

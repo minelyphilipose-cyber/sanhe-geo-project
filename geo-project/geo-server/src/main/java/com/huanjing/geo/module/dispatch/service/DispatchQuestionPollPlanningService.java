@@ -358,6 +358,10 @@ public class DispatchQuestionPollPlanningService {
                         .eq(AiPlatformConfig::getEnabled, true)
                         .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
                         .in(AiPlatformConfig::getUsageScene, "STANDARD_CHAT", "QUESTION_POLL_WEB")
+                        .and(health -> health.isNull(AiPlatformConfig::getCurrentHealthStatus)
+                                .or()
+                                .ne(AiPlatformConfig::getCurrentHealthStatus,
+                                        QuestionPollPlatformPreflightService.PREFLIGHT_FAILED))
                         .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId)
         );
         return QuestionPollPlatformSelection.preferredEnabled(candidates).stream()

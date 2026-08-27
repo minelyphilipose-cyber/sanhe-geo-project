@@ -128,6 +128,26 @@ class DispatchTaskStateServiceTest {
         verify(dispatchAlertService, never()).createAlert(any(), any(), any(), any(), any(), any(), any());
     }
 
+    @Test
+    void llmResourceWaitIsPersistedWithoutPerCustomerAlertFanout() {
+        DispatchTask task = runningTask(46L, "{\"mode\":\"question-poll-shard\",\"shardId\":90}");
+        when(dispatchTaskMapper.selectById(46L)).thenReturn(task);
+        LocalDateTime nextRetryAt = LocalDateTime.now().plusMinutes(1);
+
+        service.markResourceWaiting(
+                46L, 1, nextRetryAt, "All LLM candidates are circuit-open", "{}",
+                task.getPayloadJson(), task.getProjectId()
+        );
+
+        ArgumentCaptor<DispatchTask> captor = ArgumentCaptor.forClass(DispatchTask.class);
+        verify(dispatchTaskMapper).updateById(captor.capture());
+        assertEquals(DispatchTaskStatus.RETRY_PENDING.value(), captor.getValue().getStatus());
+        assertEquals(1, captor.getValue().getResourceWaitCount());
+        assertEquals(nextRetryAt, captor.getValue().getNextRetryAt());
+        verify(dispatchQueueService).clearQueueMark(46L);
+        verify(dispatchAlertService, never()).createAlert(any(), any(), any(), any(), any(), any(), any());
+    }
+
     private static DispatchTask runningTask(Long id, String payloadJson) {
         DispatchTask task = new DispatchTask();
         task.setId(id);

@@ -4,6 +4,7 @@ import com.huanjing.geo.common.llm.LlmInvokeException;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
 import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.alert.LlmProviderAlertService;
 import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
 import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
 import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
@@ -31,6 +32,7 @@ public class LlmPlatformRouter {
     private final LlmExecutionGateway executionGateway;
     private final AiPlatformHealthMonitorService platformHealthMonitorService;
     private final LlmMeasurementCollector measurementCollector;
+    private final LlmProviderAlertService providerAlertService;
 
     public LlmRouteResult invoke(LlmRouteRequest request) {
         List<LlmPlatformCandidate> candidates = selectionStrategy.selectCandidates(request);
@@ -46,7 +48,7 @@ public class LlmPlatformRouter {
         Exception lastError = null;
 
         for (LlmPlatformCandidate candidate : candidates) {
-            String breakerKey = breakerKey(request, candidate.platformCode());
+            String breakerKey = breakerKey(request, candidate);
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
                 throw new LlmRouteException(LlmRouteFailureKind.INTERRUPTED, "Interrupted during LLM routing",
@@ -66,12 +68,14 @@ public class LlmPlatformRouter {
                 if (!platformRateLimiterService.tryAcquire(config, request.tokenCost())) {
                     rateLimited++;
                     requestCount--;
+                    circuitBreakerService.releaseProbe(breakerKey);
                     platformHealthMonitorService.recordRateLimited(candidate.platformCode(), request.feature());
                     recordCapacitySignal(request, candidate, LlmErrorCategory.INTERNAL_RATE_LIMITED);
                     continue;
                 }
                 LlmInvokeResult result = llmInvoker.invoke(request.userPrompt(), buildModelConfig(request, candidate));
                 circuitBreakerService.recordSuccess(breakerKey);
+                providerAlertService.recordSuccess(request, candidate);
                 return new LlmRouteResult(
                         candidate.platformCode(),
                         candidate.platformName(),
@@ -86,6 +90,7 @@ public class LlmPlatformRouter {
             } catch (LlmPermitUnavailableException ex) {
                 permitBusy++;
                 lastError = ex;
+                circuitBreakerService.releaseProbe(breakerKey);
                 platformHealthMonitorService.recordPermitBusy(candidate.platformCode(), request.feature());
                 recordCapacitySignal(request, candidate, LlmErrorCategory.PERMIT_BUSY);
                 log.debug("LLM permit busy, feature={}, platform={}, channel={}",
@@ -94,6 +99,7 @@ public class LlmPlatformRouter {
                 lastError = ex;
                 recordStructuredInvokeFailure(request, candidate, ex);
                 circuitBreakerService.recordFailure(breakerKey);
+                providerAlertService.recordFailure(request, candidate, ex);
                 log.warn("LLM candidate failed, feature={}, platform={}, channel={}, reason={}",
                         request.feature(), candidate.platformCode(), candidate.channel(), ex.getMessage());
             }
@@ -133,11 +139,8 @@ public class LlmPlatformRouter {
         );
     }
 
-    private String breakerKey(LlmRouteRequest request, String platformCode) {
-        if (LlmFeature.BASELINE.equals(request.feature())) {
-            return request.feature() + ":" + platformCode;
-        }
-        return platformCode;
+    private String breakerKey(LlmRouteRequest request, LlmPlatformCandidate candidate) {
+        return request.feature() + ":" + candidate.platformCode() + ":" + candidate.channel();
     }
 
     private LlmRouteFailureKind resolveFailureKind(int total, int rateLimited, int circuitOpen, int permitBusy) {

@@ -135,15 +135,8 @@ public class DispatchTaskStateService {
         task.setNextRetryAt(nextRetryAt);
         dispatchTaskMapper.updateById(task);
         dispatchQueueService.clearQueueMark(taskId);
-        dispatchAlertService.createAlert(
-                taskId,
-                projectId,
-                DispatchAlertSeverity.WARN,
-                "Dispatch task postponed for shared LLM capacity",
-                lastError,
-                task.getRetryCount() == null ? 0 : task.getRetryCount(),
-                payloadJson
-        );
+        // Provider failures are aggregated by LlmProviderAlertService. Per-task alerts here caused
+        // one shared outage to fan out into hundreds of indistinguishable customer alerts.
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

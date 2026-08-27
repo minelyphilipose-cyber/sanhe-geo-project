@@ -476,12 +476,14 @@ geo:
     # Spread the effective A-tier question set across a seven-day polling cycle.
     question-poll-cycle-days: ${DISPATCH_QUESTION_POLL_CYCLE_DAYS:7}
     question-poll-model-tier: ${DISPATCH_QUESTION_POLL_MODEL_TIER:primary}
+    question-poll-preflight-enabled: ${DISPATCH_QUESTION_POLL_PREFLIGHT_ENABLED:true}
+    question-poll-preflight-cron: "${DISPATCH_QUESTION_POLL_PREFLIGHT_CRON:0 55 23 * * *}"
     resource-busy-retry-min-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MIN_SECONDS:30}
     resource-busy-retry-jitter-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_JITTER_SECONDS:30}
     resource-busy-retry-max-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MAX_SECONDS:900}
     resource-busy-max-attempts: ${DISPATCH_RESOURCE_BUSY_MAX_ATTEMPTS:60}
-    capacity-failure-classification-enabled: ${DISPATCH_CAPACITY_FAILURE_CLASSIFICATION_ENABLED:false}
-    resource-busy-retry-after-enabled: ${DISPATCH_RESOURCE_BUSY_RETRY_AFTER_ENABLED:false}
+    capacity-failure-classification-enabled: ${DISPATCH_CAPACITY_FAILURE_CLASSIFICATION_ENABLED:true}
+    resource-busy-retry-after-enabled: ${DISPATCH_RESOURCE_BUSY_RETRY_AFTER_ENABLED:true}
     auto-content-generation-enabled: ${DISPATCH_AUTO_CONTENT_GENERATION_ENABLED:false}
     api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET:geo-dispatch-key}
     # Required before enabling web-search profiles; blank stores only the sanitized payload.

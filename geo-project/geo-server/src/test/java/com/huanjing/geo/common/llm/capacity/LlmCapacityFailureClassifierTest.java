@@ -38,6 +38,23 @@ class LlmCapacityFailureClassifierTest {
     }
 
     @Test
+    void treatsAccountQuotaExhaustionAsResourceWaitInsteadOfBusinessFailure() {
+        LlmHttpErrorException error = new LlmHttpErrorException(
+                429,
+                "insufficient balance",
+                "exceeded_current_quota_error",
+                null,
+                LlmErrorCategory.ACCOUNT_QUOTA_EXHAUSTED
+        );
+
+        Optional<LlmCapacityFailure> result = classifier.classify(error);
+
+        assertTrue(result.isPresent());
+        assertEquals(LlmErrorCategory.ACCOUNT_QUOTA_EXHAUSTED, result.get().errorCategory());
+        assertEquals("exceeded_current_quota_error", result.get().reason());
+    }
+
+    @Test
     void classifiesRoutePermitBusyAsCapacityFailure() {
         LlmRouteException error = new LlmRouteException(
                 LlmRouteFailureKind.ALL_PERMIT_BUSY,

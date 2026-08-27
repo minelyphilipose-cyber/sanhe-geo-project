@@ -33,7 +33,8 @@ class DispatchSchedulerTest {
                 dispatchTaskService,
                 dispatchAlertService,
                 mock(ProjectDashboardSnapshotService.class),
-                mock(DispatchPollAggregationService.class)
+                mock(DispatchPollAggregationService.class),
+                mock(QuestionPollPlatformPreflightService.class)
         );
     }
 

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.llm.measurement.LlmErrorCategory;
 import com.huanjing.geo.common.llm.measurement.LlmHttpErrorException;
+import com.huanjing.geo.common.llm.measurement.LlmResponseException;
+import com.huanjing.geo.common.llm.measurement.LlmStructuredException;
 import com.huanjing.geo.common.llm.measurement.RetryAfterParser;
 import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
 import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
@@ -21,10 +23,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Slf4j
 @Service
 public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
+
+    private static final long RETRY_BASE_DELAY_MS = 250L;
+    private static final long RETRY_MAX_DELAY_MS = 5_000L;
 
     private final LlmHttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -89,9 +95,10 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
                 throw ex;
             } catch (Exception ex) {
                 lastError = ex;
-                if (attempt == modelConfig.maxRetry()) {
+                if (attempt == modelConfig.maxRetry() || !isRetryable(ex, attempt)) {
                     break;
                 }
+                waitBeforeRetry(ex, attempt);
             }
         }
         String reason = lastError == null ? "unknown error" : lastError.getMessage();
@@ -128,17 +135,26 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
                 modelConfig.requestTimeoutMs()
         );
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            String providerErrorCode = extractProviderErrorCode(response.body());
             throw new LlmHttpErrorException(
                     response.statusCode(),
                     "HTTP " + response.statusCode() + ": " + safeSnippet(response.body()),
-                    extractProviderErrorCode(response.body()),
+                    providerErrorCode,
                     RetryAfterParser.parse(response.headers()),
-                    classifyHttpStatus(response.statusCode())
+                    classifyHttpError(response.statusCode(), providerErrorCode)
             );
         }
         InvocationResponse invocation = extractResponse(response.body());
         if (!StringUtils.hasText(invocation.text())) {
-            throw new LlmInvokeException("Empty model response text");
+            log.warn("Empty LLM response, platform={}, model={}, bodyLength={}, choices={}, finishReason={}, "
+                            + "reasoningContentPresent={}",
+                    modelConfig.platformCode(), modelConfig.modelId(), safeLength(response.body()),
+                    invocation.choicesCount(), invocation.finishReason(), invocation.reasoningContentPresent());
+            throw new LlmResponseException(
+                    "Empty model response text",
+                    "empty_model_response",
+                    LlmErrorCategory.EMPTY_RESPONSE
+            );
         }
         return invocation;
     }
@@ -169,7 +185,7 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
 
     private InvocationResponse extractResponse(String body) {
         if (!StringUtils.hasText(body)) {
-            return new InvocationResponse(null, null, null);
+            return new InvocationResponse(null, null, null, 0, null, false);
         }
         try {
             JsonNode root = objectMapper.readTree(body);
@@ -178,23 +194,62 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
             JsonNode choices = root.get("choices");
             if (choices != null && choices.isArray() && !choices.isEmpty()) {
                 JsonNode first = choices.get(0);
+                String finishReason = first.path("finish_reason").isTextual()
+                        ? first.path("finish_reason").asText()
+                        : null;
                 JsonNode message = first.get("message");
-                if (message != null && message.get("content") != null && message.get("content").isTextual()) {
-                    return new InvocationResponse(message.get("content").asText(), promptTokens, completionTokens);
+                if (message != null) {
+                    String content = extractMessageContent(message.get("content"));
+                    boolean reasoningPresent = StringUtils.hasText(message.path("reasoning_content").asText(null));
+                    if (content != null) {
+                        return new InvocationResponse(content, promptTokens, completionTokens,
+                                choices.size(), finishReason, reasoningPresent);
+                    }
                 }
                 JsonNode text = first.get("text");
                 if (text != null && text.isTextual()) {
-                    return new InvocationResponse(text.asText(), promptTokens, completionTokens);
+                    return new InvocationResponse(text.asText(), promptTokens, completionTokens,
+                            choices.size(), finishReason, false);
                 }
+                boolean reasoningPresent = message != null
+                        && StringUtils.hasText(message.path("reasoning_content").asText(null));
+                return new InvocationResponse(null, promptTokens, completionTokens,
+                        choices.size(), finishReason, reasoningPresent);
             }
             JsonNode outputText = root.get("output_text");
             if (outputText != null && outputText.isTextual()) {
-                return new InvocationResponse(outputText.asText(), promptTokens, completionTokens);
+                return new InvocationResponse(outputText.asText(), promptTokens, completionTokens,
+                        choices == null || !choices.isArray() ? 0 : choices.size(), null, false);
             }
-            return new InvocationResponse(body, promptTokens, completionTokens);
+            return new InvocationResponse(body, promptTokens, completionTokens,
+                    choices == null || !choices.isArray() ? 0 : choices.size(), null, false);
         } catch (Exception ex) {
-            return new InvocationResponse(body, null, null);
+            return new InvocationResponse(body, null, null, 0, null, false);
         }
+    }
+
+    private String extractMessageContent(JsonNode content) {
+        if (content == null || content.isNull() || content.isMissingNode()) {
+            return null;
+        }
+        if (content.isTextual()) {
+            return content.asText();
+        }
+        if (!content.isArray()) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        for (JsonNode item : content) {
+            if (item.isTextual()) {
+                parts.add(item.asText());
+                continue;
+            }
+            JsonNode text = item.get("text");
+            if (text != null && text.isTextual()) {
+                parts.add(text.asText());
+            }
+        }
+        return parts.isEmpty() ? null : String.join("", parts);
     }
 
     private Integer extractNullableInt(JsonNode node) {
@@ -249,6 +304,12 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
     }
 
     private LlmErrorCategory classifyHttpStatus(int statusCode) {
+        if (statusCode == 401 || statusCode == 403) {
+            return LlmErrorCategory.AUTHENTICATION_FAILED;
+        }
+        if (statusCode == 402) {
+            return LlmErrorCategory.ACCOUNT_QUOTA_EXHAUSTED;
+        }
         if (statusCode == 429) {
             return LlmErrorCategory.PLATFORM_429;
         }
@@ -256,6 +317,71 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
             return LlmErrorCategory.HTTP_5XX;
         }
         return LlmErrorCategory.INVOKE_FAILED;
+    }
+
+    private LlmErrorCategory classifyHttpError(int statusCode, String providerErrorCode) {
+        if (isQuotaError(providerErrorCode)) {
+            return LlmErrorCategory.ACCOUNT_QUOTA_EXHAUSTED;
+        }
+        return classifyHttpStatus(statusCode);
+    }
+
+    private boolean isQuotaError(String providerErrorCode) {
+        if (!StringUtils.hasText(providerErrorCode)) {
+            return false;
+        }
+        String normalized = providerErrorCode.trim().toLowerCase();
+        return normalized.contains("exceeded_current_quota")
+                || normalized.contains("insufficient_quota")
+                || normalized.contains("billing_hard_limit")
+                || normalized.contains("account_suspended");
+    }
+
+    private boolean isRetryable(Throwable error, int attempt) {
+        LlmStructuredException structured = findStructured(error);
+        if (structured == null) {
+            return true;
+        }
+        if (structured.errorCategory() == LlmErrorCategory.EMPTY_RESPONSE) {
+            return attempt == 0;
+        }
+        if (structured.retryAfterMs() != null && structured.retryAfterMs() > RETRY_MAX_DELAY_MS) {
+            return false;
+        }
+        return structured.errorCategory() == LlmErrorCategory.PLATFORM_429
+                || structured.errorCategory() == LlmErrorCategory.HTTP_5XX
+                || structured.errorCategory() == LlmErrorCategory.TIMEOUT;
+    }
+
+    private LlmStructuredException findStructured(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof LlmStructuredException structured) {
+                return structured;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private void waitBeforeRetry(Throwable error, int attempt) throws LlmInvokeException {
+        LlmStructuredException structured = findStructured(error);
+        long delayMs = structured != null && structured.retryAfterMs() != null && structured.retryAfterMs() > 0L
+                ? Math.min(RETRY_MAX_DELAY_MS, structured.retryAfterMs())
+                : Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * (1L << Math.min(attempt, 4)));
+        if (structured == null || structured.retryAfterMs() == null) {
+            delayMs += ThreadLocalRandom.current().nextLong(RETRY_BASE_DELAY_MS + 1L);
+        }
+        try {
+            Thread.sleep(delayMs);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new LlmInvokeException("Interrupted during LLM retry backoff", interrupted);
+        }
+    }
+
+    private int safeLength(String value) {
+        return value == null ? 0 : value.length();
     }
 
     private String extractProviderErrorCode(String body) {
@@ -304,6 +430,11 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
         private volatile long lastCallAtMillis = 0L;
     }
 
-    private record InvocationResponse(String text, Integer promptTokens, Integer completionTokens) {
+    private record InvocationResponse(String text,
+                                      Integer promptTokens,
+                                      Integer completionTokens,
+                                      int choicesCount,
+                                      String finishReason,
+                                      boolean reasoningContentPresent) {
     }
 }

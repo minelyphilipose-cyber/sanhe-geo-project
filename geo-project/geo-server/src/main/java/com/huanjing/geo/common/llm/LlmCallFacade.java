@@ -96,12 +96,13 @@ public class LlmCallFacade {
                     request.legacyRequestTimeoutMs()
             );
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                String providerErrorCode = extractProviderErrorCode(response.body());
                 throw new LlmHttpErrorException(
                         response.statusCode(),
                         "Model API HTTP " + response.statusCode() + ": " + safeSnippet(response.body()),
-                        extractProviderErrorCode(response.body()),
+                        providerErrorCode,
                         RetryAfterParser.parse(response.headers()),
-                        classifyHttpStatus(response.statusCode())
+                        classifyHttpError(response.statusCode(), providerErrorCode)
                 );
             }
             return LlmCallResult.raw(
@@ -339,6 +340,12 @@ public class LlmCallFacade {
     }
 
     private LlmErrorCategory classifyHttpStatus(int statusCode) {
+        if (statusCode == 401 || statusCode == 403) {
+            return LlmErrorCategory.AUTHENTICATION_FAILED;
+        }
+        if (statusCode == 402) {
+            return LlmErrorCategory.ACCOUNT_QUOTA_EXHAUSTED;
+        }
         if (statusCode == 429) {
             return LlmErrorCategory.PLATFORM_429;
         }
@@ -346,6 +353,19 @@ public class LlmCallFacade {
             return LlmErrorCategory.HTTP_5XX;
         }
         return LlmErrorCategory.INVOKE_FAILED;
+    }
+
+    private LlmErrorCategory classifyHttpError(int statusCode, String providerErrorCode) {
+        if (StringUtils.hasText(providerErrorCode)) {
+            String normalized = providerErrorCode.trim().toLowerCase();
+            if (normalized.contains("exceeded_current_quota")
+                    || normalized.contains("insufficient_quota")
+                    || normalized.contains("billing_hard_limit")
+                    || normalized.contains("account_suspended")) {
+                return LlmErrorCategory.ACCOUNT_QUOTA_EXHAUSTED;
+            }
+        }
+        return classifyHttpStatus(statusCode);
     }
 
     private String extractProviderErrorCode(String body) {

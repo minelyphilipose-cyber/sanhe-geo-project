@@ -41,9 +41,10 @@ final class ArticleGenerationFailureClassifier {
         if (structured != null && structured.errorCategory() != null) {
             return switch (structured.errorCategory()) {
                 case PERMIT_BUSY, INTERNAL_RATE_LIMITED -> Classification.capacity();
-                case PLATFORM_429, HTTP_5XX, TIMEOUT, INVOKE_FAILED ->
+                case PLATFORM_429, HTTP_5XX, TIMEOUT, EMPTY_RESPONSE, INVOKE_FAILED ->
                         Classification.providerRetryable(structured.retryAfterMs());
-                case CONFIG_ERROR, BUSINESS_NON_RETRYABLE -> Classification.nonRetryable();
+                case ACCOUNT_QUOTA_EXHAUSTED, AUTHENTICATION_FAILED,
+                     CONFIG_ERROR, BUSINESS_NON_RETRYABLE -> Classification.nonRetryable();
             };
         }
         String message = messageChain(error);

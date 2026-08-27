@@ -21,6 +21,7 @@ public class DispatchScheduler {
     private final DispatchAlertService dispatchAlertService;
     private final ProjectDashboardSnapshotService projectDashboardSnapshotService;
     private final DispatchPollAggregationService dispatchPollAggregationService;
+    private final QuestionPollPlatformPreflightService questionPollPlatformPreflightService;
 
     @Scheduled(cron = "${geo.dispatch.cron:0 5 0 * * *}", zone = "${geo.dispatch.timezone:Asia/Shanghai}")
     public void dailyScan() {
@@ -31,6 +32,7 @@ public class DispatchScheduler {
                 log.info("Skip daily dispatch scan because lock is occupied");
                 return;
             }
+            questionPollPlatformPreflightService.runPreflight();
             dispatchPlannerService.scanAndPlan(LocalDate.now());
             dispatchTaskService.enqueueRecoveryTasks();
             if (dispatchTaskService.isHistoryCleanupEnabled()) {
@@ -50,6 +52,12 @@ public class DispatchScheduler {
         } finally {
             dispatchQueueService.releaseScanLock(lockValue);
         }
+    }
+
+    @Scheduled(cron = "${geo.dispatch.question-poll-preflight-cron:0 55 23 * * *}",
+            zone = "${geo.dispatch.timezone:Asia/Shanghai}")
+    public void questionPollPlatformPreflight() {
+        questionPollPlatformPreflightService.runPreflight();
     }
 
     private void cleanupHistory() {

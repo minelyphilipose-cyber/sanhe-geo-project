@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -26,9 +27,7 @@ public class LlmCircuitBreakerService {
             return true;
         }
         if (System.currentTimeMillis() - openedAt > properties.getCircuitBreakerOpenDurationMs()) {
-            state.openedAtMillis = 0L;
-            state.failures.set(0);
-            return true;
+            return state.halfOpenProbe.compareAndSet(false, true);
         }
         return false;
     }
@@ -38,13 +37,23 @@ public class LlmCircuitBreakerService {
         if (state != null) {
             state.failures.set(0);
             state.openedAtMillis = 0L;
+            state.halfOpenProbe.set(false);
         }
     }
 
     public void recordFailure(String platformCode) {
         BreakerState state = states.computeIfAbsent(platformCode, ignored -> new BreakerState());
-        if (state.failures.incrementAndGet() >= properties.getCircuitBreakerFailureThreshold()) {
+        int failures = state.failures.incrementAndGet();
+        if (state.halfOpenProbe.getAndSet(false)
+                || failures >= properties.getCircuitBreakerFailureThreshold()) {
             state.openedAtMillis = System.currentTimeMillis();
+        }
+    }
+
+    public void releaseProbe(String platformCode) {
+        BreakerState state = states.get(platformCode);
+        if (state != null) {
+            state.halfOpenProbe.set(false);
         }
     }
 
@@ -59,6 +68,7 @@ public class LlmCircuitBreakerService {
                             item.put("failureCount", state.failures.get());
                             item.put("open", state.openedAtMillis > 0
                                     && now - state.openedAtMillis <= properties.getCircuitBreakerOpenDurationMs());
+                            item.put("state", breakerState(state, now));
                             item.put("openedAtMillis", state.openedAtMillis);
                             return item;
                         },
@@ -67,9 +77,20 @@ public class LlmCircuitBreakerService {
                 ));
     }
 
+    private String breakerState(BreakerState state, long now) {
+        if (state.openedAtMillis <= 0L) {
+            return "CLOSED";
+        }
+        if (now - state.openedAtMillis <= properties.getCircuitBreakerOpenDurationMs()) {
+            return "OPEN";
+        }
+        return state.halfOpenProbe.get() ? "HALF_OPEN" : "PROBE_READY";
+    }
+
     // TODO: move breaker state to Redis before relying on circuit state across multi-instance deployments.
     private static final class BreakerState {
         private final AtomicInteger failures = new AtomicInteger();
+        private final AtomicBoolean halfOpenProbe = new AtomicBoolean();
         private volatile long openedAtMillis;
     }
 }

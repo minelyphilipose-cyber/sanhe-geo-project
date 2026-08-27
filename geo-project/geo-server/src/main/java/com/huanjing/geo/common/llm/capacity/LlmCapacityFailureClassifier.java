@@ -119,6 +119,7 @@ public class LlmCapacityFailureClassifier {
         return category == LlmErrorCategory.PERMIT_BUSY
                 || category == LlmErrorCategory.INTERNAL_RATE_LIMITED
                 || category == LlmErrorCategory.PLATFORM_429
+                || category == LlmErrorCategory.ACCOUNT_QUOTA_EXHAUSTED
                 || category == LlmErrorCategory.HTTP_5XX
                 || category == LlmErrorCategory.TIMEOUT;
     }

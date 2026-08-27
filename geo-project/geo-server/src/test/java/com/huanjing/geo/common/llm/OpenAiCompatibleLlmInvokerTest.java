@@ -1,6 +1,8 @@
 package com.huanjing.geo.common.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.llm.measurement.LlmErrorCategory;
+import com.huanjing.geo.common.llm.measurement.LlmStructuredException;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -62,6 +64,59 @@ class OpenAiCompatibleLlmInvokerTest {
                 () -> config(0, 10_000, 60_001, 0));
 
         assertTrue(ex.getMessage().contains("requestTimeoutMs"));
+    }
+
+    @Test
+    void invoke_doesNotRetryExhaustedAccountQuota() {
+        FakeHttpClient httpClient = new FakeHttpClient(new LlmHttpClient.HttpResponse(
+                429,
+                "{\"error\":{\"type\":\"exceeded_current_quota_error\",\"message\":\"insufficient balance\"}}"
+        ));
+        OpenAiCompatibleLlmInvoker invoker = new OpenAiCompatibleLlmInvoker(httpClient, new ObjectMapper());
+
+        LlmInvokeException error = assertThrows(LlmInvokeException.class,
+                () -> invoker.invoke("hello", config(0, 10_000, 30_000, 2)));
+
+        assertEquals(1, httpClient.callCount);
+        assertEquals(LlmErrorCategory.ACCOUNT_QUOTA_EXHAUSTED, findStructured(error).errorCategory());
+    }
+
+    @Test
+    void invoke_retriesEmptyResponseOnlyOnce() {
+        FakeHttpClient httpClient = new FakeHttpClient(
+                new LlmHttpClient.HttpResponse(200, "{\"choices\":[{\"message\":{\"content\":\"\"}}]}"),
+                new LlmHttpClient.HttpResponse(200, "{\"choices\":[{\"message\":{\"content\":\"\"}}]}")
+        );
+        OpenAiCompatibleLlmInvoker invoker = new OpenAiCompatibleLlmInvoker(httpClient, new ObjectMapper());
+
+        assertThrows(LlmInvokeException.class,
+                () -> invoker.invoke("hello", config(0, 10_000, 30_000, 2)));
+
+        assertEquals(2, httpClient.callCount);
+    }
+
+    @Test
+    void invoke_extractsTextFromContentBlocks() throws Exception {
+        FakeHttpClient httpClient = new FakeHttpClient(new LlmHttpClient.HttpResponse(
+                200,
+                "{\"choices\":[{\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"O\"},{\"type\":\"text\",\"text\":\"K\"}]}}]}"
+        ));
+        OpenAiCompatibleLlmInvoker invoker = new OpenAiCompatibleLlmInvoker(httpClient, new ObjectMapper());
+
+        LlmInvokeResult result = invoker.invoke("hello", config(0, 10_000, 30_000, 0));
+
+        assertEquals("OK", result.responseText());
+    }
+
+    private LlmStructuredException findStructured(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof LlmStructuredException structured) {
+                return structured;
+            }
+            current = current.getCause();
+        }
+        throw new AssertionError("structured error not found");
     }
 
     private LlmModelConfig config(int rateLimitQps,

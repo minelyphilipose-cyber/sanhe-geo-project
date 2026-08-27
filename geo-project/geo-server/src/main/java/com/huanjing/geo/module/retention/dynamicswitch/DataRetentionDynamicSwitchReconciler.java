@@ -3,6 +3,7 @@ package com.huanjing.geo.module.retention.dynamicswitch;
 import com.huanjing.geo.module.retention.config.DataRetentionProperties;
 import com.huanjing.geo.module.retention.dynamicswitch.DataRetentionDynamicSwitchChangeRepository.ChangeRow;
 import com.huanjing.geo.module.retention.dynamicswitch.DataRetentionDynamicSwitchModels.ChangeStatus;
+import com.huanjing.geo.module.retention.dynamicswitch.DataRetentionDynamicSwitchModels.DynamicSwitchException;
 import com.huanjing.geo.module.retention.dynamicswitch.DataRetentionDynamicSwitchModels.RequestSource;
 import com.huanjing.geo.module.retention.dynamicswitch.DataRetentionDynamicSwitchModels.Snapshot;
 import com.huanjing.geo.module.retention.dynamicswitch.DataRetentionDynamicSwitchModels.SnapshotIntegrity;
@@ -56,9 +57,19 @@ public class DataRetentionDynamicSwitchReconciler {
         try {
             authorization.validateReconcileOperator(operatorId);
         } catch (RuntimeException error) {
-            alertSink.alert("RECONCILE_OPERATOR_INVALID", null, error.getClass().getSimpleName());
+            String code = error instanceof DynamicSwitchException dynamic
+                    ? dynamic.resultCode()
+                    : "RECONCILE_OPERATOR_INVALID";
+            if ("RECONCILE_OPERATOR_MISSING".equals(code)) {
+                alertSink.resolve("RECONCILE_OPERATOR_INVALID", null);
+            } else if ("RECONCILE_OPERATOR_INVALID".equals(code)) {
+                alertSink.resolve("RECONCILE_OPERATOR_MISSING", null);
+            }
+            alertSink.alert(code, null, error.getClass().getSimpleName());
             return;
         }
+        alertSink.resolve("RECONCILE_OPERATOR_MISSING", null);
+        alertSink.resolve("RECONCILE_OPERATOR_INVALID", null);
         for (ChangeRow row : repository.findRequested(properties.getDynamicSwitch().getReconcileBatchSize())) {
             try {
                 reconcileRequested(row, operatorId);
