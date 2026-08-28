@@ -534,7 +534,12 @@ public class ProjectSelfMediaScheduleService {
         scheduleItemMapper.insert(replacement);
         try {
             companyChannelQuotaService.reserveProjectSelfMediaPlan(
-                    replacement.getCompanyId(), replacement.getProjectId(), replacement.getPlatform(), replacement.getId());
+                    replacement.getCompanyId(),
+                    replacement.getProjectId(),
+                    replacement.getPlatform(),
+                    replacement.getId(),
+                    replacement.getPlannedPublishAt().toLocalDate()
+            );
             replacement.setQuotaReservationStatus("reserved");
             scheduleItemMapper.updateById(replacement);
         } catch (RuntimeException ex) {
@@ -675,7 +680,12 @@ public class ProjectSelfMediaScheduleService {
         scheduleItemMapper.insert(replacement);
         try {
             companyChannelQuotaService.reserveProjectSelfMediaPlan(
-                    replacement.getCompanyId(), replacement.getProjectId(), replacement.getPlatform(), replacement.getId());
+                    replacement.getCompanyId(),
+                    replacement.getProjectId(),
+                    replacement.getPlatform(),
+                    replacement.getId(),
+                    replacement.getPlannedPublishAt().toLocalDate()
+            );
             replacement.setQuotaReservationStatus("reserved");
             scheduleItemMapper.updateById(replacement);
         } catch (RuntimeException ex) {
@@ -1886,7 +1896,8 @@ public class ProjectSelfMediaScheduleService {
                         batch.getCompanyId(),
                         batch.getProjectId(),
                         plan.platform(),
-                        item.getId()
+                        item.getId(),
+                        plan.plannedPublishAt().toLocalDate()
                 );
                 reservedItemIds.add(item.getId());
                 item.setQuotaReservationStatus("reserved");
@@ -3489,7 +3500,11 @@ public class ProjectSelfMediaScheduleService {
         List<AccountPublishPlan> plans = new ArrayList<>(carryOverLoad.plans());
         accountsByPlatform.forEach((platform, accounts) -> {
             CompanyChannelQuotaService.DistributionQuotaView quota =
-                    companyChannelQuotaService.selfMediaDistributionQuota(project.getCompanyId(), platform);
+                    companyChannelQuotaService.selfMediaDistributionQuota(
+                            project.getCompanyId(),
+                            platform,
+                            month.atDay(1)
+                    );
             String publishPlatform = firstText(ArticlePromptChannels.normalizeSelfMediaPublishPlatform(platform), platform);
             long activeSchedules = selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
                     project.getBrandId(),

@@ -15,12 +15,16 @@ import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+
+import java.time.LocalDate;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -141,6 +145,84 @@ class CompanyChannelQuotaServiceTest {
         assertEquals(5, quota.quotaLimit());
         verify(usageMapper, never()).insertIgnore(any(), any(), any(), any(), any());
         verify(usageMapper, never()).updateQuotaLimit(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void selfMediaDistributionQuotaUsesExplicitQuotaDate() {
+        CompanyPackageBinding binding = new CompanyPackageBinding();
+        binding.setCompanyId(7L);
+        binding.setChannelQuotaSnapshot("""
+                [
+                  {"channelCode":"self_media:toutiao","periodType":"month","quotaLimit":13,"enabled":true}
+                ]
+                """);
+        when(bindingService.requireActiveBinding(7L)).thenReturn(binding);
+        when(usageMapper.selectOne(any())).thenReturn(null);
+
+        CompanyChannelQuotaService.DistributionQuotaView quota = service.selfMediaDistributionQuota(
+                7L,
+                "toutiao",
+                LocalDate.of(2026, 9, 1)
+        );
+
+        assertEquals("2026-09", quota.periodKey());
+        assertEquals(0, quota.usedCount());
+        assertEquals(13, quota.quotaLimit());
+    }
+
+    @Test
+    void reserveProjectSelfMediaPlanUsesPlannedPublishDatePeriod() {
+        CompanyPackageBinding binding = new CompanyPackageBinding();
+        binding.setCompanyId(7L);
+        binding.setChannelQuotaSnapshot("""
+                [
+                  {"channelCode":"self_media:zhihu","periodType":"month","quotaLimit":4,"enabled":true}
+                ]
+                """);
+        when(bindingService.requireActiveBinding(7L)).thenReturn(binding);
+        when(ledgerMapper.selectByBiz("project_self_media_plan", "900")).thenReturn(null);
+        when(usageMapper.tryReserve(7L, "self_media:zhihu", "month", "2026-09")).thenReturn(1);
+
+        CompanyChannelQuotaLedger ledger = service.reserveProjectSelfMediaPlan(
+                7L,
+                9L,
+                "zhihu",
+                900L,
+                LocalDate.of(2026, 9, 29)
+        );
+
+        assertEquals("2026-09", ledger.getPeriodKey());
+        verify(usageMapper).insertIgnore(7L, "self_media:zhihu", "month", "2026-09", 4);
+        verify(ledgerMapper).insert(any(CompanyChannelQuotaLedger.class));
+    }
+
+    @Test
+    void reserveSelfMediaSchedulesSeparatesCrossMonthReservations() {
+        CompanyPackageBinding binding = new CompanyPackageBinding();
+        binding.setCompanyId(7L);
+        binding.setChannelQuotaSnapshot("""
+                [
+                  {"channelCode":"self_media:toutiao","periodType":"month","quotaLimit":13,"enabled":true}
+                ]
+                """);
+        when(bindingService.requireActiveBinding(7L)).thenReturn(binding);
+        when(ledgerMapper.selectByBiz(any(), any())).thenReturn(null);
+        when(usageMapper.tryReserve(eq(7L), eq("self_media:toutiao"), eq("month"), any())).thenReturn(1);
+
+        service.reserveSelfMediaSchedules(7L, List.of(
+                new CompanyChannelQuotaService.SelfMediaScheduleQuotaReservation(
+                        9L, "toutiao", 300L, LocalDate.of(2026, 8, 31)),
+                new CompanyChannelQuotaService.SelfMediaScheduleQuotaReservation(
+                        9L, "toutiao", 301L, LocalDate.of(2026, 9, 1))
+        ));
+
+        verify(usageMapper).tryReserve(7L, "self_media:toutiao", "month", "2026-08");
+        verify(usageMapper).tryReserve(7L, "self_media:toutiao", "month", "2026-09");
+        ArgumentCaptor<CompanyChannelQuotaLedger> captor = ArgumentCaptor.forClass(CompanyChannelQuotaLedger.class);
+        verify(ledgerMapper, times(2)).insert(captor.capture());
+        assertEquals(List.of("2026-08", "2026-09"), captor.getAllValues().stream()
+                .map(CompanyChannelQuotaLedger::getPeriodKey)
+                .toList());
     }
 
     @Test

@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -89,13 +90,28 @@ public class CompanyChannelQuotaService {
                                                               Long projectId,
                                                               String platform,
                                                               Long scheduleId) {
+        return reserveSelfMediaSchedule(
+                companyId,
+                projectId,
+                platform,
+                scheduleId,
+                LocalDate.now(BUSINESS_ZONE)
+        );
+    }
+
+    public CompanyChannelQuotaLedger reserveSelfMediaSchedule(Long companyId,
+                                                              Long projectId,
+                                                              String platform,
+                                                              Long scheduleId,
+                                                              LocalDate quotaDate) {
         if (scheduleId == null) {
             throw new BizException(400, "schedule_id is required for quota reservation");
         }
         return reserveSelfMediaSchedules(companyId, List.of(new SelfMediaScheduleQuotaReservation(
                 projectId,
                 platform,
-                scheduleId
+                scheduleId,
+                requireQuotaDate(quotaDate)
         ))).get(0);
     }
 
@@ -114,7 +130,8 @@ public class CompanyChannelQuotaService {
                     reservation.projectId(),
                     channel,
                     BIZ_TYPE_SELF_MEDIA_SCHEDULE,
-                    String.valueOf(reservation.scheduleId())
+                    String.valueOf(reservation.scheduleId()),
+                    requireQuotaDate(reservation.quotaDate())
             ));
         }
         return reserveForBizBatch(companyId, bizReservations);
@@ -124,6 +141,20 @@ public class CompanyChannelQuotaService {
                                                                  Long projectId,
                                                                  String platform,
                                                                  Long planItemId) {
+        return reserveProjectSelfMediaPlan(
+                companyId,
+                projectId,
+                platform,
+                planItemId,
+                LocalDate.now(BUSINESS_ZONE)
+        );
+    }
+
+    public CompanyChannelQuotaLedger reserveProjectSelfMediaPlan(Long companyId,
+                                                                 Long projectId,
+                                                                 String platform,
+                                                                 Long planItemId,
+                                                                 LocalDate quotaDate) {
         if (planItemId == null) {
             throw new BizException(400, "plan_item_id is required for quota reservation");
         }
@@ -132,7 +163,8 @@ public class CompanyChannelQuotaService {
                 projectId,
                 resolveSelfMediaPlatformChannel(platform),
                 BIZ_TYPE_PROJECT_SELF_MEDIA_PLAN,
-                String.valueOf(planItemId)
+                String.valueOf(planItemId),
+                requireQuotaDate(quotaDate)
         );
     }
 
@@ -140,15 +172,29 @@ public class CompanyChannelQuotaService {
                                                                     Long projectId,
                                                                     String channel,
                                                                     Long distributionTaskId) {
-        return reserveForBiz(companyId, projectId, channel, BIZ_TYPE_DISTRIBUTION, String.valueOf(distributionTaskId));
+        return reserveForBiz(
+                companyId,
+                projectId,
+                channel,
+                BIZ_TYPE_DISTRIBUTION,
+                String.valueOf(distributionTaskId),
+                LocalDate.now(BUSINESS_ZONE)
+        );
     }
 
     private CompanyChannelQuotaLedger reserveForBiz(Long companyId,
                                                     Long projectId,
                                                     String channel,
                                                     String bizType,
-                                                    String bizId) {
-        return reserveForBizBatch(companyId, List.of(new BizQuotaReservation(projectId, channel, bizType, bizId))).get(0);
+                                                    String bizId,
+                                                    LocalDate quotaDate) {
+        return reserveForBizBatch(companyId, List.of(new BizQuotaReservation(
+                projectId,
+                channel,
+                bizType,
+                bizId,
+                requireQuotaDate(quotaDate)
+        ))).get(0);
     }
 
     private List<CompanyChannelQuotaLedger> reserveForBizBatch(Long companyId,
@@ -194,7 +240,7 @@ public class CompanyChannelQuotaService {
                 continue;
             }
             SnapshotQuota quota = resolveSnapshotQuota(binding, reservation.channel());
-            String periodKey = periodKey(quota.periodType());
+            String periodKey = periodKey(quota.periodType(), reservation.quotaDate());
             QuotaGroupKey key = new QuotaGroupKey(reservation.channel(), quota.periodType(), periodKey, quota.quotaLimit());
             grouped.computeIfAbsent(key, ignored -> new ArrayList<>()).add(reservation);
         }
@@ -382,14 +428,26 @@ public class CompanyChannelQuotaService {
     }
 
     public DistributionQuotaView selfMediaDistributionQuota(Long companyId, String platform) {
+        return selfMediaDistributionQuota(companyId, platform, LocalDate.now(BUSINESS_ZONE));
+    }
+
+    public DistributionQuotaView selfMediaDistributionQuota(Long companyId,
+                                                            String platform,
+                                                            LocalDate quotaDate) {
         String channel = resolveSelfMediaPlatformChannel(platform);
-        return distributionQuotaForChannel(companyId, channel);
+        return distributionQuotaForChannel(companyId, channel, requireQuotaDate(quotaDate));
     }
 
     private DistributionQuotaView distributionQuotaForChannel(Long companyId, String channel) {
+        return distributionQuotaForChannel(companyId, channel, LocalDate.now(BUSINESS_ZONE));
+    }
+
+    private DistributionQuotaView distributionQuotaForChannel(Long companyId,
+                                                              String channel,
+                                                              LocalDate quotaDate) {
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
         SnapshotQuota quota = resolveSnapshotQuota(binding, channel);
-        String periodKey = periodKey(quota.periodType());
+        String periodKey = periodKey(quota.periodType(), quotaDate);
         CompanyChannelQuotaUsage usage = usageMapper.selectOne(
                 new LambdaQueryWrapper<CompanyChannelQuotaUsage>()
                         .eq(CompanyChannelQuotaUsage::getCompanyId, companyId)
@@ -564,9 +622,16 @@ public class CompanyChannelQuotaService {
         return ArticlePromptChannels.SELF_MEDIA + ":" + platform;
     }
 
-    private String periodKey(String periodType) {
+    private LocalDate requireQuotaDate(LocalDate quotaDate) {
+        if (quotaDate == null) {
+            throw new BizException(400, "quota_date is required");
+        }
+        return quotaDate;
+    }
+
+    private String periodKey(String periodType, LocalDate quotaDate) {
         try {
-            return QuotaPeriodResolver.periodKey(periodType);
+            return QuotaPeriodResolver.periodKey(periodType, requireQuotaDate(quotaDate));
         } catch (IllegalArgumentException ex) {
             throw new BizException(400, ex.getMessage());
         }
@@ -577,13 +642,18 @@ public class CompanyChannelQuotaService {
 
     public record SelfMediaScheduleQuotaReservation(Long projectId,
                                                     String platform,
-                                                    Long scheduleId) {
+                                                    Long scheduleId,
+                                                    LocalDate quotaDate) {
+        public SelfMediaScheduleQuotaReservation(Long projectId, String platform, Long scheduleId) {
+            this(projectId, platform, scheduleId, LocalDate.now(BUSINESS_ZONE));
+        }
     }
 
     private record BizQuotaReservation(Long projectId,
                                        String channel,
                                        String bizType,
-                                       String bizId) {
+                                       String bizId,
+                                       LocalDate quotaDate) {
     }
 
     private record QuotaGroupKey(String channel,

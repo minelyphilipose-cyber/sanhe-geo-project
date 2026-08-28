@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.content.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -33,6 +35,7 @@ public class ProjectSelfMediaScheduleBatch {
     private String generationBatchIds;
     private String requestPayload;
     private String resultSnapshot;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String failureMessage;
     private Long createdBy;
     private Long updatedBy;

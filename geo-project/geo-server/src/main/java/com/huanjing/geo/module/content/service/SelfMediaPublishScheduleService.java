@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
@@ -80,6 +81,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
@@ -520,7 +522,7 @@ public class SelfMediaPublishScheduleService {
                     continue;
                 }
                 SelfMediaPublishScheduleRejectedItemVO quotaRejected = reservedPlanItemId == null
-                        ? quotaPrecheck.check(articleId, accountId, publishPlatform)
+                        ? quotaPrecheck.check(articleId, accountId, publishPlatform, plannedCursor.toLocalDate())
                         : null;
                 if (quotaRejected != null) {
                     response.getRejectedItems().add(quotaRejected);
@@ -530,11 +532,12 @@ public class SelfMediaPublishScheduleService {
                         plannedCursor, executionCursor, validated.strategy(), false, publishSnapshot);
                 if (inserted != null) {
                     if (reservedPlanItemId == null) {
-                        quotaPrecheck.consume(publishPlatform);
+                        quotaPrecheck.consume(publishPlatform, plannedCursor.toLocalDate());
                         quotaReservations.add(new ScheduleQuotaReservation(
                                 inserted.getId(),
                                 candidate.article().getProjectId(),
-                                inserted.getPlatform()
+                                inserted.getPlatform(),
+                                inserted.getPlannedPublishAt().toLocalDate()
                         ));
                     } else {
                         companyChannelQuotaService.transferProjectSelfMediaPlanReservation(
@@ -661,10 +664,12 @@ public class SelfMediaPublishScheduleService {
             );
         }
         LocalDateTime now = LocalDateTime.now();
-        PeriodWindow month = currentMonth(now);
+        LocalDateTime nextAttemptAt = nextBrandSafeAttemptAt(brandId, now);
+        LocalDateTime plannedPublishAt = plannedPublishAtForQuickSchedule(platform, strategy, nextAttemptAt, now);
+        PeriodWindow month = currentMonth(plannedPublishAt);
         if (!quotaReplacementAlreadyApplied) {
             SelfMediaPublishScheduleRejectedItemVO quotaRejected = quotaPrecheck(brandId)
-                    .check(article.getId(), account.getId(), platform);
+                    .check(article.getId(), account.getId(), platform, plannedPublishAt.toLocalDate());
             if (quotaRejected != null) {
                 SelfMediaPublishSchedule replaceable = scheduleMapper.selectNextReplaceablePendingByBrandPlatformAndPeriod(
                         brandId, platform, month.start(), month.end(), now);
@@ -689,8 +694,6 @@ public class SelfMediaPublishScheduleService {
                 );
             }
         }
-        LocalDateTime nextAttemptAt = nextBrandSafeAttemptAt(brandId, now);
-        LocalDateTime plannedPublishAt = plannedPublishAtForQuickSchedule(platform, strategy, nextAttemptAt, now);
         QuickSchedulePlan ready = quickResponse("ready", "READY",
                 "douyin".equals(platform) ? "可以创建抖音图文立即发布任务"
                         : "可以创建" + platformLabel(platform) + "平台快速排期",
@@ -881,7 +884,8 @@ public class SelfMediaPublishScheduleService {
             }
             SelfMediaPublishSchedule inserted = scheduleMapper.selectById(scheduleId);
             reserveScheduleQuota(inserted, plan.data().candidate().article().getProjectId(),
-                    quotaPrecheck(plan.response().getBrandId()).companyId);
+                    quotaPrecheck(plan.response().getBrandId()).companyId,
+                    plan.data().plannedPublishAt().toLocalDate());
         } catch (RuntimeException ex) {
             cancelCreatedQuickDispatchAfterQuotaFailure(scheduleId, ex);
             throw ex;
@@ -4807,11 +4811,22 @@ public class SelfMediaPublishScheduleService {
         if (row == null || row.getId() == null || companyId == null || companyId <= 0) {
             return;
         }
+        reserveScheduleQuota(row, projectId, companyId, row.getPlannedPublishAt().toLocalDate());
+    }
+
+    private void reserveScheduleQuota(SelfMediaPublishSchedule row,
+                                      Long projectId,
+                                      Long companyId,
+                                      LocalDate quotaDate) {
+        if (row == null || row.getId() == null || companyId == null || companyId <= 0) {
+            return;
+        }
         companyChannelQuotaService.reserveSelfMediaSchedule(
                 companyId,
                 projectId,
                 row.getPlatform(),
-                row.getId()
+                row.getId(),
+                quotaDate
         );
     }
 
@@ -4825,7 +4840,8 @@ public class SelfMediaPublishScheduleService {
                         .map(item -> new CompanyChannelQuotaService.SelfMediaScheduleQuotaReservation(
                                 item.projectId(),
                                 item.platform(),
-                                item.scheduleId()
+                                item.scheduleId(),
+                                item.quotaDate()
                         ))
                         .toList()
         );
@@ -5683,14 +5699,18 @@ public class SelfMediaPublishScheduleService {
 
     private class QuotaPrecheck {
         private final Long companyId;
-        private final Map<String, Integer> remainingByPlatform = new LinkedHashMap<>();
+        private final Map<String, String> periodTypeByPlatform = new LinkedHashMap<>();
+        private final Map<QuotaPeriodKey, Integer> remainingByPeriod = new LinkedHashMap<>();
         private final Map<String, String> unavailableMessageByPlatform = new LinkedHashMap<>();
 
         private QuotaPrecheck(Long companyId) {
             this.companyId = companyId;
         }
 
-        private SelfMediaPublishScheduleRejectedItemVO check(Long articleId, Long accountId, String platform) {
+        private SelfMediaPublishScheduleRejectedItemVO check(Long articleId,
+                                                             Long accountId,
+                                                             String platform,
+                                                             LocalDate quotaDate) {
             String normalizedPlatform = normalizePublishPlatform(platform);
             if (!StringUtils.hasText(normalizedPlatform)) {
                 return rejected(articleId, accountId, platform,
@@ -5710,13 +5730,14 @@ public class SelfMediaPublishScheduleService {
                         unavailableMessageByPlatform.get(normalizedPlatform),
                         "客户套餐 > 渠道额度");
             }
-            Integer remaining = remainingByPlatform.computeIfAbsent(normalizedPlatform, this::loadRemaining);
-            if (remaining == null) {
+            QuotaPeriodKey key = resolveQuotaPeriod(normalizedPlatform, quotaDate);
+            if (key == null) {
                 return rejected(articleId, accountId, platform,
                         "CHANNEL_QUOTA_UNAVAILABLE",
                         unavailableMessageByPlatform.getOrDefault(normalizedPlatform, "自媒体渠道额度配置不可用"),
                         "客户套餐 > 渠道额度");
             }
+            int remaining = remainingByPeriod.getOrDefault(key, 0);
             if (remaining <= 0) {
                 return rejected(articleId, accountId, platform,
                         "CHANNEL_QUOTA_EXHAUSTED",
@@ -5726,23 +5747,44 @@ public class SelfMediaPublishScheduleService {
             return null;
         }
 
-        private void consume(String platform) {
+        private void consume(String platform, LocalDate quotaDate) {
             String normalizedPlatform = normalizePublishPlatform(platform);
-            Integer remaining = remainingByPlatform.get(normalizedPlatform);
-            if (remaining != null) {
-                remainingByPlatform.put(normalizedPlatform, remaining - 1);
+            QuotaPeriodKey key = resolveQuotaPeriod(normalizedPlatform, quotaDate);
+            Integer remaining = key == null ? null : remainingByPeriod.get(key);
+            if (key != null && remaining != null) {
+                remainingByPeriod.put(key, remaining - 1);
             }
         }
 
-        private Integer loadRemaining(String platform) {
+        private QuotaPeriodKey resolveQuotaPeriod(String platform, LocalDate quotaDate) {
+            if (quotaDate == null) {
+                unavailableMessageByPlatform.put(platform, "额度日期缺失");
+                return null;
+            }
             try {
                 String quotaPlatform = ArticlePromptChannels.normalizeSelfMediaQuotaPlatform(platform);
+                String normalizedQuotaPlatform = StringUtils.hasText(quotaPlatform) ? quotaPlatform : platform;
+                String knownPeriodType = periodTypeByPlatform.get(platform);
+                if (StringUtils.hasText(knownPeriodType)) {
+                    QuotaPeriodKey knownKey = new QuotaPeriodKey(
+                            platform,
+                            knownPeriodType,
+                            QuotaPeriodResolver.periodKey(knownPeriodType, quotaDate)
+                    );
+                    if (remainingByPeriod.containsKey(knownKey)) {
+                        return knownKey;
+                    }
+                }
                 CompanyChannelQuotaService.DistributionQuotaView quota =
                         companyChannelQuotaService.selfMediaDistributionQuota(
                                 companyId,
-                                StringUtils.hasText(quotaPlatform) ? quotaPlatform : platform
+                                normalizedQuotaPlatform,
+                                quotaDate
                         );
-                return Math.max(0, quota.quotaLimit() - quota.usedCount());
+                QuotaPeriodKey key = new QuotaPeriodKey(platform, quota.periodType(), quota.periodKey());
+                periodTypeByPlatform.put(platform, quota.periodType());
+                remainingByPeriod.putIfAbsent(key, Math.max(0, quota.quotaLimit() - quota.usedCount()));
+                return key;
             } catch (BizException ex) {
                 unavailableMessageByPlatform.put(platform, ex.getMessage());
                 return null;
@@ -5795,7 +5837,13 @@ public class SelfMediaPublishScheduleService {
 
     private record ScheduleQuotaReservation(Long scheduleId,
                                             Long projectId,
-                                            String platform) {
+                                            String platform,
+                                            LocalDate quotaDate) {
+    }
+
+    private record QuotaPeriodKey(String platform,
+                                  String periodType,
+                                  String periodKey) {
     }
 
     private record QueueClaimProfile(List<String> expectedStatuses, String targetStatus) {

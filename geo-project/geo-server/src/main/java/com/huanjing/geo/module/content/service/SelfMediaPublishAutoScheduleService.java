@@ -192,7 +192,11 @@ public class SelfMediaPublishAutoScheduleService {
         request.platforms().forEach(platform -> {
             String quotaPlatform = normalizeQuotaPlatform(platform);
             CompanyChannelQuotaService.DistributionQuotaView quota =
-                    companyChannelQuotaService.selfMediaDistributionQuota(request.companyId(), quotaPlatform);
+                    companyChannelQuotaService.selfMediaDistributionQuota(
+                            request.companyId(),
+                            quotaPlatform,
+                            request.targetMonth().atDay(1)
+                    );
             long activeSchedules = scheduleMapper.countActiveByBrandPlatformAndPeriod(
                     request.brandId(),
                     platform,

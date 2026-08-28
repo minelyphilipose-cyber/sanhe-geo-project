@@ -294,7 +294,7 @@ class ProjectSelfMediaScheduleServiceTest {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 2));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -323,7 +323,7 @@ class ProjectSelfMediaScheduleServiceTest {
             return 1;
         }).when(batchMapper).insert(any(ProjectSelfMediaScheduleBatch.class));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 2));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -378,7 +378,7 @@ class ProjectSelfMediaScheduleServiceTest {
         request.setTargetMonth("2026-07");
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-07", 0, 2));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -414,7 +414,7 @@ class ProjectSelfMediaScheduleServiceTest {
             return 1;
         }).when(batchMapper).insert(any(ProjectSelfMediaScheduleBatch.class));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-07", 0, 1));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -465,7 +465,7 @@ class ProjectSelfMediaScheduleServiceTest {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 2));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -499,7 +499,7 @@ class ProjectSelfMediaScheduleServiceTest {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 2));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -526,7 +526,7 @@ class ProjectSelfMediaScheduleServiceTest {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 2));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -550,7 +550,7 @@ class ProjectSelfMediaScheduleServiceTest {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 2));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -574,7 +574,7 @@ class ProjectSelfMediaScheduleServiceTest {
         when(batchMapper.selectByProjectAndMonth(7L, "2026-07")).thenReturn(null);
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(null);
         when(selfMediaAccountMapper.selectById(21L)).thenReturn(account(21L, "active"));
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-07", 0, 0));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -625,7 +625,7 @@ class ProjectSelfMediaScheduleServiceTest {
             return 1;
         }).when(batchMapper).insert(any(ProjectSelfMediaScheduleBatch.class));
         when(selfMediaAccountMapper.selectById(21L)).thenReturn(account(21L, "active"));
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-07", 0, 1));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -721,7 +721,7 @@ class ProjectSelfMediaScheduleServiceTest {
         batch.setStatus("failed");
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 1));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -777,7 +777,7 @@ class ProjectSelfMediaScheduleServiceTest {
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
         SelfMediaAccount newAccount = account(21L, "active");
         when(selfMediaAccountMapper.selectById(21L)).thenReturn(newAccount);
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 1));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -821,7 +821,7 @@ class ProjectSelfMediaScheduleServiceTest {
     void createForProjectUsesTemplateSceneTopicForThirdPartyPerspective() {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 1));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -868,7 +868,7 @@ class ProjectSelfMediaScheduleServiceTest {
     void createForProjectDoesNotRequireSourceQuestionsForThirdPartyPerspective() {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 1));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -965,7 +965,7 @@ class ProjectSelfMediaScheduleServiceTest {
         request.setSelfMediaAccountIds(List.of(20L));
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 2, 5));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -986,7 +986,7 @@ class ProjectSelfMediaScheduleServiceTest {
         request.setSelfMediaAccountIds(List.of(20L));
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 2));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -1014,7 +1014,7 @@ class ProjectSelfMediaScheduleServiceTest {
         SelfMediaAccount account = account();
         account.setPlatform("wechat_mp");
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account);
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "wechat"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("wechat"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:wechat", "month", "2026-06", 2, 5));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -1026,7 +1026,8 @@ class ProjectSelfMediaScheduleServiceTest {
                 .thenReturn(SelfMediaPlatformScheduleRules.defaults());
 
         assertEquals(3, service.previewForProject(7L, request).getPlannedCount());
-        verify(companyChannelQuotaService).selfMediaDistributionQuota(6L, "wechat");
+        verify(companyChannelQuotaService).selfMediaDistributionQuota(
+                eq(6L), eq("wechat"), eq(LocalDate.of(2026, 6, 1)));
         verify(selfMediaPublishScheduleMapper).countActiveByBrandPlatformAndPeriod(
                 eq(8L), eq("wechat_mp"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList());
     }
@@ -1039,7 +1040,7 @@ class ProjectSelfMediaScheduleServiceTest {
         request.setSelfMediaAccountIds(List.of(20L));
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 2));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
@@ -1077,10 +1078,10 @@ class ProjectSelfMediaScheduleServiceTest {
         wechat.setId(21L);
         wechat.setPlatform("wechat_mp");
         when(selfMediaAccountMapper.selectById(21L)).thenReturn(wechat);
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 1));
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "wechat"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("wechat"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:wechat", "month", "2026-06", 0, 3));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(

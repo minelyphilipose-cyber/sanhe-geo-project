@@ -185,7 +185,7 @@ class SelfMediaPublishScheduleServiceTest {
         environmentLockService = mock(SelfMediaPublishScheduleEnvironmentLockService.class);
         contentDistributionService = mock(ContentDistributionService.class);
         companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
-        when(companyChannelQuotaService.selfMediaDistributionQuota(anyLong(), anyString()))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(anyLong(), anyString(), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 0, 100));
         brandAccessService = mock(BrandAccessService.class);
         transactionManager = mock(PlatformTransactionManager.class);
@@ -591,7 +591,7 @@ class SelfMediaPublishScheduleServiceTest {
     void createSchedules_rejectsWhenSelfMediaChannelQuotaExhausted() {
         prepareValidArticleAndAccount();
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 3, 3));
         stubRequestInsert();
 
@@ -655,6 +655,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(51L, quotaCaptor.getValue().get(0).scheduleId());
         assertEquals(7L, quotaCaptor.getValue().get(0).projectId());
         assertEquals("toutiao", quotaCaptor.getValue().get(0).platform());
+        assertEquals(plannedAt.toLocalDate(), quotaCaptor.getValue().get(0).quotaDate());
     }
 
     @Test
@@ -755,6 +756,8 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(List.of(61L, 62L), quotaCaptor.getValue().stream()
                 .map(CompanyChannelQuotaService.SelfMediaScheduleQuotaReservation::scheduleId)
                 .toList());
+        assertTrue(quotaCaptor.getValue().stream()
+                .allMatch(item -> request.getWindowStart().toLocalDate().equals(item.quotaDate())));
     }
 
     @Test
@@ -877,7 +880,7 @@ class SelfMediaPublishScheduleServiceTest {
                 true
         )));
         when(browserEnvironmentService.validateForTaskCreation(douyinAccount, false)).thenReturn(binding());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "douyin"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("douyin"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:douyin", "month", "2026-07", 0, 8));
 
@@ -903,7 +906,7 @@ class SelfMediaPublishScheduleServiceTest {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 3, 3));
         SelfMediaPublishSchedule replaceable = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         replaceable.setId(70L);
@@ -1003,7 +1006,7 @@ class SelfMediaPublishScheduleServiceTest {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 2, 2));
         SelfMediaPublishSchedule replaceable = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         replaceable.setId(70L);
@@ -1027,7 +1030,7 @@ class SelfMediaPublishScheduleServiceTest {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 3, 3));
         SelfMediaPublishSchedule replaceable = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         replaceable.setId(70L);
@@ -1058,7 +1061,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(1, response.getCreateResponse().getCreatedSchedules().size());
         verify(scheduleMapper).cancelReplaceablePendingSchedule(eq(70L), eq(8L), eq("toutiao"), any(), any(), any());
         verify(companyChannelQuotaService).refundSelfMediaSchedule(70L);
-        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(71L));
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(71L), any());
     }
 
     @Test
@@ -1105,7 +1108,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(72L, response.getReplaceScheduleId());
         verify(scheduleMapper).cancelSafeReplaceablePendingSchedule(eq(72L), eq(8L), eq("toutiao"), any(), any(), any(), any());
         verify(companyChannelQuotaService).refundSelfMediaSchedule(72L);
-        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(73L));
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(73L), any());
     }
 
     @Test
@@ -1136,7 +1139,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("created", response.getAction());
         assertTrue(!response.getNextAttemptAt().isBefore(earliestBufferedAttempt));
         assertTrue(response.getNextAttemptAt().isBefore(clickedAt.plusMinutes(3)));
-        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(73L));
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(73L), any());
     }
 
     @Test
@@ -1158,7 +1161,7 @@ class SelfMediaPublishScheduleServiceTest {
                 SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH
         ))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "douyin"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("douyin"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:douyin", "month", "2026-06", 0, 100));
         when(scheduleAdapterRouter.contract("douyin")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
                 "douyin",
@@ -1233,7 +1236,7 @@ class SelfMediaPublishScheduleServiceTest {
                 eq(List.of(101L, 102L, 103L, 104L))
         );
         verify(browserEnvironmentService).validateForTaskCreation(douyinAccount, false);
-        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("douyin"), eq(74L));
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("douyin"), eq(74L), any());
     }
 
     @Test
@@ -1349,7 +1352,7 @@ class SelfMediaPublishScheduleServiceTest {
         when(accountMapper.selectById(22L)).thenReturn(wechatAccount);
         when(scheduleCapabilityService.readiness("wechat_mp", SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "wechat_mp"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("wechat_mp"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:wechat_mp", "month", "2026-06", 0, 100));
         when(scheduleAdapterRouter.contract("wechat_mp")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
                 "wechat_mp",
@@ -1385,7 +1388,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("QUICK_DISPATCH_CREATED", response.getCode());
         assertEquals(22L, response.getSelfMediaAccountId());
         verify(browserEnvironmentService, never()).validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean());
-        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("wechat_mp"), eq(75L));
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("wechat_mp"), eq(75L), any());
     }
 
     @Test
@@ -1393,7 +1396,7 @@ class SelfMediaPublishScheduleServiceTest {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 3, 3));
         SelfMediaPublishSchedule unsafePreviewCandidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         unsafePreviewCandidate.setId(70L);
@@ -1434,7 +1437,7 @@ class SelfMediaPublishScheduleServiceTest {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());
         when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
-        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 3, 3));
         SelfMediaPublishSchedule replaceable = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         replaceable.setId(70L);

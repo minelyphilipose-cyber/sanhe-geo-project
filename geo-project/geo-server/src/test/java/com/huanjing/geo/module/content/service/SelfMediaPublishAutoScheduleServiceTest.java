@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.util.stream.LongStream;
 import java.util.List;
 
@@ -72,11 +73,11 @@ class SelfMediaPublishAutoScheduleServiceTest {
         when(accountMapper.selectById(22L)).thenReturn(account(22L, "wechat"));
         when(scheduleMapper.countActiveByBrandPlatformAndPeriod(anyLong(), anyString(), any(), any(), any()))
                 .thenReturn(0L);
-        when(quotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(quotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 0, 2));
-        when(quotaService.selfMediaDistributionQuota(6L, "baijiahao"))
+        when(quotaService.selfMediaDistributionQuota(eq(6L), eq("baijiahao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:baijiahao", "month", "2026-06", 0, 2));
-        when(quotaService.selfMediaDistributionQuota(6L, "wechat"))
+        when(quotaService.selfMediaDistributionQuota(eq(6L), eq("wechat"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:wechat", "month", "2026-06", 0, 2));
         when(scheduleAdapterRouter.contract("toutiao")).thenReturn(java.util.Optional.of(contract(
                 "toutiao",
@@ -124,7 +125,7 @@ class SelfMediaPublishAutoScheduleServiceTest {
 
     @Test
     void previewRejectsItemsWhenMonthlyPlatformQuotaIsExhausted() {
-        when(quotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(quotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 1, 1));
 
         SelfMediaPublishAutoScheduleResponse response = service.preview(request(List.of(10L, 11L), List.of(20L)));
@@ -153,7 +154,7 @@ class SelfMediaPublishAutoScheduleServiceTest {
 
     @Test
     void createMarksSecondDailySlotOnlyWhenTasksExceedWorkdays() {
-        when(quotaService.selfMediaDistributionQuota(6L, "toutiao"))
+        when(quotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
                         "self_media:toutiao", "month", "2026-06", 0, 40));
         List<Long> articleIds = LongStream.rangeClosed(1L, 23L).boxed().toList();
@@ -175,7 +176,7 @@ class SelfMediaPublishAutoScheduleServiceTest {
 
         assertEquals(1, response.getPlannedCount());
         assertEquals("wechat_mp", response.getPlannedItems().get(0).getPlatform());
-        verify(quotaService).selfMediaDistributionQuota(6L, "wechat");
+        verify(quotaService).selfMediaDistributionQuota(eq(6L), eq("wechat"), eq(LocalDate.of(2026, 6, 1)));
         verify(scheduleMapper).countActiveByBrandPlatformAndPeriod(eq(8L), eq("wechat_mp"), any(), any(), any());
     }
 
