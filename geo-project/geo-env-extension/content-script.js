@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.2.5'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.2.6'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -3919,8 +3919,9 @@ function normalizeAccountId(value) {
 function normalizeAccountName(value) {
   return String(value || '')
     .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
-    .replace(/\s+/g, '')
+    .normalize('NFKC')
     .trim()
+    .replace(/\s+/g, ' ')
 }
 
 function normalizeToutiaoAccountName(value) {

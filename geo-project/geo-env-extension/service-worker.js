@@ -1,7 +1,7 @@
 importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
 
-const EXTENSION_VERSION = '0.2.5'
-const EXTENSION_BUILD_REVISION = '20260813.4'
+const EXTENSION_VERSION = '0.2.6'
+const EXTENSION_BUILD_REVISION = '20260829.1'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
 const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/graphic/articles'
 const XIAOHONGSHU_MANAGE_URL = 'https://creator.xiaohongshu.com/new/note-manager'

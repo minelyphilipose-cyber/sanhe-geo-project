@@ -429,6 +429,29 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
+    void reportLoginStatus_doesNotIgnoreMeaningfulAccountNameWhitespace() {
+        when(environmentAccountMapper.selectById(30L)).thenReturn(binding(null, "静姐建乡墅 家",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN, "douyin"));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account("静姐建乡墅 家", "douyin"));
+
+        service.reportLoginStatus(30L, new BrowserEnvironmentLoginStatusRequest(
+                "geo_b",
+                10L,
+                "douyin",
+                null,
+                "静姐建乡墅家",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ));
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_MISMATCH, captor.getValue().getLoginStatus());
+    }
+
+    @Test
     void reportLoginStatus_matchesPlatformPrefixedDisplayName() {
         when(environmentAccountMapper.selectById(30L)).thenReturn(binding(null, "知乎 / jnhbdxh", BrowserEnvironmentConstants.LOGIN_MISMATCH, "zhihu"));
         when(environmentMapper.selectById(20L)).thenReturn(environment());

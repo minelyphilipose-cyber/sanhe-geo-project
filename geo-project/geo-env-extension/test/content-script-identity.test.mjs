@@ -72,6 +72,29 @@ test('Douyin creator home precise name suppresses product navigation candidates'
   assert.match(identity.diagnostics, /nameSource=creator_home_precise/)
 })
 
+test('Douyin creator home preserves meaningful whitespace in account names', () => {
+  const document = baseDocument()
+  const preciseName = {
+    textContent: '静姐建乡墅 家',
+    getAttribute: () => '',
+  }
+  const homeRoot = {
+    innerText: '静姐建乡墅 家 | 抖音号：alin17355860777',
+    textContent: '静姐建乡墅 家|抖音号：alin17355860777',
+  }
+  document.body = homeRoot
+  document.querySelector = (selector) => selector === '[id^="garfish_app_for_douyin_creator_pc_home_"]' ? homeRoot : null
+  document.querySelectorAll = (selector) => selector.includes('[class*="header-"]') ? [preciseName] : []
+  const context = loadContentScript({
+    href: 'https://creator.douyin.com/creator-micro/home',
+    document,
+  })
+
+  const identity = context.readDouyinIdentity()
+
+  assert.deepEqual(Array.from(identity.accountNames), ['静姐建乡墅 家'])
+})
+
 test('Toutiao profile precise username suppresses concatenated profile text', () => {
   const document = baseDocument()
   const nameElement = {

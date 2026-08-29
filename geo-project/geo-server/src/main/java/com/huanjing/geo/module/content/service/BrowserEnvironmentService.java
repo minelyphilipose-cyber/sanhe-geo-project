@@ -1205,18 +1205,20 @@ public class BrowserEnvironmentService {
     }
 
     private String normalizeAccountNameForMatch(String platform, String value) {
-        String text = trimToNull(value);
-        if (!StringUtils.hasText(text)) {
+        String normalized = normalizeVerificationAccountName(value);
+        if (!StringUtils.hasText(normalized)) {
             return null;
         }
-        String normalized = text.replaceAll("\\s+", "");
         for (String platformName : platformDisplayNames(platform)) {
-            if (!StringUtils.hasText(platformName)) {
+            String normalizedPlatformName = normalizeVerificationAccountName(platformName);
+            if (!StringUtils.hasText(normalizedPlatformName)) {
                 continue;
             }
-            String prefix = platformName + "/";
-            if (normalized.startsWith(prefix) && normalized.length() > prefix.length()) {
-                normalized = normalized.substring(prefix.length());
+            int separator = normalized.indexOf('/');
+            if (separator > 0
+                    && normalized.substring(0, separator).trim().equals(normalizedPlatformName)
+                    && StringUtils.hasText(normalized.substring(separator + 1))) {
+                normalized = normalized.substring(separator + 1).trim();
                 break;
             }
         }

@@ -82,3 +82,15 @@ test('identity name comparison normalizes unicode case and whitespace', () => {
   assert.equal(result.matched, true)
   assert.equal(result.method, 'accountName')
 })
+
+test('identity treats an internal account-name space as meaningful', () => {
+  const evaluate = loadPolicy()
+  const result = evaluate({
+    platform: 'douyin',
+    expectedName: '静姐建乡墅 家',
+    currentNames: ['静姐建乡墅家'],
+  })
+
+  assert.equal(result.matched, false)
+  assert.equal(result.code, 'TASK_ACCOUNT_IDENTITY_NOT_CONFIRMED')
+})

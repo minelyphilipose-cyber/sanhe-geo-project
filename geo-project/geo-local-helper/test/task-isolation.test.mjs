@@ -309,7 +309,7 @@ test('helper and extension expose a rolling-upgrade compatible protocol', () => 
   const contentScript = readProjectFile('geo-env-extension/content-script.js')
 
   assert.equal(manifest.version, helperPackage.version)
-  assert.equal(manifest.version, '0.2.5')
+  assert.equal(manifest.version, '0.2.6')
   assert.match(
     manifest.version_name,
     new RegExp(`${helperPackage.version.replaceAll('.', '\\.')}.+${helperPackage.buildRevision.replaceAll('.', '\\.')}`),
