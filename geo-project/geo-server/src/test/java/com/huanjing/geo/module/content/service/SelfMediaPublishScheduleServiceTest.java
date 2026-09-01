@@ -16,6 +16,7 @@ import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleItem;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
@@ -23,6 +24,7 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleItemMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
@@ -35,6 +37,7 @@ import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse
 import com.huanjing.geo.module.content.vo.SelfMediaAutomationOverviewVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
+import com.huanjing.geo.module.content.vo.ProjectSelfMediaSchedulePlanVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -99,6 +102,7 @@ class SelfMediaPublishScheduleServiceTest {
     private ArticleDraftVersionMapper articleDraftVersionMapper;
     private ArticlePublishRecordMapper articlePublishRecordMapper;
     private DistributionTaskMapper distributionTaskMapper;
+    private ProjectSelfMediaScheduleItemMapper projectScheduleItemMapper;
     private SelfMediaAccountMapper accountMapper;
     private ProjectMapper projectMapper;
     private BrandMapper brandMapper;
@@ -167,6 +171,7 @@ class SelfMediaPublishScheduleServiceTest {
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
         articlePublishRecordMapper = mock(ArticlePublishRecordMapper.class);
         distributionTaskMapper = mock(DistributionTaskMapper.class);
+        projectScheduleItemMapper = mock(ProjectSelfMediaScheduleItemMapper.class);
         accountMapper = mock(SelfMediaAccountMapper.class);
         projectMapper = mock(ProjectMapper.class);
         brandMapper = mock(BrandMapper.class);
@@ -215,6 +220,7 @@ class SelfMediaPublishScheduleServiceTest {
                 articleDraftVersionMapper,
                 articlePublishRecordMapper,
                 distributionTaskMapper,
+                projectScheduleItemMapper,
                 accountMapper,
                 projectMapper,
                 brandMapper,
@@ -1552,6 +1558,46 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(0, response.getTotal());
         assertTrue(response.getRecords().isEmpty());
         verify(scheduleMapper, never()).selectPage(any(), any());
+    }
+
+    @Test
+    void pageSchedulePlansReturnsFormalPlansBeforeArticleGeneration() {
+        ProjectSelfMediaScheduleItem row = new ProjectSelfMediaScheduleItem();
+        row.setId(41L);
+        row.setProjectId(7L);
+        row.setBrandId(8L);
+        row.setSelfMediaAccountId(20L);
+        row.setPlatform("toutiao");
+        row.setStatus("planned");
+        row.setPromptTemplateName("品牌洞察模板");
+        row.setPlannedPublishAt(LocalDateTime.of(2026, 9, 12, 10, 0));
+        Page<ProjectSelfMediaScheduleItem> mapperPage = new Page<>(1, 20, 1);
+        mapperPage.setRecords(List.of(row));
+        when(projectScheduleItemMapper.selectPage(any(), any())).thenReturn(mapperPage);
+
+        Project project = new Project();
+        project.setId(7L);
+        project.setProjectName("三和项目");
+        Brand brand = new Brand();
+        brand.setId(8L);
+        brand.setBrandName("三和品牌");
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setId(20L);
+        account.setAccountName("头条主账号");
+        when(projectMapper.selectBatchIds(any())).thenReturn(List.of(project));
+        when(brandMapper.selectBatchIds(any())).thenReturn(List.of(brand));
+        when(accountMapper.selectBatchIds(any())).thenReturn(List.of(account));
+
+        Page<ProjectSelfMediaSchedulePlanVO> response = service.pageSchedulePlans(
+                null, null, "toutiao", "planned", null, null, null, null, 1L, 20L);
+
+        assertEquals(1, response.getTotal());
+        assertEquals("品牌洞察模板", response.getRecords().get(0).getPromptTemplateName());
+        assertEquals("三和项目", response.getRecords().get(0).getProjectName());
+        assertEquals("三和品牌", response.getRecords().get(0).getBrandName());
+        assertEquals("头条主账号", response.getRecords().get(0).getSelfMediaAccountName());
+        verify(brandAccessService).listAccessibleBrandIds(99L, BrandAccessAction.OPERATE);
+        verify(projectScheduleItemMapper).selectPage(any(), any());
     }
 
     @Test

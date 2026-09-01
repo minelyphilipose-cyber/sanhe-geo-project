@@ -1686,6 +1686,29 @@ export interface SelfMediaPublishSchedule {
   publishedConfirmedAt?: string | null
 }
 
+export interface ProjectSelfMediaSchedulePlan {
+  id: number
+  projectId: number
+  projectName?: string | null
+  brandId: number
+  brandName?: string | null
+  selfMediaAccountId: number
+  selfMediaAccountName?: string | null
+  platform: string
+  status: string
+  plannedExecutionAt?: string | null
+  plannedPublishAt?: string | null
+  generationDueAt?: string | null
+  promptTemplateName?: string | null
+  articleId?: number | null
+  scheduleId?: number | null
+  generationErrorMessage?: string | null
+  scheduleErrorCode?: string | null
+  scheduleErrorMessage?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
 export interface SelfMediaPublishScheduleAlert {
   id: number
   scheduleId: number

@@ -5,6 +5,23 @@ export interface SelfMediaScheduleRetryEvidence {
   diagnosticsJson?: string | null
 }
 
+export interface SelfMediaSchedulePlanFailureCandidate {
+  projectId: number
+  projectName?: string | null
+  status?: string | null
+  plannedExecutionAt?: string | null
+  plannedPublishAt?: string | null
+  generationDueAt?: string | null
+}
+
+export interface SelfMediaSchedulePlanFailureBatch {
+  key: string
+  projectId: number
+  projectName: string
+  targetMonth: string
+  visibleFailureCount: number
+}
+
 const UNCERTAIN_RUNTIME_STAGES = new Set([
   'content_filled',
   'execution_heartbeat_timeout_uncertain',
@@ -60,4 +77,29 @@ export function requiresManualPlatformVerification(row: SelfMediaScheduleRetryEv
   return diagnostics.includes('manual_review_without_refill')
     || diagnostics.includes('execution_heartbeat_timeout_uncertain')
     || diagnostics.includes('content_filled')
+}
+
+export function groupSelfMediaSchedulePlanFailureBatches(
+  rows: SelfMediaSchedulePlanFailureCandidate[],
+): SelfMediaSchedulePlanFailureBatch[] {
+  const batches = new Map<string, SelfMediaSchedulePlanFailureBatch>()
+  rows.forEach((row) => {
+    if (row.status !== 'generation_failed' && row.status !== 'schedule_failed') return
+    const targetMonth = (row.plannedPublishAt || row.plannedExecutionAt || row.generationDueAt || '').slice(0, 7)
+    if (!targetMonth) return
+    const key = `${row.projectId}-${targetMonth}`
+    const existing = batches.get(key)
+    if (existing) {
+      existing.visibleFailureCount += 1
+      return
+    }
+    batches.set(key, {
+      key,
+      projectId: row.projectId,
+      projectName: row.projectName || `项目 #${row.projectId}`,
+      targetMonth,
+      visibleFailureCount: 1,
+    })
+  })
+  return [...batches.values()]
 }

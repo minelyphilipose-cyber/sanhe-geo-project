@@ -656,6 +656,12 @@ public class ProjectSelfMediaScheduleService {
 
     private ProjectSelfMediaScheduleItem cloneFailedPlanItemForRetry(ProjectSelfMediaScheduleItem oldItem,
                                                                       Long operatorId) {
+        BatchArticleGenerationTask completedTask = oldItem.getGenerationTaskId() == null
+                ? null
+                : generationTaskMapper.selectById(oldItem.getGenerationTaskId());
+        boolean reuseGeneratedArticle = completedTask != null
+                && "success".equals(normalizeText(completedTask.getStatus()))
+                && completedTask.getArticleId() != null;
         ProjectSelfMediaScheduleItem replacement = new ProjectSelfMediaScheduleItem();
         replacement.setBatchId(oldItem.getBatchId());
         replacement.setProjectId(oldItem.getProjectId());
@@ -663,11 +669,22 @@ public class ProjectSelfMediaScheduleService {
         replacement.setCompanyId(oldItem.getCompanyId());
         replacement.setSelfMediaAccountId(oldItem.getSelfMediaAccountId());
         replacement.setPlatform(oldItem.getPlatform());
-        replacement.setStatus(ITEM_STATUS_PLANNED);
+        replacement.setStatus(reuseGeneratedArticle ? ITEM_STATUS_GENERATED : ITEM_STATUS_PLANNED);
         replacement.setPlannedExecutionAt(oldItem.getPlannedExecutionAt());
         replacement.setPlannedPublishAt(oldItem.getPlannedPublishAt());
         replacement.setGenerationDueAt(LocalDateTime.now(clock));
-        replacement.setNextGenerationAttemptAt(LocalDateTime.now(clock));
+        replacement.setNextGenerationAttemptAt(reuseGeneratedArticle ? null : LocalDateTime.now(clock));
+        if (reuseGeneratedArticle) {
+            replacement.setGenerationBatchId(completedTask.getBatchId());
+            replacement.setGenerationTaskId(completedTask.getId());
+            replacement.setArticleId(completedTask.getArticleId());
+            replacement.setPromptTemplateId(completedTask.getPromptTemplateId());
+            replacement.setPromptTemplateVersionId(completedTask.getPromptTemplateVersionId());
+            if (completedTask.getPromptTemplateId() != null) {
+                ArticlePromptTemplate template = promptTemplateMapper.selectById(completedTask.getPromptTemplateId());
+                replacement.setPromptTemplateName(template == null ? null : template.getName());
+            }
+        }
         replacement.setGenerationAttemptCount(0);
         replacement.setScheduleAttemptCount(0);
         replacement.setQuotaReservationStatus("pending");
@@ -696,7 +713,9 @@ public class ProjectSelfMediaScheduleService {
             throw ex;
         }
         oldItem.setStatus(ITEM_STATUS_SKIPPED);
-        oldItem.setCancellationReason("已创建新的人工重试计划项");
+        oldItem.setCancellationReason(reuseGeneratedArticle
+                ? "原生成任务已成功，已复用文章创建新的排期计划项"
+                : "已创建新的人工重试计划项");
         oldItem.setCancelledBy(operatorId);
         oldItem.setCancelledAt(LocalDateTime.now(clock));
         oldItem.setUpdatedBy(operatorId);
@@ -2268,6 +2287,7 @@ public class ProjectSelfMediaScheduleService {
             item.setStatus(ITEM_STATUS_GENERATING);
             item.setGenerationClaimToken(null);
             item.setGenerationClaimedAt(null);
+            item.setUpdatedAt(now);
             scheduleItemMapper.updateById(item);
             return true;
         } catch (RuntimeException ex) {
@@ -2337,7 +2357,10 @@ public class ProjectSelfMediaScheduleService {
             return rescheduleStoredGenerationFailure(batch, item, "文章生成任务不存在");
         }
         if (List.of("pending", "queued", "running").contains(normalizeText(task.getStatus()))) {
-            LocalDateTime timeoutAt = item.getUpdatedAt() == null ? null : item.getUpdatedAt().plusHours(2);
+            LocalDateTime taskStartedAt = task.getStartedAt() != null
+                    ? task.getStartedAt()
+                    : task.getCreatedAt() != null ? task.getCreatedAt() : item.getUpdatedAt();
+            LocalDateTime timeoutAt = taskStartedAt == null ? null : taskStartedAt.plusHours(2);
             if (timeoutAt != null && !timeoutAt.isAfter(LocalDateTime.now(clock))) {
                 return rescheduleStoredGenerationFailure(batch, item, "文章生成任务处理超时");
             }

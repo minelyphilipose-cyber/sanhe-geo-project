@@ -1,9 +1,51 @@
 <template>
-  <el-drawer v-model="visible" title="自媒体发布排期" size="84%" class="schedule-drawer">
+  <el-drawer v-model="visible" size="88%" class="schedule-drawer">
+    <template #header>
+      <div class="schedule-drawer-heading">
+        <span class="schedule-drawer-heading-icon"><el-icon><Calendar /></el-icon></span>
+        <div>
+          <h2>发布排期</h2>
+          <p>统一查看内容计划与实际发布进度</p>
+        </div>
+      </div>
+    </template>
+
+    <nav class="schedule-mode-switch" role="tablist" aria-label="排期视图">
+      <button
+        type="button"
+        role="tab"
+        class="schedule-mode-option"
+        :class="{ active: viewMode === 'plans' }"
+        :aria-selected="viewMode === 'plans'"
+        @click="selectView('plans')"
+      >
+        <el-icon><Calendar /></el-icon>
+        <span>
+          <strong>计划排期</strong>
+          <small>到期当天生成文章</small>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="schedule-mode-option"
+        :class="{ active: viewMode === 'tasks' }"
+        :aria-selected="viewMode === 'tasks'"
+        @click="selectView('tasks')"
+      >
+        <el-icon><Promotion /></el-icon>
+        <span>
+          <strong>发布任务</strong>
+          <small>跟踪平台执行结果</small>
+        </span>
+      </button>
+      <span class="schedule-result-count">共 {{ page.total }} 条</span>
+    </nav>
+
     <div class="schedule-toolbar">
       <div class="schedule-filter-row">
         <el-input v-model="query.brandName" class="schedule-filter" clearable placeholder="品牌名称" @keyup.enter="search" />
-        <el-input v-model="query.articleTitle" class="schedule-filter is-title" clearable placeholder="文章标题" @keyup.enter="search" />
+        <el-input v-if="viewMode === 'tasks'" v-model="query.articleTitle" class="schedule-filter is-title" clearable placeholder="文章标题" @keyup.enter="search" />
         <el-input v-model="query.selfMediaAccountName" class="schedule-filter" clearable placeholder="账号名称" @keyup.enter="search" />
         <el-select v-model="query.platform" class="schedule-filter" clearable placeholder="平台">
           <el-option label="微信公众号" value="wechat_mp" />
@@ -14,7 +56,7 @@
           <el-option label="抖音图文" value="douyin" />
         </el-select>
         <el-select v-model="query.status" class="schedule-filter" clearable placeholder="状态">
-          <el-option v-for="item in scheduleStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+          <el-option v-for="item in activeStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
         <el-button type="primary" :icon="Search" @click="search">查询</el-button>
         <el-button :icon="Refresh" @click="resetQuery">重置</el-button>
@@ -46,6 +88,106 @@
       </el-collapse-transition>
     </div>
 
+    <section v-if="viewMode === 'plans'" class="schedule-plan-surface">
+      <header class="schedule-plan-head">
+        <div>
+          <h3>未来发布计划</h3>
+          <p>优先展示临近与异常计划；模板将在生成当天按最新配置匹配。</p>
+        </div>
+        <div class="schedule-plan-head-actions">
+          <div class="schedule-plan-legend" aria-label="状态说明">
+            <span><i class="is-waiting" />待生成</span>
+            <span><i class="is-running" />处理中</span>
+            <span><i class="is-failed" />需处理</span>
+          </div>
+          <el-button
+            v-if="planFailureBatches.length"
+            plain
+            type="primary"
+            size="small"
+            :icon="Refresh"
+            :loading="Boolean(retryingPlanBatchKey)"
+            @click="openPlanFailureHandling"
+          >
+            处理失败批次（{{ planFailureBatches.length }}）
+          </el-button>
+        </div>
+      </header>
+      <DataState :loading="loading" :empty="!planRows.length" empty-text="暂无计划排期">
+      <el-table
+        :data="planRows"
+        table-layout="fixed"
+        class="schedule-table schedule-plan-table"
+        :row-class-name="planRowClassName"
+      >
+        <el-table-column label="执行时间" min-width="230">
+          <template #default="scope">
+            <div class="schedule-plan-time">
+              <time :datetime="scope.row.generationDueAt || scope.row.plannedExecutionAt || ''" class="schedule-plan-date">
+                <strong>{{ planDay(scope.row) }}</strong>
+                <span>{{ planMonthWeek(scope.row) }}</span>
+              </time>
+              <div class="schedule-plan-time-detail">
+                <strong>生成 {{ planClock(scope.row.generationDueAt || scope.row.plannedExecutionAt) }}</strong>
+                <span>发布 {{ planDateTime(scope.row.plannedPublishAt) }}</span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="计划内容" min-width="340" show-overflow-tooltip>
+          <template #default="scope">
+            <div class="schedule-plan-content">
+              <strong>{{ scope.row.projectName || `项目 #${scope.row.projectId}` }}</strong>
+              <span>{{ scope.row.brandName || `品牌 #${scope.row.brandId}` }}</span>
+              <span class="schedule-plan-template">
+                <el-icon><MagicStick /></el-icon>
+                {{ scope.row.promptTemplateName || '生成时匹配最新模板' }}
+              </span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="发布渠道" min-width="210">
+          <template #default="scope">
+            <div class="schedule-plan-channel">
+              <span class="schedule-platform-badge" :class="`is-${normalizePlatform(scope.row.platform)}`">
+                {{ platformLabel(scope.row.platform) }}
+              </span>
+              <span>{{ scope.row.selfMediaAccountName || `账号 #${scope.row.selfMediaAccountId}` }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="当前状态" min-width="260">
+          <template #default="scope">
+            <div class="schedule-plan-state">
+              <span class="schedule-plan-status" :class="`is-${planStatusTone(scope.row.status)}`">
+                <i />{{ planStatusLabel(scope.row.status) }}
+              </span>
+              <span v-if="planFailureText(scope.row) !== '-'" class="schedule-plan-error">
+                {{ planFailureText(scope.row) }}
+              </span>
+              <span v-else-if="scope.row.scheduleId" class="schedule-plan-reference">已进入发布任务 #{{ scope.row.scheduleId }}</span>
+              <span v-else-if="scope.row.articleId" class="schedule-plan-reference">文章 #{{ scope.row.articleId }} 已生成</span>
+              <span v-else class="schedule-plan-reference">系统将按计划自动处理</span>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="schedule-pagination">
+        <el-pagination
+          v-model:current-page="page.current"
+          v-model:page-size="page.size"
+          background
+          layout="total, sizes, prev, pager, next"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="page.total"
+          @current-change="load"
+          @size-change="handleSizeChange"
+        />
+      </div>
+      </DataState>
+    </section>
+
+    <template v-else>
     <div class="schedule-view-bar">
       <span>{{ resultScopeText }}</span>
       <el-button v-if="query.healthGroup || query.health" link type="primary" @click="clearViewFilter">查看全部</el-button>
@@ -196,6 +338,41 @@
         />
       </div>
     </DataState>
+    </template>
+
+    <el-dialog
+      v-model="planFailureDialogVisible"
+      title="处理失败批次"
+      width="min(560px, calc(100vw - 32px))"
+      append-to-body
+      class="schedule-plan-failure-dialog"
+    >
+      <p class="schedule-plan-failure-intro">
+        操作按项目和月份执行。已生成的文章会直接补排期，生成失败的会重新生成，成功项不会重复处理。
+      </p>
+      <div class="schedule-plan-failure-list">
+        <div v-for="batch in planFailureBatches" :key="batch.key" class="schedule-plan-failure-item">
+          <div>
+            <strong>{{ batch.projectName }}</strong>
+            <span>{{ planBatchMonthLabel(batch.targetMonth) }} · 当前页 {{ batch.visibleFailureCount }} 项失败</span>
+          </div>
+          <el-button
+            plain
+            type="primary"
+            size="small"
+            :loading="retryingPlanBatchKey === batch.key"
+            :disabled="Boolean(retryingPlanBatchKey) && retryingPlanBatchKey !== batch.key"
+            :aria-label="`重新处理${batch.projectName}${planBatchMonthLabel(batch.targetMonth)}批次`"
+            @click="retryPlanFailureBatch(batch, false)"
+          >
+            重新处理本批次
+          </el-button>
+        </div>
+      </div>
+      <template #footer>
+        <el-button :disabled="Boolean(retryingPlanBatchKey)" @click="planFailureDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog
       v-model="diagnosticsVisible"
@@ -375,21 +552,27 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowDown, Calendar, MagicStick, Promotion, Refresh, Search } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
 import {
   cancelSelfMediaPublishSchedule,
   confirmSelfMediaPublishScheduleFailed,
   confirmSelfMediaPublishSchedulePublished,
   getSelfMediaPublishSchedules,
+  getSelfMediaSchedulePlans,
   markSelfMediaPublishScheduleManualRequired,
   recheckSelfMediaPublishScheduleResult,
   republishSelfMediaPublishSchedule,
   retrySelfMediaPublishScheduleNow,
 } from '@/api/content'
-import type { SelfMediaPublishSchedule } from '@/types'
+import { retryProjectSelfMediaScheduleBatchFailedItems } from '@/api/project'
+import type { ProjectSelfMediaSchedulePlan, SelfMediaPublishSchedule } from '@/types'
 import { formatDateTime } from '@/utils/format'
-import { requiresManualPlatformVerification } from '../selfMediaScheduleRetry'
+import {
+  groupSelfMediaSchedulePlanFailureBatches,
+  requiresManualPlatformVerification,
+  type SelfMediaSchedulePlanFailureBatch,
+} from '../selfMediaScheduleRetry'
 
 type ScheduleHealth = 'failed' | 'manual' | 'overdue' | 'running' | 'waiting' | 'scheduled' | 'checking' | 'done' | 'cancelled'
 type ScheduleHealthGroup = 'attention' | 'processing' | 'waiting_publish' | 'url_pending' | 'done'
@@ -415,6 +598,10 @@ const visible = computed({
 })
 
 const loading = ref(false)
+const retryingPlanBatchKey = ref('')
+const planFailureDialogVisible = ref(false)
+const viewMode = ref<'plans' | 'tasks'>('plans')
+const planRows = ref<ProjectSelfMediaSchedulePlan[]>([])
 const rows = ref<SelfMediaPublishSchedule[]>([])
 const diagnosticsVisible = ref(false)
 const diagnosticsRow = ref<SelfMediaPublishSchedule | null>(null)
@@ -460,6 +647,21 @@ const scheduleStatusOptions = [
   { label: '取消待平台处理', value: 'cancel_pending_platform' },
   { label: '已取消', value: 'cancelled' },
 ]
+
+const planStatusOptions = [
+  { label: '待生成', value: 'planned' },
+  { label: '生成中', value: 'generating' },
+  { label: '已生成', value: 'generated' },
+  { label: '已进入发布', value: 'scheduled' },
+  { label: '生成失败', value: 'generation_failed' },
+  { label: '排期失败', value: 'schedule_failed' },
+  { label: '已取消', value: 'cancelled' },
+  { label: '已跳过', value: 'skipped' },
+]
+
+const activeStatusOptions = computed(() => viewMode.value === 'plans' ? planStatusOptions : scheduleStatusOptions)
+
+const planFailureBatches = computed(() => groupSelfMediaSchedulePlanFailureBatches(planRows.value))
 
 const scheduleHealthOptions: Array<{ label: string; value: ScheduleHealth }> = [
   { label: '失败', value: 'failed' },
@@ -746,15 +948,30 @@ function queryParams() {
 async function load() {
   loading.value = true
   try {
-    const res = await getSelfMediaPublishSchedules(queryParams())
-    const data = res.data.data
-    rows.value = data.records || []
+    const data = viewMode.value === 'plans'
+      ? (await getSelfMediaSchedulePlans(queryParams())).data.data
+      : (await getSelfMediaPublishSchedules(queryParams())).data.data
+    if (viewMode.value === 'plans') {
+      planRows.value = data.records as ProjectSelfMediaSchedulePlan[] || []
+    } else {
+      rows.value = data.records as SelfMediaPublishSchedule[] || []
+    }
     page.current = data.current
     page.size = data.size
     page.total = data.total
   } finally {
     loading.value = false
   }
+}
+
+function selectView(mode: 'plans' | 'tasks') {
+  if (viewMode.value === mode) return
+  viewMode.value = mode
+  query.status = ''
+  query.health = ''
+  query.healthGroup = ''
+  page.current = 1
+  load()
 }
 
 function search() {
@@ -776,6 +993,9 @@ function resetQuery() {
 }
 
 function applyInitialFilters() {
+  if (props.initialFailureCode?.trim() || props.initialStatus?.trim()) {
+    viewMode.value = 'tasks'
+  }
   query.failureCode = props.initialFailureCode?.trim() || ''
   query.status = props.initialStatus?.trim() || ''
   query.health = ''
@@ -798,6 +1018,93 @@ function statusTag(status?: string | null): 'success' | 'warning' | 'danger' | '
   if (['pending', 'filling', 'filled_verified', 'scheduling', 'publish_due', 'checking_publish_result', 'published_url_pending', 'publish_unknown', 'cancel_pending_platform'].includes(status || '')) return 'warning'
   if (['schedule_failed', 'publish_failed', 'manual_required'].includes(status || '')) return 'danger'
   return 'info'
+}
+
+function planStatusLabel(status?: string | null) {
+  return planStatusOptions.find((item) => item.value === status)?.label || status || '-'
+}
+
+function planStatusTone(status?: string | null) {
+  if (status === 'scheduled' || status === 'generated') return 'success'
+  if (status === 'generation_failed' || status === 'schedule_failed') return 'failed'
+  if (status === 'generating') return 'running'
+  if (status === 'planned') return 'waiting'
+  return 'muted'
+}
+
+function planFailureText(row: ProjectSelfMediaSchedulePlan) {
+  return row.generationErrorMessage || row.scheduleErrorMessage || row.scheduleErrorCode || '-'
+}
+
+function planBatchMonthLabel(targetMonth: string) {
+  const [year, month] = targetMonth.split('-')
+  return `${year}年${Number(month)}月`
+}
+
+function openPlanFailureHandling() {
+  if (planFailureBatches.value.length === 1) {
+    retryPlanFailureBatch(planFailureBatches.value[0])
+    return
+  }
+  planFailureDialogVisible.value = true
+}
+
+async function retryPlanFailureBatch(batch: SelfMediaSchedulePlanFailureBatch, confirm = true) {
+  if (retryingPlanBatchKey.value) return
+
+  if (confirm) {
+    try {
+      await ElMessageBox.confirm(
+        `将重新处理“${batch.projectName}”${planBatchMonthLabel(batch.targetMonth)}批次内全部可重试失败项。已生成文章会直接复用，成功项不会重复处理。是否继续？`,
+        '重新处理本批次',
+        { type: 'warning', confirmButtonText: '开始处理', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+
+  retryingPlanBatchKey.value = batch.key
+  try {
+    await retryProjectSelfMediaScheduleBatchFailedItems(batch.projectId, batch.targetMonth)
+    ElMessage.success('失败项已重新进入处理流程')
+    await load()
+    if (!planFailureBatches.value.length) {
+      planFailureDialogVisible.value = false
+    }
+  } finally {
+    retryingPlanBatchKey.value = ''
+  }
+}
+
+function planRowClassName({ row }: { row: ProjectSelfMediaSchedulePlan }) {
+  return planStatusTone(row.status) === 'failed' ? 'is-plan-failed' : ''
+}
+
+function planPrimaryTime(row: ProjectSelfMediaSchedulePlan) {
+  return row.generationDueAt || row.plannedExecutionAt || row.plannedPublishAt || ''
+}
+
+function planDay(row: ProjectSelfMediaSchedulePlan) {
+  return planPrimaryTime(row).slice(8, 10) || '--'
+}
+
+function planMonthWeek(row: ProjectSelfMediaSchedulePlan) {
+  const value = planPrimaryTime(row)
+  if (!value) return '待定'
+  const month = `${Number(value.slice(5, 7))}月`
+  const date = new Date(value)
+  const weekday = Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-CN', { weekday: 'short' })
+  return `${month} ${weekday}`.trim()
+}
+
+function planClock(value?: string | null) {
+  return value?.slice(11, 16) || '--:--'
+}
+
+function planDateTime(value?: string | null) {
+  if (!value) return '待定'
+  return `${Number(value.slice(5, 7))}月${Number(value.slice(8, 10))}日 ${planClock(value)}`
 }
 
 function toggleHealthGroupFilter(value: ScheduleHealthGroup) {
@@ -1857,12 +2164,11 @@ function normalizePlatform(value?: string | null) {
 <style scoped>
 .schedule-toolbar {
   display: grid;
-  gap: 8px;
-  margin-bottom: 14px;
-  padding: 12px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 0 0 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #e8edf5;
 }
 
 .schedule-filter-row {
@@ -1890,8 +2196,8 @@ function normalizePlatform(value?: string | null) {
 }
 
 .schedule-range-filter {
-  flex: 0 0 520px;
-  width: 520px;
+  flex: 1 1 420px;
+  width: min(520px, 100%);
   max-width: 520px;
   min-width: 0;
   overflow: hidden;
@@ -1964,6 +2270,484 @@ function normalizePlatform(value?: string | null) {
 
 .schedule-advanced-icon.expanded {
   transform: rotate(180deg);
+}
+
+.schedule-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 18px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.schedule-mode-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 190px;
+  min-height: 56px;
+  padding: 8px 16px;
+  text-align: left;
+  color: #64748b;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.schedule-mode-option::after {
+  position: absolute;
+  right: 16px;
+  bottom: -13px;
+  left: 16px;
+  height: 2px;
+  content: '';
+  background: transparent;
+  border-radius: 2px;
+}
+
+.schedule-mode-option:hover {
+  color: #1d4ed8;
+  background: #f5f8ff;
+}
+
+.schedule-mode-option.active {
+  color: #1d4ed8;
+  background: #eff5ff;
+}
+
+.schedule-mode-option.active::after {
+  background: #2563eb;
+}
+
+.schedule-mode-option > .el-icon {
+  width: 30px;
+  height: 30px;
+  font-size: 17px;
+  background: #ffffff;
+  border: 1px solid #dbe5f3;
+  border-radius: 8px;
+}
+
+.schedule-mode-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.schedule-mode-option strong {
+  color: #172033;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.schedule-mode-option.active strong {
+  color: #1d4ed8;
+}
+
+.schedule-mode-option small {
+  color: #8793a7;
+  font-size: 12px;
+}
+
+.schedule-result-count {
+  margin-left: auto;
+  color: #7b8799;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-drawer-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.schedule-drawer-heading-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: #2563eb;
+  font-size: 19px;
+  background: #edf4ff;
+  border: 1px solid #d8e6ff;
+  border-radius: 11px;
+}
+
+.schedule-drawer-heading h2,
+.schedule-plan-head h3 {
+  margin: 0;
+  color: #172033;
+  letter-spacing: -0.01em;
+}
+
+.schedule-drawer-heading h2 {
+  font-size: 19px;
+  line-height: 1.25;
+}
+
+.schedule-drawer-heading p,
+.schedule-plan-head p {
+  margin: 4px 0 0;
+  color: #7b8799;
+  font-size: 12px;
+}
+
+.schedule-plan-surface {
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #e4eaf2;
+  border-radius: 12px;
+}
+
+.schedule-plan-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  background: #fbfcfe;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.schedule-plan-head h3 {
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.schedule-plan-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.schedule-plan-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: #7b8799;
+  font-size: 12px;
+}
+
+.schedule-plan-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.schedule-plan-legend i,
+.schedule-plan-status i {
+  width: 7px;
+  height: 7px;
+  background: #94a3b8;
+  border-radius: 50%;
+}
+
+.schedule-plan-legend i.is-waiting {
+  background: #d68b17;
+}
+
+.schedule-plan-legend i.is-running {
+  background: #2563eb;
+}
+
+.schedule-plan-legend i.is-failed {
+  background: #dc2626;
+}
+
+.schedule-plan-table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.schedule-plan-table :deep(th.el-table__cell) {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 42px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 650;
+  background: #f7f9fc;
+}
+
+.schedule-plan-table :deep(td.el-table__cell) {
+  height: 70px;
+  border-bottom-color: #edf1f6;
+}
+
+.schedule-plan-table :deep(.el-table__row:hover > td.el-table__cell) {
+  background: #f8fbff;
+}
+
+.schedule-plan-table :deep(.el-table__row.is-plan-failed > td.el-table__cell) {
+  background: #fff8f8;
+}
+
+.schedule-plan-table :deep(.el-table__row.is-plan-failed:hover > td.el-table__cell) {
+  background: #fff3f3;
+}
+
+.schedule-plan-time {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.schedule-plan-date {
+  display: grid;
+  flex: 0 0 52px;
+  place-items: center;
+  min-height: 50px;
+  color: #526078;
+  background: #f2f5fa;
+  border-radius: 10px;
+}
+
+.schedule-plan-date strong {
+  color: #172033;
+  font-size: 20px;
+  font-weight: 750;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-plan-date span {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.schedule-plan-time-detail,
+.schedule-plan-content,
+.schedule-plan-channel,
+.schedule-plan-state {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.schedule-plan-time-detail strong,
+.schedule-plan-content > strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-plan-time-detail span,
+.schedule-plan-content > span,
+.schedule-plan-channel > span:last-child,
+.schedule-plan-reference {
+  max-width: 100%;
+  overflow: hidden;
+  color: #7b8799;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-plan-template {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #4f6b95 !important;
+}
+
+.schedule-plan-template .el-icon {
+  flex: 0 0 auto;
+  color: #6a85b2;
+}
+
+.schedule-platform-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 9px;
+  color: #3d4c63;
+  font-size: 12px;
+  font-weight: 650;
+  background: #eef2f7;
+  border-radius: 6px;
+}
+
+.schedule-platform-badge.is-toutiao,
+.schedule-platform-badge.is-douyin {
+  color: #9a3412;
+  background: #fff1e9;
+}
+
+.schedule-platform-badge.is-zhihu,
+.schedule-platform-badge.is-wechat_mp {
+  color: #1d4ed8;
+  background: #edf4ff;
+}
+
+.schedule-platform-badge.is-xiaohongshu {
+  color: #b4233a;
+  background: #fff0f2;
+}
+
+.schedule-plan-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 25px;
+  padding: 0 9px;
+  color: #744b0d;
+  font-size: 12px;
+  font-weight: 650;
+  background: #fff7e8;
+  border-radius: 6px;
+}
+
+.schedule-plan-status.is-waiting i {
+  background: #d68b17;
+}
+
+.schedule-plan-status.is-running {
+  color: #1d4ed8;
+  background: #edf4ff;
+}
+
+.schedule-plan-status.is-running i {
+  background: #2563eb;
+}
+
+.schedule-plan-status.is-success {
+  color: #08745c;
+  background: #eaf8f3;
+}
+
+.schedule-plan-status.is-success i {
+  background: #0f9f7a;
+}
+
+.schedule-plan-status.is-failed {
+  color: #b42335;
+  background: #ffebed;
+}
+
+.schedule-plan-status.is-failed i {
+  background: #dc2626;
+}
+
+.schedule-plan-status.is-muted {
+  color: #667085;
+  background: #f1f3f6;
+}
+
+.schedule-plan-error {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  color: #b42335;
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.schedule-plan-failure-intro {
+  margin: 0 0 10px;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.schedule-plan-failure-list {
+  border-top: 1px solid #e8edf5;
+}
+
+.schedule-plan-failure-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 68px;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.schedule-plan-failure-item > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.schedule-plan-failure-item strong {
+  overflow: hidden;
+  color: #172033;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-plan-failure-item span {
+  color: #7b8799;
+  font-size: 12px;
+}
+
+.schedule-plan-surface .schedule-pagination {
+  padding: 0 16px 16px;
+}
+
+@media (max-width: 1100px) {
+  :global(.schedule-drawer) {
+    width: 96% !important;
+  }
+
+  .schedule-plan-legend {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  :global(.schedule-drawer) {
+    width: 100% !important;
+  }
+
+  .schedule-mode-switch {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .schedule-mode-option {
+    flex: 1 1 150px;
+    min-width: 0;
+  }
+
+  .schedule-result-count {
+    flex: 1 0 100%;
+    margin: 4px 0 0;
+  }
+
+  .schedule-plan-head {
+    align-items: flex-start;
+  }
+
+  .schedule-plan-head-actions {
+    align-items: flex-end;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .schedule-filter,
+  .schedule-filter.is-title,
+  .schedule-filter.is-wide,
+  .schedule-range-filter {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+  }
+
+  .schedule-advanced-toggle {
+    margin-left: 0;
+  }
 }
 
 .schedule-view-bar {

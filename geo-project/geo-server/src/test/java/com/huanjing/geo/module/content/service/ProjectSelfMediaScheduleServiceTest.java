@@ -66,6 +66,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -1986,6 +1987,82 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals("generation_failed", item.getStatus());
         assertEquals("refunded", item.getQuotaReservationStatus());
         verify(companyChannelQuotaService).refundProjectSelfMediaPlan(100L);
+    }
+
+    @Test
+    void runningGenerationUsesTaskStartTimeInsteadOfStalePlanTimestamp() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setStatus("generating");
+        item.setGenerationTaskId(55L);
+        item.setGenerationAttemptCount(1);
+        item.setUpdatedAt(LocalDateTime.of(2026, 5, 20, 8, 0));
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(55L);
+        task.setStatus("running");
+        task.setCreatedAt(LocalDateTime.of(2026, 6, 1, 7, 55));
+        task.setStartedAt(LocalDateTime.of(2026, 6, 1, 7, 56));
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 1, 8, 0)));
+        when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+        when(generationTaskMapper.selectById(55L)).thenReturn(task);
+
+        service.progressProcessingBatches(5);
+
+        assertEquals("generating", item.getStatus());
+        assertEquals(55L, item.getGenerationTaskId());
+        assertEquals(1, item.getGenerationAttemptCount());
+        assertTrue(item.getGenerationErrorMessage() == null);
+        verify(companyChannelQuotaService, never()).refundProjectSelfMediaPlan(100L);
+    }
+
+    @Test
+    void retryFailedStoredItemReusesArticleWhenGenerationTaskActuallySucceeded() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setStatus("partial_failed");
+        ProjectSelfMediaScheduleItem failed = storedItem();
+        failed.setStatus("generation_failed");
+        failed.setGenerationBatchId(44L);
+        failed.setGenerationTaskId(55L);
+        failed.setQuotaReservationStatus("refunded");
+        AtomicReference<ProjectSelfMediaScheduleItem> replacementRef = new AtomicReference<>();
+        BatchArticleGenerationTask completed = generationTask(55L, 66L);
+        completed.setBatchId(44L);
+        completed.setPromptTemplateId(77L);
+        completed.setPromptTemplateVersionId(78L);
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(77L);
+        template.setName("最新品牌模板");
+        SelfMediaPublishScheduleVO createdSchedule = new SelfMediaPublishScheduleVO();
+        createdSchedule.setId(88L);
+        SelfMediaPublishScheduleCreateResponse created = new SelfMediaPublishScheduleCreateResponse();
+        created.setCreatedSchedules(List.of(createdSchedule));
+
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(scheduleItemMapper.selectByBatchId(33L)).thenAnswer(invocation -> replacementRef.get() == null
+                ? List.of(failed)
+                : List.of(failed, replacementRef.get()));
+        doAnswer(invocation -> {
+            ProjectSelfMediaScheduleItem inserted = invocation.getArgument(0);
+            inserted.setId(101L);
+            replacementRef.set(inserted);
+            return 1;
+        }).when(scheduleItemMapper).insert(any(ProjectSelfMediaScheduleItem.class));
+        when(generationTaskMapper.selectById(55L)).thenReturn(completed);
+        when(promptTemplateMapper.selectById(77L)).thenReturn(template);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(scheduleService.createSystemSchedulesUsingReservedQuota(any(), anyString(), eq(99L), eq(101L)))
+                .thenReturn(created);
+
+        service.retryFailedItems(7L, "2026-06");
+
+        ProjectSelfMediaScheduleItem replacement = replacementRef.get();
+        assertEquals("scheduled", replacement.getStatus());
+        assertEquals(66L, replacement.getArticleId());
+        assertEquals(55L, replacement.getGenerationTaskId());
+        assertEquals("最新品牌模板", replacement.getPromptTemplateName());
+        assertEquals("skipped", failed.getStatus());
+        verify(generationService, never()).createSystemBatch(any(), any(), anyString());
     }
 
     @Test

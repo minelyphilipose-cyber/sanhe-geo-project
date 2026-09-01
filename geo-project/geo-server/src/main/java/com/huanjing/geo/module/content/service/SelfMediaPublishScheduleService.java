@@ -27,6 +27,7 @@ import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.entity.ProjectSelfMediaScheduleItem;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
@@ -34,6 +35,7 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleItemMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
@@ -43,6 +45,7 @@ import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformSchedule
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
 import com.huanjing.geo.module.content.vo.SelfMediaAutomationOverviewVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse;
+import com.huanjing.geo.module.content.vo.ProjectSelfMediaSchedulePlanVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleRejectedItemVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
@@ -198,6 +201,7 @@ public class SelfMediaPublishScheduleService {
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final ArticlePublishRecordMapper articlePublishRecordMapper;
     private final DistributionTaskMapper distributionTaskMapper;
+    private final ProjectSelfMediaScheduleItemMapper projectScheduleItemMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
@@ -1053,6 +1057,88 @@ public class SelfMediaPublishScheduleService {
         enrichAlerts(records);
         result.setRecords(records);
         return result;
+    }
+
+    public Page<ProjectSelfMediaSchedulePlanVO> pageSchedulePlans(Long brandId,
+                                                                  String brandName,
+                                                                  String platform,
+                                                                  String status,
+                                                                  Long selfMediaAccountId,
+                                                                  String selfMediaAccountName,
+                                                                  LocalDateTime plannedPublishStart,
+                                                                  LocalDateTime plannedPublishEnd,
+                                                                  Long current,
+                                                                  Long size) {
+        if (brandId != null && brandId <= 0) {
+            fail("INVALID_BRAND", "brandId must be a positive number");
+        }
+        SysUser operator = currentUserService.requireCurrentUser();
+        long pageNo = current == null || current <= 0 ? 1 : current;
+        long pageSize = size == null || size <= 0 ? 20 : Math.min(size, 100);
+        LambdaQueryWrapper<ProjectSelfMediaScheduleItem> wrapper = new LambdaQueryWrapper<>();
+        if (brandId != null) {
+            brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.OPERATE);
+            wrapper.eq(ProjectSelfMediaScheduleItem::getBrandId, brandId);
+        } else {
+            List<Long> accessibleBrandIds = brandAccessService.listAccessibleBrandIds(operator.getId(), BrandAccessAction.OPERATE);
+            if (accessibleBrandIds == null || accessibleBrandIds.isEmpty()) {
+                return emptySchedulePlanPage(pageNo, pageSize);
+            }
+            wrapper.in(ProjectSelfMediaScheduleItem::getBrandId, accessibleBrandIds);
+        }
+        if (StringUtils.hasText(platform)) {
+            wrapper.eq(ProjectSelfMediaScheduleItem::getPlatform, platform.trim());
+        }
+        if (StringUtils.hasText(status)) {
+            wrapper.eq(ProjectSelfMediaScheduleItem::getStatus, status.trim());
+        }
+        if (plannedPublishStart != null && plannedPublishEnd != null && plannedPublishStart.isAfter(plannedPublishEnd)) {
+            fail("INVALID_PLANNED_PUBLISH_RANGE", "计划发布时间开始时间不能晚于结束时间");
+        }
+        if (plannedPublishStart != null) {
+            wrapper.ge(ProjectSelfMediaScheduleItem::getPlannedPublishAt, plannedPublishStart);
+        }
+        if (plannedPublishEnd != null) {
+            wrapper.le(ProjectSelfMediaScheduleItem::getPlannedPublishAt, plannedPublishEnd);
+        }
+        if (selfMediaAccountId != null) {
+            wrapper.eq(ProjectSelfMediaScheduleItem::getSelfMediaAccountId, selfMediaAccountId);
+        } else if (StringUtils.hasText(selfMediaAccountName)) {
+            List<Long> accountIds = selfMediaAccountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
+                            .select(SelfMediaAccount::getId)
+                            .like(SelfMediaAccount::getAccountName, selfMediaAccountName.trim()))
+                    .stream().map(SelfMediaAccount::getId).toList();
+            if (accountIds.isEmpty()) {
+                return emptySchedulePlanPage(pageNo, pageSize);
+            }
+            wrapper.in(ProjectSelfMediaScheduleItem::getSelfMediaAccountId, accountIds);
+        }
+        if (StringUtils.hasText(brandName)) {
+            List<Long> brandIds = brandMapper.selectList(new LambdaQueryWrapper<Brand>()
+                            .select(Brand::getId)
+                            .and(w -> w.like(Brand::getBrandName, brandName.trim())
+                                    .or().like(Brand::getBrandShortName, brandName.trim())))
+                    .stream().map(Brand::getId).toList();
+            if (brandIds.isEmpty()) {
+                return emptySchedulePlanPage(pageNo, pageSize);
+            }
+            wrapper.in(ProjectSelfMediaScheduleItem::getBrandId, brandIds);
+        }
+        wrapper.last("ORDER BY CASE WHEN status IN ('generation_failed', 'schedule_failed') THEN 0 ELSE 1 END, "
+                + "planned_publish_at ASC, id ASC");
+        Page<ProjectSelfMediaScheduleItem> data = projectScheduleItemMapper.selectPage(new Page<>(pageNo, pageSize), wrapper);
+        Page<ProjectSelfMediaSchedulePlanVO> result = new Page<>(data.getCurrent(), data.getSize(), data.getTotal());
+        List<ProjectSelfMediaSchedulePlanVO> records = data.getRecords().stream()
+                .map(ProjectSelfMediaSchedulePlanVO::from).toList();
+        enrichSchedulePlanDisplayNames(records);
+        result.setRecords(records);
+        return result;
+    }
+
+    private Page<ProjectSelfMediaSchedulePlanVO> emptySchedulePlanPage(long pageNo, long pageSize) {
+        Page<ProjectSelfMediaSchedulePlanVO> empty = new Page<>(pageNo, pageSize, 0);
+        empty.setRecords(List.of());
+        return empty;
     }
 
     private Page<SelfMediaPublishScheduleVO> emptySchedulePage(long pageNo, long pageSize) {
@@ -5645,6 +5731,36 @@ public class SelfMediaPublishScheduleService {
 
         for (SelfMediaPublishScheduleVO record : records) {
             record.setArticleTitle(articleTitles.get(record.getArticleId()));
+            record.setBrandName(brandNames.get(record.getBrandId()));
+            record.setSelfMediaAccountName(accountNames.get(record.getSelfMediaAccountId()));
+        }
+    }
+
+    private void enrichSchedulePlanDisplayNames(List<ProjectSelfMediaSchedulePlanVO> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        Map<Long, String> projectNames = new LinkedHashMap<>();
+        List<Project> projects = projectMapper.selectBatchIds(records.stream().map(ProjectSelfMediaSchedulePlanVO::getProjectId)
+                .filter(id -> id != null && id > 0).distinct().toList());
+        for (Project project : projects == null ? List.<Project>of() : projects) {
+            projectNames.put(project.getId(), project.getProjectName());
+        }
+        Map<Long, String> brandNames = new LinkedHashMap<>();
+        List<Brand> brands = brandMapper.selectBatchIds(records.stream().map(ProjectSelfMediaSchedulePlanVO::getBrandId)
+                .filter(id -> id != null && id > 0).distinct().toList());
+        for (Brand brand : brands == null ? List.<Brand>of() : brands) {
+            brandNames.put(brand.getId(), displayBrandName(brand));
+        }
+        Map<Long, String> accountNames = new LinkedHashMap<>();
+        List<SelfMediaAccount> accounts = selfMediaAccountMapper.selectBatchIds(records.stream()
+                .map(ProjectSelfMediaSchedulePlanVO::getSelfMediaAccountId)
+                .filter(id -> id != null && id > 0).distinct().toList());
+        for (SelfMediaAccount account : accounts == null ? List.<SelfMediaAccount>of() : accounts) {
+            accountNames.put(account.getId(), account.getAccountName());
+        }
+        for (ProjectSelfMediaSchedulePlanVO record : records) {
+            record.setProjectName(projectNames.get(record.getProjectId()));
             record.setBrandName(brandNames.get(record.getBrandId()));
             record.setSelfMediaAccountName(accountNames.get(record.getSelfMediaAccountId()));
         }

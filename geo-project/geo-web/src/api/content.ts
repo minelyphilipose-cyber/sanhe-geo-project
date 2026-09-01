@@ -6,6 +6,7 @@ import type {
   DistributionTask,
   PageResult,
   PublishQuota,
+  ProjectSelfMediaSchedulePlan,
   RecommendedSitesResponse,
   R,
   SelfMediaAccount,
@@ -1538,10 +1539,27 @@ export function getSelfMediaPublishSchedules(params?: {
   articleTitle?: string
   selfMediaAccountId?: number
   selfMediaAccountName?: string
+  plannedPublishStart?: string
+  plannedPublishEnd?: string
   current?: number
   size?: number
 }) {
   return request.get<R<PageResult<SelfMediaPublishSchedule>>>('/content/self-media-schedules', { params })
+}
+
+export function getSelfMediaSchedulePlans(params?: {
+  brandId?: number
+  brandName?: string
+  platform?: string
+  status?: string
+  selfMediaAccountId?: number
+  selfMediaAccountName?: string
+  plannedPublishStart?: string
+  plannedPublishEnd?: string
+  current?: number
+  size?: number
+}) {
+  return request.get<R<PageResult<ProjectSelfMediaSchedulePlan>>>('/content/self-media-schedule-plans', { params })
 }
 
 export function getSelfMediaAutomationOverview() {

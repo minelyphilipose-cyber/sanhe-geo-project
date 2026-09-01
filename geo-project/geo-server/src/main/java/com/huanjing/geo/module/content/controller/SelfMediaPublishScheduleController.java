@@ -10,6 +10,7 @@ import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleManualResultR
 import com.huanjing.geo.module.content.service.SelfMediaPublishAutoScheduleService;
 import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
 import com.huanjing.geo.module.content.vo.SelfMediaAutomationOverviewVO;
+import com.huanjing.geo.module.content.vo.ProjectSelfMediaSchedulePlanVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
@@ -100,6 +101,23 @@ public class SelfMediaPublishScheduleController {
                                                              @RequestParam(defaultValue = "20") Long size) {
         ensureInternalSelfMediaScheduleAccess();
         return R.ok(scheduleService.pageSchedules(brandId, brandName, platform, status, failureCode, articleId, articleTitle, selfMediaAccountId, selfMediaAccountName, plannedPublishStart, plannedPublishEnd, current, size));
+    }
+
+    @GetMapping("/self-media-schedule-plans")
+    public R<Page<ProjectSelfMediaSchedulePlanVO>> pageSchedulePlans(
+            @RequestParam(required = false) Long brandId,
+            @RequestParam(required = false) String brandName,
+            @RequestParam(required = false) String platform,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long selfMediaAccountId,
+            @RequestParam(required = false) String selfMediaAccountName,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime plannedPublishStart,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime plannedPublishEnd,
+            @RequestParam(defaultValue = "1") Long current,
+            @RequestParam(defaultValue = "20") Long size) {
+        ensureInternalSelfMediaScheduleAccess();
+        return R.ok(scheduleService.pageSchedulePlans(brandId, brandName, platform, status, selfMediaAccountId,
+                selfMediaAccountName, plannedPublishStart, plannedPublishEnd, current, size));
     }
 
     @GetMapping("/self-media-automation/overview")
