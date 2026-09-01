@@ -8,6 +8,7 @@ import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService;
+import com.huanjing.geo.module.content.wechat.WechatFuncInfoValidator;
 import com.huanjing.geo.module.content.wechat.WechatHtmlRewriter;
 import com.huanjing.geo.module.content.wechat.WechatMediaService;
 import com.huanjing.geo.module.content.wechat.WechatMpClient;
@@ -35,7 +36,7 @@ import static org.mockito.Mockito.when;
 
 class WechatMpAdapterTest {
 
-    private final WechatMpAdapter adapter = new WechatMpAdapter(null, null, null, null, null, null, null, null);
+    private final WechatMpAdapter adapter = new WechatMpAdapter(null, null, null, null, null, null, null, null, null);
 
     @Test
     void selfMediaIdentity_matchesWechatPlatform() {
@@ -85,6 +86,19 @@ class WechatMpAdapterTest {
 
         assertEquals(401, ex.getCode());
         assertEquals("wechat_mp account not active, please re-authorize", ex.getMessage());
+        verify(fixture.wechatMpClient, never()).getMaterialCount(any());
+    }
+
+    @Test
+    void preflightCredential_unconfirmedPermissionRejectsBeforePlatformCall() {
+        Fixture fixture = fixture(false);
+        when(fixture.funcInfoValidator.hasDraftPermissions(fixture.account.getScopeJson())).thenReturn(false);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> fixture.adapter.preflightCredential(fixture.account));
+
+        assertEquals(61016, ex.getCode());
+        assertEquals("微信公众号素材、草稿或发布接口权限尚未确认，请在公众号后台确认权限后重新授权", ex.getMessage());
         verify(fixture.wechatMpClient, never()).getMaterialCount(any());
     }
 
@@ -164,6 +178,24 @@ class WechatMpAdapterTest {
         assertEquals("api unauthorized rid: rid-from-wechat", result.getResponseBody());
         assertFalse(result.isRetryable());
         verify(fixture.wechatMpClient, never()).submitPublish(any(), any());
+    }
+
+    @Test
+    void submitToTarget_mapsWechatPermissionConfirmationRequiredToActionableFailure() {
+        Fixture fixture = fixture(true);
+        TargetContext.SelfMediaTarget target = target(fixture.account, Map.of("publishAction", "publish"));
+        when(fixture.wechatMpClient.addDraft(eq("access-token"), any()))
+                .thenThrow(new BizException(61016,
+                        "function category of API need be confirmed by component rid: test-rid"));
+
+        SubmitResult result = fixture.adapter.submitToTarget(article(), "markdown body", target);
+
+        assertFalse(result.isSuccess());
+        assertEquals(61016, result.getStatusCode());
+        assertEquals("WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED", result.getFailureKind());
+        assertEquals("当前公众号的素材、草稿或发布接口权限尚未确认。请在公众号后台完成权限确认，并在品牌详情重新授权公众号。",
+                result.getErrorMessage());
+        assertFalse(result.isRetryable());
     }
 
     @Test
@@ -266,6 +298,7 @@ class WechatMpAdapterTest {
         WechatTokenAwareExecutor tokenAwareExecutor = mock(WechatTokenAwareExecutor.class);
         WechatMpClient wechatMpClient = mock(WechatMpClient.class);
         WechatOpenPlatformProperties properties = new WechatOpenPlatformProperties();
+        WechatFuncInfoValidator funcInfoValidator = mock(WechatFuncInfoValidator.class);
         BrandService brandService = mock(BrandService.class);
         ObjectMapper objectMapper = new ObjectMapper();
 
@@ -275,6 +308,7 @@ class WechatMpAdapterTest {
         brand.setBrandName("三禾");
 
         when(brandService.requireExistingBrand(10L)).thenReturn(brand);
+        when(funcInfoValidator.hasDraftPermissions(account.getScopeJson())).thenReturn(true);
         when(mediaService.ensureThumbMediaId(account, 10L, 100L)).thenReturn("thumb_media_id");
         when(articleRenderService.renderOrFallbackForPublish(any(), eq("markdown body"))).thenReturn("<p>markdown body</p>");
         when(htmlRewriter.rewrite(eq("<p>markdown body</p>"), any())).thenReturn("<p>wechat body</p>");
@@ -292,10 +326,11 @@ class WechatMpAdapterTest {
                 tokenAwareExecutor,
                 wechatMpClient,
                 properties,
+                funcInfoValidator,
                 brandService,
                 objectMapper
         );
-        return new Fixture(tested, account, wechatMpClient, mediaService);
+        return new Fixture(tested, account, wechatMpClient, mediaService, funcInfoValidator);
     }
 
     private SelfMediaAccount account() {
@@ -327,6 +362,7 @@ class WechatMpAdapterTest {
         return task;
     }
 
-    private record Fixture(WechatMpAdapter adapter, SelfMediaAccount account, WechatMpClient wechatMpClient, WechatMediaService mediaService) {
+    private record Fixture(WechatMpAdapter adapter, SelfMediaAccount account, WechatMpClient wechatMpClient,
+                           WechatMediaService mediaService, WechatFuncInfoValidator funcInfoValidator) {
     }
 }

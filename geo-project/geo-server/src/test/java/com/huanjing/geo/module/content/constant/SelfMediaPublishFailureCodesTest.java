@@ -20,6 +20,18 @@ class SelfMediaPublishFailureCodesTest {
     }
 
     @Test
+    void wechatPermissionConfirmationRequiredHasActionableMetadata() {
+        assertEquals("WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED",
+                SelfMediaPublishFailureCodes.classifyByMessage(
+                        "function category of API need be confirmed by component rid: test-rid"));
+        assertEquals("微信公众号接口权限待确认",
+                SelfMediaPublishFailureCodes.label("WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED"));
+        assertEquals("重新授权公众号",
+                SelfMediaPublishFailureCodes.actionLabel("WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED"));
+        assertFalse(SelfMediaPublishFailureCodes.retryable("WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED"));
+    }
+
+    @Test
     void platformTabLifecycleFailuresAreRetryable() {
         assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("PLATFORM_TAB_GONE"));
         assertTrue(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable("PLATFORM_TAB_REDIRECTED"));

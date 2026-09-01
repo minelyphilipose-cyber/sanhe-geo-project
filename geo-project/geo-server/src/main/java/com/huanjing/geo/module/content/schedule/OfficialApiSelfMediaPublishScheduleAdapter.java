@@ -217,11 +217,17 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
 
     private boolean preflightRetryable(BizException ex) {
         int code = ex == null ? 0 : ex.getCode();
+        if (code == 61016) {
+            return false;
+        }
         return code == 429 || code >= 500;
     }
 
     private String preflightFailureCode(BizException ex) {
         int code = ex == null ? 0 : ex.getCode();
+        if (code == 61016) {
+            return "WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED";
+        }
         if (code == 429) {
             return "OFFICIAL_API_CREDENTIAL_REFRESHING";
         }
@@ -242,7 +248,7 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         if (code == 401 || code == 40001 || code == 42001 || code == 61023) {
             return FailureKind.AUTH_EXPIRED;
         }
-        if (code == 403 || code == 48001) {
+        if (code == 403 || code == 48001 || code == 61016) {
             return FailureKind.PERMISSION;
         }
         if (code == 429) {

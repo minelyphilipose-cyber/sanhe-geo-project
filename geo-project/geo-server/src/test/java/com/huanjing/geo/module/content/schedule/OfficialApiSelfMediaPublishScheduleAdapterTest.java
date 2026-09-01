@@ -195,6 +195,37 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
     }
 
     @Test
+    void schedulePreflightUnconfirmedWechatPermissionIsActionable() {
+        adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
+                platformRouter,
+                List.of(new PreflightFailingAdapter(new BizException(61016, "wechat permission confirmation required"))),
+                scheduleMapper,
+                distributionTaskMapper,
+                articleDraftMapper,
+                articleDraftVersionMapper,
+                articleBodyProvider,
+                selfMediaAccountMapper,
+                projectMapper,
+                imagePublicUrlRewriter,
+                materialSelectionService,
+                capabilityService,
+                new ObjectMapper()
+        );
+        SelfMediaPublishSchedule row = scheduleRow();
+        when(scheduleMapper.selectById(10L)).thenReturn(row);
+        when(distributionTaskMapper.selectOne(any())).thenReturn(null);
+        when(selfMediaAccountMapper.selectById(40L)).thenReturn(account());
+
+        ScheduleExecutionResult result = adapter.schedule(SelfMediaPublishScheduleVO.from(row));
+
+        assertEquals(false, result.success());
+        assertEquals("WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED", result.failureCode());
+        assertEquals(null, result.nextAttemptAt());
+        verify(distributionTaskMapper, never()).insert(any());
+        verify(articleDraftMapper, never()).selectById(any());
+    }
+
+    @Test
     void schedulePreflightCredentialRefreshingReturnsRetry() {
         adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
                 platformRouter,

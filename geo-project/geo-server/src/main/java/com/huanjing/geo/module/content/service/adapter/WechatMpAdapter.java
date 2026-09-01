@@ -9,6 +9,7 @@ import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService;
+import com.huanjing.geo.module.content.wechat.WechatFuncInfoValidator;
 import com.huanjing.geo.module.content.wechat.WechatHtmlRewriter;
 import com.huanjing.geo.module.content.wechat.WechatMediaService;
 import com.huanjing.geo.module.content.wechat.WechatMpClient;
@@ -31,7 +32,9 @@ import org.springframework.util.StringUtils;
 public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     public static final String PLATFORM = "wechat_mp";
     private static final int WECHAT_API_UNAUTHORIZED_CODE = 48001;
+    private static final int WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED_CODE = 61016;
     private static final String WECHAT_API_UNAUTHORIZED = "WECHAT_API_UNAUTHORIZED";
+    private static final String WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED = "WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED";
     private static final String WECHAT_COVER_MATERIAL_NOT_FOUND = "WECHAT_COVER_MATERIAL_NOT_FOUND";
     private static final String WECHAT_COVER_MATERIAL_INVALID = "WECHAT_COVER_MATERIAL_INVALID";
     private static final String WECHAT_COVER_FILE_MISSING = "WECHAT_COVER_FILE_MISSING";
@@ -46,6 +49,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     private final WechatTokenAwareExecutor tokenAwareExecutor;
     private final WechatMpClient wechatMpClient;
     private final WechatOpenPlatformProperties openPlatformProperties;
+    private final WechatFuncInfoValidator funcInfoValidator;
     private final BrandService brandService;
     private final ObjectMapper objectMapper;
 
@@ -71,6 +75,10 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
         }
         if (!"active".equals(account.getStatus())) {
             throw new BizException(401, "wechat_mp account not active, please re-authorize");
+        }
+        if (!funcInfoValidator.hasDraftPermissions(account.getScopeJson())) {
+            throw new BizException(WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED_CODE,
+                    "微信公众号素材、草稿或发布接口权限尚未确认，请在公众号后台确认权限后重新授权");
         }
         tokenAwareExecutor.execute(account, accessToken -> {
             wechatMpClient.getMaterialCount(accessToken);
@@ -304,6 +312,10 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     }
 
     private String failureKind(int code, String message) {
+        if (code == WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED_CODE
+                || containsIgnoreCase(message, "function category of api need be confirmed")) {
+            return WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED;
+        }
         if (code == WECHAT_API_UNAUTHORIZED_CODE || containsIgnoreCase(message, "api unauthorized")) {
             return WECHAT_API_UNAUTHORIZED;
         }
@@ -329,7 +341,8 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     }
 
     private boolean retryable(int code) {
-        if (code == WECHAT_API_UNAUTHORIZED_CODE) {
+        if (code == WECHAT_API_UNAUTHORIZED_CODE
+                || code == WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED_CODE) {
             return false;
         }
         return code == 40001 || code == 42001 || code == 45009 || code == 45011 || code == 429 || code >= 500;
@@ -339,7 +352,11 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
         if (ex == null) {
             return "";
         }
-        if (WECHAT_API_UNAUTHORIZED.equals(failureKind(ex.getCode(), ex.getMessage()))) {
+        String failureKind = failureKind(ex.getCode(), ex.getMessage());
+        if (WECHAT_API_PERMISSION_CONFIRMATION_REQUIRED.equals(failureKind)) {
+            return "当前公众号的素材、草稿或发布接口权限尚未确认。请在公众号后台完成权限确认，并在品牌详情重新授权公众号。";
+        }
+        if (WECHAT_API_UNAUTHORIZED.equals(failureKind)) {
             return switch (operationStage) {
                 case STAGE_PREPARE_COVER_MATERIAL, STAGE_RENDER_CONTENT ->
                         "当前公众号缺少素材上传或图片处理权限。请确认客户公众号具备素材管理权限，并重新授权公众号。";
@@ -351,7 +368,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
                         "当前公众号缺少发布所需授权。请在品牌详情重新授权公众号，并确认授权时已勾选素材、草稿和发布相关权限。";
             };
         }
-        return switch (failureKind(ex.getCode(), ex.getMessage())) {
+        return switch (failureKind) {
             case WECHAT_COVER_MATERIAL_NOT_FOUND ->
                     "公众号封面素材不存在或不属于当前品牌。请打开文章详情更换封面素材后重新创建排期。";
             case WECHAT_COVER_MATERIAL_INVALID ->
