@@ -108,6 +108,32 @@ class OpenAiCompatibleLlmInvokerTest {
         assertEquals("OK", result.responseText());
     }
 
+    @Test
+    void invoke_disablesThinkingOnlyForKimiK26() throws Exception {
+        FakeHttpClient kimiClient = successfulClient();
+        FakeHttpClient openAiClient = successfulClient();
+
+        new OpenAiCompatibleLlmInvoker(kimiClient, new ObjectMapper())
+                .invoke("hello", config("kimi", "kimi-k2.6", 0, 10_000, 30_000, 0));
+        new OpenAiCompatibleLlmInvoker(openAiClient, new ObjectMapper())
+                .invoke("hello", config("openai", "gpt-test", 0, 10_000, 30_000, 0));
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        var kimiRequest = objectMapper.readTree(kimiClient.lastBody);
+        var openAiRequest = objectMapper.readTree(openAiClient.lastBody);
+        assertEquals("disabled", kimiRequest.path("thinking").path("type").asText());
+        assertTrue(kimiRequest.path("temperature").isMissingNode());
+        assertTrue(kimiRequest.path("reasoning").isMissingNode());
+        assertTrue(openAiRequest.path("thinking").isMissingNode());
+        assertEquals(0.2D, openAiRequest.path("temperature").asDouble());
+    }
+
+    private FakeHttpClient successfulClient() {
+        return new FakeHttpClient(
+                new LlmHttpClient.HttpResponse(200, "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}")
+        );
+    }
+
     private LlmStructuredException findStructured(Throwable error) {
         Throwable current = error;
         while (current != null) {
@@ -123,10 +149,19 @@ class OpenAiCompatibleLlmInvokerTest {
                                   Integer connectTimeoutMs,
                                   Integer requestTimeoutMs,
                                   Integer maxRetry) {
+        return config("openai", "gpt-test", rateLimitQps, connectTimeoutMs, requestTimeoutMs, maxRetry);
+    }
+
+    private LlmModelConfig config(String platformCode,
+                                  String modelId,
+                                  int rateLimitQps,
+                                  Integer connectTimeoutMs,
+                                  Integer requestTimeoutMs,
+                                  Integer maxRetry) {
         return new LlmModelConfig(
-                "openai",
-                "OpenAI",
-                "gpt-test",
+                platformCode,
+                platformCode,
+                modelId,
                 "GPT Test",
                 "https://api.example.com/v1",
                 "secret",
@@ -146,6 +181,7 @@ class OpenAiCompatibleLlmInvokerTest {
         private int callCount;
         private int lastConnectTimeoutMs;
         private int lastRequestTimeoutMs;
+        private String lastBody;
 
         private FakeHttpClient(Object... responses) {
             this.responses = responses;
@@ -159,6 +195,7 @@ class OpenAiCompatibleLlmInvokerTest {
                                      int requestTimeoutMs) throws Exception {
             this.lastConnectTimeoutMs = connectTimeoutMs;
             this.lastRequestTimeoutMs = requestTimeoutMs;
+            this.lastBody = body;
             Object response = responses[Math.min(callCount, responses.length - 1)];
             callCount++;
             if (response instanceof Exception ex) {

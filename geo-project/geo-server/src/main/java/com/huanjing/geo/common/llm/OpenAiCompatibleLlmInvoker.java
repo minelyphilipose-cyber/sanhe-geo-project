@@ -169,10 +169,16 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
 
     private String buildRequestBody(String prompt, LlmModelConfig modelConfig) throws Exception {
         Map<String, Object> payload = new LinkedHashMap<>();
+        boolean disableKimiThinking = isKimiK26(modelConfig);
         payload.put("model", modelConfig.modelId());
-        payload.put("temperature", modelConfig.temperature());
+        if (!disableKimiThinking) {
+            payload.put("temperature", modelConfig.temperature());
+        }
         if (modelConfig.maxTokens() != null) {
             payload.put("max_tokens", modelConfig.maxTokens());
+        }
+        if (disableKimiThinking) {
+            payload.put("thinking", Map.of("type", "disabled"));
         }
         List<Map<String, String>> messages = new ArrayList<>();
         if (StringUtils.hasText(modelConfig.systemPrompt())) {
@@ -181,6 +187,11 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
         messages.add(Map.of("role", "user", "content", prompt));
         payload.put("messages", messages);
         return objectMapper.writeValueAsString(payload);
+    }
+
+    private boolean isKimiK26(LlmModelConfig modelConfig) {
+        return "kimi".equalsIgnoreCase(modelConfig.platformCode())
+                && "kimi-k2.6".equalsIgnoreCase(modelConfig.modelId());
     }
 
     private InvocationResponse extractResponse(String body) {
