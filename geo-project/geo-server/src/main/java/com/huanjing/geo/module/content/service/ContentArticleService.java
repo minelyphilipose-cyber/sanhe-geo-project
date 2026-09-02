@@ -1209,7 +1209,8 @@ public class ContentArticleService {
     }
 
     private DuplicateResult checkDuplicate(ArticleDraft article, String newTitle) {
-        if (!StringUtils.hasText(newTitle)) {
+        if (!StringUtils.hasText(newTitle)
+                || isDouyinSelfMedia(article.getChannelGroupCode(), article.getChannelSubCode(), article.getContentStyle())) {
             return DuplicateResult.none();
         }
         List<ArticleDraft> candidates = articleDraftMapper.selectList(

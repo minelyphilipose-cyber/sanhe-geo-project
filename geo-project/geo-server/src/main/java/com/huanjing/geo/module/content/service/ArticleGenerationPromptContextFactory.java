@@ -193,7 +193,13 @@ public class ArticleGenerationPromptContextFactory {
         BatchArticlePromptBuilder.PromptBuildResult prompt = resolution.template() == null
                 ? promptBuilder.build(input)
                 : v2
-                ? promptAssemblerV2.assemble(input, resolution.template(), resolution.version(), runtimePolicy, medicalContext != null)
+                ? promptAssemblerV2.assemble(
+                        input,
+                        resolution.template(),
+                        resolution.version(),
+                        runtimePolicy,
+                        medicalContext != null,
+                        promptBuilder.resolvePublishedDouyinTitles(input))
                 : promptBuilder.buildFromTemplate(input, resolution.template(), resolution.version());
         if (medicalContext != null) {
             prompt = v2

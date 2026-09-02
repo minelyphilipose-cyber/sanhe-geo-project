@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
 @Service
 @RequiredArgsConstructor
 public class DouyinImageTextPublishSnapshotService {
-    private static final int MIN_IMAGE_COUNT = 4;
+    private static final int MIN_IMAGE_COUNT = 1;
     private static final int MAX_IMAGE_COUNT = 6;
     private static final int MAX_TITLE_LENGTH = 20;
     private static final int MAX_DESCRIPTION_LENGTH = 1000;
@@ -93,7 +93,7 @@ public class DouyinImageTextPublishSnapshotService {
                 ? distinctPositiveIds(autoSelectedImageMaterialIds)
                 : requestedMaterialIds;
         if (materialIds.size() < MIN_IMAGE_COUNT || materialIds.size() > MAX_IMAGE_COUNT) {
-            throw new BizException(400, "系统从封面图和插图文件夹自动归集的抖音图文图片不足4张");
+            throw new BizException(400, "抖音图文图片数量必须为1至6张");
         }
         for (Long materialId : materialIds) {
             BrandMaterial material = brandMaterialMapper.selectById(materialId);

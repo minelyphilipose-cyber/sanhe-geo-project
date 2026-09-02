@@ -502,6 +502,41 @@ class ArticlePromptAssemblerV2Test {
         assertFalse(costPrompt.contains("示范提纲"));
     }
 
+    @Test
+    void addsCompleteDouyinRulesAndAtMostFivePublishedTitles() throws Exception {
+        Project project = new Project();
+        project.setId(1L);
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("测试品牌");
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(10L);
+        template.setArticleTypeCode("social_note");
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(11L);
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "装修前要不要预留全屋智能", null,
+                null, null, List.of("全屋智能"), "social_note", "douyin", "medium", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+        );
+        ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
+                ArticlePromptChannels.SELF_MEDIA, "douyin", TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(
+                input, template, version, policy, false,
+                List.of("标题一", "标题二", "标题三", "标题四", "标题五", "标题六"));
+
+        assertTrue(result.userPrompt().contains("# 抖音图文自然行文规则"));
+        assertTrue(result.userPrompt().contains("不要按照“项目是什么—设备是什么—优势是什么”的说明书逻辑机械罗列"));
+        assertTrue(result.userPrompt().contains("不要把小节写成彼此独立的知识卡片"));
+        assertTrue(result.userPrompt().contains("这些标题只用于了解近期发布语境"));
+        assertTrue(result.userPrompt().contains("- 标题五"));
+        assertFalse(result.userPrompt().contains("标题六"));
+        JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
+        assertEquals(5, snapshot.path("recentTitles").size());
+        assertEquals("v2_douyin_natural_20260902", snapshot.path("promptRevision").asText());
+    }
+
     private int occurrences(String source, String target) {
         return (source.length() - source.replace(target, "").length()) / target.length();
     }

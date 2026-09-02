@@ -18,12 +18,14 @@ import org.springframework.util.StringUtils;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -33,7 +35,9 @@ public class SelfMediaPublishMaterialSelectionService {
     private static final String COVER_FOLDER_NAME = "封面";
     private static final String ILLUSTRATION_FOLDER_PREFIX = "插图";
     private static final String BRAND_IMAGE_CATEGORY = "brand_image";
-    private static final int DOUYIN_IMAGE_TEXT_MAX_IMAGES = 6;
+    private static final int DOUYIN_IMAGE_TEXT_POOL_MAX_IMAGES = 6;
+    private static final int DOUYIN_IMAGE_TEXT_AUTO_MIN_IMAGES = 2;
+    private static final int DOUYIN_IMAGE_TEXT_AUTO_MAX_IMAGES = 4;
     private static final long DOUYIN_IMAGE_TEXT_MAX_IMAGE_BYTES = 50L * 1024L * 1024L;
     private static final Pattern MARKDOWN_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*]\\(([^\\s)]+)(?:\\s+\"[^\"]*\")?\\)");
     private static final Pattern MATERIAL_API_PATH_PATTERN = Pattern.compile(".*/api/brands/(\\d+)/materials/(\\d+)/(?:stream|preview-url)$");
@@ -56,9 +60,8 @@ public class SelfMediaPublishMaterialSelectionService {
     }
 
     /**
-     * Reuses the existing article material selection rules for Douyin image-text
-     * publishing, then fills the list from project-related illustration folders.
-     * The article cover is always placed first when it can be resolved.
+     * Builds a small candidate pool from the article cover and illustrations,
+     * then chooses and orders the automatic Douyin images without cover priority.
      */
     public List<Long> selectDouyinImageTextImages(Project project, ArticleDraft article, String markdown) {
         Long brandId = materialBrandId(project, article);
@@ -67,15 +70,18 @@ public class SelfMediaPublishMaterialSelectionService {
         }
         List<Long> contentImageIds = resolveImageMaterialIds(brandId, markdown);
         Long coverId = resolveCoverMaterialId(brandId, article, contentImageIds);
-        LinkedHashSet<Long> selected = new LinkedHashSet<>();
-        addDouyinImage(brandId, selected, coverId);
+        LinkedHashSet<Long> candidates = new LinkedHashSet<>();
+        addDouyinImage(brandId, candidates, coverId);
         for (Long materialId : contentImageIds) {
-            addDouyinImage(brandId, selected, materialId);
-            if (selected.size() >= DOUYIN_IMAGE_TEXT_MAX_IMAGES) {
-                return List.copyOf(selected);
+            addDouyinImage(brandId, candidates, materialId);
+            if (candidates.size() >= DOUYIN_IMAGE_TEXT_POOL_MAX_IMAGES) {
+                break;
             }
         }
         for (Long folderId : illustrationFolderIds(brandId, project == null ? null : project.getId())) {
+            if (candidates.size() >= DOUYIN_IMAGE_TEXT_POOL_MAX_IMAGES) {
+                break;
+            }
             List<BrandMaterial> materials = materialMapper.selectList(new LambdaQueryWrapper<BrandMaterial>()
                     .eq(BrandMaterial::getBrandId, brandId)
                     .eq(BrandMaterial::getCategory, BRAND_IMAGE_CATEGORY)
@@ -85,18 +91,26 @@ public class SelfMediaPublishMaterialSelectionService {
                     .orderByDesc(BrandMaterial::getId));
             for (BrandMaterial material : materials) {
                 if (isUsableDouyinImage(brandId, material)) {
-                    selected.add(material.getId());
+                    candidates.add(material.getId());
                 }
-                if (selected.size() >= DOUYIN_IMAGE_TEXT_MAX_IMAGES) {
-                    return List.copyOf(selected);
+                if (candidates.size() >= DOUYIN_IMAGE_TEXT_POOL_MAX_IMAGES) {
+                    break;
                 }
             }
         }
-        return List.copyOf(selected);
+        List<Long> shuffled = new ArrayList<>(candidates);
+        Collections.shuffle(shuffled);
+        int max = Math.min(DOUYIN_IMAGE_TEXT_AUTO_MAX_IMAGES, shuffled.size());
+        if (max == 0) {
+            return List.of();
+        }
+        int min = Math.min(DOUYIN_IMAGE_TEXT_AUTO_MIN_IMAGES, max);
+        int count = ThreadLocalRandom.current().nextInt(min, max + 1);
+        return List.copyOf(shuffled.subList(0, count));
     }
 
     private void addDouyinImage(Long brandId, Set<Long> selected, Long materialId) {
-        if (materialId == null || selected.size() >= DOUYIN_IMAGE_TEXT_MAX_IMAGES) {
+        if (materialId == null || selected.size() >= DOUYIN_IMAGE_TEXT_POOL_MAX_IMAGES) {
             return;
         }
         BrandMaterial material = materialMapper.selectById(materialId);

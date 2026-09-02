@@ -56,7 +56,7 @@ public class ArticlePromptAssemblerV2 {
             ArticlePromptTemplateVersion version,
             ArticleRuntimePolicy runtimePolicy
     ) {
-        return assemble(input, template, version, runtimePolicy, false);
+        return assemble(input, template, version, runtimePolicy, false, List.of());
     }
 
     public BatchArticlePromptBuilder.PromptBuildResult assemble(
@@ -66,8 +66,20 @@ public class ArticlePromptAssemblerV2 {
             ArticleRuntimePolicy runtimePolicy,
             boolean specialIndustry
     ) {
+        return assemble(input, template, version, runtimePolicy, specialIndustry, List.of());
+    }
+
+    public BatchArticlePromptBuilder.PromptBuildResult assemble(
+            BatchArticlePromptBuilder.PromptBuildInput input,
+            ArticlePromptTemplate template,
+            ArticlePromptTemplateVersion version,
+            ArticleRuntimePolicy runtimePolicy,
+            boolean specialIndustry,
+            List<String> recentTitles
+    ) {
         boolean neutralEducationMode = specialIndustry
                 && XiaohongshuArticlePolicies.isNeutralEducationTemplate(template);
+        List<String> normalizedRecentTitles = nonEmpty(recentTitles).stream().limit(5).toList();
         List<String> omittedMaterialKeys = new ArrayList<>();
         ArticleContentLengthPolicy contentLengthPolicy = contentLengthPolicyResolver.resolve(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode(), input.length(), neutralEducationMode);
@@ -75,6 +87,10 @@ public class ArticlePromptAssemblerV2 {
         section(prompt, "真实性与硬边界", truthfulnessRules(input.forbiddenPhrases()));
         section(prompt, "全局写作原则", GLOBAL_WRITING_RULES);
         section(prompt, "当前渠道与写作视角", channelDirection(runtimePolicy, neutralEducationMode));
+        if (isDouyin(runtimePolicy)) {
+            section(prompt, "抖音图文自然行文规则", BatchArticlePromptBuilder.DOUYIN_PLATFORM_POLICY);
+            section(prompt, "近期已发布抖音图文标题", recentDouyinTitleContext(normalizedRecentTitles));
+        }
         section(prompt, "当前文章任务", templateTask(input, template));
         section(prompt, "严格审核平台品牌表达要求",
                 strictEditorialBrandDirection(input, template, runtimePolicy, specialIndustry, neutralEducationMode));
@@ -90,12 +106,14 @@ public class ArticlePromptAssemblerV2 {
         Map<String, Object> promptSnapshot = baseSnapshot(
                 input, template, version, runtimePolicy, contentLengthPolicy, omittedMaterialKeys, specialIndustry);
         promptSnapshot.put("xiaohongshuContentMode", neutralEducationMode ? "neutral_education" : "default");
+        promptSnapshot.put("recentTitles", normalizedRecentTitles);
         promptSnapshot.put("systemPrompt", SYSTEM_PROMPT);
         promptSnapshot.put("userPrompt", prompt.toString().trim());
 
         Map<String, Object> inputSnapshot = baseSnapshot(
                 input, template, version, runtimePolicy, contentLengthPolicy, omittedMaterialKeys, specialIndustry);
         inputSnapshot.put("xiaohongshuContentMode", neutralEducationMode ? "neutral_education" : "default");
+        inputSnapshot.put("recentTitles", normalizedRecentTitles);
         inputSnapshot.put("projectId", input.project() == null ? null : input.project().getId());
         inputSnapshot.put("sourceProjectId", input.sourceProjectId());
         inputSnapshot.put("sourceBrandId", input.sourceBrandId());
@@ -130,7 +148,9 @@ public class ArticlePromptAssemblerV2 {
                                              boolean specialIndustry) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("promptContract", PROMPT_CONTRACT);
-        snapshot.put("promptRevision", "v2_xiaohongshu_converged_20260804");
+        snapshot.put("promptRevision", isDouyin(runtimePolicy)
+                ? "v2_douyin_natural_20260902"
+                : "v2_xiaohongshu_converged_20260804");
         snapshot.put("templateId", template == null ? null : template.getId());
         snapshot.put("templateVersionId", version == null ? null : version.getId());
         snapshot.put("templateVersionNo", version == null ? null : version.getVersionNo());
@@ -189,6 +209,24 @@ public class ArticlePromptAssemblerV2 {
                     : "采用客户官方身份表达，可使用“我们”或自然省略主语；不要虚构个人经历，也不要强行反复强调官方身份。";
         };
         return channelGuide + "\n" + perspectiveGuide;
+    }
+
+    private boolean isDouyin(ArticleRuntimePolicy policy) {
+        return ArticlePromptChannels.SELF_MEDIA.equals(policy.channelGroupCode())
+                && "douyin".equals(ArticlePromptChannels.canonicalSubCode(
+                policy.channelGroupCode(), policy.channelSubCode()));
+    }
+
+    private String recentDouyinTitleContext(List<String> recentTitles) {
+        if (recentTitles.isEmpty()) {
+            return null;
+        }
+        StringBuilder text = new StringBuilder("以下仅列出最近30天内实际发布的同品牌抖音图文标题，最多5篇：");
+        for (String title : recentTitles) {
+            text.append("\n- ").append(title);
+        }
+        return text.append("\n这些标题只用于了解近期发布语境，不做完全重复或明显同构判断，不参与正文内容质检，也不要据此安排正文结构。")
+                .toString();
     }
 
     private String templateTask(BatchArticlePromptBuilder.PromptBuildInput input,

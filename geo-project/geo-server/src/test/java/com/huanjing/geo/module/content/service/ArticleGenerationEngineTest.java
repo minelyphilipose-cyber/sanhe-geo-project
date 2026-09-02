@@ -21,6 +21,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
@@ -29,6 +31,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ArticleGenerationEngineTest {
+
+    @Test
+    void skipsTitleDuplicateJudgementForDouyinOnly() {
+        assertFalse(ArticleGenerationEngine.shouldCheckTitleDuplicate(
+                new ArticleGenerationEngine.StructureValidationContext("self_media", "douyin", false)));
+        assertTrue(ArticleGenerationEngine.shouldCheckTitleDuplicate(
+                new ArticleGenerationEngine.StructureValidationContext("self_media", "wechat", false)));
+        assertTrue(ArticleGenerationEngine.shouldCheckTitleDuplicate(null));
+    }
 
     @Test
     void generateUsesRouterWhenNoModelSpecified() throws Exception {

@@ -121,6 +121,7 @@ class ArticleAiDraftServiceTest {
         promptContextFactory = mock(ArticleGenerationPromptContextFactory.class);
         BatchArticlePromptBuilder promptBuilder = new BatchArticlePromptBuilder(
                 articleMapper,
+                mock(com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper.class),
                 sysDictItemMapper,
                 objectMapper,
                 mock(ArticlePromptVariableRegistry.class)

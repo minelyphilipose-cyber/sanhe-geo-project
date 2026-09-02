@@ -177,6 +177,23 @@ class ArticleAutoImageInsertionServiceTest {
     }
 
     @Test
+    void insertForChannel_randomizesDouyinImageCountBetweenTwoAndFour() {
+        List<BrandMaterial> images = java.util.stream.LongStream.rangeClosed(1, 5)
+                .mapToObj(id -> material(id, "配图" + id + ".png", "https://cdn.example.com/" + id + ".png"))
+                .toList();
+        when(folderMapper.selectList(any())).thenReturn(List.of(folder(100L, "插图_1")));
+        when(brandMaterialMapper.selectList(any())).thenReturn(images);
+        when(publicUrlService.buildPublicStreamUrl(any())).thenAnswer(invocation -> {
+            BrandMaterial material = invocation.getArgument(0);
+            return "https://app.example.com/api/public/brand-materials/" + material.getId() + "/stream";
+        });
+
+        String result = service.insertForChannel(project(), "self_media", "douyin", "正文", null);
+
+        assertThat(countOccurrences(result, "api/public/brand-materials/")).isBetween(2, 4);
+    }
+
+    @Test
     void insertForChannel_excludesExistingMarkdownImagesAndCoverImage() {
         BrandMaterial existing = material(1L, "已有图.png", "https://cdn.example.com/existing.png");
         BrandMaterial cover = material(2L, "封面.png", "https://cdn.example.com/cover.png");

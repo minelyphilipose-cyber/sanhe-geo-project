@@ -1431,8 +1431,8 @@ function pruneDouyinImageTextTaskStates(states = {}, nowMs = Date.now()) {
 async function prepareDouyinImageTextEditor(config, session, tabId, task, payload) {
   const taskId = Number(task.taskId || payload.taskId)
   const expectedImageCount = Number(payload.expectedImageCount || payload.imageUrls?.length || 0)
-  if (!Number.isInteger(expectedImageCount) || expectedImageCount < 4 || expectedImageCount > 6) {
-    throw new Error(`DOUYIN_IMAGE_COUNT_INVALID：抖音图文图片数量必须为4–6张，实际=${expectedImageCount}`)
+  if (!Number.isInteger(expectedImageCount) || expectedImageCount < 1 || expectedImageCount > 6) {
+    throw new Error(`DOUYIN_IMAGE_COUNT_INVALID：抖音图文图片数量必须为1–6张，实际=${expectedImageCount}`)
   }
   if (!Array.isArray(payload.imageUrls) || payload.imageUrls.length !== expectedImageCount) {
     throw new Error('DOUYIN_IMAGE_URLS_INVALID：抖音图文图片地址与预期数量不一致')

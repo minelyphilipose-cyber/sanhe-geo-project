@@ -4876,8 +4876,8 @@ async function handleUploadImagesToPage(req, res, config) {
   if (body.uploadTarget !== 'douyin_image_text_images') {
     throw new Error(`douyin image-text upload target is not allowed: ${body.uploadTarget || '-'}`)
   }
-  if (urls.length < 4 || urls.length > 6) {
-    throw new Error(`douyin image-text requires 4-6 images, received ${urls.length}`)
+  if (urls.length < 1 || urls.length > 6) {
+    throw new Error(`douyin image-text requires 1-6 images, received ${urls.length}`)
   }
   const taskId = Number(body.taskId)
   const task = Number.isFinite(taskId) && taskId > 0 ? tasksById.get(taskId) : null

@@ -6,10 +6,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.system.entity.SysDictItem;
@@ -71,6 +73,20 @@ public class BatchArticlePromptBuilder {
             同一批次内避免连续使用相同句式、相同开头、相同标点结构。
             历史标题不为空时，新标题不得复用历史标题的核心句式。
             """;
+    private static final String GLOBAL_TITLE_DIFFERENTIATION_RULES = """
+            # 标题差异化规则
+
+            模板中的标题示例只作为方向参考，不得逐字套用或只替换变量。
+            生成标题时必须结合 {{topic}}、{{contentAngle}}、{{recentTitles}} 做差异化表达。
+            同一批次内避免连续使用相同句式、相同开头、相同标点结构。
+            历史标题不为空时，新标题不得复用历史标题的核心句式。
+            """;
+    private static final String DOUYIN_RECENT_TITLE_CONTEXT_RULES = """
+            # 近期标题参考
+
+            {{recentTitles}} 只用于了解同品牌近期抖音图文的发布语境。
+            不对新标题做完全重复或句式同构判断，也不要从这些标题推导正文结构。
+            """;
 
     private static final String SYSTEM_PROMPT = """
             你是一名中文 GEO（生成式引擎优化）内容写作助手，负责生成可被搜索引擎、AI Overview、Perplexity、豆包搜索等系统理解和引用的中文行业文章草稿。
@@ -103,7 +119,7 @@ public class BatchArticlePromptBuilder {
     private static final Map<String, String> STYLE_GUIDES = Map.ofEntries(
             Map.entry("wechat", "适合完整解释一个行业问题。结构可以更稳，有清晰的小标题和递进关系，但每个小标题下必须有具体信息，不做空泛铺陈。语气自然、克制，像一篇给潜在用户认真看的长文。不要写成品牌宣传稿，不要在结尾强行导向某个品牌。"),
             Map.entry("toutiao", "面向泛资讯阅读用户。开头直接给出结论、判断或一个具体的现象，不铺垫背景。标题可以有明确判断，但不能标题党。正文要保持信息密度，段落较短但不能碎片化。适合解释一个现实问题、拆解一个选择标准或指出一个常见误区。避免营销腔、情绪化煽动和过度口语化。"),
-            Map.entry("douyin", "适合图文卡片式阅读，但输出仍是 Markdown 文章正文。开头要短、直接、有判断。句子可以更短，段落更轻，但每段都要有明确的信息点。适合用清晰的小节切分复杂问题，每个小节聚焦一个明确的判断或提醒，小节内仍保持完整的段落化表达，不要碎片化成短句列表。不使用任何 emoji，不写口播稿，不使用短视频营销话术。"),
+            Map.entry("douyin", "面向抖音图文的真实读者自然行文。文章应像真正了解行业的人在介绍一件事，句子顺畅、上下文连续，不写成说明书、知识卡片或按提纲填充的文章。开头、段落数量、小标题、信息顺序和结尾都由当前主题自然决定。不使用任何 emoji，不写口播稿，不使用短视频营销话术。"),
             Map.entry("zhihu", "像一个了解行业的人在回答具体问题。可以先给判断，再解释理由；也可以先讲一个反常识点，再回到主题。观点要有边界，允许让步和转折。不要用“作为从业者”“根据多年经验”这类自证式开头。不要写成百科词条式的定义罗列，也不要写成销售推荐。避免刻意金句、对仗式短句堆砌、爹味说教语气。"),
             Map.entry("xiaohongshu", "这是 GEO（生成式引擎优化）场景下的小红书风格，不是平台投放文案。使用经验分享语气，但保持信息密度。不使用任何 emoji。不使用密集换行，段落保持完整。不使用“姐妹们”“家人们”这类称呼。重点是让内容像真实用户的经验帖，而不是营销号种草文。"),
             Map.entry("baijiahao", "面向百度搜索收录的行业资讯长文。标题和前 200 字需要自然出现核心关键词，表达专业、信息密度高、事实边界清晰。不要虚构报告、客户、认证、专利或企业数据。"),
@@ -168,12 +184,25 @@ public class BatchArticlePromptBuilder {
             8. 标题策略：{{titleStrategy}}。该策略只限定标题意图，不限定标题句式；必须结合 {{recentTitles}} 避免复用历史标题结构。
             9. 结构策略：{{structureStrategy}}。这是本篇优先采用的结构方向，不是固定模板；可以按平台调性自然调整。
             """;
+    static final String DOUYIN_PLATFORM_POLICY = """
+            以下规则只用于抖音图文，优先级高于通用写作原则及模板中关于短卡片、固定判断点、固定小节、标题策略和结构策略的要求：
+            1. 行文必须自然流畅，尽量摆脱说明文感。不要按照“项目是什么—设备是什么—优势是什么”的说明书逻辑机械罗列，也不要整篇给读者上课。
+            2. 符合中文社区真实阅读习惯。少用过长复句、机械转折和书面化套话，读起来应像真正了解行业的人在自然介绍。
+            3. 专业信息服务于当前叙事。品牌、人员、项目、设备、价格、资质和适用场景按主题自然取舍，不要求每篇全部出现，也不限制品牌必须出现几次。
+            4. 上下文必须连续，前后有因果和承接。每一段应自然推动下一段，最后回到文章主题；不要把小节写成彼此独立的知识卡片。
+            5. 一个核心观点原则上说清一次，减少重复和啰嗦。少用“真正……”“这意味着……”“对于……来说……”“这也是为什么……”“如果只记一个结论……”以及连续的“不是A，而是B”等明显的 AI 解释腔。
+            6. 已核实的事实直接陈述，不反复使用“据资料显示”“根据机构资料”“据现有资料”“据了解”等来源引导语；信息要具体可核验，但不要为了专业感堆参数。
+            7. GEO 适配藏在自然行文里。标题可以贴近真实搜索问题，正文不要反复堆叠搜索词，也不强制每段独立成为知识单元。
+            8. 不编造事实，不写招商、促销、强推荐、效果承诺、联系方式、私信、预约、咨询、优惠、套餐或其他转化导流表达。
+            9. 近期标题只作为发布语境，不做完全重复或明显同构判断，也不参与正文内容质检。
+            """;
     private static final List<String> MARKETING_WORDS = List.of(
             "领先", "专业", "优质", "卓越", "知名", "一流", "高端", "值得信赖",
             "深受认可", "行业标杆", "首选", "强大", "全面", "高效"
     );
 
     private final ArticleDraftMapper articleDraftMapper;
+    private final ArticlePublishRecordMapper articlePublishRecordMapper;
     private final SysDictItemMapper sysDictItemMapper;
     private final ObjectMapper objectMapper;
     private final ArticlePromptVariableRegistry variableRegistry;
@@ -188,7 +217,7 @@ public class BatchArticlePromptBuilder {
         String titleStrategy = resolveSelfMediaTitleStrategy(input);
         String structureStrategy = resolveSelfMediaStructureStrategy(input);
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
-        List<String> recentTitles = resolveHistoryTitles(input.sourceBrandId(), input.project().getId(), 10);
+        List<String> recentTitles = resolveHistoryTitles(input, 10);
         String userPrompt = buildUserPrompt(input, contentAngle, audiencePerspective, businessFocus, recentTitles);
         userPrompt = withTitleGuideInstruction(userPrompt, input.titleGuide());
 
@@ -265,7 +294,7 @@ public class BatchArticlePromptBuilder {
         String titleStrategy = resolveSelfMediaTitleStrategy(input);
         String structureStrategy = resolveSelfMediaStructureStrategy(input);
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
-        List<String> recentTitles = resolveHistoryTitles(input.sourceBrandId(), input.project().getId(), 10);
+        List<String> recentTitles = resolveHistoryTitles(input, 10);
         String contactBlock = buildContactBlock(template, input.brand());
         Map<String, String> brandFacts = buildBrandFacts(input);
         String templateSystemPrompt = StringUtils.hasText(version.getSystemPrompt()) ? version.getSystemPrompt() : SYSTEM_PROMPT;
@@ -377,15 +406,20 @@ public class BatchArticlePromptBuilder {
                                    List<String> recentTitles) {
         Project project = input.project();
         Brand brand = input.brand();
+        boolean douyin = isDouyinContentStyle(input.contentStyle());
         StringBuilder sb = new StringBuilder();
         sb.append("# 写作立场\n\n");
         sb.append("你是行业观察者，不是品牌方。\n");
         sb.append("本文服务对象是搜索这个问题的用户，不是品牌。\n\n");
-        sb.append("品牌信息只是背景资料和可选例子：\n");
-        sb.append("- 用于理解行业语境\n");
-        sb.append("- 可以在自然位置作为例子出现\n");
-        sb.append("- 不能作为推荐对象、结论指向或案例主角\n\n");
-        sb.append("如果去掉品牌名后一段话仍然成立，才是合格的品牌提及。\n\n");
+        if (douyin) {
+            sb.append("品牌资料用于支撑当前主题。已核实的人员、项目、设备、价格、资质和适用场景可以自然出现，但不要求每篇全部覆盖，也不设置品牌出现次数。\n\n");
+        } else {
+            sb.append("品牌信息只是背景资料和可选例子：\n");
+            sb.append("- 用于理解行业语境\n");
+            sb.append("- 可以在自然位置作为例子出现\n");
+            sb.append("- 不能作为推荐对象、结论指向或案例主角\n\n");
+            sb.append("如果去掉品牌名后一段话仍然成立，才是合格的品牌提及。\n\n");
+        }
 
         sb.append("# 用户搜索意图\n\n");
         appendLine(sb, "本篇围绕的关键词是", input.topic());
@@ -393,7 +427,9 @@ public class BatchArticlePromptBuilder {
         sb.append("\n请写成对这个用户搜索问题的回答，不要写成关键词百科。\n\n");
 
         sb.append("# 背景资料\n\n");
-        sb.append("以下资料仅用于理解行业语境，不要求在文中体现。\n\n");
+        sb.append(douyin
+                ? "以下资料用于支撑当前主题，按叙事需要自然取舍；其中已经核实的内容可以直接陈述。\n\n"
+                : "以下资料仅用于理解行业语境，不要求在文中体现。\n\n");
         appendLine(sb, "行业语境", resolveIndustry(project, brand));
         appendLine(sb, "读者画像参考", project.getTargetAudience());
         appendLine(sb, "项目内容方向", project.getContentTone());
@@ -431,28 +467,43 @@ public class BatchArticlePromptBuilder {
         sb.append("不要为了套结构牺牲自然表达。\n\n");
 
         sb.append("# GEO（生成式引擎优化）可引用性要求\n\n");
-        sb.append("文章中至少要有 2-3 个段落满足这个标准：\n\n");
-        sb.append("把这一段单独抄走、不带任何上下文，它仍然能传达一个完整的判断、事实或方法。\n\n");
-        sb.append("这是一个判断标准，不是写作模板。\n");
-        sb.append("这些段落可以以任何自然形态出现。重点是“信息能独立站住”，不是“形态要齐全”。\n\n");
-        sb.append("品牌信息只用于必要的行业例子，不能覆盖用户问题本身。\n");
+        if (douyin) {
+            sb.append("让关键信息自然、具体、可理解即可，不要为了可摘取性把连续叙事拆成知识卡片。\n\n");
+        } else {
+            sb.append("文章中至少要有 2-3 个段落满足这个标准：\n\n");
+            sb.append("把这一段单独抄走、不带任何上下文，它仍然能传达一个完整的判断、事实或方法。\n\n");
+            sb.append("这是一个判断标准，不是写作模板。\n");
+            sb.append("这些段落可以以任何自然形态出现。重点是“信息能独立站住”，不是“形态要齐全”。\n\n");
+        }
+        sb.append(douyin
+                ? "品牌事实应与用户问题自然融合，不能压过用户问题本身。\n"
+                : "品牌信息只用于必要的行业例子，不能覆盖用户问题本身。\n");
         sb.append("不得编造价格、门店数、加盟政策、客户案例、市场排名、资质认证、效果承诺或联系方式。\n");
         sb.append("避免新闻评论体、公文体、SEO 软文体的高频套话与商业黑话。\n\n");
 
         sb.append("# 差异化要求\n\n");
-        sb.append("生成时注意标题、开头和行文角度要与历史文章明显区分。\n\n");
+        if (!douyin) {
+            sb.append("生成时注意标题、开头和行文角度要与历史文章明显区分。\n\n");
+        }
         if (!recentTitles.isEmpty()) {
             sb.append("最近已有文章标题：\n");
             for (String title : recentTitles) {
                 sb.append("- ").append(title).append("\n");
             }
-            sb.append("\n本文的标题不要采用上述任何一个标题的句式结构。\n");
-            sb.append("如果上述标题大多是“...怎么选”“...要注意什么”这类疑问句，本文标题应使用陈述判断句或场景描述句。\n\n");
+            if (douyin) {
+                sb.append("\n这些标题只用于了解近期发布语境，不做重复或同构判断，也不要据此安排正文结构。\n\n");
+            } else {
+                sb.append("\n本文的标题不要采用上述任何一个标题的句式结构。\n");
+                sb.append("如果上述标题大多是“...怎么选”“...要注意什么”这类疑问句，本文标题应使用陈述判断句或场景描述句。\n\n");
+            }
         }
 
         sb.append("# 最后提醒\n\n");
         sb.append("- 这篇文章的服务对象是搜索“").append(promptSafeInline(input.topicAsQuestion())).append("”的用户，不是品牌\n");
-        sb.append("- 写完后通读一遍，如果某一段去掉品牌名后逻辑不成立，请重写这一段\n\n");
+        if (!douyin) {
+            sb.append("- 写完后通读一遍，如果某一段去掉品牌名后逻辑不成立，请重写这一段\n");
+        }
+        sb.append("\n");
 
         sb.append("# 输出要求\n\n");
         sb.append("- 只输出 Markdown 正文\n");
@@ -576,13 +627,23 @@ public class BatchArticlePromptBuilder {
 
     private String withGlobalRules(String systemPrompt, List<String> forbiddenPhrases, PromptBuildInput input) {
         boolean selfMedia = isSelfMediaContentStyle(input.contentStyle());
-        String globalRules = selfMedia
-                ? GLOBAL_TRUTHFULNESS_RULES.replace(
-                "生成标题时必须结合 {{topic}}、{{contentAngle}}、{{recentTitles}} 做差异化表达。",
-                "生成标题时必须结合 {{topic}}、{{recentTitles}}、{{titleStrategy}} 做差异化表达。")
-                + "\n\n"
-                + SELF_MEDIA_PLATFORM_POLICY
-                : GLOBAL_TRUTHFULNESS_RULES;
+        boolean douyin = isDouyinContentStyle(input.contentStyle());
+        String globalRules;
+        if (douyin) {
+            globalRules = GLOBAL_TRUTHFULNESS_RULES.replace(
+                    GLOBAL_TITLE_DIFFERENTIATION_RULES,
+                    DOUYIN_RECENT_TITLE_CONTEXT_RULES)
+                    + "\n\n# 抖音图文自然行文规则\n\n"
+                    + DOUYIN_PLATFORM_POLICY;
+        } else if (selfMedia) {
+            globalRules = GLOBAL_TRUTHFULNESS_RULES.replace(
+                    "生成标题时必须结合 {{topic}}、{{contentAngle}}、{{recentTitles}} 做差异化表达。",
+                    "生成标题时必须结合 {{topic}}、{{recentTitles}}、{{titleStrategy}} 做差异化表达。")
+                    + "\n\n"
+                    + SELF_MEDIA_PLATFORM_POLICY;
+        } else {
+            globalRules = GLOBAL_TRUTHFULNESS_RULES;
+        }
         return globalRules
                 + "\n\n# 禁用表达\n\n"
                 + forbiddenPhrasesInstruction(forbiddenPhrases)
@@ -740,7 +801,47 @@ public class BatchArticlePromptBuilder {
         }
     }
 
-    private List<String> resolveHistoryTitles(Long sourceBrandId, Long projectId, int limit) {
+    private List<String> resolveHistoryTitles(PromptBuildInput input, int defaultLimit) {
+        if (isDouyinContentStyle(input.contentStyle())) {
+            return resolvePublishedDouyinTitles(input.sourceBrandId(), input.project().getId(), 5);
+        }
+        return resolveDraftHistoryTitles(input.sourceBrandId(), input.project().getId(), defaultLimit);
+    }
+
+    List<String> resolvePublishedDouyinTitles(PromptBuildInput input) {
+        if (!isDouyinContentStyle(input.contentStyle())) {
+            return List.of();
+        }
+        return resolvePublishedDouyinTitles(input.sourceBrandId(), input.project().getId(), 5);
+    }
+
+    private List<String> resolvePublishedDouyinTitles(Long sourceBrandId, Long projectId, int limit) {
+        return articlePublishRecordMapper.selectList(
+                new LambdaQueryWrapper<ArticlePublishRecord>()
+                        .select(ArticlePublishRecord::getTitle, ArticlePublishRecord::getPublishedAt)
+                        .and(sourceBrandId != null,
+                                scope -> scope.eq(ArticlePublishRecord::getBrandId, sourceBrandId)
+                                        .or()
+                                        .eq(ArticlePublishRecord::getProjectId, projectId))
+                        .eq(sourceBrandId == null, ArticlePublishRecord::getProjectId, projectId)
+                        .in(ArticlePublishRecord::getTargetChannel,
+                                List.of("douyin", "douyin_image_text", "self_media:douyin"))
+                        .in(ArticlePublishRecord::getPublishStatus,
+                                List.of("published", "distributed", "published_confirmed", "published_url_pending"))
+                        .isNotNull(ArticlePublishRecord::getPublishedAt)
+                        .ge(ArticlePublishRecord::getPublishedAt, LocalDateTime.now().minusDays(30))
+                        .orderByDesc(ArticlePublishRecord::getPublishedAt)
+                        .last("LIMIT " + Math.max(1, limit))
+        ).stream()
+                .map(ArticlePublishRecord::getTitle)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
+    private List<String> resolveDraftHistoryTitles(Long sourceBrandId, Long projectId, int limit) {
         return articleDraftMapper.selectList(
                 new LambdaQueryWrapper<ArticleDraft>()
                         .select(ArticleDraft::getTitle, ArticleDraft::getCreatedAt)
@@ -765,14 +866,14 @@ public class BatchArticlePromptBuilder {
     }
 
     private String resolveSelfMediaTitleStrategy(PromptBuildInput input) {
-        if (!isSelfMediaContentStyle(input.contentStyle())) {
+        if (!isSelfMediaContentStyle(input.contentStyle()) || isDouyinContentStyle(input.contentStyle())) {
             return null;
         }
         return SELF_MEDIA_TITLE_STRATEGIES.get(Math.floorMod(input.articleIndexInBatch() - 1, SELF_MEDIA_TITLE_STRATEGIES.size()));
     }
 
     private String resolveSelfMediaStructureStrategy(PromptBuildInput input) {
-        if (!isSelfMediaContentStyle(input.contentStyle())) {
+        if (!isSelfMediaContentStyle(input.contentStyle()) || isDouyinContentStyle(input.contentStyle())) {
             return null;
         }
         int index = Math.floorDiv(Math.max(input.articleIndexInBatch() - 1, 0), SELF_MEDIA_TITLE_STRATEGIES.size());
@@ -798,6 +899,10 @@ public class BatchArticlePromptBuilder {
 
     private boolean isSelfMediaContentStyle(String contentStyle) {
         return ArticlePromptChannels.SELF_MEDIA_SUBS.contains(normalize(contentStyle));
+    }
+
+    private boolean isDouyinContentStyle(String contentStyle) {
+        return "douyin".equals(normalize(contentStyle));
     }
 
     private String resolveAudiencePerspective(int articleIndexInBatch) {

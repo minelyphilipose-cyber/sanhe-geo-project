@@ -91,7 +91,8 @@ public class ArticleGenerationEngine {
                 quality = qualityChecker.withWarning(quality, "content_truncated",
                         "正文超过" + input.maxContentChars() + "字，已按平台限制自动收束");
             }
-            if (titleDuplicateChecker.exists(input.project().getId(), title)) {
+            if (shouldCheckTitleDuplicate(input.structureValidationContext())
+                    && titleDuplicateChecker.exists(input.project().getId(), title)) {
                 quality = qualityChecker.withWarning(quality, "duplicate_title", "标题与项目历史文章标准化后完全相同");
             }
             if (quality != null && quality.rewriteRequired()) {
@@ -148,6 +149,13 @@ public class ArticleGenerationEngine {
         return Math.min(
                 Math.max(articleRequestTimeoutMs, LlmModelConfig.MAX_REQUEST_TIMEOUT_MS),
                 LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS);
+    }
+
+    static boolean shouldCheckTitleDuplicate(StructureValidationContext context) {
+        return context == null
+                || !ArticlePromptChannels.SELF_MEDIA.equals(context.channelGroupCode())
+                || !"douyin".equals(ArticlePromptChannels.canonicalSubCode(
+                context.channelGroupCode(), context.channelSubCode()));
     }
 
     private String normalizeContent(String content) {

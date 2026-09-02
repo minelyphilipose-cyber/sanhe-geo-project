@@ -24,6 +24,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,7 +36,8 @@ public class ArticleAutoImageInsertionService {
     private static final int SHORT_ARTICLE_IMAGE_COUNT = 1;
     private static final int MEDIUM_ARTICLE_IMAGE_COUNT = 2;
     private static final int LONG_ARTICLE_IMAGE_COUNT = 3;
-    private static final int DOUYIN_BODY_IMAGE_COUNT = 5;
+    private static final int DOUYIN_MIN_BODY_IMAGE_COUNT = 2;
+    private static final int DOUYIN_MAX_BODY_IMAGE_COUNT = 4;
     private static final int SHORT_ARTICLE_TEXT_LENGTH = 600;
     private static final int LONG_ARTICLE_TEXT_LENGTH = 1500;
     private static final Pattern MARKDOWN_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*]\\(([^)]+)\\)");
@@ -79,7 +81,7 @@ public class ArticleAutoImageInsertionService {
         Set<String> excludedUrls = existingImageUrls(contentMarkdown);
         addExcludedUrl(excludedUrls, excludedImageUrl);
         boolean douyinImageText = isDouyinImageText(channelGroupCode, channelSubCode);
-        int imageCount = douyinImageText ? DOUYIN_BODY_IMAGE_COUNT : bodyImageCount(contentMarkdown);
+        int imageCount = douyinImageText ? randomDouyinImageCount() : bodyImageCount(contentMarkdown);
         List<ImageRef> images = selectRandomIllustrationImages(project, imageCount, excludedUrls);
         if (images.isEmpty()) {
             return contentMarkdown;
@@ -176,6 +178,12 @@ public class ArticleAutoImageInsertionService {
                     normalizedExcludedUrls, limit);
         }
         return refs.values().stream().toList();
+    }
+
+    private int randomDouyinImageCount() {
+        return ThreadLocalRandom.current().nextInt(
+                DOUYIN_MIN_BODY_IMAGE_COUNT,
+                DOUYIN_MAX_BODY_IMAGE_COUNT + 1);
     }
 
     private void addShuffledImageRefs(Map<String, ImageRef> refs,

@@ -83,7 +83,7 @@
     if (!location.pathname.includes('/creator-micro/content/post/image')) {
       throw new Error(`DOUYIN_IMAGE_EDITOR_NOT_READY：当前不是抖音图文详情页；${describeState(deps)}`)
     }
-    if (!taskId || expectedImageCount < 4 || expectedImageCount > 6
+    if (!taskId || expectedImageCount < 1 || expectedImageCount > 6
         || !title || !descriptionBase || !finalDescription || !topicQuery) {
       throw new Error('DOUYIN_IMAGE_TEXT_PAYLOAD_INVALID：服务端下发的抖音图文最终载荷不完整')
     }

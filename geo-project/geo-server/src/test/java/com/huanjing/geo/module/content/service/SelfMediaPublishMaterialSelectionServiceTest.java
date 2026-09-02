@@ -18,8 +18,10 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
@@ -90,7 +92,7 @@ class SelfMediaPublishMaterialSelectionServiceTest {
     }
 
     @Test
-    void automaticallyCombinesArticleCoverWithProjectIllustrationFolderImages() {
+    void automaticallyChoosesTwoToFourDouyinImagesWithoutFixedCoverOrder() {
         BrandImageFolder coverFolder = activeFolder(9L);
         BrandImageFolder illustrationFolder = activeFolder(10L);
         illustrationFolder.setFolderName("插图_huawei");
@@ -119,7 +121,9 @@ class SelfMediaPublishMaterialSelectionServiceTest {
 
         List<Long> selected = service.selectDouyinImageTextImages(project(), article, "");
 
-        assertEquals(List.of(88L, 101L, 102L, 103L), selected);
+        assertTrue(selected.size() >= 2 && selected.size() <= 4);
+        assertEquals(selected.size(), Set.copyOf(selected).size());
+        assertTrue(Set.of(88L, 101L, 102L, 103L).containsAll(selected));
     }
 
     private Project project() {

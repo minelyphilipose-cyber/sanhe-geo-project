@@ -513,8 +513,8 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
         douyinTopicError.value = preview.message || '抖音图文自动发布条件尚未满足'
       } else if (!douyinTopicRegionText.value || !douyinTopicIndustryText.value || !douyinTopicQuery.value) {
         douyinTopicError.value = preview.message || '品牌地域或行业未能解析为中文描述，请先修正品牌配置'
-      } else if (selectedDouyinImageMaterialIds.value.length < 4) {
-        douyinTopicError.value = '封面图和插图文件夹中的可用图片不足4张，请先补充品牌图片素材'
+      } else if (selectedDouyinImageMaterialIds.value.length < 1) {
+        douyinTopicError.value = '未找到可用的抖音图文图片，请先补充品牌图片素材'
       }
     } catch (error) {
       douyinTopicRegionText.value = ''
@@ -928,8 +928,8 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       ElMessage.warning('系统尚未匹配到可用的抖音账号')
       return
     }
-    if (selectedDouyinImageMaterialIds.value.length < 4 || selectedDouyinImageMaterialIds.value.length > 6) {
-      ElMessage.warning('请选择 4–6 张抖音图文图片')
+    if (selectedDouyinImageMaterialIds.value.length < 1 || selectedDouyinImageMaterialIds.value.length > 6) {
+      ElMessage.warning('请选择 1–6 张抖音图文图片')
       return
     }
     const title = douyinTitle.value.trim()

@@ -4,11 +4,13 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationBatch;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateVersionMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -50,6 +52,7 @@ class ArticleGenerationPromptContextFactoryTest {
     private final ArticlePromptTemplateMapper promptTemplateMapper = mock(ArticlePromptTemplateMapper.class);
     private final ArticlePromptTemplateVersionMapper promptTemplateVersionMapper = mock(ArticlePromptTemplateVersionMapper.class);
     private final ArticleDraftMapper articleDraftMapper = mock(ArticleDraftMapper.class);
+    private final ArticlePublishRecordMapper articlePublishRecordMapper = mock(ArticlePublishRecordMapper.class);
     private final SysDictItemMapper sysDictItemMapper = mock(SysDictItemMapper.class);
     private final TemplatePerspectiveService perspectiveService = mock(TemplatePerspectiveService.class);
     private final BrandOfferingPromptSelector offeringPromptSelector = mock(BrandOfferingPromptSelector.class);
@@ -60,6 +63,7 @@ class ArticleGenerationPromptContextFactoryTest {
     @BeforeAll
     static void initMyBatisPlusTableInfo() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraft.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticlePublishRecord.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticlePromptTemplate.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticlePromptTemplateVersion.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), KeywordGroup.class);
@@ -72,6 +76,7 @@ class ArticleGenerationPromptContextFactoryTest {
     void setUp() {
         BatchArticlePromptBuilder promptBuilder = new BatchArticlePromptBuilder(
                 articleDraftMapper,
+                articlePublishRecordMapper,
                 sysDictItemMapper,
                 new ObjectMapper(),
                 new ArticlePromptVariableRegistry(new ObjectMapper())
@@ -271,6 +276,37 @@ class ArticleGenerationPromptContextFactoryTest {
         assertThat(result.prompt().userPrompt()).contains("正文不含标题不少于2000字");
         assertThat(result.prompt().promptSnapshot()).contains("\"targetMinChars\":2000");
         assertThat(result.prompt().promptSnapshot()).contains("\"targetMaxChars\":3000");
+    }
+
+    @Test
+    void v2DouyinReceivesCompleteRulesAndFivePublishedTitles() {
+        ArticlePromptTemplate template = selfMediaTemplate();
+        template.setChannelSubCode("douyin");
+        template.setArticleTypeCode("social_note");
+        ArticlePromptTemplateVersion version = selfMediaVersion();
+        version.setQualityRulesJson("{\"promptContract\":\"v2\"}");
+        when(promptTemplateMapper.selectById(101L)).thenReturn(template);
+        when(promptTemplateVersionMapper.selectById(201L)).thenReturn(version);
+        when(articlePublishRecordMapper.selectList(any())).thenReturn(List.of(
+                publishedTitle("标题一"), publishedTitle("标题二"), publishedTitle("标题三"),
+                publishedTitle("标题四"), publishedTitle("标题五"), publishedTitle("标题六")));
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result =
+                factory.buildStrict(new PromptContextRequest(
+                        10L, "manual", "social_note", "self_media", "douyin",
+                        "装修前要不要预留全屋智能", null, "medium", null, null, null,
+                        101L, 201L, null, null, null, 1
+                ));
+
+        assertThat(result.prompt().userPrompt())
+                .contains("# 抖音图文自然行文规则")
+                .contains("不要把小节写成彼此独立的知识卡片")
+                .contains("- 标题五")
+                .doesNotContain("标题六");
+        assertThat(result.prompt().promptSnapshot())
+                .contains("\"promptRevision\":\"v2_douyin_natural_20260902\"")
+                .contains("\"recentTitles\":[\"标题一\",\"标题二\",\"标题三\",\"标题四\",\"标题五\"]");
+        verify(articlePublishRecordMapper).selectList(any());
     }
 
     @Test
@@ -489,6 +525,13 @@ class ArticleGenerationPromptContextFactoryTest {
         second.setGroupId(90L);
         second.setKeywordText("颍州区养生馆");
         return List.of(first, second);
+    }
+
+    private ArticlePublishRecord publishedTitle(String title) {
+        ArticlePublishRecord record = new ArticlePublishRecord();
+        record.setTitle(title);
+        record.setPublishedAt(LocalDateTime.now());
+        return record;
     }
 
     private ArticlePromptTemplate template() {

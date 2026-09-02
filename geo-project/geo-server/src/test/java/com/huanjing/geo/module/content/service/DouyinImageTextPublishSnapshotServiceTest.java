@@ -148,6 +148,24 @@ class DouyinImageTextPublishSnapshotServiceTest {
     }
 
     @Test
+    void acceptsOneImageAndRejectsMoreThanSix() {
+        Brand brand = brand("阜阳市", "全屋定制");
+        BrandMaterial material = material(1L);
+        when(materialMapper.selectById(1L)).thenReturn(material);
+        when(publicUrlService.buildPublicStreamUrl(material)).thenReturn("https://signed.example/1");
+        DouyinImageTextQuickPublishRequest request = new DouyinImageTextQuickPublishRequest();
+        request.setTitle("阜阳装修记录");
+        request.setDescription("正文内容");
+        request.setImageMaterialIds(List.of(1L));
+
+        DouyinImageTextPublishSnapshot snapshot = service.build(brand, request);
+
+        assertEquals(List.of(1L), snapshot.imageMaterialIds());
+        request.setImageMaterialIds(List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L));
+        assertThrows(BizException.class, () -> service.build(brand, request));
+    }
+
+    @Test
     void buildsFromGeneratedArticleAndSafelyLimitsLegacyLongContent() {
         Brand brand = brand("阜阳市", "全屋定制");
         for (long id = 1; id <= 4; id++) {

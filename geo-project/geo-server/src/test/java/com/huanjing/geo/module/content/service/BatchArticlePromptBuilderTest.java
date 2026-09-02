@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.ArticlePublishRecord;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePublishRecordMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.system.entity.SysDictItem;
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -25,9 +28,11 @@ import static org.mockito.Mockito.when;
 class BatchArticlePromptBuilderTest {
 
     private final ArticleDraftMapper articleDraftMapper = mock(ArticleDraftMapper.class);
+    private final ArticlePublishRecordMapper articlePublishRecordMapper = mock(ArticlePublishRecordMapper.class);
     private final SysDictItemMapper sysDictItemMapper = mock(SysDictItemMapper.class);
     private final BatchArticlePromptBuilder builder = new BatchArticlePromptBuilder(
             articleDraftMapper,
+            articlePublishRecordMapper,
             sysDictItemMapper,
             new ObjectMapper(),
             new ArticlePromptVariableRegistry(new ObjectMapper())
@@ -36,6 +41,7 @@ class BatchArticlePromptBuilderTest {
     @BeforeAll
     static void initMyBatisPlusTableInfo() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraft.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticlePublishRecord.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), SysDictItem.class);
     }
 
@@ -105,8 +111,53 @@ class BatchArticlePromptBuilderTest {
         assertThat(builder.buildContactBlock(brand, "soft_hint")).isEqualTo("感兴趣的可以自己搜一下相关信息了解。");
     }
 
+    @Test
+    void douyinUsesFivePublishedTitlesAsContextWithoutDuplicateJudgement() {
+        when(sysDictItemMapper.selectOne(any())).thenReturn(null);
+        List<ArticlePublishRecord> records = java.util.stream.LongStream.rangeClosed(1, 6)
+                .mapToObj(index -> publishedRecord("近期标题" + index, index))
+                .toList();
+        when(articlePublishRecordMapper.selectList(any())).thenReturn(records);
+
+        BatchArticlePromptBuilder.PromptBuildResult result = builder.build(douyinPromptInput());
+
+        assertThat(result.systemPrompt())
+                .contains("抖音图文自然行文规则")
+                .contains("行文必须自然流畅")
+                .contains("不对新标题做完全重复或句式同构判断")
+                .doesNotContain("品牌名全文不超过 1 次")
+                .doesNotContain("结构策略：判断清单型");
+        assertThat(result.userPrompt())
+                .contains("近期标题1")
+                .contains("近期标题5")
+                .doesNotContain("近期标题6")
+                .contains("不做重复或同构判断")
+                .doesNotContain("本文的标题不要采用上述任何一个标题的句式结构")
+                .doesNotContain("标题策略：")
+                .doesNotContain("结构策略：");
+    }
+
     private BatchArticlePromptBuilder.PromptBuildInput promptInput() {
         return promptInput(List.of());
+    }
+
+    private BatchArticlePromptBuilder.PromptBuildInput douyinPromptInput() {
+        BatchArticlePromptBuilder.PromptBuildInput base = promptInput();
+        return new BatchArticlePromptBuilder.PromptBuildInput(
+                base.project(), base.brand(), base.brandStatement(), base.topicSource(), base.topic(),
+                base.topicAsQuestion(), base.keywordGroupId(), base.keywordGroupName(), base.relatedKeywords(),
+                base.articleType(), "douyin", "short", base.extraPrompt(), base.articleIndexInBatch(),
+                base.forbiddenPhrases(), base.titleGuide(), base.perspectiveCode(), base.perspectiveMatchedScope(),
+                base.perspectiveMatchedConfigId(), base.selectedOfferings(), base.sourceProjectId(),
+                base.sourceBrandId(), base.subjectProjectId(), base.subjectBrandId(), base.requestedQuestionSceneCode(),
+                base.effectiveQuestionSceneCode(), base.questionSceneSource());
+    }
+
+    private ArticlePublishRecord publishedRecord(String title, long minutesAgo) {
+        ArticlePublishRecord record = new ArticlePublishRecord();
+        record.setTitle(title);
+        record.setPublishedAt(LocalDateTime.now().minusMinutes(minutesAgo));
+        return record;
     }
 
     private BatchArticlePromptBuilder.PromptBuildInput promptInput(
