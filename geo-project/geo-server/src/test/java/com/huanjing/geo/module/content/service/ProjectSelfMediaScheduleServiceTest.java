@@ -76,13 +76,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
 
 class ProjectSelfMediaScheduleServiceTest {
     private ProjectMapper projectMapper;
@@ -1987,6 +1989,55 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals("generation_failed", item.getStatus());
         assertEquals("refunded", item.getQuotaReservationStatus());
         verify(companyChannelQuotaService).refundProjectSelfMediaPlan(100L);
+    }
+
+    @Test
+    void dueStoredPlanItemCreatesGenerationTaskFromRandomATierQuestion() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        ProjectSelfMediaScheduleItem item = storedItem();
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 11, 5, 0)));
+        when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+
+        KeywordGroupResult first = new KeywordGroupResult();
+        first.setKeywordText("第一个 A 类问题");
+        first.setSceneCode("first-scene");
+        KeywordGroupResult selected = new KeywordGroupResult();
+        selected.setKeywordText("本次随机选中的 A 类问题");
+        selected.setSceneCode("selected-scene");
+        List<KeywordGroupResult> questions = List.of(first, selected);
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'"))
+                .thenReturn(questions);
+
+        BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(
+                44L, 1, "pending", false, false, List.of());
+        when(generationService.createSystemBatch(any(), eq(99L), eq("project-self-media-plan-33-100")))
+                .thenReturn(generation);
+        BatchArticleGenerationTask pendingTask = new BatchArticleGenerationTask();
+        pendingTask.setId(55L);
+        pendingTask.setBatchId(44L);
+        pendingTask.setStatus("pending");
+        pendingTask.setCreatedAt(LocalDateTime.of(2026, 6, 11, 5, 0));
+        when(generationTaskMapper.selectList(any())).thenReturn(List.of(pendingTask));
+        when(generationTaskMapper.selectById(55L)).thenReturn(pendingTask);
+
+        ProjectSelfMediaScheduleService testedService = spy(service);
+        doReturn(selected).when(testedService).randomQuestion(questions);
+
+        assertEquals(1, testedService.progressProcessingBatches(5));
+
+        ArgumentCaptor<BatchArticleGenerateRequest> requestCaptor =
+                ArgumentCaptor.forClass(BatchArticleGenerateRequest.class);
+        verify(generationService).createSystemBatch(
+                requestCaptor.capture(), eq(99L), eq("project-self-media-plan-33-100"));
+        BatchArticleGenerateRequest.TopicConfig topic = requestCaptor.getValue().getTopics().get(0);
+        assertEquals("本次随机选中的 A 类问题", topic.getTopic());
+        assertEquals("本次随机选中的 A 类问题", topic.getTopicAsQuestion());
+        assertEquals("selected-scene", topic.getQuestionSceneCode());
+        assertEquals("generating", item.getStatus());
+        assertEquals(55L, item.getGenerationTaskId());
     }
 
     @Test

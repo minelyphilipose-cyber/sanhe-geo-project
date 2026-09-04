@@ -2021,7 +2021,7 @@ public class ProjectSelfMediaScheduleService {
             if (questions.isEmpty()) {
                 throw new BizException(ERROR_CODE, "项目缺少 A 级问题，无法生成自媒体排期文章");
             }
-            KeywordGroupResult question = questions.get(startIndex % questions.size());
+            KeywordGroupResult question = randomQuestion(questions);
             return new TopicSeed(question.getKeywordText(), question.getKeywordText(), question.getSceneCode());
         }
         String cacheKey = plan.platform() + "|" + perspective.perspectiveCode();
@@ -2081,6 +2081,10 @@ public class ProjectSelfMediaScheduleService {
     }
 
     private record TopicSeed(String topic, String topicAsQuestion, String sceneCode) {
+    }
+
+    KeywordGroupResult randomQuestion(List<KeywordGroupResult> questions) {
+        return questions.get(ThreadLocalRandom.current().nextInt(questions.size()));
     }
 
     private boolean progressProcessingBatch(ProjectSelfMediaScheduleBatch batch) {
