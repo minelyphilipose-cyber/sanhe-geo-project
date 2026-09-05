@@ -1,7 +1,12 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.mapper.DouyinArticleImageBatchMapper;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.DouyinArticleImageBatch;
 import com.huanjing.geo.module.customer.entity.BrandImageFolder;
 import com.huanjing.geo.module.customer.entity.BrandImageFolderProject;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
@@ -24,6 +29,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
@@ -47,6 +53,8 @@ public class SelfMediaPublishMaterialSelectionService {
     private final BrandImageFolderMapper folderMapper;
     private final BrandImageFolderProjectMapper folderProjectMapper;
     private final BrandMaterialMapper materialMapper;
+    private final DouyinArticleImageBatchMapper imageBatchMapper;
+    private final ObjectMapper objectMapper;
 
     public Selection select(Project project, ArticleDraft article, String markdown) {
         Long brandId = materialBrandId(project, article);
@@ -64,6 +72,41 @@ public class SelfMediaPublishMaterialSelectionService {
      * then chooses and orders the automatic Douyin images without cover priority.
      */
     public List<Long> selectDouyinImageTextImages(Project project, ArticleDraft article, String markdown) {
+        if (article != null && article.getDouyinImageBatchId() != null) {
+            var batch = imageBatchMapper.selectById(article.getDouyinImageBatchId());
+            if (batch == null || !"applied".equals(batch.getStatus())
+                    || !Objects.equals(batch.getArticleId(), article.getId())
+                    || !Objects.equals(batch.getAppliedVersionNo(), article.getCurrentVersionNo())) {
+                throw new BizException(409, "文章版本与生成图片不一致，请重新生成并应用图片");
+            }
+            try {
+                List<Long> ids = objectMapper.readValue(batch.getMaterialIdsJson(),
+                        new TypeReference<List<Long>>() { });
+                if (ids.size() != batch.getImageCount() || ids.isEmpty() || ids.size() > 6
+                        || new LinkedHashSet<>(ids).size() != ids.size()) throw new IllegalStateException();
+                for (Long id : ids) {
+                    BrandMaterial material = materialMapper.selectById(id);
+                    // Generated pages are owned by the article, not by a shared active image folder.
+                    if (material == null || !Objects.equals(material.getBrandId(), batch.getSubjectBrandId())
+                            || !Objects.equals(material.getSourceArticleId(), article.getId())
+                            || !BRAND_IMAGE_CATEGORY.equals(material.getCategory())
+                            || !StringUtils.hasText(material.getObjectKey())
+                            || !Set.of("jpg", "jpeg", "png", "webp").contains(normalizeType(material.getFileType()))
+                            || (material.getFileSize() != null && material.getFileSize() > DOUYIN_IMAGE_TEXT_MAX_IMAGE_BYTES)) {
+                        throw new IllegalStateException();
+                    }
+                }
+                return List.copyOf(ids);
+            } catch (Exception ex) {
+                throw new BizException(409, "本篇生成图片不完整或已失效，禁止回退到随机素材");
+            }
+        }
+        if (article != null && imageBatchMapper.selectCount(new LambdaQueryWrapper<DouyinArticleImageBatch>()
+                .eq(DouyinArticleImageBatch::getArticleId, article.getId())
+                .eq(DouyinArticleImageBatch::getAutomatic, true)
+                .ne(DouyinArticleImageBatch::getStatus, "applied")) > 0) {
+            throw new BizException(409, "本篇豆包图片尚未生成并应用，请在文章详情查看生图进度或重试，不能使用旧素材发布");
+        }
         Long brandId = materialBrandId(project, article);
         if (brandId == null) {
             return List.of();
@@ -84,6 +127,7 @@ public class SelfMediaPublishMaterialSelectionService {
             }
             List<BrandMaterial> materials = materialMapper.selectList(new LambdaQueryWrapper<BrandMaterial>()
                     .eq(BrandMaterial::getBrandId, brandId)
+                    .isNull(BrandMaterial::getSourceArticleId)
                     .eq(BrandMaterial::getCategory, BRAND_IMAGE_CATEGORY)
                     .eq(BrandMaterial::getFolderId, folderId)
                     .isNotNull(BrandMaterial::getObjectKey)

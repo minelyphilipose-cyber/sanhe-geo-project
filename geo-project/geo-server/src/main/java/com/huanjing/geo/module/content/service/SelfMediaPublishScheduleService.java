@@ -92,6 +92,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -284,6 +285,9 @@ public class SelfMediaPublishScheduleService {
                                                                              String idempotencyKeyHeader) {
         SysUser operator = currentUserService.requireCurrentUser();
         QuickSchedulePlan plan = buildQuickSchedulePlan(request, operator.getId(), false, true);
+        if (plan.response().getReplacePlanItemId() != null) {
+            return replaceReservedPlanWithQuickSchedule(request, operator.getId(), idempotencyKeyHeader, plan, false);
+        }
         if ("replace_required".equals(plan.response().getAction())) {
             if (!Boolean.TRUE.equals(request.getReplaceNextScheduled())) {
                 return plan.response();
@@ -327,6 +331,9 @@ public class SelfMediaPublishScheduleService {
                                                                                String idempotencyKeyHeader) {
         SysUser operator = currentUserService.requireCurrentUser();
         QuickSchedulePlan plan = buildQuickSchedulePlan(request, operator.getId(), false, true);
+        if (plan.response().getReplacePlanItemId() != null) {
+            return replaceReservedPlanWithQuickSchedule(request, operator.getId(), idempotencyKeyHeader, plan, true);
+        }
         if (!List.of("ready", "replace_required").contains(plan.response().getAction())) {
             return plan.response();
         }
@@ -688,6 +695,18 @@ public class SelfMediaPublishScheduleService {
                             publishSnapshot
                     );
                 }
+                if ("CHANNEL_QUOTA_EXHAUSTED".equals(quotaRejected.getCode())) {
+                    ProjectSelfMediaScheduleItem planItem = findReplaceableReservedPlan(brandId, platform, plannedPublishAt, now);
+                    if (planItem != null) {
+                        QuickSchedulePlan replacement = quickResponse("replace_required", "MONTH_PLATFORM_PLAN_ALREADY_RESERVED",
+                                "该平台额度已由自动排期预占。继续发布将替换最近一条尚未开始生成的计划（"
+                                        + planItem.getPlannedPublishAt() + "），复用其额度，是否继续？",
+                                article.getId(), brandId, platform, account.getId(), null,
+                                planItem.getPlannedPublishAt(), planItem.getPlannedExecutionAt());
+                        replacement.response().setReplacePlanItemId(planItem.getId());
+                        return attachDouyinImageTextPreview(replacement, topicPreview, autoSelectedImageMaterialIds, publishSnapshot);
+                    }
+                }
                 return attachDouyinImageTextPreview(
                         quickResponse("quota_exhausted", quotaRejected.getCode(),
                         platformLabel(platform) + "本月可发布额度已用完，当前无法继续创建排期。请下月额度恢复后再发布，或调整品牌套餐额度。",
@@ -743,6 +762,62 @@ public class SelfMediaPublishScheduleService {
                         .last("LIMIT 1")
         );
         return version == null ? null : version.getContentMarkdown();
+    }
+
+    private ProjectSelfMediaScheduleItem findReplaceableReservedPlan(Long brandId, String platform,
+                                                                     LocalDateTime publishAt, LocalDateTime now) {
+        Long companyId = quotaPrecheck(brandId).companyId;
+        CompanyChannelQuotaService.DistributionQuotaView quota = companyChannelQuotaService
+                .selfMediaDistributionQuota(companyId, platform, publishAt.toLocalDate());
+        PeriodWindow month = currentMonth(publishAt);
+        return projectScheduleItemMapper.selectSafeReplaceableReservedPlan(brandId, platform, companyId,
+                quota.periodType(), quota.periodKey(), month.start(), month.end(),
+                now.plusMinutes(QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES));
+    }
+
+    private SelfMediaPlatformQuickScheduleResponse replaceReservedPlanWithQuickSchedule(
+            SelfMediaPlatformQuickScheduleRequest request, Long operatorId, String idempotencyKeyHeader,
+            QuickSchedulePlan preview, boolean dispatch) {
+        if (!Boolean.TRUE.equals(request.getReplaceNextScheduled())) return preview.response();
+        QuickSchedulePlan ready = buildQuickSchedulePlan(request, operatorId, true, true);
+        if (!"ready".equals(ready.response().getAction())) return ready.response();
+        if (protectedDuplicateSchedule(ready) != null) {
+            ready.response().setAction("duplicate_blocked");
+            ready.response().setCode("ARTICLE_ACCOUNT_PLATFORM_SCHEDULE_EXISTS");
+            ready.response().setMessage("该文章已有排期、发布或待确认记录，本次未替换其他计划");
+            return ready.response();
+        }
+        LocalDateTime now = LocalDateTime.now();
+        QuickSchedulePlan plan = dispatch ? withQuickDispatchTiming(ready, now) : ready;
+        Long expectedItemId = preview.response().getReplacePlanItemId();
+        SelfMediaPublishScheduleCreateResponse created = executeInShortTransaction(tx -> {
+            ProjectSelfMediaScheduleItem item = findReplaceableReservedPlan(plan.response().getBrandId(),
+                    plan.response().getPlatform(), plan.data().plannedPublishAt(), now);
+            if (item == null || !Objects.equals(item.getId(), expectedItemId)
+                    || projectScheduleItemMapper.cancelReservedPlanForManualPublish(item.getId(), item.getBrandId(),
+                    item.getPlatform(), item.getPlannedPublishAt(), item.getGenerationDueAt(),
+                    now.plusMinutes(QUICK_DISPATCH_REPLACE_PROTECTION_MINUTES), now, operatorId) != 1) {
+                fail("REPLACE_TARGET_NOT_AVAILABLE", "待生成计划已变化或开始处理，请刷新后重试");
+            }
+            SelfMediaPublishScheduleCreateResponse result = createQuickSchedule(plan, operatorId,
+                    idempotencyKeyHeader, dispatch, false, !dispatch);
+            if (result.getCreatedSchedules().size() != 1) {
+                fail("QUICK_SCHEDULE_NOT_CREATED", firstRejectedMessage(result));
+            }
+            Long scheduleId = result.getCreatedSchedules().get(0).getId();
+            companyChannelQuotaService.transferProjectSelfMediaPlanReservation(item.getId(), scheduleId);
+            projectScheduleItemMapper.update(null, new LambdaUpdateWrapper<ProjectSelfMediaScheduleItem>()
+                    .eq(ProjectSelfMediaScheduleItem::getId, item.getId())
+                    .set(ProjectSelfMediaScheduleItem::getCancellationReason, "已由手动发布替换，额度转入任务 #" + scheduleId));
+            return result;
+        });
+        SelfMediaPlatformQuickScheduleResponse response = plan.response();
+        response.setAction("created");
+        response.setCode(dispatch ? "QUICK_DISPATCH_CREATED" : "QUICK_SCHEDULE_CREATED");
+        response.setReplacePlanItemId(expectedItemId);
+        response.setMessage("已替换最近一条尚未开始生成的同平台计划，复用原有额度创建手动发布任务");
+        response.setCreateResponse(created);
+        return response;
     }
 
     private SelfMediaPublishScheduleCreateResponse createQuickSchedule(QuickSchedulePlan plan,

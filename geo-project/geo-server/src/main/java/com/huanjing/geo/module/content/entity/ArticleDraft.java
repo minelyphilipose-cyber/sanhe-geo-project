@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 @Data
 @TableName("article_draft")
 public class ArticleDraft {
+    private Long douyinImageBatchId;
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long batchId;

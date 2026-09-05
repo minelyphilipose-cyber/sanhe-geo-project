@@ -170,6 +170,8 @@ class ProjectSelfMediaScheduleServiceTest {
                 .thenReturn(SelfMediaPlatformScheduleRules.defaults());
         when(scheduleAdapterRouter.contract(anyString())).thenReturn(Optional.empty());
 
+        DouyinArticleImageService images = mock(DouyinArticleImageService.class);
+        org.mockito.Mockito.lenient().when(images.prepareAutomatic(any(), any())).thenReturn(true);
         service = new ProjectSelfMediaScheduleService(
                 projectMapper,
                 brandMapper,
@@ -188,6 +190,7 @@ class ProjectSelfMediaScheduleServiceTest {
                 autoScheduleService,
                 scheduleService,
                 generationService,
+                images,
                 perspectiveService,
                 templateAllocationService,
                 coverSelectionService,

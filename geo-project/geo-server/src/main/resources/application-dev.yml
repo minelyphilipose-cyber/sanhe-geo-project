@@ -14,6 +14,8 @@ spring:
 
 # JWT
 geo:
+  douyin-images:
+    auto-enabled: true
   public-base-url: http://localhost:8080
   wechat:
     client:

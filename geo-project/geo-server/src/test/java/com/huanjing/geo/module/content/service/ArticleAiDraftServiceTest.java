@@ -131,7 +131,7 @@ class ArticleAiDraftServiceTest {
                 currentUserService, brandAccessService, promptBuilder, promptContextFactory,
                 offeringPromptSelector, generationEngine, mock(MedicalArticleComplianceChecker.class),
                 mock(SpecialIndustryComplianceAlertService.class),
-                mock(ArticleCoverSelectionService.class), passThroughAutoImageInsertionService(), rateLimiter, auditService,
+                mock(ArticleCoverSelectionService.class), mock(DouyinArticleImageService.class), passThroughAutoImageInsertionService(), rateLimiter, auditService,
                 objectMapper, txManager(), Runnable::run);
     }
 
@@ -461,7 +461,7 @@ class ArticleAiDraftServiceTest {
                 mock(ArticleImagePublicUrlRewriter.class),
                 new ArticleBodyProvider(versionMapper, mock(com.huanjing.geo.common.storage.ObjectStorageService.class)),
                 mock(ArticleAutoImageInsertionService.class),
-                mock(ArticleCoverSelectionService.class),
+                mock(ArticleCoverSelectionService.class), mock(DouyinArticleImageService.class),
                 brandAccessService, mock(AuditService.class));
     }
 

@@ -1854,6 +1854,7 @@ export interface SelfMediaPlatformQuickScheduleResponse {
   platformLabel?: string | null
   selfMediaAccountId?: number | null
   replaceScheduleId?: number | null
+  replacePlanItemId?: number | null
   plannedPublishAt?: string | null
   nextAttemptAt?: string | null
   brandSafetyIntervalMinutes?: number | null

@@ -3,6 +3,8 @@ package com.huanjing.geo.common.storage;
 import com.huanjing.geo.common.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -72,5 +74,20 @@ class RoutingObjectStorageServiceTest {
         assertEquals("https://cos/a", service.presignedGetUrl("brand/a.jpg", 600));
 
         verify(cosBackend, never()).stat("brand/a.jpg");
+    }
+
+    @ParameterizedTest
+    @EnumSource(StorageProperties.Provider.class)
+    void generatedImagesFollowTheConfiguredStorage(StorageProperties.Provider provider) {
+        properties.setProvider(provider);
+        String key = "brands/25/douyin-articles/123/456/1.jpg";
+        byte[] bytes = {1, 2, 3};
+        ObjectStorageService selected = provider == StorageProperties.Provider.MINIO ? minioBackend : cosBackend;
+        ObjectStorageService other = provider == StorageProperties.Provider.MINIO ? cosBackend : minioBackend;
+        when(selected.readBytes(key)).thenReturn(bytes);
+        service.putBytes(key, bytes, "image/jpeg");
+        org.junit.jupiter.api.Assertions.assertArrayEquals(bytes, service.readBytes(key));
+        verify(selected).putBytes(key, bytes, "image/jpeg");
+        org.mockito.Mockito.verifyNoInteractions(other);
     }
 }

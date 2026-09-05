@@ -14,6 +14,48 @@ import java.time.LocalDateTime;
 public interface ProjectSelfMediaScheduleItemMapper extends BaseMapper<ProjectSelfMediaScheduleItem> {
 
     @Select("""
+            SELECT i.* FROM project_self_media_schedule_item i
+            JOIN company_channel_quota_ledger l
+              ON l.biz_type = 'project_self_media_plan' AND l.biz_id = CAST(i.id AS CHAR)
+            WHERE i.brand_id = #{brandId} AND i.platform = #{platform}
+              AND i.company_id = #{companyId} AND l.company_id = i.company_id
+              AND l.channel_code = CONCAT('self_media:', #{platform})
+              AND l.period_type = #{periodType} AND l.period_key = #{periodKey}
+              AND l.status = 'reserved' AND l.delta_count = 1
+              AND i.quota_reservation_status = 'reserved' AND i.status = 'planned'
+              AND i.schedule_id IS NULL AND i.article_id IS NULL
+              AND i.generation_task_id IS NULL AND i.generation_batch_id IS NULL
+              AND i.generation_claim_token IS NULL AND i.generation_claimed_at IS NULL
+              AND i.planned_publish_at >= #{periodStart} AND i.planned_publish_at < #{periodEnd}
+              AND i.generation_due_at >= #{replaceAfter}
+            ORDER BY i.planned_publish_at ASC, i.id ASC LIMIT 1
+            """)
+    ProjectSelfMediaScheduleItem selectSafeReplaceableReservedPlan(@Param("brandId") Long brandId,
+            @Param("platform") String platform, @Param("companyId") Long companyId,
+            @Param("periodType") String periodType, @Param("periodKey") String periodKey,
+            @Param("periodStart") LocalDateTime periodStart, @Param("periodEnd") LocalDateTime periodEnd,
+            @Param("replaceAfter") LocalDateTime replaceAfter);
+
+    @Update("""
+            UPDATE project_self_media_schedule_item
+            SET status = 'cancelled', quota_reservation_status = 'transferred',
+                cancelled_by = #{operatorId}, cancelled_at = #{now}, updated_by = #{operatorId}, updated_at = #{now},
+                cancellation_reason = '已由手动发布替换，预占额度转入手动发布任务'
+            WHERE id = #{itemId} AND brand_id = #{brandId} AND platform = #{platform}
+              AND status = 'planned' AND quota_reservation_status = 'reserved'
+              AND schedule_id IS NULL AND article_id IS NULL
+              AND generation_task_id IS NULL AND generation_batch_id IS NULL
+              AND generation_claim_token IS NULL AND generation_claimed_at IS NULL
+              AND planned_publish_at = #{expectedPublishAt} AND generation_due_at = #{expectedGenerationDueAt}
+              AND generation_due_at >= #{replaceAfter}
+            """)
+    int cancelReservedPlanForManualPublish(@Param("itemId") Long itemId, @Param("brandId") Long brandId,
+            @Param("platform") String platform, @Param("expectedPublishAt") LocalDateTime expectedPublishAt,
+            @Param("expectedGenerationDueAt") LocalDateTime expectedGenerationDueAt,
+            @Param("replaceAfter") LocalDateTime replaceAfter, @Param("now") LocalDateTime now,
+            @Param("operatorId") Long operatorId);
+
+    @Select("""
             SELECT *
             FROM project_self_media_schedule_item
             WHERE batch_id = #{batchId}

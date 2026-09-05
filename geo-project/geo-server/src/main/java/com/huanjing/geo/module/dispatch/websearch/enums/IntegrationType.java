@@ -2,6 +2,7 @@ package com.huanjing.geo.module.dispatch.websearch.enums;
 
 public enum IntegrationType {
     OPENAI_CHAT,
+    OPENAI_IMAGE,
     VOLCENGINE_RESPONSES_WEB,
     DASHSCOPE_NATIVE_WEB,
     TENCENT_TOKENHUB_RESPONSES_WEB,
@@ -19,7 +20,7 @@ public enum IntegrationType {
                  MIMO_CHAT_WEB,
                  QIHOO_360_AI_SEARCH_WEB,
                  ZHIPU_CHAT_WEB -> true;
-            case OPENAI_CHAT -> false;
+            case OPENAI_CHAT, OPENAI_IMAGE -> false;
         };
     }
 

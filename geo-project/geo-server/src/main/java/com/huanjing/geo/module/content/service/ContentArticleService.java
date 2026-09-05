@@ -72,6 +72,7 @@ public class ContentArticleService {
     private final ArticleBodyProvider articleBodyProvider;
     private final ArticleAutoImageInsertionService autoImageInsertionService;
     private final ArticleCoverSelectionService coverSelectionService;
+    private final DouyinArticleImageService douyinArticleImageService;
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
 
@@ -435,8 +436,12 @@ public class ContentArticleService {
         if (!StringUtils.hasText(topic)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Topic is required");
         }
-        String coverImageUrl = resolveManualCreateCoverUrl(project, req, channelGroupCode, channelSubCode, contentStyle, createSource);
-        if (isDouyinSelfMedia(channelGroupCode, channelSubCode, contentStyle)) {
+        boolean generateDouyinImages = "ai_preview".equals(createSource)
+                && douyinArticleImageService.automaticEnabledFor(channelGroupCode, channelSubCode);
+        String coverImageUrl = generateDouyinImages ? null
+                : resolveManualCreateCoverUrl(project, req, channelGroupCode, channelSubCode, contentStyle, createSource);
+        if (generateDouyinImages) content = DouyinArticleImageService.cleanImages(content);
+        if (!generateDouyinImages && isDouyinSelfMedia(channelGroupCode, channelSubCode, contentStyle)) {
             if (req.getHeadImageMaterialId() != null) {
                 if (req.getHeadImageMaterialId().equals(req.getCoverMaterialId())) {
                     throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Head image must differ from cover image");
@@ -490,6 +495,7 @@ public class ContentArticleService {
         draft.setDuplicateScore(duplicateResult.score);
         draft.setDuplicateArticleId(duplicateResult.articleId);
         articleDraftMapper.updateById(draft);
+        if (generateDouyinImages) douyinArticleImageService.enqueueForGeneratedArticle(draft.getId(), operator.getId());
         draft.setProjectName(project.getProjectName());
         auditArticleTransition("ARTICLE_CREATED", AuditResult.SUCCESS, operator, project, draft, null, initialStatus, "manual create", null);
         return draft;

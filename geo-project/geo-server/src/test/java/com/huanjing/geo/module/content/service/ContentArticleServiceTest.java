@@ -125,6 +125,7 @@ class ContentArticleServiceTest {
                 ),
                 autoImageInsertionService,
                 coverSelectionService,
+                mock(DouyinArticleImageService.class),
                 brandAccessService,
                 auditService
         );

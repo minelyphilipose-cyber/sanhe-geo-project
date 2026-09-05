@@ -120,6 +120,9 @@ public class DefaultLlmPlatformSelectionStrategy implements LlmPlatformSelection
                               String modelId,
                               String modelName,
                               String apiKey) {
+        if ("IMAGE_GENERATION".equals(config.getUsageScene()) || "OPENAI_IMAGE".equals(config.getIntegrationType())) {
+            return;
+        }
         if (!StringUtils.hasText(platformCode)
                 || !StringUtils.hasText(apiUrl)
                 || !StringUtils.hasText(modelId)

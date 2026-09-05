@@ -71,6 +71,23 @@ class AiPlatformConfigServiceTest {
     }
 
     @Test
+    void imageModelCannotEnterTextGenerationCandidates() {
+        when(currentUserService.requireCurrentUser()).thenReturn(operator());
+        when(platformCredentialService.encryptForStorage("secret")).thenReturn("encrypted-secret");
+        AiPlatformConfigCreateRequest req = new AiPlatformConfigCreateRequest();
+        req.setPlatformCode("doubao_image"); req.setPlatformName("豆包生图"); req.setPriorityLevel("P1");
+        req.setUsageScene("IMAGE_GENERATION"); req.setIntegrationType("OPENAI_IMAGE");
+        req.setApiKey("secret"); req.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
+        req.setModelId("doubao-seedream-5-0-260128"); req.setModelName("Seedream 5.0");
+        req.setEnabled(true); req.setDegraded(false); req.setEnabledForArticle(true);
+        aiPlatformConfigService.create(req);
+        ArgumentCaptor<AiPlatformConfig> captor = ArgumentCaptor.forClass(AiPlatformConfig.class);
+        verify(aiPlatformConfigMapper).insert(captor.capture());
+        org.junit.jupiter.api.Assertions.assertFalse(captor.getValue().getEnabledForArticle());
+        org.junit.jupiter.api.Assertions.assertFalse(captor.getValue().getEnabledForPresale());
+    }
+
+    @Test
     void shouldDeletePlatformConfig() {
         AiPlatformConfig entity = new AiPlatformConfig();
         entity.setId(1L);

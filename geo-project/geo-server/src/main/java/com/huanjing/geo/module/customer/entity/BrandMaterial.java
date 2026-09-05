@@ -13,6 +13,7 @@ public class BrandMaterial {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long brandId;
+    private Long sourceArticleId;
     private Long folderId;
     private String category;
     private String fileName;

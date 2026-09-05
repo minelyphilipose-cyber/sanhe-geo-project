@@ -31,12 +31,14 @@ class SelfMediaPublishMaterialSelectionServiceTest {
     private BrandImageFolderMapper folderMapper;
     private BrandImageFolderProjectMapper folderProjectMapper;
     private BrandMaterialMapper materialMapper;
+    private com.huanjing.geo.module.content.mapper.DouyinArticleImageBatchMapper imageBatchMapper;
     private SelfMediaPublishMaterialSelectionService service;
 
     @BeforeAll
     static void initTableInfo() {
         initTableInfo(BrandImageFolder.class);
         initTableInfo(BrandMaterial.class);
+        initTableInfo(com.huanjing.geo.module.content.entity.DouyinArticleImageBatch.class);
     }
 
     private static void initTableInfo(Class<?> entityType) {
@@ -52,7 +54,18 @@ class SelfMediaPublishMaterialSelectionServiceTest {
         folderMapper = mock(BrandImageFolderMapper.class);
         folderProjectMapper = mock(BrandImageFolderProjectMapper.class);
         materialMapper = mock(BrandMaterialMapper.class);
-        service = new SelfMediaPublishMaterialSelectionService(folderMapper, folderProjectMapper, materialMapper);
+        imageBatchMapper = mock(com.huanjing.geo.module.content.mapper.DouyinArticleImageBatchMapper.class);
+        service = new SelfMediaPublishMaterialSelectionService(folderMapper, folderProjectMapper, materialMapper,
+                imageBatchMapper, new com.fasterxml.jackson.databind.ObjectMapper());
+    }
+
+    @Test
+    void automaticImagesPendingCannotFallBackToLegacyPictures() {
+        ArticleDraft article = new ArticleDraft(); article.setId(123L);
+        when(imageBatchMapper.selectCount(any())).thenReturn(1L);
+        org.junit.jupiter.api.Assertions.assertThrows(com.huanjing.geo.common.exception.BizException.class,
+                () -> service.selectDouyinImageTextImages(new Project(), article, "![old](https://example.com/a.jpg)"));
+        org.mockito.Mockito.verifyNoInteractions(materialMapper, folderMapper);
     }
 
     @Test
@@ -124,6 +137,26 @@ class SelfMediaPublishMaterialSelectionServiceTest {
         assertTrue(selected.size() >= 2 && selected.size() <= 4);
         assertEquals(selected.size(), Set.copyOf(selected).size());
         assertTrue(Set.of(88L, 101L, 102L, 103L).containsAll(selected));
+    }
+
+    @Test
+    void usesEntireGeneratedSetInOriginalOrderAndRejectsStaleVersions() {
+        ArticleDraft article = new ArticleDraft();
+        article.setId(1L); article.setCurrentVersionNo(2); article.setDouyinImageBatchId(7L);
+        var batch = new com.huanjing.geo.module.content.entity.DouyinArticleImageBatch();
+        batch.setId(7L); batch.setArticleId(1L); batch.setAppliedVersionNo(2); batch.setSubjectBrandId(50L);
+        batch.setStatus("applied"); batch.setImageCount(6); batch.setMaterialIdsJson("[106,102,104,103,105,101]");
+        when(imageBatchMapper.selectById(7L)).thenReturn(batch);
+        when(materialMapper.selectById(anyLong())).thenAnswer(inv -> {
+            BrandMaterial image = material(inv.getArgument(0), "https://app.test/generated.png", null);
+            image.setSourceArticleId(1L);
+            return image;
+        });
+        assertEquals(List.of(106L, 102L, 104L, 103L, 105L, 101L), service.selectDouyinImageTextImages(project(), article, ""));
+        article.setCurrentVersionNo(3);
+        org.junit.jupiter.api.Assertions.assertThrows(com.huanjing.geo.common.exception.BizException.class,
+                () -> service.selectDouyinImageTextImages(project(), article, ""));
+        org.mockito.Mockito.verifyNoInteractions(folderMapper, folderProjectMapper);
     }
 
     private Project project() {

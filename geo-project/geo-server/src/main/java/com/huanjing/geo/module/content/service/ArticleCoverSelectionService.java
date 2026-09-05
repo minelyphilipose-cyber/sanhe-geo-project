@@ -86,6 +86,7 @@ public class ArticleCoverSelectionService {
     private List<BrandMaterial> brandImages(Long brandId, Long folderId) {
         return materialMapper.selectList(new LambdaQueryWrapper<BrandMaterial>()
                         .eq(BrandMaterial::getBrandId, brandId)
+                        .isNull(BrandMaterial::getSourceArticleId)
                         .eq(BrandMaterial::getCategory, "brand_image")
                         .eq(folderId != null, BrandMaterial::getFolderId, folderId)
                         .isNotNull(BrandMaterial::getObjectKey)

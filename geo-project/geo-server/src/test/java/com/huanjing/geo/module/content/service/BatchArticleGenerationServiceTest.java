@@ -95,6 +95,7 @@ class BatchArticleGenerationServiceTest {
     private BrandAccessService brandAccessService;
     private LlmCallFacade llmCallFacade;
     private ArticleCoverSelectionService coverSelectionService;
+    private DouyinArticleImageService douyinArticleImageService;
     private BatchArticleGenerationService service;
 
     @BeforeEach
@@ -124,6 +125,7 @@ class BatchArticleGenerationServiceTest {
         brandAccessService = mock(BrandAccessService.class);
         llmCallFacade = mock(LlmCallFacade.class);
         coverSelectionService = mock(ArticleCoverSelectionService.class);
+        douyinArticleImageService = mock(DouyinArticleImageService.class);
         when(readinessService.detectTaskReadinessWarningCodes(any(), any(), any())).thenReturn(List.of());
         when(taskMapper.renewRunningClaim(any(), any(), any(), any())).thenReturn(1);
         when(taskMapper.update(any(), any())).thenReturn(1);
@@ -152,6 +154,7 @@ class BatchArticleGenerationServiceTest {
                 articleModelResolver,
                 passThroughAutoImageInsertionService(),
                 coverSelectionService,
+                douyinArticleImageService,
                 promptBuilder,
                 promptContextFactory,
                 medicalArticleGenerationService,
@@ -985,6 +988,27 @@ class BatchArticleGenerationServiceTest {
         assertEquals(30L, draftCaptor.getValue().getSubjectBrandId());
         assertEquals("https://example.com/subject-cover.jpg", draftCaptor.getValue().getCoverImageUrl());
         verify(coverSelectionService).selectRandomCoverUrl(30L);
+    }
+
+    @Test
+    void newDouyinArticleQueuesImagesWithoutPickingLegacyMaterials() {
+        Project project = new Project(); project.setId(10L); project.setBrandId(20L);
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setBatchId(100L); task.setProjectId(10L); task.setChannelGroupCode("self_media");
+        task.setChannelSubCode("douyin");
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch(); batch.setCreatedBy(5L);
+        when(batchMapper.selectById(100L)).thenReturn(batch);
+        when(douyinArticleImageService.automaticEnabledFor("self_media", "douyin")).thenReturn(true);
+        when(articleDraftMapper.insert(any())).thenAnswer(inv -> { ((ArticleDraft) inv.getArgument(0)).setId(901L); return 1; });
+        ReflectionTestUtils.invokeMethod(service, "persistArticle", project, task, "标题",
+                "正文\n\n![旧图](https://example.com/old.jpg)", promptResult(),
+                new ArticleModelResolver.ModelSelection("mock", "mock-model", null), generatedArticle().result(),
+                null, MedicalArticleConstants.COMPLIANCE_PASSED, MedicalArticleComplianceChecker.CheckResult.pass());
+        ArgumentCaptor<ArticleDraftVersion> version = forClass(ArticleDraftVersion.class);
+        verify(articleDraftVersionMapper).insert(version.capture());
+        assertThat(version.getValue().getContentMarkdown()).doesNotContain("old.jpg");
+        org.mockito.Mockito.verifyNoInteractions(coverSelectionService);
+        verify(douyinArticleImageService).enqueueForGeneratedArticle(901L, 5L);
     }
 
     @Test

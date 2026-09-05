@@ -9,6 +9,11 @@
           </div>
           <div class="detail-summary-actions">
             <el-button
+              v-if="canArticleWrite && isDouyinArticle"
+              size="small"
+              @click="imageStudioVisible = true"
+            >生图测试</el-button>
+            <el-button
               v-if="canArticleWrite && canEditFromDetail(detailData.article.status)"
               size="small"
               type="primary"
@@ -32,7 +37,7 @@
               </template>
             </el-dropdown>
             <el-tag :type="statusTagType(detailData.article.status)">
-              {{ statusLabel(detailData.article.status) }}
+              {{ isDouyinArticle && detailData.article.status === 'approved' && !coverImageUrl ? '正文已就绪' : statusLabel(detailData.article.status) }}
             </el-tag>
           </div>
         </div>
@@ -70,6 +75,9 @@
             </div>
           </el-descriptions-item>
         </el-descriptions>
+        <DouyinImageProgress v-if="visible && isDouyinArticle" :article-id="detailData.article.id"
+          :current-version-no="detailData.article.currentVersionNo || 1" :active="!imageStudioVisible"
+          @applied="emit('imagesApplied')" />
         <div v-if="coverImageUrl" class="detail-cover-panel">
           <div class="detail-cover-copy">
             <span>文章封面</span>
@@ -238,10 +246,15 @@
       </div>
     </div>
   </el-drawer>
+  <DouyinImageStudio v-if="detailData && visible && canArticleWrite && isDouyinArticle && imageStudioVisible" v-model="imageStudioVisible"
+    :article-id="detailData.article.id" :current-version-no="detailData.article.currentVersionNo || 1"
+    @applied="emit('imagesApplied')" />
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import DouyinImageStudio from './DouyinImageStudio.vue'
+import DouyinImageProgress from './DouyinImageProgress.vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import type { ArticleDetailResponse, ArticleDraft, BatchArticleGenerationTaskDetail } from '@/types'
 import { formatDateTime } from '@/utils/format'
@@ -293,6 +306,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  imagesApplied: []
   'update:modelValue': [value: boolean]
   'update:viewMode': [value: ViewMode]
   revision: []
@@ -300,6 +314,9 @@ const emit = defineEmits<{
   batchGenerationOpen: [batchId: number]
 }>()
 
+const imageStudioVisible = ref(false)
+const isDouyinArticle = computed(() => props.detailData?.article.channelGroupCode === 'self_media'
+  && ['douyin', 'douyin_image_text'].includes(props.detailData?.article.channelSubCode || ''))
 const visible = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value),

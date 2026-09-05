@@ -211,6 +211,7 @@ public class ArticleAutoImageInsertionService {
         return brandMaterialMapper.selectList(
                 new LambdaQueryWrapper<BrandMaterial>()
                         .eq(BrandMaterial::getBrandId, brandId)
+                        .isNull(BrandMaterial::getSourceArticleId)
                         .eq(BrandMaterial::getCategory, "brand_image")
                         .in(folderIds != null && !folderIds.isEmpty(), BrandMaterial::getFolderId, folderIds)
                         .isNotNull(BrandMaterial::getFileUrl)

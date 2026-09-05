@@ -23,6 +23,7 @@ public class SelfMediaPlatformQuickScheduleResponse {
     private List<Long> imageMaterialIds;
     private Integer expectedImageCount;
     private Long replaceScheduleId;
+    private Long replacePlanItemId;
     private LocalDateTime plannedPublishAt;
     private LocalDateTime nextAttemptAt;
     private Integer brandSafetyIntervalMinutes;

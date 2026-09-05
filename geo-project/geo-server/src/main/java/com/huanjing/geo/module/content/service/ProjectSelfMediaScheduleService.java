@@ -149,6 +149,7 @@ public class ProjectSelfMediaScheduleService {
     private final SelfMediaPublishAutoScheduleService autoScheduleService;
     private final SelfMediaPublishScheduleService scheduleService;
     private final BatchArticleGenerationService generationService;
+    private final DouyinArticleImageService douyinArticleImageService;
     private final TemplatePerspectiveService perspectiveService;
     private final ArticleTemplateAllocationService templateAllocationService;
     private final ArticleCoverSelectionService coverSelectionService;
@@ -2428,6 +2429,19 @@ public class ProjectSelfMediaScheduleService {
 
     private boolean createScheduleForStoredItem(ProjectSelfMediaScheduleBatch batch,
                                                 ProjectSelfMediaScheduleItem item) {
+        if ("douyin".equals(item.getPlatform())) {
+            try {
+                if (!douyinArticleImageService.prepareAutomatic(item.getArticleId(), batch.getCreatedBy())) return false;
+            } catch (RuntimeException ex) {
+                item.setStatus(ITEM_STATUS_SCHEDULE_FAILED);
+                item.setScheduleErrorCode("DOUYIN_IMAGE_GENERATION_FAILED");
+                item.setScheduleErrorMessage(trimMessage(ex.getMessage()));
+                item.setNextScheduleAttemptAt(null);
+                scheduleItemMapper.updateById(item);
+                alertStoredItemFailure(batch, item, "抖音图片未就绪，已暂停排期");
+                return true;
+            }
+        }
         SelfMediaPublishScheduleCreateRequest request = new SelfMediaPublishScheduleCreateRequest();
         request.setBrandId(batch.getBrandId());
         request.setArticleIds(List.of(item.getArticleId()));

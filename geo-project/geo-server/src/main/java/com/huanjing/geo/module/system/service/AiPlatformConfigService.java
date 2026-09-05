@@ -113,6 +113,7 @@ public class AiPlatformConfigService {
 
         AiPlatformConfig entity = new AiPlatformConfig();
         fillEntity(entity, req);
+        isolateImageModel(entity);
         aiPlatformConfigMapper.insert(entity);
 
         activityLogService.logAction(
@@ -179,6 +180,7 @@ public class AiPlatformConfigService {
         Map<String, Object> before = snapshot(entity);
 
         fillEntity(entity, req);
+        isolateImageModel(entity);
         aiPlatformConfigMapper.updateById(entity);
         // MyBatis-Plus omits null fields in updateById. Persist both credential columns
         // explicitly so switching sources also removes the previous source atomically.
@@ -203,6 +205,9 @@ public class AiPlatformConfigService {
         currentUserService.ensurePermission("user.manage");
 
         AiPlatformConfig entity = requireById(id);
+        if ("IMAGE_GENERATION".equals(entity.getUsageScene()) && Boolean.TRUE.equals(enabledForPresale)) {
+            throw new BizException(400, "图片模型不能用于售前文本生成");
+        }
         if (Boolean.TRUE.equals(enabledForPresale) && !StringUtils.hasText(entity.getLowModelId())) {
             throw new BizException(400, "low_model_id is required when enabling presale");
         }
@@ -319,6 +324,9 @@ public class AiPlatformConfigService {
         }
         UsageScene scene = parseEnum(UsageScene.class, usageScene, "usage_scene");
         IntegrationType integration = parseEnum(IntegrationType.class, integrationType, "integration_type");
+        if ((scene == UsageScene.IMAGE_GENERATION) != (integration == IntegrationType.OPENAI_IMAGE)) {
+            throw new BizException(400, "图片生成用途必须配合 OPENAI_IMAGE 协议使用");
+        }
         if (!StringUtils.hasText(platformName)) {
             throw new BizException(400, "platform_name is required");
         }
@@ -440,6 +448,17 @@ public class AiPlatformConfigService {
                 || providerConfig.hasNonNull("generationCredentialRef"))) {
             throw new BizException(400, "single-provider web credentials must use primary_key_ref only");
         }
+    }
+
+    private void isolateImageModel(AiPlatformConfig entity) {
+        if (!UsageScene.IMAGE_GENERATION.name().equals(entity.getUsageScene())) return;
+        entity.setEnabledForArticle(false);
+        entity.setEnabledForPresale(false);
+        entity.setEnabledForPresaleQuestionGeneration(false);
+        entity.setPresaleEvaluateEnabled(false);
+        entity.setEnabledForGeoQuestion(false);
+        entity.setEnabledForQuestionPoll(false);
+        entity.setEnabledForMobileDashboard(false);
     }
 
     private void requireEnvRef(JsonNode providerConfig, String fieldName) {

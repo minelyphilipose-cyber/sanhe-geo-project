@@ -112,7 +112,10 @@
           </el-table-column>
           <el-table-column label="能力开关" min-width="210">
             <template #default="scope">
-              <div class="capability-tags">
+              <div v-if="scope.row.usageScene === 'IMAGE_GENERATION'" class="capability-tags">
+                <span class="capability-tag" :class="scope.row.enabled ? 'is-success' : 'is-muted'">图片生成</span>
+              </div>
+              <div v-else class="capability-tags">
                 <span class="capability-tag" :class="scope.row.enabledForGeoQuestion ? 'is-success' : 'is-muted'">问题池</span>
                 <span class="capability-tag" :class="isPresaleEnabled(scope.row) ? 'is-success' : 'is-muted'">售前</span>
                 <span class="capability-tag" :class="scope.row.presaleEvaluateEnabled ? 'is-success' : 'is-muted'">评估</span>
@@ -190,6 +193,13 @@
             <i />
           </div>
           <div class="form-grid basic-info-grid">
+            <el-form-item label="模型用途">
+              <el-select v-model="form.usageScene" @change="handleUsageSceneChange">
+                <el-option label="文本生成" value="STANDARD_CHAT" />
+                <el-option label="图片生成 · 豆包 Seedream" value="IMAGE_GENERATION" />
+                <el-option v-if="isQuestionPollWebProfile" label="联网轮询" value="QUESTION_POLL_WEB" />
+              </el-select>
+            </el-form-item>
             <el-form-item label="平台编码" prop="platformCode">
               <el-input v-model="form.platformCode" placeholder="如: doubao / deepseek" />
             </el-form-item>
@@ -241,6 +251,7 @@
             <i />
           </div>
           <div class="constraint-hint">密钥来源二选一：页面密钥会加密保存；填写新密钥或主密钥引用时会自动切换来源</div>
+          <div v-if="isImageProfile" class="constraint-hint">图片模型用于抖音图文生图测试，不参与正文写作。保存配置不会开启自动生图或发布。</div>
           <div class="form-grid is-two">
             <el-form-item label="接口地址" prop="apiUrl">
               <el-input v-model="form.apiUrl" placeholder="https://xxx/v1" />
@@ -334,7 +345,7 @@
             <span>模型总开关已关闭，所有子能力暂不生效</span>
           </div>
 
-          <div class="capability-group">
+          <div v-if="!isImageProfile" class="capability-group">
             <div class="capability-group-head">
               <span class="capability-group-strip is-report" />
               <strong>AI 可见度诊断报告</strong>
@@ -406,7 +417,7 @@
             </div>
           </div>
 
-          <div class="capability-group">
+          <div v-if="!isImageProfile" class="capability-group">
             <div class="capability-group-head">
               <span class="capability-group-strip is-content" />
               <strong>内容生成</strong>
@@ -455,7 +466,7 @@
             </div>
           </div>
 
-          <div class="capability-group">
+          <div v-if="!isImageProfile" class="capability-group">
             <div class="capability-group-head">
               <span class="capability-group-strip is-batch" />
               <strong>跑批任务</strong>
@@ -639,6 +650,7 @@ const existingApiKeyConfigured = ref(false)
 const form = reactive({
   platformCode: '',
   usageScene: 'STANDARD_CHAT',
+  integrationType: 'OPENAI_CHAT',
   platformName: '',
   platformHomeUrl: '',
   platformLogoUrl: '',
@@ -679,6 +691,30 @@ const apiKeyPlaceholder = computed(() => mode.value === 'edit' && existingApiKey
   ? '已配置页面密钥；留空表示不更换'
   : '输入平台密钥（加密保存）')
 const isQuestionPollWebProfile = computed(() => form.usageScene === 'QUESTION_POLL_WEB')
+const isImageProfile = computed(() => form.usageScene === 'IMAGE_GENERATION')
+
+function handleUsageSceneChange(value: string) {
+  if (value !== 'IMAGE_GENERATION') {
+    form.integrationType = 'OPENAI_CHAT'
+    return
+  }
+  form.integrationType = 'OPENAI_IMAGE'
+  form.enabledForArticle = false
+  form.enabledForPresale = false
+  form.enabledForPresaleQuestionGeneration = false
+  form.presaleEvaluateEnabled = false
+  form.enabledForGeoQuestion = false
+  form.enabledForQuestionPoll = false
+  form.enabledForMobileDashboard = false
+  form.lowModelId = ''
+  if (mode.value === 'create') {
+    form.platformCode = 'doubao_image'
+    form.platformName = '豆包图片生成'
+    form.apiUrl = 'https://ark.cn-beijing.volces.com/api/v3'
+    form.modelId = 'doubao-seedream-5-0-260128'
+    form.modelName = 'Seedream 5.0'
+  }
+}
 
 const rules: FormRules = {
   platformCode: [
@@ -744,6 +780,7 @@ watch(
 function resetForm() {
   form.platformCode = ''
   form.usageScene = 'STANDARD_CHAT'
+  form.integrationType = 'OPENAI_CHAT'
   form.platformName = ''
   form.platformHomeUrl = ''
   form.platformLogoUrl = ''
@@ -864,6 +901,7 @@ function openEdit(row: AIPlatformConfigItem) {
   existingApiKeyConfigured.value = !!row.apiKeyConfigured
   form.platformCode = row.platformCode
   form.usageScene = row.usageScene || 'STANDARD_CHAT'
+  form.integrationType = row.integrationType || 'OPENAI_CHAT'
   form.platformName = row.platformName
   form.platformHomeUrl = row.platformHomeUrl || ''
   form.platformLogoUrl = normalizeObjectStorageUrl(row.platformLogoUrl) || row.platformLogoUrl || ''
@@ -911,6 +949,7 @@ async function submit() {
     const payload = {
       platformCode: form.platformCode.trim(),
       usageScene: form.usageScene,
+      integrationType: form.integrationType,
       platformName: form.platformName.trim(),
       platformHomeUrl: form.platformHomeUrl.trim() || undefined,
       platformLogoUrl: normalizeObjectStorageUrl(form.platformLogoUrl) || undefined,

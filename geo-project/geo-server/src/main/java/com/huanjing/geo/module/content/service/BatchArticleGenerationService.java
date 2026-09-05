@@ -163,6 +163,7 @@ public class BatchArticleGenerationService {
     private final ArticleModelResolver articleModelResolver;
     private final ArticleAutoImageInsertionService autoImageInsertionService;
     private final ArticleCoverSelectionService coverSelectionService;
+    private final DouyinArticleImageService douyinArticleImageService;
     private final BatchArticlePromptBuilder promptBuilder;
     private final ArticleGenerationPromptContextFactory promptContextFactory;
     private final MedicalArticleGenerationService medicalArticleGenerationService;
@@ -211,6 +212,7 @@ public class BatchArticleGenerationService {
                                          ArticleModelResolver articleModelResolver,
                                          ArticleAutoImageInsertionService autoImageInsertionService,
                                          ArticleCoverSelectionService coverSelectionService,
+                                         DouyinArticleImageService douyinArticleImageService,
                                          BatchArticlePromptBuilder promptBuilder,
                                          ArticleGenerationPromptContextFactory promptContextFactory,
                                          MedicalArticleGenerationService medicalArticleGenerationService,
@@ -249,6 +251,7 @@ public class BatchArticleGenerationService {
         this.articleModelResolver = articleModelResolver;
         this.autoImageInsertionService = autoImageInsertionService;
         this.coverSelectionService = coverSelectionService;
+        this.douyinArticleImageService = douyinArticleImageService;
         this.promptBuilder = promptBuilder;
         this.promptContextFactory = promptContextFactory;
         this.medicalArticleGenerationService = medicalArticleGenerationService;
@@ -1397,8 +1400,10 @@ public class BatchArticleGenerationService {
             draft.setTopicAsQuestion(task.getTopicAsQuestion());
             draft.setTitle(title);
             applyMedicalDraftFields(draft, medicalContext, complianceStatus);
+            boolean generateDouyinImages = douyinArticleImageService.automaticEnabledFor(
+                    task.getChannelGroupCode(), task.getChannelSubCode());
             String coverImageUrl = null;
-            if (ArticlePromptChannels.SELF_MEDIA.equals(task.getChannelGroupCode())) {
+            if (!generateDouyinImages && ArticlePromptChannels.SELF_MEDIA.equals(task.getChannelGroupCode())) {
                 coverImageUrl = coverSelectionService.selectRandomCoverUrl(coverBrandId(project, task));
                 draft.setCoverImageUrl(coverImageUrl);
             }
@@ -1414,7 +1419,8 @@ public class BatchArticleGenerationService {
             version.setVersionNo(1);
             version.setTitle(title);
             Project imageProject = imageProject(project, task);
-            version.setContentMarkdown(autoImageInsertionService.insertForChannel(imageProject, task.getChannelGroupCode(),
+            version.setContentMarkdown(generateDouyinImages ? DouyinArticleImageService.cleanImages(content)
+                    : autoImageInsertionService.insertForChannel(imageProject, task.getChannelGroupCode(),
                     task.getChannelSubCode(), content, coverImageUrl));
             version.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), result));
             String routingInputSnapshot = enrichRoutingInputSnapshot(prompt.inputSnapshot(), model);
@@ -1434,6 +1440,13 @@ public class BatchArticleGenerationService {
             logRow.setGeneratedTitle(title);
             logRow.setModelCode(model.platformCode());
             articleGenerationLogMapper.insert(logRow);
+            if (generateDouyinImages) {
+                BatchArticleGenerationBatch generationBatch = batchMapper.selectById(task.getBatchId());
+                if (generationBatch == null || generationBatch.getCreatedBy() == null) {
+                    throw new BizException(409, "生成批次缺少操作人，不能创建抖音生图任务");
+                }
+                douyinArticleImageService.enqueueForGeneratedArticle(draft.getId(), generationBatch.getCreatedBy());
+            }
             return draft.getId();
         }));
     }

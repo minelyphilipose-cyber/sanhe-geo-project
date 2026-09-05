@@ -85,6 +85,7 @@ public class ArticleAiDraftService {
     private final MedicalArticleComplianceChecker medicalComplianceChecker;
     private final SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService;
     private final ArticleCoverSelectionService coverSelectionService;
+    private final DouyinArticleImageService douyinArticleImageService;
     private final ArticleAutoImageInsertionService autoImageInsertionService;
     private final ArticleAiDraftRateLimiter rateLimiter;
     private final AuditService auditService;
@@ -103,6 +104,7 @@ public class ArticleAiDraftService {
                                  MedicalArticleComplianceChecker medicalComplianceChecker,
                                  SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService,
                                  ArticleCoverSelectionService coverSelectionService,
+                                 DouyinArticleImageService douyinArticleImageService,
                                  ArticleAutoImageInsertionService autoImageInsertionService,
                                  ArticleAiDraftRateLimiter rateLimiter,
                                  AuditService auditService, ObjectMapper objectMapper,
@@ -119,6 +121,7 @@ public class ArticleAiDraftService {
         this.medicalComplianceChecker = medicalComplianceChecker;
         this.specialIndustryComplianceAlertService = specialIndustryComplianceAlertService;
         this.coverSelectionService = coverSelectionService;
+        this.douyinArticleImageService = douyinArticleImageService;
         this.autoImageInsertionService = autoImageInsertionService;
         this.rateLimiter = rateLimiter;
         this.auditService = auditService; this.objectMapper = objectMapper;
@@ -575,8 +578,10 @@ public class ArticleAiDraftService {
             draft.setTopicAsQuestion(context.topicAsQuestion());
             draft.setTitle(title);
             applyMedicalDraftFields(draft, context.medicalContext());
+            boolean generateDouyinImages = douyinArticleImageService.automaticEnabledFor(
+                    context.channelGroupCode(), context.channelSubCode());
             String coverImageUrl = null;
-            if (ArticlePromptChannels.SELF_MEDIA.equals(context.channelGroupCode())) {
+            if (!generateDouyinImages && ArticlePromptChannels.SELF_MEDIA.equals(context.channelGroupCode())) {
                 coverImageUrl = coverSelectionService.selectRandomCoverUrl(context.project().getBrandId());
                 draft.setCoverImageUrl(coverImageUrl);
             }
@@ -591,7 +596,8 @@ public class ArticleAiDraftService {
             version.setArticleId(draft.getId());
             version.setVersionNo(1);
             version.setTitle(title);
-            version.setContentMarkdown(autoImageInsertionService.insertForChannel(context.project(), context.channelGroupCode(),
+            version.setContentMarkdown(generateDouyinImages ? DouyinArticleImageService.cleanImages(generated.content())
+                    : autoImageInsertionService.insertForChannel(context.project(), context.channelGroupCode(),
                     context.channelSubCode(), generated.content(), coverImageUrl));
             version.setPromptSnapshot(enrichPromptSnapshot(context.prompt().promptSnapshot(), generated.result(), "AI_TEMPLATE"));
             version.setInputSnapshot(context.prompt().inputSnapshot());
@@ -600,6 +606,7 @@ public class ArticleAiDraftService {
             version.setGeneratedBy(GENERATED_BY_TEMPLATE_AI);
             version.setCreatedBy(operator.getId());
             articleDraftVersionMapper.insert(version);
+            if (generateDouyinImages) douyinArticleImageService.enqueueForGeneratedArticle(draft.getId(), operator.getId());
             return draft;
         }));
     }

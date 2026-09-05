@@ -223,6 +223,7 @@
       @revision="openRevisionFromDetail"
       @style-render="handleDetailStyleRenderCommand"
       @batch-generation-open="openBatchGenerationJob"
+      @images-applied="detailData && openDetail(detailData.article.id)"
     />
 
     <ArticleRevisionDialog

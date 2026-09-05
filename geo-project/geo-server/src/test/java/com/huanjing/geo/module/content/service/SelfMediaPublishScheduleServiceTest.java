@@ -930,6 +930,88 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void previewRecognizesQuotaReservedByFuturePlanBeforeArticleGeneration() {
+        prepareQuotaReservedByFuturePlan();
+        SelfMediaPlatformQuickScheduleResponse response = service.previewPlatformQuickSchedule(quickRequest("toutiao", false));
+        assertEquals("replace_required", response.getAction());
+        assertEquals(91L, response.getReplacePlanItemId());
+        assertEquals(null, response.getReplaceScheduleId());
+        assertTrue(response.getMessage().contains("尚未开始生成"));
+        verify(scheduleMapper, never()).insert(any());
+        verify(companyChannelQuotaService, never()).transferProjectSelfMediaPlanReservation(anyLong(), anyLong());
+    }
+
+    @Test
+    void dispatchTransfersFuturePlanQuotaWithoutRefundingOrReservingAgain() {
+        prepareQuotaReservedByFuturePlan();
+        stubRequestInsert();
+        when(projectScheduleItemMapper.cancelReservedPlanForManualPublish(eq(91L), eq(8L), eq("toutiao"),
+                any(), any(), any(), any(), anyLong())).thenReturn(1);
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            ((SelfMediaPublishSchedule) invocation.getArgument(0)).setId(73L);
+            return 1;
+        });
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(quickRequest("toutiao", true), "replace-plan");
+        assertEquals("created", response.getAction());
+        assertEquals(91L, response.getReplacePlanItemId());
+        verify(companyChannelQuotaService).transferProjectSelfMediaPlanReservation(91L, 73L);
+        verify(companyChannelQuotaService, never()).refundProjectSelfMediaPlan(anyLong());
+        verify(companyChannelQuotaService, never()).reserveSelfMediaSchedule(anyLong(), anyLong(), anyString(), anyLong(), any());
+        verify(scheduleMapper, never()).cancelSafeReplaceablePendingSchedule(anyLong(), anyLong(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
+    void dispatchDoesNotReplaceFuturePlanWithoutExistingConfirmationFlag() {
+        prepareQuotaReservedByFuturePlan();
+        assertEquals("replace_required", service.dispatchPlatformQuickSchedule(quickRequest("toutiao", false), "preview-plan").getAction());
+        verify(projectScheduleItemMapper, never()).cancelReservedPlanForManualPublish(anyLong(), anyLong(), anyString(), any(), any(), any(), any(), anyLong());
+        verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void dispatchStopsIfFuturePlanWasClaimedByGenerationWorker() {
+        prepareQuotaReservedByFuturePlan();
+        assertThrows(BizException.class, () -> service.dispatchPlatformQuickSchedule(quickRequest("toutiao", true), "claimed-plan"));
+        verify(scheduleMapper, never()).insert(any());
+        verify(companyChannelQuotaService, never()).transferProjectSelfMediaPlanReservation(anyLong(), anyLong());
+        verify(transactionManager).rollback(any());
+    }
+
+    @Test
+    void failedQuotaTransferRollsBackReplacementAndNewSchedule() {
+        prepareQuotaReservedByFuturePlan();
+        stubRequestInsert();
+        when(projectScheduleItemMapper.cancelReservedPlanForManualPublish(eq(91L), eq(8L), eq("toutiao"),
+                any(), any(), any(), any(), anyLong())).thenReturn(1);
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            ((SelfMediaPublishSchedule) invocation.getArgument(0)).setId(73L);
+            return 1;
+        });
+        org.mockito.Mockito.doThrow(new BizException(409, "reservation changed"))
+                .when(companyChannelQuotaService).transferProjectSelfMediaPlanReservation(91L, 73L);
+        assertThrows(BizException.class, () -> service.dispatchPlatformQuickSchedule(quickRequest("toutiao", true), "lost-plan-quota"));
+        verify(transactionManager).rollback(any());
+    }
+
+    private void prepareQuotaReservedByFuturePlan() {
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
+                ProjectSelfMediaScheduleItem.class);
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-09", 3, 3));
+        ProjectSelfMediaScheduleItem item = new ProjectSelfMediaScheduleItem();
+        item.setId(91L); item.setBrandId(8L); item.setCompanyId(6L); item.setPlatform("toutiao");
+        item.setPlannedPublishAt(LocalDateTime.now().plusDays(2));
+        item.setPlannedExecutionAt(item.getPlannedPublishAt().minusHours(1));
+        item.setGenerationDueAt(item.getPlannedExecutionAt().minusHours(4));
+        when(projectScheduleItemMapper.selectSafeReplaceableReservedPlan(eq(8L), eq("toutiao"), eq(6L),
+                eq("month"), eq("2026-09"), any(), any(), any())).thenReturn(item);
+    }
+
+    @Test
     void dispatchPlatformQuickScheduleRejectsWhenBrandActiveQueueFull() {
         prepareValidArticleAndAccount();
         when(accountMapper.selectOne(any())).thenReturn(account());
