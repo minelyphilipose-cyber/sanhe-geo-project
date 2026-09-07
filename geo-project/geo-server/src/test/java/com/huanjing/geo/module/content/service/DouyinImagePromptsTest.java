@@ -16,7 +16,6 @@ class DouyinImagePromptsTest {
         assertEquals(16, DouyinImagePrompts.STYLES.size());
         assertEquals(16, DouyinImagePrompts.STYLES.stream().distinct().count());
         assertTrue(DouyinImagePrompts.style("colorful_handbook").contains("大面积实色色块"));
-        assertTrue(DouyinImagePrompts.style("colorful_handbook").contains("不用蜡笔、粉笔、水彩晕染"));
         for (String style : DouyinImagePrompts.STYLES) {
             batch.setStyleCode(style);
             String prompt = DouyinImagePrompts.image(batch, plan, 0, true);

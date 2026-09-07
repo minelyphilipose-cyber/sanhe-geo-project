@@ -33,7 +33,7 @@ public final class DouyinImagePrompts {
             case "geometric" -> "现代几何构成：用精准几何形、比例、节奏和色彩关系形成视觉张力，保持文字区安静清楚";
             case "architectural_sketch" -> "建筑线稿手册：暖白纸张底色，高精度建筑、空间或结构线稿作为主景，搭配一种中高饱和主题色、手绘标注感和精品印刷颗粒";
             case "photo_blueprint" -> "实景图纸拼贴：高质量主题场景照片与蓝图、尺寸线、材料样本或专业工具形成编辑拼贴，暖调光线、中等饱和度和清楚层次";
-            case "colorful_handbook" -> "彩色手绘指南：暖白底色，3—5种中高饱和的大面积实色色块、干净粗轮廓、成熟编辑插画和轻微丝网印刷颗粒；不用蜡笔、粉笔、水彩晕染、儿童涂鸦或廉价促销图标";
+            case "colorful_handbook" -> "彩色手绘指南：暖白底色，3—5种中高饱和的大面积实色色块、干净粗轮廓、成熟编辑插画和轻微丝网印刷颗粒；不用廉价促销图标";
             case "vintage_archive" -> "复古工程档案：牛皮纸、撕边、铅笔或针管笔线稿、棕橙标签与旧式印刷颗粒，像经过设计的专业档案而非做旧模板";
             default -> throw new IllegalArgumentException("未知图片风格");
         };
