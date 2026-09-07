@@ -1,7 +1,7 @@
 <template>
   <div v-if="batch || loadError" class="douyin-image-progress" aria-live="polite">
     <el-alert :title="loadError || title" :description="description" :type="alertType" :closable="false" show-icon />
-    <el-button v-if="loadError" size="small" @click="load">重新读取图片进度</el-button>
+    <el-button size="small" :loading="loading" @click="load">刷新图片状态</el-button>
   </div>
 </template>
 
@@ -13,6 +13,7 @@ const props = defineProps<{ articleId: number; currentVersionNo: number; active:
 const emit = defineEmits<{ applied: [] }>()
 const batch = ref<DouyinImageBatch | null>(null)
 const loadError = ref('')
+const loading = ref(false)
 const labels = { queued: '等待生成', running: '生成中', succeeded: '已生成，待应用', failed: '生成失败', applied: '已插入文章' }
 const title = computed(() => batch.value
   ? `豆包图片${labels[batch.value.status]} · ${batch.value.imageUrls.length}/${batch.value.imageCount} 张` : '')
@@ -20,7 +21,7 @@ const description = computed(() => {
   if (loadError.value) return '图片任务可能仍在继续，可重新读取进度。'
   if (batch.value?.errorMessage) return batch.value.errorMessage
   if (batch.value?.status === 'queued' || batch.value?.status === 'running') {
-    return '正文已完成，图片正在处理中，完成后页面会自动刷新。'
+    return '正文已完成，图片正在处理中，可点击“刷新图片状态”查看最新结果。'
   }
   if (batch.value?.status === 'failed') return '可在“生图测试”中重试未完成图片。'
   if (batch.value?.status === 'succeeded') return '图片尚未插入正文，可在“生图测试”中查看并应用。'
@@ -28,13 +29,12 @@ const description = computed(() => {
 })
 const alertType = computed(() => loadError.value || batch.value?.errorMessage || batch.value?.status === 'failed'
   ? 'error' : batch.value?.status === 'applied' ? 'success' : 'info')
-let timer: ReturnType<typeof setTimeout> | undefined
 let context = 0
 let notifiedVersion = 0
 
 async function load() {
-  clearTimeout(timer)
-  if (!props.active) return
+  if (!props.active || loading.value) return
+  loading.value = true
   const requestContext = context
   try {
     const { data } = await listDouyinImages(props.articleId)
@@ -47,24 +47,20 @@ async function load() {
       notifiedVersion = appliedVersion
       emit('applied')
     }
-    // Keep watching a completed generation until the worker has also applied it.
-    if (batch.value && ['queued', 'running', 'succeeded'].includes(batch.value.status) && !batch.value.errorMessage) {
-      timer = setTimeout(load, 8000)
-    }
   } catch {
     if (requestContext === context) loadError.value = '暂时无法读取豆包图片进度'
-  }
+  } finally { if (requestContext === context) loading.value = false }
 }
 
 watch(() => [props.active, props.articleId, props.currentVersionNo] as const, () => {
   context++
-  clearTimeout(timer)
   batch.value = null
+  loading.value = false
   loadError.value = ''
   notifiedVersion = 0
   if (props.active) void load()
 }, { immediate: true })
-onBeforeUnmount(() => { context++; clearTimeout(timer) })
+onBeforeUnmount(() => { context++ })
 </script>
 
 <style scoped>

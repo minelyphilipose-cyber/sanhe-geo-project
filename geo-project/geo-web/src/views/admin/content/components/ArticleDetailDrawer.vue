@@ -78,7 +78,7 @@
         <DouyinImageProgress v-if="visible && isDouyinArticle" :article-id="detailData.article.id"
           :current-version-no="detailData.article.currentVersionNo || 1" :active="!imageStudioVisible"
           @applied="emit('imagesApplied')" />
-        <div v-if="coverImageUrl" class="detail-cover-panel">
+        <div v-if="coverImageUrl" class="detail-cover-panel" :class="{ 'douyin-cover': isDouyinArticle }">
           <div class="detail-cover-copy">
             <span>文章封面</span>
             <strong>{{ detailData.article.title || '封面图片' }}</strong>
@@ -242,17 +242,20 @@
           </el-radio-group>
         </div>
         <el-input v-if="viewMode === 'markdown'" type="textarea" :rows="14" :model-value="markdown" readonly />
-        <div v-else class="markdown-preview" v-html="html"></div>
+        <div v-else class="markdown-preview" :class="{ 'douyin-preview': isDouyinArticle }" @click="openPreviewImage" v-html="html"></div>
       </div>
     </div>
   </el-drawer>
+  <ElImageViewer v-if="visible && previewImages.length" :url-list="previewImages" :initial-index="previewImageIndex"
+    @close="previewImages = []" />
   <DouyinImageStudio v-if="detailData && visible && canArticleWrite && isDouyinArticle && imageStudioVisible" v-model="imageStudioVisible"
     :article-id="detailData.article.id" :current-version-no="detailData.article.currentVersionNo || 1"
     @applied="emit('imagesApplied')" />
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { ElImageViewer } from 'element-plus'
 import DouyinImageStudio from './DouyinImageStudio.vue'
 import DouyinImageProgress from './DouyinImageProgress.vue'
 import { ArrowDown } from '@element-plus/icons-vue'
@@ -315,6 +318,15 @@ const emit = defineEmits<{
 }>()
 
 const imageStudioVisible = ref(false)
+const previewImages = ref<string[]>([])
+const previewImageIndex = ref(0)
+function openPreviewImage(event: MouseEvent) {
+  if (!isDouyinArticle.value || !(event.target instanceof HTMLImageElement)) return
+  const images = Array.from((event.currentTarget as HTMLElement).querySelectorAll('img'))
+  previewImageIndex.value = images.indexOf(event.target)
+  previewImages.value = images.map(image => image.src)
+}
+watch(() => [props.modelValue, props.detailData?.article.id], () => { previewImages.value = [] })
 const isDouyinArticle = computed(() => props.detailData?.article.channelGroupCode === 'self_media'
   && ['douyin', 'douyin_image_text'].includes(props.detailData?.article.channelSubCode || ''))
 const visible = computed({
@@ -728,6 +740,20 @@ function publishedUrlLabel(value?: string | null) {
   height: auto;
   margin: 14px auto;
   border-radius: 6px;
+}
+
+.douyin-preview :deep(img) {
+  width: auto;
+  max-width: min(100%, 360px);
+  max-height: 640px;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+
+.douyin-cover img {
+  height: 180px;
+  aspect-ratio: auto;
+  object-fit: contain;
 }
 
 .markdown-preview :deep(table) {

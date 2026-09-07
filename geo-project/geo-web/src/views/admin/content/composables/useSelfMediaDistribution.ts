@@ -511,8 +511,8 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       douyinTopicQuery.value = preview.topicQuery || ''
       if (preview.action !== 'ready') {
         douyinTopicError.value = preview.message || '抖音图文自动发布条件尚未满足'
-      } else if (!douyinTopicRegionText.value || !douyinTopicIndustryText.value || !douyinTopicQuery.value) {
-        douyinTopicError.value = preview.message || '品牌地域或行业未能解析为中文描述，请先修正品牌配置'
+      } else if (!douyinTopicQuery.value) {
+        douyinTopicError.value = preview.message || '发布话题未能生成，请先检查品牌配置'
       } else if (selectedDouyinImageMaterialIds.value.length < 1) {
         douyinTopicError.value = '未找到可用的抖音图文图片，请先补充品牌图片素材'
       }
@@ -522,7 +522,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       douyinTopicQuery.value = ''
       selectedSelfMediaAccountId.value = null
       selectedDouyinImageMaterialIds.value = []
-      douyinTopicError.value = error instanceof Error ? error.message : '中文地域和行业解析失败'
+      douyinTopicError.value = error instanceof Error ? error.message : '发布话题生成失败'
     } finally {
       douyinTopicLoading.value = false
     }
@@ -943,7 +943,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       return
     }
     if (!douyinTopicQuery.value || douyinTopicError.value) {
-      ElMessage.warning(douyinTopicError.value || '中文地域和行业尚未解析完成')
+      ElMessage.warning(douyinTopicError.value || '发布话题尚未生成完成')
       return
     }
     if (`${description}\n${douyinTopicQuery.value}`.length > 1000) {

@@ -45,6 +45,16 @@ public class ArticlePromptAssemblerV2 {
             以下内容是可选择的事实素材库，不是必须逐项写入的企业介绍清单。只选取与本篇主线直接相关的少量事实；普通主题通常使用1～2项品牌事实，品牌专题也不要求完整罗列企业资料。未被选中的材料可以不写，不得为满足篇幅重复品牌资料，或集中堆叠定位、业务、产品、区域、资质和案例。
             """.trim();
 
+    private static final String MEDICAL_BEAUTY_DOUYIN_RULES = """
+            以下是医美抖音图文的专用内容任务，优先于通用品牌宣传、推荐视角、文章类型和补充要求：
+            1. 从原主题中提取一个读者真正关心的具体问题，用中立、温和的信息说明回应。遇到“哪家好、推荐、排名、哪家服务细致”等推广问句，标题转换为同一关注点的知识问题，不回答哪家值得选，不把品牌当作预设答案；不要转成与原主题无关的泛化风险标题。
+            2. 正文必须保留本篇真实品牌名称，通常出现一次，用一句话结合一项与主题直接相关、材料明确提供的客观事实，不把多个服务环节打包成一项事实。品牌句嵌入与主线相关的段落，不另写整段机构介绍。没有相关事实时只保留客观主体背景，不拼凑优势；不要编造用户经历、第三方评价或官方账号身份。
+            3. 主要篇幅讲清这个具体问题的判断依据、沟通要点或信息边界。通用解释不归因于该品牌，不紧接品牌句延伸“这些服务更稳妥、体验更好”等利益判断，不把机构宣称开展某项服务等同于实际做得好。语气平实，不写“口碑好、服务细致、老牌更可靠、专业领先、放心选择”等自我评价，不推导出推荐、信任、选择或适合某类人的结论。
+            4. 不罗列手术、注射、整形等业务菜单，不堆资质、设备、医生阵容，不以疗效、审美改善、安全性或恢复速度作为卖点，不提供个体诊疗建议，不引导咨询、预约、到店、私信或购买。
+            5. 标题不植入推荐结论或营销悬念；正文不生成话题标签，发布环节会按真实品牌名追加一个标签。不用别名、谐音或无关词掩饰内容所属行业。
+            6. 不固定为“开场问题—机构优势—推荐收尾”的结构；按本篇具体问题自然推进，只讲少量必要信息，避免重复铺陈。结尾停在本篇问题的解释或边界，不再落回品牌推荐。
+            """.trim();
+
     private final ObjectMapper objectMapper;
     private final ArticleContentLengthPolicyResolver contentLengthPolicyResolver;
     private final ArticleEditorialMissionResolver editorialMissionResolver;
@@ -79,19 +89,27 @@ public class ArticlePromptAssemblerV2 {
     ) {
         boolean neutralEducationMode = specialIndustry
                 && XiaohongshuArticlePolicies.isNeutralEducationTemplate(template);
+        boolean medicalBeautyDouyin = isMedicalBeautyDouyin(input.brand(), runtimePolicy);
         List<String> normalizedRecentTitles = nonEmpty(recentTitles).stream().limit(5).toList();
         List<String> omittedMaterialKeys = new ArrayList<>();
         ArticleContentLengthPolicy contentLengthPolicy = contentLengthPolicyResolver.resolve(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode(), input.length(), neutralEducationMode);
         StringBuilder prompt = new StringBuilder(4096);
         section(prompt, "真实性与硬边界", truthfulnessRules(input.forbiddenPhrases()));
-        section(prompt, "全局写作原则", GLOBAL_WRITING_RULES);
-        section(prompt, "当前渠道与写作视角", channelDirection(runtimePolicy, neutralEducationMode));
+        section(prompt, "全局写作原则", medicalBeautyDouyin ? GLOBAL_WRITING_RULES.replace(
+                "将品牌能力与读者需求自然建立联系；营销信息必须参与问题解释，不能作为孤立广告块生硬追加。",
+                "品牌仅作为真实主体背景和相关事实来源自然出现，不承担推荐、背书或转化任务。") : GLOBAL_WRITING_RULES);
+        section(prompt, "当前渠道与写作视角", medicalBeautyDouyin
+                ? "抖音图文：采用平实、客观的信息说明视角，保留真实品牌背景，不冒充第三方评测或亲历分享。"
+                : channelDirection(runtimePolicy, neutralEducationMode));
         if (isDouyin(runtimePolicy)) {
             section(prompt, "抖音图文自然行文规则", BatchArticlePromptBuilder.DOUYIN_PLATFORM_POLICY);
             section(prompt, "近期已发布抖音图文标题", recentDouyinTitleContext(normalizedRecentTitles));
         }
-        section(prompt, "当前文章任务", templateTask(input, template));
+        section(prompt, "当前文章任务", medicalBeautyDouyin ? MEDICAL_BEAUTY_DOUYIN_RULES : templateTask(input, template));
+        if (medicalBeautyDouyin && StringUtils.hasText(input.extraPrompt())) {
+            section(prompt, "本次补充要求（仅在符合医美抖音专用内容任务时采用）", input.extraPrompt());
+        }
         section(prompt, "严格审核平台品牌表达要求",
                 strictEditorialBrandDirection(input, template, runtimePolicy, specialIndustry, neutralEducationMode));
         section(prompt, "小红书特殊行业表达要求",
@@ -149,7 +167,8 @@ public class ArticlePromptAssemblerV2 {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("promptContract", PROMPT_CONTRACT);
         snapshot.put("promptRevision", isDouyin(runtimePolicy)
-                ? "v2_douyin_natural_20260902"
+                ? isMedicalBeautyDouyin(input.brand(), runtimePolicy)
+                    ? "v2_douyin_medical_beauty_factual_20260907" : "v2_douyin_natural_20260902"
                 : "v2_xiaohongshu_converged_20260804");
         snapshot.put("templateId", template == null ? null : template.getId());
         snapshot.put("templateVersionId", version == null ? null : version.getId());
@@ -199,7 +218,7 @@ public class ArticlePromptAssemblerV2 {
                 policy.channelGroupCode(), policy.channelSubCode());
         String perspectiveGuide = switch (policy.perspectiveCode()) {
             case TemplatePerspectiveCodes.INDUSTRY_NEUTRAL ->
-                    "采用第三方、客观克制的表达。可以介绍和宣传品牌，但判断必须有材料依据，不把营销结论伪装成行业共识。";
+                    "采用第三方、客观克制的行业中立表达，不承担品牌推广或推荐任务。品牌如因事实说明确有必要，只能作为普通行业样本出现，不得导出优先选择、值得推荐或适合购买的结论。";
             case TemplatePerspectiveCodes.REVIEW_RECOMMEND ->
                     strictEditorial
                             ? "采用第三方客观评述视角。只能依据真实材料说明品牌与哪些需求匹配以及能力边界，不得把品牌写成默认答案、优先选择或明确推荐结论，也不得伪造亲历、购买或使用体验。"
@@ -211,7 +230,11 @@ public class ArticlePromptAssemblerV2 {
         return channelGuide + "\n" + perspectiveGuide;
     }
 
-    private boolean isDouyin(ArticleRuntimePolicy policy) {
+    static boolean isMedicalBeautyDouyin(Brand brand, ArticleRuntimePolicy policy) {
+        return brand != null && "medical_beauty".equals(brand.getComplianceIndustryCode()) && isDouyin(policy);
+    }
+
+    private static boolean isDouyin(ArticleRuntimePolicy policy) {
         return ArticlePromptChannels.SELF_MEDIA.equals(policy.channelGroupCode())
                 && "douyin".equals(ArticlePromptChannels.canonicalSubCode(
                 policy.channelGroupCode(), policy.channelSubCode()));
@@ -264,8 +287,14 @@ public class ArticlePromptAssemblerV2 {
         if (neutralEducationMode) {
             return "本篇为特殊行业小红书中立科普内容，不承担品牌露出任务。标题和正文不得出现企业、品牌、具体机构、医生或品牌专属产品服务名称，也不得引用品牌定位、主营业务、服务范围、资质、案例和联系方式。";
         }
+        if (isMedicalBeautyDouyin(input.brand(), runtimePolicy)) {
+            return "保留真实品牌名称及少量相关事实；品牌露出不得转化为机构推荐或优势宣传，具体遵循医美抖音专用内容任务。";
+        }
         String platform = ArticlePromptChannels.channelName(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode());
+        if (TemplatePerspectiveCodes.INDUSTRY_NEUTRAL.equals(runtimePolicy.perspectiveCode())) {
+            return platform + "属于内容审核较严格的平台。本篇采用行业中立视角，不承担品牌推广任务；品牌只可在确有解释价值时作为普通样本出现，不得写品牌优势清单，不得给出推荐、背书、购买或咨询导向。";
+        }
         boolean brandFocused = isBrandFocused(input);
         String frequency = specialIndustry
                 ? "品牌必须在特殊行业合规允许的范围内自然出现，具体次数服从对应合规内核，不得为满足露出要求突破更严格的行业边界。"

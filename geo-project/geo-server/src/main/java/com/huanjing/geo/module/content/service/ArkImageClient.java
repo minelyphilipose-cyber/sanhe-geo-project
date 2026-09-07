@@ -88,13 +88,44 @@ public class ArkImageClient {
         HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
         try (InputStream body = response.body()) {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                // Never persist signed URLs, request headers, or upstream credential-bearing error bodies.
-                throw new BizException(502, operation + "失败，HTTP " + response.statusCode());
+                throw upstreamFailure(request, response, body, operation);
             }
             byte[] bytes = body.readNBytes(limit + 1);
             if (bytes.length == 0 || bytes.length > limit) throw new BizException(502, operation + "返回文件为空或过大");
             return bytes;
         }
+    }
+
+    private BizException upstreamFailure(HttpRequest request, HttpResponse<?> response, InputStream body, String operation) {
+        StringBuilder message = new StringBuilder(operation + "失败，HTTP " + response.statusCode());
+        String requestId = response.headers().firstValue("x-request-id")
+                .orElse(response.headers().firstValue("x-tt-logid").orElse(""));
+        try {
+            // Retain only diagnostic fields, never the full body, prompt, headers or signed URLs.
+            byte[] bytes = body.readNBytes(8193);
+            if (bytes.length <= 8192) {
+                JsonNode root = json.readTree(bytes);
+                if (root != null) {
+                    JsonNode error = root.path("error");
+                    appendDiagnostic(message, "错误码", error.path("code").asText(""), request, 100);
+                    appendDiagnostic(message, "说明", error.path("message").asText(""), request, 450);
+                    appendDiagnostic(message, "参数", error.path("param").asText(""), request, 80);
+                    if (requestId.isBlank()) requestId = root.path("request_id").asText(error.path("request_id").asText(""));
+                }
+            }
+        } catch (Exception ignored) { /* Malformed or unavailable error bodies must preserve the HTTP failure. */ }
+        appendDiagnostic(message, "Request ID", requestId, request, 120);
+        return new BizException(502, message.toString());
+    }
+
+    private static void appendDiagnostic(StringBuilder target, String label, String value, HttpRequest request, int limit) {
+        String credential = request.headers().firstValue("Authorization").orElse("").replaceFirst("(?i)^Bearer\\s+", "");
+        String safe = credential.isBlank() ? value : value.replace(credential, "[已隐藏]");
+        safe = safe.replaceAll("(?i)https?://[^\\s<>]+", "[链接已隐藏]")
+                .replaceAll("(?i)Bearer\\s+[^\\s,;]+", "Bearer [已隐藏]")
+                .replaceAll("[\\p{Cntrl}\\s]+", " ").trim();
+        if (!safe.isBlank()) target.append("；").append(label).append("：")
+                .append(safe.length() > limit ? safe.substring(0, limit) + "…" : safe);
     }
 
     static String imageType(byte[] bytes) {

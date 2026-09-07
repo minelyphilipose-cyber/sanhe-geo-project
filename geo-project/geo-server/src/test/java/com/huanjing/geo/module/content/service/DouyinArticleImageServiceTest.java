@@ -13,6 +13,8 @@ import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.*;
 import com.huanjing.geo.module.customer.service.BrandMaterialPublicUrlService;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -41,6 +43,7 @@ class DouyinArticleImageServiceTest {
     private final ObjectStorageService storage = mock(ObjectStorageService.class);
     private final BrandMaterialPublicUrlService urls = mock(BrandMaterialPublicUrlService.class);
     private final TransactionTemplate tx = mock(TransactionTemplate.class);
+    private final SelfMediaPublishMaterialSelectionService materialSelection = mock(SelfMediaPublishMaterialSelectionService.class);
     private DouyinArticleImageService service;
 
     @BeforeAll
@@ -55,12 +58,47 @@ class DouyinArticleImageServiceTest {
     void setup() {
         service = new DouyinArticleImageService(batches, articles, mock(ArticleDraftVersionMapper.class), mock(BrandMapper.class),
                 mock(ProjectMapper.class), materials, models, mock(SelfMediaPublishScheduleMapper.class), mock(ArticleBodyProvider.class),
-                urls, storage, mock(CurrentUserService.class), mock(BrandAccessService.class), tx, json, llm, client);
+                urls, storage, mock(CurrentUserService.class), mock(BrandAccessService.class), tx, json, llm, client, materialSelection);
         when(batches.update(isNull(), any())).thenReturn(1);
         doAnswer(inv -> {
             ((Consumer<TransactionStatus>) inv.getArgument(0)).accept(new SimpleTransactionStatus());
             return null;
         }).when(tx).executeWithoutResult(any());
+    }
+
+    @Test
+    void distributionReadinessUsesPublishValidationAndDoesNotGenerateImages() {
+        ArticleDraft article = distributionArticle();
+        when(materialSelection.selectDouyinImageTextImages(any(), eq(article), eq("body"))).thenReturn(List.of(9L));
+        assertDoesNotThrow(() -> service.requireDistributionImagesReady(article.getId()));
+        when(materialSelection.selectDouyinImageTextImages(any(), eq(article), eq("body")))
+                .thenThrow(new BizException(409, "图片尚未生成并应用"));
+        assertEquals("图片尚未生成并应用", assertThrows(BizException.class,
+                () -> service.requireDistributionImagesReady(article.getId())).getMessage());
+        verifyNoInteractions(client, storage, llm);
+    }
+
+    @Test
+    void distributionReadinessRejectsEmptyImages() {
+        ArticleDraft article = distributionArticle();
+        when(materialSelection.selectDouyinImageTextImages(any(), eq(article), anyString())).thenReturn(List.of());
+        assertThrows(BizException.class, () -> service.requireDistributionImagesReady(article.getId()));
+    }
+
+    private ArticleDraft distributionArticle() {
+        ArticleDraft article = new ArticleDraft();
+        article.setId(42L); article.setProjectId(7L); article.setCurrentVersionNo(1);
+        article.setChannelGroupCode("self_media"); article.setChannelSubCode("douyin");
+        when(articles.selectById(42L)).thenReturn(article);
+        SysUser user = new SysUser(); user.setId(2L);
+        when(((CurrentUserService) ReflectionTestUtils.getField(service, "users")).requireCurrentUser()).thenReturn(user);
+        Project project = new Project(); project.setId(7L);
+        when(((ProjectMapper) ReflectionTestUtils.getField(service, "projects")).selectById(7L)).thenReturn(project);
+        ArticleDraftVersion version = new ArticleDraftVersion();
+        when(((ArticleDraftVersionMapper) ReflectionTestUtils.getField(service, "versions")).selectOne(any())).thenReturn(version);
+        when(((ArticleBodyProvider) ReflectionTestUtils.getField(service, "bodies")).getArticleBody(version))
+                .thenReturn(new ArticleBodyProvider.ArticleBody(1L, "body", "db", "hash"));
+        return article;
     }
 
     @Test
@@ -167,6 +205,78 @@ class DouyinArticleImageServiceTest {
         assertThrows(BizException.class, () -> DouyinArticleImageService.requireCurrentSource(batch, article));
         assertThrows(BizException.class, () -> service.parsePlan(plan(), 4));
         assertEquals(2, service.parsePlan(plan(), 2).path("pages").size());
+    }
+
+    @Test
+    void zeroImageSpecialIndustryRetryReplansNeutralMedicalCopyBeforeCallingImageModel() throws Exception {
+        DouyinArticleImageBatch batch = batch("minimal");
+        batch.setPlanJson(plan().replace("主题", "旧推广标题")); batch.setMaterialIdsJson("[]");
+        ArticleDraft article = article(); article.setMedicalIndustryCode("medical_beauty");
+        when(batches.selectOne(any())).thenReturn(batch);
+        when(articles.selectById(1L)).thenReturn(article);
+        AiPlatformConfig model = new AiPlatformConfig(); model.setId(9L);
+        model.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
+        when(models.selectOne(any())).thenReturn(model);
+        var result = mock(com.huanjing.geo.common.llm.LlmCallResult.class, RETURNS_DEEP_STUBS);
+        when(result.invokeResult().responseText()).thenReturn(plan().replace("主题", "了解就医信息"));
+        when(llm.execute(any())).thenReturn(result);
+        when(client.generate(any(), anyString())).thenThrow(new BizException(502, "模拟接口拒绝"));
+
+        service.processNext();
+
+        verify(llm).execute(any());
+        assertEquals(DouyinImagePrompts.SPECIAL_INDUSTRY_POLICY,
+                json.readTree(batch.getPlanJson()).path("contentPolicy").asText());
+        verify(client).generate(eq(model), argThat(prompt -> prompt.contains("了解就医信息")
+                && !prompt.contains("旧推广标题") && !prompt.contains("品牌介绍")));
+        verifyNoInteractions(storage, materials);
+    }
+
+    @Test
+    void medicalRetryDoesNotMixPartiallyGeneratedOldPlanWithNewPolicy() throws Exception {
+        DouyinArticleImageBatch batch = batch("minimal");
+        batch.setPlanJson(plan()); batch.setMaterialIdsJson("[101]");
+        ArticleDraft article = article(); article.setMedicalIndustryCode("medical_beauty");
+        when(batches.selectOne(any())).thenReturn(batch);
+        when(articles.selectById(1L)).thenReturn(article);
+        AiPlatformConfig model = new AiPlatformConfig(); model.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
+        when(models.selectOne(any())).thenReturn(model);
+
+        service.processNext();
+
+        assertEquals("failed", batch.getStatus());
+        assertEquals("[101]", batch.getMaterialIdsJson());
+        assertEquals("这组图片使用旧版方案，请点击“生成一组测试图”重新创建", batch.getErrorMessage());
+        verifyNoInteractions(llm, client, storage, materials);
+    }
+
+    @Test
+    void oralIndustryAlsoUsesNeutralPlanAndOperatorErrorsStayShort() throws Exception {
+        DouyinArticleImageBatch batch = batch("minimal");
+        batch.setPlanJson(null); batch.setMaterialIdsJson("[]");
+        ArticleDraft article = article(); article.setMedicalIndustryCode("oral");
+        when(batches.selectOne(any())).thenReturn(batch);
+        when(articles.selectById(1L)).thenReturn(article);
+        AiPlatformConfig model = new AiPlatformConfig(); model.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
+        when(models.selectOne(any())).thenReturn(model);
+        var result = mock(com.huanjing.geo.common.llm.LlmCallResult.class, RETURNS_DEEP_STUBS);
+        when(result.invokeResult().responseText()).thenReturn(plan().replace("主题", "就医信息怎么了解"));
+        when(llm.execute(any())).thenReturn(result);
+        when(client.generate(any(), anyString())).thenThrow(new BizException(502,
+                "豆包生图失败，HTTP 400；错误码：InputTextSensitiveContentDetected；Request ID：abc"));
+
+        service.processNext();
+
+        assertEquals("图片文案未通过内容检查，请重新生成一组图片", batch.getErrorMessage());
+        verify(llm).execute(any());
+        verify(client).generate(eq(model), argThat(prompt -> !prompt.contains("品牌介绍")));
+        assertEquals("图片模型当前请求较多，请稍后重试",
+                DouyinArticleImageService.operatorError("豆包生图失败，HTTP 429；错误码：RateLimitExceeded"));
+        assertEquals("图片模型配置不可用，请联系管理员检查",
+                DouyinArticleImageService.operatorError("豆包生图失败，HTTP 401"));
+        assertEquals("图片模型未接受本次请求，请联系管理员检查",
+                DouyinArticleImageService.operatorError("豆包生图失败，HTTP 400；错误码：InvalidParameter"));
+        assertNull(DouyinArticleImageService.operatorError((String) null));
     }
 
     @Test

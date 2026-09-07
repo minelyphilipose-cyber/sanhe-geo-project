@@ -17,6 +17,8 @@ export interface DouyinImageBatch {
 
 const path = (articleId: number) => `/content/articles/${articleId}/douyin-images`
 export const listDouyinImages = (articleId: number) => request.get<R<DouyinImageBatch[]>>(path(articleId))
+export const checkDouyinDistributionImages = (articleId: number) =>
+  request.get<R<boolean>>(`${path(articleId)}/distribution-readiness`)
 export const generateDouyinImages = (articleId: number, data: { requestKey: string; imageCount: number; styleCode: string }) =>
   request.post<R<DouyinImageBatch>>(path(articleId), data)
 export const retryDouyinImages = (articleId: number, batchId: number) =>

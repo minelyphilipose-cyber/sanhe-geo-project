@@ -57,6 +57,16 @@ public class DouyinImageTextPublishSnapshotService {
         if (brand == null || brand.getId() == null) {
             throw new BizException(400, "当前文章未绑定有效品牌，无法生成抖音中文话题");
         }
+        if ("medical_beauty".equals(brand.getComplianceIndustryCode())) {
+            boolean useShortName = StringUtils.hasText(brand.getBrandShortName());
+            String name = requireText(useShortName ? brand.getBrandShortName() : brand.getBrandName(),
+                    "请先配置真实品牌名称或品牌简称，再生成抖音话题");
+            if (name.matches("(?s).*[\\s#＃].*")) {
+                throw new BizException(400, "品牌话题名称不能包含空白或井号，请配置可用的真实品牌简称");
+            }
+            return new TopicPreview("", "", "#" + name,
+                    useShortName ? "brandShortName" : "brandName", brand.getIndustry());
+        }
         ResolvedText region = resolveRegion(brand);
         ResolvedText industry = resolveIndustry(brand.getIndustry());
         return new TopicPreview(region.text(), industry.text(), "#" + region.text() + industry.text(),

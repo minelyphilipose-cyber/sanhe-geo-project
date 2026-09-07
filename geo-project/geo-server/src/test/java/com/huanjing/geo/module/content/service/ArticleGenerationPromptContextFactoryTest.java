@@ -118,7 +118,7 @@ class ArticleGenerationPromptContextFactoryTest {
                         List.<BrandOfferingPromptSelector.SelectedOffering>of()));
         when(medicalArticleGenerationService.resolveContext(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
         when(medicalArticleGenerationService.resolveContextV2(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
-        when(medicalArticleGenerationService.applyMedicalPromptV2(any(), any(), anyBoolean()))
+        when(medicalArticleGenerationService.applyMedicalPromptV2(any(), any(), anyBoolean(), anyBoolean()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }
 

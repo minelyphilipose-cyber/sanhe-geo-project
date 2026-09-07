@@ -256,6 +256,15 @@ public class MedicalArticleGenerationService {
             MedicalPromptContext context,
             boolean neutralEducationMode
     ) {
+        return applyMedicalPromptV2(prompt, context, neutralEducationMode, false);
+    }
+
+    public BatchArticlePromptBuilder.PromptBuildResult applyMedicalPromptV2(
+            BatchArticlePromptBuilder.PromptBuildResult prompt,
+            MedicalPromptContext context,
+            boolean neutralEducationMode,
+            boolean medicalBeautyDouyin
+    ) {
         if (context == null) {
             return prompt;
         }
@@ -276,7 +285,9 @@ public class MedicalArticleGenerationService {
             specialRules.append("本篇采用无品牌中立科普模式。特殊行业属性只用于限制表达边界，不向正文提供企业、品牌、具体机构、品牌专属项目服务、资质、案例或人员信息。")
                     .append("不得补充品牌露出、机构选择、适用性判断、效果预测、诊断治疗建议或转化信息。");
         } else {
-            specialRules.append("以下规则只约束表达方式，不得改变用户主题。标题必须直接回应原主题，不得为了体现行业规则主动加入与主题无关的审核术语或风险标签。\n")
+            specialRules.append(medicalBeautyDouyin
+                            ? "标题和正文围绕原主题的实际关注点展开；推广或推荐式问句转换为中立知识问题，保留真实品牌及少量客观事实，不作机构推荐。\n"
+                            : "以下规则只约束表达方式，不得改变用户主题。标题必须直接回应原主题，不得为了体现行业规则主动加入与主题无关的审核术语或风险标签。\n")
                     .append(V2_SPECIAL_INDUSTRY_COMPLIANCE_DIRECTION);
         }
         if (!facts.isEmpty()) {

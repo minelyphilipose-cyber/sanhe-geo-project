@@ -15,6 +15,55 @@ import static org.mockito.Mockito.*;
 
 class ArkImageClientTest {
     @Test
+    void preservesActionableUpstreamErrorWithoutCredentialsOrSignedUrls() throws Exception {
+        String message = failedGeneration(400, """
+                {"error":{"code":"InputTextSensitiveContentDetected","message":"Request rejected test-secret https://images.volces.com/a?signature=secret-signature","param":"prompt"},"request_id":"request-body-123"}
+                """, java.util.Map.of());
+        assertTrue(message.contains("HTTP 400"));
+        assertTrue(message.contains("InputTextSensitiveContentDetected"));
+        assertTrue(message.contains("参数：prompt"));
+        assertTrue(message.contains("Request ID：request-body-123"));
+        assertFalse(message.contains("test-secret"));
+        assertFalse(message.contains("secret-signature"));
+    }
+
+    @Test
+    void preservesHttpStatusAndHeaderRequestIdWhenBodyIsNotUsable() throws Exception {
+        for (String body : new String[]{"", "<html>proxy failure test-secret</html>", "x".repeat(9000)}) {
+            String message = failedGeneration(400, body, java.util.Map.of("x-tt-logid", java.util.List.of("header-request-456")));
+            assertEquals("豆包生图失败，HTTP 400；Request ID：header-request-456", message);
+        }
+    }
+
+    @Test
+    void boundsLongDiagnosticMessagesToFitPersistedTaskError() throws Exception {
+        String message = failedGeneration(429, "{\"error\":{\"code\":\"RateLimitExceeded\",\"message\":\"" + "a".repeat(2000) + "\"}}",
+                java.util.Map.of("x-request-id", java.util.List.of("request-789")));
+        assertTrue(message.contains("HTTP 429"));
+        assertTrue(message.contains("RateLimitExceeded"));
+        assertTrue(message.contains("request-789"));
+        assertTrue(message.length() < 1000);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String failedGeneration(int status, String body, java.util.Map<String, java.util.List<String>> headers) throws Exception {
+        var credentials = mock(PlatformCredentialService.class);
+        when(credentials.resolvePrimaryCredentialStrict(any(), any())).thenReturn("test-secret");
+        HttpClient http = mock(HttpClient.class);
+        HttpResponse<java.io.InputStream> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(status);
+        when(response.headers()).thenReturn(HttpHeaders.of(headers, (name, value) -> true));
+        when(response.body()).thenReturn(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)));
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(response);
+        AiPlatformConfig config = new AiPlatformConfig();
+        config.setApiUrl("https://ark.cn-beijing.volces.com/api/v3"); config.setModelId("test-model");
+        BizException error = assertThrows(BizException.class,
+                () -> new ArkImageClient(new ObjectMapper(), credentials, http).generate(config, "test prompt"));
+        verify(http, times(1)).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        return error.getMessage();
+    }
+
+    @Test
     void usesImageEndpointExplicitNoWatermarkAndPortraitSize() {
         assertEquals("https://ark.cn-beijing.volces.com/api/v3/images/generations",
                 ArkImageClient.endpoint("https://ark.cn-beijing.volces.com/api/v3/").toString());

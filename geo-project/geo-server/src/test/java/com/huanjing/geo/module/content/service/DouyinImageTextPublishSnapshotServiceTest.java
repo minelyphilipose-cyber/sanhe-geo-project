@@ -56,6 +56,38 @@ class DouyinImageTextPublishSnapshotServiceTest {
     }
 
     @Test
+    void medicalBeautyUsesActualBrandShortNameWithoutRequiringRegionOrIndustry() {
+        Brand brand = brand(null, null);
+        brand.setComplianceIndustryCode("medical_beauty");
+        brand.setBrandName("阜阳永功医疗美容");
+        brand.setBrandShortName("永功");
+        assertEquals("#永功", service.previewTopic(brand).topicQuery());
+        assertEquals("brandShortName", service.previewTopic(brand).regionSourceField());
+        brand.setBrandShortName(null);
+        assertEquals("#阜阳永功医疗美容", service.previewTopic(brand).topicQuery());
+        brand.setBrandName(null);
+        assertThrows(BizException.class, () -> service.previewTopic(brand));
+    }
+
+    @Test
+    void medicalBeautyPublishSnapshotAppendsOneBrandTag() {
+        Brand brand = brand("阜阳市", "医疗美容");
+        brand.setComplianceIndustryCode("medical_beauty");
+        brand.setBrandName("阜阳永功医疗美容");
+        brand.setBrandShortName("永功");
+        BrandMaterial image = material(1L);
+        when(materialMapper.selectById(1L)).thenReturn(image);
+        when(publicUrlService.buildPublicStreamUrl(image)).thenReturn("https://example.com/1.png");
+        var request = new DouyinImageTextQuickPublishRequest();
+        request.setTitle("面诊时需要问清哪些细节");
+        request.setDescription("阜阳永功医疗美容的公开信息作为主体背景。\n#永功");
+        request.setImageMaterialIds(List.of(1L));
+        var snapshot = service.build(brand, request);
+        assertEquals("阜阳永功医疗美容的公开信息作为主体背景。\n#永功", snapshot.finalDescription());
+        assertFalse(snapshot.finalDescription().contains("#阜阳医疗美容"));
+    }
+
+    @Test
     void resolvesAdministrativeCodeAndIndustryCodeFromDictionary() {
         Brand brand = brand("341200", "whole_house_customization");
         SysDictItem region = dict("阜阳市");

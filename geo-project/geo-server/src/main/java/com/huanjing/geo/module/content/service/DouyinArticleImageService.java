@@ -56,6 +56,7 @@ public class DouyinArticleImageService {
     private final ObjectMapper json;
     private final LlmCallFacade llm;
     private final ArkImageClient imageClient;
+    private final SelfMediaPublishMaterialSelectionService materialSelection;
 
     @Value("${geo.douyin-images.auto-enabled:false}")
     private boolean autoEnabled;
@@ -70,6 +71,16 @@ public class DouyinArticleImageService {
         return batches.selectList(new LambdaQueryWrapper<DouyinArticleImageBatch>()
                 .eq(DouyinArticleImageBatch::getArticleId, articleId)
                 .orderByDesc(DouyinArticleImageBatch::getId).last("LIMIT 20")).stream().map(this::view).toList();
+    }
+
+    public void requireDistributionImagesReady(Long articleId) {
+        authorize(articleId, false);
+        ArticleDraft article = requireArticle(articleId);
+        Project project = projects.selectById(article.getProjectId());
+        String markdown = bodies.getArticleBody(currentVersion(article)).markdown();
+        if (materialSelection.selectDouyinImageTextImages(project, article, markdown).isEmpty()) {
+            throw new BizException(409, "抖音图文图片尚未就绪，请先生成并应用图片后再分发");
+        }
     }
 
     public BatchView generate(Long articleId, GenerateRequest request) {
@@ -214,24 +225,34 @@ public class DouyinArticleImageService {
         batch.setStatus("running");
         batch.setRunToken(runToken);
         try {
-            requireCurrentSource(batch, requireArticle(batch.getArticleId()));
+            ArticleDraft sourceArticle = requireArticle(batch.getArticleId());
+            requireCurrentSource(batch, sourceArticle);
+            boolean neutralSpecialIndustry = sourceArticle.getMedicalIndustryCode() != null
+                    && !sourceArticle.getMedicalIndustryCode().isBlank();
             AiPlatformConfig model = requireModel(batch.getModelConfigId());
-            JsonNode plan;
-            if (batch.getPlanJson() == null) {
+            List<Long> ids = new ArrayList<>(readIds(batch.getMaterialIdsJson()));
+            JsonNode plan = batch.getPlanJson() == null ? null : parsePlan(batch.getPlanJson(), batch.getImageCount());
+            boolean outdatedSpecialPlan = neutralSpecialIndustry && plan != null
+                    && !DouyinImagePrompts.SPECIAL_INDUSTRY_POLICY.equals(plan.path("contentPolicy").asText());
+            if (outdatedSpecialPlan && !ids.isEmpty()) {
+                throw new BizException(409, "这组图片使用旧版方案，请点击“生成一组测试图”重新创建");
+            }
+            if (plan == null || outdatedSpecialPlan) {
                 String response = llm.execute(LlmCallRequest.routed(new LlmRouteRequest(
                         "article", "你是中文图文编辑。严格根据材料规划图片，只输出指定JSON。",
-                        DouyinImagePrompts.planning(batch), 0.7, 20_000, 300_000, 300_000,
+                        DouyinImagePrompts.planning(batch, neutralSpecialIndustry),
+                        neutralSpecialIndustry ? 0.3 : 0.7, 20_000, 300_000, 300_000,
                         0, null, true, 1, 0, List.of()))).invokeResult().responseText();
                 plan = parsePlan(response, batch.getImageCount());
+                if (neutralSpecialIndustry) ((com.fasterxml.jackson.databind.node.ObjectNode) plan)
+                        .put("contentPolicy", DouyinImagePrompts.SPECIAL_INDUSTRY_POLICY);
                 batch.setPlanJson(writeJson(plan));
                 saveProgress(batch);
-            } else {
-                plan = parsePlan(batch.getPlanJson(), batch.getImageCount());
             }
-            List<Long> ids = new ArrayList<>(readIds(batch.getMaterialIdsJson()));
             for (int page = ids.size(); page < batch.getImageCount(); page++) {
                 requireCurrentSource(batch, requireArticle(batch.getArticleId()));
-                ArkImageClient.GeneratedImage image = imageClient.generate(model, DouyinImagePrompts.image(batch, plan, page));
+                ArkImageClient.GeneratedImage image = imageClient.generate(model,
+                        DouyinImagePrompts.image(batch, plan, page, neutralSpecialIndustry));
                 String objectKey = "brands/" + batch.getSubjectBrandId() + "/douyin-articles/" + batch.getArticleId()
                         + "/" + batch.getId() + "/" + (page + 1) + "." + image.extension();
                 storage.putBytes(objectKey, image.bytes(), image.contentType());
@@ -276,14 +297,15 @@ public class DouyinArticleImageService {
         } catch (Exception ex) {
             if (ex instanceof InterruptedException) Thread.currentThread().interrupt();
             batch.setStatus("failed");
-            batch.setErrorMessage(ex instanceof BizException ? ex.getMessage() : "生图或存储失败，请检查模型、网络和对象存储配置后重试");
+            batch.setErrorMessage(operatorError(ex));
             batches.update(null, new LambdaUpdateWrapper<DouyinArticleImageBatch>()
                     .eq(DouyinArticleImageBatch::getId, batch.getId()).eq(DouyinArticleImageBatch::getStatus, "running")
                     .eq(DouyinArticleImageBatch::getRunToken, batch.getRunToken())
                     .set(DouyinArticleImageBatch::getStatus, "failed")
                     .set(DouyinArticleImageBatch::getErrorMessage, batch.getErrorMessage())
                     .set(DouyinArticleImageBatch::getUpdatedAt, LocalDateTime.now()));
-            log.warn("Douyin image generation failed batchId={} type={}", batch.getId(), ex.getClass().getSimpleName());
+            log.warn("Douyin image generation failed articleId={} batchId={} modelConfigId={} type={} detail={}",
+                    batch.getArticleId(), batch.getId(), batch.getModelConfigId(), ex.getClass().getSimpleName(), ex.getMessage());
         }
     }
 
@@ -425,8 +447,34 @@ public class DouyinArticleImageService {
         try {
             return new BatchView(batch.getId(), batch.getArticleId(), batch.getSourceVersionNo(), batch.getAppliedVersionNo(),
                     batch.getStatus(), batch.getImageCount(), batch.getStyleCode(), urls(batch),
-                    batch.getPlanJson() == null ? null : json.readTree(batch.getPlanJson()), batch.getErrorMessage(), batch.getCreatedAt());
+                    batch.getPlanJson() == null ? null : json.readTree(batch.getPlanJson()),
+                    operatorError(batch.getErrorMessage()), batch.getCreatedAt());
         } catch (Exception ex) { throw new BizException(500, "生图任务读取失败"); }
+    }
+
+    static String operatorError(Exception error) {
+        String message = operatorError(error == null ? null : error.getMessage());
+        return message == null ? "图片生成失败，请稍后重试" : message;
+    }
+
+    static String operatorError(String detail) {
+        if (detail == null || detail.isBlank()) return null;
+        if (detail.contains("InputTextSensitiveContentDetected")) {
+            return "图片文案未通过内容检查，请重新生成一组图片";
+        }
+        if (detail.contains("HTTP 400")) {
+            return "图片模型未接受本次请求，请联系管理员检查";
+        }
+        if (detail.contains("RateLimit") || detail.contains("HTTP 429")) {
+            return "图片模型当前请求较多，请稍后重试";
+        }
+        if (detail.contains("HTTP 401") || detail.contains("HTTP 403")) {
+            return "图片模型配置不可用，请联系管理员检查";
+        }
+        if (detail.toLowerCase(Locale.ROOT).contains("timeout") || detail.contains("超时")) {
+            return "图片生成超时，请稍后重试未完成图片";
+        }
+        return detail.length() <= 120 ? detail : "图片生成失败，请稍后重试或联系管理员";
     }
 
     private List<String> urls(DouyinArticleImageBatch batch) {

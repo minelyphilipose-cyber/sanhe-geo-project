@@ -21,15 +21,19 @@ describe('Douyin article image progress', () => {
   })
   afterEach(() => { vi.useRealTimers(); vi.resetAllMocks() })
 
-  it('shows progress and requests one article refresh after automatic application', async () => {
+  it('never polls and refreshes the article only after a manual status refresh finds applied images', async () => {
     const wrapper = mount(DouyinImageProgress, options)
     await flushPromises()
     expect(wrapper.text()).toContain('生成中 · 1/4 张')
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(listDouyinImages).toHaveBeenCalledTimes(1)
     vi.mocked(listDouyinImages).mockResolvedValue(response([{ ...running, status: 'succeeded', imageUrls: ['1', '2', '3', '4'] }]) as never)
-    await vi.advanceTimersByTimeAsync(8000)
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
     expect(wrapper.emitted('applied')).toBeUndefined()
     vi.mocked(listDouyinImages).mockResolvedValue(response([{ ...running, status: 'applied', appliedVersionNo: 2, imageUrls: ['1', '2', '3', '4'] }]) as never)
-    await vi.advanceTimersByTimeAsync(8000)
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('已插入文章 · 4/4 张')
     expect(wrapper.emitted('applied')).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(16000)

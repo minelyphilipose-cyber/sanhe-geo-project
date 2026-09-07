@@ -11,6 +11,7 @@ import {
 } from '@/api/content'
 import { getBrandDetail } from '@/api/customer'
 import { getPublishSites } from '@/api/publishSite'
+import { checkDouyinDistributionImages } from '@/api/douyinImages'
 
 export type DistributionChannel = 'official_site' | 'industry_site' | 'forum' | 'self_media' | 'authority_media'
 
@@ -90,9 +91,21 @@ export function useArticleDistributionChannels(options: UseArticleDistributionCh
     remark: '',
   })
 
-  function openDistributionChannel(row: ArticleDraft) {
-    distributionChannelArticle.value = row
-    distributionChannelVisible.value = true
+  const checkingDistribution = ref(false)
+  async function openDistributionChannel(row: ArticleDraft) {
+    if (checkingDistribution.value) return
+    checkingDistribution.value = true
+    distributionChannelVisible.value = false
+    distributionChannelArticle.value = null
+    try {
+      if (row.channelGroupCode === 'self_media' && ['douyin', 'douyin_image_text'].includes(row.channelSubCode || '')) {
+        await checkDouyinDistributionImages(row.id)
+      }
+      distributionChannelArticle.value = row
+      distributionChannelVisible.value = true
+    } catch {
+      // The shared request handler displays the server's image readiness message.
+    } finally { checkingDistribution.value = false }
   }
 
   async function selectDistributionChannel(channel: DistributionChannel) {

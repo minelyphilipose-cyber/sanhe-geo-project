@@ -206,7 +206,8 @@ public class ArticleGenerationPromptContextFactory {
                     ? medicalArticleGenerationService.applyMedicalPromptV2(
                     prompt,
                     medicalContext,
-                    XiaohongshuArticlePolicies.isNeutralEducationTemplate(resolution.template()))
+                    XiaohongshuArticlePolicies.isNeutralEducationTemplate(resolution.template()),
+                    ArticlePromptAssemblerV2.isMedicalBeautyDouyin(brand, runtimePolicy))
                     : medicalArticleGenerationService.applyMedicalPrompt(prompt, medicalContext);
         }
         return new PromptContextResult(project, brand, input, prompt, forbiddenPhrases,

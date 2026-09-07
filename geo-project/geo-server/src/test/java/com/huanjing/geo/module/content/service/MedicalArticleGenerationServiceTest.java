@@ -243,6 +243,21 @@ class MedicalArticleGenerationServiceTest {
     }
 
     @Test
+    void medicalBeautyDouyinAllowsNeutralTitleConversionWithoutRemovingBrand() {
+        var context = new MedicalArticleGenerationService.MedicalPromptContext(
+                MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY, MedicalArticleConstants.TIER_EDUCATION,
+                null, null, null, null, null, null, null, 2, false,
+                null, false, null, null, null, null, null);
+        var prompt = new BatchArticlePromptBuilder.PromptBuildResult(
+                "system", "主体：阜阳永功医疗美容", null, null, "{}", "{}");
+        var result = service.applyMedicalPromptV2(prompt, context, false, true);
+        assertThat(result.userPrompt()).contains("推广或推荐式问句转换为中立知识问题")
+                .contains("保留真实品牌及少量客观事实")
+                .contains("主体：阜阳永功医疗美容")
+                .doesNotContain("标题必须直接回应原主题");
+    }
+
+    @Test
     void v2MedicalPromptTreatsQualificationsAsOptionalEvidenceAndIgnoresLegacyStyleAgenda() {
         MedicalArticleGenerationService.MedicalPromptContext context = new MedicalArticleGenerationService.MedicalPromptContext(
                 MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY, MedicalArticleConstants.TIER_EDUCATION,

@@ -19,6 +19,12 @@ public class DouyinArticleImageController {
         return R.ok(service.list(articleId));
     }
 
+    @GetMapping("/distribution-readiness")
+    public R<Boolean> distributionReadiness(@PathVariable Long articleId) {
+        service.requireDistributionImagesReady(articleId);
+        return R.ok(true);
+    }
+
     @PostMapping
     public R<BatchView> generate(@PathVariable Long articleId, @RequestBody GenerateRequest request) {
         return R.ok(service.generate(articleId, request));

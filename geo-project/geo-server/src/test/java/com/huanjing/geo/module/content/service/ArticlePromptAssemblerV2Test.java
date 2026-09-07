@@ -19,6 +19,41 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ArticlePromptAssemblerV2Test {
+    @Test
+    void medicalBeautyDouyinKeepsBrandButReplacesPromotionalMissionOnlyInItsScope() throws Exception {
+        Brand brand = new Brand();
+        brand.setId(2L);
+        brand.setBrandName("阜阳永功医疗美容");
+        brand.setComplianceIndustryCode("medical_beauty");
+        var input = new BatchArticlePromptBuilder.PromptBuildInput(
+                new Project(), brand, null, "manual", "阜阳哪家医美门诊部服务比较细致", null,
+                null, null, List.of(), "social_note", "douyin", "short", null,
+                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of());
+        var template = new ArticlePromptTemplate();
+        var version = new ArticlePromptTemplateVersion();
+        var policy = new ArticleRuntimePolicy(ArticlePromptChannels.SELF_MEDIA, "douyin",
+                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+
+        var result = assembler.assemble(input, template, version, policy, true);
+
+        assertTrue(result.userPrompt().contains("正文必须保留本篇真实品牌名称"));
+        assertTrue(result.userPrompt().contains("标题转换为同一关注点的知识问题"));
+        assertTrue(result.userPrompt().contains("阜阳永功医疗美容"));
+        assertFalse(result.userPrompt().contains("营销信息必须参与问题解释"));
+        assertFalse(result.userPrompt().contains("采用客户官方身份表达"));
+        assertEquals("v2_douyin_medical_beauty_factual_20260907",
+                objectMapper.readTree(result.promptSnapshot()).path("promptRevision").asText());
+
+        brand.setComplianceIndustryCode("oral");
+        assertFalse(assembler.assemble(input, template, version, policy, true).userPrompt()
+                .contains("医美抖音图文的专用内容任务"));
+        brand.setComplianceIndustryCode("medical_beauty");
+        var otherChannel = new ArticleRuntimePolicy(ArticlePromptChannels.SELF_MEDIA, "wechat",
+                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+        assertFalse(assembler.assemble(input, template, version, otherChannel, true).userPrompt()
+                .contains("医美抖音图文的专用内容任务"));
+    }
+
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ArticlePromptAssemblerV2 assembler = new ArticlePromptAssemblerV2(

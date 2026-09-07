@@ -58,14 +58,17 @@ const styleCode = ref('auto')
 const busy = ref(false)
 const loading = ref(false)
 const loadError = ref('')
-const styles: Record<string, string> = { editorial: '编辑杂志', photographic: '场景摄影', material_3d: '立体材质', minimal: '极简信息', illustrated: '叙事插画', paper_collage: '纸艺拼贴' }
+const styles: Record<string, string> = {
+  editorial: '国际编辑杂志', photographic: '商业场景摄影', material_3d: '高精度立体材质',
+  minimal: '静奢极简', illustrated: '现代编辑插画', paper_collage: '艺术纸艺拼贴',
+  swiss_grid: '瑞士网格', luxury_catalog: '高端品牌画册', architectural: '建筑空间构成',
+  data_story: '高级数据叙事', oriental: '现代东方美学', geometric: '现代几何构成',
+}
 const statuses: Record<DouyinImageBatch['status'], string> = { queued: '等待生成', running: '生成中', succeeded: '待选用', failed: '生成失败', applied: '已应用' }
-let timer: ReturnType<typeof setTimeout> | undefined
 let requestKey: string | undefined
 let context = 0
 
 async function load() {
-  clearTimeout(timer)
   const requestContext = context
   loading.value = true
   try {
@@ -73,7 +76,6 @@ async function load() {
     if (requestContext !== context) return
     batches.value = response.data.data
     loadError.value = ''
-    if (visible.value && batches.value.some(batch => ['queued', 'running'].includes(batch.status))) timer = setTimeout(load, 8000)
   } catch (error) {
     if (requestContext === context) loadError.value = error instanceof Error ? error.message : '图片任务读取失败，请刷新重试'
   } finally { if (requestContext === context) loading.value = false }
@@ -87,7 +89,7 @@ async function generate() {
   try {
     await generateDouyinImages(props.articleId, { requestKey, imageCount: imageCount.value, styleCode: styleCode.value })
     requestKey = undefined
-    ElMessage.success('生图任务已创建，完成后会显示在这里')
+    ElMessage.success('生图任务已创建，请点击刷新查看生成结果')
     await load()
   } catch { /* The shared request handler displays the error. */ }
   finally { busy.value = false }
@@ -113,12 +115,11 @@ async function apply(batch: DouyinImageBatch) {
 
 watch(() => [props.modelValue, props.articleId] as const, ([open]) => {
   context++
-  clearTimeout(timer)
   batches.value = []
   requestKey = undefined
   if (open) void load()
 }, { immediate: true })
-onBeforeUnmount(() => { context++; clearTimeout(timer) })
+onBeforeUnmount(() => { context++ })
 </script>
 
 <style scoped>
