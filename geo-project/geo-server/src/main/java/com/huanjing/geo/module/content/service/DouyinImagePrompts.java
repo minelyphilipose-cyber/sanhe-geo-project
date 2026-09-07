@@ -10,7 +10,8 @@ public final class DouyinImagePrompts {
     public static final String SPECIAL_INDUSTRY_POLICY = "special_industry_medical_copy_v4";
     public static final List<String> STYLES = List.of(
             "editorial", "photographic", "material_3d", "minimal", "illustrated", "paper_collage",
-            "swiss_grid", "luxury_catalog", "architectural", "data_story", "oriental", "geometric");
+            "swiss_grid", "luxury_catalog", "architectural", "data_story", "oriental", "geometric",
+            "architectural_sketch", "photo_blueprint", "colorful_handbook", "vintage_archive");
 
     static final String QUALITY_DIRECTION = "成熟商业视觉成片：构图有明确主次，字体、比例、对齐和留白经过设计；"
             + "材质纹理细腻，光影与空间层次自然，色彩统一且有丰富的细微层次；"
@@ -19,17 +20,21 @@ public final class DouyinImagePrompts {
     public static String style(String code) {
         return switch (code) {
             case "editorial" -> "国际编辑杂志：非对称网格、大字标题、跨栏层次、宽留白和精细纸张纹理，像成熟设计刊物内页";
-            case "photographic" -> "商业场景摄影与文字：主题相关的示意场景、自然定向光、克制景深和干净文字区，不冒充真实案例或门店";
+            case "photographic" -> "暖调商业摄影画册：高质量主题示意场景、温暖自然光、柔化高光、适度胶片颗粒和中等饱和度，配合干净编辑排版，不冒充真实案例或门店";
             case "material_3d" -> "高精度立体材质：按行业选择纸张、玻璃、石材或金属，以可信光照、柔和阴影和清楚的平面文字呈现";
             case "minimal" -> "静奢极简信息设计：少量平面色块、精细线条、强字体层级和大面积留白，以比例与细节体现品质";
             case "illustrated" -> "现代编辑插画：以一个相关使用场景推动叙事，造型成熟、线条克制、色彩有层次，避免幼儿卡通感";
             case "paper_collage" -> "艺术纸艺拼贴：棉纸、描图纸等细腻肌理自然层叠，配合编辑式排版，文字区域平整清楚";
             case "swiss_grid" -> "瑞士网格设计：严格模块网格、理性无衬线字体、鲜明比例和少量强调色，秩序清楚而不呆板";
-            case "luxury_catalog" -> "高端品牌画册：克制配色、精致静物或材质细节、大面积留白和优雅排版，不使用俗艳金色装饰";
-            case "architectural" -> "建筑空间构成：利用空间透视、光影切面、结构线和抽象体块建立纵深，文字与空间自然结合";
+            case "luxury_catalog" -> "高端品牌画册：暖白纸张、精致静物或材质细节、大面积留白与优雅排版，使用一种高饱和强调色，不使用俗艳金色装饰";
+            case "architectural" -> "极简建筑画册：浅色建筑线稿、空间透视、柔和蓝灰渐变和实景局部共同构图，以少量高饱和强调色建立焦点";
             case "data_story" -> "高级数据叙事：用清晰的信息层级、路径、刻度和简洁图形组织内容，不虚构数字，不做普通PPT图表";
             case "oriental" -> "现代东方美学：宣纸纤维、墨色层次、克制留白与当代字体结合，避免古风模板和无法辨认的书法字";
             case "geometric" -> "现代几何构成：用精准几何形、比例、节奏和色彩关系形成视觉张力，保持文字区安静清楚";
+            case "architectural_sketch" -> "建筑线稿手册：暖白纸张底色，高精度建筑、空间或结构线稿作为主景，搭配一种中高饱和主题色、手绘标注感和精品印刷颗粒";
+            case "photo_blueprint" -> "实景图纸拼贴：高质量主题场景照片与蓝图、尺寸线、材料样本或专业工具形成编辑拼贴，暖调光线、中等饱和度和清楚层次";
+            case "colorful_handbook" -> "彩色手绘指南：暖白底色，3—5种中高饱和的大面积实色色块、干净粗轮廓、成熟编辑插画和轻微丝网印刷颗粒；不用蜡笔、粉笔、水彩晕染、儿童涂鸦或廉价促销图标";
+            case "vintage_archive" -> "复古工程档案：牛皮纸、撕边、铅笔或针管笔线稿、棕橙标签与旧式印刷颗粒，像经过设计的专业档案而非做旧模板";
             default -> throw new IllegalArgumentException("未知图片风格");
         };
     }
@@ -37,17 +42,21 @@ public final class DouyinImagePrompts {
     static String neutralStyle(String code) {
         return switch (code) {
             case "editorial" -> "国际编辑杂志：象牙白、墨黑与钴蓝或珊瑚色形成清楚对比，非对称跨栏；使用一个大型概念物件和精细纸张层次";
-            case "photographic" -> "高端商业静物摄影：深灰、雾蓝与暖白，玻璃、石材、折叠纸或档案盒形成主景，定向棚拍光和克制景深";
+            case "photographic" -> "暖调商业静物画册：深灰、雾蓝与暖白，玻璃、石材、折叠结构或档案盒形成主景，温暖定向光、柔化高光和适度胶片颗粒";
             case "material_3d" -> "高精度立体材质：深蓝、银灰与暖白，玻璃、石材、磨砂金属构成清晰雕塑主体，可信光照和柔和投影";
             case "minimal" -> "静奢极简：炭黑、象牙白加一种强调色，以一个放大的几何或雕塑主体建立焦点，用比例和细节体现品质";
             case "illustrated" -> "现代概念编辑插画：用窗口、路径、书页或平衡结构表达信息关系，成熟造型、丰富色阶和清楚的空间层次";
             case "paper_collage" -> "高级纸雕拼贴：选择一种明确主色和一种对比强调色，多层纸张搭建微缩场景与可识别的中心物件，具有浮雕深度和自然投影，避免平铺纸张";
             case "swiss_grid" -> "瑞士网格设计：暖白、黑色、钴蓝与少量红色，严格模块网格、超大字体比例和醒目的几何视觉主体";
-            case "luxury_catalog" -> "高端画册：炭灰、奶油白、石材色和少量金属色，精致静物或抽象雕塑占据主画面，大面积留白但不空洞";
-            case "architectural" -> "建筑空间构成：石材灰、板岩蓝与暖光，利用透视通道、光影切面、结构线和抽象体块建立纵深主景";
+            case "luxury_catalog" -> "高端画册：炭灰、奶油白、石材色和一种高饱和强调色，精致静物或抽象雕塑占据主画面，大面积留白但不空洞";
+            case "architectural" -> "极简建筑画册：石材灰、板岩蓝、暖白和少量强调色，以抽象空间线稿、透视通道、光影切面与实物局部建立纵深";
             case "data_story" -> "高级信息叙事：深海军蓝、冰蓝与青绿色，通过有体积的路径、节点和层级图形形成视觉中心，不虚构数字";
             case "oriental" -> "现代东方美学：暖白、墨黑、靛蓝或少量朱红，宣纸纤维、石材与墨色层次组成当代静物或抽象山形主景";
             case "geometric" -> "现代几何构成：深蓝、珊瑚橙、奶油白等明确色彩关系，以大尺度几何体、节奏和空间叠压形成视觉张力";
+            case "architectural_sketch" -> "线稿信息手册：暖白纸张，高精度抽象建筑、窗口、路径或结构线稿为主景，搭配一种中高饱和主题色和精品印刷颗粒";
+            case "photo_blueprint" -> "静物图纸拼贴：高质量中性静物或抽象空间与蓝图、尺寸线、纸张样本形成编辑拼贴，暖调光线和中等饱和度，不使用门店实景";
+            case "colorful_handbook" -> "彩色手绘指南：暖白底色，3—5种中高饱和的大面积实色色块、干净粗轮廓、可识别概念物件和轻微丝网印刷颗粒；不用蜡笔、粉笔、水彩晕染或儿童涂鸦";
+            case "vintage_archive" -> "复古信息档案：牛皮纸、撕边、铅笔或针管笔线稿、棕橙标签与旧式印刷颗粒，以路径、档案结构或抽象建筑为主体";
             default -> throw new IllegalArgumentException("未知图片风格");
         };
     }

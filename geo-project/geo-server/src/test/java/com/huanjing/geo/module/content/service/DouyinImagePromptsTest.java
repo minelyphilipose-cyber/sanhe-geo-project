@@ -13,8 +13,10 @@ class DouyinImagePromptsTest {
                 {"visualDirection":"纸张和留白","pages":[{"title":"了解服务流程","subtitle":"信息核实",
                 "text":"沟通前整理关心的问题","source":"原文推广依据SECRET_SOURCE","visual":"文档与简洁流程图"}]}
                 """);
-        assertEquals(12, DouyinImagePrompts.STYLES.size());
-        assertEquals(12, DouyinImagePrompts.STYLES.stream().distinct().count());
+        assertEquals(16, DouyinImagePrompts.STYLES.size());
+        assertEquals(16, DouyinImagePrompts.STYLES.stream().distinct().count());
+        assertTrue(DouyinImagePrompts.style("colorful_handbook").contains("大面积实色色块"));
+        assertTrue(DouyinImagePrompts.style("colorful_handbook").contains("不用蜡笔、粉笔、水彩晕染"));
         for (String style : DouyinImagePrompts.STYLES) {
             batch.setStyleCode(style);
             String prompt = DouyinImagePrompts.image(batch, plan, 0, true);

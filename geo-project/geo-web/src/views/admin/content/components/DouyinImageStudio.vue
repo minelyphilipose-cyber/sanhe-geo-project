@@ -59,10 +59,12 @@ const busy = ref(false)
 const loading = ref(false)
 const loadError = ref('')
 const styles: Record<string, string> = {
-  editorial: '国际编辑杂志', photographic: '商业场景摄影', material_3d: '高精度立体材质',
+  editorial: '国际编辑杂志', photographic: '暖调商业摄影', material_3d: '高精度立体材质',
   minimal: '静奢极简', illustrated: '现代编辑插画', paper_collage: '艺术纸艺拼贴',
-  swiss_grid: '瑞士网格', luxury_catalog: '高端品牌画册', architectural: '建筑空间构成',
+  swiss_grid: '瑞士网格', luxury_catalog: '高端品牌画册', architectural: '极简建筑画册',
   data_story: '高级数据叙事', oriental: '现代东方美学', geometric: '现代几何构成',
+  architectural_sketch: '建筑线稿手册', photo_blueprint: '实景图纸拼贴',
+  colorful_handbook: '彩色手绘指南', vintage_archive: '复古工程档案',
 }
 const statuses: Record<DouyinImageBatch['status'], string> = { queued: '等待生成', running: '生成中', succeeded: '待选用', failed: '生成失败', applied: '已应用' }
 let requestKey: string | undefined
