@@ -76,6 +76,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -412,6 +413,7 @@ public class BatchArticleGenerationService {
                         BatchArticleGenerationTask task = new BatchArticleGenerationTask();
                         ThirdPartySubjectRotationService.RotationResult subjectContext =
                                 subjectRotationService.resolve(project, brand, platform.channelGroupCode(), platform.perspectiveCode());
+                        TaskTopic taskTopic = resolveTaskTopic(topic, platform, subjectContext);
                         task.setBatchId(batch.getId());
                         task.setProjectId(project.getId());
                         task.setSourceBrandId(subjectContext.sourceBrandId());
@@ -427,7 +429,7 @@ public class BatchArticleGenerationService {
                         task.setChannelSubCode(platform.channelSubCode());
                         task.setAgentSiteModule(platform.agentSiteModule());
                         task.setArticleTypeCode(platform.articleTypeCode());
-                        task.setQuestionSceneCode(topic.questionSceneCode());
+                        task.setQuestionSceneCode(taskTopic.questionSceneCode());
                         task.setPromptTemplateId(platform.templateId());
                         task.setPromptTemplateVersionId(platform.templateVersionId());
                         task.setPerspectiveCode(platform.perspectiveCode());
@@ -438,15 +440,15 @@ public class BatchArticleGenerationService {
                         task.setSuggestedPlatformCodes(writeJson(topic.suggestedPlatformCodes()));
                         task.setSelectedPlatformCodes(writeJson(topic.selectedPlatformCodes()));
                         List<String> warningCodes = readinessService.detectTaskReadinessWarningCodes(
-                                topic.questionSceneCode(), platform.contactDisclosureMode(), brand);
+                                taskTopic.questionSceneCode(), platform.contactDisclosureMode(), brand);
                         List<String> confirmedCodes = warningCodes.stream()
                                 .filter(topic.confirmedReadinessWarningCodes()::contains)
                                 .toList();
                         task.setReadinessWarningCodes(warningCodes.isEmpty() ? null : writeJson(warningCodes));
                         task.setReadinessWarningConfirmed(!confirmedCodes.isEmpty());
                         task.setLength(DEFAULT_LENGTH);
-                        task.setTopic(topic.topic());
-                        task.setTopicAsQuestion(topic.topicAsQuestion());
+                        task.setTopic(taskTopic.topic());
+                        task.setTopicAsQuestion(taskTopic.topicAsQuestion());
                         task.setMedicalIndustryCode(topic.medicalIndustryCode());
                         task.setMedicalCategoryCode(topic.medicalCategoryCode());
                         task.setMedicalCategoryName(topic.medicalCategoryName());
@@ -669,6 +671,16 @@ public class BatchArticleGenerationService {
             }
         }
         return recovered;
+    }
+
+    public void resumePendingOrStalledSystem(Long batchId) {
+        BatchArticleGenerationBatch batch = batchMapper.selectById(batchId);
+        if (batch == null) {
+            throw new BizException(404, "Batch not found");
+        }
+        if (!recoverStalledBatch(batch, LocalDateTime.now())) {
+            throw new BizException(400, "当前批次没有可恢复的等待或超时任务");
+        }
     }
 
     private void runBatch(Long batchId) {
@@ -2195,9 +2207,14 @@ public class BatchArticleGenerationService {
         }
         ChannelRef channel = resolveChannel(platform);
         TemplatePerspectiveService.ResolvedPerspective perspective = resolvePerspective(brandId, channel, perspectiveMemo);
-        Optional<String> expectedSpecialTemplateName = expectedSpecialIndustryTemplateName(brandId, channel);
+        String allocationSceneCode = TemplatePerspectiveCodes.REVIEW_RECOMMEND.equals(
+                TemplatePerspectiveCodes.normalize(perspective.perspectiveCode())) ? null : questionSceneCode;
+        Optional<String> expectedSpecialTemplateName = TemplatePerspectiveCodes.REVIEW_RECOMMEND.equals(
+                TemplatePerspectiveCodes.normalize(perspective.perspectiveCode()))
+                ? Optional.empty()
+                : expectedSpecialIndustryTemplateName(brandId, channel);
         AutoTemplateAllocation allocation = allocateAutoTemplates(
-                unitKey, channel, questionSceneCode, perspective, count, smartSelections, expectedSpecialTemplateName.orElse(null));
+                unitKey, channel, allocationSceneCode, perspective, count, smartSelections, expectedSpecialTemplateName.orElse(null));
         if (allocation.templates().isEmpty()) {
             if (TemplatePerspectiveCodes.isThirdParty(perspective.perspectiveCode())) {
                 throw missingTemplateException(topic, channel, questionSceneCode, perspective.perspectiveCode());
@@ -2248,6 +2265,31 @@ public class BatchArticleGenerationService {
                 allocationService.allocate(channel.groupCode(), channel.subCode(), questionSceneCode, perspective.perspectiveCode(), count),
                 TEMPLATE_SOURCE_WEIGHTED
         );
+    }
+
+    private TaskTopic resolveTaskTopic(ValidatedTopic requested,
+                                       ValidatedPlatform platform,
+                                       ThirdPartySubjectRotationService.RotationResult subjectContext) {
+        if (!subjectContext.rotated()
+                || !TemplatePerspectiveCodes.REVIEW_RECOMMEND.equals(
+                TemplatePerspectiveCodes.normalize(platform.perspectiveCode()))) {
+            return new TaskTopic(requested.topic(), requested.topicAsQuestion(), requested.questionSceneCode());
+        }
+        List<KeywordGroupResult> questions = keywordGroupResultMapper.selectProjectQuestionsByTiers(
+                subjectContext.subjectProjectId(), "'A'");
+        if (questions == null || questions.isEmpty()) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "第三方推广主体项目缺少 A 类问题");
+        }
+        KeywordGroupResult question = randomQuestion(questions);
+        if (!StringUtils.hasText(question.getKeywordText())) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "第三方推广主体项目的 A 类问题内容为空");
+        }
+        String text = question.getKeywordText().trim();
+        return new TaskTopic(text, text, question.getSceneCode());
+    }
+
+    KeywordGroupResult randomQuestion(List<KeywordGroupResult> questions) {
+        return questions.get(ThreadLocalRandom.current().nextInt(questions.size()));
     }
 
     private AutoTemplateAllocation allocateSpecialIndustryTemplate(ChannelRef channel,
@@ -3170,6 +3212,9 @@ public class BatchArticleGenerationService {
                                      String templateSource,
                                      Integer count,
                                      String extraPrompt) {
+    }
+
+    private record TaskTopic(String topic, String topicAsQuestion, String questionSceneCode) {
     }
 
     private record AutoTemplateAllocation(List<ArticleTemplateAllocationService.AllocatedTemplate> templates,

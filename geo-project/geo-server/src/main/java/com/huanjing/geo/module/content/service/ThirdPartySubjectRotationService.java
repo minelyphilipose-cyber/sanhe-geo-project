@@ -20,6 +20,7 @@ import com.huanjing.geo.module.content.mapper.ThirdPartySubjectPoolItemMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
@@ -35,12 +36,14 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -65,6 +68,7 @@ public class ThirdPartySubjectRotationService {
             """;
 
     private final BrandMapper brandMapper;
+    private final ProjectMapper projectMapper;
     private final BatchArticleGenerationTaskMapper taskMapper;
     private final ThirdPartySubjectPoolItemMapper poolItemMapper;
     private final SysDictItemMapper sysDictItemMapper;
@@ -300,26 +304,32 @@ public class ThirdPartySubjectRotationService {
 
         Map<Long, ThirdPartySubjectPoolBrandRow> rowMap = brandMapper.selectThirdPartySubjectPoolRows().stream()
                 .collect(Collectors.toMap(ThirdPartySubjectPoolBrandRow::getBrandId, Function.identity(), (a, b) -> a));
-        List<ThirdPartySubjectPoolBrandRow> candidates = confirmedItems.stream()
+        List<ThirdPartySubjectPoolBrandRow> eligibleCandidates = confirmedItems.stream()
                 .map(item -> rowMap.get(item.getSubjectBrandId()))
                 .filter(Objects::nonNull)
                 .filter(row -> hardRule(sourceBrand, coverableIndustries, includeAll, row).candidate())
+                .toList();
+        Map<Long, List<Long>> projectIdsByBrand = eligibleCandidates.stream()
+                .collect(Collectors.toMap(
+                        ThirdPartySubjectPoolBrandRow::getBrandId,
+                        row -> {
+                            List<Long> ids = projectMapper.selectActiveProjectIdsByBrandId(row.getBrandId());
+                            return ids == null ? List.of() : ids;
+                        },
+                        (left, ignored) -> left,
+                        LinkedHashMap::new
+                ));
+        List<ThirdPartySubjectPoolBrandRow> candidates = eligibleCandidates.stream()
+                .filter(row -> !projectIdsByBrand.getOrDefault(row.getBrandId(), List.of()).isEmpty())
                 .toList();
         if (candidates.isEmpty()) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "已确认的第三方主体当前均不可用，请刷新覆盖并确认主体池");
         }
 
         Map<Long, LastSelection> lastSelectedMap = lastSelectedMap(sourceBrandId, candidates);
-        ThirdPartySubjectPoolBrandRow selected = candidates.stream()
-                .min(Comparator
-                        .comparing((ThirdPartySubjectPoolBrandRow row) -> lastSelectedMap.get(row.getBrandId()),
-                                Comparator.nullsFirst(Comparator.naturalOrder()))
-                        .thenComparing(ThirdPartySubjectPoolBrandRow::getBrandId))
-                .orElseThrow(() -> new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "已确认的第三方主体当前均不可用，请刷新覆盖并确认主体池"));
-        Long subjectProjectId = selected.getSubjectProjectId();
-        if (subjectProjectId == null) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "轮换主体缺少有效项目");
-        }
+        ThirdPartySubjectPoolBrandRow selected = leastRecentlyUsedCandidate(candidates, lastSelectedMap);
+        List<Long> projectIds = projectIdsByBrand.get(selected.getBrandId());
+        Long subjectProjectId = randomProjectId(projectIds);
         return new RotationResult(sourceBrandId, sourceProjectId, selected.getBrandId(), subjectProjectId, true);
     }
 
@@ -334,8 +344,25 @@ public class ThirdPartySubjectRotationService {
     private boolean shouldRotate(Brand sourceBrand, String channelGroupCode, String perspectiveCode) {
         return sourceBrand != null
                 && ArticlePromptChannels.SELF_MEDIA.equals(channelGroupCode)
-                && TemplatePerspectiveCodes.isThirdParty(perspectiveCode)
+                && TemplatePerspectiveCodes.REVIEW_RECOMMEND.equals(TemplatePerspectiveCodes.normalize(perspectiveCode))
                 && !coverableIndustries(sourceBrand.getCoverableIndustries()).isEmpty();
+    }
+
+    private ThirdPartySubjectPoolBrandRow leastRecentlyUsedCandidate(
+            List<ThirdPartySubjectPoolBrandRow> candidates,
+            Map<Long, LastSelection> lastSelectedMap) {
+        return candidates.stream()
+                .min(Comparator
+                        .comparing((ThirdPartySubjectPoolBrandRow row) -> lastSelectedMap.get(row.getBrandId()),
+                                Comparator.nullsFirst(Comparator.naturalOrder()))
+                        .thenComparing(ThirdPartySubjectPoolBrandRow::getBrandId))
+                .orElseThrow(() -> new BizException(
+                        ContentErrorCodes.ARTICLE_BAD_REQUEST,
+                        "已确认的第三方主体当前均不可用，请刷新覆盖并确认主体池"));
+    }
+
+    Long randomProjectId(List<Long> projectIds) {
+        return projectIds.get(ThreadLocalRandom.current().nextInt(projectIds.size()));
     }
 
     private List<ThirdPartySubjectPoolItem> confirmedItems(Long sourceBrandId) {
@@ -633,11 +660,11 @@ public class ThirdPartySubjectRotationService {
             if (other == null) {
                 return 1;
             }
-            int idCompare = compareNullable(lastSelectedTaskId, other.lastSelectedTaskId);
-            if (idCompare != 0) {
-                return idCompare;
+            int timeCompare = compareNullable(lastSelectedAt, other.lastSelectedAt);
+            if (timeCompare != 0) {
+                return timeCompare;
             }
-            return compareNullable(lastSelectedAt, other.lastSelectedAt);
+            return compareNullable(lastSelectedTaskId, other.lastSelectedTaskId);
         }
 
         private static <T extends Comparable<T>> int compareNullable(T left, T right) {

@@ -663,6 +663,9 @@ public class ProjectSelfMediaScheduleService {
         boolean reuseGeneratedArticle = completedTask != null
                 && "success".equals(normalizeText(completedTask.getStatus()))
                 && completedTask.getArticleId() != null;
+        boolean retryExistingTask = completedTask != null
+                && completedTask.getBatchId() != null
+                && List.of("failed", "pending", "queued", "running").contains(normalizeText(completedTask.getStatus()));
         ProjectSelfMediaScheduleItem replacement = new ProjectSelfMediaScheduleItem();
         replacement.setBatchId(oldItem.getBatchId());
         replacement.setProjectId(oldItem.getProjectId());
@@ -670,14 +673,18 @@ public class ProjectSelfMediaScheduleService {
         replacement.setCompanyId(oldItem.getCompanyId());
         replacement.setSelfMediaAccountId(oldItem.getSelfMediaAccountId());
         replacement.setPlatform(oldItem.getPlatform());
-        replacement.setStatus(reuseGeneratedArticle ? ITEM_STATUS_GENERATED : ITEM_STATUS_PLANNED);
+        replacement.setStatus(reuseGeneratedArticle
+                ? ITEM_STATUS_GENERATED
+                : retryExistingTask ? ITEM_STATUS_GENERATING : ITEM_STATUS_PLANNED);
         replacement.setPlannedExecutionAt(oldItem.getPlannedExecutionAt());
         replacement.setPlannedPublishAt(oldItem.getPlannedPublishAt());
         replacement.setGenerationDueAt(LocalDateTime.now(clock));
-        replacement.setNextGenerationAttemptAt(reuseGeneratedArticle ? null : LocalDateTime.now(clock));
-        if (reuseGeneratedArticle) {
+        replacement.setNextGenerationAttemptAt(reuseGeneratedArticle || retryExistingTask ? null : LocalDateTime.now(clock));
+        if (reuseGeneratedArticle || retryExistingTask) {
             replacement.setGenerationBatchId(completedTask.getBatchId());
             replacement.setGenerationTaskId(completedTask.getId());
+        }
+        if (reuseGeneratedArticle) {
             replacement.setArticleId(completedTask.getArticleId());
             replacement.setPromptTemplateId(completedTask.getPromptTemplateId());
             replacement.setPromptTemplateVersionId(completedTask.getPromptTemplateVersionId());
@@ -686,7 +693,7 @@ public class ProjectSelfMediaScheduleService {
                 replacement.setPromptTemplateName(template == null ? null : template.getName());
             }
         }
-        replacement.setGenerationAttemptCount(0);
+        replacement.setGenerationAttemptCount(retryExistingTask ? 1 : 0);
         replacement.setScheduleAttemptCount(0);
         replacement.setQuotaReservationStatus("pending");
         replacement.setGenerationIdempotencyKey("project-self-media-plan-" + oldItem.getBatchId()
@@ -712,6 +719,21 @@ public class ProjectSelfMediaScheduleService {
             replacement.setCancellationReason("人工重试时额度预占失败");
             scheduleItemMapper.updateById(replacement);
             throw ex;
+        }
+        if (retryExistingTask) {
+            try {
+                if ("failed".equals(normalizeText(completedTask.getStatus()))) {
+                    generationService.retryFailedSystem(completedTask.getBatchId());
+                } else {
+                    generationService.resumePendingOrStalledSystem(completedTask.getBatchId());
+                }
+            } catch (RuntimeException ex) {
+                refundStoredItemQuota(replacement);
+                replacement.setStatus(ITEM_STATUS_CANCELLED);
+                replacement.setCancellationReason("人工重试文章生成任务失败");
+                scheduleItemMapper.updateById(replacement);
+                throw ex;
+            }
         }
         oldItem.setStatus(ITEM_STATUS_SKIPPED);
         oldItem.setCancellationReason(reuseGeneratedArticle
@@ -2025,6 +2047,11 @@ public class ProjectSelfMediaScheduleService {
             KeywordGroupResult question = randomQuestion(questions);
             return new TopicSeed(question.getKeywordText(), question.getKeywordText(), question.getSceneCode());
         }
+        if (TemplatePerspectiveCodes.REVIEW_RECOMMEND.equals(
+                TemplatePerspectiveCodes.normalize(perspective.perspectiveCode()))) {
+            // The promoted brand and its A-tier question are selected atomically when the generation task is created.
+            return new TopicSeed("第三方品牌评测推荐", "第三方品牌评测推荐", null);
+        }
         String cacheKey = plan.platform() + "|" + perspective.perspectiveCode();
         CompatibleQuestionScenes scenes = sceneCache.computeIfAbsent(cacheKey,
                 ignored -> compatibleQuestionScenes(plan.platform(), perspective.perspectiveCode()));
@@ -2354,12 +2381,16 @@ public class ProjectSelfMediaScheduleService {
 
     private boolean progressStoredItemGeneration(ProjectSelfMediaScheduleBatch batch,
                                                  ProjectSelfMediaScheduleItem item) {
+        if (item.getNextGenerationAttemptAt() != null
+                && item.getNextGenerationAttemptAt().isAfter(LocalDateTime.now(clock))) {
+            return false;
+        }
         if (item.getGenerationTaskId() == null) {
             return false;
         }
         BatchArticleGenerationTask task = generationTaskMapper.selectById(item.getGenerationTaskId());
         if (task == null) {
-            return rescheduleStoredGenerationFailure(batch, item, "文章生成任务不存在");
+            return failStoredGenerationPermanently(batch, item, "文章生成任务不存在，无法保留原选题重试");
         }
         if (List.of("pending", "queued", "running").contains(normalizeText(task.getStatus()))) {
             LocalDateTime taskStartedAt = task.getStartedAt() != null
@@ -2367,14 +2398,15 @@ public class ProjectSelfMediaScheduleService {
                     : task.getCreatedAt() != null ? task.getCreatedAt() : item.getUpdatedAt();
             LocalDateTime timeoutAt = taskStartedAt == null ? null : taskStartedAt.plusHours(2);
             if (timeoutAt != null && !timeoutAt.isAfter(LocalDateTime.now(clock))) {
-                return rescheduleStoredGenerationFailure(batch, item, "文章生成任务处理超时");
+                return retryStoredGenerationTask(batch, item, task, "文章生成任务处理超时");
             }
             return false;
         }
         if (!"success".equals(normalizeText(task.getStatus())) || task.getArticleId() == null) {
-            return rescheduleStoredGenerationFailure(
+            return retryStoredGenerationTask(
                     batch,
                     item,
+                    task,
                     firstText(task.getErrorMessage(), "文章生成失败")
             );
         }
@@ -2399,30 +2431,55 @@ public class ProjectSelfMediaScheduleService {
         return true;
     }
 
-    private boolean rescheduleStoredGenerationFailure(ProjectSelfMediaScheduleBatch batch,
-                                                       ProjectSelfMediaScheduleItem item,
-                                                       String message) {
+    private boolean retryStoredGenerationTask(ProjectSelfMediaScheduleBatch batch,
+                                              ProjectSelfMediaScheduleItem item,
+                                              BatchArticleGenerationTask task,
+                                              String message) {
         int attempts = safeCount(item.getGenerationAttemptCount());
         item.setGenerationErrorMessage(trimMessage(message));
         item.setGenerationClaimToken(null);
         item.setGenerationClaimedAt(null);
         if (attempts >= GENERATION_START_MAX_ATTEMPTS) {
-            item.setStatus(ITEM_STATUS_GENERATION_FAILED);
-            item.setNextGenerationAttemptAt(null);
-            refundStoredItemQuota(item);
-            alertStoredItemFailure(batch, item, "文章生成连续失败");
-            resolveStoredItemRiskAlert(item, batch.getUpdatedBy());
-        } else {
-            item.setStatus(ITEM_STATUS_PLANNED);
-            item.setGenerationBatchId(null);
-            item.setGenerationTaskId(null);
-            item.setNextGenerationAttemptAt(LocalDateTime.now(clock)
-                    .plusMinutes(generationRetryDelayMinutes(Math.max(1, attempts))));
-            item.setGenerationIdempotencyKey("project-self-media-plan-" + item.getBatchId()
-                    + "-retry-" + java.util.UUID.randomUUID());
-            metrics.generationRetry();
+            return failStoredGenerationPermanently(batch, item, message);
         }
-        metrics.generation(attempts >= GENERATION_START_MAX_ATTEMPTS ? "failed" : "retryable_failed");
+        int nextAttempt = attempts + 1;
+        item.setGenerationAttemptCount(nextAttempt);
+        try {
+            if ("failed".equals(normalizeText(task.getStatus()))) {
+                generationService.retryFailedSystem(task.getBatchId());
+            } else {
+                generationService.resumePendingOrStalledSystem(task.getBatchId());
+            }
+            item.setStatus(ITEM_STATUS_GENERATING);
+            item.setNextGenerationAttemptAt(null);
+            item.setGenerationErrorMessage(null);
+        } catch (RuntimeException ex) {
+            item.setGenerationErrorMessage(trimMessage(firstText(ex.getMessage(), message)));
+            if (nextAttempt >= GENERATION_START_MAX_ATTEMPTS) {
+                return failStoredGenerationPermanently(batch, item, item.getGenerationErrorMessage());
+            }
+            item.setStatus(ITEM_STATUS_GENERATING);
+            item.setNextGenerationAttemptAt(LocalDateTime.now(clock)
+                    .plusMinutes(generationRetryDelayMinutes(nextAttempt)));
+        }
+        metrics.generationRetry();
+        metrics.generation("retryable_failed");
+        scheduleItemMapper.updateById(item);
+        return true;
+    }
+
+    private boolean failStoredGenerationPermanently(ProjectSelfMediaScheduleBatch batch,
+                                                     ProjectSelfMediaScheduleItem item,
+                                                     String message) {
+        item.setStatus(ITEM_STATUS_GENERATION_FAILED);
+        item.setGenerationErrorMessage(trimMessage(message));
+        item.setNextGenerationAttemptAt(null);
+        item.setGenerationClaimToken(null);
+        item.setGenerationClaimedAt(null);
+        refundStoredItemQuota(item);
+        alertStoredItemFailure(batch, item, "文章生成连续失败");
+        resolveStoredItemRiskAlert(item, batch.getUpdatedBy());
+        metrics.generation("failed");
         scheduleItemMapper.updateById(item);
         return true;
     }

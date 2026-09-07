@@ -69,6 +69,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -824,7 +825,7 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     @Test
-    void createForProjectUsesTemplateSceneTopicForThirdPartyPerspective() {
+    void createForProjectDefersReviewRecommendationTopicUntilSubjectIsSelected() {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
         when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
@@ -843,8 +844,6 @@ class ProjectSelfMediaScheduleServiceTest {
                 .thenReturn(List.of(brandQuestion, decisionQuestion));
         when(perspectiveService.resolve(8L, "self_media", "toutiao"))
                 .thenReturn(new TemplatePerspectiveService.ResolvedPerspective("review_recommend", "channel", 99L));
-        when(templateAllocationService.activeTemplates("self_media", "toutiao", null, "review_recommend"))
-                .thenReturn(List.of(templateWithScene("decision")));
         BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(44L, 1, "pending", false, false, List.of());
         when(generationService.createSystemBatch(any(), eq(99L))).thenReturn(generation);
         BatchArticleGenerationTask task = new BatchArticleGenerationTask();
@@ -866,8 +865,8 @@ class ProjectSelfMediaScheduleServiceTest {
 
         ArgumentCaptor<BatchArticleGenerateRequest> captor = ArgumentCaptor.forClass(BatchArticleGenerateRequest.class);
         verify(generationService).createSystemBatch(captor.capture(), eq(99L));
-        assertEquals("decision", captor.getValue().getTopics().get(0).getQuestionSceneCode());
-        assertEquals("这类服务应该怎么选", captor.getValue().getTopics().get(0).getTopic());
+        assertNull(captor.getValue().getTopics().get(0).getQuestionSceneCode());
+        assertEquals("第三方品牌评测推荐", captor.getValue().getTopics().get(0).getTopic());
     }
 
     @Test
@@ -883,8 +882,6 @@ class ProjectSelfMediaScheduleServiceTest {
         when(keywordGroupResultMapper.selectProjectQuestionsByTiers(7L, "'A'")).thenReturn(List.of());
         when(perspectiveService.resolve(8L, "self_media", "toutiao"))
                 .thenReturn(new TemplatePerspectiveService.ResolvedPerspective("review_recommend", "channel", 99L));
-        when(templateAllocationService.activeTemplates("self_media", "toutiao", null, "review_recommend"))
-                .thenReturn(List.of(templateWithScene("brand")));
         BatchArticleGenerateResponse generation = new BatchArticleGenerateResponse(44L, 1, "pending", false, false, List.of());
         when(generationService.createSystemBatch(any(), eq(99L))).thenReturn(generation);
         BatchArticleGenerationTask task = new BatchArticleGenerationTask();
@@ -906,8 +903,8 @@ class ProjectSelfMediaScheduleServiceTest {
 
         ArgumentCaptor<BatchArticleGenerateRequest> captor = ArgumentCaptor.forClass(BatchArticleGenerateRequest.class);
         verify(generationService).createSystemBatch(captor.capture(), eq(99L));
-        assertEquals("brand", captor.getValue().getTopics().get(0).getQuestionSceneCode());
-        assertEquals("这个品牌是否适合当前需求", captor.getValue().getTopics().get(0).getTopic());
+        assertNull(captor.getValue().getTopics().get(0).getQuestionSceneCode());
+        assertEquals("第三方品牌评测推荐", captor.getValue().getTopics().get(0).getTopic());
     }
 
     @Test
@@ -2041,6 +2038,31 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals("selected-scene", topic.getQuestionSceneCode());
         assertEquals("generating", item.getStatus());
         assertEquals(55L, item.getGenerationTaskId());
+    }
+
+    @Test
+    void failedStoredGenerationRetriesOriginalTaskWithoutReselectingTopic() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setStatus("generating");
+        item.setGenerationBatchId(44L);
+        item.setGenerationTaskId(55L);
+        item.setGenerationAttemptCount(1);
+        BatchArticleGenerationTask failedTask = failedGenerationTask(55L, "model timeout");
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 11, 6, 0)));
+        when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+        when(generationTaskMapper.selectById(55L)).thenReturn(failedTask);
+
+        assertEquals(1, service.progressProcessingBatches(5));
+
+        assertEquals("generating", item.getStatus());
+        assertEquals(44L, item.getGenerationBatchId());
+        assertEquals(55L, item.getGenerationTaskId());
+        assertEquals(2, item.getGenerationAttemptCount());
+        verify(generationService).retryFailedSystem(44L);
+        verify(generationService, never()).createSystemBatch(any(), any(), anyString());
+        verify(keywordGroupResultMapper, never()).selectProjectQuestionsByTiers(any(), anyString());
     }
 
     @Test

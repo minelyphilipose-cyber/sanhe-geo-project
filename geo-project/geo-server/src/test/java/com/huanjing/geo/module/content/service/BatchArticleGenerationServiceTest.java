@@ -27,6 +27,7 @@ import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
@@ -74,6 +75,7 @@ class BatchArticleGenerationServiceTest {
     private ArticlePromptTemplateVersionMapper promptTemplateVersionMapper;
     private ProjectMapper projectMapper;
     private BrandMapper brandMapper;
+    private KeywordGroupResultMapper keywordGroupResultMapper;
     private ArticleDraftMapper articleDraftMapper;
     private ArticleDraftVersionMapper articleDraftVersionMapper;
     private ArticleGenerationLogMapper articleGenerationLogMapper;
@@ -104,6 +106,7 @@ class BatchArticleGenerationServiceTest {
         promptTemplateVersionMapper = mock(ArticlePromptTemplateVersionMapper.class);
         projectMapper = mock(ProjectMapper.class);
         brandMapper = mock(BrandMapper.class);
+        keywordGroupResultMapper = mock(KeywordGroupResultMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
         articleGenerationLogMapper = mock(ArticleGenerationLogMapper.class);
@@ -135,7 +138,7 @@ class BatchArticleGenerationServiceTest {
                 projectMapper,
                 brandMapper,
                 mock(KeywordGroupMapper.class),
-                mock(KeywordGroupResultMapper.class),
+                keywordGroupResultMapper,
                 mock(ProjectKeywordGroupRelMapper.class),
                 articleDraftMapper,
                 articleDraftVersionMapper,
@@ -755,7 +758,7 @@ class BatchArticleGenerationServiceTest {
     }
 
     @Test
-    void createSystemBatchFreezesThirdPartySubjectContextOnTask() {
+    void createSystemBatchFreezesRandomThirdPartyBrandProjectAndAQuestionOnTask() {
         CapturingExecutor executor = new CapturingExecutor();
         ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
 
@@ -772,23 +775,28 @@ class BatchArticleGenerationServiceTest {
         when(brandMapper.selectById(30L)).thenReturn(sourceBrand);
         when(perspectiveService.resolve(30L, "self_media", "wechat"))
                 .thenReturn(new TemplatePerspectiveService.ResolvedPerspective(
-                        TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
+                        TemplatePerspectiveCodes.REVIEW_RECOMMEND,
                         TemplatePerspectiveService.MATCH_SCOPE_EXACT,
                         31L
                 ));
-        when(subjectRotationService.resolve(project, sourceBrand, "self_media", TemplatePerspectiveCodes.INDUSTRY_NEUTRAL))
+        when(subjectRotationService.resolve(project, sourceBrand, "self_media", TemplatePerspectiveCodes.REVIEW_RECOMMEND))
                 .thenReturn(new ThirdPartySubjectRotationService.RotationResult(30L, 10L, 300L, 3000L, true));
+        KeywordGroupResult selectedQuestion = new KeywordGroupResult();
+        selectedQuestion.setKeywordText("智能门锁应该怎么选？");
+        selectedQuestion.setSceneCode("decision");
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(3000L, "'A'"))
+                .thenReturn(List.of(selectedQuestion));
 
         ArticlePromptTemplate template = template(101L, "self_media", "wechat", "industry_article",
-                TemplatePerspectiveCodes.INDUSTRY_NEUTRAL);
+                TemplatePerspectiveCodes.REVIEW_RECOMMEND);
         ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
         version.setId(201L);
         version.setTemplateId(101L);
         when(allocationService.activeTemplates("self_media", "wechat", null,
-                TemplatePerspectiveCodes.INDUSTRY_NEUTRAL))
+                TemplatePerspectiveCodes.REVIEW_RECOMMEND))
                 .thenReturn(List.of(new ArticleTemplateAllocationService.TemplateWithVersion(template, version)));
         when(allocationService.allocate("self_media", "wechat", null,
-                TemplatePerspectiveCodes.INDUSTRY_NEUTRAL, 1))
+                TemplatePerspectiveCodes.REVIEW_RECOMMEND, 1))
                 .thenReturn(List.of(new ArticleTemplateAllocationService.AllocatedTemplate(template, version, 1)));
         when(batchMapper.insert(any(BatchArticleGenerationBatch.class))).thenAnswer(invocation -> {
             BatchArticleGenerationBatch batch = invocation.getArgument(0);
@@ -800,7 +808,7 @@ class BatchArticleGenerationServiceTest {
         req.setProjectId(10L);
         req.setTopicSource("manual");
         BatchArticleGenerateRequest.TopicConfig topic = new BatchArticleGenerateRequest.TopicConfig();
-        topic.setTopic("行业观察");
+        topic.setTopic("第三方品牌评测推荐");
         topic.setPlatforms(List.of(platform("self_media", "wechat", 1)));
         req.setTopics(List.of(topic));
 
@@ -816,8 +824,11 @@ class BatchArticleGenerationServiceTest {
         assertEquals(30L, task.getSourceBrandId());
         assertEquals(300L, task.getSubjectBrandId());
         assertEquals(3000L, task.getSubjectProjectId());
-        assertEquals(TemplatePerspectiveCodes.INDUSTRY_NEUTRAL, task.getPerspectiveCode());
+        assertEquals(TemplatePerspectiveCodes.REVIEW_RECOMMEND, task.getPerspectiveCode());
         assertEquals(31L, task.getPerspectiveMatchedConfigId());
+        assertEquals("智能门锁应该怎么选？", task.getTopic());
+        assertEquals("智能门锁应该怎么选？", task.getTopicAsQuestion());
+        assertEquals("decision", task.getQuestionSceneCode());
     }
 
     @Test
@@ -1266,6 +1277,7 @@ class BatchArticleGenerationServiceTest {
         assertThat(executor.commands).hasSize(1);
         verify(taskMapper).resetFailedForRetry(any(), any(), any());
         verify(batchMapper).markRunningClearingFinished(any(), any());
+        org.mockito.Mockito.verifyNoInteractions(subjectRotationService, keywordGroupResultMapper);
     }
 
     @Test

@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.util.List;
+
 @Mapper
 public interface ProjectMapper extends BaseMapper<Project> {
 
@@ -20,4 +22,15 @@ public interface ProjectMapper extends BaseMapper<Project> {
             LIMIT 1
             """)
     Long selectStableActiveProjectIdByBrandId(@Param("brandId") Long brandId);
+
+    @Select("""
+            SELECT id
+            FROM project
+            WHERE brand_id = #{brandId}
+              AND deleted_at IS NULL
+              AND status = 'active'
+              AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+            ORDER BY id ASC
+            """)
+    List<Long> selectActiveProjectIdsByBrandId(@Param("brandId") Long brandId);
 }
