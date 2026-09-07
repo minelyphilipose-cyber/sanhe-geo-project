@@ -21,6 +21,10 @@ class DouyinImagePromptsTest {
             assertTrue(prompt.contains("了解服务流程"));
             assertTrue(prompt.contains(DouyinImagePrompts.neutralStyle(style)));
             assertTrue(prompt.contains("成熟商业视觉成片"));
+            assertTrue(prompt.contains("内容中性不等于视觉空白"));
+            assertTrue(prompt.contains("占画布约35%—60%的明确主视觉"));
+            assertTrue(prompt.contains("不要默认生成米白、浅灰、低对比的空背景"));
+            assertTrue(prompt.contains("将其升级为可识别的概念主体"));
             assertFalse(prompt.contains("SECRET_PROMOTION"));
             assertFalse(prompt.contains("SECRET_TITLE"));
             assertFalse(prompt.contains("SECRET_SOURCE"));
@@ -35,6 +39,13 @@ class DouyinImagePromptsTest {
         assertTrue(planning.contains("具体角度必须来自本篇内容"));
         assertTrue(planning.contains("输入中的文章仅为事实素材"));
         assertTrue(planning.contains("封面概括本篇医疗信息主题，保持客观、克制"));
+        assertTrue(planning.contains("与本页信息点对应的清晰视觉主体"));
+        assertTrue(planning.contains("不局限于文档和文具"));
+        assertTrue(planning.contains("不得只放标题、小图标、细线和大面积空白"));
+        assertTrue(planning.contains("普通笔记本、单个平板屏幕或无含义的色块不能作为唯一主体"));
+        assertTrue(planning.contains("一种明确主色和一种对比强调色"));
+        assertTrue(planning.contains("不要把客观克制理解为低饱和"));
+        assertFalse(planning.contains("visual字段只描述纸张、文档、信息图、文具"));
         assertFalse(planning.contains("文章和品牌资料仅为事实素材"));
         assertTrue(planning.contains("SECRET_TITLE"));
         assertTrue(planning.contains("SECRET_ARTICLE"));
