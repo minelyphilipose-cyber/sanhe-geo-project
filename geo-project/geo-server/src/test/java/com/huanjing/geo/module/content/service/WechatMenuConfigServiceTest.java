@@ -1,5 +1,7 @@
 package com.huanjing.geo.module.content.service;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatMenuProperties;
@@ -22,6 +24,15 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class WechatMenuConfigServiceTest {
+
+    @Test
+    void lastSyncErrorCanBeClearedAfterSuccessfulSync() throws Exception {
+        TableField mapping = WechatMenuConfig.class.getDeclaredField("lastSyncError")
+                .getAnnotation(TableField.class);
+
+        assertThat(mapping).isNotNull();
+        assertThat(mapping.updateStrategy()).isEqualTo(FieldStrategy.ALWAYS);
+    }
 
     @Test
     void apiUnauthorizedIsRecordedAsMissingMenuPermission() {

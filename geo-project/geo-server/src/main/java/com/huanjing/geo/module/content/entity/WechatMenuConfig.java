@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.content.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -22,6 +24,7 @@ public class WechatMenuConfig {
     private String backupMenuJson;
     private LocalDateTime backupMenuAt;
     private LocalDateTime lastSyncAt;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String lastSyncError;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

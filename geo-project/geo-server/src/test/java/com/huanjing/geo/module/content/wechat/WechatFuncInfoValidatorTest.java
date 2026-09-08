@@ -49,7 +49,7 @@ class WechatFuncInfoValidatorTest {
     }
 
     @Test
-    void draftPermissionRejectsScopeThatStillNeedsConfirmation() {
+    void draftPermissionAcceptsReturnedScopeThatHasSeparateConfirmationState() {
         WechatFuncInfoValidator validator = validator(true, List.of(1, 7, 11));
         String funcInfo = """
                 [
@@ -61,8 +61,8 @@ class WechatFuncInfoValidatorTest {
                 ]
                 """;
 
-        assertThat(validator.hasDraftPermissions(funcInfo)).isFalse();
-        assertThat(validator.missingRequired(funcInfo)).containsExactly(1);
+        assertThat(validator.hasDraftPermissions(funcInfo)).isTrue();
+        assertThat(validator.missingRequired(funcInfo)).isEmpty();
     }
 
     @Test

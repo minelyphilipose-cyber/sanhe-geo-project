@@ -32,7 +32,7 @@ public class WechatFuncInfoValidator {
     }
 
     public Set<Integer> missingRequired(String funcInfoJson) {
-        return missingRequired(funcInfoJson, properties.getRequiredDraftFuncScopes(), true);
+        return missingRequired(funcInfoJson, properties.getRequiredDraftFuncScopes(), false);
     }
 
     public boolean hasMenuPermission(String funcInfoJson) {
