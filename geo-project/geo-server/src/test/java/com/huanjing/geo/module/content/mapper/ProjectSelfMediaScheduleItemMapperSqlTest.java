@@ -41,10 +41,15 @@ class ProjectSelfMediaScheduleItemMapperSqlTest {
         String sql = String.join("\n", method.getAnnotation(Select.class).value());
 
         assertTrue(sql.contains("LEFT JOIN article_draft a"));
+        assertTrue(sql.contains("LEFT JOIN douyin_article_image_batch image_batch"));
+        assertTrue(sql.contains("b.status NOT IN ('paused', 'skipped')"));
         assertTrue(sql.contains("i.status = 'cancelled'"));
         assertTrue(sql.contains("i.quota_reservation_status = 'refunded'"));
         assertTrue(sql.contains("i.cancelled_by IS NULL"));
         assertTrue(sql.contains("排期失败超过可重试时限，系统已释放预占额度"));
-        assertTrue(sql.contains("a.douyin_image_batch_id IS NOT NULL"));
+        assertTrue(sql.contains("COALESCE(a.status, '') <> 'deleted'"));
+        assertTrue(sql.contains("image_batch.article_id = a.id"));
+        assertTrue(sql.contains("image_batch.status = 'applied'"));
+        assertTrue(sql.contains("image_batch.applied_version_no = a.current_version_no"));
     }
 }

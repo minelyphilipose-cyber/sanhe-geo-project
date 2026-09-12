@@ -13,6 +13,7 @@ import com.huanjing.geo.module.content.dto.ProjectSelfMediaAutoScheduleRequest;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleItemActionRequest;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleItemUpdateRequest;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaLedger;
+import com.huanjing.geo.module.content.entity.DouyinArticleImageBatch;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
@@ -33,6 +34,7 @@ import com.huanjing.geo.module.content.mapper.ProjectSelfMediaSchedulePlanMapper
 import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleItemMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaLedgerMapper;
+import com.huanjing.geo.module.content.mapper.DouyinArticleImageBatchMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
@@ -119,6 +121,7 @@ class ProjectSelfMediaScheduleServiceTest {
     private CurrentUserService currentUserService;
     private SystemAlertService systemAlertService;
     private CompanyChannelQuotaLedgerMapper quotaLedgerMapper;
+    private DouyinArticleImageBatchMapper douyinArticleImageBatchMapper;
     private ProjectSelfMediaScheduleMetrics metrics;
     private DouyinArticleImageService douyinArticleImageService;
     private ProjectSelfMediaScheduleService service;
@@ -163,6 +166,7 @@ class ProjectSelfMediaScheduleServiceTest {
         currentUserService = mock(CurrentUserService.class);
         systemAlertService = mock(SystemAlertService.class);
         quotaLedgerMapper = mock(CompanyChannelQuotaLedgerMapper.class);
+        douyinArticleImageBatchMapper = mock(DouyinArticleImageBatchMapper.class);
         metrics = new ProjectSelfMediaScheduleMetrics(new SimpleMeterRegistry());
         java.util.concurrent.atomic.AtomicLong planItemIds = new java.util.concurrent.atomic.AtomicLong(1000L);
         doAnswer(invocation -> {
@@ -218,6 +222,7 @@ class ProjectSelfMediaScheduleServiceTest {
                 new ObjectMapper().findAndRegisterModules(),
                 scheduleAdapterRouter,
                 quotaLedgerMapper,
+                douyinArticleImageBatchMapper,
                 metrics
         );
         service.setClock(Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneId.systemDefault()));
@@ -2156,7 +2161,7 @@ class ProjectSelfMediaScheduleServiceTest {
     @Test
     void historicalSystemRefundedImageFailureShowsManualRescheduleAfterImagesApplied() {
         ProjectSelfMediaScheduleBatch batch = storedBatch();
-        batch.setStatus("failed");
+        batch.setStatus("created");
         ProjectSelfMediaScheduleItem item = storedItem();
         item.setPlatform("douyin");
         item.setStatus("cancelled");
@@ -2166,14 +2171,21 @@ class ProjectSelfMediaScheduleServiceTest {
         item.setScheduleErrorMessage("抖音图片生成失败");
         item.setCancelledAt(LocalDateTime.of(2026, 6, 4, 9, 0));
         item.setCancellationReason("排期失败超过可重试时限，系统已释放预占额度");
+        ProjectSelfMediaScheduleItem scheduled = storedItem();
+        scheduled.setId(99L);
+        scheduled.setStatus("scheduled");
         ArticleDraft article = new ArticleDraft();
         article.setId(66L);
         article.setDouyinImageBatchId(12L);
+        article.setCurrentVersionNo(3);
+        article.setStatus("ready");
+        DouyinArticleImageBatch imageBatch = appliedImageBatch(12L, 66L, 3);
 
         when(batchMapper.selectRecoverableDouyinImageFailures(5)).thenReturn(List.of(batch));
         when(batchMapper.selectProcessing(4)).thenReturn(List.of());
-        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item, scheduled));
         when(articleDraftMapper.selectById(66L)).thenReturn(article);
+        when(douyinArticleImageBatchMapper.selectById(12L)).thenReturn(imageBatch);
         when(scheduleItemMapper.markRefundedDouyinScheduleForManualReschedule(eq(66L), any(), any()))
                 .thenReturn(1);
 
@@ -2184,7 +2196,35 @@ class ProjectSelfMediaScheduleServiceTest {
         assertTrue(item.getScheduleErrorMessage().contains("重新处理本批次"));
         assertNull(item.getCancelledAt());
         assertNull(item.getCancellationReason());
+        assertEquals("partial_failed", batch.getStatus());
         verify(douyinArticleImageService, never()).prepareAutomatic(any(), any());
+    }
+
+    @Test
+    void historicalAllCancelledBatchShowsManualRescheduleAfterImagesApplied() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setStatus("cancelled");
+        ProjectSelfMediaScheduleItem item = systemRefundedImageFailureItem(100L, 66L);
+        item.setScheduleErrorMessage("抖音图片生成失败");
+        ArticleDraft article = new ArticleDraft();
+        article.setId(66L);
+        article.setDouyinImageBatchId(12L);
+        article.setCurrentVersionNo(3);
+        article.setStatus("ready");
+
+        when(batchMapper.selectRecoverableDouyinImageFailures(5)).thenReturn(List.of(batch));
+        when(batchMapper.selectProcessing(4)).thenReturn(List.of());
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+        when(articleDraftMapper.selectById(66L)).thenReturn(article);
+        when(douyinArticleImageBatchMapper.selectById(12L)).thenReturn(appliedImageBatch(12L, 66L, 3));
+        when(scheduleItemMapper.markRefundedDouyinScheduleForManualReschedule(eq(66L), any(), any()))
+                .thenReturn(1);
+
+        assertEquals(1, service.progressProcessingBatches(5));
+
+        assertEquals("schedule_failed", item.getStatus());
+        assertEquals("DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE", item.getScheduleErrorCode());
+        assertEquals("failed", batch.getStatus());
     }
 
     @Test
@@ -2357,10 +2397,17 @@ class ProjectSelfMediaScheduleServiceTest {
         createdSchedule.setId(88L);
         SelfMediaPublishScheduleCreateResponse created = new SelfMediaPublishScheduleCreateResponse();
         created.setCreatedSchedules(List.of(createdSchedule));
+        ArticleDraft article = new ArticleDraft();
+        article.setId(66L);
+        article.setDouyinImageBatchId(12L);
+        article.setCurrentVersionNo(3);
+        article.setStatus("ready");
 
         when(quotaLedgerMapper.selectProjectPlanReconciliationCandidates(any(), eq(0L), eq(10)))
                 .thenReturn(List.of(ledger));
         when(scheduleItemMapper.selectById(100L)).thenReturn(failed);
+        when(articleDraftMapper.selectById(66L)).thenReturn(article);
+        when(douyinArticleImageBatchMapper.selectById(12L)).thenReturn(appliedImageBatch(12L, 66L, 3));
         doAnswer(invocation -> {
             assertEquals("cancelled", failed.getStatus());
             assertEquals("refunded", failed.getQuotaReservationStatus());
@@ -2454,6 +2501,8 @@ class ProjectSelfMediaScheduleServiceTest {
         ArticleDraft article = new ArticleDraft();
         article.setId(66L);
         article.setDouyinImageBatchId(12L);
+        article.setCurrentVersionNo(3);
+        article.setStatus("ready");
         AtomicReference<ProjectSelfMediaScheduleItem> replacementRef = new AtomicReference<>();
         SelfMediaPublishScheduleVO createdSchedule = new SelfMediaPublishScheduleVO();
         createdSchedule.setId(88L);
@@ -2465,6 +2514,7 @@ class ProjectSelfMediaScheduleServiceTest {
                 ? List.of(cancelled)
                 : List.of(cancelled, replacementRef.get()));
         when(articleDraftMapper.selectById(66L)).thenReturn(article);
+        when(douyinArticleImageBatchMapper.selectById(12L)).thenReturn(appliedImageBatch(12L, 66L, 3));
         doAnswer(invocation -> {
             ProjectSelfMediaScheduleItem inserted = invocation.getArgument(0);
             inserted.setId(101L);
@@ -2485,6 +2535,37 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals("skipped", cancelled.getStatus());
         verify(companyChannelQuotaService).reserveProjectSelfMediaPlan(6L, 7L, "douyin", 101L,
                 LocalDate.of(2026, 6, 13));
+    }
+
+    @Test
+    void retryRejectsDeletedArticleAndStaleAppliedImageBatch() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setStatus("cancelled");
+        ProjectSelfMediaScheduleItem deletedArticleItem = systemRefundedImageFailureItem(100L, 66L);
+        ProjectSelfMediaScheduleItem staleImageItem = systemRefundedImageFailureItem(101L, 67L);
+
+        ArticleDraft deletedArticle = new ArticleDraft();
+        deletedArticle.setId(66L);
+        deletedArticle.setDouyinImageBatchId(12L);
+        deletedArticle.setCurrentVersionNo(3);
+        deletedArticle.setStatus("deleted");
+        ArticleDraft editedArticle = new ArticleDraft();
+        editedArticle.setId(67L);
+        editedArticle.setDouyinImageBatchId(13L);
+        editedArticle.setCurrentVersionNo(4);
+        editedArticle.setStatus("ready");
+
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(deletedArticleItem, staleImageItem));
+        when(articleDraftMapper.selectById(66L)).thenReturn(deletedArticle);
+        when(articleDraftMapper.selectById(67L)).thenReturn(editedArticle);
+        when(douyinArticleImageBatchMapper.selectById(13L)).thenReturn(appliedImageBatch(13L, 67L, 3));
+
+        BizException error = assertThrows(BizException.class,
+                () -> service.retryFailedItems(7L, "2026-06"));
+
+        assertEquals("当前批次没有可重试的失败项", error.getMessage());
+        verify(companyChannelQuotaService, never()).reserveProjectSelfMediaPlan(any(), any(), anyString(), any(), any());
     }
 
     @Test
@@ -2541,6 +2622,27 @@ class ProjectSelfMediaScheduleServiceTest {
         item.setQuotaReservationStatus("reserved");
         item.setCreatedBy(99L);
         return item;
+    }
+
+    private ProjectSelfMediaScheduleItem systemRefundedImageFailureItem(Long itemId, Long articleId) {
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setId(itemId);
+        item.setPlatform("douyin");
+        item.setStatus("cancelled");
+        item.setArticleId(articleId);
+        item.setScheduleErrorCode("DOUYIN_IMAGE_GENERATION_FAILED");
+        item.setQuotaReservationStatus("refunded");
+        item.setCancellationReason("排期失败超过可重试时限，系统已释放预占额度");
+        return item;
+    }
+
+    private DouyinArticleImageBatch appliedImageBatch(Long batchId, Long articleId, int appliedVersionNo) {
+        DouyinArticleImageBatch imageBatch = new DouyinArticleImageBatch();
+        imageBatch.setId(batchId);
+        imageBatch.setArticleId(articleId);
+        imageBatch.setStatus("applied");
+        imageBatch.setAppliedVersionNo(appliedVersionNo);
+        return imageBatch;
     }
 
     private ProjectSelfMediaScheduleBatch processingBatchWithTwoGenerationPlans() {

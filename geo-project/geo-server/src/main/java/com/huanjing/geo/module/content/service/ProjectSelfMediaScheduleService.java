@@ -41,6 +41,7 @@ import com.huanjing.geo.module.content.mapper.ProjectSelfMediaSchedulePlanMapper
 import com.huanjing.geo.module.content.mapper.ProjectSelfMediaScheduleItemMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaLedgerMapper;
+import com.huanjing.geo.module.content.mapper.DouyinArticleImageBatchMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
@@ -167,6 +168,7 @@ public class ProjectSelfMediaScheduleService {
     private final ObjectMapper objectMapper;
     private final SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
     private final CompanyChannelQuotaLedgerMapper quotaLedgerMapper;
+    private final DouyinArticleImageBatchMapper douyinArticleImageBatchMapper;
     private final ProjectSelfMediaScheduleMetrics metrics;
     @Value("${geo.self-media.auto-schedule.article-generation-lead-hours:4}")
     private int articleGenerationLeadHours = 4;
@@ -671,17 +673,25 @@ public class ProjectSelfMediaScheduleService {
             return false;
         }
         String status = normalizeText(item.getStatus());
-        if (ITEM_STATUS_SCHEDULE_FAILED.equals(status)) {
-            return DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE.equals(item.getScheduleErrorCode());
-        }
-        if (!ITEM_STATUS_CANCELLED.equals(status)
-                || !DOUYIN_IMAGE_GENERATION_FAILED.equals(item.getScheduleErrorCode())
-                || item.getCancelledBy() != null
-                || !SYSTEM_QUOTA_REFUND_CANCELLATION_REASON.equals(item.getCancellationReason())) {
+        boolean markedReady = ITEM_STATUS_SCHEDULE_FAILED.equals(status)
+                && DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE.equals(item.getScheduleErrorCode());
+        boolean systemRefundedFailure = ITEM_STATUS_CANCELLED.equals(status)
+                && DOUYIN_IMAGE_GENERATION_FAILED.equals(item.getScheduleErrorCode())
+                && item.getCancelledBy() == null
+                && SYSTEM_QUOTA_REFUND_CANCELLATION_REASON.equals(item.getCancellationReason());
+        if (!markedReady && !systemRefundedFailure) {
             return false;
         }
         ArticleDraft article = articleDraftMapper.selectById(item.getArticleId());
-        return article != null && article.getDouyinImageBatchId() != null;
+        if (article == null || "deleted".equals(normalizeText(article.getStatus()))
+                || article.getDouyinImageBatchId() == null || article.getCurrentVersionNo() == null) {
+            return false;
+        }
+        var imageBatch = douyinArticleImageBatchMapper.selectById(article.getDouyinImageBatchId());
+        return imageBatch != null
+                && Objects.equals(imageBatch.getArticleId(), article.getId())
+                && "applied".equals(normalizeText(imageBatch.getStatus()))
+                && Objects.equals(imageBatch.getAppliedVersionNo(), article.getCurrentVersionNo());
     }
 
     private ProjectSelfMediaScheduleItem cloneFailedPlanItemForRetry(ProjectSelfMediaScheduleItem oldItem,

@@ -35,7 +35,8 @@ public interface ProjectSelfMediaScheduleBatchMapper extends BaseMapper<ProjectS
             FROM project_self_media_schedule_batch b
             JOIN project_self_media_schedule_item i ON i.batch_id = b.id
             LEFT JOIN article_draft a ON a.id = i.article_id
-            WHERE b.status IN ('failed', 'partial_failed')
+            LEFT JOIN douyin_article_image_batch image_batch ON image_batch.id = a.douyin_image_batch_id
+            WHERE b.status NOT IN ('paused', 'skipped')
               AND (
                   (i.status = 'schedule_failed'
                    AND i.schedule_error_code = 'DOUYIN_IMAGE_GENERATION_FAILED'
@@ -67,7 +68,10 @@ public interface ProjectSelfMediaScheduleBatchMapper extends BaseMapper<ProjectS
                     AND i.quota_reservation_status = 'refunded'
                     AND i.cancelled_by IS NULL
                     AND i.cancellation_reason = '排期失败超过可重试时限，系统已释放预占额度'
-                    AND a.douyin_image_batch_id IS NOT NULL)
+                    AND COALESCE(a.status, '') <> 'deleted'
+                    AND image_batch.article_id = a.id
+                    AND image_batch.status = 'applied'
+                    AND image_batch.applied_version_no = a.current_version_no)
               )
             ORDER BY b.updated_at ASC, b.id ASC
             LIMIT #{limit}
