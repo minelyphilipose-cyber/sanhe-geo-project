@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.mapper;
 
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Select;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -23,7 +24,27 @@ class ProjectSelfMediaScheduleItemMapperSqlTest {
                 "markRefundedDouyinScheduleForManualReschedule", Long.class, Long.class,
                 java.time.LocalDateTime.class);
         String refundedSql = String.join("\n", refunded.getAnnotation(Update.class).value());
+        assertTrue(refundedSql.contains("SET status = 'schedule_failed'"));
         assertTrue(refundedSql.contains("quota_reservation_status = 'refunded'"));
+        assertTrue(refundedSql.contains("status = 'cancelled'"));
+        assertTrue(refundedSql.contains("cancelled_by IS NULL"));
+        assertTrue(refundedSql.contains("排期失败超过可重试时限，系统已释放预占额度"));
+        assertTrue(refundedSql.contains("cancelled_at = NULL"));
+        assertTrue(refundedSql.contains("cancellation_reason = NULL"));
         assertTrue(refundedSql.contains("重新处理本批次"));
+    }
+
+    @Test
+    void recoveryScanIncludesOnlySystemRefundedCancelledItemsWithAppliedImages() throws Exception {
+        Method method = ProjectSelfMediaScheduleBatchMapper.class.getMethod(
+                "selectRecoverableDouyinImageFailures", int.class);
+        String sql = String.join("\n", method.getAnnotation(Select.class).value());
+
+        assertTrue(sql.contains("LEFT JOIN article_draft a"));
+        assertTrue(sql.contains("i.status = 'cancelled'"));
+        assertTrue(sql.contains("i.quota_reservation_status = 'refunded'"));
+        assertTrue(sql.contains("i.cancelled_by IS NULL"));
+        assertTrue(sql.contains("排期失败超过可重试时限，系统已释放预占额度"));
+        assertTrue(sql.contains("a.douyin_image_batch_id IS NOT NULL"));
     }
 }

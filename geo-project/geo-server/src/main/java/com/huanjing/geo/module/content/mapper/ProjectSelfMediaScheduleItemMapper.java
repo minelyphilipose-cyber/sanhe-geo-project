@@ -82,15 +82,22 @@ public interface ProjectSelfMediaScheduleItemMapper extends BaseMapper<ProjectSe
 
     @Update("""
             UPDATE project_self_media_schedule_item
-            SET schedule_error_code = 'DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE',
+            SET status = 'schedule_failed',
+                schedule_error_code = 'DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE',
                 schedule_error_message = '图片已生成，原排期额度已退还，请在排期管理中点击“重新处理本批次”重新排期',
+                cancelled_by = NULL,
+                cancelled_at = NULL,
+                cancellation_reason = NULL,
                 updated_by = COALESCE(#{operatorId}, updated_by),
                 updated_at = #{now}
             WHERE article_id = #{articleId}
               AND platform = 'douyin'
-              AND status = 'schedule_failed'
               AND schedule_error_code = 'DOUYIN_IMAGE_GENERATION_FAILED'
               AND quota_reservation_status = 'refunded'
+              AND (status = 'schedule_failed'
+                   OR (status = 'cancelled'
+                       AND cancelled_by IS NULL
+                       AND cancellation_reason = '排期失败超过可重试时限，系统已释放预占额度'))
             """)
     int markRefundedDouyinScheduleForManualReschedule(@Param("articleId") Long articleId,
                                                        @Param("operatorId") Long operatorId,

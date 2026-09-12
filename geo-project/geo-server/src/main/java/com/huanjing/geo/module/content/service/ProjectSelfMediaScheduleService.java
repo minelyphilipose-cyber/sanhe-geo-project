@@ -131,6 +131,11 @@ public class ProjectSelfMediaScheduleService {
     private static final String ITEM_STATUS_SCHEDULE_FAILED = "schedule_failed";
     private static final String ITEM_STATUS_CANCELLED = "cancelled";
     private static final String ITEM_STATUS_SKIPPED = "skipped";
+    private static final String DOUYIN_IMAGE_GENERATION_FAILED = "DOUYIN_IMAGE_GENERATION_FAILED";
+    private static final String DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE =
+            "DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE";
+    private static final String SYSTEM_QUOTA_REFUND_CANCELLATION_REASON =
+            "排期失败超过可重试时限，系统已释放预占额度";
 
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
@@ -639,10 +644,8 @@ public class ProjectSelfMediaScheduleService {
                 item.setUpdatedBy(operatorId);
                 scheduleItemMapper.updateById(item);
                 retried++;
-            } else if (ITEM_STATUS_SCHEDULE_FAILED.equals(status)
-                    && item.getArticleId() != null
-                    && "refunded".equals(normalizeText(item.getQuotaReservationStatus()))
-                    && "DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE".equals(item.getScheduleErrorCode())) {
+            } else if (isRefundedDouyinImageReadyForReschedule(item)) {
+                item.setScheduleErrorCode(DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE);
                 cloneFailedPlanItemForRetry(item, operatorId);
                 retried++;
             } else if (ITEM_STATUS_GENERATION_FAILED.equals(status)) {
@@ -661,13 +664,33 @@ public class ProjectSelfMediaScheduleService {
         return getBatchDetail(project.getId(), batch.getTargetMonth());
     }
 
+    private boolean isRefundedDouyinImageReadyForReschedule(ProjectSelfMediaScheduleItem item) {
+        if (item.getArticleId() == null
+                || !"douyin".equals(normalizeText(item.getPlatform()))
+                || !"refunded".equals(normalizeText(item.getQuotaReservationStatus()))) {
+            return false;
+        }
+        String status = normalizeText(item.getStatus());
+        if (ITEM_STATUS_SCHEDULE_FAILED.equals(status)) {
+            return DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE.equals(item.getScheduleErrorCode());
+        }
+        if (!ITEM_STATUS_CANCELLED.equals(status)
+                || !DOUYIN_IMAGE_GENERATION_FAILED.equals(item.getScheduleErrorCode())
+                || item.getCancelledBy() != null
+                || !SYSTEM_QUOTA_REFUND_CANCELLATION_REASON.equals(item.getCancellationReason())) {
+            return false;
+        }
+        ArticleDraft article = articleDraftMapper.selectById(item.getArticleId());
+        return article != null && article.getDouyinImageBatchId() != null;
+    }
+
     private ProjectSelfMediaScheduleItem cloneFailedPlanItemForRetry(ProjectSelfMediaScheduleItem oldItem,
                                                                       Long operatorId) {
         BatchArticleGenerationTask completedTask = oldItem.getGenerationTaskId() == null
                 ? null
                 : generationTaskMapper.selectById(oldItem.getGenerationTaskId());
         boolean reuseAppliedImageArticle = oldItem.getArticleId() != null
-                && "DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE".equals(oldItem.getScheduleErrorCode());
+                && DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE.equals(oldItem.getScheduleErrorCode());
         boolean reuseGeneratedArticle = reuseAppliedImageArticle || (completedTask != null
                 && "success".equals(normalizeText(completedTask.getStatus()))
                 && completedTask.getArticleId() != null);
@@ -761,7 +784,7 @@ public class ProjectSelfMediaScheduleService {
 
     private void moveImageReadyScheduleRetryIntoFuture(ProjectSelfMediaScheduleItem oldItem,
                                                         ProjectSelfMediaScheduleItem replacement) {
-        if (!"DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE".equals(oldItem.getScheduleErrorCode())
+        if (!DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE.equals(oldItem.getScheduleErrorCode())
                 || replacement.getPlannedExecutionAt() == null
                 || replacement.getPlannedPublishAt() == null) {
             return;
@@ -1479,7 +1502,7 @@ public class ProjectSelfMediaScheduleService {
                                 .contains(normalizeText(item.getStatus()))) {
                             item.setStatus(ITEM_STATUS_CANCELLED);
                             item.setCancelledAt(now);
-                            item.setCancellationReason("排期失败超过可重试时限，系统已释放预占额度");
+                            item.setCancellationReason(SYSTEM_QUOTA_REFUND_CANCELLATION_REASON);
                         }
                         scheduleItemMapper.updateById(item);
                     }
@@ -2300,14 +2323,30 @@ public class ProjectSelfMediaScheduleService {
         boolean restoredHistoricalImageFailure = false;
         for (ProjectSelfMediaScheduleItem item : items) {
             String status = normalizeText(item.getStatus());
+            if (ITEM_STATUS_CANCELLED.equals(status)
+                    && isRefundedDouyinImageReadyForReschedule(item)) {
+                int marked = scheduleItemMapper.markRefundedDouyinScheduleForManualReschedule(
+                        item.getArticleId(), batch.getUpdatedBy(), now);
+                if (marked > 0) {
+                    item.setStatus(ITEM_STATUS_SCHEDULE_FAILED);
+                    item.setScheduleErrorCode(DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE);
+                    item.setScheduleErrorMessage(
+                            "图片已生成，原排期额度已退还，请在排期管理中点击“重新处理本批次”重新排期");
+                    item.setCancelledBy(null);
+                    item.setCancelledAt(null);
+                    item.setCancellationReason(null);
+                    status = ITEM_STATUS_SCHEDULE_FAILED;
+                    changed = true;
+                }
+            }
             if (ITEM_STATUS_SCHEDULE_FAILED.equals(status)
-                    && "DOUYIN_IMAGE_GENERATION_FAILED".equals(item.getScheduleErrorCode())
+                    && DOUYIN_IMAGE_GENERATION_FAILED.equals(item.getScheduleErrorCode())
                     && "reserved".equals(normalizeText(item.getQuotaReservationStatus()))
                     && DouyinArticleImageService.isRetryableAutomaticFailure(item.getScheduleErrorMessage())) {
                 int restored = scheduleItemMapper.update(null, new LambdaUpdateWrapper<ProjectSelfMediaScheduleItem>()
                         .eq(ProjectSelfMediaScheduleItem::getId, item.getId())
                         .eq(ProjectSelfMediaScheduleItem::getStatus, ITEM_STATUS_SCHEDULE_FAILED)
-                        .eq(ProjectSelfMediaScheduleItem::getScheduleErrorCode, "DOUYIN_IMAGE_GENERATION_FAILED")
+                        .eq(ProjectSelfMediaScheduleItem::getScheduleErrorCode, DOUYIN_IMAGE_GENERATION_FAILED)
                         .eq(ProjectSelfMediaScheduleItem::getQuotaReservationStatus, "reserved")
                         .set(ProjectSelfMediaScheduleItem::getStatus, ITEM_STATUS_GENERATED)
                         .set(ProjectSelfMediaScheduleItem::getScheduleErrorCode, null)
@@ -2620,7 +2659,7 @@ public class ProjectSelfMediaScheduleService {
                 if (!douyinArticleImageService.prepareAutomatic(item.getArticleId(), batch.getCreatedBy())) return false;
             } catch (RuntimeException ex) {
                 item.setStatus(ITEM_STATUS_SCHEDULE_FAILED);
-                item.setScheduleErrorCode("DOUYIN_IMAGE_GENERATION_FAILED");
+                item.setScheduleErrorCode(DOUYIN_IMAGE_GENERATION_FAILED);
                 item.setScheduleErrorMessage(trimMessage(ex.getMessage()));
                 item.setNextScheduleAttemptAt(null);
                 scheduleItemMapper.updateById(item);
