@@ -39,6 +39,7 @@ class DouyinArticleImageServiceTest {
     private final DouyinArticleImageBatchMapper batches = mock(DouyinArticleImageBatchMapper.class);
     private final ArticleDraftMapper articles = mock(ArticleDraftMapper.class);
     private final BrandMaterialMapper materials = mock(BrandMaterialMapper.class);
+    private final ProjectMapper projects = mock(ProjectMapper.class);
     private final AiPlatformConfigMapper models = mock(AiPlatformConfigMapper.class);
     private final ArkImageClient client = mock(ArkImageClient.class);
     private final LlmCallFacade llm = mock(LlmCallFacade.class);
@@ -59,9 +60,11 @@ class DouyinArticleImageServiceTest {
     @SuppressWarnings("unchecked")
     void setup() {
         service = new DouyinArticleImageService(batches, articles, mock(ArticleDraftVersionMapper.class), mock(BrandMapper.class),
-                mock(ProjectMapper.class), materials, models, mock(SelfMediaPublishScheduleMapper.class), mock(ArticleBodyProvider.class),
+                projects, materials, models, mock(SelfMediaPublishScheduleMapper.class), mock(ArticleBodyProvider.class),
                 urls, storage, mock(CurrentUserService.class), mock(BrandAccessService.class), tx, json, llm, client, materialSelection);
         when(batches.update(isNull(), any())).thenReturn(1);
+        Project activeProject = new Project(); activeProject.setId(7L); activeProject.setStatus("active");
+        when(projects.selectById(7L)).thenReturn(activeProject);
         doAnswer(inv -> {
             ((Consumer<TransactionStatus>) inv.getArgument(0)).accept(new SimpleTransactionStatus());
             return null;
@@ -198,8 +201,47 @@ class DouyinArticleImageServiceTest {
         service.processNext();
 
         assertEquals("queued", batch.getStatus());
-        assertNull(batch.getErrorMessage());
+        assertEquals("图片生成正在等待模型资源，系统会自动重试，无需操作", batch.getErrorMessage());
         verifyNoInteractions(client, storage, materials);
+    }
+
+    @Test
+    void plannerAuthenticationFailureStopsForManualAction() throws Exception {
+        DouyinArticleImageBatch batch = batch("minimal");
+        batch.setMaterialIdsJson("[]");
+        when(batches.selectOne(any())).thenReturn(batch);
+        when(articles.selectById(1L)).thenReturn(article());
+        AiPlatformConfig model = new AiPlatformConfig();
+        model.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
+        when(models.selectOne(any())).thenReturn(model);
+        when(llm.execute(any())).thenThrow(new LlmRouteException(
+                LlmRouteFailureKind.ALL_FAILED,
+                "All LLM candidates failed",
+                1,
+                new BizException(502, "模型请求失败，HTTP 401")));
+
+        service.processNext();
+
+        assertEquals("failed", batch.getStatus());
+        assertEquals("分图模型配置不可用，请联系管理员检查", batch.getErrorMessage());
+        verifyNoInteractions(client, storage, materials);
+    }
+
+    @Test
+    void inactiveProjectCancelsQueuedAutomaticBatchBeforeCallingModels() {
+        DouyinArticleImageBatch batch = batch("minimal");
+        batch.setAutomatic(true);
+        batch.setMaterialIdsJson("[]");
+        when(batches.selectOne(any())).thenReturn(batch);
+        when(articles.selectById(1L)).thenReturn(article());
+        Project paused = new Project(); paused.setId(7L); paused.setStatus("paused");
+        when(projects.selectById(7L)).thenReturn(paused);
+
+        service.processNext();
+
+        assertEquals("cancelled", batch.getStatus());
+        assertNull(batch.getErrorMessage());
+        verifyNoInteractions(models, client, llm, storage, materials);
     }
 
     @Test
@@ -218,7 +260,30 @@ class DouyinArticleImageServiceTest {
         service.processNext();
 
         assertEquals("queued", batch.getStatus());
-        assertNull(batch.getErrorMessage());
+        assertEquals("图片模型暂时不可用，系统会自动重试，无需操作", batch.getErrorMessage());
+        verifyNoInteractions(storage, materials);
+    }
+
+    @Test
+    void automaticRetryWindowEndsWithActionableOperatorMessage() throws Exception {
+        ReflectionTestUtils.setField(service, "automaticRetryWindowMinutes", 360);
+        DouyinArticleImageBatch batch = batch("minimal");
+        batch.setAutomatic(true);
+        batch.setCreatedAt(java.time.LocalDateTime.now().minusHours(7));
+        batch.setPlanJson(plan());
+        batch.setMaterialIdsJson("[]");
+        when(batches.selectOne(any())).thenReturn(batch);
+        when(articles.selectById(1L)).thenReturn(article());
+        AiPlatformConfig model = new AiPlatformConfig();
+        model.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
+        when(models.selectOne(any())).thenReturn(model);
+        when(client.generate(any(), anyString())).thenThrow(
+                new BizException(502, "豆包生图失败，HTTP 429；错误码：RateLimitExceeded"));
+
+        service.processNext();
+
+        assertEquals("failed", batch.getStatus());
+        assertEquals("图片模型持续不可用，系统已停止自动重试，请在文章详情中手动重试", batch.getErrorMessage());
         verifyNoInteractions(storage, materials);
     }
 
@@ -369,6 +434,7 @@ class DouyinArticleImageServiceTest {
     private ArticleDraft article() {
         ArticleDraft article = new ArticleDraft();
         article.setId(1L); article.setTitle("品牌介绍"); article.setCurrentVersionNo(1); article.setStatus("approved");
+        article.setProjectId(7L);
         article.setChannelGroupCode("self_media"); article.setChannelSubCode("douyin");
         return article;
     }

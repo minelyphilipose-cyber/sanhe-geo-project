@@ -1132,7 +1132,8 @@ public class ProjectSelfMediaScheduleService {
         for (int i = 0; i < configs.size(); i++) {
             ProjectSelfMediaScheduleConfig config = configs.get(i);
             Project project = projectMapper.selectById(config.getProjectId());
-            if (project == null || project.getDeletedAt() != null) {
+            if (project == null || project.getDeletedAt() != null
+                    || !"active".equals(normalizeText(project.getStatus()))) {
                 continue;
             }
             ProjectSelfMediaSchedulePlan plan = new ProjectSelfMediaSchedulePlan();
@@ -1262,15 +1263,19 @@ public class ProjectSelfMediaScheduleService {
                 markProjectSchedulePlanTerminal(plan, "skipped", "项目未开启自媒体自动排期开关");
                 return;
             }
+            Project project = projectMapper.selectById(plan.getProjectId());
+            if (project == null || project.getDeletedAt() != null) {
+                markProjectSchedulePlanTerminal(plan, "skipped", "项目不存在或已删除");
+                return;
+            }
+            if (!"active".equals(normalizeText(project.getStatus()))) {
+                markProjectSchedulePlanTerminal(plan, "skipped", null);
+                return;
+            }
             ProjectSelfMediaScheduleBatch existed = settleTerminalGenerationFailure(
                     batchMapper.selectByProjectAndMonth(plan.getProjectId(), plan.getTargetMonth()));
             if (isActiveOrCompletedBatch(existed)) {
                 markProjectSchedulePlanTerminal(plan, "completed", null);
-                return;
-            }
-            Project project = projectMapper.selectById(plan.getProjectId());
-            if (project == null || project.getDeletedAt() != null) {
-                markProjectSchedulePlanTerminal(plan, "skipped", "项目不存在或已删除");
                 return;
             }
             Long operatorId = plan.getCreatedBy() != null && plan.getCreatedBy() > 0
@@ -1349,7 +1354,17 @@ public class ProjectSelfMediaScheduleService {
             log.warn("released stale project self-media generation claims count={}", releasedClaims);
         }
         int processed = 0;
-        for (ProjectSelfMediaScheduleBatch batch : batchMapper.selectProcessing(Math.max(1, limit))) {
+        int safeLimit = Math.max(1, limit);
+        Map<Long, ProjectSelfMediaScheduleBatch> candidates = new LinkedHashMap<>();
+        for (ProjectSelfMediaScheduleBatch batch : batchMapper.selectRecoverableDouyinImageFailures(safeLimit)) {
+            candidates.put(batch.getId(), batch);
+        }
+        if (candidates.size() < safeLimit) {
+            for (ProjectSelfMediaScheduleBatch batch : batchMapper.selectProcessing(safeLimit - candidates.size())) {
+                candidates.putIfAbsent(batch.getId(), batch);
+            }
+        }
+        for (ProjectSelfMediaScheduleBatch batch : candidates.values()) {
             try {
                 if (progressProcessingBatch(batch)) {
                     processed++;
@@ -2251,21 +2266,37 @@ public class ProjectSelfMediaScheduleService {
                 || !"active".equals(normalizeText(project.getStatus()))) {
             boolean changed = skipInactiveProjectItems(batch, items);
             refreshStoredBatchSummary(batch, scheduleItemMapper.selectByBatchId(batch.getId()));
+            clearStoredBatchFailure(batch);
             return changed;
         }
         boolean changed = false;
+        boolean restoredHistoricalImageFailure = false;
         for (ProjectSelfMediaScheduleItem item : items) {
             String status = normalizeText(item.getStatus());
             if (ITEM_STATUS_SCHEDULE_FAILED.equals(status)
                     && "DOUYIN_IMAGE_GENERATION_FAILED".equals(item.getScheduleErrorCode())
+                    && "reserved".equals(normalizeText(item.getQuotaReservationStatus()))
                     && DouyinArticleImageService.isRetryableAutomaticFailure(item.getScheduleErrorMessage())) {
+                int restored = scheduleItemMapper.update(null, new LambdaUpdateWrapper<ProjectSelfMediaScheduleItem>()
+                        .eq(ProjectSelfMediaScheduleItem::getId, item.getId())
+                        .eq(ProjectSelfMediaScheduleItem::getStatus, ITEM_STATUS_SCHEDULE_FAILED)
+                        .eq(ProjectSelfMediaScheduleItem::getScheduleErrorCode, "DOUYIN_IMAGE_GENERATION_FAILED")
+                        .eq(ProjectSelfMediaScheduleItem::getQuotaReservationStatus, "reserved")
+                        .set(ProjectSelfMediaScheduleItem::getStatus, ITEM_STATUS_GENERATED)
+                        .set(ProjectSelfMediaScheduleItem::getScheduleErrorCode, null)
+                        .set(ProjectSelfMediaScheduleItem::getScheduleErrorMessage, null)
+                        .set(ProjectSelfMediaScheduleItem::getNextScheduleAttemptAt, now)
+                        .set(ProjectSelfMediaScheduleItem::getUpdatedAt, now));
+                if (restored != 1) {
+                    continue;
+                }
                 item.setStatus(ITEM_STATUS_GENERATED);
                 item.setScheduleErrorCode(null);
                 item.setScheduleErrorMessage(null);
                 item.setNextScheduleAttemptAt(now);
-                scheduleItemMapper.updateById(item);
                 status = ITEM_STATUS_GENERATED;
                 changed = true;
+                restoredHistoricalImageFailure = true;
             }
             if (ITEM_STATUS_PLANNED.equals(status)
                     && !firstGenerationAttemptAt(item).isAfter(now)) {
@@ -2290,6 +2321,9 @@ public class ProjectSelfMediaScheduleService {
             }
         }
         refreshStoredBatchSummary(batch, scheduleItemMapper.selectByBatchId(batch.getId()));
+        if (restoredHistoricalImageFailure) {
+            clearStoredBatchFailure(batch);
+        }
         return changed;
     }
 
@@ -2313,11 +2347,34 @@ public class ProjectSelfMediaScheduleService {
             item.setScheduleErrorMessage(null);
             item.setCancellationReason("项目未启用，系统已跳过");
             item.setUpdatedBy(batch.getUpdatedBy() != null ? batch.getUpdatedBy() : batch.getCreatedBy());
-            scheduleItemMapper.updateById(item);
+            item.setUpdatedAt(LocalDateTime.now(clock));
+            scheduleItemMapper.update(null, new LambdaUpdateWrapper<ProjectSelfMediaScheduleItem>()
+                    .eq(ProjectSelfMediaScheduleItem::getId, item.getId())
+                    .set(ProjectSelfMediaScheduleItem::getStatus, ITEM_STATUS_SKIPPED)
+                    .set(ProjectSelfMediaScheduleItem::getNextGenerationAttemptAt, null)
+                    .set(ProjectSelfMediaScheduleItem::getNextScheduleAttemptAt, null)
+                    .set(ProjectSelfMediaScheduleItem::getGenerationClaimToken, null)
+                    .set(ProjectSelfMediaScheduleItem::getGenerationClaimedAt, null)
+                    .set(ProjectSelfMediaScheduleItem::getGenerationErrorMessage, null)
+                    .set(ProjectSelfMediaScheduleItem::getScheduleErrorCode, null)
+                    .set(ProjectSelfMediaScheduleItem::getScheduleErrorMessage, null)
+                    .set(ProjectSelfMediaScheduleItem::getQuotaReservationStatus, item.getQuotaReservationStatus())
+                    .set(ProjectSelfMediaScheduleItem::getCancellationReason, item.getCancellationReason())
+                    .set(ProjectSelfMediaScheduleItem::getUpdatedBy, item.getUpdatedBy())
+                    .set(ProjectSelfMediaScheduleItem::getUpdatedAt, item.getUpdatedAt()));
             resolveStoredItemRiskAlert(item, item.getUpdatedBy());
             changed = true;
         }
         return changed;
+    }
+
+    private void clearStoredBatchFailure(ProjectSelfMediaScheduleBatch batch) {
+        if (batch == null || batch.getId() == null || StringUtils.hasText(batch.getFailureMessage())) {
+            return;
+        }
+        batchMapper.update(null, new LambdaUpdateWrapper<ProjectSelfMediaScheduleBatch>()
+                .eq(ProjectSelfMediaScheduleBatch::getId, batch.getId())
+                .set(ProjectSelfMediaScheduleBatch::getFailureMessage, null));
     }
 
     private LocalDateTime firstGenerationAttemptAt(ProjectSelfMediaScheduleItem item) {

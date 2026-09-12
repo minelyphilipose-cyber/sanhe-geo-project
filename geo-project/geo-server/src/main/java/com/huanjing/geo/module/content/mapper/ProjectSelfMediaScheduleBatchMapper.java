@@ -29,4 +29,38 @@ public interface ProjectSelfMediaScheduleBatchMapper extends BaseMapper<ProjectS
             LIMIT #{limit}
             """)
     List<ProjectSelfMediaScheduleBatch> selectProcessing(@Param("limit") int limit);
+
+    @Select("""
+            SELECT DISTINCT b.*
+            FROM project_self_media_schedule_batch b
+            JOIN project_self_media_schedule_item i ON i.batch_id = b.id
+            WHERE b.status IN ('failed', 'partial_failed')
+              AND i.status = 'schedule_failed'
+              AND i.schedule_error_code = 'DOUYIN_IMAGE_GENERATION_FAILED'
+              AND i.quota_reservation_status = 'reserved'
+              AND (
+                   LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%waiting for permits%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%permit unavailable%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%permit busy%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%rate limit%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%http 429%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%too many requests%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%timeout%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%timed out%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%connection refused%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%connection reset%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%connection closed%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%connectexception%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%socketexception%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%circuit open%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) LIKE '%circuit-open%'
+                OR LOWER(COALESCE(i.schedule_error_message, '')) REGEXP 'http[[:space:]]+5[0-9]{2}'
+                OR i.schedule_error_message LIKE '%图片模型当前请求较多%'
+                OR i.schedule_error_message LIKE '%图片生成超时%'
+                OR i.schedule_error_message LIKE '%任务中断或超时%'
+              )
+            ORDER BY b.updated_at ASC, b.id ASC
+            LIMIT #{limit}
+            """)
+    List<ProjectSelfMediaScheduleBatch> selectRecoverableDouyinImageFailures(@Param("limit") int limit);
 }

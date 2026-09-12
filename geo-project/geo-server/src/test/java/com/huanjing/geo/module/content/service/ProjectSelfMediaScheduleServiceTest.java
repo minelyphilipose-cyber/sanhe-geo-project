@@ -1,5 +1,7 @@
 package com.huanjing.geo.module.content.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
@@ -57,6 +59,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -119,6 +122,16 @@ class ProjectSelfMediaScheduleServiceTest {
     private ProjectSelfMediaScheduleMetrics metrics;
     private DouyinArticleImageService douyinArticleImageService;
     private ProjectSelfMediaScheduleService service;
+
+    @org.junit.jupiter.api.BeforeAll
+    static void metadata() {
+        for (Class<?> type : List.of(
+                ProjectSelfMediaScheduleBatch.class,
+                ProjectSelfMediaSchedulePlan.class,
+                ProjectSelfMediaScheduleItem.class)) {
+            TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), type);
+        }
+    }
 
     @BeforeEach
     void setUp() {
@@ -945,6 +958,46 @@ class ProjectSelfMediaScheduleServiceTest {
 
         verify(batchMapper, never()).insert(any());
         verify(batchMapper, never()).selectByProjectAndMonth(7L, "2026-06");
+        verify(generationService, never()).createSystemBatch(any(), any());
+    }
+
+    @Test
+    void createDueEnabledProjectPlansIgnoresInactiveProjectWithoutCreatingPlan() {
+        ProjectSelfMediaScheduleConfig config = config(true);
+        when(configMapper.selectEnabledPage(0L, 2)).thenReturn(List.of(config));
+        when(configMapper.selectEnabledPage(7L, 2)).thenReturn(List.of());
+        Project paused = project();
+        paused.setStatus("paused");
+        when(projectMapper.selectById(7L)).thenReturn(paused);
+
+        int created = service.createDueEnabledProjectPlans(
+                "2026-06", "job", LocalDateTime.of(2026, 6, 1, 1, 0), 2, 0, 2);
+
+        assertEquals(0, created);
+        verify(planMapper, never()).insert(any());
+        verify(batchMapper, never()).insert(any());
+    }
+
+    @Test
+    void queuedPlanForInactiveProjectIsSilentlySkippedBeforeCreatingBatch() {
+        ProjectSelfMediaSchedulePlan plan = new ProjectSelfMediaSchedulePlan();
+        plan.setId(77L);
+        plan.setProjectId(7L);
+        plan.setTargetMonth("2026-06");
+        plan.setStatus("pending");
+        plan.setRetryCount(0);
+        plan.setCreatedBy(99L);
+        when(planMapper.selectList(any())).thenReturn(List.of(), List.of(plan));
+        when(planMapper.update(eq(null), any())).thenReturn(1);
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        Project paused = project();
+        paused.setStatus("paused");
+        when(projectMapper.selectById(7L)).thenReturn(paused);
+
+        assertEquals(1, service.processDueProjectSchedulePlans(5, 3, 120));
+
+        verify(batchMapper, never()).selectByProjectAndMonth(any(), anyString());
+        verify(batchMapper, never()).insert(any());
         verify(generationService, never()).createSystemBatch(any(), any());
     }
 
@@ -1998,12 +2051,34 @@ class ProjectSelfMediaScheduleServiceTest {
     @Test
     void inactiveProjectSkipsDueItemWithoutCreatingGenerationTaskOrError() {
         ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setFailureMessage("旧批次错误");
         ProjectSelfMediaScheduleItem item = storedItem();
+        item.setGenerationClaimToken("old-claim");
+        item.setGenerationClaimedAt(LocalDateTime.of(2026, 6, 1, 7, 55));
+        item.setGenerationErrorMessage("旧生成错误");
+        item.setScheduleErrorCode("OLD_ERROR");
+        item.setScheduleErrorMessage("旧排期错误");
         Project paused = project();
         paused.setStatus("paused");
         when(projectMapper.selectById(7L)).thenReturn(paused);
         when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
         when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+        AtomicReference<String> persistedItemSet = new AtomicReference<>();
+        doAnswer(invocation -> {
+            Object wrapper = invocation.getArgument(1);
+            if (wrapper instanceof com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<?> update) {
+                persistedItemSet.set(update.getSqlSet());
+            }
+            return 1;
+        }).when(scheduleItemMapper).update(eq(null), any());
+        AtomicReference<String> persistedBatchSet = new AtomicReference<>();
+        doAnswer(invocation -> {
+            Object wrapper = invocation.getArgument(1);
+            if (wrapper instanceof com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<?> update) {
+                persistedBatchSet.set(update.getSqlSet());
+            }
+            return 1;
+        }).when(batchMapper).update(eq(null), any());
 
         assertEquals(1, service.progressProcessingBatches(5));
 
@@ -2012,6 +2087,11 @@ class ProjectSelfMediaScheduleServiceTest {
         assertNull(item.getScheduleErrorCode());
         assertNull(item.getScheduleErrorMessage());
         assertEquals("refunded", item.getQuotaReservationStatus());
+        assertTrue(persistedItemSet.get().contains("generation_claim_token"));
+        assertTrue(persistedItemSet.get().contains("generation_error_message"));
+        assertTrue(persistedItemSet.get().contains("schedule_error_code"));
+        assertTrue(persistedItemSet.get().contains("schedule_error_message"));
+        assertTrue(persistedBatchSet.get().contains("failure_message"));
         verify(generationService, never()).createSystemBatch(any(), any(), anyString());
         verify(companyChannelQuotaService).refundProjectSelfMediaPlan(100L);
     }
@@ -2019,23 +2099,58 @@ class ProjectSelfMediaScheduleServiceTest {
     @Test
     void historicalDouyinCapacityFailureReturnsToAutomaticWaiting() {
         ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setStatus("failed");
+        batch.setFailureMessage("部分文章生成或排期失败");
         ProjectSelfMediaScheduleItem item = storedItem();
         item.setPlatform("douyin");
         item.setStatus("schedule_failed");
         item.setArticleId(66L);
         item.setScheduleErrorCode("DOUYIN_IMAGE_GENERATION_FAILED");
         item.setScheduleErrorMessage("抖音图片生成失败，请在文章详情中重试：All LLM candidates are waiting for permits");
-        when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
+        when(batchMapper.selectRecoverableDouyinImageFailures(5)).thenReturn(List.of(batch));
+        when(batchMapper.selectProcessing(4)).thenReturn(List.of());
         when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
         when(douyinArticleImageService.prepareAutomatic(66L, 99L)).thenReturn(false);
+        AtomicReference<String> persistedItemSet = new AtomicReference<>();
+        doAnswer(invocation -> {
+            Object wrapper = invocation.getArgument(1);
+            if (wrapper instanceof com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<?> update) {
+                persistedItemSet.set(update.getSqlSet());
+            }
+            return 1;
+        }).when(scheduleItemMapper).update(eq(null), any());
 
         assertEquals(1, service.progressProcessingBatches(5));
 
         assertEquals("generated", item.getStatus());
         assertNull(item.getScheduleErrorCode());
         assertNull(item.getScheduleErrorMessage());
+        assertTrue(persistedItemSet.get().contains("schedule_error_code"));
+        assertTrue(persistedItemSet.get().contains("schedule_error_message"));
         verify(douyinArticleImageService).prepareAutomatic(66L, 99L);
         verify(scheduleService, never()).createSystemSchedulesUsingReservedQuota(any(), anyString(), any(), any());
+    }
+
+    @Test
+    void refundedHistoricalImageFailureIsNotRecovered() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setStatus("failed");
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setPlatform("douyin");
+        item.setStatus("schedule_failed");
+        item.setArticleId(66L);
+        item.setQuotaReservationStatus("refunded");
+        item.setScheduleErrorCode("DOUYIN_IMAGE_GENERATION_FAILED");
+        item.setScheduleErrorMessage("All LLM candidates are waiting for permits");
+        when(batchMapper.selectRecoverableDouyinImageFailures(5)).thenReturn(List.of(batch));
+        when(batchMapper.selectProcessing(4)).thenReturn(List.of());
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+
+        assertEquals(0, service.progressProcessingBatches(5));
+
+        assertEquals("schedule_failed", item.getStatus());
+        verify(douyinArticleImageService, never()).prepareAutomatic(any(), any());
+        verify(scheduleItemMapper, never()).update(eq(null), any());
     }
 
     @Test
