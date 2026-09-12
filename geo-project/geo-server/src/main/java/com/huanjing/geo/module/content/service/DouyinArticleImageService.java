@@ -47,6 +47,7 @@ public class DouyinArticleImageService {
     private final BrandMaterialMapper materials;
     private final AiPlatformConfigMapper models;
     private final SelfMediaPublishScheduleMapper schedules;
+    private final ProjectSelfMediaScheduleItemMapper scheduleItems;
     private final ArticleBodyProvider bodies;
     private final BrandMaterialPublicUrlService publicUrls;
     private final ObjectStorageService storage;
@@ -359,7 +360,8 @@ public class DouyinArticleImageService {
             }
             batch.setStatus("failed");
             batch.setErrorMessage(retryable
-                    ? "图片模型持续不可用，系统已停止自动重试，请在文章详情中手动重试"
+                    ? "图片任务自创建起已等待超过" + Math.max(1, automaticRetryWindowMinutes)
+                            + "分钟，系统已停止自动重试，请在文章详情中手动重试"
                     : operatorError(ex, failureStage));
             batches.update(null, new LambdaUpdateWrapper<DouyinArticleImageBatch>()
                     .eq(DouyinArticleImageBatch::getId, batch.getId()).eq(DouyinArticleImageBatch::getStatus, "running")
@@ -390,7 +392,10 @@ public class DouyinArticleImageService {
                     .eq(ArticleDraft::getId, batch.getArticleId()).last("FOR UPDATE"));
             DouyinArticleImageBatch current = requireBatch(batch.getArticleId(), batch.getId());
             if (Objects.equals(article.getDouyinImageBatchId(), current.getId())
-                    && Objects.equals(article.getCurrentVersionNo(), current.getAppliedVersionNo())) return;
+                    && Objects.equals(article.getCurrentVersionNo(), current.getAppliedVersionNo())) {
+                recoverScheduleAfterImagesApplied(current.getArticleId(), operatorId);
+                return;
+            }
             requireCurrentSource(current, article);
             if (!"succeeded".equals(current.getStatus())) throw new BizException(409, "请等待整组图片生成成功再应用");
             if (List.of("distributed", "published", "distributing", "deleted").contains(article.getStatus())
@@ -423,7 +428,18 @@ public class DouyinArticleImageService {
                     .eq(DouyinArticleImageBatch::getId, current.getId()).set(DouyinArticleImageBatch::getStatus, "applied")
                     .set(DouyinArticleImageBatch::getAppliedVersionNo, next.getVersionNo())
                     .set(DouyinArticleImageBatch::getUpdatedAt, LocalDateTime.now()));
+            recoverScheduleAfterImagesApplied(current.getArticleId(), operatorId);
         });
+    }
+
+    private void recoverScheduleAfterImagesApplied(Long articleId, Long operatorId) {
+        LocalDateTime now = LocalDateTime.now();
+        int restored = scheduleItems.restoreReservedDouyinScheduleAfterImagesApplied(articleId, operatorId, now);
+        int requiresReschedule = scheduleItems.markRefundedDouyinScheduleForManualReschedule(articleId, operatorId, now);
+        if (restored > 0 || requiresReschedule > 0) {
+            log.info("Douyin schedule synchronized after images applied articleId={} restored={} requiresReschedule={}",
+                    articleId, restored, requiresReschedule);
+        }
     }
 
     static void requireCurrentSource(DouyinArticleImageBatch batch, ArticleDraft article) {

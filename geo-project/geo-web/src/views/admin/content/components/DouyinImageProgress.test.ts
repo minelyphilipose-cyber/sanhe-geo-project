@@ -9,7 +9,7 @@ const running = { id: 9, sourceVersionNo: 1, appliedVersionNo: null, status: 'ru
 const options = {
   props: { articleId: 42, currentVersionNo: 1, active: true },
   global: { stubs: {
-    ElAlert: { props: ['title', 'description'], template: '<div>{{ title }} {{ description }}</div>' },
+    ElAlert: { props: ['title', 'description', 'type'], template: '<div :data-type="type">{{ title }} {{ description }}</div>' },
     ElButton: { template: '<button><slot /></button>' },
   } },
 }
@@ -66,6 +66,26 @@ describe('Douyin article image progress', () => {
     expect(wrapper.text()).toContain('模型请求超时')
     await vi.advanceTimersByTimeAsync(16000)
     expect(listDouyinImages).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('shows queued waits as information and cancelled work with an operator-friendly reason', async () => {
+    vi.mocked(listDouyinImages).mockResolvedValueOnce(response([{
+      ...running, status: 'queued', errorMessage: '图片生成正在等待模型资源，系统会自动重试，无需操作',
+    }]) as never)
+    const wrapper = mount(DouyinImageProgress, options)
+    await flushPromises()
+    expect(wrapper.find('[data-type]').attributes('data-type')).toBe('info')
+    expect(wrapper.text()).toContain('系统会自动重试，无需操作')
+
+    vi.mocked(listDouyinImages).mockResolvedValueOnce(response([{
+      ...running, status: 'cancelled', errorMessage: null,
+    }]) as never)
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('豆包图片已取消')
+    expect(wrapper.text()).toContain('项目已停用，图片生成已取消')
+    expect(wrapper.find('[data-type]').attributes('data-type')).toBe('info')
     wrapper.unmount()
   })
 

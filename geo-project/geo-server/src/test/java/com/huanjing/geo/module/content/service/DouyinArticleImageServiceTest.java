@@ -47,6 +47,7 @@ class DouyinArticleImageServiceTest {
     private final BrandMaterialPublicUrlService urls = mock(BrandMaterialPublicUrlService.class);
     private final TransactionTemplate tx = mock(TransactionTemplate.class);
     private final SelfMediaPublishMaterialSelectionService materialSelection = mock(SelfMediaPublishMaterialSelectionService.class);
+    private final ProjectSelfMediaScheduleItemMapper scheduleItems = mock(ProjectSelfMediaScheduleItemMapper.class);
     private DouyinArticleImageService service;
 
     @BeforeAll
@@ -60,7 +61,7 @@ class DouyinArticleImageServiceTest {
     @SuppressWarnings("unchecked")
     void setup() {
         service = new DouyinArticleImageService(batches, articles, mock(ArticleDraftVersionMapper.class), mock(BrandMapper.class),
-                projects, materials, models, mock(SelfMediaPublishScheduleMapper.class), mock(ArticleBodyProvider.class),
+                projects, materials, models, mock(SelfMediaPublishScheduleMapper.class), scheduleItems, mock(ArticleBodyProvider.class),
                 urls, storage, mock(CurrentUserService.class), mock(BrandAccessService.class), tx, json, llm, client, materialSelection);
         when(batches.update(isNull(), any())).thenReturn(1);
         Project activeProject = new Project(); activeProject.setId(7L); activeProject.setStatus("active");
@@ -147,6 +148,8 @@ class DouyinArticleImageServiceTest {
         assertEquals("douyin_image", captured.getValue().getGeneratedBy());
         assertTrue(captured.getValue().getContentMarkdown().contains("/101"));
         assertTrue(captured.getValue().getContentMarkdown().contains("/102"));
+        verify(scheduleItems).restoreReservedDouyinScheduleAfterImagesApplied(eq(1L), eq(2L), any());
+        verify(scheduleItems).markRefundedDouyinScheduleForManualReschedule(eq(1L), eq(2L), any());
         verifyNoInteractions(client);
     }
 
@@ -283,7 +286,8 @@ class DouyinArticleImageServiceTest {
         service.processNext();
 
         assertEquals("failed", batch.getStatus());
-        assertEquals("图片模型持续不可用，系统已停止自动重试，请在文章详情中手动重试", batch.getErrorMessage());
+        assertEquals("图片任务自创建起已等待超过360分钟，系统已停止自动重试，请在文章详情中手动重试",
+                batch.getErrorMessage());
         verifyNoInteractions(storage, materials);
     }
 

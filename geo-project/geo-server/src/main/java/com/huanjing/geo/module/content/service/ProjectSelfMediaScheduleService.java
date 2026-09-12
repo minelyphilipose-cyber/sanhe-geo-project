@@ -639,6 +639,12 @@ public class ProjectSelfMediaScheduleService {
                 item.setUpdatedBy(operatorId);
                 scheduleItemMapper.updateById(item);
                 retried++;
+            } else if (ITEM_STATUS_SCHEDULE_FAILED.equals(status)
+                    && item.getArticleId() != null
+                    && "refunded".equals(normalizeText(item.getQuotaReservationStatus()))
+                    && "DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE".equals(item.getScheduleErrorCode())) {
+                cloneFailedPlanItemForRetry(item, operatorId);
+                retried++;
             } else if (ITEM_STATUS_GENERATION_FAILED.equals(status)) {
                 cloneFailedPlanItemForRetry(item, operatorId);
                 retried++;
@@ -660,9 +666,11 @@ public class ProjectSelfMediaScheduleService {
         BatchArticleGenerationTask completedTask = oldItem.getGenerationTaskId() == null
                 ? null
                 : generationTaskMapper.selectById(oldItem.getGenerationTaskId());
-        boolean reuseGeneratedArticle = completedTask != null
+        boolean reuseAppliedImageArticle = oldItem.getArticleId() != null
+                && "DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE".equals(oldItem.getScheduleErrorCode());
+        boolean reuseGeneratedArticle = reuseAppliedImageArticle || (completedTask != null
                 && "success".equals(normalizeText(completedTask.getStatus()))
-                && completedTask.getArticleId() != null;
+                && completedTask.getArticleId() != null);
         boolean retryExistingTask = completedTask != null
                 && completedTask.getBatchId() != null
                 && List.of("failed", "pending", "queued", "running").contains(normalizeText(completedTask.getStatus()));
@@ -678,18 +686,23 @@ public class ProjectSelfMediaScheduleService {
                 : retryExistingTask ? ITEM_STATUS_GENERATING : ITEM_STATUS_PLANNED);
         replacement.setPlannedExecutionAt(oldItem.getPlannedExecutionAt());
         replacement.setPlannedPublishAt(oldItem.getPlannedPublishAt());
+        moveImageReadyScheduleRetryIntoFuture(oldItem, replacement);
         replacement.setGenerationDueAt(LocalDateTime.now(clock));
         replacement.setNextGenerationAttemptAt(reuseGeneratedArticle || retryExistingTask ? null : LocalDateTime.now(clock));
-        if (reuseGeneratedArticle || retryExistingTask) {
+        if (completedTask != null && (reuseGeneratedArticle || retryExistingTask)) {
             replacement.setGenerationBatchId(completedTask.getBatchId());
             replacement.setGenerationTaskId(completedTask.getId());
+        } else if (reuseGeneratedArticle) {
+            replacement.setGenerationBatchId(oldItem.getGenerationBatchId());
+            replacement.setGenerationTaskId(oldItem.getGenerationTaskId());
         }
         if (reuseGeneratedArticle) {
-            replacement.setArticleId(completedTask.getArticleId());
-            replacement.setPromptTemplateId(completedTask.getPromptTemplateId());
-            replacement.setPromptTemplateVersionId(completedTask.getPromptTemplateVersionId());
-            if (completedTask.getPromptTemplateId() != null) {
-                ArticlePromptTemplate template = promptTemplateMapper.selectById(completedTask.getPromptTemplateId());
+            replacement.setArticleId(reuseAppliedImageArticle ? oldItem.getArticleId() : completedTask.getArticleId());
+            replacement.setPromptTemplateId(completedTask == null ? oldItem.getPromptTemplateId() : completedTask.getPromptTemplateId());
+            replacement.setPromptTemplateVersionId(completedTask == null
+                    ? oldItem.getPromptTemplateVersionId() : completedTask.getPromptTemplateVersionId());
+            if (replacement.getPromptTemplateId() != null) {
+                ArticlePromptTemplate template = promptTemplateMapper.selectById(replacement.getPromptTemplateId());
                 replacement.setPromptTemplateName(template == null ? null : template.getName());
             }
         }
@@ -744,6 +757,20 @@ public class ProjectSelfMediaScheduleService {
         oldItem.setUpdatedBy(operatorId);
         scheduleItemMapper.updateById(oldItem);
         return replacement;
+    }
+
+    private void moveImageReadyScheduleRetryIntoFuture(ProjectSelfMediaScheduleItem oldItem,
+                                                        ProjectSelfMediaScheduleItem replacement) {
+        if (!"DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE".equals(oldItem.getScheduleErrorCode())
+                || replacement.getPlannedExecutionAt() == null
+                || replacement.getPlannedPublishAt() == null) {
+            return;
+        }
+        LocalDateTime earliestExecution = LocalDateTime.now(clock).plusMinutes(5);
+        while (!replacement.getPlannedExecutionAt().isAfter(earliestExecution)) {
+            replacement.setPlannedExecutionAt(replacement.getPlannedExecutionAt().plusDays(1));
+            replacement.setPlannedPublishAt(replacement.getPlannedPublishAt().plusDays(1));
+        }
     }
 
     public ProjectSelfMediaScheduleBatchDetailVO retryAbnormalScheduleItems(Long projectId, String targetMonth) {

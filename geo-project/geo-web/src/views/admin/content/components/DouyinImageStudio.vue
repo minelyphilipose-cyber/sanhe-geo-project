@@ -23,7 +23,7 @@
         <el-button v-if="batch.status === 'succeeded'" type="primary" plain :disabled="busy || batch.sourceVersionNo !== currentVersionNo" @click="apply(batch)">应用这一组</el-button>
       </div>
       <p v-if="batch.sourceVersionNo !== currentVersionNo && batch.status !== 'applied'" class="studio-note">文章已更新，这组图片仍可预览，请基于最新版本重新生成后再应用。</p>
-      <el-alert v-if="batch.errorMessage" :title="batch.errorMessage" type="error" :closable="false" />
+      <el-alert v-if="batch.errorMessage || batch.status === 'cancelled'" :title="batchNotice(batch)" :type="batchNoticeType(batch)" :closable="false" />
       <div v-if="batch.imageUrls.length" class="image-grid">
         <figure v-for="(url, index) in batch.imageUrls" :key="url">
           <el-image :src="url" :alt="batch.plan?.pages[index]?.title || `图文第${index + 1}页`" :preview-src-list="batch.imageUrls" :initial-index="index" fit="contain" lazy preview-teleported />
@@ -66,9 +66,22 @@ const styles: Record<string, string> = {
   architectural_sketch: '建筑线稿手册', photo_blueprint: '实景图纸拼贴',
   colorful_handbook: '彩色手绘指南', vintage_archive: '复古工程档案',
 }
-const statuses: Record<DouyinImageBatch['status'], string> = { queued: '等待生成', running: '生成中', succeeded: '待选用', failed: '生成失败', applied: '已应用' }
+const statuses: Record<DouyinImageBatch['status'], string> = {
+  queued: '等待生成', running: '生成中', succeeded: '待选用',
+  failed: '生成失败', applied: '已应用', cancelled: '已取消',
+}
 let requestKey: string | undefined
 let context = 0
+
+function batchNotice(batch: DouyinImageBatch) {
+  return batch.status === 'cancelled' ? '项目已停用，图片生成已取消。' : batch.errorMessage || ''
+}
+
+function batchNoticeType(batch: DouyinImageBatch) {
+  if (batch.status === 'failed') return 'error'
+  if (batch.status === 'succeeded') return 'warning'
+  return 'info'
+}
 
 async function load() {
   const requestContext = context

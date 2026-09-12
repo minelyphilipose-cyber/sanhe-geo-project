@@ -14,11 +14,15 @@ const emit = defineEmits<{ applied: [] }>()
 const batch = ref<DouyinImageBatch | null>(null)
 const loadError = ref('')
 const loading = ref(false)
-const labels = { queued: '等待生成', running: '生成中', succeeded: '已生成，待应用', failed: '生成失败', applied: '已插入文章' }
+const labels: Record<DouyinImageBatch['status'], string> = {
+  queued: '等待生成', running: '生成中', succeeded: '已生成，待应用',
+  failed: '生成失败', applied: '已插入文章', cancelled: '已取消',
+}
 const title = computed(() => batch.value
   ? `豆包图片${labels[batch.value.status]} · ${batch.value.imageUrls.length}/${batch.value.imageCount} 张` : '')
 const description = computed(() => {
   if (loadError.value) return '图片任务可能仍在继续，可重新读取进度。'
+  if (batch.value?.status === 'cancelled') return '项目已停用，图片生成已取消。'
   if (batch.value?.errorMessage) return batch.value.errorMessage
   if (batch.value?.status === 'queued' || batch.value?.status === 'running') {
     return '正文已完成，图片正在处理中，可点击“刷新图片状态”查看最新结果。'
@@ -27,8 +31,12 @@ const description = computed(() => {
   if (batch.value?.status === 'succeeded') return '图片尚未插入正文，可在“生图测试”中查看并应用。'
   return ''
 })
-const alertType = computed(() => loadError.value || batch.value?.errorMessage || batch.value?.status === 'failed'
-  ? 'error' : batch.value?.status === 'applied' ? 'success' : 'info')
+const alertType = computed(() => {
+  if (loadError.value || batch.value?.status === 'failed') return 'error'
+  if (batch.value?.status === 'applied') return 'success'
+  if (batch.value?.status === 'succeeded' && batch.value.errorMessage) return 'warning'
+  return 'info'
+})
 let context = 0
 let notifiedVersion = 0
 

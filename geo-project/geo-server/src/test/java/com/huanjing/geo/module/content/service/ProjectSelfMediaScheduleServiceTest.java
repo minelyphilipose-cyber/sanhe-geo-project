@@ -2304,6 +2304,52 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     @Test
+    void retryRefundedImageScheduleReusesAppliedArticleAndReservesQuotaAgain() {
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 12, 10, 0)));
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setStatus("failed");
+        ProjectSelfMediaScheduleItem failed = storedItem();
+        failed.setPlatform("douyin");
+        failed.setStatus("schedule_failed");
+        failed.setArticleId(66L);
+        failed.setScheduleErrorCode("DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE");
+        failed.setQuotaReservationStatus("refunded");
+        AtomicReference<ProjectSelfMediaScheduleItem> replacementRef = new AtomicReference<>();
+        SelfMediaPublishScheduleVO createdSchedule = new SelfMediaPublishScheduleVO();
+        createdSchedule.setId(88L);
+        SelfMediaPublishScheduleCreateResponse created = new SelfMediaPublishScheduleCreateResponse();
+        created.setCreatedSchedules(List.of(createdSchedule));
+
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(scheduleItemMapper.selectByBatchId(33L)).thenAnswer(invocation -> replacementRef.get() == null
+                ? List.of(failed)
+                : List.of(failed, replacementRef.get()));
+        doAnswer(invocation -> {
+            ProjectSelfMediaScheduleItem inserted = invocation.getArgument(0);
+            inserted.setId(101L);
+            replacementRef.set(inserted);
+            return 1;
+        }).when(scheduleItemMapper).insert(any(ProjectSelfMediaScheduleItem.class));
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(douyinArticleImageService.prepareAutomatic(66L, 99L)).thenReturn(true);
+        when(scheduleService.createSystemSchedulesUsingReservedQuota(any(), anyString(), eq(99L), eq(101L)))
+                .thenReturn(created);
+
+        service.retryFailedItems(7L, "2026-06");
+
+        ProjectSelfMediaScheduleItem replacement = replacementRef.get();
+        assertEquals("scheduled", replacement.getStatus());
+        assertEquals(66L, replacement.getArticleId());
+        assertEquals("transferred", replacement.getQuotaReservationStatus());
+        assertEquals("skipped", failed.getStatus());
+        assertEquals(LocalDateTime.of(2026, 6, 13, 9, 0), replacement.getPlannedExecutionAt());
+        assertEquals(LocalDateTime.of(2026, 6, 13, 10, 0), replacement.getPlannedPublishAt());
+        verify(companyChannelQuotaService).reserveProjectSelfMediaPlan(6L, 7L, "douyin", 101L,
+                LocalDate.of(2026, 6, 13));
+        verify(generationService, never()).createSystemBatch(any(), any(), anyString());
+    }
+
+    @Test
     void monitorCreatesDeduplicatedRiskAlertForDueStoredItem() {
         ProjectSelfMediaScheduleBatch batch = storedBatch();
         ProjectSelfMediaScheduleItem item = storedItem();

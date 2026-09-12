@@ -55,6 +55,47 @@ public interface ProjectSelfMediaScheduleItemMapper extends BaseMapper<ProjectSe
             @Param("replaceAfter") LocalDateTime replaceAfter, @Param("now") LocalDateTime now,
             @Param("operatorId") Long operatorId);
 
+    @Update("""
+            UPDATE project_self_media_schedule_item i
+            JOIN project_self_media_schedule_batch b ON b.id = i.batch_id
+            SET i.status = 'generated',
+                i.schedule_error_code = NULL,
+                i.schedule_error_message = NULL,
+                i.schedule_attempt_count = 0,
+                i.next_schedule_attempt_at = #{now},
+                i.updated_by = COALESCE(#{operatorId}, i.updated_by),
+                i.updated_at = #{now},
+                b.status = 'planned',
+                b.failure_message = NULL,
+                b.updated_by = COALESCE(#{operatorId}, b.updated_by),
+                b.updated_at = #{now}
+            WHERE i.article_id = #{articleId}
+              AND i.platform = 'douyin'
+              AND i.status = 'schedule_failed'
+              AND i.schedule_error_code = 'DOUYIN_IMAGE_GENERATION_FAILED'
+              AND i.quota_reservation_status = 'reserved'
+              AND b.status IN ('planned', 'processing', 'failed', 'partial_failed')
+            """)
+    int restoreReservedDouyinScheduleAfterImagesApplied(@Param("articleId") Long articleId,
+                                                         @Param("operatorId") Long operatorId,
+                                                         @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE project_self_media_schedule_item
+            SET schedule_error_code = 'DOUYIN_IMAGE_READY_REQUIRES_RESCHEDULE',
+                schedule_error_message = '图片已生成，原排期额度已退还，请在排期管理中点击“重新处理本批次”重新排期',
+                updated_by = COALESCE(#{operatorId}, updated_by),
+                updated_at = #{now}
+            WHERE article_id = #{articleId}
+              AND platform = 'douyin'
+              AND status = 'schedule_failed'
+              AND schedule_error_code = 'DOUYIN_IMAGE_GENERATION_FAILED'
+              AND quota_reservation_status = 'refunded'
+            """)
+    int markRefundedDouyinScheduleForManualReschedule(@Param("articleId") Long articleId,
+                                                       @Param("operatorId") Long operatorId,
+                                                       @Param("now") LocalDateTime now);
+
     @Select("""
             SELECT *
             FROM project_self_media_schedule_item

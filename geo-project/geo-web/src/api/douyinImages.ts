@@ -6,7 +6,7 @@ export interface DouyinImageBatch {
   articleId: number
   sourceVersionNo: number
   appliedVersionNo: number | null
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'applied'
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'applied' | 'cancelled'
   imageCount: number
   styleCode: string
   imageUrls: string[]

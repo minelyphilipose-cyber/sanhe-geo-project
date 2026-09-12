@@ -13,7 +13,9 @@ const options = {
   props: { modelValue: true, articleId: 42, currentVersionNo: 1 },
   global: { stubs: {
     ElDialog: slots, ElForm: slots, ElFormItem: slots, ElSelect: slots, ElOption: true,
-    ElInputNumber: true, ElEmpty: true, ElAlert: true, ElTag: slots, ElImage: true,
+    ElInputNumber: true, ElEmpty: true,
+    ElAlert: { props: ['title', 'type'], template: '<div class="alert" :data-type="type">{{ title }}</div>' },
+    ElTag: slots, ElImage: true,
     ElCollapse: slots, ElCollapseItem: slots,
     ElButton: { props: ['disabled', 'loading'], template: '<button :disabled="disabled || loading"><slot /></button>' },
   } },
@@ -66,6 +68,23 @@ describe('Douyin image testing flow', () => {
     await wrapper.setProps({ modelValue: false })
     await vi.advanceTimersByTimeAsync(9000)
     expect(listDouyinImages).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('uses informational notices for queued waits and cancelled projects', async () => {
+    vi.mocked(listDouyinImages).mockResolvedValue(response([
+      { id: 9, sourceVersionNo: 1, appliedVersionNo: null, status: 'queued', imageCount: 4, imageUrls: [], styleCode: 'minimal', errorMessage: '系统会自动重试，无需操作' },
+      { id: 10, sourceVersionNo: 1, appliedVersionNo: null, status: 'cancelled', imageCount: 4, imageUrls: [], styleCode: 'editorial', errorMessage: null },
+    ]) as never)
+    const wrapper = mount(DouyinImageStudio, options)
+    await flushPromises()
+    const alerts = wrapper.findAll('.alert')
+    expect(alerts).toHaveLength(2)
+    expect(alerts[0]!.attributes('data-type')).toBe('info')
+    expect(alerts[0]!.text()).toContain('无需操作')
+    expect(alerts[1]!.attributes('data-type')).toBe('info')
+    expect(alerts[1]!.text()).toContain('项目已停用，图片生成已取消')
+    expect(wrapper.text()).toContain('已取消 · 0/4')
     wrapper.unmount()
   })
 })
