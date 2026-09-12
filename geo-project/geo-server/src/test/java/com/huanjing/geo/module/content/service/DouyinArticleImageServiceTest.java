@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.LlmCallFacade;
+import com.huanjing.geo.common.llm.router.LlmRouteException;
+import com.huanjing.geo.common.llm.router.LlmRouteFailureKind;
 import com.huanjing.geo.common.storage.ObjectStorageService;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
@@ -179,6 +181,48 @@ class DouyinArticleImageServiceTest {
     }
 
     @Test
+    void temporaryPlannerCapacityReturnsBatchToQueue() throws Exception {
+        DouyinArticleImageBatch batch = batch("minimal");
+        batch.setMaterialIdsJson("[]");
+        when(batches.selectOne(any())).thenReturn(batch);
+        when(articles.selectById(1L)).thenReturn(article());
+        AiPlatformConfig model = new AiPlatformConfig();
+        model.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
+        when(models.selectOne(any())).thenReturn(model);
+        when(llm.execute(any())).thenThrow(new LlmRouteException(
+                LlmRouteFailureKind.ALL_PERMIT_BUSY,
+                "All LLM candidates are waiting for permits",
+                0,
+                null));
+
+        service.processNext();
+
+        assertEquals("queued", batch.getStatus());
+        assertNull(batch.getErrorMessage());
+        verifyNoInteractions(client, storage, materials);
+    }
+
+    @Test
+    void temporaryImageProviderFailureReturnsBatchToQueue() throws Exception {
+        DouyinArticleImageBatch batch = batch("minimal");
+        batch.setPlanJson(plan());
+        batch.setMaterialIdsJson("[]");
+        when(batches.selectOne(any())).thenReturn(batch);
+        when(articles.selectById(1L)).thenReturn(article());
+        AiPlatformConfig model = new AiPlatformConfig();
+        model.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
+        when(models.selectOne(any())).thenReturn(model);
+        when(client.generate(any(), anyString())).thenThrow(
+                new BizException(502, "豆包生图失败，HTTP 429；错误码：RateLimitExceeded"));
+
+        service.processNext();
+
+        assertEquals("queued", batch.getStatus());
+        assertNull(batch.getErrorMessage());
+        verifyNoInteractions(storage, materials);
+    }
+
+    @Test
     void preservesPageOrderEvenWithOneParagraphAndRemovesOldImages() {
         String body = DouyinArticleImageService.insertImages("一段文章。\n\n![旧图](https://old/image.jpg)",
                 List.of("https://new/1", "https://new/2", "https://new/3", "https://new/4", "https://new/5", "https://new/6"));
@@ -276,6 +320,14 @@ class DouyinArticleImageServiceTest {
                 DouyinArticleImageService.operatorError("豆包生图失败，HTTP 401"));
         assertEquals("图片模型未接受本次请求，请联系管理员检查",
                 DouyinArticleImageService.operatorError("豆包生图失败，HTTP 400；错误码：InvalidParameter"));
+        assertTrue(DouyinArticleImageService.isRetryableAutomaticFailure(
+                "All LLM candidates are waiting for permits"));
+        assertTrue(DouyinArticleImageService.isRetryableAutomaticFailure(
+                "图片模型当前请求较多，请稍后重试"));
+        assertTrue(DouyinArticleImageService.isRetryableAutomaticFailure(
+                "任务中断或超时，可重试未完成图片"));
+        assertFalse(DouyinArticleImageService.isRetryableAutomaticFailure(
+                "图片文案未通过内容检查，请重新生成一组图片"));
         assertNull(DouyinArticleImageService.operatorError((String) null));
     }
 

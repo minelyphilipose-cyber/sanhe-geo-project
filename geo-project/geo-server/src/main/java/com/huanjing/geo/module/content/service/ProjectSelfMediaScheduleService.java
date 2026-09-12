@@ -1060,13 +1060,14 @@ public class ProjectSelfMediaScheduleService {
             for (ProjectSelfMediaScheduleConfig config : configs) {
                 lastProjectId = config.getProjectId();
                 try {
+                    Project project = projectMapper.selectById(config.getProjectId());
+                    if (project == null || project.getDeletedAt() != null
+                            || !"active".equals(normalizeText(project.getStatus()))) {
+                        continue;
+                    }
                     ProjectSelfMediaScheduleBatch existed = settleTerminalGenerationFailure(
                             batchMapper.selectByProjectAndMonth(config.getProjectId(), targetMonth));
                     if (isActiveOrCompletedBatch(existed)) {
-                        continue;
-                    }
-                    Project project = projectMapper.selectById(config.getProjectId());
-                    if (project == null || project.getDeletedAt() != null) {
                         continue;
                     }
                     Long operatorId = resolveSystemOperatorId(project, config);
@@ -2246,9 +2247,26 @@ public class ProjectSelfMediaScheduleService {
         }
         LocalDateTime now = LocalDateTime.now(clock);
         Project project = projectMapper.selectById(batch.getProjectId());
+        if (project == null || project.getDeletedAt() != null
+                || !"active".equals(normalizeText(project.getStatus()))) {
+            boolean changed = skipInactiveProjectItems(batch, items);
+            refreshStoredBatchSummary(batch, scheduleItemMapper.selectByBatchId(batch.getId()));
+            return changed;
+        }
         boolean changed = false;
         for (ProjectSelfMediaScheduleItem item : items) {
             String status = normalizeText(item.getStatus());
+            if (ITEM_STATUS_SCHEDULE_FAILED.equals(status)
+                    && "DOUYIN_IMAGE_GENERATION_FAILED".equals(item.getScheduleErrorCode())
+                    && DouyinArticleImageService.isRetryableAutomaticFailure(item.getScheduleErrorMessage())) {
+                item.setStatus(ITEM_STATUS_GENERATED);
+                item.setScheduleErrorCode(null);
+                item.setScheduleErrorMessage(null);
+                item.setNextScheduleAttemptAt(now);
+                scheduleItemMapper.updateById(item);
+                status = ITEM_STATUS_GENERATED;
+                changed = true;
+            }
             if (ITEM_STATUS_PLANNED.equals(status)
                     && !firstGenerationAttemptAt(item).isAfter(now)) {
                 Long operatorId = batch.getUpdatedBy() != null ? batch.getUpdatedBy() : batch.getCreatedBy();
@@ -2272,6 +2290,33 @@ public class ProjectSelfMediaScheduleService {
             }
         }
         refreshStoredBatchSummary(batch, scheduleItemMapper.selectByBatchId(batch.getId()));
+        return changed;
+    }
+
+    private boolean skipInactiveProjectItems(ProjectSelfMediaScheduleBatch batch,
+                                             List<ProjectSelfMediaScheduleItem> items) {
+        boolean changed = false;
+        for (ProjectSelfMediaScheduleItem item : items) {
+            String status = normalizeText(item.getStatus());
+            if (item.getScheduleId() != null || List.of(ITEM_STATUS_CANCELLED, ITEM_STATUS_SKIPPED,
+                    ITEM_STATUS_SCHEDULED).contains(status)) {
+                continue;
+            }
+            refundStoredItemQuota(item);
+            item.setStatus(ITEM_STATUS_SKIPPED);
+            item.setNextGenerationAttemptAt(null);
+            item.setNextScheduleAttemptAt(null);
+            item.setGenerationClaimToken(null);
+            item.setGenerationClaimedAt(null);
+            item.setGenerationErrorMessage(null);
+            item.setScheduleErrorCode(null);
+            item.setScheduleErrorMessage(null);
+            item.setCancellationReason("项目未启用，系统已跳过");
+            item.setUpdatedBy(batch.getUpdatedBy() != null ? batch.getUpdatedBy() : batch.getCreatedBy());
+            scheduleItemMapper.updateById(item);
+            resolveStoredItemRiskAlert(item, item.getUpdatedBy());
+            changed = true;
+        }
         return changed;
     }
 

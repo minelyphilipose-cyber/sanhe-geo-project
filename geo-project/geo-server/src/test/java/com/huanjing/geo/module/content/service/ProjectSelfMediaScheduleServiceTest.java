@@ -117,6 +117,7 @@ class ProjectSelfMediaScheduleServiceTest {
     private SystemAlertService systemAlertService;
     private CompanyChannelQuotaLedgerMapper quotaLedgerMapper;
     private ProjectSelfMediaScheduleMetrics metrics;
+    private DouyinArticleImageService douyinArticleImageService;
     private ProjectSelfMediaScheduleService service;
 
     @BeforeEach
@@ -171,8 +172,8 @@ class ProjectSelfMediaScheduleServiceTest {
                 .thenReturn(SelfMediaPlatformScheduleRules.defaults());
         when(scheduleAdapterRouter.contract(anyString())).thenReturn(Optional.empty());
 
-        DouyinArticleImageService images = mock(DouyinArticleImageService.class);
-        org.mockito.Mockito.lenient().when(images.prepareAutomatic(any(), any())).thenReturn(true);
+        douyinArticleImageService = mock(DouyinArticleImageService.class);
+        org.mockito.Mockito.lenient().when(douyinArticleImageService.prepareAutomatic(any(), any())).thenReturn(true);
         service = new ProjectSelfMediaScheduleService(
                 projectMapper,
                 brandMapper,
@@ -191,7 +192,7 @@ class ProjectSelfMediaScheduleServiceTest {
                 autoScheduleService,
                 scheduleService,
                 generationService,
-                images,
+                douyinArticleImageService,
                 perspectiveService,
                 templateAllocationService,
                 coverSelectionService,
@@ -915,6 +916,12 @@ class ProjectSelfMediaScheduleServiceTest {
         second.setProjectId(2L);
         when(configMapper.selectEnabledPage(0L, 2)).thenReturn(List.of(first, second));
         when(configMapper.selectEnabledPage(2L, 2)).thenReturn(List.of());
+        Project firstProject = project();
+        firstProject.setId(1L);
+        Project secondProject = project();
+        secondProject.setId(2L);
+        when(projectMapper.selectById(1L)).thenReturn(firstProject);
+        when(projectMapper.selectById(2L)).thenReturn(secondProject);
         when(batchMapper.selectByProjectAndMonth(1L, "2026-06")).thenThrow(new RuntimeException("broken project"));
         ProjectSelfMediaScheduleBatch existing = new ProjectSelfMediaScheduleBatch();
         existing.setId(22L);
@@ -926,21 +933,18 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     @Test
-    void createDueEnabledProjectsRecordsSkippedBatchForInactiveProject() {
+    void createDueEnabledProjectsIgnoresInactiveProjectWithoutCreatingBatch() {
         ProjectSelfMediaScheduleConfig config = config(true);
         when(configMapper.selectEnabledPage(0L, 2)).thenReturn(List.of(config));
         when(configMapper.selectEnabledPage(7L, 2)).thenReturn(List.of());
         Project paused = project();
         paused.setStatus("paused");
         when(projectMapper.selectById(7L)).thenReturn(paused);
-        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(null);
 
         assertEquals(0, service.createDueEnabledProjects("2026-06", 2));
 
-        ArgumentCaptor<ProjectSelfMediaScheduleBatch> captor = ArgumentCaptor.forClass(ProjectSelfMediaScheduleBatch.class);
-        verify(batchMapper).insert(captor.capture());
-        assertEquals("skipped", captor.getValue().getStatus());
-        assertTrue(captor.getValue().getFailureMessage().contains("active"));
+        verify(batchMapper, never()).insert(any());
+        verify(batchMapper, never()).selectByProjectAndMonth(7L, "2026-06");
         verify(generationService, never()).createSystemBatch(any(), any());
     }
 
@@ -1989,6 +1993,49 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals("generation_failed", item.getStatus());
         assertEquals("refunded", item.getQuotaReservationStatus());
         verify(companyChannelQuotaService).refundProjectSelfMediaPlan(100L);
+    }
+
+    @Test
+    void inactiveProjectSkipsDueItemWithoutCreatingGenerationTaskOrError() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        ProjectSelfMediaScheduleItem item = storedItem();
+        Project paused = project();
+        paused.setStatus("paused");
+        when(projectMapper.selectById(7L)).thenReturn(paused);
+        when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+
+        assertEquals(1, service.progressProcessingBatches(5));
+
+        assertEquals("skipped", item.getStatus());
+        assertNull(item.getGenerationErrorMessage());
+        assertNull(item.getScheduleErrorCode());
+        assertNull(item.getScheduleErrorMessage());
+        assertEquals("refunded", item.getQuotaReservationStatus());
+        verify(generationService, never()).createSystemBatch(any(), any(), anyString());
+        verify(companyChannelQuotaService).refundProjectSelfMediaPlan(100L);
+    }
+
+    @Test
+    void historicalDouyinCapacityFailureReturnsToAutomaticWaiting() {
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setPlatform("douyin");
+        item.setStatus("schedule_failed");
+        item.setArticleId(66L);
+        item.setScheduleErrorCode("DOUYIN_IMAGE_GENERATION_FAILED");
+        item.setScheduleErrorMessage("抖音图片生成失败，请在文章详情中重试：All LLM candidates are waiting for permits");
+        when(batchMapper.selectProcessing(5)).thenReturn(List.of(batch));
+        when(scheduleItemMapper.selectByBatchId(33L)).thenReturn(List.of(item));
+        when(douyinArticleImageService.prepareAutomatic(66L, 99L)).thenReturn(false);
+
+        assertEquals(1, service.progressProcessingBatches(5));
+
+        assertEquals("generated", item.getStatus());
+        assertNull(item.getScheduleErrorCode());
+        assertNull(item.getScheduleErrorMessage());
+        verify(douyinArticleImageService).prepareAutomatic(66L, 99L);
+        verify(scheduleService, never()).createSystemSchedulesUsingReservedQuota(any(), anyString(), any(), any());
     }
 
     @Test

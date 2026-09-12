@@ -134,6 +134,16 @@ public class DouyinArticleImageService {
         }
         GenerateRequest request = new GenerateRequest("auto-v" + article.getCurrentVersionNo(), 4, "auto", null);
         DouyinArticleImageBatch batch = create(articleId, request, operatorId, true);
+        if ("failed".equals(batch.getStatus()) && isRetryableAutomaticFailure(batch.getErrorMessage())) {
+            batches.update(null, new LambdaUpdateWrapper<DouyinArticleImageBatch>()
+                    .eq(DouyinArticleImageBatch::getId, batch.getId())
+                    .eq(DouyinArticleImageBatch::getStatus, "failed")
+                    .set(DouyinArticleImageBatch::getStatus, "queued")
+                    .set(DouyinArticleImageBatch::getRunToken, null)
+                    .set(DouyinArticleImageBatch::getErrorMessage, null)
+                    .set(DouyinArticleImageBatch::getUpdatedAt, LocalDateTime.now()));
+            return false;
+        }
         if ("failed".equals(batch.getStatus())) throw new BizException(400, "抖音图片生成失败，请在文章详情中重试：" + batch.getErrorMessage());
         if (!"succeeded".equals(batch.getStatus()) && !"applied".equals(batch.getStatus())) return false;
         applyBatch(batch, operatorId);
@@ -214,7 +224,9 @@ public class DouyinArticleImageService {
                 .set(DouyinArticleImageBatch::getStatus, "failed")
                 .set(DouyinArticleImageBatch::getErrorMessage, "任务中断或超时，可重试未完成图片"));
         DouyinArticleImageBatch batch = batches.selectOne(new LambdaQueryWrapper<DouyinArticleImageBatch>()
-                .eq(DouyinArticleImageBatch::getStatus, "queued").orderByAsc(DouyinArticleImageBatch::getId).last("LIMIT 1"));
+                .eq(DouyinArticleImageBatch::getStatus, "queued")
+                .le(DouyinArticleImageBatch::getUpdatedAt, LocalDateTime.now())
+                .orderByAsc(DouyinArticleImageBatch::getId).last("LIMIT 1"));
         if (batch == null) return;
         String runToken = UUID.randomUUID().toString();
         if (batches.update(null, new LambdaUpdateWrapper<DouyinArticleImageBatch>()
@@ -224,6 +236,7 @@ public class DouyinArticleImageService {
                 .set(DouyinArticleImageBatch::getUpdatedAt, LocalDateTime.now())) != 1) return;
         batch.setStatus("running");
         batch.setRunToken(runToken);
+        String failureStage = "prepare";
         try {
             ArticleDraft sourceArticle = requireArticle(batch.getArticleId());
             requireCurrentSource(batch, sourceArticle);
@@ -238,6 +251,7 @@ public class DouyinArticleImageService {
                 throw new BizException(409, "这组图片使用旧版方案，请点击“生成一组测试图”重新创建");
             }
             if (plan == null || outdatedSpecialPlan) {
+                failureStage = "planning";
                 String response = llm.execute(LlmCallRequest.routed(new LlmRouteRequest(
                         "article", "你是中文图文编辑。严格根据材料规划图片，只输出指定JSON。",
                         DouyinImagePrompts.planning(batch, neutralSpecialIndustry),
@@ -249,6 +263,7 @@ public class DouyinArticleImageService {
                 batch.setPlanJson(writeJson(plan));
                 saveProgress(batch);
             }
+            failureStage = "image";
             for (int page = ids.size(); page < batch.getImageCount(); page++) {
                 requireCurrentSource(batch, requireArticle(batch.getArticleId()));
                 ArkImageClient.GeneratedImage image = imageClient.generate(model,
@@ -296,6 +311,22 @@ public class DouyinArticleImageService {
             }
         } catch (Exception ex) {
             if (ex instanceof InterruptedException) Thread.currentThread().interrupt();
+            if (isRetryableAutomaticFailure(ex)) {
+                batch.setStatus("queued");
+                batch.setRunToken(null);
+                batch.setErrorMessage(null);
+                batches.update(null, new LambdaUpdateWrapper<DouyinArticleImageBatch>()
+                        .eq(DouyinArticleImageBatch::getId, batch.getId()).eq(DouyinArticleImageBatch::getStatus, "running")
+                        .eq(DouyinArticleImageBatch::getRunToken, runToken)
+                        .set(DouyinArticleImageBatch::getStatus, "queued")
+                        .set(DouyinArticleImageBatch::getRunToken, null)
+                        .set(DouyinArticleImageBatch::getErrorMessage, null)
+                        .set(DouyinArticleImageBatch::getUpdatedAt, LocalDateTime.now().plusMinutes(1)));
+                log.warn("Douyin image generation deferred after temporary model failure articleId={} batchId={} modelConfigId={} stage={} type={} detail={}",
+                        batch.getArticleId(), batch.getId(), batch.getModelConfigId(), failureStage,
+                        ex.getClass().getSimpleName(), ex.getMessage());
+                return;
+            }
             batch.setStatus("failed");
             batch.setErrorMessage(operatorError(ex));
             batches.update(null, new LambdaUpdateWrapper<DouyinArticleImageBatch>()
@@ -304,8 +335,9 @@ public class DouyinArticleImageService {
                     .set(DouyinArticleImageBatch::getStatus, "failed")
                     .set(DouyinArticleImageBatch::getErrorMessage, batch.getErrorMessage())
                     .set(DouyinArticleImageBatch::getUpdatedAt, LocalDateTime.now()));
-            log.warn("Douyin image generation failed articleId={} batchId={} modelConfigId={} type={} detail={}",
-                    batch.getArticleId(), batch.getId(), batch.getModelConfigId(), ex.getClass().getSimpleName(), ex.getMessage());
+            log.warn("Douyin image generation failed articleId={} batchId={} modelConfigId={} stage={} type={} detail={}",
+                    batch.getArticleId(), batch.getId(), batch.getModelConfigId(), failureStage,
+                    ex.getClass().getSimpleName(), ex.getMessage());
         }
     }
 
@@ -455,6 +487,20 @@ public class DouyinArticleImageService {
     static String operatorError(Exception error) {
         String message = operatorError(error == null ? null : error.getMessage());
         return message == null ? "图片生成失败，请稍后重试" : message;
+    }
+
+    static boolean isRetryableAutomaticFailure(Throwable error) {
+        ArticleGenerationFailureClassifier.Classification classification =
+                ArticleGenerationFailureClassifier.classify(error);
+        return classification.capacityDeferred() || classification.providerRetryable();
+    }
+
+    static boolean isRetryableAutomaticFailure(String detail) {
+        if (detail == null || detail.isBlank()) return false;
+        return isRetryableAutomaticFailure(new RuntimeException(detail))
+                || detail.contains("图片模型当前请求较多")
+                || detail.contains("图片生成超时")
+                || detail.contains("任务中断或超时");
     }
 
     static String operatorError(String detail) {
