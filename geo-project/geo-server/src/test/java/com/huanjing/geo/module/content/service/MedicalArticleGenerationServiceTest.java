@@ -243,7 +243,7 @@ class MedicalArticleGenerationServiceTest {
     }
 
     @Test
-    void medicalBeautyDouyinAllowsNeutralTitleConversionWithoutRemovingBrand() {
+    void medicalBeautyDouyinAllowsNeutralTitleConversionWithoutRemovingBrand() throws Exception {
         var context = new MedicalArticleGenerationService.MedicalPromptContext(
                 MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY, MedicalArticleConstants.TIER_EDUCATION,
                 null, null, null, null, null, null, null, 2, false,
@@ -251,8 +251,14 @@ class MedicalArticleGenerationServiceTest {
         var prompt = new BatchArticlePromptBuilder.PromptBuildResult(
                 "system", "主体：阜阳永功医疗美容", null, null, "{}", "{}");
         var result = service.applyMedicalPromptV2(prompt, context, false, true);
+        assertThat(new ObjectMapper().readTree(result.promptSnapshot()).path("userPrompt").asText())
+                .isEqualTo(result.userPrompt());
+        assertThat(new ObjectMapper().readTree(result.inputSnapshot()).has("userPrompt")).isFalse();
         assertThat(result.userPrompt()).contains("推广或推荐式问句转换为中立知识问题")
-                .contains("保留真实品牌及少量客观事实")
+                .contains("正文优先完整回答或解释标题")
+                .contains("在相关论述中自然融入真实品牌及与标题直接相关的事实")
+                .contains("不改写成品牌介绍稿")
+                .contains("不以举例形式带过品牌")
                 .contains("主体：阜阳永功医疗美容")
                 .doesNotContain("标题必须直接回应原主题");
     }
@@ -292,6 +298,28 @@ class MedicalArticleGenerationServiceTest {
         assertThat(result.inputSnapshot()).contains("\"medicalAdReviewNo\":\"审查编号\"");
         assertThat(result.inputSnapshot()).contains("\"diagnosisScope\":\"医疗美容科\"");
         assertThat(result.inputSnapshot()).contains("\"practitionerInfoPublic\":\"王医生，已公开医师执业信息\"");
+    }
+
+    @Test
+    void medicalBeautyFactsFollowTopicInsteadOfAlwaysPrependingInstitutionAndDoctorLists() throws Exception {
+        var context = new MedicalArticleGenerationService.MedicalPromptContext(
+                MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY, MedicalArticleConstants.TIER_EDUCATION,
+                null, null, null, null, null, null, null, 5, false, null, false,
+                "项目资质原文", "机构资质原文", "诊疗范围原文", "医生资料原文", null);
+        var prompt = new BatchArticlePromptBuilder.PromptBuildResult("system", "正文任务", null, null, "{}",
+                "{\"topic\":\"眼综合和单独切开双眼皮哪种更自然\"}");
+        var eyeResult = service.applyMedicalPromptV2(prompt, context, false, true);
+        assertThat(eyeResult.userPrompt()).doesNotContain("机构资质原文", "诊疗范围原文", "医生资料原文");
+        assertThat(new ObjectMapper().readTree(eyeResult.inputSnapshot()).path("medicalLicense").asText())
+                .isEqualTo("机构资质原文");
+        var qualification = new BatchArticlePromptBuilder.PromptBuildResult("system", "正文任务", null, null, "{}",
+                "{\"topic\":\"怎么核对医生执业资质\"}");
+        assertThat(service.applyMedicalPromptV2(qualification, context, false, true).userPrompt())
+                .contains("医生资料原文").doesNotContain("机构资质原文");
+        var institution = new BatchArticlePromptBuilder.PromptBuildResult("system", "正文任务", null, null, "{}",
+                "{\"topic\":\"医美机构资质怎么核验\"}");
+        assertThat(service.applyMedicalPromptV2(institution, context, false, true).userPrompt())
+                .contains("机构资质原文").doesNotContain("医生资料原文");
     }
 
     private Project project() {

@@ -196,7 +196,8 @@ public class DouyinArticleImageService {
             batch.setRequestKey(request.requestKey());
             batch.setStatus("queued");
             batch.setImageCount(count);
-            batch.setStyleCode(selectStyle(brandId, request.styleCode()));
+            batch.setStyleCode(selectStyle(brandId, request.styleCode(),
+                    "medical_beauty".equals(article.getMedicalIndustryCode())));
             batch.setSourceTitle(article.getTitle());
             batch.setSourceMarkdown(markdown);
             Map<String, Object> facts = new LinkedHashMap<>();
@@ -218,7 +219,7 @@ public class DouyinArticleImageService {
         }));
     }
 
-    String selectStyle(Long brandId, String requested) {
+    String selectStyle(Long brandId, String requested, boolean medicalBeauty) {
         if (requested != null && !requested.equals("auto")) {
             if (!DouyinImagePrompts.STYLES.contains(requested)) throw new BizException(400, "图片风格无效");
             return requested;
@@ -227,7 +228,9 @@ public class DouyinArticleImageService {
                 .eq(DouyinArticleImageBatch::getSubjectBrandId, brandId)
                 .orderByDesc(DouyinArticleImageBatch::getId).last("LIMIT 3"))
                 .stream().map(DouyinArticleImageBatch::getStyleCode).toList();
-        List<String> available = DouyinImagePrompts.STYLES.stream().filter(style -> !recent.contains(style)).toList();
+        List<String> candidates = medicalBeauty
+                ? DouyinImagePrompts.MEDICAL_BEAUTY_AUTO_STYLES : DouyinImagePrompts.STYLES;
+        List<String> available = candidates.stream().filter(style -> !recent.contains(style)).toList();
         return available.get(ThreadLocalRandom.current().nextInt(available.size()));
     }
 
@@ -269,12 +272,7 @@ public class DouyinArticleImageService {
             }
             if (plan == null || outdatedSpecialPlan) {
                 failureStage = "planning";
-                String response = llm.execute(LlmCallRequest.routed(new LlmRouteRequest(
-                        "article", "你是中文图文编辑。严格根据材料规划图片，只输出指定JSON。",
-                        DouyinImagePrompts.planning(batch, neutralSpecialIndustry),
-                        neutralSpecialIndustry ? 0.3 : 0.7, 20_000, 300_000, 300_000,
-                        0, null, true, 1, 0, List.of()))).invokeResult().responseText();
-                plan = parsePlan(response, batch.getImageCount());
+                plan = createPlan(batch, neutralSpecialIndustry);
                 if (neutralSpecialIndustry) ((com.fasterxml.jackson.databind.node.ObjectNode) plan)
                         .put("contentPolicy", DouyinImagePrompts.SPECIAL_INDUSTRY_POLICY);
                 batch.setPlanJson(writeJson(plan));
@@ -285,8 +283,16 @@ public class DouyinArticleImageService {
                 ArticleDraft currentArticle = requireArticle(batch.getArticleId());
                 requireCurrentSource(batch, currentArticle);
                 if (cancelInactiveAutomaticBatch(batch, currentArticle, runToken)) return;
-                ArkImageClient.GeneratedImage image = imageClient.generate(model,
-                        DouyinImagePrompts.image(batch, plan, page, neutralSpecialIndustry));
+                String imagePrompt = DouyinImagePrompts.image(batch, plan, page, neutralSpecialIndustry);
+                var trace = ((com.fasterxml.jackson.databind.node.ObjectNode) plan).withObject("/generationTrace");
+                var pageTrace = trace.withObject("/imageRequests").putObject(String.valueOf(page + 1));
+                pageTrace.put("prompt", imagePrompt);
+                pageTrace.put("modelConfigId", batch.getModelConfigId());
+                pageTrace.put("platform", model.getPlatformCode());
+                pageTrace.put("model", model.getModelId());
+                batch.setPlanJson(writeJson(plan));
+                saveProgress(batch);
+                ArkImageClient.GeneratedImage image = imageClient.generate(model, imagePrompt);
                 String objectKey = "brands/" + batch.getSubjectBrandId() + "/douyin-articles/" + batch.getArticleId()
                         + "/" + batch.getId() + "/" + (page + 1) + "." + image.extension();
                 storage.putBytes(objectKey, image.bytes(), image.contentType());
@@ -467,14 +473,48 @@ public class DouyinArticleImageService {
         return String.join("\n\n", blocks);
     }
 
+    private JsonNode createPlan(DouyinArticleImageBatch batch, boolean neutral) throws Exception {
+        String basePrompt = DouyinImagePrompts.planning(batch, neutral);
+        String prompt = basePrompt;
+        var attempts = json.createArrayNode();
+        for (int attempt = 0; attempt < 2; attempt++) {
+            var result = llm.execute(LlmCallRequest.routed(new LlmRouteRequest(
+                    "article", "你是中文图文编辑。严格根据材料规划图片，只输出指定JSON。",
+                    prompt, neutral ? 0.3 : 0.7, 20_000, 300_000, 300_000,
+                    0, null, true, 1, 0, List.of()))).invokeResult();
+            var entry = attempts.addObject();
+            entry.put("prompt", prompt);
+            entry.put("platform", result.platformCode());
+            entry.put("model", result.modelId());
+            entry.put("response", result.responseText());
+            try {
+                var plan = (com.fasterxml.jackson.databind.node.ObjectNode) parsePlan(result.responseText(), batch.getImageCount());
+                plan.putObject("generationTrace").put("revision", DouyinImagePrompts.REVISION)
+                        .set("planningAttempts", attempts);
+                return plan;
+            } catch (com.fasterxml.jackson.core.JsonProcessingException | BizException ex) {
+                entry.put("validationError", ex.getMessage());
+                if (attempt == 1) throw new BizException(502, "分图方案格式不正确，请重新生成：" + ex.getMessage());
+                prompt = basePrompt + "\n上一份方案格式不正确：" + ex.getMessage()
+                        + "\n请重新规划完整方案，修正上述问题，仍只输出JSON。";
+            }
+        }
+        throw new IllegalStateException("分图方案未生成");
+    }
+
     JsonNode parsePlan(String value, int count) throws Exception {
+        if (value == null || value.isBlank()) throw new BizException(502, "分图方案为空，请重试");
         String raw = value.trim().replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
         JsonNode plan = json.readTree(raw);
-        if (!plan.path("pages").isArray() || plan.path("pages").size() != count
+        if (plan == null || !plan.isObject() || !plan.path("pages").isArray() || plan.path("pages").size() != count
+                || !plan.path("visualDirection").isTextual()
                 || plan.path("visualDirection").asText().isBlank()) throw new BizException(502, "分图方案格式或张数不正确，请重试");
         for (JsonNode page : plan.path("pages")) {
-            if (page.path("title").asText().isBlank() || page.path("text").asText().isBlank()
-                    || page.path("visual").asText().isBlank()) throw new BizException(502, "分图方案缺少标题、正文或画面说明");
+            for (String field : List.of("title", "text", "visual")) {
+                if (!page.path(field).isTextual() || page.path(field).asText().isBlank()) {
+                    throw new BizException(502, "分图方案的标题、正文和画面说明需为非空文本");
+                }
+            }
         }
         return plan;
     }

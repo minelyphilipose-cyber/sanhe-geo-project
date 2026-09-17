@@ -10,6 +10,8 @@ import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.project.entity.Project;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 
@@ -19,29 +21,74 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ArticlePromptAssemblerV2Test {
-    @Test
-    void medicalBeautyDouyinKeepsBrandButReplacesPromotionalMissionOnlyInItsScope() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {TemplatePerspectiveCodes.CUSTOMER, TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
+            TemplatePerspectiveCodes.REVIEW_RECOMMEND})
+    void medicalBeautyDouyinAnswersTitleWithRelevantBrandFactsOnlyInItsScope(String perspective) throws Exception {
         Brand brand = new Brand();
         brand.setId(2L);
         brand.setBrandName("阜阳永功医疗美容");
         brand.setComplianceIndustryCode("medical_beauty");
+        brand.setCoreProducts("品牌核心服务资料");
+        brand.setBusinessIntro("品牌业务介绍资料");
+        brand.setBrandPositioning("旧宣传定位");
+        brand.setBrandCaseDescription("笼统口碑宣传");
+        var offering = new BrandOfferingPromptSelector.SelectedOffering(
+                12L, "皮肤管理服务", List.of(), null, "关注皮肤管理流程", "先记录关注问题，再说明服务流程", null);
         var input = new BatchArticlePromptBuilder.PromptBuildInput(
                 new Project(), brand, null, "manual", "阜阳哪家医美门诊部服务比较细致", null,
                 null, null, List.of(), "social_note", "douyin", "short", null,
-                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of());
+                1, List.of(), null, perspective, "default", null, List.of(offering));
         var template = new ArticlePromptTemplate();
         var version = new ArticlePromptTemplateVersion();
         var policy = new ArticleRuntimePolicy(ArticlePromptChannels.SELF_MEDIA, "douyin",
-                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+                perspective, "none", false);
 
         var result = assembler.assemble(input, template, version, policy, true);
 
-        assertTrue(result.userPrompt().contains("正文必须保留本篇真实品牌名称"));
+        assertTrue(result.userPrompt().contains("正文必须自然提及本篇真实品牌名称"));
+        assertTrue(result.userPrompt().contains("不限定为一次或一句"));
+        assertTrue(result.userPrompt().contains("不使用“以某品牌为例、比如某品牌、拿某品牌举例、作为行业样本”等举例式引入"));
+        assertTrue(result.userPrompt().contains("正文以完整回答或解释最终标题为首要任务"));
+        assertTrue(result.userPrompt().contains("这是写作思路，不要求先写科普、再另起品牌段"));
+        assertTrue(result.userPrompt().contains("产品或服务资料只是可选的相关依据，不是必写清单"));
+        assertTrue(result.userPrompt().contains("不因已传入产品资料就强制介绍"));
+        assertTrue(result.userPrompt().contains("不为植入品牌改换标题的关注点"));
+        assertFalse(result.userPrompt().contains("将该品牌作为实际介绍对象"));
+        assertFalse(result.userPrompt().contains("品牌信息介绍视角"));
+        assertFalse(result.userPrompt().contains("正文应具体介绍至少一项"));
+        assertTrue(result.userPrompt().contains("产品或服务1：名称：皮肤管理服务"));
+        assertTrue(result.userPrompt().contains("先记录关注问题，再说明服务流程"));
+        assertFalse(result.userPrompt().contains("品牌核心服务资料"));
+        assertFalse(result.userPrompt().contains("品牌业务介绍资料"));
+        assertTrue(result.userPrompt().contains("可以有一点调皮"));
+        assertTrue(result.userPrompt().contains("独立的 Markdown 一级标题"));
+        assertFalse(result.userPrompt().contains("旧宣传定位"));
+        assertFalse(result.userPrompt().contains("笼统口碑宣传"));
+        assertFalse(result.userPrompt().contains("# 全局写作原则"));
+        assertTrue(objectMapper.readTree(result.promptSnapshot()).path("omittedMaterialKeys").toString()
+                .contains("brandCaseDescription"));
+        assertEquals("皮肤管理服务", objectMapper.readTree(result.inputSnapshot())
+                .path("selectedOfferings").get(0).path("name").asText());
+        assertFalse(result.userPrompt().contains("通常出现一次，用一句话结合一项"));
+        assertFalse(result.userPrompt().contains("品牌仅作为真实主体背景"));
+        assertFalse(result.userPrompt().contains("只能作为普通行业样本出现"));
         assertTrue(result.userPrompt().contains("标题转换为同一关注点的知识问题"));
         assertTrue(result.userPrompt().contains("阜阳永功医疗美容"));
         assertFalse(result.userPrompt().contains("营销信息必须参与问题解释"));
         assertFalse(result.userPrompt().contains("采用客户官方身份表达"));
-        assertEquals("v2_douyin_medical_beauty_factual_20260907",
+        assertTrue(result.userPrompt().contains("每段补充原因、区别、可核对的信息或具体问题"));
+        assertTrue(result.userPrompt().contains("不再重复一遍观点或口号"));
+        assertTrue(result.userPrompt().contains("正文是否真正回答它"));
+        assertTrue(result.userPrompt().contains("不硬接无关项目"));
+        assertTrue(result.userPrompt().contains("不给个体诊疗建议"));
+        assertTrue(result.userPrompt().contains("不确定时收窄表述"));
+        assertTrue(result.userPrompt().contains("正文不含标题控制在约600～900字"));
+        assertTrue(result.userPrompt().contains("让读者知道这条信息跟自己的问题有什么关系"));
+        var lengthPolicy = objectMapper.readTree(result.promptSnapshot()).path("effectiveLengthPolicy");
+        assertEquals(600, lengthPolicy.path("targetMinChars").asInt());
+        assertEquals(900, lengthPolicy.path("targetMaxChars").asInt());
+        assertEquals("v2_douyin_medical_beauty_conversation_20260917",
                 objectMapper.readTree(result.promptSnapshot()).path("promptRevision").asText());
 
         brand.setComplianceIndustryCode("oral");
@@ -165,7 +212,7 @@ class ArticlePromptAssemblerV2Test {
 
         BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
 
-        assertTrue(result.userPrompt().contains("标题不超过20个字"));
+        assertTrue(result.userPrompt().contains("独立的 Markdown 一级标题（# 标题），不超过20字"));
         assertTrue(result.userPrompt().contains("正文篇幅较短时以自然分段为主"));
         assertTrue(result.userPrompt().contains("只有确实存在多个相对独立的信息单元时才使用 Markdown 二级标题"));
         assertFalse(result.userPrompt().contains("不得把整篇长文写成从头到尾没有小标题"));

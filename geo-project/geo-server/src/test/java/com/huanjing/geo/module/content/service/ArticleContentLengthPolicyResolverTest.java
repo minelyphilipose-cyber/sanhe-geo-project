@@ -16,8 +16,8 @@ class ArticleContentLengthPolicyResolverTest {
         ArticleContentLengthPolicy xiaohongshu = resolver.resolve(
                 ArticlePromptChannels.SELF_MEDIA, "xiaohongshu", "long");
 
-        assertThat(douyin.targetMinChars()).isEqualTo(400);
-        assertThat(douyin.targetMaxChars()).isEqualTo(700);
+        assertThat(douyin.targetMinChars()).isEqualTo(600);
+        assertThat(douyin.targetMaxChars()).isEqualTo(900);
         assertThat(douyin.source()).isEqualTo(ArticleContentLengthPolicyResolver.SOURCE_CHANNEL_POLICY);
         assertThat(xiaohongshu.targetMinChars()).isEqualTo(600);
         assertThat(xiaohongshu.targetMaxChars()).isEqualTo(900);

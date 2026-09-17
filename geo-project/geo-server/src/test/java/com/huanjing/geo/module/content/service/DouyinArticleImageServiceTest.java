@@ -35,6 +35,39 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class DouyinArticleImageServiceTest {
+    @Test
+    void planParsingDoesNotReviewContentOrSourceEvidence() throws Exception {
+        var plan = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(plan());
+        for (var page : plan.path("pages")) {
+            var fields = (com.fasterxml.jackson.databind.node.ObjectNode) page;
+            fields.put("subject", "同一人物与花瓣").put("layout", "自由构图");
+            fields.put("text", "自由表达，不受后端字数或内容规则过滤。".repeat(6));
+        }
+        var first = (com.fasterxml.jackson.databind.node.ObjectNode) plan.path("pages").get(0);
+        for (String source : List.of("", "未在原文出现的摘录")) {
+            first.put("source", source);
+            assertEquals(plan, service.parsePlan(plan.toString(), 2));
+        }
+        first.remove("source");
+        assertEquals(plan, service.parsePlan(plan.toString(), 2));
+    }
+
+    @Test
+    void planParsingRejectsOnlyInvalidStructureOrRequiredFieldFormat() throws Exception {
+        for (String invalid : Arrays.asList(null, "", "null", "[]", "{}")) {
+            assertThrows(BizException.class, () -> service.parsePlan(invalid, 2));
+        }
+        for (String field : List.of("title", "text", "visual")) {
+            var plan = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(plan());
+            var page = (com.fasterxml.jackson.databind.node.ObjectNode) plan.path("pages").get(0);
+            page.put(field, 123);
+            assertThrows(BizException.class, () -> service.parsePlan(plan.toString(), 2));
+            page.put(field, " ");
+            assertThrows(BizException.class, () -> service.parsePlan(plan.toString(), 2));
+            page.remove(field);
+            assertThrows(BizException.class, () -> service.parsePlan(plan.toString(), 2));
+        }
+    }
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     private final DouyinArticleImageBatchMapper batches = mock(DouyinArticleImageBatchMapper.class);
     private final ArticleDraftMapper articles = mock(ArticleDraftMapper.class);
@@ -304,9 +337,23 @@ class DouyinArticleImageServiceTest {
     void rotatesAwayFromThreeRecentSubjectStyles() {
         List<DouyinArticleImageBatch> history = List.of(batch("editorial"), batch("photographic"), batch("minimal"));
         when(batches.selectList(any())).thenReturn(history);
-        for (int i = 0; i < 20; i++) assertFalse(List.of("editorial", "photographic", "minimal").contains(service.selectStyle(8L, "auto")));
-        assertEquals("editorial", service.selectStyle(8L, "editorial"));
-        assertThrows(BizException.class, () -> service.selectStyle(8L, "unknown"));
+        for (int i = 0; i < 20; i++) assertFalse(List.of("editorial", "photographic", "minimal").contains(service.selectStyle(8L, "auto", false)));
+        assertEquals("editorial", service.selectStyle(8L, "editorial", false));
+        assertThrows(BizException.class, () -> service.selectStyle(8L, "unknown", false));
+    }
+
+    @Test
+    void medicalBeautyAutoRotatesWithinMagazineStylesAndHonorsManualChoice() {
+        when(batches.selectList(any())).thenReturn(List.of(batch("editorial"), batch("photographic"), batch("illustrated")));
+        Set<String> remaining = Set.of("luxury_catalog", "paper_collage", "oriental", "architectural_sketch",
+                "photo_blueprint", "colorful_handbook", "vintage_archive");
+        for (int i = 0; i < 20; i++) {
+            assertTrue(remaining.contains(service.selectStyle(8L, "auto", true)));
+        }
+        assertTrue(remaining.contains(service.selectStyle(8L, null, true)));
+        assertEquals("data_story", service.selectStyle(8L, "data_story", true));
+        when(batches.selectList(any())).thenReturn(List.of());
+        assertTrue(DouyinImagePrompts.MEDICAL_BEAUTY_AUTO_STYLES.contains(service.selectStyle(8L, "auto", true)));
     }
 
     @Test
@@ -323,7 +370,9 @@ class DouyinArticleImageServiceTest {
     @Test
     void zeroImageSpecialIndustryRetryReplansNeutralMedicalCopyBeforeCallingImageModel() throws Exception {
         DouyinArticleImageBatch batch = batch("minimal");
-        batch.setPlanJson(plan().replace("主题", "旧推广标题")); batch.setMaterialIdsJson("[]");
+        var oldPlan = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(plan().replace("主题", "旧推广标题"));
+        oldPlan.put("contentPolicy", "special_industry_medical_copy_v6");
+        batch.setPlanJson(oldPlan.toString()); batch.setMaterialIdsJson("[]");
         ArticleDraft article = article(); article.setMedicalIndustryCode("medical_beauty");
         when(batches.selectOne(any())).thenReturn(batch);
         when(articles.selectById(1L)).thenReturn(article);
@@ -331,7 +380,15 @@ class DouyinArticleImageServiceTest {
         model.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
         when(models.selectOne(any())).thenReturn(model);
         var result = mock(com.huanjing.geo.common.llm.LlmCallResult.class, RETURNS_DEEP_STUBS);
-        when(result.invokeResult().responseText()).thenReturn(plan().replace("主题", "了解就医信息"));
+        batch.setSourceMarkdown("核对姓名与专业方向，记录想了解的问题。");
+        var validPlan = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(plan().replace("主题", "了解就医信息"));
+        var firstPage = (com.fasterxml.jackson.databind.node.ObjectNode) validPlan.path("pages").get(0);
+        firstPage.put("visual", "人物与花瓣组合的自由拼贴").put("source", "未在原文中出现的摘录");
+        var nextPage = (com.fasterxml.jackson.databind.node.ObjectNode) validPlan.path("pages").get(1);
+        nextPage.put("visual", "同一人物与花瓣延续叙事");
+        when(result.invokeResult().responseText()).thenReturn(validPlan.toString());
+        when(result.invokeResult().modelId()).thenReturn("planner-test");
+        when(result.invokeResult().platformCode()).thenReturn("text-test");
         when(llm.execute(any())).thenReturn(result);
         when(client.generate(any(), anyString())).thenThrow(new BizException(502, "模拟接口拒绝"));
 
@@ -342,13 +399,20 @@ class DouyinArticleImageServiceTest {
                 json.readTree(batch.getPlanJson()).path("contentPolicy").asText());
         verify(client).generate(eq(model), argThat(prompt -> prompt.contains("了解就医信息")
                 && !prompt.contains("旧推广标题") && !prompt.contains("品牌介绍")));
+        var trace = json.readTree(batch.getPlanJson()).path("generationTrace");
+        assertEquals("planner-test", trace.path("planningAttempts").get(0).path("model").asText());
+        assertTrue(trace.path("planningAttempts").get(0).path("prompt").asText().contains("不设物件黑名单"));
+        assertTrue(trace.path("imageRequests").path("1").path("prompt").asText().contains("了解就医信息"));
+        assertEquals(9L, trace.path("imageRequests").path("1").path("modelConfigId").asLong());
         verifyNoInteractions(storage, materials);
     }
 
     @Test
     void medicalRetryDoesNotMixPartiallyGeneratedOldPlanWithNewPolicy() throws Exception {
         DouyinArticleImageBatch batch = batch("minimal");
-        batch.setPlanJson(plan()); batch.setMaterialIdsJson("[101]");
+        var oldPlan = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(plan());
+        oldPlan.put("contentPolicy", "special_industry_medical_copy_v4");
+        batch.setPlanJson(oldPlan.toString()); batch.setMaterialIdsJson("[101]");
         ArticleDraft article = article(); article.setMedicalIndustryCode("medical_beauty");
         when(batches.selectOne(any())).thenReturn(batch);
         when(articles.selectById(1L)).thenReturn(article);
@@ -361,6 +425,27 @@ class DouyinArticleImageServiceTest {
         assertEquals("[101]", batch.getMaterialIdsJson());
         assertEquals("这组图片使用旧版方案，请点击“生成一组测试图”重新创建", batch.getErrorMessage());
         verifyNoInteractions(llm, client, storage, materials);
+    }
+
+    @Test
+    void wrongPageCountGetsOneCorrectionAndNeverReachesImageProvider() throws Exception {
+        var batch = batch("editorial");
+        batch.setSourceMarkdown("核对姓名与专业方向。");
+        batch.setMaterialIdsJson("[]");
+        var article = article(); article.setMedicalIndustryCode("medical_beauty");
+        when(batches.selectOne(any())).thenReturn(batch);
+        when(articles.selectById(1L)).thenReturn(article);
+        var model = new AiPlatformConfig(); model.setApiUrl("https://ark.cn-beijing.volces.com/api/v3");
+        when(models.selectOne(any())).thenReturn(model);
+        var response = mock(com.huanjing.geo.common.llm.LlmCallResult.class, RETURNS_DEEP_STUBS);
+        when(response.invokeResult().responseText()).thenReturn("{\"visualDirection\":\"自由构图\",\"pages\":[]}");
+        when(llm.execute(any())).thenReturn(response);
+
+        service.processNext();
+
+        assertEquals("failed", batch.getStatus());
+        verify(llm, times(2)).execute(any());
+        verifyNoInteractions(client, storage, materials);
     }
 
     @Test

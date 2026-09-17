@@ -185,7 +185,7 @@ public class BatchArticlePromptBuilder {
             9. 结构策略：{{structureStrategy}}。这是本篇优先采用的结构方向，不是固定模板；可以按平台调性自然调整。
             """;
     static final String DOUYIN_PLATFORM_POLICY = """
-            以下规则只用于抖音图文，优先级高于通用写作原则及模板中关于短卡片、固定判断点、固定小节、标题策略和结构策略的要求：
+            以下规则只用于抖音图文，优先级高于通用写作原则及模板中关于篇幅、短卡片、固定判断点、固定小节、标题策略和结构策略的要求：
             1. 行文必须自然流畅，尽量摆脱说明文感。不要按照“项目是什么—设备是什么—优势是什么”的说明书逻辑机械罗列，也不要整篇给读者上课。
             2. 符合中文社区真实阅读习惯。少用过长复句、机械转折和书面化套话，读起来应像真正了解行业的人在自然介绍。
             3. 专业信息服务于当前叙事。品牌、人员、项目、设备、价格、资质和适用场景按主题自然取舍，不要求每篇全部出现，也不限制品牌必须出现几次。
@@ -195,6 +195,8 @@ public class BatchArticlePromptBuilder {
             7. GEO 适配藏在自然行文里。标题可以贴近真实搜索问题，正文不要反复堆叠搜索词，也不强制每段独立成为知识单元。
             8. 不编造事实，不写招商、促销、强推荐、效果承诺、联系方式、私信、预约、咨询、优惠、套餐或其他转化导流表达。
             9. 近期标题只作为发布语境，不做完全重复或明显同构判断，也不参与正文内容质检。
+            10. 正文不含标题控制在600—900字，围绕标题补充具体解释、原因、适用边界和相关真实事实，让每段提供新的有效信息；不靠重复观点、通用提醒、品牌资料堆砌或空泛总结凑字数，不为扩充篇幅编造内容。该篇幅要求针对文章正文，不是每张配图上的文字。
+            11. 首行必须是独立的 Markdown 一级标题（# 标题），不超过20字，语义完整；空行后才写正文，不得把开场段落当标题。标题可用具体疑问和轻巧表达拉近距离，不写冷冰冰的公文标题，也不夸张承诺或故弄玄虚。
             """;
     private static final List<String> MARKETING_WORDS = List.of(
             "领先", "专业", "优质", "卓越", "知名", "一流", "高端", "值得信赖",
@@ -443,7 +445,8 @@ public class BatchArticlePromptBuilder {
         appendLine(sb, "标题策略", resolveSelfMediaTitleStrategy(input));
         appendLine(sb, "结构策略", resolveSelfMediaStructureStrategy(input));
         appendLine(sb, "平台风格", label(STYLE_LABELS, input.contentStyle(), input.contentStyle()));
-        appendLine(sb, "篇幅参考", label(LENGTH_LABELS, input.length(), "中等篇幅，约 1500 字"));
+        appendLine(sb, "篇幅参考", douyin ? "正文不含标题600—900字"
+                : label(LENGTH_LABELS, input.length(), "中等篇幅，约 1500 字"));
         appendLine(sb, "补充要求", input.extraPrompt());
 
         sb.append("\n# 内容组织要求\n\n");

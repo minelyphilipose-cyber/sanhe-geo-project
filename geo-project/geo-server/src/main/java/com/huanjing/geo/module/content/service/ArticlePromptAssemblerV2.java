@@ -46,13 +46,23 @@ public class ArticlePromptAssemblerV2 {
             """.trim();
 
     private static final String MEDICAL_BEAUTY_DOUYIN_RULES = """
-            以下是医美抖音图文的专用内容任务，优先于通用品牌宣传、推荐视角、文章类型和补充要求：
-            1. 从原主题中提取一个读者真正关心的具体问题，用中立、温和的信息说明回应。遇到“哪家好、推荐、排名、哪家服务细致”等推广问句，标题转换为同一关注点的知识问题，不回答哪家值得选，不把品牌当作预设答案；不要转成与原主题无关的泛化风险标题。
-            2. 正文必须保留本篇真实品牌名称，通常出现一次，用一句话结合一项与主题直接相关、材料明确提供的客观事实，不把多个服务环节打包成一项事实。品牌句嵌入与主线相关的段落，不另写整段机构介绍。没有相关事实时只保留客观主体背景，不拼凑优势；不要编造用户经历、第三方评价或官方账号身份。
-            3. 主要篇幅讲清这个具体问题的判断依据、沟通要点或信息边界。通用解释不归因于该品牌，不紧接品牌句延伸“这些服务更稳妥、体验更好”等利益判断，不把机构宣称开展某项服务等同于实际做得好。语气平实，不写“口碑好、服务细致、老牌更可靠、专业领先、放心选择”等自我评价，不推导出推荐、信任、选择或适合某类人的结论。
-            4. 不罗列手术、注射、整形等业务菜单，不堆资质、设备、医生阵容，不以疗效、审美改善、安全性或恢复速度作为卖点，不提供个体诊疗建议，不引导咨询、预约、到店、私信或购买。
-            5. 标题不植入推荐结论或营销悬念；正文不生成话题标签，发布环节会按真实品牌名追加一个标签。不用别名、谐音或无关词掩饰内容所属行业。
-            6. 不固定为“开场问题—机构优势—推荐收尾”的结构；按本篇具体问题自然推进，只讲少量必要信息，避免重复铺陈。结尾停在本篇问题的解释或边界，不再落回品牌推荐。
+            以下是医美抖音图文的专用内容任务，优先于通用模板和补充要求：
+            1. 正文以完整回答或解释最终标题为首要任务。先找到读者在这件事上具体卡在哪里，从这个小困惑进入，把为什么、有什么区别、怎样理解讲透。这是写作思路，不要求先写科普、再另起品牌段。
+               遇到推荐、排名等问句，标题转换为同一关注点的知识问题，保留读者原来的关心点，不把所有问题都改成资质核验。
+            2. 标题像一句愿意点开继续聊的话，轻松、亲切，可以有一点调皮。用具体纠结、自然反问或轻巧的措辞制造兴趣，不写行政文件式的“核心维度、合规性、基础原则”。
+               中立约束的是结论，不是语气。语气参考：“医生头衔挺多，到底看哪个？”“双眼皮想自然，项目越多越好？”；只参考亲切程度，不照抄句式，不让所有标题都变成问句。保留明确的主题词和完整语义，不强塞地域词。
+               先在内部拟三个不同说法，选最像自然聊天、主题又清楚的一个；不要直接复述输入问句。少用“如何判断、是否正规、要关注什么”的报告句式，也不要靠加“呀、哦”或生硬倒装假装俏皮。只输出选中的标题。
+               不用震惊、逆袭、变美密码、闭眼选等夸张词，不调侃身体缺陷、制造容貌焦虑或暗示效果；不写营销悬念，不伪装亲历。
+            3. 正文像一个懂行、耐心的人在和读者聊清楚问题，可自然使用“你”“我们先看看这个区别”，这里的“我们”不是机构身份。用短而完整的句子，专业词紧接通俗解释，让读者知道这条信息跟自己的问题有什么关系。
+               可以用假设情境或具体问法解释，但明确是情境，不编造咨询经历、患者故事、评价或“有人说”的传闻。不要以“核心在于、基础门槛、首先其次最后、总的来说”串成整篇；少用“必须、应当、需要注意”的训导句。
+               在600—900字内解释2—3个相关、互不重复的信息点。每段补充原因、区别、可核对的信息或具体问题；不是把这几个标签写成固定提纲。开篇接住困惑，结尾在问题说清时自然停下，不再重复一遍观点或口号。
+            4. 正文必须自然提及本篇真实品牌名称，并融入材料提供、与标题直接相关的具体内容。先在内部选出真正有用的少量事实，再组织解释，不把整份品牌档案轮流搬进段落。
+               不使用“以某品牌为例、比如某品牌、拿某品牌举例、作为行业样本”等举例式引入。品牌进入位置服从语义，不限定为一次或一句，不单独插入广告段，不为植入品牌改换标题的关注点。
+               产品或服务资料只是可选的相关依据，不是必写清单；不因已传入产品资料就强制介绍。相关产品的名称、流程或区别可以具体讲，但不把目标人群字段直接变成对读者的适用性判断。缺少相关产品时可使用主营业务或业务介绍，不硬接无关项目。
+               写医生资质时优先解释本人执业信息与所讨论工作的对应关系，不先铺一整段机构许可证；写眼部问题时只取相关眼部资料，不旁列鼻部、皮肤等业务。不堆资质、设备、医生阵容，通用知识不算作品牌优势。
+            5. 所有事实与专业解释必须有材料或可靠知识依据；不确定时收窄表述。不从资质、从业年限或流程推导效果、安全、口碑或选择结论，不把“可能”写成“一定”。风险和个体差异说明贴着相关论点自然解释，不固定每篇一段免责声明。
+               不虚构品牌事实、亲历、疗效或第三方背书，不给个体诊疗建议，不写促销、私信、预约等导流表达；不生成话题标签。
+            6. 写完默读：标题是不是一句完整、具体、有亲近感的话？正文是否真正回答它？有没有重复讲道理或突然插入品牌简历？删去套话后仍需有原因、细节和真实品牌信息；不要输出自查过程。
             """.trim();
 
     private final ObjectMapper objectMapper;
@@ -96,14 +106,16 @@ public class ArticlePromptAssemblerV2 {
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode(), input.length(), neutralEducationMode);
         StringBuilder prompt = new StringBuilder(4096);
         section(prompt, "真实性与硬边界", truthfulnessRules(input.forbiddenPhrases()));
-        section(prompt, "全局写作原则", medicalBeautyDouyin ? GLOBAL_WRITING_RULES.replace(
-                "将品牌能力与读者需求自然建立联系；营销信息必须参与问题解释，不能作为孤立广告块生硬追加。",
-                "品牌仅作为真实主体背景和相关事实来源自然出现，不承担推荐、背书或转化任务。") : GLOBAL_WRITING_RULES);
+        if (!medicalBeautyDouyin) {
+            section(prompt, "全局写作原则", GLOBAL_WRITING_RULES);
+        }
         section(prompt, "当前渠道与写作视角", medicalBeautyDouyin
-                ? "抖音图文：采用平实、客观的信息说明视角，保留真实品牌背景，不冒充第三方评测或亲历分享。"
+                ? "抖音图文：标题轻松亲切、略带俏皮，事实与结论保持中立。正文顺着标题里的具体困惑聊清楚，真实品牌内容自然参与解释，不冒充亲历分享。"
                 : channelDirection(runtimePolicy, neutralEducationMode));
         if (isDouyin(runtimePolicy)) {
-            section(prompt, "抖音图文自然行文规则", BatchArticlePromptBuilder.DOUYIN_PLATFORM_POLICY);
+            if (!medicalBeautyDouyin) {
+                section(prompt, "抖音图文自然行文规则", BatchArticlePromptBuilder.DOUYIN_PLATFORM_POLICY);
+            }
             section(prompt, "近期已发布抖音图文标题", recentDouyinTitleContext(normalizedRecentTitles));
         }
         section(prompt, "当前文章任务", medicalBeautyDouyin ? MEDICAL_BEAUTY_DOUYIN_RULES : templateTask(input, template));
@@ -117,7 +129,7 @@ public class ArticlePromptAssemblerV2 {
         section(prompt, "主题、关键词与读者", topicMaterial(input, omittedMaterialKeys));
         section(prompt, "可用事实材料", neutralEducationMode
                 ? neutralEducationFactMaterial(omittedMaterialKeys)
-                : FACT_MATERIAL_USAGE + "\n" + factMaterial(input, omittedMaterialKeys, specialIndustry));
+                : FACT_MATERIAL_USAGE + "\n" + factMaterial(input, omittedMaterialKeys, specialIndustry, medicalBeautyDouyin));
         section(prompt, "联系方式边界", contactDirection(input.project(), input.brand(), runtimePolicy, omittedMaterialKeys));
         section(prompt, "输出要求", outputRules(contentLengthPolicy, runtimePolicy, neutralEducationMode));
 
@@ -168,7 +180,7 @@ public class ArticlePromptAssemblerV2 {
         snapshot.put("promptContract", PROMPT_CONTRACT);
         snapshot.put("promptRevision", isDouyin(runtimePolicy)
                 ? isMedicalBeautyDouyin(input.brand(), runtimePolicy)
-                    ? "v2_douyin_medical_beauty_factual_20260907" : "v2_douyin_natural_20260902"
+                    ? "v2_douyin_medical_beauty_conversation_20260917" : "v2_douyin_natural_20260902"
                 : "v2_xiaohongshu_converged_20260804");
         snapshot.put("templateId", template == null ? null : template.getId());
         snapshot.put("templateVersionId", version == null ? null : version.getId());
@@ -288,7 +300,7 @@ public class ArticlePromptAssemblerV2 {
             return "本篇为特殊行业小红书中立科普内容，不承担品牌露出任务。标题和正文不得出现企业、品牌、具体机构、医生或品牌专属产品服务名称，也不得引用品牌定位、主营业务、服务范围、资质、案例和联系方式。";
         }
         if (isMedicalBeautyDouyin(input.brand(), runtimePolicy)) {
-            return "保留真实品牌名称及少量相关事实；品牌露出不得转化为机构推荐或优势宣传，具体遵循医美抖音专用内容任务。";
+            return "优先完整回答或解释标题，在相关论述中自然融入真实品牌及与标题直接相关的产品、服务或业务事实；不以举例形式引入，不单独插入品牌介绍或广告段，不因品牌露出改变文章主线。不作无依据的优势宣传、机构推荐或转化引导，具体遵循医美抖音专用内容任务。";
         }
         String platform = ArticlePromptChannels.channelName(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode());
@@ -390,7 +402,8 @@ public class ArticlePromptAssemblerV2 {
 
     private String factMaterial(BatchArticlePromptBuilder.PromptBuildInput input,
                                 List<String> omitted,
-                                boolean specialIndustry) {
+                                boolean specialIndustry,
+                                boolean medicalBeautyDouyin) {
         List<String> parts = new ArrayList<>();
         Project project = input.project();
         Brand brand = input.brand();
@@ -399,11 +412,21 @@ public class ArticlePromptAssemblerV2 {
         addOrOmit(parts, omitted, "brandShortName", "品牌简称", brand == null ? null : brand.getBrandShortName());
         addOrOmit(parts, omitted, "industry", "所属行业", brand == null ? null : brand.getIndustry());
         addOrOmit(parts, omitted, "projectStatement", "项目陈述", project == null ? null : project.getCustomStatement());
-        addOrOmit(parts, omitted, "brandPositioning", "品牌定位", brand == null ? null : brand.getBrandPositioning());
-        addOrOmit(parts, omitted, "mainBusiness", "主营业务", brand == null ? null : brand.getMainBusiness());
-        addOrOmit(parts, omitted, "coreProducts", "核心产品", brand == null ? null : brand.getCoreProducts());
+        if (medicalBeautyDouyin) {
+            omitted.add("brandPositioning");
+            omitted.add("brandCaseDescription");
+        } else {
+            addOrOmit(parts, omitted, "brandPositioning", "品牌定位", brand == null ? null : brand.getBrandPositioning());
+        }
+        boolean focusedOfferings = medicalBeautyDouyin && input.selectedOfferings() != null && !input.selectedOfferings().isEmpty();
+        if (focusedOfferings) {
+            omitted.addAll(List.of("mainBusiness", "coreProducts", "businessIntro"));
+        } else {
+            addOrOmit(parts, omitted, "mainBusiness", "主营业务", brand == null ? null : brand.getMainBusiness());
+            addOrOmit(parts, omitted, "coreProducts", "核心产品", brand == null ? null : brand.getCoreProducts());
+            addOrOmit(parts, omitted, "businessIntro", "业务介绍", brand == null ? null : brand.getBusinessIntro());
+        }
         addOrOmit(parts, omitted, "serviceArea", "服务区域", brand == null ? null : brand.getServiceArea());
-        addOrOmit(parts, omitted, "businessIntro", "业务介绍", brand == null ? null : brand.getBusinessIntro());
         // Special-industry qualifications are injected once by MedicalArticleGenerationService
         // together with their exact scope and review identifiers. Repeating them here makes the
         // model treat qualifications as the default editorial lead instead of optional evidence.
@@ -411,14 +434,17 @@ public class ArticlePromptAssemblerV2 {
             addOrOmit(parts, omitted, "brandQualificationDescription", "资质信息",
                     brand == null ? null : brand.getBrandQualificationDescription());
         }
-        addOrOmit(parts, omitted, "brandCaseDescription", "案例信息", brand == null ? null : brand.getBrandCaseDescription());
-        appendOfferings(parts, input.selectedOfferings(), omitted);
+        if (!medicalBeautyDouyin) {
+            addOrOmit(parts, omitted, "brandCaseDescription", "案例信息", brand == null ? null : brand.getBrandCaseDescription());
+        }
+        appendOfferings(parts, input.selectedOfferings(), omitted, medicalBeautyDouyin);
         return parts.isEmpty() ? "除主题外没有可引用的品牌事实；请以通用知识解释问题，不补造品牌资料。" : String.join("\n", parts);
     }
 
     private void appendOfferings(List<String> parts,
                                  List<BrandOfferingPromptSelector.SelectedOffering> offerings,
-                                 List<String> omitted) {
+                                 List<String> omitted,
+                                 boolean medicalBeautyDouyin) {
         if (offerings == null || offerings.isEmpty()) {
             omitted.add("selectedOfferings");
             return;
@@ -433,10 +459,10 @@ public class ArticlePromptAssemblerV2 {
             if (offering.aliases() != null && !offering.aliases().isEmpty()) {
                 add(details, "简称", String.join("、", nonEmpty(offering.aliases())));
             }
-            add(details, "目标人群", offering.targetUsers());
+            if (!medicalBeautyDouyin) add(details, "目标人群", offering.targetUsers());
             add(details, "适用场景", offering.useScenarios());
             add(details, "介绍", offering.intro());
-            add(details, "资质描述", offering.qualificationDescription());
+            if (!medicalBeautyDouyin) add(details, "资质描述", offering.qualificationDescription());
             parts.add("产品或服务" + index++ + "：" + String.join("；", details));
         }
         if (index == 1) {
@@ -484,6 +510,9 @@ public class ArticlePromptAssemblerV2 {
                 ? "首行使用一个清晰标题；"
                 : "首行使用一个清晰、完整、自然的标题，标题不超过" + maxTitleChars
                 + "个字（不计算 Markdown 标题标记），不要使用被强行截断的表达；";
+        if (isDouyin(runtimePolicy)) {
+            titleRequirement = "首行必须是独立的 Markdown 一级标题（# 标题），不超过20字，语义完整；空行后才写正文，不得将开场段落当标题。";
+        }
         return "输出一篇完整的 Markdown 文章。"
                 + contentLengthPolicyResolver.promptRequirement(contentLengthPolicy)
                 + titleRequirement

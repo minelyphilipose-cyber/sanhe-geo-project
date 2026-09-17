@@ -33,6 +33,20 @@ import static org.mockito.Mockito.when;
 class ArticleGenerationEngineTest {
 
     @Test
+    void rejectsProseOpeningsAndOverlongTitlesWithoutTruncatingTheirContent() {
+        String opening = "在阜阳，想找到评价不错的医疗美容机构，关键要看机构是否具备规范资质、医生团队是否专业，以及服务是否贴合个人需求。";
+        var error = org.junit.jupiter.api.Assertions.assertThrows(com.huanjing.geo.common.exception.BizException.class,
+                () -> ArticleGenerationEngine.validateDouyinTitle(opening + "\n\n后续正文。", 20));
+        assertThat(error.getMessage()).contains("缺少独立标题", "不会截取正文");
+        org.junit.jupiter.api.Assertions.assertThrows(com.huanjing.geo.common.exception.BizException.class,
+                () -> ArticleGenerationEngine.validateDouyinTitle("# " + opening + "\n\n正文。", 20));
+        org.junit.jupiter.api.Assertions.assertThrows(com.huanjing.geo.common.exception.BizException.class,
+                () -> ArticleGenerationEngine.validateDouyinTitle("# 医生头衔挺多，到底看哪个？", 20));
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> ArticleGenerationEngine.validateDouyinTitle(
+                "# 医生头衔挺多，到底看哪个？\r\n\r\n先把头衔与执业信息分开看。", 20));
+    }
+
+    @Test
     void skipsTitleDuplicateJudgementForDouyinOnly() {
         assertFalse(ArticleGenerationEngine.shouldCheckTitleDuplicate(
                 new ArticleGenerationEngine.StructureValidationContext("self_media", "douyin", false)));

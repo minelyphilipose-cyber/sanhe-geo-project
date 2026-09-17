@@ -123,11 +123,14 @@ class BatchArticlePromptBuilderTest {
 
         assertThat(result.systemPrompt())
                 .contains("抖音图文自然行文规则")
+                .contains("正文不含标题控制在600—900字")
                 .contains("行文必须自然流畅")
                 .contains("不对新标题做完全重复或句式同构判断")
                 .doesNotContain("品牌名全文不超过 1 次")
                 .doesNotContain("结构策略：判断清单型");
         assertThat(result.userPrompt())
+                .contains("篇幅参考：正文不含标题600—900字")
+                .doesNotContain("中等篇幅，约 1500 字")
                 .contains("近期标题1")
                 .contains("近期标题5")
                 .doesNotContain("近期标题6")

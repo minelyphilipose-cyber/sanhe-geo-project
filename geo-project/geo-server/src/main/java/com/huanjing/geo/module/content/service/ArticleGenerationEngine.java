@@ -62,6 +62,9 @@ public class ArticleGenerationEngine {
         if (!StringUtils.hasText(content)) {
             throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI generated empty article");
         }
+        if (isDouyin(input.structureValidationContext())) {
+            validateDouyinTitle(content, input.maxTitleChars());
+        }
         TitleLimitResult titleLimit = limitTitle(content, input.maxTitleChars());
         content = titleLimit.content();
         ContentLimitResult contentLimit = limitBodyContent(content, input.maxContentChars());
@@ -156,6 +159,28 @@ public class ArticleGenerationEngine {
                 || !ArticlePromptChannels.SELF_MEDIA.equals(context.channelGroupCode())
                 || !"douyin".equals(ArticlePromptChannels.canonicalSubCode(
                 context.channelGroupCode(), context.channelSubCode()));
+    }
+
+    private static boolean isDouyin(StructureValidationContext context) {
+        return context != null && ArticlePromptChannels.SELF_MEDIA.equals(context.channelGroupCode())
+                && "douyin".equals(ArticlePromptChannels.canonicalSubCode(
+                context.channelGroupCode(), context.channelSubCode()));
+    }
+
+    // A prose opening is not a title. Reject before either limiter can discard it.
+    static void validateDouyinTitle(String content, Integer maxChars) {
+        String[] parts = content.strip().split("\\R", 2);
+        String first = parts[0].strip();
+        if (!first.startsWith("# ") || first.substring(2).isBlank()
+                || parts.length < 2 || parts[1].isBlank()) {
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED,
+                    "抖音文章缺少独立标题或正文，请重新生成；首行应为 # 标题，不会截取正文充当标题");
+        }
+        String title = first.substring(2).strip();
+        if (maxChars != null && title.codePointCount(0, title.length()) > maxChars) {
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED,
+                    "抖音标题超过" + maxChars + "字，请重新生成完整短标题，不会强行截断");
+        }
     }
 
     private String normalizeContent(String content) {

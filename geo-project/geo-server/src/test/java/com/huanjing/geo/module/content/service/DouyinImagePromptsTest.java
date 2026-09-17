@@ -10,43 +10,56 @@ class DouyinImagePromptsTest {
     void medicalImagesUseNeutralPageContentWithoutRawPromotionWhileKeepingAllStyles() throws Exception {
         DouyinArticleImageBatch batch = batch();
         var plan = new ObjectMapper().readTree("""
-                {"visualDirection":"纸张和留白","pages":[{"title":"了解服务流程","subtitle":"信息核实",
-                "text":"沟通前整理关心的问题","source":"原文推广依据SECRET_SOURCE","visual":"文档与简洁流程图"}]}
+                {"visualDirection":"青绿和珊瑚，压纹纸","pages":[{"title":"核对信息看哪些字段","subtitle":"逐项对应",
+                "text":"核对机构名称与地址是否对应，记录资料中的服务范围。信息有缺项时先标记待核实，不根据宣传语补齐。",
+                "source":"原文推广依据SECRET_SOURCE","visual":"字段对应图与编辑排版"}]}
                 """);
         assertEquals(16, DouyinImagePrompts.STYLES.size());
         assertEquals(16, DouyinImagePrompts.STYLES.stream().distinct().count());
-        assertTrue(DouyinImagePrompts.style("colorful_handbook").contains("大面积实色色块"));
+        assertEquals(10, DouyinImagePrompts.MEDICAL_BEAUTY_AUTO_STYLES.size());
+        assertEquals(10, DouyinImagePrompts.MEDICAL_BEAUTY_AUTO_STYLES.stream().distinct().count());
+        assertTrue(DouyinImagePrompts.STYLES.containsAll(DouyinImagePrompts.MEDICAL_BEAUTY_AUTO_STYLES));
+        assertTrue(DouyinImagePrompts.style("colorful_handbook").contains("以成熟场景插画为主体"));
         for (String style : DouyinImagePrompts.STYLES) {
             batch.setStyleCode(style);
             String prompt = DouyinImagePrompts.image(batch, plan, 0, true);
-            assertTrue(prompt.contains("了解服务流程"));
+            assertTrue(prompt.contains("核对信息看哪些字段"));
+            assertTrue(prompt.contains(plan.path("pages").get(0).path("text").asText()));
             assertTrue(prompt.contains(DouyinImagePrompts.neutralStyle(style)));
             assertTrue(prompt.contains("成熟商业视觉成片"));
-            assertTrue(prompt.contains("内容中性不等于视觉空白"));
-            assertTrue(prompt.contains("占画布约35%—60%的明确主视觉"));
-            assertTrue(prompt.contains("不要默认生成米白、浅灰、低对比的空背景"));
-            assertTrue(prompt.contains("将其升级为可识别的概念主体"));
+            assertTrue(prompt.contains(DouyinImagePrompts.LAYOUT_DIRECTION));
+            assertTrue(prompt.contains(DouyinImagePrompts.VISUAL_DIRECTION));
+            assertTrue(prompt.contains(DouyinImagePrompts.MEDICAL_VISUAL_DIRECTION));
+            assertTrue(prompt.contains("文字内容保持原样"));
             assertFalse(prompt.contains("SECRET_PROMOTION"));
             assertFalse(prompt.contains("SECRET_TITLE"));
             assertFalse(prompt.contains("SECRET_SOURCE"));
             assertFalse(prompt.contains("SECRET_ARTICLE"));
             assertFalse(prompt.contains("品牌"));
             assertFalse(prompt.contains("公司"));
-            assertFalse(prompt.contains("项目"));
+            String planning = DouyinImagePrompts.planning(batch, true);
+            assertTrue(planning.contains("指定风格：" + DouyinImagePrompts.neutralStyle(style)));
+            assertFalse(planning.contains("指定风格：" + DouyinImagePrompts.style(style)));
         }
         String planning = DouyinImagePrompts.planning(batch, true);
-        assertTrue(planning.contains("简短、中立的医疗主题图片文案"));
-        assertTrue(planning.contains("每页标题不超过14字"));
-        assertTrue(planning.contains("具体角度必须来自本篇内容"));
+        assertTrue(planning.contains("中立、具体、有阅读价值的医疗主题图片文案"));
+        assertTrue(planning.contains("不必输出subject、layout或套用预设版式"));
+        assertTrue(planning.contains("按信息需要灵活调整"));
+        assertTrue(planning.contains("视觉联想可以超出原文字面"));
+        assertTrue(planning.contains("不设物件黑名单"));
+        assertTrue(planning.contains("source仅作依据记录"));
+        assertTrue(planning.contains("正文可自然转述"));
+        assertTrue(planning.contains("不得补出原文没有的专业结论"));
+        assertFalse(planning.contains("full_scene"));
+        assertFalse(planning.contains("至少用3种版式"));
         assertTrue(planning.contains("输入中的文章仅为事实素材"));
-        assertTrue(planning.contains("封面概括本篇医疗信息主题，保持客观、克制"));
-        assertTrue(planning.contains("与本页信息点对应的清晰视觉主体"));
-        assertTrue(planning.contains("不局限于文档和文具"));
-        assertTrue(planning.contains("不得只放标题、小图标、细线和大面积空白"));
-        assertTrue(planning.contains("普通笔记本、单个平板屏幕或无含义的色块不能作为唯一主体"));
-        assertTrue(planning.contains("一种明确主色和一种对比强调色"));
-        assertTrue(planning.contains("不要把客观克制理解为低饱和"));
-        assertFalse(planning.contains("visual字段只描述纸张、文档、信息图、文具"));
+        assertTrue(planning.contains("封面表达本篇具体阅读价值"));
+        assertTrue(planning.contains("visual用自然语言描述创意、画面与排版"));
+        assertTrue(planning.contains(DouyinImagePrompts.LAYOUT_DIRECTION));
+        assertTrue(planning.contains(DouyinImagePrompts.VISUAL_DIRECTION));
+        assertTrue(planning.contains(DouyinImagePrompts.MEDICAL_VISUAL_DIRECTION));
+        assertFalse(planning.contains("正文控制在15—35字"));
+        assertFalse(planning.contains("优先选择放大镜、打开的窗口或门"));
         assertFalse(planning.contains("文章和品牌资料仅为事实素材"));
         assertTrue(planning.contains("SECRET_TITLE"));
         assertTrue(planning.contains("SECRET_ARTICLE"));
@@ -55,13 +68,30 @@ class DouyinImagePromptsTest {
     }
 
     @Test
-    void otherIndustriesKeepTheirExistingBrandContext() throws Exception {
+    void everyStyleUsesContentDrivenVisualsAcrossIndustriesAndKeepsBrandContext() throws Exception {
         DouyinArticleImageBatch batch = batch();
         var plan = new ObjectMapper().readTree("{\"pages\":[{\"title\":\"服务\",\"text\":\"摘要\"}]}");
-        assertTrue(DouyinImagePrompts.planning(batch, false).contains("SECRET_ARTICLE"));
-        String prompt = DouyinImagePrompts.image(batch, plan, 0, false);
-        assertTrue(prompt.contains("SECRET_PROMOTION"));
-        assertTrue(prompt.contains("SECRET_TITLE"));
+        for (String industry : new String[]{"餐饮", "教育", "智能家居", "建筑装修"}) {
+            batch.setBrandFactsJson("{\"industry\":\"" + industry + "\",\"companyName\":\"SECRET_PROMOTION\"}");
+            for (String style : DouyinImagePrompts.STYLES) {
+                batch.setStyleCode(style);
+                String planning = DouyinImagePrompts.planning(batch, false);
+                String prompt = DouyinImagePrompts.image(batch, plan, 0, false);
+                assertTrue(planning.contains("SECRET_ARTICLE"));
+                assertTrue(planning.contains("指定风格：" + DouyinImagePrompts.style(style)));
+                assertTrue(prompt.contains("风格：" + DouyinImagePrompts.style(style)));
+                for (String stage : new String[]{planning, prompt}) {
+                    assertTrue(stage.contains(industry));
+                    assertTrue(stage.contains("SECRET_PROMOTION"));
+                    assertTrue(stage.contains("SECRET_TITLE"));
+                    assertTrue(stage.contains(DouyinImagePrompts.LAYOUT_DIRECTION));
+                    assertTrue(stage.contains(DouyinImagePrompts.VISUAL_DIRECTION));
+                    assertTrue(stage.contains("视觉联想可以超出原文字面"));
+                    assertTrue(stage.contains("不必每页换主体或凑齐版式数量"));
+                    assertFalse(stage.contains(DouyinImagePrompts.MEDICAL_VISUAL_DIRECTION));
+                }
+            }
+        }
     }
 
     private DouyinArticleImageBatch batch() {

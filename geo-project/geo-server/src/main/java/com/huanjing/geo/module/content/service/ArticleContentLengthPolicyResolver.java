@@ -24,7 +24,7 @@ public class ArticleContentLengthPolicyResolver {
         String subCode = ArticlePromptChannels.canonicalSubCode(channelGroupCode, channelSubCode);
         if (ArticlePromptChannels.SELF_MEDIA.equals(channelGroupCode)) {
             return switch (subCode == null ? "" : subCode) {
-                case "douyin" -> policy(requested, 400, 700, SOURCE_CHANNEL_POLICY);
+                case "douyin" -> policy(requested, 600, 900, SOURCE_CHANNEL_POLICY);
                 case "xiaohongshu" -> neutralEducationMode
                         ? policy(requested, 500, 700, SOURCE_CHANNEL_POLICY)
                         : policy(requested, 600, 900, SOURCE_CHANNEL_POLICY);
