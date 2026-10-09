@@ -45,6 +45,7 @@ $files = @(
   "platform-toutiao.js",
   "platform-xiaohongshu.js",
   "platform-zhihu.js",
+  "platform-sohu.js",
   "popup.html",
   "popup.js",
   "README.md",

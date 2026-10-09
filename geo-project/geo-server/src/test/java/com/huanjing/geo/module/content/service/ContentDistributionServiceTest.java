@@ -45,6 +45,8 @@ import com.huanjing.geo.module.system.service.SystemAlertService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
@@ -519,6 +521,71 @@ class ContentDistributionServiceTest {
         assertEquals(1, selfMediaAdapter.capturedTarget.privateStatus());
         assertEquals(2, selfMediaAdapter.capturedTarget.downloadType());
         assertEquals("douyin text", selfMediaAdapter.capturedTarget.platformOptions().get("text"));
+    }
+
+    @Test
+    void reissuedScheduleTaskRetainsPublishOptions() throws Exception {
+        givenCommonData();
+        var adapter = mock(com.huanjing.geo.module.content.service.adapter.SemiAutoSelfMediaAdapter.class);
+        when(adapter.supportsPlatform("sohu")).thenReturn(true);
+        when(adapter.prepareFillTask(any(), any(), any())).thenReturn(
+                new com.huanjing.geo.module.content.service.adapter.SemiAutoFillTask(
+                        "sohu", "https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle", "测试文章", "<p>正文</p>", null, List.of(), null, null));
+        ReflectionTestUtils.setField(contentDistributionService, "semiAutoSelfMediaAdapters", List.of(adapter));
+        when(fillTokenService.replaceActiveAndIssueInternalWithoutVersionCheck(any(), any(), any(), any()))
+                .thenReturn(new com.huanjing.geo.module.extension.dto.FillTokenIssueResponse("test-token", 1000L, "test-nonce"));
+        ArticleDraft article = articleDraftMapper.selectById(1L);
+        Project project = projectMapper.selectById(20L);
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setId(40L);
+        account.setBrandId(30L);
+        account.setPlatform("sohu");
+        DistributionTask reusable = semiAutoTask("filled");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(reusable);
+        Map<String, Object> options = Map.of("scheduleId", 483L, "scheduleStrategy", "backend_delayed_publish");
+        ReflectionTestUtils.invokeMethod(contentDistributionService, "reissueReusableSemiAutoSelfMediaTask",
+                article, project, currentUserService.requireCurrentUser(), account, reusable, null, options);
+        ArgumentCaptor<LambdaUpdateWrapper<DistributionTask>> updates = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(distributionTaskMapper, org.mockito.Mockito.atLeastOnce()).update(eq(null), updates.capture());
+        String payload = updates.getAllValues().stream().flatMap(w -> w.getParamNameValuePairs().values().stream())
+                .filter(v -> v instanceof String && ((String) v).contains("renderedHtml")).map(String::valueOf).findFirst().orElseThrow();
+        var node = new ObjectMapper().readTree(payload).path("platformOptions");
+        assertEquals(483L, node.path("scheduleId").asLong());
+        assertEquals("backend_delayed_publish", node.path("scheduleStrategy").asText());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"toutiao", "baijiahao", "zhihu", "xiaohongshu", "douyin", "sohu"})
+    void reissuedTokenKeepsSharedScheduleOptionsOnEveryBrowserPlatform(String platform) throws Exception {
+        givenCommonData();
+        var adapter = mock(com.huanjing.geo.module.content.service.adapter.SemiAutoSelfMediaAdapter.class);
+        when(adapter.supportsPlatform(platform)).thenReturn(true);
+        when(adapter.prepareFillTask(any(), any(), any())).thenReturn(
+                new com.huanjing.geo.module.content.service.adapter.SemiAutoFillTask(platform,
+                        "https://example.test/editor", "测试文章", "<p>正文</p>", null, List.of(), null, null));
+        ReflectionTestUtils.setField(contentDistributionService, "semiAutoSelfMediaAdapters", List.of(adapter));
+        when(fillTokenService.replaceActiveAndIssueInternalWithoutVersionCheck(any(), any(), any(), any()))
+                .thenReturn(new com.huanjing.geo.module.extension.dto.FillTokenIssueResponse("test-token", 1000L, "test-nonce"));
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setId(40L);
+        account.setBrandId(30L);
+        account.setPlatform(platform);
+        DistributionTask reusable = semiAutoTask("token_issued");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(reusable);
+
+        DistributionTask result = ReflectionTestUtils.invokeMethod(contentDistributionService,
+                "reissueReusableSemiAutoSelfMediaTask", articleDraftMapper.selectById(1L),
+                projectMapper.selectById(20L), currentUserService.requireCurrentUser(), account, reusable, null,
+                Map.of("scheduleId", 483L, "scheduleStrategy", "platform_schedule"));
+
+        assertEquals(reusable, result);
+        verify(adapter).prepareFillTask(any(), any(), any());
+        verify(fillTokenService).replaceActiveAndIssueInternalWithoutVersionCheck(40L, 30L, 100L, 300L);
+        ArgumentCaptor<LambdaUpdateWrapper<DistributionTask>> updates = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(distributionTaskMapper, org.mockito.Mockito.atLeastOnce()).update(eq(null), updates.capture());
+        String payload = updates.getAllValues().stream().flatMap(w -> w.getParamNameValuePairs().values().stream())
+                .filter(v -> v instanceof String && ((String) v).contains("renderedHtml")).map(String::valueOf).findFirst().orElseThrow();
+        assertEquals(483L, new ObjectMapper().readTree(payload).path("platformOptions").path("scheduleId").asLong());
     }
 
     @Test

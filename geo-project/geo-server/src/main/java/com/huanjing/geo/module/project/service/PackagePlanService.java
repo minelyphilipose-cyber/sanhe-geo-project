@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -190,9 +191,7 @@ public class PackagePlanService {
             validateBoundPackageExpansion(
                     plan,
                     req,
-                    audienceType,
-                    findChannelQuotaConfigs(plan.getId()),
-                    channelQuotaConfigs
+                    audienceType
             );
         }
         plan.setPackageName(req.getPackageName().trim());
@@ -270,9 +269,6 @@ public class PackagePlanService {
         PackagePlan plan = requireById(packagePlanId);
         List<PackageChannelQuotaConfigRequest> normalizedConfigs = normalizeChannelQuotaInput(configs);
         validateChannelQuotaConfigs(normalizedConfigs);
-        if (companyPackageBindingService.hasBindingsForPackagePlan(plan.getId())) {
-            validateBoundChannelQuotaExpansion(findChannelQuotaConfigs(plan.getId()), normalizedConfigs);
-        }
         replaceChannelQuotaConfigs(plan.getId(), normalizedConfigs);
         return findChannelQuotaConfigs(plan.getId());
     }
@@ -400,9 +396,7 @@ public class PackagePlanService {
     private void validateBoundPackageExpansion(
             PackagePlan plan,
             PackagePlanUpdateRequest req,
-            String audienceType,
-            List<PackageChannelQuotaConfig> currentChannelQuotas,
-            List<PackageChannelQuotaConfigRequest> nextChannelQuotas
+            String audienceType
     ) {
         String currentAudienceType = normalizeAudienceType(plan.getAudienceType());
         if (!Objects.equals(currentAudienceType, audienceType)) {
@@ -434,41 +428,6 @@ public class PackagePlanService {
         if (plan.getTargetWindowDays() != null && req.getTargetWindowDays() > plan.getTargetWindowDays()) {
             throw boundPackageReduction("目标周期只能缩短，不能从 "
                     + plan.getTargetWindowDays() + " 天调整为 " + req.getTargetWindowDays() + " 天");
-        }
-
-        validateBoundChannelQuotaExpansion(currentChannelQuotas, nextChannelQuotas);
-    }
-
-    private void validateBoundChannelQuotaExpansion(
-            List<PackageChannelQuotaConfig> currentConfigs,
-            List<PackageChannelQuotaConfigRequest> nextConfigs
-    ) {
-        Map<String, PackageChannelQuotaConfigRequest> nextByChannel = nextConfigs.stream()
-                .collect(Collectors.toMap(
-                        cfg -> normalizeChannel(cfg.getChannelCode()),
-                        cfg -> cfg,
-                        (left, right) -> right,
-                        LinkedHashMap::new
-                ));
-        for (PackageChannelQuotaConfig current : currentConfigs == null ? List.<PackageChannelQuotaConfig>of() : currentConfigs) {
-            if (current == null || !Boolean.TRUE.equals(current.getEnabled())) {
-                continue;
-            }
-            String channel = normalizeChannel(current.getChannelCode());
-            PackageChannelQuotaConfigRequest next = nextByChannel.get(channel);
-            if (next == null || !Boolean.TRUE.equals(next.getEnabled())) {
-                throw boundPackageReduction("已启用渠道 " + channel + " 不可删除或停用");
-            }
-            String currentPeriod = normalizePeriod(current.getPeriodType());
-            String nextPeriod = normalizePeriod(next.getPeriodType());
-            if (!Objects.equals(currentPeriod, nextPeriod)) {
-                throw boundPackageReduction("已启用渠道 " + channel + " 的额度周期不可从 "
-                        + currentPeriod + " 修改为 " + nextPeriod);
-            }
-            if (current.getQuotaLimit() != null && next.getQuotaLimit() < current.getQuotaLimit()) {
-                throw boundPackageReduction("渠道 " + channel + " 的额度只能增加，不能从 "
-                        + current.getQuotaLimit() + " 调整为 " + next.getQuotaLimit());
-            }
         }
     }
 
@@ -502,7 +461,21 @@ public class PackagePlanService {
 
     private List<PackageChannelQuotaConfigRequest> normalizeChannelQuotaInput(List<PackageChannelQuotaConfigRequest> configs) {
         if (configs != null && !configs.isEmpty()) {
-            return configs;
+            List<PackageChannelQuotaConfigRequest> normalized = new ArrayList<>(configs);
+            PackageChannelQuotaConfigRequest toutiao = normalized.stream()
+                    .filter(item -> "self_media:toutiao".equals(normalizeChannel(item.getChannelCode())))
+                    .findFirst().orElse(null);
+            boolean hasSohu = normalized.stream()
+                    .anyMatch(item -> "self_media:sohu".equals(normalizeChannel(item.getChannelCode())));
+            if (toutiao != null && !hasSohu) {
+                PackageChannelQuotaConfigRequest sohu = new PackageChannelQuotaConfigRequest();
+                sohu.setChannelCode("self_media:sohu");
+                sohu.setPeriodType(toutiao.getPeriodType());
+                sohu.setQuotaLimit(toutiao.getQuotaLimit());
+                sohu.setEnabled(toutiao.getEnabled());
+                normalized.add(sohu);
+            }
+            return normalized;
         }
         return DEFAULT_PERIOD_BY_CHANNEL.entrySet().stream().map(entry -> {
             PackageChannelQuotaConfigRequest req = new PackageChannelQuotaConfigRequest();

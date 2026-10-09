@@ -678,7 +678,7 @@ public class ContentDistributionService {
         if (reusable != null) {
             BrowserEnvironmentAccount reusableEnvironmentBinding = browserEnvironmentService.validateForTaskCreation(account);
             if (reusableEnvironmentBinding != null || AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
-                return reissueReusableSemiAutoSelfMediaTask(article, project, operator, account, reusable, reusableEnvironmentBinding);
+                return reissueReusableSemiAutoSelfMediaTask(article, project, operator, account, reusable, reusableEnvironmentBinding, mpTarget.platformOptions());
             }
             return reusable;
         }
@@ -697,7 +697,8 @@ public class ContentDistributionService {
                         operator,
                         account,
                         existed,
-                        existedEnvironmentBinding
+                        existedEnvironmentBinding,
+                        mpTarget.platformOptions()
                 );
             }
             return existed;
@@ -788,7 +789,7 @@ public class ContentDistributionService {
         }
         BrowserEnvironmentAccount environmentBinding = browserEnvironmentService.validateForTaskCreation(account);
         if (environmentBinding != null || AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
-            return reissueReusableSemiAutoSelfMediaTask(article, project, operator, account, reusable, environmentBinding);
+            return reissueReusableSemiAutoSelfMediaTask(article, project, operator, account, reusable, environmentBinding, mpTarget.platformOptions());
         }
         return reusable;
     }
@@ -834,15 +835,16 @@ public class ContentDistributionService {
                                                                   SysUser operator,
                                                                   SelfMediaAccount account,
                                                                   DistributionTask reusable,
-                                                                  BrowserEnvironmentAccount environmentBinding) {
+                                                                  BrowserEnvironmentAccount environmentBinding,
+                                                                  Map<String, Object> platformOptions) {
         if (!List.of("pending", "token_issued", "filling", "filled").contains(reusable.getStatus())) {
             return reusable;
         }
-        if (!"token_issued".equals(reusable.getStatus())) {
+        if (!"token_issued".equals(reusable.getStatus()) || (platformOptions != null && !platformOptions.isEmpty())) {
             String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
             SemiAutoSelfMediaAdapter adapter = resolveSemiAutoSelfMediaAdapter(account.getPlatform());
             SemiAutoFillTask fillTask = adapter.prepareFillTask(article, content, adapter.fillProfile());
-            String fillPayload = toFillPayload(fillTask, environmentBinding, project, article);
+            String fillPayload = toFillPayload(fillTask, environmentBinding, project, article, platformOptions);
             updateSemiAutoTaskPrepared(reusable.getId(), fillPayload);
         }
         applyEnvironmentInfo(reusable, environmentBinding);

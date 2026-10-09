@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.util.DatabaseText;
 import com.huanjing.geo.module.content.config.WechatMpClientProperties;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.constant.SelfMediaAccountIdentity;
@@ -43,6 +44,8 @@ import java.util.UUID;
 @Slf4j
 @RequiredArgsConstructor
 public class SelfMediaAccountService {
+    private static final int AUTH_ERROR_MAX_LENGTH = 512;
+
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final WechatMpClient wechatMpClient;
     private final WechatOpenPlatformProperties openPlatformProperties;
@@ -176,7 +179,7 @@ public class SelfMediaAccountService {
                 account.setStatus("disabled");
                 account.setLastAuthError("wechat permission missing");
             } else {
-                account.setLastAuthError(ex.getMessage());
+                account.setLastAuthError(DatabaseText.truncate(ex.getMessage(), AUTH_ERROR_MAX_LENGTH));
             }
         }
         account.setLastAuthCheckedAt(LocalDateTime.now());

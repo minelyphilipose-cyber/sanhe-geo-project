@@ -15,7 +15,10 @@ import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
@@ -61,6 +64,7 @@ class ExtensionSessionServiceTest {
                 brandAccessService,
                 currentUserService
         );
+        ReflectionTestUtils.setField(service, "clock", Clock.fixed(Instant.parse("2026-10-08T04:00:00Z"), ZoneOffset.UTC));
     }
 
     @Test
@@ -77,6 +81,7 @@ class ExtensionSessionServiceTest {
         assertEquals("SHA-256", inserted.getTokenHashAlg());
         assertEquals("geo_b", inserted.getEnvironmentKey());
         assertEquals("profile-1", inserted.getProviderProfileId());
+        assertEquals(inserted.getBoundAt().plusDays(30), response.expiresAt());
     }
 
     @Test
@@ -115,15 +120,18 @@ class ExtensionSessionServiceTest {
     }
 
     @Test
-    void slidingRenewOnlyWhenNearExpiry() {
+    void existingSevenDaySessionRenewsOnUseWithoutWaitingForExpiryWindow() {
         ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "geo_b", "profile-1", null, "1.2.3", "ua");
         ExtensionSession session = sessionFromInsert(response.token());
-        session.setExpiresAt(LocalDateTime.now().plusDays(3));
+        session.setId(1L);
+        session.setExpiresAt(LocalDateTime.of(2026, 10, 14, 4, 0));
         when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
+        when(sessionMapper.renewActiveExpiry(eq(1L), any(), any(), any())).thenReturn(1);
 
         ExtensionTokenRefreshResponse refresh = service.validateAndMaybeRenew(response.token(), "1.2.4", "ua2");
 
-        assertFalse(refresh.renewed());
+        assertTrue(refresh.renewed());
+        assertEquals(LocalDateTime.of(2026, 11, 7, 4, 0), refresh.expiresAt());
         assertNull(refresh.token());
         verify(sessionMapper, never()).revokeActive(any(), any(), any());
     }
@@ -133,7 +141,7 @@ class ExtensionSessionServiceTest {
         ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "geo_b", "profile-1", null, "1.2.3", "ua");
         ExtensionSession session = sessionFromInsert(response.token());
         session.setId(1L);
-        session.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(12));
+        session.setExpiresAt(LocalDateTime.of(2026, 10, 8, 16, 0));
         when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
         when(sessionMapper.renewActiveExpiry(eq(1L), any(), any(), any())).thenReturn(1);
 
@@ -142,15 +150,85 @@ class ExtensionSessionServiceTest {
         assertTrue(refresh.renewed());
         assertNull(refresh.token());
         assertEquals(1L, refresh.sessionId());
-        assertTrue(refresh.expiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC).plusDays(6)));
+        assertEquals(LocalDateTime.of(2026, 11, 7, 4, 0), refresh.expiresAt());
         verify(sessionMapper).renewActiveExpiry(eq(1L), any(), any(), eq(refresh.expiresAt()));
         verify(sessionMapper, never()).revokeActive(any(), any(), any());
     }
 
     @Test
+    void sameUtcDayDoesNotRenewAgainEvenAtMidnightBoundary() {
+        ExtensionSession session = session();
+        session.setExpiresAt(LocalDateTime.of(2026, 11, 7, 0, 0));
+        when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
+
+        ExtensionTokenRefreshResponse refresh = service.validateAndMaybeRenew("ext.token", "1.2.4", "ua");
+
+        assertFalse(refresh.renewed());
+        assertEquals(session.getExpiresAt(), refresh.expiresAt());
+        verify(sessionMapper, never()).renewActiveExpiry(any(), any(), any(), any());
+    }
+
+    @Test
+    void nextUtcDayRenewsEvenWithTwentyNineDaysRemaining() {
+        ExtensionSession session = session();
+        session.setId(1L);
+        session.setExpiresAt(LocalDateTime.of(2026, 11, 7, 4, 0));
+        ReflectionTestUtils.setField(service, "clock", Clock.fixed(Instant.parse("2026-10-09T04:00:00Z"), ZoneOffset.UTC));
+        when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
+        when(sessionMapper.renewActiveExpiry(eq(1L), any(), any(), any())).thenReturn(1);
+
+        ExtensionTokenRefreshResponse refresh = service.validateAndMaybeRenew("ext.token", "1.2.4", "ua");
+
+        assertTrue(refresh.renewed());
+        assertEquals(LocalDateTime.of(2026, 11, 8, 4, 0), refresh.expiresAt());
+    }
+
+    @Test
+    void expiryResponseUsesDatabaseSecondPrecision() {
+        ReflectionTestUtils.setField(service, "clock", Clock.fixed(Instant.parse("2026-10-08T04:00:00.876625Z"), ZoneOffset.UTC));
+        ExtensionSession session = session();
+        session.setId(1L);
+        when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
+        when(sessionMapper.renewActiveExpiry(eq(1L), any(), any(), any())).thenReturn(1);
+
+        ExtensionTokenRefreshResponse refresh = service.validateAndMaybeRenew("ext.token", "1.2.4", "ua");
+
+        assertEquals(LocalDateTime.of(2026, 11, 7, 4, 0), refresh.expiresAt());
+    }
+
+    @Test
+    void concurrentRenewalReturnsLatestExpiryWithoutRotatingToken() {
+        ExtensionSession session = session();
+        session.setId(1L);
+        session.setExpiresAt(LocalDateTime.of(2026, 10, 14, 4, 0));
+        ExtensionSession latest = session();
+        latest.setExpiresAt(LocalDateTime.of(2026, 11, 7, 4, 0));
+        when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
+        when(sessionMapper.selectById(1L)).thenReturn(latest);
+
+        ExtensionTokenRefreshResponse refresh = service.validateAndMaybeRenew("ext.token", "1.2.4", "ua");
+
+        assertFalse(refresh.renewed());
+        assertNull(refresh.token());
+        assertEquals(latest.getExpiresAt(), refresh.expiresAt());
+    }
+
+    @Test
+    void expiredAuthorizationCannotBeRenewed() {
+        ExtensionSession session = session();
+        session.setExpiresAt(LocalDateTime.of(2026, 10, 8, 4, 0));
+        when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
+
+        BizException error = assertThrows(BizException.class, () -> service.validateAndMaybeRenew("ext.token", "1.2.4", "ua"));
+
+        assertEquals(EXTENSION_UNAUTHORIZED, error.getCode());
+        verify(sessionMapper, never()).renewActiveExpiry(any(), any(), any(), any());
+    }
+
+    @Test
     void expiredSessionIsRejectedByEveryAuthenticatedEndpoint() {
         ExtensionSession session = session();
-        session.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).minusSeconds(1));
+        session.setExpiresAt(LocalDateTime.of(2026, 10, 8, 3, 59, 59));
         when(sessionMapper.selectActiveByLookupHash(session.getTokenLookupHash())).thenReturn(session);
 
         BizException ex = assertThrows(BizException.class, () -> service.requireActiveSession("ext.token"));
@@ -253,7 +331,7 @@ class ExtensionSessionServiceTest {
         session.setTokenHash(HashSupport.saltedSha256Hex(session.getTokenSalt(), "ext.token"));
         session.setTokenHashAlg("SHA-256");
         session.setStatus("active");
-        session.setExpiresAt(LocalDateTime.now().plusDays(1));
+        session.setExpiresAt(LocalDateTime.of(2026, 10, 9, 4, 0));
         return session;
     }
 }

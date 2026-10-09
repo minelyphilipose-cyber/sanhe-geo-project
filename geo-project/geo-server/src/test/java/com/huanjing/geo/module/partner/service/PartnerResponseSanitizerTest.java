@@ -141,9 +141,10 @@ class PartnerResponseSanitizerTest {
         List<PartnerPackagePlanVO> result = (List<PartnerPackagePlanVO>) sanitizer.packagePlans(List.of(plan));
 
         assertEquals(1, result.size());
-        assertEquals(List.of("official_site", "self_media:douyin"),
+        assertEquals(List.of("official_site", "self_media:douyin", "self_media:sohu"),
                 result.get(0).getChannelQuotaConfigs().stream().map(item -> item.getChannelCode()).toList());
         assertEquals("抖音", result.get(0).getChannelQuotaConfigs().get(1).getChannelName());
+        assertEquals("搜狐", result.get(0).getChannelQuotaConfigs().get(2).getChannelName());
         assertEquals(12, result.get(0).getCoreQuestionLimit());
         assertNoBcGetter(result.get(0));
     }

@@ -47,6 +47,22 @@ class SelfMediaScheduleCapabilityServiceTest {
     }
 
     @Test
+    void openingSohuAccountConfigurationDoesNotEnablePublishing() {
+        SelfMediaScheduleCapability row = new SelfMediaScheduleCapability();
+        row.setPlatform("sohu");
+        row.setVerificationStatus("unverified");
+        row.setSupportsSchedule(false);
+        row.setV1Strategy("pending");
+        when(mapper.selectByPlatform("sohu")).thenReturn(row);
+        when(adapterRouter.contract("sohu")).thenReturn(Optional.empty());
+
+        var readiness = service.automaticPublishReadiness("sohu");
+
+        assertFalse(readiness.ready());
+        assertEquals("PLATFORM_CAPABILITY_UNVERIFIED", readiness.code());
+    }
+
+    @Test
     void upsertVerifiedPlatformScheduleRequiresDelayRangeAndStoresVerifier() {
         SelfMediaScheduleCapabilityUpsertRequest request = verifiedRequest();
         when(adapterRouter.contract("toutiao")).thenReturn(Optional.of(toutiaoContract()));

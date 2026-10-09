@@ -17,6 +17,8 @@ import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
@@ -671,6 +673,39 @@ class ExtensionTaskStateServiceTest {
         DistributionTask task = task(status);
         when(semiAutoTaskAccessService.requireOperableTask(30L, 99L))
                 .thenReturn(new SemiAutoTaskAccessService.SemiAutoTaskContext(task, 10L));
+    }
+
+    @Test
+    void sohuReviewAckQueuesCheckingWithoutClaimingPublishedAndAllowsDuplicateAck() {
+        DistributionTask task = task("submitted");
+        task.setIntegrationMethod("sohu");
+        when(semiAutoTaskAccessService.requireOperableTask(30L, 99L))
+                .thenReturn(new SemiAutoTaskAccessService.SemiAutoTaskContext(task, 10L));
+        when(taskMapper.markSemiAutoFilled(eq(30L), any())).thenReturn(0);
+        Map<String, Object> request = Map.of("fillResult", Map.of("platform", "sohu", "publishOptions", Map.of(
+                "submitted", true, "published", false,
+                "publishVerification", Map.of("submissionVerified", true, "verified", false,
+                        "platformStatus", "reviewing", "platformPublishId", "1084790665"))));
+
+        assertEquals("submitted", service.ackFilled(30L, 99L, 7L, request).status());
+        verify(selfMediaPublishScheduleService).markDistributionTaskScheduled(eq(30L), any(String.class));
+        verify(selfMediaPublishScheduleService, never()).markDistributionTaskPublishedConfirmed(any(), any(), any());
+        verify(companyChannelQuotaService, never()).refundDistribution(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"toutiao", "baijiahao", "zhihu", "xiaohongshu", "douyin", "sohu"})
+    void submittedTaskAcceptsDuplicateFillAcknowledgementWithoutRefundingOrRepublishing(String platform) {
+        DistributionTask task = task("submitted");
+        task.setIntegrationMethod(platform);
+        when(semiAutoTaskAccessService.requireOperableTask(30L, 99L))
+                .thenReturn(new SemiAutoTaskAccessService.SemiAutoTaskContext(task, 10L));
+        when(taskMapper.markSemiAutoFilled(eq(30L), any())).thenReturn(0);
+
+        assertEquals("submitted", service.ackFilled(30L, 99L, 7L, Map.of()).status());
+
+        verify(selfMediaPublishScheduleService).markDistributionTaskFilled(eq(30L), any());
+        verifyNoInteractions(companyChannelQuotaService);
     }
 
     private DistributionTask task(String status) {

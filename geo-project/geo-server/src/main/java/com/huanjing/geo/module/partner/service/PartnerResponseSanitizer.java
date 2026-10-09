@@ -48,7 +48,7 @@ import java.util.Set;
 public class PartnerResponseSanitizer {
 
     private static final Set<String> PARTNER_SELF_MEDIA_PLATFORMS = Set.of(
-            "wechat", "douyin", "toutiao", "zhihu", "baijiahao", "xiaohongshu"
+            "wechat", "douyin", "toutiao", "zhihu", "baijiahao", "xiaohongshu", "sohu"
     );
 
     private static final Map<String, String> PARTNER_CHANNEL_NAMES = Map.of(
@@ -58,7 +58,8 @@ public class PartnerResponseSanitizer {
             "self_media:toutiao", "头条",
             "self_media:zhihu", "知乎",
             "self_media:baijiahao", "百家号",
-            "self_media:xiaohongshu", "小红书"
+            "self_media:xiaohongshu", "小红书",
+            "self_media:sohu", "搜狐"
     );
 
     private final CurrentUserService currentUserService;

@@ -124,6 +124,13 @@ public class SelfMediaPublishScheduleVO {
         vo.setFailureActionLabel(SelfMediaPublishFailureCodes.actionLabel(row.getFailureCode()));
         vo.setFailureActionKind(SelfMediaPublishFailureCodes.actionKind(row.getFailureCode()));
         vo.setFailureMessage(row.getFailureMessage());
+        // Older terminal rows can retain a polling timestamp and a checking stage.
+        if ("publish_failed".equals(row.getStatus())) {
+            vo.setNextAttemptAt(null);
+            vo.setLockedUntil(null);
+            vo.setRuntimeStage("SOHU_REVIEW_REJECTED".equals(row.getFailureCode()) ? "publish_rejected" : "publish_failed");
+            vo.setRuntimeStageMessage(row.getFailureMessage());
+        }
         vo.setDiagnosticsJson(row.getDiagnosticsJson());
         SelfMediaPublishScheduleActionPolicy.Decision actionDecision =
                 SelfMediaPublishScheduleActionPolicy.evaluate(

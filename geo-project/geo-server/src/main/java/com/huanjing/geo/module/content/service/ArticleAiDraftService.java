@@ -173,7 +173,7 @@ public class ArticleAiDraftService {
 
         return CompletableFuture.supplyAsync(
                 () -> previewInWorker(project, operator, prompt, inputSnapshot,
-                        req.getModelPlatformCode(), req.getModelId(), allowContactInfo),
+                        req.getModelPlatformCode(), req.getModelId(), allowContactInfo, "sohu".equals(req.getContentStyle())),
                 articleAiDraftExecutor
         );
     }
@@ -397,7 +397,8 @@ public class ArticleAiDraftService {
                                                           String inputSnapshot,
                                                           String requestedPlatformCode,
                                                           String requestedModelId,
-                                                          boolean allowContactInfo) {
+                                                          boolean allowContactInfo,
+                                                          boolean sohu) {
         long started = System.nanoTime();
         ArticleModelResolver.ModelSelection model = null;
         try {
@@ -410,11 +411,13 @@ public class ArticleAiDraftService {
                             requestedPlatformCode,
                             requestedModelId,
                             true,
-                            allowContactInfo,
+                            sohu ? false : allowContactInfo,
                             false,
                             List.of(),
-                            null,
-                            ArticleGenerationTemperatures.DEFAULT
+                            sohu ? ArticlePromptChannels.SOHU_MAX_TITLE_CHARS : null,
+                            ArticleGenerationTemperatures.DEFAULT,
+                            (Integer) null,
+                            sohu ? new ArticleGenerationEngine.StructureValidationContext("self_media", "sohu", false) : null
                     )
             );
             model = generated.model();

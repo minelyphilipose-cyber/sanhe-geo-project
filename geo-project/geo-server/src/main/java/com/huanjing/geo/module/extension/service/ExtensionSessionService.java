@@ -115,7 +115,7 @@ public class ExtensionSessionService {
         }
         TokenMaterial token = newToken();
         LocalDateTime now = now();
-        LocalDateTime expiresAt = now.plusDays(properties.getLongToken().getTtlDays());
+        LocalDateTime expiresAt = now.withNano(0).plusDays(properties.getLongToken().getTtlDays());
         ExtensionSession session = new ExtensionSession();
         session.setBrandId(brandId);
         session.setOperatorId(operatorId);
@@ -152,13 +152,15 @@ public class ExtensionSessionService {
         LocalDateTime now = now();
         sessionMapper.touchActive(session.getId(), now, extensionVersion, userAgent);
 
-        LocalDateTime renewThreshold = now.plusDays(properties.getLongToken().getSlideRenewThresholdDays());
-        if (session.getExpiresAt().isAfter(renewThreshold)) {
+        // Expiry records the last renewal time plus TTL. A UTC-day boundary and
+        // the same atomic database guard prevent repeated or concurrent renewals.
+        LocalDateTime renewThreshold = now.toLocalDate().atStartOfDay().plusDays(properties.getLongToken().getTtlDays());
+        if (!session.getExpiresAt().isBefore(renewThreshold)) {
             auditTokenRefresh(session, false, session.getExpiresAt(), null);
             return new ExtensionTokenRefreshResponse(null, false, session.getExpiresAt(), session.getId());
         }
 
-        LocalDateTime renewedExpiresAt = now.plusDays(properties.getLongToken().getTtlDays());
+        LocalDateTime renewedExpiresAt = now.withNano(0).plusDays(properties.getLongToken().getTtlDays());
         int renewed = sessionMapper.renewActiveExpiry(
                 session.getId(),
                 now,

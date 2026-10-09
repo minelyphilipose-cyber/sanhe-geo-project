@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
@@ -31,7 +32,9 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.TimeZone;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -987,12 +990,19 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
-    void createEnvironmentAccountReusesDeletedBindingInsteadOfChangingDatabaseId() {
-        BrowserEnvironmentAccount existing = binding(null, "旧名称", BrowserEnvironmentConstants.LOGIN_UNKNOWN);
+    void createEnvironmentAccountReusesDeletedBindingWithSameIdentityInsteadOfChangingDatabaseId() {
+        BrowserEnvironmentAccount existing = binding(null, "阜阳全屋智能家居", BrowserEnvironmentConstants.LOGIN_UNKNOWN);
         existing.setDeletedAt(LocalDateTime.now().minusMinutes(1));
         when(environmentMapper.selectById(20L)).thenReturn(environment());
         when(selfMediaAccountMapper.selectById(10L)).thenReturn(account());
         when(environmentAccountMapper.selectOldestBySelfMediaAccountIdIncludingDeleted(10L)).thenReturn(existing);
+        when(environmentAccountMapper.selectOne(any())).thenAnswer(invocation -> {
+            LambdaQueryWrapper<BrowserEnvironmentAccount> query = invocation.getArgument(0);
+            String sql = query.getSqlSegment();
+            // Restoring the row makes its unchanged identity visible to the uniqueness lookup.
+            return sql.contains("id <>") && query.getParamNameValuePairs().containsValue(existing.getId())
+                    ? null : existing;
+        });
 
         var response = service.createEnvironmentAccount(new BrowserEnvironmentAccountCreateRequest(
                 20L, 10L, null, "阜阳全屋智能家居"));
@@ -1020,6 +1030,67 @@ class BrowserEnvironmentServiceTest {
         )));
 
         assertTrue(ex.getMessage().contains("AdsPower 浏览器编号或环境代号已被其他启用环境使用"));
+    }
+
+    @Test
+    void selfMediaAutomationReadinessUsesUtcForExtensionExpiryAndHeartbeat() {
+        TimeZone originalZone = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+            ExtensionSession session = extensionSession();
+            session.setLastSeenAt(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+            session.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(20));
+            when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), any(LocalDateTime.class)))
+                    .thenReturn(List.of(localAgentSession()));
+            when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(session));
+            when(environmentMapper.selectList(any())).thenReturn(List.of(environment()));
+            when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of());
+
+            var response = service.selfMediaAutomationReadiness(1L);
+
+            assertTrue(response.localAgent().online());
+            assertTrue(response.extensionBinding().bound());
+            assertTrue(response.extensionBinding().online());
+            assertTrue(response.issues().stream().noneMatch(issue ->
+                    "EXTENSION_NOT_BOUND".equals(issue.code()) || "EXTENSION_OFFLINE".equals(issue.code())));
+        } finally {
+            TimeZone.setDefault(originalZone);
+        }
+    }
+
+    @Test
+    void selfMediaAutomationReadinessKeepsStaleExtensionBoundAndOffersOpenWithoutRebinding() {
+        ExtensionSession session = extensionSession();
+        session.setLastSeenAt(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(11));
+        session.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusDays(1));
+        when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), any(LocalDateTime.class)))
+                .thenReturn(List.of(localAgentSession()));
+        when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(session));
+        when(environmentMapper.selectList(any())).thenReturn(List.of(environment()));
+        when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of());
+
+        var response = service.selfMediaAutomationReadiness(1L);
+
+        assertTrue(response.extensionBinding().bound());
+        assertTrue(!response.extensionBinding().online());
+        assertTrue(response.issues().stream().anyMatch(issue ->
+                "EXTENSION_OFFLINE".equals(issue.code()) && "OPEN_ADSPOWER_ENVIRONMENT".equals(issue.actionKey())));
+    }
+
+    @Test
+    void selfMediaAutomationReadinessRejectsExpiredUtcExtension() {
+        ExtensionSession session = extensionSession();
+        session.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+        when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), any(LocalDateTime.class)))
+                .thenReturn(List.of(localAgentSession()));
+        when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(session));
+        when(environmentMapper.selectList(any())).thenReturn(List.of(environment()));
+        when(selfMediaAccountMapper.selectList(any())).thenReturn(List.of());
+
+        var response = service.selfMediaAutomationReadiness(1L);
+
+        assertTrue(!response.extensionBinding().bound());
+        assertTrue(response.issues().stream().anyMatch(issue -> "EXTENSION_NOT_BOUND".equals(issue.code())));
     }
 
     @Test
@@ -1091,12 +1162,12 @@ class BrowserEnvironmentServiceTest {
         otherEnvironment.setId(51L);
         otherEnvironment.setEnvironmentKey("other_env");
         otherEnvironment.setProviderProfileId("other-profile");
-        otherEnvironment.setLastSeenAt(LocalDateTime.now().minusSeconds(10));
+        otherEnvironment.setLastSeenAt(LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
         ExtensionSession matching = extensionSession();
         matching.setId(52L);
         matching.setEnvironmentKey("geo_b");
         matching.setProviderProfileId("profile-1");
-        matching.setLastSeenAt(LocalDateTime.now().minusMinutes(2));
+        matching.setLastSeenAt(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(2));
         when(localAgentSessionMapper.selectActiveByOperatorId(eq(99L), any(LocalDateTime.class)))
                 .thenReturn(List.of(localAgentSession()));
         when(extensionSessionMapper.selectActiveByBrandId(1L)).thenReturn(List.of(otherEnvironment, matching));
@@ -1196,8 +1267,8 @@ class BrowserEnvironmentServiceTest {
         row.setBrandId(1L);
         row.setOperatorId(99L);
         row.setExtensionVersion("1.0.0");
-        row.setLastSeenAt(LocalDateTime.now().minusMinutes(1));
-        row.setExpiresAt(LocalDateTime.now().plusHours(1));
+        row.setLastSeenAt(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+        row.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(1));
         return row;
     }
 }

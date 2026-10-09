@@ -2116,7 +2116,9 @@ public class ProjectSelfMediaScheduleService {
                 ArticlePromptChannels.SELF_MEDIA,
                 plan.platform()
         );
-        if (!TemplatePerspectiveCodes.isThirdParty(perspective.perspectiveCode())) {
+        if (!TemplatePerspectiveCodes.isThirdParty(perspective.perspectiveCode())
+                || ("sohu".equals(plan.platform())
+                && !TemplatePerspectiveCodes.REVIEW_RECOMMEND.equals(perspective.perspectiveCode()))) {
             if (questions.isEmpty()) {
                 throw new BizException(ERROR_CODE, "项目缺少 A 级问题，无法生成自媒体排期文章");
             }

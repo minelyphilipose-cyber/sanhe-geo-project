@@ -41,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.text.Normalizer;
 import java.util.Locale;
 import java.util.ArrayList;
@@ -65,7 +66,7 @@ public class BrowserEnvironmentService {
     private final ExtensionProperties extensionProperties;
     private final SelfMediaLoginVerificationService loginVerificationService;
     private final SelfMediaLoginObservationService loginObservationService;
-    private static final Set<String> SEMI_AUTO_PLATFORMS = Set.of("toutiao", "baijiahao", "zhihu", "xiaohongshu");
+    private static final Set<String> SEMI_AUTO_PLATFORMS = Set.of("toutiao", "baijiahao", "zhihu", "xiaohongshu", "sohu");
 
     public List<BrowserEnvironmentVO> listEnvironments(Long brandId) {
         SysUser operator = currentUserService.requireCurrentUser();
@@ -82,6 +83,8 @@ public class BrowserEnvironmentService {
         SysUser operator = currentUserService.requireCurrentUser();
         brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.READ);
         LocalDateTime now = LocalDateTime.now();
+        // ExtensionSessionService stores session timestamps in UTC, unlike helper timestamps.
+        LocalDateTime extensionNow = LocalDateTime.now(ZoneOffset.UTC);
         List<SelfMediaAutomationReadinessVO.Issue> issues = new ArrayList<>();
 
         LocalAgentSession localAgent = localAgentSessionMapper.selectActiveByOperatorId(operator.getId(), now).stream()
@@ -125,7 +128,7 @@ public class BrowserEnvironmentService {
         }
 
         List<ExtensionSession> activeExtensionSessions = extensionSessionMapper.selectActiveByBrandId(brandId).stream()
-                .filter(item -> item.getExpiresAt() != null && item.getExpiresAt().isAfter(now))
+                .filter(item -> item.getExpiresAt() != null && item.getExpiresAt().isAfter(extensionNow))
                 .toList();
         ExtensionSession extensionSession = activeExtensionSessions.stream()
                 .filter(item -> extensionSessionMatchesEnvironment(item, defaultEnvironment))
@@ -140,7 +143,7 @@ public class BrowserEnvironmentService {
                 new SelfMediaAutomationReadinessVO.ExtensionBinding(
                         extensionSession != null,
                         extensionSession != null && extensionSession.getLastSeenAt() != null
-                                && extensionSession.getLastSeenAt().isAfter(now.minusMinutes(10)),
+                                && extensionSession.getLastSeenAt().isAfter(extensionNow.minusMinutes(10)),
                         extensionSession == null ? null : extensionSession.getId(),
                         extensionSession == null ? null : extensionSession.getEnvironmentKey(),
                         extensionSession == null ? null : extensionSession.getProviderProfileId(),
@@ -260,7 +263,8 @@ public class BrowserEnvironmentService {
             case "LOCAL_AGENT_NOT_BOUND", "LOCAL_AGENT_OFFLINE" -> "OPEN_LOCAL_HELPER_SETUP";
             case "ADSPOWER_ENVIRONMENT_NOT_CONFIGURED" -> "IMPORT_ADSPOWER_ENVIRONMENT";
             case "ADSPOWER_ENVIRONMENT_DISABLED" -> "EDIT_BROWSER_ENVIRONMENT";
-            case "EXTENSION_NOT_BOUND", "EXTENSION_OFFLINE", "EXTENSION_VERSION_OUTDATED" -> "OPEN_AND_BIND_EXTENSION";
+            case "EXTENSION_NOT_BOUND", "EXTENSION_VERSION_OUTDATED" -> "OPEN_AND_BIND_EXTENSION";
+            case "EXTENSION_OFFLINE" -> "OPEN_ADSPOWER_ENVIRONMENT";
             case "ACCOUNT_ENVIRONMENT_NOT_BOUND" -> "BIND_UNBOUND_ACCOUNTS";
             case "ACCOUNT_LOGIN_MISMATCH", "ACCOUNT_LOGIN_EXPIRED", "ACCOUNT_LOGIN_REQUIRED",
                     "ACCOUNT_LOGIN_ERROR", "ACCOUNT_LOGIN_UNKNOWN" -> "OPEN_ADSPOWER_ENVIRONMENT";
@@ -522,7 +526,7 @@ public class BrowserEnvironmentService {
         row.setSelfMediaAccountId(account.getId());
         row.setPlatform(account.getPlatform());
         row.setExpectedAccountName(trimToNull(request.expectedAccountName()));
-        ensureExpectedIdentityNotClaimed(null, account.getBrandId(), account.getPlatform(), row.getExpectedAccountName());
+        ensureExpectedIdentityNotClaimed(row.getId(), account.getBrandId(), account.getPlatform(), row.getExpectedAccountName());
         row.setLoginStatus(BrowserEnvironmentConstants.LOGIN_UNKNOWN);
         row.setUpdatedBy(operator.getId());
         row.setUpdatedAt(now);
@@ -1242,6 +1246,7 @@ public class BrowserEnvironmentService {
             case "zhihu" -> "知乎";
             case "xiaohongshu" -> "小红书";
             case "baijiahao" -> "百家号";
+            case "sohu" -> "搜狐";
             case "douyin" -> "抖音图文";
             default -> normalized;
         };

@@ -1,7 +1,7 @@
-importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
+importScripts('env-config.js', 'fill-result.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'platform-sohu.js')
 
-const EXTENSION_VERSION = '0.2.6'
-const EXTENSION_BUILD_REVISION = '20260829.1'
+const EXTENSION_VERSION = '0.2.10'
+const EXTENSION_BUILD_REVISION = '20261008.3'
 const DOUYIN_MANAGE_URL = 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
 const TOUTIAO_MANAGE_URL = 'https://mp.toutiao.com/profile_v4/graphic/articles'
 const XIAOHONGSHU_MANAGE_URL = 'https://creator.xiaohongshu.com/new/note-manager'
@@ -33,10 +33,11 @@ const DEFAULT_PROFILE_CONFIGS = {
 const BUILD_PROFILE_CONFIG = globalThis.GEO_ENV_BUILD_CONFIG || DEFAULT_PROFILE_CONFIGS.prod
 const BUILD_PROFILE_KEY = normalizeProfileKey(BUILD_PROFILE_CONFIG.profileKey || DEFAULT_PROFILE_KEY)
 const BUILD_PROFILE_LABEL = BUILD_PROFILE_CONFIG.profileLabel || BUILD_PROFILE_CONFIG.label || DEFAULT_PROFILE_CONFIGS[BUILD_PROFILE_KEY]?.label || BUILD_PROFILE_KEY
-const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 'baijiahao', 'douyin'])
+const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 'baijiahao', 'douyin', 'sohu'])
 const autoLoginReportAtByKey = new Map()
 const autoPollTabUpdatedAtByKey = new Map()
 const bindIntentInFlight = new Set()
+let sohuSubmissionWriteChain = Promise.resolve()
 let douyinImageTextStateWriteChain = Promise.resolve()
 const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
 const RUNTIME_STATUS_HEARTBEAT_ALARM = 'geo-runtime-status-heartbeat'
@@ -216,11 +217,14 @@ async function apiRequest(config, path, init = {}, extensionToken) {
 }
 
 function isExtensionUnauthorized(error) {
+  if ([408, 429].includes(error?.status) || error?.status >= 500) return false
   const message = String(error?.message || '')
   return error?.code === 70002
-    || message.includes('extension token invalid')
-    || message.includes('extension token expired')
-    || message.includes('扩展后台绑定已失效')
+    || (error?.status > 0 && (
+      message.includes('extension token invalid')
+      || message.includes('extension token expired')
+      || message.includes('扩展后台绑定已失效')
+    ))
 }
 
 async function clearExtensionSession(expectedToken = null) {
@@ -257,10 +261,7 @@ async function refreshExtensionSession(config, session, options = {}) {
 
 async function refreshExtensionSessionOnce(config, session) {
   try {
-    const refreshed = await apiRequest(config, '/api/v1/extension/token/refresh', {
-      method: 'POST',
-      body: JSON.stringify({ extensionVersion: EXTENSION_VERSION }),
-    }, session.extensionToken)
+    const refreshed = await requestExtensionSessionRefresh(config, session.extensionToken)
     const nextSession = {
       ...session,
       sessionId: refreshed?.sessionId || session.sessionId,
@@ -279,6 +280,34 @@ async function refreshExtensionSessionOnce(config, session) {
       throw unauthorized
     }
     throw error
+  }
+}
+
+async function requestExtensionSessionRefresh(config, extensionToken) {
+  // Retry only authorization refresh, never article filling or publication.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+    try {
+      const refreshed = await apiRequest(config, '/api/v1/extension/token/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ extensionVersion: EXTENSION_VERSION }),
+        signal: controller.signal,
+      }, extensionToken)
+      if (!refreshed?.sessionId || !refreshed?.expiresAt) {
+        const error = new Error('后台授权响应不完整，请稍后重试')
+        error.status = 502
+        throw error
+      }
+      return refreshed
+    } catch (error) {
+      const transient = ['TypeError', 'AbortError', 'TimeoutError'].includes(error?.name)
+        || [408, 429].includes(error?.status) || error?.status >= 500
+      if (isExtensionUnauthorized(error) || !transient || attempt === 2) throw error
+    } finally {
+      clearTimeout(timeout)
+    }
+    await delay(500 * (attempt + 1))
   }
 }
 
@@ -1251,6 +1280,12 @@ async function handleTask(config, session, task, options = {}) {
   }
   assertExpectedIdentityPresent(payload)
   payload.precheckedIdentity = precheckedIdentity || null
+  applySohuScheduleOptions(payload, task)
+  if (normalizePlatform(task.platform) === 'sohu') {
+    await appendEventLog({ type: 'sohu_schedule_intent', taskId: task.taskId,
+      scheduleId: payload.platformOptions?.scheduleId || null,
+      scheduleStrategy: payload.platformOptions?.scheduleStrategy || '', autoPublish: payload.autoPublish === true })
+  }
   applyDouyinImageTextPlatformOptions(payload)
 
   const tab = await prepareFillTab(options.fillTabId || null, task.platform, payload.publishUrl)
@@ -1302,6 +1337,19 @@ async function handleTask(config, session, task, options = {}) {
     body: JSON.stringify({ fillResult }),
   }, session.extensionToken)
   return fillResult
+}
+
+function applySohuScheduleOptions(payload = {}, task = {}) {
+  if (normalizePlatform(task.platform) !== 'sohu') return payload
+  const options = payload.platformOptions || {}
+  const scheduleId = Number(options.scheduleId)
+  if (Number.isSafeInteger(scheduleId) && scheduleId > 0
+      && (!task.schedule?.id || Number(task.schedule.id) === scheduleId)
+      && options.scheduleStrategy === 'backend_delayed_publish') {
+    payload.autoPublish = true
+    payload.scheduleRequired = false
+  }
+  return payload
 }
 
 function applyDouyinImageTextPlatformOptions(payload = {}) {
@@ -1629,6 +1677,11 @@ async function ensureTaskIdentityTab(config, session, task, candidateTabId) {
 function normalizeFillTransportError(error, task = {}, payload = {}) {
   const message = error?.message || String(error || '')
   const platform = normalizePlatform(task?.platform || payload?.platform)
+  if (platform === 'sohu' && payload.autoPublish === true && isMessageChannelClosedError(message)) {
+    const normalized = new Error(`SOHU_PUBLISH_NOT_CONFIRMED：搜狐页面跳转，须回查原文章结果，禁止重复提交；${message}`)
+    normalized.code = 'SOHU_PUBLISH_NOT_CONFIRMED'
+    return normalized
+  }
   if (platform === 'douyin' && isMessageChannelClosedError(message)) {
     const normalized = new Error(`抖音填充或发布过程中页面发生跳转，扩展消息通道已关闭；请点击“重新校验”确认平台作品状态。原始错误：${message}`)
     normalized.code = 'DOUYIN_FILL_FAILED'
@@ -1651,6 +1704,9 @@ function normalizeFillResult(fillResult, task = {}) {
 }
 
 async function recoverPublishAfterFillError(tabId, task, payload, error) {
+  if (normalizePlatform(task?.platform || payload?.platform) === 'sohu') {
+    return recoverSohuPublishAfterFillError(tabId, task, payload, error)
+  }
   const xiaohongshuResult = await recoverXiaohongshuPublishAfterMessageChannelClosed(tabId, task, payload, error).catch((xiaohongshuError) => {
     if (xiaohongshuError !== error) throw xiaohongshuError
     return null
@@ -1672,6 +1728,53 @@ async function recoverPublishAfterFillError(tabId, task, payload, error) {
   })
   if (zhihuResult) return zhihuResult
   return recoverToutiaoScheduleAfterWorksListTimeout(tabId, task, payload, error)
+}
+
+async function recoverSohuPublishAfterFillError(tabId, task, payload, error) {
+  if (payload.autoPublish !== true) throw error
+  // A navigation can destroy the editor message port after successful submission.
+  // Read only the same tab's works list; recovery must never click publish again.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null)
+    if (globalThis.__GEO_SOHU_PLATFORM__?.isWorksManageUrl(tab?.url)) {
+      await ensureContentScript(tabId)
+      const response = await chrome.tabs.sendMessage(tabId, {
+        type: 'GEO_ENV_READ_SOHU_PUBLISH_RESULT', payload: { ...payload, requireSubmissionAttempt: true },
+      }, { frameId: 0 }).catch(() => null)
+      const verification = response?.result
+      if (response?.ok && verification?.found && ['reviewing', 'published'].includes(verification.platformStatus)) {
+        return {
+          platform: 'sohu', taskId: task.taskId,
+          titleFilled: true, contentFilled: true,
+          publishOptions: {
+            filled: true, submitted: true, published: verification.platformStatus === 'published',
+            publishVerification: verification,
+            message: verification.platformStatus === 'reviewing' ? '搜狐已提交，审核中' : `搜狐内容状态：${verification.platformStatus}`,
+          },
+          recoveredAfterNavigation: true,
+        }
+      }
+    }
+    await delay(750)
+  }
+  throw error
+}
+
+async function reserveSohuSubmissionAttempt(payload) {
+  const write = sohuSubmissionWriteChain.catch(() => {}).then(async () => {
+    const taskId = Number(payload.taskId)
+    if (!Number.isSafeInteger(taskId) || taskId <= 0 || !payload.expectedAccountName || !payload.title) {
+      throw new Error('SOHU_TASK_ID_REQUIRED：提交前必须绑定系统任务和账号')
+    }
+    const key = `geoSohuSubmissionTask:${taskId}`
+    const stored = await chrome.storage.local.get(key)
+    if (stored[key]) throw new Error('SOHU_ALREADY_SUBMITTED：该系统任务已尝试提交，只允许回查结果')
+    const state = { taskId, title: payload.title, accountName: payload.expectedAccountName, attemptedAt: new Date().toISOString() }
+    await chrome.storage.local.set({ [key]: state })
+    return state
+  })
+  sohuSubmissionWriteChain = write
+  return write
 }
 
 async function recoverBaijiahaoAfterMessageChannelClosed(tabId, task, payload, error) {
@@ -2930,12 +3033,13 @@ async function ensureContentScript(tabId) {
   const ping = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' }, { frameId: 0 }).catch(() => null)
   const href = String(ping?.result?.href || '')
   const needsDouyinAdapter = href.includes('creator.douyin.com') && !ping?.result?.adapters?.douyin
+  const needsSohuAdapter = href.includes('mp.sohu.com') && !ping?.result?.adapters?.sohu
   const oldContentScript = ping?.ok && ping.result?.contentScriptVersion && ping.result.contentScriptVersion !== EXTENSION_VERSION
   if (oldContentScript) {
     await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => null)
     await waitForTabComplete(tabId, 45_000).catch(() => null)
     await delay(1200)
-  } else if (ping?.ok && !needsDouyinAdapter) {
+  } else if (ping?.ok && !needsDouyinAdapter && !needsSohuAdapter) {
     return
   }
   await injectContentScripts(tabId, { allFrames: true })
@@ -2943,7 +3047,7 @@ async function ensureContentScript(tabId) {
 }
 
 async function injectContentScripts(tabId, options = {}) {
-  const files = ['fill-result.js', 'identity-policy.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js']
+  const files = ['fill-result.js', 'identity-policy.js', 'platform-baijiahao.js', 'platform-douyin.js', 'platform-toutiao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'platform-sohu.js', 'content-script.js']
   await requireInjectablePlatformTab(tabId)
   try {
     await chrome.scripting.executeScript({
@@ -3117,7 +3221,7 @@ async function resolveFillTab(candidateTabId, platform, publishUrl) {
 async function prepareFillTab(candidateTabId, platform, publishUrl) {
   let tab = await resolveFillTab(candidateTabId, platform, publishUrl)
   try {
-    await waitForTabComplete(tab.id, 45_000)
+    await waitForPublishEditorReady(tab.id, platform)
     await waitForFillContentScriptReadyWithRecovery(tab.id, platform, 30_000)
     return tab
   } catch (error) {
@@ -3125,9 +3229,33 @@ async function prepareFillTab(candidateTabId, platform, publishUrl) {
   }
 
   tab = await chrome.tabs.create({ url: publishUrl, active: true })
-  await waitForTabComplete(tab.id, 45_000)
+  await waitForPublishEditorReady(tab.id, platform)
   await waitForFillContentScriptReadyWithRecovery(tab.id, platform, 30_000)
   return tab
+}
+
+async function waitForPublishEditorReady(tabId, platform) {
+  if (normalizePlatform(platform) !== 'sohu') return waitForTabComplete(tabId, 45_000)
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null)
+    if (!tab) throw codedError('PLATFORM_TAB_GONE', '搜狐编辑页已关闭')
+    if (!globalThis.__GEO_SOHU_PLATFORM__.isPublishUrl(tab.url)) {
+      throw codedError('PLATFORM_TAB_REDIRECTED', '搜狐编辑页已跳转，请核对当前页面')
+    }
+    const state = await executeScriptOnPlatformTab(tabId, {
+      target: { tabId, frameIds: [0] },
+      func: () => {
+        const visible = element => Boolean(element && element.getBoundingClientRect().width > 0
+          && element.getBoundingClientRect().height > 0 && getComputedStyle(element).visibility !== 'hidden')
+        return document.readyState !== 'loading'
+          && visible(document.querySelector('.publish-title input'))
+          && visible(document.querySelector('#editor .ql-editor[contenteditable="true"]'))
+      },
+    }).catch(() => [])
+    if (state[0]?.result === true) return
+    await delay(500)
+  }
+  throw codedError('SOHU_EDITOR_NOT_READY', '搜狐标题框和正文编辑器尚未就绪')
 }
 
 function isReusablePublishTab(platform, currentUrlValue, publishUrlValue) {
@@ -3385,6 +3513,7 @@ function isAutoPollReadyUrl(urlValue) {
   try {
     const url = new URL(urlValue)
     const platform = inferPlatformFromUrl(urlValue)
+    if (platform === 'sohu') return globalThis.__GEO_SOHU_PLATFORM__.isPublishUrl(urlValue)
     if (platform === 'toutiao') {
       return url.hostname === 'mp.toutiao.com' && url.pathname.includes('/graphic/publish')
     }
@@ -3413,6 +3542,7 @@ function isAllowedLoginReportUrl(platform, urlValue) {
   try {
     const url = new URL(urlValue)
     const normalizedPlatform = normalizePlatform(platform)
+    if (normalizedPlatform === 'sohu') return globalThis.__GEO_SOHU_PLATFORM__.isAccountUrl(urlValue)
     if (normalizedPlatform === 'toutiao') {
       return url.hostname === 'mp.toutiao.com'
         && !isToutiaoArticlePreviewUrl(url)
@@ -3487,6 +3617,7 @@ function inferPlatformFromUrl(urlValue) {
   try {
     const url = new URL(urlValue)
     if (url.hostname === 'mp.toutiao.com') return 'toutiao'
+    if (url.hostname === 'mp.sohu.com') return 'sohu'
     if (url.hostname === 'www.zhihu.com' || url.hostname === 'zhihu.com' || url.hostname === 'zhuanlan.zhihu.com') return 'zhihu'
     if (url.hostname === 'creator.xiaohongshu.com' || url.hostname === 'www.xiaohongshu.com') return 'xiaohongshu'
     if (url.hostname === 'baijiahao.baidu.com') return 'baijiahao'
@@ -3505,6 +3636,7 @@ function platformReportPageHint(platform) {
     xiaohongshu: '小红书创作者主页(creator.xiaohongshu.com/new/home?source=official)',
     baijiahao: '百家号个人中心页(baijiahao.baidu.com/builder/rc/settings/accountSet)',
     douyin: '抖音创作者中心首页(creator.douyin.com/creator-micro/home)',
+    sohu: '搜狐账号信息页(mp.sohu.com/mpfe/v4/personalCenter/account?curTab=1)',
   }
   return hints[normalizedPlatform] || `${platform || '对应平台'}后台页`
 }
@@ -3517,12 +3649,14 @@ function platformDisplayName(platform) {
     xiaohongshu: '小红书',
     baijiahao: '百家号',
     douyin: '抖音',
+    sohu: '搜狐',
   }
   return names[normalizedPlatform] || '平台'
 }
 
 function defaultLoginReportUrl(platform) {
   const normalizedPlatform = normalizePlatform(platform)
+  if (normalizedPlatform === 'sohu') return globalThis.__GEO_SOHU_PLATFORM__.ACCOUNT_URL
   if (normalizedPlatform === 'toutiao') return 'https://mp.toutiao.com/profile_v4/personal/info'
   if (normalizedPlatform === 'zhihu') return globalThis.__GEO_ZHIHU_PLATFORM__?.CREATOR_CENTER_URL || 'https://www.zhihu.com/creator/manage/creation/article'
   if (normalizedPlatform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/new/home?source=official'
@@ -3539,6 +3673,7 @@ function isAllowedPlatformHost(platform, host) {
     xiaohongshu: ['creator.xiaohongshu.com', 'www.xiaohongshu.com'],
     baijiahao: ['baijiahao.baidu.com'],
     douyin: ['creator.douyin.com'],
+    sohu: ['mp.sohu.com'],
   }
   const hosts = allowed[normalizedPlatform] || []
   return hosts.includes(host)
@@ -3559,6 +3694,8 @@ function normalizePlatform(value) {
     'baijiahao': 'baijiahao',
     '抖音': 'douyin',
     'douyin': 'douyin',
+    '搜狐': 'sohu',
+    '搜狐号': 'sohu',
   }
   return aliases[text] || text
 }
@@ -3704,7 +3841,7 @@ async function sendFillMessageOnce(tabId, message, options = {}) {
 }
 
 function isAutomatedBrowserPublishPlatform(platform) {
-  return ['baijiahao', 'douyin', 'toutiao', 'xiaohongshu', 'zhihu'].includes(normalizePlatform(platform))
+  return ['baijiahao', 'douyin', 'toutiao', 'xiaohongshu', 'zhihu', 'sohu'].includes(normalizePlatform(platform))
 }
 
 function fillMessageTimeoutMs(platform) {
@@ -3731,6 +3868,7 @@ async function enrichFillMessageError(tabId, platform, error) {
     toutiao: 'TOUTIAO_PUBLISH_NOT_CONFIRMED',
     xiaohongshu: 'XIAOHONGSHU_PUBLISH_NOT_CONFIRMED',
     zhihu: 'ZHIHU_PUBLISH_NOT_CONFIRMED',
+    sohu: 'SOHU_PUBLISH_NOT_CONFIRMED',
   }[normalizedPlatform]
   enriched.code = postSubmissionCode
       && ['submitting_publish', 'verifying_publish_result'].includes(activeStage)
@@ -3821,8 +3959,9 @@ async function dispatchTrustedClick(tabId, click) {
         && !isAllowedPlatformUrl('toutiao', tab.url)
         && !isAllowedPlatformUrl('zhihu', tab.url)
         && !isAllowedPlatformUrl('baijiahao', tab.url)
-        && !isAllowedPlatformUrl('douyin', tab.url))) {
-    throw new Error('真实点击仅允许用于小红书、头条、知乎、百家号或抖音页面')
+        && !isAllowedPlatformUrl('douyin', tab.url)
+        && !isAllowedPlatformUrl('sohu', tab.url))) {
+    throw new Error('真实点击仅允许用于小红书、头条、知乎、百家号、抖音或搜狐页面')
   }
   const target = { tabId }
   await chrome.debugger.attach(target, '1.3')
@@ -4785,6 +4924,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { ok: false, error: 'invalid douyin image-text taskId' }
       }
       const state = await saveDouyinImageTextTaskState(taskId, message.state || {})
+      return { ok: true, state }
+    }
+    if (message?.type === 'GEO_ENV_SOHU_BEFORE_SUBMIT') {
+      if (!globalThis.__GEO_SOHU_PLATFORM__.isPublishUrl(sender.url || sender.tab?.url)) {
+        throw new Error('SOHU_EDITOR_NOT_FOUND：提交状态仅接受搜狐编辑页')
+      }
+      const state = await reserveSohuSubmissionAttempt(message.payload || {})
       return { ok: true, state }
     }
     if (message?.type === 'GEO_ENV_REPORT_LOGIN_STATUS') {

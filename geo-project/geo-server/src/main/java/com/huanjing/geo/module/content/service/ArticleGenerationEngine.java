@@ -44,7 +44,11 @@ public class ArticleGenerationEngine {
     private int articleRequestTimeoutMs = LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS;
 
     public GeneratedArticle generate(GenerateInput input) throws LlmInvokeException {
-        String outboundPrompt = promptFilter.filterOutboundPrompt(
+        boolean sohu = input.structureValidationContext() != null && SohuArticlePolicies.applies(
+                input.structureValidationContext().channelGroupCode(), input.structureValidationContext().channelSubCode());
+        String outboundPrompt = sohu
+                ? promptFilter.filterOutboundPrompt(input.userPrompt(), input.project(), input.brand(), false, true)
+                : promptFilter.filterOutboundPrompt(
                 input.userPrompt(),
                 input.project(),
                 input.brand(),
@@ -53,7 +57,9 @@ public class ArticleGenerationEngine {
         GenerationCall call = invokeModel(input, outboundPrompt);
         LlmInvokeResult result = call.result();
         ArticleModelResolver.ModelSelection model = call.model();
-        String content = normalizeContent(promptFilter.filterGeneratedContent(
+        String content = normalizeContent(sohu
+                ? promptFilter.filterGeneratedContent(result.responseText(), input.project(), input.brand(), false, true)
+                : promptFilter.filterGeneratedContent(
                 result.responseText(),
                 input.project(),
                 input.brand(),
@@ -65,6 +71,7 @@ public class ArticleGenerationEngine {
         if (isDouyin(input.structureValidationContext())) {
             validateDouyinTitle(content, input.maxTitleChars());
         }
+        if (sohu) SohuArticlePolicies.validateTitle(extractTitle(content), input.project(), input.brand());
         TitleLimitResult titleLimit = limitTitle(content, input.maxTitleChars());
         content = titleLimit.content();
         ContentLimitResult contentLimit = limitBodyContent(content, input.maxContentChars());

@@ -33,6 +33,7 @@ import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishC
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleMode;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
+import com.huanjing.geo.module.content.service.adapter.SohuPlatformScheduleAdapter;
 import com.huanjing.geo.module.content.vo.SelfMediaPlatformQuickScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaAutomationOverviewVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
@@ -56,6 +57,9 @@ import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -91,6 +95,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -1199,6 +1204,72 @@ class SelfMediaPublishScheduleServiceTest {
         verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(73L), any());
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "toutiao, platform-quick-dispatch-",
+            "sohu, platform-quick-dispatch-",
+            "toutiao, project-self-media-schedule-",
+            "sohu, project-self-media-schedule-"
+    })
+    void dispatchPlatformQuickSchedulePreservesExistingTaskWithoutReplacementConfirmation(String platform, String requestPrefix) {
+        prepareValidArticleAndAccount();
+        ArticleDraft selectedArticle = article();
+        selectedArticle.setChannelGroupCode("self_media");
+        selectedArticle.setChannelSubCode(platform);
+        when(articleDraftMapper.selectById(10L)).thenReturn(selectedArticle);
+        SelfMediaAccount selectedAccount = account();
+        selectedAccount.setPlatform(platform);
+        when(accountMapper.selectOne(any())).thenReturn(selectedAccount);
+        when(accountMapper.selectById(20L)).thenReturn(selectedAccount);
+        if (platform.equals("sohu")) {
+            SohuPlatformScheduleAdapter adapter = new SohuPlatformScheduleAdapter();
+            when(scheduleAdapterRouter.contract(platform)).thenReturn(Optional.of(adapter.capabilityContract()));
+            when(scheduleAdapterRouter.rules(eq(platform), anyString())).thenReturn(adapter.scheduleRules("backend_delayed_publish"));
+            when(scheduleAdapterRouter.platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION))
+                    .thenReturn(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu", "sohu"));
+        }
+        when(scheduleCapabilityService.readiness(eq(platform), anyString()))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(scheduleCapabilityService.immediatePublishReadiness(eq(platform), anyString()))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        SelfMediaPublishSchedule existing = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        existing.setId(72L);
+        existing.setArticleId(11L);
+        existing.setPlatform(platform);
+        existing.setRequestIdempotencyKey(requestPrefix + "11-" + platform + "-first");
+        existing.setPlannedPublishAt(LocalDateTime.now().plusMinutes(12));
+        existing.setNextAttemptAt(existing.getPlannedPublishAt());
+        when(scheduleMapper.selectSafeReplaceablePendingByBrandPlatformAndPeriod(
+                anyLong(), eq(platform), any(), any(), any(), any())).thenReturn(existing);
+        when(scheduleMapper.selectById(72L)).thenReturn(existing);
+        when(scheduleMapper.cancelSafeReplaceablePendingSchedule(
+                eq(72L), anyLong(), anyString(), any(), any(), any(), any())).thenReturn(1);
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of(existing));
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(73L);
+            when(scheduleMapper.selectById(73L)).thenReturn(row);
+            return 1;
+        });
+
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(
+                quickRequest(platform, false), "platform-quick-dispatch-10-" + platform + "-second");
+
+        assertEquals("created", response.getAction(), response.getMessage());
+        assertNull(response.getReplaceScheduleId());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PENDING, existing.getStatus());
+        assertEquals(73L, response.getCreateResponse().getCreatedSchedules().get(0).getId());
+        if (requestPrefix.equals("platform-quick-dispatch-")) {
+            assertFalse(response.getNextAttemptAt().isBefore(existing.getNextAttemptAt().plusMinutes(3)));
+        }
+        verify(scheduleMapper, never()).cancelSafeReplaceablePendingSchedule(
+                anyLong(), anyLong(), anyString(), any(), any(), any(), any());
+        verify(companyChannelQuotaService, never()).refundSelfMediaSchedule(72L);
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq(platform), eq(73L), any());
+    }
+
     @Test
     void dispatchPlatformQuickScheduleUsesBufferedAttemptTimeInsteadOfBusinessWindow() {
         prepareValidArticleAndAccount();
@@ -1230,12 +1301,86 @@ class SelfMediaPublishScheduleServiceTest {
         verify(companyChannelQuotaService).reserveSelfMediaSchedule(eq(6L), eq(7L), eq("toutiao"), eq(73L), any());
     }
 
-    @Test
-    void dispatchPlatformQuickScheduleCreatesDouyinBrowserTaskDirectlyFromGeneratedArticle() {
+    @ParameterizedTest
+    @CsvSource({"sohu, 14, 17", "sohu, 15, 18", "toutiao, 15, 18", "sohu, 17, 20"})
+    void manualDispatchAvoidsAutomaticSlotsBeyondInitialProtectionWindow(String platform,
+                                                                           int automaticMinute,
+                                                                           int expectedMinute) {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 9, 10, 0);
+        SelfMediaPublishSchedule manual = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        manual.setPlatform(platform);
+        manual.setRequestIdempotencyKey("platform-quick-dispatch-existing");
+        manual.setNextAttemptAt(now.plusMinutes(12));
+        SelfMediaPublishSchedule automatic = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        automatic.setPlatform(platform);
+        automatic.setRequestIdempotencyKey("project-self-media-schedule-existing");
+        automatic.setNextAttemptAt(now.plusMinutes(automaticMinute));
+        SelfMediaPublishSchedule resultCheck = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        resultCheck.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        resultCheck.setNextAttemptAt(now.plusMinutes(expectedMinute));
+        when(scheduleMapper.selectBrandActiveScheduleSlots(eq(8L), any(), any(), anyList()))
+                .thenReturn(List.of(automatic, resultCheck, manual));
+
+        LocalDateTime actual = ReflectionTestUtils.invokeMethod(service,
+                "nextBrandProtectedImmediateAttemptAt", 8L, now);
+
+        assertEquals(now.plusMinutes(expectedMinute), actual);
+        assertTrue(Duration.between(automatic.getNextAttemptAt(), actual).compareTo(Duration.ofMinutes(3)) >= 0);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "scheduled, project-self-media-schedule-",
+            "checking_publish_result, project-self-media-schedule-",
+            "publish_unknown, platform-quick-dispatch-",
+            "published_url_pending, platform-quick-dispatch-"
+    })
+    void manualDispatchDoesNotWaitForPublicationResultCheckSlots(String status, String requestPrefix) {
+        prepareValidArticleAndAccount();
+        when(accountMapper.selectOne(any())).thenReturn(account());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        LocalDateTime clickedAt = LocalDateTime.now();
+        SelfMediaPublishSchedule check = scheduleWithStatus(status);
+        check.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        check.setRequestIdempotencyKey(requestPrefix + "previous");
+        check.setNextAttemptAt(clickedAt.plusMinutes(10).withSecond(0).withNano(0));
+        when(scheduleMapper.selectBrandActiveScheduleSlots(anyLong(), any(), any(), any())).thenReturn(List.of(check));
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(73L);
+            when(scheduleMapper.selectById(73L)).thenReturn(row);
+            return 1;
+        });
+
+        SelfMediaPlatformQuickScheduleResponse response = service.dispatchPlatformQuickSchedule(
+                quickRequest("toutiao", false), "platform-quick-dispatch-new");
+
+        assertEquals("created", response.getAction(), response.getMessage());
+        assertFalse(response.getNextAttemptAt().isBefore(clickedAt.plusMinutes(1)));
+        assertTrue(response.getNextAttemptAt().isBefore(clickedAt.plusMinutes(3)));
+        assertEquals(status, check.getStatus());
+        verify(scheduleMapper, never()).cancelSafeReplaceablePendingSchedule(
+                anyLong(), anyLong(), anyString(), any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {8L, 18L})
+    void dispatchPlatformQuickScheduleCreatesDouyinBrowserTaskDirectlyFromGeneratedArticle(long contentBrandId) {
         ArticleDraft article = article();
+        Brand contentBrand = brand();
+        contentBrand.setId(contentBrandId);
+        contentBrand.setCityName("阜阳市");
+        contentBrand.setBrandName("植伢口腔");
+        contentBrand.setPublicAddress("安徽省阜阳市颍州区测试路1号");
+        if (contentBrandId != 8L) {
+            article.setSubjectBrandId(contentBrandId);
+            when(brandMapper.selectThirdPartySourceBrands()).thenReturn(List.of(brand()));
+        }
         when(articleDraftMapper.selectById(10L)).thenReturn(article);
         when(projectMapper.selectById(7L)).thenReturn(project());
         when(brandMapper.selectById(8L)).thenReturn(brand());
+        when(brandMapper.selectById(contentBrandId)).thenReturn(contentBrand);
         ArticleDraftVersion version = new ArticleDraftVersion();
         version.setContentMarkdown("# article title for check\n\n自动生成的抖音图文正文。");
         when(articleDraftVersionMapper.selectOne(any())).thenReturn(version);
@@ -1281,14 +1426,14 @@ class SelfMediaPublishScheduleServiceTest {
                 "#阜阳全屋定制",
                 "cityName",
                 "全屋定制",
-                "阜阳市测试路",
+                "安徽省阜阳市颍州区测试路1号植伢口腔",
                 List.of(101L, 102L, 103L, 104L),
                 4,
                 "immediate",
                 LocalDateTime.now()
         );
         when(douyinImageTextPublishSnapshotService.buildFromArticle(
-                brand(),
+                contentBrand,
                 article,
                 version.getContentMarkdown(),
                 List.of(101L, 102L, 103L, 104L)
@@ -1302,6 +1447,7 @@ class SelfMediaPublishScheduleServiceTest {
             assertEquals("douyin", row.getPlatform());
             assertEquals(15L, row.getBrowserEnvironmentId());
             assertEquals(25L, row.getBrowserEnvironmentAccountId());
+            assertEquals("安徽省阜阳市颍州区测试路1号植伢口腔", row.getPublishCheckLocationName());
             assertEquals("{\"contentKind\":\"image_text\"}", row.getPublishPayloadJson());
             return 1;
         });
@@ -1318,7 +1464,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("QUICK_DISPATCH_CREATED", response.getCode());
         assertEquals(21L, response.getSelfMediaAccountId());
         verify(douyinImageTextPublishSnapshotService).buildFromArticle(
-                any(Brand.class),
+                eq(contentBrand),
                 eq(article),
                 eq(version.getContentMarkdown()),
                 eq(List.of(101L, 102L, 103L, 104L))
@@ -1741,8 +1887,71 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED, response.getStatus());
         assertEquals("https://example.test/post/1", response.getPlatformPublishedUrl());
         verify(scheduleMapper).updateById(row);
-        verify(companyChannelQuotaService).confirmSelfMediaSchedule(93L);
+        verify(companyChannelQuotaService).confirmSelfMediaSchedule(eq(93L), any());
         verify(environmentLockService).release(93L);
+    }
+
+    @Test
+    void duplicatePublishedConfirmationReconcilesQuotaWithoutAnotherPublishRecord() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED);
+        row.setPlatform("sohu");
+        row.setId(93L);
+        row.setPlannedPublishAt(LocalDateTime.of(2026, 10, 8, 9, 17));
+        row.setPlatformPublishedUrl("https://www.sohu.com/a/1084927624_122895192");
+        row.setFailureCode("SOHU_PUBLISH_NOT_CONFIRMED");
+        row.setNextAttemptAt(LocalDateTime.now());
+        when(scheduleMapper.selectById(93L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.confirmPublished(93L, row.getPlatformPublishedUrl());
+
+        assertNull(response.getFailureCode());
+        assertNull(response.getNextAttemptAt());
+        verify(companyChannelQuotaService).confirmSelfMediaSchedule(93L, LocalDate.of(2026, 10, 8));
+        verify(articlePublishRecordMapper, never()).insert(any(ArticlePublishRecord.class));
+        assertThrows(BizException.class, () -> service.confirmPublished(93L, "https://www.sohu.com/a/999_122895192"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"toutiao, publish_failed", "sohu, publish_failed",
+            "toutiao, published_confirmed", "sohu, published_confirmed"})
+    void confirmPublishedKeepsActualResultWhenReleasedQuotaCannotBeRestored(String platform, String status) {
+        var bindingService = mock(com.huanjing.geo.module.customer.service.CompanyPackageBindingService.class);
+        var usageMapper = mock(com.huanjing.geo.module.content.mapper.CompanyChannelQuotaUsageMapper.class);
+        var ledgerMapper = mock(com.huanjing.geo.module.content.mapper.CompanyChannelQuotaLedgerMapper.class);
+        var systemAlerts = mock(com.huanjing.geo.module.system.service.SystemAlertService.class);
+        var binding = new com.huanjing.geo.module.customer.entity.CompanyPackageBinding();
+        binding.setChannelQuotaSnapshot("[{\"channelCode\":\"self_media:" + platform
+                + "\",\"periodType\":\"month\",\"quotaLimit\":13,\"enabled\":true}]");
+        var ledger = new com.huanjing.geo.module.content.entity.CompanyChannelQuotaLedger();
+        ledger.setId(501L);
+        ledger.setCompanyId(7L);
+        ledger.setProjectId(9L);
+        ledger.setChannelCode("self_media:" + platform);
+        ledger.setStatus("refunded");
+        when(ledgerMapper.selectByBiz("self_media_schedule", "93")).thenReturn(ledger);
+        when(bindingService.requireActiveBinding(7L)).thenReturn(binding);
+        when(ledgerMapper.reserveReleased(eq(501L), eq("month"), eq("2026-10"), any())).thenReturn(1);
+        when(usageMapper.tryReserve(7L, "self_media:" + platform, "month", "2026-10")).thenReturn(0);
+        ReflectionTestUtils.setField(service, "companyChannelQuotaService", new CompanyChannelQuotaService(
+                bindingService, usageMapper, ledgerMapper, distributionTaskMapper, accountMapper, systemAlerts, transactionManager));
+        SelfMediaPublishSchedule row = scheduleWithStatus(status);
+        row.setId(93L);
+        row.setPlatform(platform);
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        row.setPlannedPublishAt(LocalDateTime.of(2026, 10, 8, 9, 17));
+        row.setPlatformPublishedUrl(platform.equals("sohu")
+                ? "https://www.sohu.com/a/1084927624_122895192"
+                : "https://www.toutiao.com/article/123/");
+        when(scheduleMapper.selectById(93L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO result = service.confirmPublished(93L, row.getPlatformPublishedUrl());
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED, result.getStatus());
+        assertEquals(row.getPlatformPublishedUrl(), result.getPlatformPublishedUrl());
+        verify(scheduleMapper).updateById(row);
+        verify(ledgerMapper, never()).updateStatusFromReserved(anyLong(), eq("confirmed"), any());
+        verify(systemAlerts).createRecipientAlert(eq("quota_schedule_confirmation_failed"), anyString(),
+                anyString(), anyString(), any(), any(), eq("admin"), eq("quota-schedule-confirmation-93"));
     }
 
     @Test
@@ -3011,6 +3220,7 @@ class SelfMediaPublishScheduleServiceTest {
     @Test
     void recoverTimedOutLocalAgentSchedulesOnlyRechecksWhenSubmissionMayHaveStarted() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
+        row.setPlatform("sohu");
         row.setId(121L);
         row.setCreatedBy(88L);
         row.setRuntimeStage("publish_submitting");
@@ -3030,6 +3240,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(88L, row.getUpdatedBy());
         verify(currentUserService, never()).requireCurrentUser();
         verify(environmentLockService).release(121L);
+        verify(companyChannelQuotaService, never()).refundSelfMediaSchedule(any());
     }
 
     @Test
@@ -3109,6 +3320,46 @@ class SelfMediaPublishScheduleServiceTest {
         verify(scheduleMapper).updateById(row);
         verify(articleDraftMapper).updateById(article);
         verify(environmentLockService).release(114L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"toutiao", "baijiahao", "zhihu", "xiaohongshu", "douyin", "sohu"})
+    void automaticRetryUsesSharedQuotaAndExecutionTimeSlotRules(String platform) {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        row.setId(114L);
+        row.setPlatform(platform);
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        row.setRequestIdempotencyKey("project-self-media-schedule-existing");
+        row.setDiagnosticsJson("{\"reason\":\"platform schedule time expired\"}");
+        when(scheduleMapper.selectById(114L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO result = service.retryNow(114L);
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PENDING, result.getStatus());
+        verify(companyChannelQuotaService).restoreSelfMediaScheduleReservation(eq(114L), any());
+        verify(scheduleMapper).selectBrandActiveScheduleSlots(eq(8L), any(), any(),
+                eq(new ArrayList<>(Set.of(SelfMediaPublishScheduleConstants.STATUS_PENDING,
+                        SelfMediaPublishScheduleConstants.STATUS_FILLING, SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
+                        SelfMediaPublishScheduleConstants.STATUS_SCHEDULING))));
+    }
+
+    @Test
+    void retryDoesNotWaitForItsOwnPriorAttemptOrPublicationResultCheck() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 9, 10, 0);
+        SelfMediaPublishSchedule manual = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        manual.setId(114L);
+        manual.setRequestIdempotencyKey("platform-quick-dispatch-existing");
+        manual.setNextAttemptAt(now.plusMinutes(12));
+        SelfMediaPublishSchedule check = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED);
+        check.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        check.setNextAttemptAt(now.plusMinutes(10));
+        when(scheduleMapper.selectBrandActiveScheduleSlots(eq(8L), any(), any(), anyList()))
+                .thenReturn(List.of(manual, check));
+
+        LocalDateTime actual = ReflectionTestUtils.invokeMethod(service,
+                "nextBrandProtectedImmediateAttemptAt", 8L, now, 114L);
+
+        assertEquals(now.plusMinutes(2), actual);
     }
 
     @Test
@@ -3387,9 +3638,144 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("https://cdn.test/cover-117.jpg", response.getPublishCheckCoverUrl());
         assertEquals(platformScheduledAt, response.getPlatformScheduledAt());
         assertEquals(platformScheduledAt.plusHours(1), response.getNextAttemptAt());
-        verify(companyChannelQuotaService).confirmSelfMediaSchedule(117L);
+        verify(companyChannelQuotaService).confirmSelfMediaSchedule(eq(117L), any());
         verify(companyChannelQuotaService).confirmDistribution(317L);
         verify(environmentLockService).release(117L);
+    }
+
+    @Test
+    void sohuReviewSubmissionQueuesCheckAndKeepsArticleDistributing() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        row.setId(117L);
+        row.setPlatform("sohu");
+        row.setDistributionTaskId(317L);
+        when(scheduleMapper.selectById(117L)).thenReturn(row);
+        ArticleDraft article = article();
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        SelfMediaPublishScheduleVO result = service.markLocalAgentExecutionScheduled(117L,
+                "{\"fillResult\":{\"publishOptions\":{\"publishVerification\":{\"verified\":false,\"submissionVerified\":true,\"platformStatus\":\"reviewing\",\"platformPublishId\":\"1084790665\"}}}}");
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED, result.getStatus());
+        assertEquals("publish_reviewing", result.getRuntimeStage());
+        assertEquals("distributing", article.getStatus());
+        assertNull(result.getPublishedConfirmedAt());
+        assertNull(result.getPlatformPublishedUrl());
+        verify(articlePublishRecordMapper, never()).insert(any());
+        verify(companyChannelQuotaService).confirmSelfMediaSchedule(eq(117L), any());
+    }
+
+    @Test
+    void sohuCannotConfirmReviewingOrWrongArticleUrlAsPublished() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        row.setId(119L);
+        row.setPlatform("sohu");
+        row.setPlatformPublishId("1084790665");
+        when(scheduleMapper.selectById(119L)).thenReturn(row);
+        assertThrows(BizException.class, () -> service.markClaimedPublishedConfirmed(119L,
+                "https://www.sohu.com/a/1084790665_122895192", "{\"platformStatus\":\"reviewing\"}"));
+        for (String url : List.of("https://www.sohu.com.evil.example/a/1084790665_122895192", "https://www.sohu.com/a/999_122895192")) {
+            assertThrows(BizException.class, () -> service.markClaimedPublishedConfirmed(119L, url, "{\"platformStatus\":\"published\"}"));
+        }
+        verify(scheduleMapper, never()).updateById(any(SelfMediaPublishSchedule.class));
+        verify(companyChannelQuotaService, never()).confirmDistribution(any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"11, scheduled", "12, publish_unknown"})
+    void sohuReviewChecksContinueUntilTheContractLimitWithoutRefillOrRefund(int attempts, String expectedStatus) {
+        SelfMediaPublishSchedule row = localAgentPublishCheckSchedule(119L, attempts, 3);
+        row.setPlatform("sohu");
+        row.setPlatformPublishId("1084790665");
+        row.setRequestIdempotencyKey("platform-quick-dispatch-review-boundary");
+        when(scheduleMapper.selectById(119L)).thenReturn(row);
+        when(scheduleAdapterRouter.contract("sohu"))
+                .thenReturn(Optional.of(new SohuPlatformScheduleAdapter().capabilityContract()));
+
+        SelfMediaPublishScheduleVO result = service.markClaimedPublishCheckUnknown(119L,
+                "{\"platformStatus\":\"reviewing\",\"platformPublishId\":\"1084790665\"}");
+
+        assertEquals(expectedStatus, result.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, result.getQueueKind());
+        assertEquals("publish_reviewing", result.getRuntimeStage());
+        assertEquals(12, row.getMaxAttempts());
+        assertEquals("1084790665", row.getPlatformPublishId());
+        assertNull(row.getLockedUntil());
+        assertNull(result.getPublishedConfirmedAt());
+        if (attempts < 12) {
+            assertNotNull(result.getNextAttemptAt());
+            assertTrue(result.getNextAttemptAt().isAfter(LocalDateTime.now()));
+            assertNull(result.getFailureCode());
+        } else {
+            assertNull(result.getNextAttemptAt());
+            assertEquals("SOHU_REVIEW_PENDING_MANUAL", result.getFailureCode());
+        }
+        verify(environmentLockService).release(119L);
+        verify(companyChannelQuotaService, never()).refundSelfMediaSchedule(any());
+        verifyNoInteractions(contentDistributionService);
+        verify(articlePublishRecordMapper, never()).insert(any());
+    }
+
+    @Test
+    void sohuMatchedPublicArticleClosesTheCheckAndUpdatesTheArticle() {
+        SelfMediaPublishSchedule row = localAgentPublishCheckSchedule(119L, 2, 12);
+        row.setPlatform("sohu");
+        row.setDistributionTaskId(319L);
+        row.setPlatformPublishId("1084790665");
+        ArticleDraft article = article();
+        when(scheduleMapper.selectById(119L)).thenReturn(row);
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+
+        SelfMediaPublishScheduleVO result = service.markClaimedPublishedConfirmed(119L,
+                "https://www.sohu.com/a/1084790665_122895192",
+                "{\"platformStatus\":\"published\",\"platformPublishId\":\"1084790665\"}");
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED, result.getStatus());
+        assertEquals("published_confirmed", result.getRuntimeStage());
+        assertEquals("https://www.sohu.com/a/1084790665_122895192", result.getPlatformPublishedUrl());
+        assertNotNull(result.getPublishedConfirmedAt());
+        assertNull(result.getNextAttemptAt());
+        assertNull(row.getLockedUntil());
+        assertEquals("published", article.getStatus());
+        verify(distributionTaskMapper).update(eq(null), any());
+        verify(environmentLockService).release(119L);
+        verify(companyChannelQuotaService, never()).refundSelfMediaSchedule(any());
+    }
+
+    @Test
+    void sohuRejectionClosesTaskAndRefundsTheOriginalScheduleReservation() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        row.setId(120L);
+        row.setPlatform("sohu");
+        row.setDistributionTaskId(320L);
+        row.setPlatformPublishId("1084790665");
+        row.setNextAttemptAt(LocalDateTime.now());
+        row.setRuntimeStage("publish_checking");
+        when(scheduleMapper.selectById(120L)).thenReturn(row);
+        SelfMediaPublishScheduleVO result = service.markClaimedPublishFailed(120L, "SOHU_REVIEW_REJECTED", "审核未通过", "{}");
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED, result.getStatus());
+        assertEquals("SOHU_REVIEW_REJECTED", result.getFailureCode());
+        assertNull(row.getNextAttemptAt());
+        assertNull(result.getNextAttemptAt());
+        assertEquals("publish_rejected", row.getRuntimeStage());
+        assertEquals("审核未通过", result.getRuntimeStageMessage());
+        verify(distributionTaskMapper).update(eq(null), any(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class));
+        verify(companyChannelQuotaService).refundSelfMediaSchedule(120L);
+        verify(companyChannelQuotaService, never()).confirmDistribution(any());
+    }
+
+    @Test
+    void historicalSohuRejectionHidesStalePollingWithoutChangingTheStoredRow() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED);
+        row.setPlatform("sohu");
+        row.setFailureCode("SOHU_REVIEW_REJECTED");
+        row.setFailureMessage("文章被平台判定为广告软文");
+        row.setRuntimeStage("publish_checking");
+        row.setNextAttemptAt(LocalDateTime.now());
+        SelfMediaPublishScheduleVO result = SelfMediaPublishScheduleVO.from(row);
+        assertNull(result.getNextAttemptAt());
+        assertEquals("publish_rejected", result.getRuntimeStage());
+        assertEquals(row.getFailureMessage(), result.getRuntimeStageMessage());
+        assertNotNull(row.getNextAttemptAt());
+        assertEquals("publish_checking", row.getRuntimeStage());
     }
 
     @Test
@@ -3436,7 +3822,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertTrue(response.getDiagnosticsJson().contains("\"platformPublishedUrl\":\"https://example.test/article/118\""));
         assertEquals("published", article.getStatus());
         verify(articleDraftMapper).updateById(article);
-        verify(companyChannelQuotaService).confirmSelfMediaSchedule(118L);
+        verify(companyChannelQuotaService).confirmSelfMediaSchedule(eq(118L), any());
         verify(companyChannelQuotaService).confirmDistribution(318L);
         verify(environmentLockService).release(118L);
     }

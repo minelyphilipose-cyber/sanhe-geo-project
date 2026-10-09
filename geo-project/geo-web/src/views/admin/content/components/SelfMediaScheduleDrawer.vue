@@ -54,6 +54,7 @@
           <el-option label="知乎" value="zhihu" />
           <el-option label="小红书" value="xiaohongshu" />
           <el-option label="抖音图文" value="douyin" />
+          <el-option label="搜狐" value="sohu" />
         </el-select>
         <el-select v-model="query.status" class="schedule-filter" clearable placeholder="状态">
           <el-option v-for="item in activeStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -1252,7 +1253,7 @@ function stageLabel(row: SelfMediaPublishSchedule) {
 }
 
 function isBackendDelayedPlatform(platform?: string | null) {
-  return platform === 'zhihu'
+  return platform === 'zhihu' || platform === 'sohu'
 }
 
 function isOfficialApiPlatform(platform?: string | null) {

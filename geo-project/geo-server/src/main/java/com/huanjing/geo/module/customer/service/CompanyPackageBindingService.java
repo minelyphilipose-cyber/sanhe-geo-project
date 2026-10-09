@@ -484,7 +484,7 @@ public class CompanyPackageBindingService {
     }
 
     private List<ChannelQuotaSnapshotItem> partnerVisibleChannelSnapshot(List<PackageChannelQuotaConfig> channelQuotas) {
-        Set<String> allowedSelfMedia = Set.of("wechat", "douyin", "toutiao", "zhihu", "baijiahao", "xiaohongshu");
+        Set<String> allowedSelfMedia = Set.of("wechat", "douyin", "toutiao", "zhihu", "baijiahao", "xiaohongshu", "sohu");
         return toSnapshot(channelQuotas).stream()
                 .filter(item -> {
                     String code = item.getChannelCode();

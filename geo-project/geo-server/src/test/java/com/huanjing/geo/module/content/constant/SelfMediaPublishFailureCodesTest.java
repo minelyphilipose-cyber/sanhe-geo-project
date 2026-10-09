@@ -9,6 +9,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SelfMediaPublishFailureCodesTest {
 
     @Test
+    void sohuDailyLimitAndImageValidationDoNotAutomaticallyRetrySubmission() {
+        for (String code : new String[]{"SOHU_DAILY_LIMIT_REACHED", "SOHU_DAILY_QUOTA_NOT_CONFIRMED", "SOHU_IMAGE_UPLOAD_NOT_CONFIRMED", "SOHU_IMAGE_FILE_INVALID"}) {
+            assertFalse(SelfMediaPublishFailureCodes.retryable(code));
+            assertFalse(SelfMediaPublishFailureCodes.isScheduleExecutionRetryable(code));
+            assertFalse(SelfMediaPublishFailureCodes.isPostSubmissionVerificationFailure(code));
+        }
+        assertEquals("搜狐今日发文额度已用完", SelfMediaPublishFailureCodes.label("SOHU_DAILY_LIMIT_REACHED"));
+    }
+
+    @Test
     void wechatApiUnauthorizedHasActionableMetadata() {
         assertEquals("WECHAT_API_UNAUTHORIZED",
                 SelfMediaPublishFailureCodes.classifyByMessage("api unauthorized rid: rid-from-wechat"));

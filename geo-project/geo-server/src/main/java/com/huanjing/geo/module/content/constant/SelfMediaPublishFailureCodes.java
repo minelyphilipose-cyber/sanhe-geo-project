@@ -16,6 +16,7 @@ public final class SelfMediaPublishFailureCodes {
     private static final Pattern EXPLICIT_CODE_PATTERN = Pattern.compile("^([A-Z0-9_]{3,80})[：:]");
 
     private static final Set<String> LOCAL_AGENT_PUBLISH_CHECK_TERMINAL_CODES = Set.of(
+            "SOHU_REVIEW_REJECTED",
             BAIJIAHAO_REVIEW_REJECTED,
             BAIJIAHAO_WORK_WITHDRAWN,
             DOUYIN_REVIEW_REJECTED
@@ -68,6 +69,8 @@ public final class SelfMediaPublishFailureCodes {
     );
 
     private static final Set<String> POST_SUBMISSION_VERIFICATION_CODES = Set.of(
+            "SOHU_PUBLISH_NOT_CONFIRMED",
+            "SOHU_ALREADY_SUBMITTED",
             "DOUYIN_PUBLISH_NOT_CONFIRMED",
             "TOUTIAO_PUBLISH_NOT_CONFIRMED",
             "XIAOHONGSHU_PUBLISH_NOT_CONFIRMED",
@@ -78,6 +81,14 @@ public final class SelfMediaPublishFailureCodes {
     );
 
     private static final Map<String, FailureMetadata> METADATA = Map.ofEntries(
+            entry("SOHU_DAILY_LIMIT_REACHED", "搜狐今日发文额度已用完", false, "搜狐账号每天最多发5篇，请次日重新安排；不要重复提交。"),
+            entry("SOHU_DAILY_QUOTA_NOT_CONFIRMED", "搜狐剩余额度未确认", false, "打开搜狐编辑页核对今日剩余发文额度，再恢复原任务。"),
+            entry("SOHU_IMAGE_UPLOAD_NOT_CONFIRMED", "搜狐正文插图上传未确认", false, "检查正文插图是否完整上传并显示，确认后恢复原任务。"),
+            entry("SOHU_IMAGE_FILE_INVALID", "搜狐正文插图格式或大小不符", false, "使用不超过10MB的JPG、PNG或GIF插图。"),
+            entry("SOHU_CONTENT_IMAGE_REQUIRED", "搜狐文章缺少正文插图", false, "先为文章正文添加插图，再恢复原任务。"),
+            entry("SOHU_PUBLISH_NOT_CONFIRMED", "搜狐提交结果待核对", true, "仅回查我的内容确认审核及发布结果，禁止重复提交。", "RETRY_NOW", "重新校验", "api"),
+            entry("SOHU_ALREADY_SUBMITTED", "搜狐任务已尝试提交", true, "仅回查原文章结果，禁止重新提交。", "RETRY_NOW", "重新校验", "api"),
+            entry("SOHU_REVIEW_REJECTED", "搜狐文章审核未通过", false, "查看搜狐我的内容中的审核原因，修改文章后创建新任务。"),
             entry("DISTRIBUTION_QUOTA_EXHAUSTED", "分发额度已用尽", false, "补充分发额度后重新创建排期。", "OPEN_PACKAGE_QUOTA", "查看套餐额度", "navigate"),
             entry("CHANNEL_QUOTA_EXHAUSTED", "渠道额度已用完", false, "补充该平台渠道额度后重新创建排期。", "OPEN_PACKAGE_QUOTA", "查看渠道额度", "navigate"),
             entry("CHANNEL_QUOTA_UNAVAILABLE", "渠道额度配置不可用", false, "检查品牌或平台渠道额度配置。", "OPEN_PACKAGE_QUOTA", "检查额度配置", "navigate"),

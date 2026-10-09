@@ -549,6 +549,7 @@
       :toutiao-accounts="toutiaoAccounts"
       :baijiahao-accounts="baijiahaoAccounts"
       :zhihu-accounts="zhihuAccounts"
+      :sohu-accounts="sohuAccounts"
       :xiaohongshu-accounts="xiaohongshuAccounts"
       :current-platform-accounts="currentPlatformAccounts"
       :selected-self-media-quota-hint="selectedSelfMediaQuotaHint"
@@ -702,6 +703,7 @@ const {
   toutiaoAccounts,
   baijiahaoAccounts,
   zhihuAccounts,
+  sohuAccounts,
   xiaohongshuAccounts,
   checkingSelfMediaAccountId,
   imageFolderScope,

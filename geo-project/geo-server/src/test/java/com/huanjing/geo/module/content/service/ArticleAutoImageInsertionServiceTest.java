@@ -9,6 +9,8 @@ import com.huanjing.geo.module.customer.service.BrandMaterialPublicUrlService;
 import com.huanjing.geo.module.project.entity.Project;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 
@@ -20,6 +22,44 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ArticleAutoImageInsertionServiceTest {
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3})
+    void sohuInsertsSelectedCoverFirstAndDoesNotRepeatIt(int availableIllustrations) {
+        String cover = "https://cdn.example.com/cover.png";
+        List<BrandMaterial> materials = new java.util.ArrayList<>();
+        materials.add(material(99L, "封面.png", cover));
+        for (int i = 0; i < availableIllustrations; i++) {
+            materials.add(material((long) i + 1, "插图" + i + ".png", "https://cdn.example.com/" + i + ".png"));
+        }
+        when(folderMapper.selectList(any())).thenReturn(List.of());
+        when(brandMaterialMapper.selectList(any())).thenReturn(materials);
+        when(publicUrlService.buildPublicStreamUrl(any())).thenAnswer(invocation ->
+                ((BrandMaterial) invocation.getArgument(0)).getFileUrl());
+        String markdown = "# 标题\n\n第一段正文。\n\n第二段正文。";
+
+        String result = service.insertForChannel(project(), "self_media", "sohu", markdown, cover);
+
+        assertThat(result).contains("第一段正文。\n\n![封面图](" + cover + ")");
+        assertThat(result.indexOf("![封面图]")).isEqualTo(result.indexOf("!["));
+        assertThat(countOccurrences(result, "![")).isEqualTo(1 + Math.min(2, availableIllustrations));
+        assertThat(countOccurrences(result, cover)).isEqualTo(1);
+        assertThat(service.insertForChannel(project(), "self_media", "sohu", result, cover)).isEqualTo(result);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3, 4})
+    void sohuUsesUpToThreeAvailableImagesAndAllowsNoImages(int available) {
+        List<BrandMaterial> materials = java.util.stream.IntStream.range(0, available)
+                .mapToObj(i -> material((long) i + 1, "插图" + i + ".png", "https://cdn.example.com/" + i + ".png")).toList();
+        when(folderMapper.selectList(any())).thenReturn(List.of());
+        when(brandMaterialMapper.selectList(any())).thenReturn(materials);
+        for (BrandMaterial material : materials) {
+            when(publicUrlService.buildPublicStreamUrl(material)).thenReturn(material.getFileUrl());
+        }
+        String result = service.insertForChannel(project(), "self_media", "sohu", "# 标题\n\n简短正文。", null);
+        assertThat(result.split("!\\[", -1).length - 1).isEqualTo(Math.min(3, available));
+        assertThat(result).contains("简短正文。");
+    }
 
     private BrandImageFolderMapper folderMapper;
     private BrandImageFolderProjectMapper folderProjectMapper;

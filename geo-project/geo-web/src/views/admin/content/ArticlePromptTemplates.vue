@@ -195,6 +195,7 @@
             <el-form-item label="渠道小类">
               <el-select
                 v-model="form.channelSubCode"
+                @change="handleFormSubChange"
                 clearable
                 filterable
                 allow-create
@@ -230,8 +231,8 @@
               <el-input v-model="form.sampleOutputUrl" clearable placeholder="可选，填写标杆样文 URL" />
             </el-form-item>
             <el-form-item label="联系方式露出">
-              <el-select v-model="form.contactDisclosureMode">
-                <el-option v-for="item in contactModes" :key="item.value" :label="item.label" :value="item.value" />
+              <el-select v-model="form.contactDisclosureMode" :disabled="form.channelGroupCode === 'self_media' && form.channelSubCode === 'sohu'">
+                <el-option v-for="item in contactModes.filter(item => item.value !== 'address_only' || (form.channelGroupCode === 'self_media' && form.channelSubCode === 'sohu'))" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
             <el-form-item>
@@ -442,6 +443,7 @@ const questionScenes = [
   { label: '功能', value: 'function' },
 ]
 const contactModes = [
+  { label: '仅公开地址（搜狐）', value: 'address_only' },
   { label: '完整露出（官网 / 电话 / 地址）', value: 'full' },
   { label: '软引导', value: 'soft_hint' },
   { label: '仅品牌名', value: 'brand_only' },
@@ -743,6 +745,15 @@ function normalizeTemplateDetail(
 function handleFormGroupChange() {
   form.channelSubCode = null
   form.agentSiteModule = form.channelGroupCode === 'agent_site' ? 'knowledge' : null
+  handleFormSubChange()
+}
+
+function handleFormSubChange() {
+  if (form.channelGroupCode === 'self_media' && form.channelSubCode === 'sohu') {
+    form.contactDisclosureMode = 'address_only'
+  } else if (form.contactDisclosureMode === 'address_only') {
+    form.contactDisclosureMode = 'none'
+  }
 }
 
 async function loadTemplates() {

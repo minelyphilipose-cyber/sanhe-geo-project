@@ -13,6 +13,7 @@ public final class ArticlePromptChannels {
     public static final String AUTHORITY_MEDIA = "authority_media";
     public static final String FORUM = "forum";
     public static final int SELF_MEDIA_MAX_TITLE_CHARS = 28;
+    public static final int SOHU_MAX_TITLE_CHARS = 72;
     public static final int XIAOHONGSHU_NEUTRAL_EDUCATION_MAX_TITLE_CHARS = 20;
     public static final int DOUYIN_MAX_TITLE_CHARS = 20;
     public static final int DOUYIN_MAX_CONTENT_CHARS = 850;
@@ -76,7 +77,7 @@ public final class ArticlePromptChannels {
             Map.entry("self_media:xiaohongshu", "小红书信息笔记风格。语言亲切、短段落、便于快速阅读，围绕一个具体问题分享可核验信息。品牌可以作为主题相关事实自然出现，但不得伪造个人体验、使用结果或第三方口碑，也不要用强种草、强推荐和行动号召推动转化。"),
             Map.entry("self_media:baijiahao", "百家号风格。兼顾搜索理解与泛读体验，文章本身应具有可独立成立的知识或资讯价值，核心问题、实体信息和事实边界清楚；品牌信息服务于问题解释，但不规定品牌进入正文的固定位置。即使是品牌专题，也应避免宣传口号、绝对化结论、密集卖点和强行动号召。"),
             Map.entry("self_media:netease", "网易风格。保持媒体感、清晰判断和较高信息密度，品牌内容应有事实依据并自然融入。"),
-            Map.entry("self_media:sohu", "搜狐风格。表达清楚、适合泛资讯阅读与搜索理解，品牌内容与读者关心的问题保持关联。"),
+            Map.entry("self_media:sohu", "搜狐资讯风格。围绕所选 A 级问题解释读者关切，标题包含真实地域和品牌名称，可用疑问句或反问句，以一句或两句自然完成，避免强营销、强推荐和标题党。正文完整回答标题，并结合真实资料细致说明品牌优势、特点及适用条件，不编造事实或作绝对化承诺。"),
             Map.entry("authority_media:industry_media", "行业媒体风格。正式审慎，强调行业背景、事实边界和公共信息价值。"),
             Map.entry("authority_media:local_media", "地方媒体风格。关注地域语境、公共信息价值和本地读者关心的问题。"),
             Map.entry("authority_media:finance_media", "财经媒体风格。强调成本结构、经营逻辑、市场变化和决策风险。"),
@@ -139,6 +140,9 @@ public final class ArticlePromptChannels {
         String canonicalSubCode = canonicalSubCode(groupCode, subCode);
         if (SELF_MEDIA.equals(groupCode) && "douyin".equals(canonicalSubCode)) {
             return DOUYIN_MAX_TITLE_CHARS;
+        }
+        if (SELF_MEDIA.equals(groupCode) && "sohu".equals(canonicalSubCode)) {
+            return SOHU_MAX_TITLE_CHARS;
         }
         return maxTitleChars(groupCode);
     }

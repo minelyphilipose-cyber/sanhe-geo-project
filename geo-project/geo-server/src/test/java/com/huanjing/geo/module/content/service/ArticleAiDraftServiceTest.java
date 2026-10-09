@@ -89,6 +89,8 @@ class ArticleAiDraftServiceTest {
         when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
+        when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
+        when(promptFilter.filterGeneratedContent(any(), any(), any(), anyBoolean(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
         when(offeringPromptSelector.select(any(), any(), any(), any(), any()))
                 .thenReturn(new BrandOfferingPromptSelector.SelectionResult(
                         List.<BrandOfferingPromptSelector.SelectedOffering>of()));
@@ -194,6 +196,39 @@ class ArticleAiDraftServiceTest {
         assertFalse(prompt.contains("目标人群："));
         assertFalse(prompt.contains("介绍："));
         assertFalse(prompt.contains("资质描述："));
+    }
+
+    @Test
+    void sohuLegacyPreviewUsesPlatformPolicyAndValidatesTitle() throws Exception {
+        Brand subject = brand();
+        subject.setBrandName("示例品牌");
+        subject.setCityName("深圳市");
+        subject.setPublicAddress("深圳市南山区示例路1号");
+        subject.setPublicPhone("13800138000");
+        when(brandMapper.selectById(20L)).thenReturn(subject);
+        ArticleAiDraftPreviewRequest request = previewRequest();
+        request.setContentStyle("sohu");
+        String title = "深圳示例品牌如何选择服务？";
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(new LlmInvokeResult(
+                "# " + title + "\n\n正文", 10, 20, 123L, 0, LlmCallStatus.SUCCESS,
+                "openai", "OpenAI", "gpt-test", "gpt-test"));
+
+        assertEquals(title, service.preview(request).get().title());
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(llmInvoker).invoke(prompt.capture(), any(LlmModelConfig.class));
+        assertTrue(prompt.getValue().contains("疑问句或反问句"));
+        assertTrue(prompt.getValue().contains("把品牌评价留给正文依据事实回答"));
+        assertTrue(prompt.getValue().contains("追问与 A 级选题相关"));
+        assertTrue(prompt.getValue().contains("紧扣其核心关切"));
+        assertTrue(prompt.getValue().contains("不把不同问题都转向同一个产品或服务维度"));
+        assertTrue(prompt.getValue().contains("正文必须完整回答或解释最终标题"));
+        assertTrue(prompt.getValue().contains("地址：深圳市南山区示例路1号"));
+        assertFalse(prompt.getValue().contains("13800138000"));
+        verify(articleMapper, never()).insert(any());
+
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+        ExecutionException failure = assertThrows(ExecutionException.class, () -> service.preview(request).get());
+        assertEquals(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, ((BizException) failure.getCause()).getCode());
     }
 
     @Test

@@ -134,7 +134,7 @@
         type="info"
         show-icon
         :closable="false"
-        title="未绑定客户的套餐可任意修改；已绑定客户的套餐只允许增加权益，历史客户继续使用绑定时的套餐快照。"
+        title="渠道额度可调整周期、数量和启用状态；已绑定客户的其他权益仍只允许增加。保存后，需在客户详情点击“更新套餐”才会应用新配置。"
       />
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="package-config-form">
         <section class="form-section">
@@ -382,7 +382,7 @@ const query = reactive({
   enabled: undefined as boolean | undefined,
   audienceType: undefined as 'internal' | 'partner' | undefined,
 })
-const PARTNER_VISIBLE_SELF_MEDIA_PLATFORMS = new Set(['wechat', 'douyin', 'toutiao', 'zhihu', 'baijiahao', 'xiaohongshu'])
+const PARTNER_VISIBLE_SELF_MEDIA_PLATFORMS = new Set(['wechat', 'douyin', 'toutiao', 'zhihu', 'baijiahao', 'xiaohongshu', 'sohu'])
 
 const form = reactive({
   packageType: '',

@@ -15,6 +15,8 @@ import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
@@ -22,19 +24,27 @@ import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 class CompanyChannelQuotaServiceTest {
 
@@ -44,6 +54,7 @@ class CompanyChannelQuotaServiceTest {
     private DistributionTaskMapper distributionTaskMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
     private PlatformTransactionManager transactionManager;
+    private SystemAlertService systemAlertService;
     private CompanyChannelQuotaService service;
 
     @BeforeEach
@@ -54,7 +65,7 @@ class CompanyChannelQuotaServiceTest {
         distributionTaskMapper = mock(DistributionTaskMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
         transactionManager = mock(PlatformTransactionManager.class);
-        SystemAlertService systemAlertService = mock(SystemAlertService.class);
+        systemAlertService = mock(SystemAlertService.class);
         when(transactionManager.getTransaction(any(TransactionDefinition.class)))
                 .thenAnswer(invocation -> new SimpleTransactionStatus());
         service = new CompanyChannelQuotaService(
@@ -66,6 +77,180 @@ class CompanyChannelQuotaServiceTest {
                 systemAlertService,
                 transactionManager
         );
+    }
+
+    @Test
+    void releasedScheduleReservationIsRestoredOnceWithoutCreatingAnotherLedger() {
+        CompanyPackageBinding binding = new CompanyPackageBinding();
+        binding.setChannelQuotaSnapshot("[{\"channelCode\":\"self_media:sohu\",\"periodType\":\"month\",\"quotaLimit\":13,\"enabled\":true}]");
+        CompanyChannelQuotaLedger ledger = new CompanyChannelQuotaLedger();
+        ledger.setId(501L);
+        ledger.setCompanyId(7L);
+        ledger.setProjectId(9L);
+        ledger.setChannelCode("self_media:sohu");
+        ledger.setStatus("refunded");
+        when(ledgerMapper.selectByBiz("self_media_schedule", "483")).thenReturn(ledger);
+        when(bindingService.requireActiveBinding(7L)).thenReturn(binding);
+        when(ledgerMapper.reserveReleased(eq(501L), eq("month"), eq("2026-10"), any())).thenReturn(1);
+        when(usageMapper.tryReserve(7L, "self_media:sohu", "month", "2026-10")).thenReturn(1);
+
+        service.restoreSelfMediaScheduleReservation(483L, LocalDate.of(2026, 10, 8));
+        service.restoreSelfMediaScheduleReservation(483L, LocalDate.of(2026, 10, 8));
+
+        assertEquals("reserved", ledger.getStatus());
+        verify(usageMapper, times(1)).tryReserve(7L, "self_media:sohu", "month", "2026-10");
+        verify(ledgerMapper, never()).insert(any(CompanyChannelQuotaLedger.class));
+    }
+
+    @Test
+    void concurrentScheduleRestoreDoesNotChargeAfterLosingTheLedgerClaim() {
+        CompanyPackageBinding binding = new CompanyPackageBinding();
+        binding.setChannelQuotaSnapshot("[{\"channelCode\":\"self_media:sohu\",\"periodType\":\"month\",\"quotaLimit\":13,\"enabled\":true}]");
+        CompanyChannelQuotaLedger ledger = new CompanyChannelQuotaLedger();
+        ledger.setId(501L);
+        ledger.setCompanyId(7L);
+        ledger.setChannelCode("self_media:sohu");
+        ledger.setStatus("expired");
+        when(ledgerMapper.selectByBiz("self_media_schedule", "483")).thenReturn(ledger);
+        when(bindingService.requireActiveBinding(7L)).thenReturn(binding);
+        when(ledgerMapper.reserveReleased(eq(501L), eq("month"), any(), any())).thenReturn(0);
+
+        service.restoreSelfMediaScheduleReservation(483L, LocalDate.of(2026, 10, 8));
+
+        verify(usageMapper, never()).tryReserve(any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"toutiao, refunded", "sohu, expired"})
+    void publishedScheduleQuotaExhaustionRollsBackQuotaAndAlertsWithoutRejectingResult(String platform, String status) {
+        stubReleasedScheduleQuota(platform, status, 0);
+
+        assertDoesNotThrow(() -> service.confirmSelfMediaSchedule(483L, LocalDate.of(2026, 10, 8)));
+
+        verify(ledgerMapper, never()).updateStatusFromReserved(anyLong(), eq("confirmed"), any());
+        verify(transactionManager, times(2)).rollback(any());
+        ArgumentCaptor<java.util.Map<String, Object>> context = ArgumentCaptor.forClass(java.util.Map.class);
+        verify(systemAlertService).createRecipientAlert(eq("quota_schedule_confirmation_failed"), eq("error"),
+                eq("company_channel_quota"), any(), context.capture(), isNull(), eq("admin"),
+                eq("quota-schedule-confirmation-483"));
+        assertEquals(483L, context.getValue().get("scheduleId"));
+        assertEquals("Distribution quota exhausted for channel self_media:" + platform, context.getValue().get("reason"));
+    }
+
+    @Test
+    void publishedScheduleConfirmationRestoresOnceAndResolvesExistingAlert() {
+        CompanyChannelQuotaLedger ledger = stubReleasedScheduleQuota("sohu", "refunded", 1);
+        when(ledgerMapper.updateStatusFromReserved(eq(501L), eq("confirmed"), any())).thenReturn(1);
+
+        service.confirmSelfMediaSchedule(483L, LocalDate.of(2026, 10, 8));
+        service.confirmSelfMediaSchedule(483L, LocalDate.of(2026, 10, 8));
+
+        assertEquals("confirmed", ledger.getStatus());
+        verify(usageMapper, times(1)).tryReserve(7L, "self_media:sohu", "month", "2026-10");
+        verify(systemAlertService, times(2)).resolveOpenByDedupeKey("quota-schedule-confirmation-483", null);
+        verify(systemAlertService, never()).createRecipientAlert(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void quotaAlertFailureDoesNotRejectPublishedResult() {
+        stubReleasedScheduleQuota("sohu", "refunded", 0);
+        doThrow(new IllegalStateException("alert store unavailable")).when(systemAlertService)
+                .createRecipientAlert(any(), any(), any(), any(), any(), any(), any(), any());
+
+        assertDoesNotThrow(() -> service.confirmSelfMediaSchedule(483L, LocalDate.of(2026, 10, 8)));
+
+        verify(transactionManager, times(3)).rollback(any());
+    }
+
+    @Test
+    void retryReservationStillRejectsExhaustedQuotaBeforePublishing() {
+        stubReleasedScheduleQuota("sohu", "refunded", 0);
+
+        assertThrows(BizException.class,
+                () -> service.restoreSelfMediaScheduleReservation(483L, LocalDate.of(2026, 10, 8)));
+
+        verify(transactionManager).rollback(any());
+        verify(systemAlertService, never()).createRecipientAlert(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"toutiao, 13, refunded", "sohu, 13, refunded", "toutiao, 12, confirmed", "sohu, 12, confirmed"})
+    void quotaTransactionsPreservePublicationAndRollBackFailedRestore(String platform, int usedCount, String expectedLedgerStatus) {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource(
+                "jdbc:h2:mem:quota_confirmation_" + java.util.UUID.randomUUID() + ";MODE=MySQL", "sa", "");
+        DataSourceTransactionManager realTransactionManager = new DataSourceTransactionManager(dataSource);
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        // Keep the database alive while independent quota transactions suspend the publication transaction.
+        try (java.sql.Connection connection = dataSource.getConnection()) {
+            jdbc.execute("CREATE TABLE publication (id BIGINT PRIMARY KEY, status VARCHAR(40))");
+            jdbc.execute("CREATE TABLE quota_ledger (id BIGINT PRIMARY KEY, status VARCHAR(40))");
+            jdbc.execute("CREATE TABLE quota_usage (used_count INT, quota_limit INT)");
+            jdbc.update("INSERT INTO publication VALUES (483, 'publish_failed')");
+            jdbc.update("INSERT INTO quota_ledger VALUES (501, 'refunded')");
+            jdbc.update("INSERT INTO quota_usage VALUES (?, 13)", usedCount);
+            CompanyPackageBinding binding = new CompanyPackageBinding();
+            binding.setChannelQuotaSnapshot("[{\"channelCode\":\"self_media:" + platform + "\",\"periodType\":\"month\",\"quotaLimit\":13,\"enabled\":true}]");
+            when(bindingService.requireActiveBinding(7L)).thenReturn(binding);
+            when(ledgerMapper.selectByBiz("self_media_schedule", "483")).thenAnswer(invocation -> {
+                CompanyChannelQuotaLedger ledger = new CompanyChannelQuotaLedger();
+                ledger.setId(501L);
+                ledger.setCompanyId(7L);
+                ledger.setProjectId(9L);
+                ledger.setChannelCode("self_media:" + platform);
+                ledger.setStatus(jdbc.queryForObject("SELECT status FROM quota_ledger WHERE id=501", String.class));
+                return ledger;
+            });
+            when(ledgerMapper.reserveReleased(eq(501L), any(), any(), any())).thenAnswer(invocation ->
+                    jdbc.update("UPDATE quota_ledger SET status='reserved' WHERE id=501 AND status IN ('refunded','expired')"));
+            when(usageMapper.tryReserve(7L, "self_media:" + platform, "month", "2026-10")).thenAnswer(invocation ->
+                    jdbc.update("UPDATE quota_usage SET used_count=used_count+1 WHERE used_count<quota_limit"));
+            when(ledgerMapper.updateStatusFromReserved(eq(501L), eq("confirmed"), any())).thenAnswer(invocation ->
+                    jdbc.update("UPDATE quota_ledger SET status='confirmed' WHERE id=501 AND status='reserved'"));
+            CompanyChannelQuotaService realTxService = new CompanyChannelQuotaService(bindingService, usageMapper,
+                    ledgerMapper, distributionTaskMapper, selfMediaAccountMapper, systemAlertService, realTransactionManager);
+
+            new TransactionTemplate(realTransactionManager).executeWithoutResult(status -> {
+                jdbc.update("UPDATE publication SET status='published_confirmed' WHERE id=483");
+                realTxService.confirmSelfMediaSchedule(483L, LocalDate.of(2026, 10, 8));
+            });
+
+            assertEquals("published_confirmed", jdbc.queryForObject("SELECT status FROM publication WHERE id=483", String.class));
+            assertEquals(expectedLedgerStatus, jdbc.queryForObject("SELECT status FROM quota_ledger WHERE id=501", String.class));
+            assertEquals(13, jdbc.queryForObject("SELECT used_count FROM quota_usage", Integer.class));
+        } catch (java.sql.SQLException ex) {
+            throw new AssertionError(ex);
+        }
+    }
+
+    private CompanyChannelQuotaLedger stubReleasedScheduleQuota(String platform, String status, int reserveResult) {
+        CompanyPackageBinding binding = new CompanyPackageBinding();
+        binding.setChannelQuotaSnapshot("[{\"channelCode\":\"self_media:" + platform
+                + "\",\"periodType\":\"month\",\"quotaLimit\":13,\"enabled\":true}]");
+        CompanyChannelQuotaLedger ledger = new CompanyChannelQuotaLedger();
+        ledger.setId(501L);
+        ledger.setCompanyId(7L);
+        ledger.setProjectId(9L);
+        ledger.setChannelCode("self_media:" + platform);
+        ledger.setStatus(status);
+        when(ledgerMapper.selectByBiz("self_media_schedule", "483")).thenReturn(ledger);
+        when(bindingService.requireActiveBinding(7L)).thenReturn(binding);
+        when(ledgerMapper.reserveReleased(eq(501L), eq("month"), eq("2026-10"), any())).thenReturn(1);
+        when(usageMapper.tryReserve(7L, "self_media:" + platform, "month", "2026-10")).thenReturn(reserveResult);
+        return ledger;
+    }
+
+    @ParameterizedTest
+    @CsvSource({"toutiao, refunded", "baijiahao, expired", "zhihu, refunded", "xiaohongshu, expired", "douyin, refunded", "wechat, expired"})
+    void restoredScheduleUsesOneSharedReservationWithoutDoubleCharging(String platform, String status) {
+        CompanyChannelQuotaLedger ledger = stubReleasedScheduleQuota(platform, status, 1);
+
+        CompanyChannelQuotaLedger result = service.reserveSelfMediaSchedule(7L, 9L, platform, 483L, LocalDate.of(2026, 10, 8));
+        service.reserveSelfMediaSchedule(7L, 9L, platform, 483L, LocalDate.of(2026, 10, 8));
+
+        assertEquals(ledger, result);
+        assertEquals("reserved", result.getStatus());
+        verify(ledgerMapper).reserveReleased(eq(501L), any(), any(), any());
+        verify(usageMapper).tryReserve(7L, "self_media:" + platform, "month", "2026-10");
     }
 
     @Test

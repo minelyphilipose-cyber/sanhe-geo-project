@@ -410,6 +410,37 @@ class ContentArticleServiceTest {
     }
 
     @Test
+    void createSohuAiPreviewSelectsCoverAndInsertsAvailableIllustrations() {
+        doAnswer(invocation -> {
+            ((ArticleDraft) invocation.getArgument(0)).setId(99L);
+            return 1;
+        }).when(articleDraftMapper).insert(any(ArticleDraft.class));
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+        String cover = "https://example.test/cover.jpg";
+        String illustrated = "# 深圳品牌如何选择服务？\n\n说明\n\n![插图](https://example.test/image.jpg)";
+        when(coverSelectionService.selectRandomCoverUrl(20L)).thenReturn(cover);
+        when(autoImageInsertionService.insertForChannel(any(), eq("self_media"), eq("sohu"), any(), eq(cover)))
+                .thenReturn(illustrated);
+        ManualArticleCreateRequest request = new ManualArticleCreateRequest();
+        request.setProjectId(10L);
+        request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("sohu");
+        request.setChannelGroupCode("self_media");
+        request.setChannelSubCode("sohu");
+        request.setTopic("如何选择服务");
+        request.setTitle("深圳品牌如何选择服务？");
+        request.setContentMarkdown("# 深圳品牌如何选择服务？\n\n说明");
+        request.setSource("ai_preview");
+
+        ArticleDraft result = service.createManual(request);
+
+        assertEquals(cover, result.getCoverImageUrl());
+        ArgumentCaptor<ArticleDraftVersion> version = ArgumentCaptor.forClass(ArticleDraftVersion.class);
+        verify(articleDraftVersionMapper).insert(version.capture());
+        assertEquals(illustrated, version.getValue().getContentMarkdown());
+    }
+
+    @Test
     void createManualBrandAccessDeniedStopsBeforeInsert() {
         doThrow(new BizException(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, "denied"))
                 .when(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);

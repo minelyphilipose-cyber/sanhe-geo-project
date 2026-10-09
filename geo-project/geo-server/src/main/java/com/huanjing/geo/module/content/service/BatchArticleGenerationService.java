@@ -2270,7 +2270,8 @@ public class BatchArticleGenerationService {
     private TaskTopic resolveTaskTopic(ValidatedTopic requested,
                                        ValidatedPlatform platform,
                                        ThirdPartySubjectRotationService.RotationResult subjectContext) {
-        if (!subjectContext.rotated()
+        if ((!subjectContext.rotated()
+                && !SohuArticlePolicies.applies(platform.channelGroupCode(), platform.channelSubCode()))
                 || !TemplatePerspectiveCodes.REVIEW_RECOMMEND.equals(
                 TemplatePerspectiveCodes.normalize(platform.perspectiveCode()))) {
             return new TaskTopic(requested.topic(), requested.topicAsQuestion(), requested.questionSceneCode());

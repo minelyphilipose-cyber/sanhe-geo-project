@@ -1,6 +1,6 @@
 globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS = globalThis.__GEO_ENV_READY_REPORT_DELAYS_MS || [350, 1500, 3500, 7000]
 globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT = globalThis.__GEO_ENV_ACTIVE_FILL_TASK_CONTEXT || null
-var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.2.6'
+var GEO_ENV_CONTENT_SCRIPT_VERSION = '0.2.10'
 globalThis.__GEO_ENV_CONTENT_SCRIPT_VERSION = GEO_ENV_CONTENT_SCRIPT_VERSION
 
 if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
@@ -35,6 +35,7 @@ if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
           contentScriptVersion: GEO_ENV_CONTENT_SCRIPT_VERSION,
           adapters: {
             douyin: Boolean(globalThis.__GEO_DOUYIN_PLATFORM__?.createPublishOptionsAdapter),
+            sohu: Boolean(globalThis.__GEO_SOHU_PLATFORM__?.createPublishOptionsAdapter),
           },
         }
       }
@@ -50,6 +51,10 @@ if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
           platform,
           identity: readPlatformIdentity(platform),
         }
+      }
+      if (message?.type === 'GEO_ENV_READ_SOHU_PUBLISH_RESULT') {
+        if (!globalThis.__GEO_SOHU_PLATFORM__) throw new Error('SOHU_ADAPTER_NOT_LOADED：搜狐适配器未加载')
+        return globalThis.__GEO_SOHU_PLATFORM__.readPublishResult(message.payload || {})
       }
       if (message?.type === 'GEO_ENV_FILL_TASK') {
         return fillPayload(message.payload || {})
@@ -84,6 +89,7 @@ if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
 function isEditorReadyReportLocation() {
   const href = String(location.href || '')
   if (location.hostname === 'mp.toutiao.com') return href.includes('/graphic/publish')
+  if (location.hostname === 'mp.sohu.com') return globalThis.__GEO_SOHU_PLATFORM__?.isPublishUrl(href) || false
   if (location.hostname === 'zhuanlan.zhihu.com' || location.hostname === 'www.zhihu.com') {
     return location.pathname.startsWith('/write')
   }
@@ -255,8 +261,10 @@ async function fillPayload(payload) {
     throw new Error(`${platformDisplayName(fillProfile.platform)}标题长度不符合平台要求：${expectedTitle}`)
   }
   const rawHtml = payload.renderedHtml || payload.html || payload.content || ''
-  const coverImageCleanup = removeCoverImageFromContent(rawHtml, resolvePayloadStandaloneImageUrls(payload))
-  const imageCleanup = removeUnsupportedContentImages(coverImageCleanup.html, fillProfile)
+  const isSohu = normalizePlatform(fillProfile.platform) === 'sohu'
+  const coverImageCleanup = isSohu ? { html: rawHtml, removed: false } : removeCoverImageFromContent(rawHtml, resolvePayloadStandaloneImageUrls(payload))
+  const sohuContent = isSohu ? globalThis.__GEO_SOHU_PLATFORM__.prepareContent(coverImageCleanup.html) : null
+  const imageCleanup = removeUnsupportedContentImages(sohuContent?.html || coverImageCleanup.html, fillProfile)
   const normalizedContent = removeDuplicateLeadingTitle(imageCleanup.html, expectedTitle)
   updateActiveFillStage('filling_title')
   const titleFilled = await fillTitle(filledTitle, titleElement, fillProfile)
@@ -275,6 +283,9 @@ async function fillPayload(payload) {
   await delay(500)
   updateActiveFillStage('verifying_content')
   verifyFilled(titleElement, contentElement, filledTitle, normalizedContent.html, fillProfile)
+  const contentImages = isSohu
+    ? await globalThis.__GEO_SOHU_PLATFORM__.fillContentImages(sohuContent, payload, { fetchImageAsFile, waitForCondition })
+    : null
   const publishPayload = filledTitle && filledTitle !== expectedTitle
     ? { ...payload, title: filledTitle, articleTitle: filledTitle }
     : payload
@@ -301,6 +312,7 @@ async function fillPayload(payload) {
     contentFilled,
     tagsFilled,
     publishOptions,
+    contentImages,
     platform: fillProfile.platform,
     taskId: payload.taskId || null,
     identityCheck,
@@ -356,6 +368,17 @@ function resolvePublishOptionsAdapter(platform) {
   if (normalized === 'baijiahao') return BAIJIAHAO_PUBLISH_OPTIONS_ADAPTER
   if (normalized === 'douyin') return DOUYIN_PUBLISH_OPTIONS_ADAPTER
   if (normalized === 'toutiao') return TOUTIAO_PUBLISH_OPTIONS_ADAPTER
+  if (normalized === 'sohu') {
+    const adapter = globalThis.__GEO_SOHU_PLATFORM__?.createPublishOptionsAdapter?.({
+      delay, clickTrustedActionOnce,
+      reserveSubmissionAttempt: async payload => {
+        const response = await safeRuntimeRequest({ type: 'GEO_ENV_SOHU_BEFORE_SUBMIT', payload })
+        if (!response?.ok) throw new Error(response?.error || 'SOHU_SUBMISSION_STATE_UNAVAILABLE：无法保存提交状态，已阻止发布')
+      },
+    })
+    if (!adapter) throw new Error('SOHU_ADAPTER_NOT_LOADED：搜狐适配器未加载，请更新扩展')
+    return adapter
+  }
   return null
 }
 
@@ -582,6 +605,8 @@ function normalizePlatform(value) {
     'baijiahao': 'baijiahao',
     '抖音': 'douyin',
     'douyin': 'douyin',
+    '搜狐': 'sohu',
+    '搜狐号': 'sohu',
   }
   return aliases[text] || text
 }
@@ -2538,6 +2563,7 @@ function platformDisplayName(platform) {
   if (normalized === 'toutiao') return '头条'
   if (normalized === 'baijiahao') return '百家号'
   if (normalized === 'douyin') return '抖音'
+  if (normalized === 'sohu') return '搜狐'
   return normalized || '平台'
 }
 
@@ -3114,6 +3140,7 @@ function selectorList(value) {
 }
 
 function defaultTitleSelectors(platform) {
+  if (normalizePlatform(platform) === 'sohu') return ['.publish-title input[placeholder*="标题"]']
   const common = [
     '[data-geo-fill="title"]',
     'textarea[placeholder*="标题"]',
@@ -3148,6 +3175,7 @@ function defaultTitleSelectors(platform) {
 }
 
 function defaultContentSelectors(platform) {
+  if (normalizePlatform(platform) === 'sohu') return ['#editor .ql-editor[contenteditable="true"]']
   const common = [
     '[data-geo-fill="content"]',
     '[contenteditable="true"]',
@@ -3190,6 +3218,7 @@ function defaultContentSelectors(platform) {
 }
 
 function defaultTagSelectors(platform) {
+  if (normalizePlatform(platform) === 'sohu') return []
   if (platform === 'xiaohongshu') {
     return xiaohongshuEditorSelectors().tags
   }
@@ -3262,6 +3291,7 @@ function verifyExpectedPlatformIdentity(payload, platform) {
 
 function inferPlatformFromLocation() {
   if (location.hostname === 'mp.toutiao.com') return 'toutiao'
+  if (location.hostname === 'mp.sohu.com') return 'sohu'
   if (location.hostname.endsWith('zhihu.com')) return 'zhihu'
   if (location.hostname.endsWith('xiaohongshu.com')) return 'xiaohongshu'
   if (location.hostname === 'baijiahao.baidu.com') return 'baijiahao'
@@ -3270,6 +3300,10 @@ function inferPlatformFromLocation() {
 }
 
 function readPlatformIdentity(platform) {
+  if (platform === 'sohu') {
+    if (!globalThis.__GEO_SOHU_PLATFORM__?.readIdentity) throw new Error('SOHU_ADAPTER_NOT_LOADED：搜狐适配器未加载')
+    return globalThis.__GEO_SOHU_PLATFORM__.readIdentity()
+  }
   if (platform === 'toutiao') return readToutiaoIdentity()
   if (platform === 'zhihu') return readZhihuIdentity()
   if (platform === 'xiaohongshu') return readXiaohongshuIdentity()
@@ -3943,6 +3977,9 @@ function normalizeToutiaoAccountName(value) {
 
 function normalizeTitleForPlatform(title, fillProfile = null) {
   const text = String(title || '').trim()
+  if (normalizePlatform(fillProfile?.platform) === 'sohu' && (Array.from(text).length < 5 || Array.from(text).length > 72)) {
+    throw new Error('SOHU_TITLE_INVALID：搜狐标题须为5至72字')
+  }
   if (normalizePlatform(fillProfile?.platform) === 'douyin') return text.slice(0, 30)
   if (normalizePlatform(fillProfile?.platform) !== 'toutiao') return text
   return normalizeToutiaoTitle(text)
@@ -4647,7 +4684,7 @@ function firePointerClick(el, options = {}) {
 }
 
 function requiresTrustedClick(platform) {
-  return ['xiaohongshu', 'toutiao', 'zhihu', 'baijiahao', 'douyin'].includes(normalizePlatform(platform))
+  return ['xiaohongshu', 'toutiao', 'zhihu', 'baijiahao', 'douyin', 'sohu'].includes(normalizePlatform(platform))
 }
 
 async function requestTrustedClick(el, options = {}) {

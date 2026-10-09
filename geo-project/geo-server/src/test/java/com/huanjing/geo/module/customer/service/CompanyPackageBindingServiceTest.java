@@ -36,6 +36,8 @@ import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class CompanyPackageBindingServiceTest {
@@ -336,6 +338,52 @@ class CompanyPackageBindingServiceTest {
         verify(quotaUsageMapper).updateQuotaLimit(eq(7L), eq("official_site"), eq("month"), any(), eq(20));
         verify(quotaUsageMapper).insertIgnore(7L, "authority_media", "total", "TOTAL", 50);
         verify(quotaUsageMapper).updateQuotaLimit(7L, "authority_media", "total", "TOTAL", 50);
+    }
+
+    @Test
+    void refreshActiveBindingAppliesChangedSohuPeriodWithoutResettingUsageOrAllocations() {
+        CompanyPackageBinding binding = activeBinding();
+        binding.setPackagePlanId(3L);
+        binding.setChannelQuotaSnapshot("[{\"channelCode\":\"self_media:sohu\",\"periodType\":\"month\",\"quotaLimit\":13}]");
+        PackageChannelQuotaConfig sohu = quota("self_media:sohu", 3);
+        sohu.setPeriodType("day");
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+        when(packagePlanMapper.selectById(3L)).thenReturn(enabledPlan());
+        when(channelQuotaConfigMapper.selectList(any())).thenReturn(List.of(sohu));
+        when(projectChannelAllocationMapper.activeProjectRowsForUpdate(7L, "self_media:sohu", null))
+                .thenReturn(List.of(projectRow(11L, "P1", 2)));
+
+        service.refreshActiveBinding(7L);
+
+        var snapshot = JSONUtil.parseArray(binding.getChannelQuotaSnapshot()).getJSONObject(0);
+        assertEquals("self_media:sohu", snapshot.getStr("channelCode"));
+        assertEquals("day", snapshot.getStr("periodType"));
+        assertEquals(3, snapshot.getInt("quotaLimit"));
+        verify(bindingMapper).updateById(binding);
+        verify(quotaUsageMapper).insertIgnore(eq(7L), eq("self_media:sohu"), eq("day"), any(), eq(3));
+        verify(quotaUsageMapper).updateQuotaLimit(eq(7L), eq("self_media:sohu"), eq("day"), any(), eq(3));
+        verifyNoMoreInteractions(quotaUsageMapper);
+        verifyNoInteractions(quotaLedgerMapper, distributionTaskMapper);
+        verify(projectChannelAllocationMapper, never()).updateById(any());
+    }
+
+    @Test
+    void refreshActiveBindingRejectsSohuQuotaBelowProjectAllocationBeforeChangingSnapshot() {
+        CompanyPackageBinding binding = activeBinding();
+        binding.setPackagePlanId(3L);
+        binding.setChannelQuotaSnapshot("existing snapshot");
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+        when(packagePlanMapper.selectById(3L)).thenReturn(enabledPlan());
+        when(channelQuotaConfigMapper.selectList(any())).thenReturn(List.of(quota("self_media:sohu", 3)));
+        when(projectChannelAllocationMapper.activeProjectRowsForUpdate(7L, "self_media:sohu", null))
+                .thenReturn(List.of(projectRow(11L, "P1", 4)));
+
+        BizException ex = assertThrows(BizException.class, () -> service.refreshActiveBinding(7L));
+
+        assertEquals("PACKAGE_CHANNEL_ALLOCATION_EXCEEDED", ex.getMessage());
+        assertEquals("existing snapshot", binding.getChannelQuotaSnapshot());
+        verify(bindingMapper, never()).updateById(any());
+        verifyNoInteractions(quotaUsageMapper, quotaLedgerMapper, distributionTaskMapper);
     }
 
     @Test

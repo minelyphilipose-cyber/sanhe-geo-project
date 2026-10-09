@@ -29,6 +29,11 @@ public class ArticleAiDraftPromptFilter {
     private static final Pattern ADDRESS_LIKE = Pattern.compile(
             "[^\\r\\n，,。；;]{0,30}(?:省|市|区|县)[^\\r\\n，,。；;]{0,30}(?:路|街|巷|号|栋|楼|室|门店|网点)[^\\r\\n，,。；;]{0,30}"
     );
+    private static final Pattern IMAGE_REFERENCE = Pattern.compile("!\\[[^]]*]\\([^\\r\\n)]+\\)|<img\\b[^>]*>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CONTACT_CHANNEL = Pattern.compile(
+            "(?:微信(?:号)?|wechat|QQ(?:号)?|公众号|二维码|邮箱|(?:联系)?电话|手机|(?:官方)?网站|官网|网址)\\s*[:：]\\s*[^\\r\\n，,。；;]+",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern URL = Pattern.compile("(?:https?://|www\\.)[^\\s<>()，。；;]+", Pattern.CASE_INSENSITIVE);
 
     private final SysDictItemMapper sysDictItemMapper;
 
@@ -48,11 +53,48 @@ public class ArticleAiDraftPromptFilter {
         return removeGeneratedRedactionMarkers(filterOutboundPrompt(content, project, brand, allowContactInfo));
     }
 
+    public String filterOutboundPrompt(String prompt, Project project, Brand brand, boolean allowContactInfo, boolean addressOnly) {
+        if (!addressOnly) return filterOutboundPrompt(prompt, project, brand, allowContactInfo);
+        String restored = restoreSensitiveDictionaryValues(prompt == null ? "" : prompt);
+        return redactSohuContactChannels(redactPii(restored, brand, false, true), brand);
+    }
+
+    public String filterGeneratedContent(String content, Project project, Brand brand, boolean allowContactInfo, boolean addressOnly) {
+        return removeGeneratedRedactionMarkers(filterOutboundPrompt(content, project, brand, allowContactInfo, addressOnly));
+    }
+
     private String redactPii(String value, Brand brand, boolean allowContactInfo) {
+        return redactPii(value, brand, allowContactInfo, allowContactInfo);
+    }
+
+    private String redactPii(String value, Brand brand, boolean allowContactInfo, boolean allowAddress) {
         String redacted = EMAIL.matcher(value).replaceAll("[EMAIL_REDACTED]");
         redacted = redactMobiles(redacted, allowedPhones(brand, allowContactInfo));
-        redacted = redactAddresses(redacted, brand, allowContactInfo);
+        redacted = redactAddresses(redacted, brand, allowAddress);
         return redactBankCards(ID_CARD.matcher(redacted).replaceAll("[ID_REDACTED]"));
+    }
+
+    private String redactSohuContactChannels(String value, Brand brand) {
+        // Preserve material image URLs; an image reference is not a contact link.
+        java.util.ArrayList<String> images = new java.util.ArrayList<>();
+        Matcher matcher = IMAGE_REFERENCE.matcher(value);
+        StringBuffer protectedText = new StringBuffer();
+        while (matcher.find()) {
+            String marker = "GEO_PRESERVED_IMAGE_" + images.size() + "_END";
+            images.add(matcher.group());
+            matcher.appendReplacement(protectedText, marker);
+        }
+        matcher.appendTail(protectedText);
+        String redacted = CONTACT_CHANNEL.matcher(protectedText).replaceAll("[CONTACT_REDACTED]");
+        if (brand != null && StringUtils.hasText(brand.getWebsite())) {
+            redacted = redacted.replace(brand.getWebsite().trim(), "[URL_REDACTED]");
+        }
+        redacted = redacted.replaceAll("(?i)(?<!!)\\[([^]]+)]\\((?:https?://|www\\.)[^)]+\\)", "$1");
+        redacted = URL.matcher(redacted).replaceAll("[URL_REDACTED]");
+        for (int index = 0; index < images.size(); index++) {
+            redacted = redacted.replace("GEO_PRESERVED_IMAGE_" + index + "_END", images.get(index));
+        }
+        return redacted;
     }
 
     private String removeGeneratedRedactionMarkers(String value) {
@@ -70,6 +112,8 @@ public class ArticleAiDraftPromptFilter {
                     .replace("[EMAIL_REDACTED]", "")
                     .replace("[ID_REDACTED]", "")
                     .replace("[NUMBER_REDACTED]", "")
+                    .replace("[CONTACT_REDACTED]", "")
+                    .replace("[URL_REDACTED]", "")
                     .replaceAll("[：:，,。；;、\\s]+$", "")
                     .trim();
             if (line.contains("_REDACTED]") && isEmptyContactLine(replaced)) {

@@ -14,6 +14,7 @@ import {
   evaluateDouyinPublishSignals,
   evaluateToutiaoPublishSignals,
   evaluateXiaohongshuPublishSignals,
+  evaluateSohuPublishSignals,
 } from './publish-check.js'
 import {
   preferScheduleClaimBlock,
@@ -72,6 +73,7 @@ const PUBLISH_CHECK_TASK_ID_OFFSET = 900_000_000_000
 const PUPPETEER_DISCONNECT_TIMEOUT_MS = 2_000
 const PUPPETEER_PROTOCOL_TIMEOUT_MS = 120_000
 const PUPPETEER_PAGE_GOTO_TIMEOUT_MS = 75_000
+const PUBLISH_CHECK_PAGE_ATTACH_TIMEOUT_MS = 5_000
 const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
 const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
 const LOCAL_AGENT_RUNTIME_STATUS_HEARTBEAT_MS = 60_000
@@ -417,6 +419,8 @@ async function connectPuppeteer(puppeteer, wsEndpoint, config = {}) {
     browserWSEndpoint: wsEndpoint,
     protocolTimeout: puppeteerProtocolTimeoutMs(config),
     defaultViewport: null,
+    networkEnabled: config.puppeteerNetworkEnabled !== false,
+    waitForInitiallyDiscoveredTargets: config.puppeteerWaitForInitialTargets !== false,
   })
 }
 
@@ -690,8 +694,6 @@ async function observeAdspowerBrowserSession(config, context, data = null) {
     const version = await cdpSession.send('Browser.getVersion')
     const getVersionLatencyMs = Date.now() - getVersionStartedAt
     const pagesStartedAt = Date.now()
-    const pages = await browser.pages()
-    const pagesLatencyMs = Date.now() - pagesStartedAt
     const targets = browser.targets().map((target) => ({
       targetId: targetIdOf(target),
       parentTargetId: targetIdOf(target.opener?.()),
@@ -700,6 +702,7 @@ async function observeAdspowerBrowserSession(config, context, data = null) {
       ownership: 'unknown',
       resourceOrigin: 'startup_discovered',
     })).filter((target) => target.targetId)
+    const pagesLatencyMs = Date.now() - pagesStartedAt
     const cdpProbeLatencyMs = connectLatencyMs + getVersionLatencyMs + pagesLatencyMs
     const processMetrics = await collectBrowserProcessMetrics(
       environmentContext.providerProfileId,
@@ -721,7 +724,7 @@ async function observeAdspowerBrowserSession(config, context, data = null) {
         browserGetVersionMs: getVersionLatencyMs,
         browserPagesMs: pagesLatencyMs,
       },
-      browserPageCount: pages.length,
+      browserPageCount: targets.filter((target) => target.resourceType === 'observed_tab').length,
       browserVersion: {
         product: String(version?.product || '').slice(0, 128) || null,
         protocolVersion: String(version?.protocolVersion || '').slice(0, 32) || null,
@@ -2042,7 +2045,7 @@ async function inspectGeoEnvExtensionTarget(target) {
 
 function isGeoEnvExtensionTarget(info) {
   if (!info?.extensionId) return false
-  return info.name === GEO_ENV_EXTENSION_NAME
+  return info.name === GEO_ENV_EXTENSION_NAME || info.name === 'GEO Media Helper DEV'
 }
 
 async function inspectGeoEnvExtension(wsEndpoint) {
@@ -2055,8 +2058,14 @@ async function inspectGeoEnvExtension(wsEndpoint) {
     }
   }
   const { default: puppeteer } = await import('puppeteer-core')
-  const browser = await connectPuppeteer(puppeteer, wsEndpoint)
+  const browser = await connectPuppeteer(puppeteer, wsEndpoint, {
+    puppeteerNetworkEnabled: false, puppeteerWaitForInitialTargets: false,
+  })
   try {
+    await browser.waitForTarget(
+      (target) => target.type() === 'service_worker' && String(target.url()).startsWith('chrome-extension://'),
+      { timeout: 5000 },
+    ).catch(() => null)
     const targets = browser.targets()
     const inspected = []
     for (const target of targets) {
@@ -2480,11 +2489,20 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     throw error
   }
   if (result.failed) {
-    markPublishCheckRuntimeTaskStage(runtimeTask, 'reporting_failed')
+    // Persist the terminal evidence before reporting so a restart only retries the acknowledgement.
+    markPublishCheckRuntimeTaskFinished(runtimeTask, 'failed', result, claimedProviderProfileId)
     upsertTask(runtimeTask)
     await saveRuntimeTasks()
-    await reportPublishCheckFailed(config, scheduleId, claimAttempt, result)
-    markPublishCheckRuntimeTaskFinished(runtimeTask, 'failed', result, claimedProviderProfileId)
+    try {
+      runtimeTask.schedule = await reportPublishCheckFailed(config, scheduleId, claimAttempt, result) || runtimeTask.schedule
+      runtimeTask.backendFailureReportedAt = nowIso()
+      runtimeTask.backendFailureReportLastError = null
+    } catch (error) {
+      runtimeTask.backendFailureReportAttempts = Number(runtimeTask.backendFailureReportAttempts || 0) + 1
+      runtimeTask.backendFailureReportLastError = formatBackendError(error)
+      terminateTaskForScheduleClaimError(runtimeTask, error)
+      if (isNonRetryableBackendReportError(error)) runtimeTask.backendFailureReportRejectedAt = nowIso()
+    }
     await saveRuntimeTasks().catch(() => null)
     return { ok: true, claimed: true, scheduleId, outcome: 'failed', result }
   }
@@ -2606,6 +2624,11 @@ function compactPublishCheckRuntimeResult(result) {
   return {
     found: result.found === true,
     failed: result.failed === true,
+    failureCode: result.failureCode || '',
+    failureMessage: result.failureMessage || '',
+    rejectionReason: result.rejectionReason || '',
+    pageStatus: result.pageStatus || '',
+    matchedText: String(result.matchedText || '').slice(0, 500),
     reason: result.reason || '',
     platformStatus: result.platformStatus || '',
     matchStrategy: result.matchStrategy || '',
@@ -2634,6 +2657,7 @@ function markPublishCheckRuntimeTaskFinished(task, status, result, providerProfi
   task.claimOwner = null
   if (status === 'failed') {
     task.failedAt = nowIso()
+    task.lastResult = compactPublishCheckRuntimeResult(result)
     task.lastError = {
       code: result?.failureCode || 'PUBLISH_RESULT_CHECK_FAILED',
       message: result?.failureMessage || result?.reason || 'publish result check failed',
@@ -2799,10 +2823,19 @@ function shouldReloadPublishCheckPage(platform, result, reloadCount) {
 }
 
 async function reuseOrCreatePublishCheckPage(browser, platform, targetUrl) {
-  const pages = await browser.pages()
-  const reusablePage = pages.find((page) => isReusablePublishCheckPage(platform, page.url(), targetUrl))
-  if (reusablePage) {
-    return { page: reusablePage, created: false }
+  // Initializing every tab lets an unrelated stalled page block the works-list check.
+  const targets = browser.targets().filter((target) => target.type() === 'page'
+    && isReusablePublishCheckPage(platform, target.url(), targetUrl))
+  const deadline = Date.now() + PUBLISH_CHECK_PAGE_ATTACH_TIMEOUT_MS
+  for (const target of targets) {
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) break
+    try {
+      const page = await withTimeout(target.page(), remainingMs, 'publish check page attachment')
+      if (page && !page.isClosed()) return { page, created: false }
+    } catch {
+      // Leave stale user tabs untouched; the temporary check page is closed by the caller.
+    }
   }
   return { page: await browser.newPage(), created: true }
 }
@@ -2840,6 +2873,7 @@ function isReusablePublishCheckPage(platform, currentUrl, targetUrl) {
 
 async function evaluatePublishResult(page, schedule) {
   const platform = String(schedule?.platform || '').trim().toLowerCase()
+  if (platform === 'sohu') return evaluateSohuPublishResult(page, schedule)
   if (platform === 'zhihu') {
     return evaluateZhihuPublishResult(page, schedule)
   }
@@ -2853,6 +2887,33 @@ async function evaluatePublishResult(page, schedule) {
     return evaluateDouyinPublishResult(page, schedule)
   }
   return evaluateToutiaoPublishResult(page, schedule)
+}
+
+async function evaluateSohuPublishResult(page, schedule) {
+  const state = await page.evaluate(() => {
+    const visible = element => {
+      const rect = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+    }
+    return {
+      url: location.href,
+      accountNames: Array.from(document.querySelectorAll('#header-user .user-name, #account-info .account-info-text h3')).filter(visible).map(e => e.textContent),
+      sohuCards: Array.from(document.querySelectorAll('.article-content-info')).filter(visible).map(row => ({
+        title: row.querySelector('h3.title a')?.textContent || '',
+        href: row.querySelector('h3.title a')?.href || '',
+        status: row.querySelector('.status')?.textContent || '',
+        rejectionReason: row.querySelector('.article-reson-text')?.textContent || '',
+        publishedAt: row.querySelector('.date-common')?.textContent?.trim() || '',
+        text: row.innerText || '',
+      })),
+    }
+  })
+  return evaluateSohuPublishSignals({
+    title: schedule.publishCheckTitle, expectedAccountName: schedule.expectedAccountName,
+    platformPublishId: schedule.platformPublishId,
+    submittedAt: schedule.scheduledAt || schedule.platformScheduledAt || schedule.plannedPublishAt,
+  }, state)
 }
 
 async function evaluateToutiaoPublishResult(page, schedule) {
@@ -3510,7 +3571,8 @@ async function reportScheduleExecutionSuccess(config, task, fillResult) {
     }),
   })
   const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/executions/${outcome}`
-  return signedTrustedBackendRequest(config, path, { method: 'POST', body, signatureBodyText: '' })
+  const acknowledged = await signedTrustedBackendRequest(config, path, { method: 'POST', body, signatureBodyText: '' })
+  return { ...task.schedule, ...acknowledged }
 }
 
 function resolveScheduleExecutionOutcome(fillResult) {
@@ -3519,6 +3581,8 @@ function resolveScheduleExecutionOutcome(fillResult) {
   const verified = verification.verified === true || verification.verified === 'true'
   if (verified && publishOptions.published === true) return 'published'
   if (verified && publishOptions.scheduled === true) return 'scheduled'
+  if (fillResult?.platform === 'sohu' && publishOptions.submitted === true
+      && verification.submissionVerified === true && verification.platformStatus === 'reviewing') return 'scheduled'
   return 'filled'
 }
 
@@ -3952,8 +4016,10 @@ async function flushPendingPublishCheckFailureReports(config, platform = '') {
         url: task.url || '',
         backendHeartbeatAt: task.backendHeartbeatAt || '',
         backendHeartbeatLastError: task.backendHeartbeatLastError || null,
+        ...task.lastResult,
       }
-      task.schedule = await reportPublishCheckUnknown(
+      const report = task.lastResult?.failed === true ? reportPublishCheckFailed : reportPublishCheckUnknown
+      task.schedule = await report(
         config, scheduleId, claimAttemptOfTask(task), result,
       ) || task.schedule || null
       task.backendFailureReportedAt = nowIso()
@@ -4149,8 +4215,8 @@ function trimPublishCheckEvidence(evidence = {}) {
 }
 
 async function handleSchedulePollOnce(req, res, config) {
-  await requireHelperAccess(req, config)
   const body = req.method === 'POST' ? await readJson(req) : {}
+  await requireHelperAccess(req, config)
   const queryPlatform = new URL(req.url, 'http://localhost').searchParams.get('platform')
   const platform = String(body.platform || queryPlatform || '').trim()
   if (!platform) {
@@ -4174,6 +4240,7 @@ function defaultPublishUrlForPlatform(platform) {
   if (normalized === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
   if (normalized === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish?from=tab_switch&target=article'
   if (normalized === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1'
+  if (normalized === 'sohu') return 'https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle?contentStatus=1'
   return null
 }
 
@@ -4183,6 +4250,7 @@ function defaultWorksListUrlForPlatform(platform) {
   if (normalized === 'douyin') return 'https://creator.douyin.com/creator-micro/content/manage?enter_from=publish'
   if (normalized === 'xiaohongshu') return 'https://creator.xiaohongshu.com/new/note-manager'
   if (normalized === 'baijiahao') return null
+  if (normalized === 'sohu') return 'https://mp.sohu.com/mpfe/v4/contentManagement/first/page'
   return defaultPublishUrlForPlatform(platform)
 }
 
@@ -4194,7 +4262,7 @@ function worksListUrlForPublishCheck(platform, launchUrl, context = {}) {
     if (baijiahaoWorksListHasAppId(launchUrl)) return launchUrl
     return null
   }
-  if (normalized === 'douyin' || normalized === 'xiaohongshu' || normalized === 'toutiao') {
+  if (normalized === 'douyin' || normalized === 'xiaohongshu' || normalized === 'toutiao' || normalized === 'sohu') {
     return defaultWorksListUrlForPlatform(normalized)
   }
   return launchUrl || defaultWorksListUrlForPlatform(normalized)
@@ -5898,6 +5966,7 @@ async function route(req, res, config) {
         platforms: cachedSelfMediaSchedulePlatforms || [],
         platformSource: 'backend',
         platformFetchError: lastSelfMediaSchedulePlatformsError,
+        allowedPlatforms: config.selfMediaSchedulePlatforms ?? null,
         intervalMs: Number(config.selfMediaSchedulePollIntervalMs || 10_000),
       },
       scheduleHeartbeat: {
@@ -6158,7 +6227,9 @@ async function pollSelfMediaSchedules(config) {
     return { ok: true, claimed: false, claimBlockedReason: 'HELPER_CAPACITY_FULL' }
   }
   const timeoutMs = Number(config.selfMediaSchedulePollStepTimeoutMs || SCHEDULE_POLL_STEP_TIMEOUT_MS)
-  const platforms = rotateSchedulePlatforms(await selfMediaSchedulePlatforms(config))
+  const platforms = rotateSchedulePlatforms(restrictSchedulePlatforms(
+    await selfMediaSchedulePlatforms(config), config.selfMediaSchedulePlatforms,
+  ))
   let lastNoClaimReason = ''
   let lastRetryAfterSeconds = null
   for (const platform of platforms) {
@@ -6258,6 +6329,13 @@ function normalizePlatformList(raw) {
     .map((item) => String(item || '').trim().toLowerCase())
     .filter(Boolean)
   return Array.from(new Set(platforms))
+}
+
+function restrictSchedulePlatforms(platforms, allowedPlatforms) {
+  if (allowedPlatforms == null) return platforms
+  if (!Array.isArray(allowedPlatforms)) throw new Error('selfMediaSchedulePlatforms must be an array')
+  const allowed = new Set(normalizePlatformList(allowedPlatforms))
+  return platforms.filter(platform => allowed.has(platform))
 }
 
 startLocalAgentSessionRefresher(config)

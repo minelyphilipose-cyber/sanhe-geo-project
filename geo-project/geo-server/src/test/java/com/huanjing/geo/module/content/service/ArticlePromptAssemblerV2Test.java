@@ -24,6 +24,92 @@ class ArticlePromptAssemblerV2Test {
     @ParameterizedTest
     @ValueSource(strings = {TemplatePerspectiveCodes.CUSTOMER, TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
             TemplatePerspectiveCodes.REVIEW_RECOMMEND})
+    void toutiaoUsesRegionalBrandQuestionsWithoutChangingBodyOrContactPolicies(String perspective) throws Exception {
+        Project project = new Project();
+        project.setCityName("合肥市");
+        Brand brand = new Brand();
+        brand.setBrandName("测试品牌");
+        brand.setBrandShortName("测试");
+        brand.setCityName("阜阳市");
+        brand.setMainBusiness("企业知识管理服务");
+        var input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "企业知识库怎么建设", "企业知识库怎么建设",
+                null, null, List.of(), "faq", "toutiao", "medium", null,
+                1, List.of(), null, perspective, "default", null, List.of());
+        var policy = new ArticleRuntimePolicyResolver().resolve(null, "self_media", "toutiao", perspective);
+        var result = assembler.assemble(input, new ArticlePromptTemplate(), new ArticlePromptTemplateVersion(), policy, false);
+
+        assertTrue(result.userPrompt().contains("今日头条标题要求"));
+        assertTrue(result.userPrompt().contains("主体地域“阜阳市”"));
+        assertTrue(result.userPrompt().contains("品牌名称“测试品牌”"));
+        assertTrue(result.userPrompt().contains("疑问句或反问句"));
+        assertTrue(result.userPrompt().contains("把品牌评价留给正文依据事实回答"));
+        assertTrue(result.userPrompt().contains("追问与 A 级选题相关"));
+        assertTrue(result.userPrompt().contains("28字上限"));
+        assertFalse(result.userPrompt().contains("72字上限"));
+        assertFalse(result.userPrompt().contains("标题默认不出现品牌"));
+        assertFalse(result.userPrompt().contains("标题只有在用户主题本身明确围绕该品牌时"));
+        assertFalse(result.userPrompt().contains("搜狐正文要求"));
+        assertFalse(result.userPrompt().contains("最多仅可展示已配置的公开地址"));
+        if (TemplatePerspectiveCodes.CUSTOMER.equals(perspective)) {
+            assertTrue(result.userPrompt().contains("全文应自然出现1～2次"));
+            assertTrue(result.userPrompt().contains("至少使用一项与主题直接相关的真实品牌事实"));
+        }
+        assertEquals(policy.contactDisclosureMode(),
+                new ObjectMapper().readTree(result.inputSnapshot()).path("runtimePolicy").path("contactDisclosureMode").asText());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {TemplatePerspectiveCodes.CUSTOMER, TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
+            TemplatePerspectiveCodes.REVIEW_RECOMMEND})
+    void sohuAnswersRegionalBrandTitleAndLimitsContactsToAddress(String perspective) {
+        Project project = new Project();
+        project.setCityName("合肥市");
+        Brand brand = new Brand();
+        brand.setBrandName("华为智家");
+        brand.setCityName("阜阳市");
+        brand.setMainBusiness("全屋智能设计与服务");
+        brand.setPublicAddress("阜阳市测试路88号");
+        brand.setPublicPhone("13812345678");
+        brand.setWebsite("https://brand.example.com");
+        var input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project, brand, null, "manual", "全屋智能需要提前规划吗", "全屋智能需要提前规划吗",
+                null, null, List.of("全屋智能"), "industry_article", "sohu", "medium", null,
+                1, List.of(), null, perspective, "default", null, List.of());
+        var policy = new ArticleRuntimePolicyResolver().resolve(null, "self_media", "sohu", perspective);
+        var result = assembler.assemble(input, new ArticlePromptTemplate(), new ArticlePromptTemplateVersion(), policy, false);
+        assertTrue(result.userPrompt().contains("主体地域“阜阳市”"));
+        assertTrue(result.userPrompt().contains("品牌名称“华为智家”"));
+        assertTrue(result.userPrompt().contains("疑问句或反问句"));
+        assertTrue(result.userPrompt().contains("一句或两句均可"));
+        assertTrue(result.userPrompt().contains("把品牌评价留给正文依据事实回答"));
+        assertTrue(result.userPrompt().contains("先提地域行业问题，再接地域品牌追问"));
+        assertTrue(result.userPrompt().contains("直接提出品牌的具体问题，再接相关追问"));
+        assertTrue(result.userPrompt().contains("追问与 A 级选题相关"));
+        assertTrue(result.userPrompt().contains("紧扣其核心关切"));
+        assertTrue(result.userPrompt().contains("不把不同问题都转向同一个产品或服务维度"));
+        assertTrue(result.userPrompt().contains("说明式导语替代品牌追问"));
+        assertTrue(result.userPrompt().contains("完整回答或解释最终标题"));
+        assertTrue(result.userPrompt().contains("细致说明与主题相关"));
+        assertFalse(result.userPrompt().contains("标题默认不出现品牌"));
+        assertFalse(result.userPrompt().contains("标题只有在用户主题本身明确围绕该品牌时"));
+        assertFalse(result.userPrompt().contains("全文应自然出现1～2次"));
+        assertFalse(result.userPrompt().contains("品牌只可在确有解释价值时作为普通样本出现"));
+        assertTrue(result.userPrompt().contains("最多仅可展示已配置的公开地址"));
+        assertTrue(result.userPrompt().contains("阜阳市测试路88号"));
+        assertTrue(result.userPrompt().contains("全屋智能设计与服务"));
+        assertTrue(result.userPrompt().contains("2000～3000字"));
+        assertFalse(result.userPrompt().contains("13812345678"));
+        assertFalse(result.userPrompt().contains("brand.example.com"));
+        assertFalse(result.userPrompt().contains("可以明确推荐品牌"));
+        assertFalse(result.userPrompt().contains("只可在确有解释价值时作为普通样本"));
+        brand.setPublicAddress(null);
+        assertTrue(assembler.assemble(input, new ArticlePromptTemplate(), new ArticlePromptTemplateVersion(), policy, false)
+                .userPrompt().contains("当前未配置公开地址，省略地址"));
+    }
+    @ParameterizedTest
+    @ValueSource(strings = {TemplatePerspectiveCodes.CUSTOMER, TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
+            TemplatePerspectiveCodes.REVIEW_RECOMMEND})
     void medicalBeautyDouyinAnswersTitleWithRelevantBrandFactsOnlyInItsScope(String perspective) throws Exception {
         Brand brand = new Brand();
         brand.setId(2L);

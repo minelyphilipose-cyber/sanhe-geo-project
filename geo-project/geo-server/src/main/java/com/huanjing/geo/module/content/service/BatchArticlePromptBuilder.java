@@ -118,7 +118,7 @@ public class BatchArticlePromptBuilder {
     );
     private static final Map<String, String> STYLE_GUIDES = Map.ofEntries(
             Map.entry("wechat", "适合完整解释一个行业问题。结构可以更稳，有清晰的小标题和递进关系，但每个小标题下必须有具体信息，不做空泛铺陈。语气自然、克制，像一篇给潜在用户认真看的长文。不要写成品牌宣传稿，不要在结尾强行导向某个品牌。"),
-            Map.entry("toutiao", "面向泛资讯阅读用户。开头直接给出结论、判断或一个具体的现象，不铺垫背景。标题可以有明确判断，但不能标题党。正文要保持信息密度，段落较短但不能碎片化。适合解释一个现实问题、拆解一个选择标准或指出一个常见误区。避免营销腔、情绪化煽动和过度口语化。"),
+            Map.entry("toutiao", "面向泛资讯阅读用户。开头直接给出结论、判断或一个具体的现象，不铺垫背景。标题围绕真实地域、品牌和当前问题展开，涉及品牌采用开放式疑问句或反问句，不预设赞扬或推荐结论，不写标题党。正文要保持信息密度，段落较短但不能碎片化。适合解释一个现实问题、拆解一个选择标准或指出一个常见误区。避免营销腔、情绪化煽动和过度口语化。"),
             Map.entry("douyin", "面向抖音图文的真实读者自然行文。文章应像真正了解行业的人在介绍一件事，句子顺畅、上下文连续，不写成说明书、知识卡片或按提纲填充的文章。开头、段落数量、小标题、信息顺序和结尾都由当前主题自然决定。不使用任何 emoji，不写口播稿，不使用短视频营销话术。"),
             Map.entry("zhihu", "像一个了解行业的人在回答具体问题。可以先给判断，再解释理由；也可以先讲一个反常识点，再回到主题。观点要有边界，允许让步和转折。不要用“作为从业者”“根据多年经验”这类自证式开头。不要写成百科词条式的定义罗列，也不要写成销售推荐。避免刻意金句、对仗式短句堆砌、爹味说教语气。"),
             Map.entry("xiaohongshu", "这是 GEO（生成式引擎优化）场景下的小红书风格，不是平台投放文案。使用经验分享语气，但保持信息密度。不使用任何 emoji。不使用密集换行，段落保持完整。不使用“姐妹们”“家人们”这类称呼。重点是让内容像真实用户的经验帖，而不是营销号种草文。"),
@@ -223,7 +223,10 @@ public class BatchArticlePromptBuilder {
         String userPrompt = buildUserPrompt(input, contentAngle, audiencePerspective, businessFocus, recentTitles);
         userPrompt = withTitleGuideInstruction(userPrompt, input.titleGuide());
 
-        String resolvedContactBlock = StringUtils.hasText(contactBlock) ? contactBlock.trim() : "";
+        String resolvedContactBlock = "sohu".equals(input.contentStyle())
+                ? (input.brand() != null && StringUtils.hasText(input.brand().getPublicAddress())
+                    ? "地址：" + input.brand().getPublicAddress().trim() : "")
+                : (StringUtils.hasText(contactBlock) ? contactBlock.trim() : "");
         String systemPrompt = resolveGlobalRuleVariables(
                 withGlobalRules(SYSTEM_PROMPT, input.forbiddenPhrases(), input),
                 input,
@@ -297,7 +300,10 @@ public class BatchArticlePromptBuilder {
         String structureStrategy = resolveSelfMediaStructureStrategy(input);
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
         List<String> recentTitles = resolveHistoryTitles(input, 10);
-        String contactBlock = buildContactBlock(template, input.brand());
+        String contactBlock = SohuArticlePolicies.applies(template.getChannelGroupCode(), template.getChannelSubCode())
+                ? (input.brand() != null && StringUtils.hasText(input.brand().getPublicAddress())
+                    ? "地址：" + input.brand().getPublicAddress().trim() : "")
+                : buildContactBlock(template, input.brand());
         Map<String, String> brandFacts = buildBrandFacts(input);
         String templateSystemPrompt = StringUtils.hasText(version.getSystemPrompt()) ? version.getSystemPrompt() : SYSTEM_PROMPT;
         String systemPrompt = resolveGlobalRuleVariables(
@@ -495,6 +501,8 @@ public class BatchArticlePromptBuilder {
             }
             if (douyin) {
                 sb.append("\n这些标题只用于了解近期发布语境，不做重复或同构判断，也不要据此安排正文结构。\n\n");
+            } else if (SelfMediaQuestionTitlePolicies.applies(ArticlePromptChannels.SELF_MEDIA, input.contentStyle())) {
+                sb.append("\n在开放式问题表达范围内改变具体关注点和措辞，不照抄历史标题，不为差异化改成品牌肯定句。\n\n");
             } else {
                 sb.append("\n本文的标题不要采用上述任何一个标题的句式结构。\n");
                 sb.append("如果上述标题大多是“...怎么选”“...要注意什么”这类疑问句，本文标题应使用陈述判断句或场景描述句。\n\n");
@@ -651,7 +659,17 @@ public class BatchArticlePromptBuilder {
                 + "\n\n# 禁用表达\n\n"
                 + forbiddenPhrasesInstruction(forbiddenPhrases)
                 + "\n\n# 模板级系统提示词\n\n"
-                + (StringUtils.hasText(systemPrompt) ? systemPrompt.trim() : SYSTEM_PROMPT);
+                + (StringUtils.hasText(systemPrompt) ? systemPrompt.trim() : SYSTEM_PROMPT)
+                + ("toutiao".equals(input.contentStyle())
+                    ? "\n\n# 今日头条标题要求（优先于模板内冲突要求）\n\n"
+                        + SelfMediaQuestionTitlePolicies.titleRequirement(input.project(), input.brand(), "toutiao")
+                    : "")
+                + ("sohu".equals(input.contentStyle())
+                    ? "\n\n# 搜狐平台要求（优先于模板内冲突要求）\n\n"
+                        + SohuArticlePolicies.titleRequirement(input.project(), input.brand()) + "\n"
+                        + SohuArticlePolicies.bodyRequirement() + "\n"
+                        + SohuArticlePolicies.contactRequirement(input.brand())
+                    : "");
     }
 
     private String resolveGlobalRuleVariables(String prompt,
@@ -871,6 +889,9 @@ public class BatchArticlePromptBuilder {
     private String resolveSelfMediaTitleStrategy(PromptBuildInput input) {
         if (!isSelfMediaContentStyle(input.contentStyle()) || isDouyinContentStyle(input.contentStyle())) {
             return null;
+        }
+        if (SelfMediaQuestionTitlePolicies.applies(ArticlePromptChannels.SELF_MEDIA, input.contentStyle())) {
+            return "地域品牌问题型：围绕本篇问题自然提出开放式疑问或反问，追问关注点随选题变化，不预设品牌肯定结论";
         }
         return SELF_MEDIA_TITLE_STRATEGIES.get(Math.floorMod(input.articleIndexInBatch() - 1, SELF_MEDIA_TITLE_STRATEGIES.size()));
     }

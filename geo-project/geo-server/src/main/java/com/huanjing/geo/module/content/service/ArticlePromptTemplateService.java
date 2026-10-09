@@ -47,6 +47,7 @@ public class ArticlePromptTemplateService {
     public static final String CONTACT_SOFT_HINT = "soft_hint";
     public static final String CONTACT_BRAND_ONLY = "brand_only";
     public static final String CONTACT_NONE = "none";
+    public static final String CONTACT_ADDRESS_ONLY = "address_only";
     private static final Set<String> DELETE_ALLOWED_ROLES = Set.of("delivery_manager", "super_admin");
     public static final Map<String, String> QUESTION_SCENE_LABELS = Map.of(
             "brand", "品牌",
@@ -272,9 +273,13 @@ public class ArticlePromptTemplateService {
             throw new BizException(400, "Invalid template status");
         }
         validateWeight(weight);
-        if (!List.of(CONTACT_FULL, CONTACT_SOFT_HINT, CONTACT_BRAND_ONLY, CONTACT_NONE)
+        if (!List.of(CONTACT_FULL, CONTACT_SOFT_HINT, CONTACT_BRAND_ONLY, CONTACT_NONE, CONTACT_ADDRESS_ONLY)
                 .contains(normalizeContactMode(contactDisclosureMode))) {
             throw new BizException(400, "Invalid contact disclosure mode");
+        }
+        if (CONTACT_ADDRESS_ONLY.equals(normalizeContactMode(contactDisclosureMode))
+                && !SohuArticlePolicies.applies(group, sub)) {
+            throw new BizException(400, "仅地址模式用于搜狐文章模板");
         }
         String scene = normalizeQuestionScene(questionSceneCode);
         if (scene != null && !QUESTION_SCENE_LABELS.containsKey(scene)) {

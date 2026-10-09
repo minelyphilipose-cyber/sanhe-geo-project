@@ -23,8 +23,7 @@ public class ExtensionProperties {
 
     @Data
     public static class LongToken {
-        private long ttlDays = 7;
-        private long slideRenewThresholdDays = 1;
+        private long ttlDays = 30;
     }
 
     @Data

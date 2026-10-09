@@ -45,6 +45,17 @@
         </button>
         <button
           class="media-platform"
+          :class="{ active: selectedMediaPlatform === 'sohu', disabled: selfMediaSubmitting || !sohuAccounts.length }"
+          type="button"
+          :disabled="selfMediaSubmitting || !sohuAccounts.length"
+          @click="actions.handleSemiAutoPlatformClick('sohu')"
+        >
+          <span class="sohu-mark">狐</span>
+          <span class="media-name">搜狐</span>
+          <el-tag size="small" :type="actions.semiAutoStatusTagType(sohuAccounts)">{{ actions.semiAutoStatusLabel(sohuAccounts) }}</el-tag>
+        </button>
+        <button
+          class="media-platform"
           :class="{ active: selectedMediaPlatform === 'baijiahao', disabled: selfMediaSubmitting || !baijiahaoAccounts.length }"
           type="button"
           :disabled="selfMediaSubmitting || !baijiahaoAccounts.length"
@@ -289,6 +300,7 @@ const props = defineProps<{
   toutiaoAccounts: SelfMediaAccount[]
   baijiahaoAccounts: SelfMediaAccount[]
   zhihuAccounts: SelfMediaAccount[]
+  sohuAccounts: SelfMediaAccount[]
   xiaohongshuAccounts: SelfMediaAccount[]
   currentPlatformAccounts: SelfMediaAccount[]
   selectedSelfMediaQuotaHint: string
@@ -531,7 +543,8 @@ function formatShortTime(value?: string | null) {
 .toutiao-mark,
 .baijiahao-mark,
 .zhihu-mark,
-.xiaohongshu-mark {
+.xiaohongshu-mark,
+.sohu-mark {
   position: relative;
   z-index: 1;
   display: inline-flex;
@@ -552,6 +565,10 @@ function formatShortTime(value?: string | null) {
 
 .douyin-mark {
   background: linear-gradient(135deg, #020617, #1e293b);
+}
+
+.sohu-mark {
+  background: #b45309;
 }
 
 .toutiao-mark {

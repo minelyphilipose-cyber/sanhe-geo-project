@@ -451,6 +451,9 @@ public class ContentArticleService {
                 content = autoImageInsertionService.insertForChannel(project, channelGroupCode, channelSubCode, content, coverImageUrl);
             }
         }
+        if ("ai_preview".equals(createSource) && SohuArticlePolicies.applies(channelGroupCode, channelSubCode)) {
+            content = autoImageInsertionService.insertForChannel(project, channelGroupCode, channelSubCode, content, coverImageUrl);
+        }
         markdownImageReferenceValidator.validate(project, content);
 
         String initialStatus = "approved";
@@ -523,7 +526,8 @@ public class ContentArticleService {
         }
         boolean coverRequired = requiresManualCreateCover(channelSubCode, contentStyle);
         if ("ai_preview".equals(createSource) && req.getCoverMaterialId() == null) {
-            return coverRequired ? coverSelectionService.selectRandomCoverUrl(project.getBrandId()) : null;
+            return coverRequired || SohuArticlePolicies.applies(channelGroupCode, channelSubCode)
+                    ? coverSelectionService.selectRandomCoverUrl(project.getBrandId()) : null;
         }
         if (req.getCoverMaterialId() == null && !coverRequired) {
             return null;

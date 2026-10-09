@@ -373,7 +373,7 @@ public class SelfMediaPublishScheduleService {
             if (!"ready".equals(plan.response().getAction())) {
                 return plan.response();
             }
-        } else {
+        } else if (Boolean.TRUE.equals(request.getReplaceNextScheduled())) {
             SelfMediaPublishSchedule replaceable = scheduleMapper.selectSafeReplaceablePendingByBrandPlatformAndPeriod(
                     plan.response().getBrandId(),
                     plan.response().getPlatform(),
@@ -2982,7 +2982,15 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(null);
         row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
         applyRuntimeStage(row, "publish_submitted", "平台发布或定时提交完成");
+        boolean sohuReviewing = "sohu".equals(normalizePublishPlatform(row.getPlatform()))
+                && "reviewing".equalsIgnoreCase(verification.pageStatusCode());
+        if (sohuReviewing) {
+            applyRuntimeStage(row, "publish_reviewing", "搜狐已提交，审核中，等待结果回查");
+        }
         scheduleMapper.updateById(row);
+        if (sohuReviewing) {
+            markDistributionTaskPublished(row, verification);
+        }
         syncArticleForScheduleState(row);
         confirmScheduleQuotaIfPresent(row);
         confirmDistributionQuotaIfPresent(row);
@@ -3184,6 +3192,24 @@ public class SelfMediaPublishScheduleService {
         row.setLockedUntil(null);
         row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
         applyRuntimeStage(row, "publish_checking", "发布结果待继续复查");
+        PlatformScheduleVerification verification = parsePlatformScheduleVerification(diagnosticsJson);
+        if ("sohu".equals(normalizePublishPlatform(row.getPlatform()))
+                && "reviewing".equalsIgnoreCase(verification.pageStatusCode())) {
+            int maxAttempts = resolvePublishCheckMaxAttempts(row);
+            row.setMaxAttempts(Math.max(maxAttempts, row.getMaxAttempts() == null ? 0 : row.getMaxAttempts()));
+            row.setNextAttemptAt(nextPublishCheckRetryAt(row, row.getMaxAttempts()));
+            row.setStatus(row.getNextAttemptAt() == null
+                    ? SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
+                    : SelfMediaPublishScheduleConstants.STATUS_SCHEDULED);
+            row.setFailureCode(row.getNextAttemptAt() == null ? "SOHU_REVIEW_PENDING_MANUAL" : null);
+            row.setFailureMessage(row.getNextAttemptAt() == null ? "搜狐仍在审核，自动回查次数已用完，请核对平台结果" : null);
+            applyRuntimeStage(row, "publish_reviewing", "搜狐审核中，等待结果回查");
+            scheduleMapper.updateById(row);
+            syncArticleForScheduleState(row);
+            environmentLockService.release(row.getId());
+            reconcileAlerts(row);
+            return SelfMediaPublishScheduleVO.from(row);
+        }
         if (isPendingPlatformScheduledDiagnostics(diagnosticsJson)) {
             row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
             row.setNextAttemptAt(nextPendingPlatformScheduleCheckAt(row));
@@ -3303,20 +3329,24 @@ public class SelfMediaPublishScheduleService {
                 verification == null ? null : verification.platformPublishedUrl(),
                 row.getPlatformPublishedUrl()
         ));
+        if ("sohu".equals(normalizePublishPlatform(row.getPlatform())) && !isRejectedVerification(verification)) {
+            validateSohuPublishedUrl(row, publishedUrl, verification);
+        }
         if (isRejectedVerification(verification)) {
             row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED);
             row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
             row.setNextAttemptAt(null);
             row.setLockedUntil(null);
             row.setPublishedConfirmedAt(null);
-            row.setFailureCode("DOUYIN_CONTENT_REJECTED");
+            boolean sohu = "sohu".equals(normalizePublishPlatform(row.getPlatform()));
+            row.setFailureCode(sohu ? "SOHU_REVIEW_REJECTED" : "DOUYIN_CONTENT_REJECTED");
             row.setFailureMessage(trimFailureMessage(firstText(
                     verification.pageStatus(),
                     verification.matchedText(),
-                    "抖音作品未通过审核"
+                    sohu ? "搜狐文章未通过审核" : "抖音作品未通过审核"
             )));
             row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
-            applyRuntimeStage(row, "publish_rejected", "抖音作品未通过审核");
+            applyRuntimeStage(row, "publish_rejected", sohu ? "搜狐文章未通过审核" : "抖音作品未通过审核");
             return;
         }
         LocalDateTime confirmedAt = LocalDateTime.now();
@@ -3369,6 +3399,31 @@ public class SelfMediaPublishScheduleService {
         return scheduleAdapterRouter.contract(platform)
                 .map(SelfMediaPlatformCapabilityContract::requiresPublishedUrl)
                 .orElseGet(() -> !"douyin".equals(normalizePublishPlatform(platform)));
+    }
+
+    private void validateSohuPublishedUrl(SelfMediaPublishSchedule row, String url, PlatformScheduleVerification verification) {
+        if (verification != null && "reviewing".equalsIgnoreCase(verification.pageStatusCode())) {
+            fail("SOHU_PUBLISH_NOT_CONFIRMED", "搜狐仍在审核，不能确认已发布");
+        }
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(url == null ? "" : url);
+        } catch (IllegalArgumentException ex) {
+            fail("SOHU_PUBLISH_NOT_CONFIRMED", "搜狐公开链接无效");
+            return;
+        }
+        if (!"https".equals(uri.getScheme()) || !"www.sohu.com".equals(uri.getHost())
+                || !uri.getPath().matches("/a/\\d+_\\d+")) {
+            fail("SOHU_PUBLISH_NOT_CONFIRMED", "确认搜狐发布必须取得对应文章的公开链接");
+        }
+        String id = uri.getPath().substring(3).split("_")[0];
+        String expectedId = row.getPlatformPublishId();
+        String verifiedId = verification == null ? null : verification.platformPublishId();
+        if (StringUtils.hasText(expectedId) && !expectedId.equals(id)
+                || StringUtils.hasText(verifiedId) && !verifiedId.equals(id)) {
+            fail("SOHU_PUBLISH_NOT_CONFIRMED", "搜狐公开链接与已提交文章 ID 不一致");
+        }
+        row.setPlatformPublishId(id);
     }
 
     private boolean isRejectedVerification(PlatformScheduleVerification verification) {
@@ -3568,7 +3623,15 @@ public class SelfMediaPublishScheduleService {
         row.setFailureCode(trimFailureCode(failureCode, "PUBLISH_RESULT_CHECK_FAILED"));
         row.setFailureMessage(trimFailureMessage(failureMessage));
         row.setDiagnosticsJson(validDiagnosticsJson(diagnosticsJson));
+        row.setNextAttemptAt(null);
+        applyRuntimeStage(row, "SOHU_REVIEW_REJECTED".equals(row.getFailureCode()) ? "publish_rejected" : "publish_failed",
+                row.getFailureMessage());
+        touch(row);
         scheduleMapper.updateById(row);
+        if ("sohu".equals(normalizePublishPlatform(row.getPlatform())) && "SOHU_REVIEW_REJECTED".equals(failureCode)) {
+            markDistributionTaskPublished(row, new PlatformScheduleVerification(null, null,
+                    row.getPlatformPublishId(), null, null, "rejected", failureMessage, null));
+        }
         releaseArticleIfNoActiveSchedule(row);
         refundScheduleQuotaIfPresent(row);
         environmentLockService.release(row.getId());
@@ -3776,6 +3839,18 @@ public class SelfMediaPublishScheduleService {
     @Transactional
     public SelfMediaPublishScheduleVO confirmPublished(Long id, SelfMediaPublishScheduleManualResultRequest request) {
         SelfMediaPublishSchedule row = requireScheduleWithAccess(id);
+        if (SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(normalize(row.getStatus()))) {
+            if (request == null || !StringUtils.hasText(request.getPlatformPublishedUrl())
+                    || !request.getPlatformPublishedUrl().trim().equals(row.getPlatformPublishedUrl())) {
+                fail("PUBLISHED_URL_NOT_MATCHED", "重复确认必须使用原文章的公开链接");
+            }
+            row.setNextAttemptAt(null);
+            row.setFailureCode(null);
+            row.setFailureMessage(null);
+            scheduleMapper.updateById(row);
+            confirmScheduleQuotaIfPresent(row);
+            return SelfMediaPublishScheduleVO.from(row);
+        }
         if (!actionDecision(row).canConfirmPublished()) {
             fail("SCHEDULE_STATUS_NOT_CONFIRMABLE", "当前排期状态不允许确认已发布");
         }
@@ -3815,6 +3890,9 @@ public class SelfMediaPublishScheduleService {
         row.setFailureCode(trimFailureCode(failureCode, "PUBLISH_RESULT_MANUAL_FAILED"));
         row.setFailureMessage(trimFailureMessage(failureMessage));
         row.setDiagnosticsJson(manualPublishFailedDiagnostics(row, failureCode, failureMessage, note));
+        row.setNextAttemptAt(null);
+        row.setLockedUntil(null);
+        applyRuntimeStage(row, "publish_failed", row.getFailureMessage());
         touch(row);
         scheduleMapper.updateById(row);
         releaseArticleIfNoActiveSchedule(row);
@@ -3962,8 +4040,10 @@ public class SelfMediaPublishScheduleService {
         String strategy = StringUtils.hasText(row.getScheduleStrategy())
                 ? normalize(row.getScheduleStrategy())
                 : quickScheduleStrategy(row.getPlatform());
-        LocalDateTime nextAttemptAt = nextBrandProtectedImmediateAttemptAt(row.getBrandId(), now);
+        LocalDateTime nextAttemptAt = nextBrandProtectedImmediateAttemptAt(row.getBrandId(), now,
+                row.getId());
         LocalDateTime plannedPublishAt = plannedPublishAtForQuickSchedule(row.getPlatform(), strategy, nextAttemptAt, now);
+        companyChannelQuotaService.restoreSelfMediaScheduleReservation(row.getId(), plannedPublishAt.toLocalDate());
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
         row.setScheduleStrategy(strategy);
@@ -5010,7 +5090,8 @@ public class SelfMediaPublishScheduleService {
 
     private void confirmScheduleQuotaIfPresent(SelfMediaPublishSchedule row) {
         if (row != null && row.getId() != null) {
-            companyChannelQuotaService.confirmSelfMediaSchedule(row.getId());
+            companyChannelQuotaService.confirmSelfMediaSchedule(row.getId(),
+                    row.getPlannedPublishAt() == null ? null : row.getPlannedPublishAt().toLocalDate());
         }
     }
 
@@ -5368,6 +5449,10 @@ public class SelfMediaPublishScheduleService {
     }
 
     private LocalDateTime nextBrandProtectedImmediateAttemptAt(Long brandId, LocalDateTime now) {
+        return nextBrandProtectedImmediateAttemptAt(brandId, now, null);
+    }
+
+    private LocalDateTime nextBrandProtectedImmediateAttemptAt(Long brandId, LocalDateTime now, Long excludedScheduleId) {
         LocalDateTime cursor = now.plusMinutes(QUICK_DISPATCH_MANUAL_START_DELAY_MINUTES).withSecond(0).withNano(0);
         if (brandId == null) {
             return cursor;
@@ -5377,16 +5462,24 @@ public class SelfMediaPublishScheduleService {
         List<SelfMediaPublishSchedule> protectedSlots = scheduleMapper.selectBrandActiveScheduleSlots(
                 brandId,
                 protectionStart,
-                protectionEnd.plusMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES),
-                new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES)
+                now.plusHours(QUICK_SCHEDULE_SLOT_LOOKAHEAD_HOURS),
+                new ArrayList<>(QUICK_DISPATCH_CAPACITY_STATUSES)
         );
-        List<LocalDateTime> occupiedTimes = (protectedSlots == null
+        List<SelfMediaPublishSchedule> executionSlots = (protectedSlots == null
                 ? List.<SelfMediaPublishSchedule>of()
                 : protectedSlots).stream()
+                .filter(slot -> excludedScheduleId == null || !excludedScheduleId.equals(slot.getId()))
+                .filter(slot -> QUICK_DISPATCH_CAPACITY_STATUSES.contains(normalize(slot.getStatus()))
+                        && !SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK.equals(normalize(slot.getQueueKind())))
+                .toList();
+        List<LocalDateTime> occupiedTimes = executionSlots.stream()
+                .filter(slot -> {
+                    LocalDateTime occupied = slot.getNextAttemptAt() != null ? slot.getNextAttemptAt() : slot.getPlannedPublishAt();
+                    return occupied != null && (isManualQuickDispatchSchedule(slot) || !occupied.isAfter(protectionEnd));
+                })
                 .map(slot -> slot.getNextAttemptAt() != null ? slot.getNextAttemptAt() : slot.getPlannedPublishAt())
                 .filter(occupied -> occupied != null
-                        && !occupied.isBefore(protectionStart)
-                        && !occupied.isAfter(protectionEnd))
+                        && !occupied.isBefore(protectionStart))
                 .sorted()
                 .toList();
         for (LocalDateTime occupied : occupiedTimes) {
@@ -5395,7 +5488,12 @@ public class SelfMediaPublishScheduleService {
                 cursor = safeAfter.plusSeconds(10).withNano(0);
             }
         }
-        return cursor;
+        List<LocalDateTime> allExecutionTimes = executionSlots.stream()
+                .map(slot -> slot.getNextAttemptAt() != null ? slot.getNextAttemptAt() : slot.getPlannedPublishAt())
+                .filter(java.util.Objects::nonNull)
+                .sorted()
+                .toList();
+        return nextSafeAttemptAt(cursor, allExecutionTimes, false);
     }
 
     private LocalDateTime nextBrandSafeAttemptAt(Long brandId, LocalDateTime candidate, Long excludedScheduleId) {
@@ -5429,6 +5527,12 @@ public class SelfMediaPublishScheduleService {
                 .filter(java.util.Objects::nonNull)
                 .sorted()
                 .toList();
+        return nextSafeAttemptAt(cursor, occupiedTimes, respectBusinessWindow);
+    }
+
+    private LocalDateTime nextSafeAttemptAt(LocalDateTime cursor,
+                                            List<LocalDateTime> occupiedTimes,
+                                            boolean respectBusinessWindow) {
         Duration safetyInterval = Duration.ofMinutes(QUICK_SCHEDULE_BRAND_INTERVAL_MINUTES);
         for (LocalDateTime occupied : occupiedTimes) {
             Duration distance = Duration.between(occupied, cursor).abs();

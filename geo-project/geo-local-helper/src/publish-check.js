@@ -1,3 +1,71 @@
+export function evaluateSohuPublishSignals(target = {}, pageState = {}) {
+  const normalizeName = value => String(value || '').normalize('NFKC').trim().replace(/\s+/g, '')
+  const names = [...new Set((pageState.accountNames || []).map(normalizeName).filter(Boolean))]
+  const expectedName = normalizeName(target.expectedAccountName)
+  const base = { found: false, failed: false, platformStatus: 'unknown', url: pageState.url || '', targetTitle: target.title || '' }
+  let pageUrl
+  try { pageUrl = new URL(pageState.url) } catch { return { ...base, reason: 'invalid works list URL' } }
+  if (pageUrl.protocol !== 'https:' || pageUrl.hostname !== 'mp.sohu.com' || pageUrl.pathname !== '/mpfe/v4/contentManagement/first/page') {
+    return { ...base, reason: 'not Sohu works list' }
+  }
+  if (!expectedName || names.length !== 1 || names[0] !== expectedName) {
+    return { ...base, reason: 'account identity not matched' }
+  }
+  const title = String(target.title || '').trim()
+  const parseSohuTime = value => {
+    const match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/)
+    return match ? Date.parse(`${match[1]}T${match[2]}:00+08:00`) : Number.NaN
+  }
+  const expectedTime = parseSohuTime(target.submittedAt)
+  const candidates = (pageState.sohuCards || []).filter(card => {
+    if (!title || String(card.title || '').trim() !== title) return false
+    if (target.platformPublishId) {
+      try {
+        const url = new URL(card.href, pageUrl)
+        return (url.hostname === 'www.sohu.com' ? url.pathname.match(/^\/a\/(\d+)_/)?.[1] : url.searchParams.get('id')) === String(target.platformPublishId)
+      } catch { return false }
+    }
+    const recordTime = parseSohuTime(card.publishedAt)
+    return Number.isFinite(expectedTime) && Number.isFinite(recordTime)
+      && recordTime >= expectedTime - 60000 && recordTime <= expectedTime + 10 * 60000
+      && !/草稿/.test(String(card.status || ''))
+  })
+  if (candidates.length !== 1) return { ...base, reason: 'article title not uniquely matched', candidateCount: candidates.length }
+  const card = candidates[0]
+  let link
+  try { link = new URL(card.href, pageUrl) } catch { return { ...base, reason: 'article URL missing' } }
+  const publicMatch = link.protocol === 'https:' && link.hostname === 'www.sohu.com' && link.pathname.match(/^\/a\/(\d+)_(\d+)$/)
+  const preview = link.protocol === 'https:' && link.hostname === 'mp.sohu.com' && link.pathname === '/mpfe/v4/contentManagement/news/articlepreview'
+  const id = publicMatch ? publicMatch[1] : preview ? link.searchParams.get('id') : ''
+  if (!id || !/^\d+$/.test(id)) return { ...base, reason: 'article ID missing' }
+  if (target.platformPublishId) {
+    if (String(target.platformPublishId) !== id) return { ...base, reason: 'article ID not matched' }
+  } else {
+    const recordTime = parseSohuTime(card.publishedAt)
+    if (!Number.isFinite(expectedTime) || !Number.isFinite(recordTime) || recordTime < expectedTime - 60000 || recordTime > expectedTime + 10 * 60000) {
+      return { ...base, reason: 'submission time not matched' }
+    }
+  }
+  const status = String(card.status || '')
+  const reviewing = /审核中|待审核/.test(status)
+  const rejected = /未通过|审核失败|已拒绝/.test(status)
+  const rejectionReason = rejected ? String(card.rejectionReason || '').replace(/\s+/g, ' ').trim().slice(0, 480) : ''
+  const published = Boolean(publicMatch) && !reviewing && !rejected && !/草稿|已删除|已撤回|已下线/.test(status)
+  return {
+    ...base, found: published, failed: rejected, reviewing,
+    submissionVerified: reviewing || published,
+    platformStatus: rejected ? 'rejected' : reviewing ? 'reviewing' : published ? 'published' : 'unknown',
+    pageStatusCode: rejected ? 'rejected' : reviewing ? 'reviewing' : published ? 'published' : 'unknown',
+    failureCode: rejected ? 'SOHU_REVIEW_REJECTED' : undefined,
+    failureMessage: rejected ? rejectionReason || '搜狐文章审核未通过，请查看平台审核原因' : undefined,
+    rejectionReason,
+    platformPublishId: id, platformPublishedUrl: published ? link.href : '',
+    pageStatus: status, matchedText: String(card.text || '').slice(0, 500),
+    reason: reviewing ? 'Sohu article is under review' : published ? 'matched public Sohu article' : rejected ? 'Sohu article rejected' : 'unknown Sohu article status',
+    candidateCount: 1,
+  }
+}
+
 export function evaluateXiaohongshuPublishSignals(target = {}, pageState = {}, options = {}) {
   const text = String(pageState.text || '')
   const normalizedText = normalizeCompact(text)

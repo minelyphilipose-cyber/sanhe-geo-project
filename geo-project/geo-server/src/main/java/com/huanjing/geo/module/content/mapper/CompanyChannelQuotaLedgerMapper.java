@@ -13,6 +13,14 @@ import java.util.List;
 @Mapper
 public interface CompanyChannelQuotaLedgerMapper extends BaseMapper<CompanyChannelQuotaLedger> {
 
+    @Update("UPDATE company_channel_quota_ledger SET status = 'reserved', period_type = #{periodType}, " +
+            "period_key = #{periodKey}, reserved_at = #{now}, confirmed_at = NULL, refunded_at = NULL, expire_checked_at = NULL " +
+            "WHERE id = #{id} AND status IN ('refunded', 'expired')")
+    int reserveReleased(@Param("id") Long id,
+                        @Param("periodType") String periodType,
+                        @Param("periodKey") String periodKey,
+                        @Param("now") LocalDateTime now);
+
     @Update("UPDATE company_channel_quota_ledger " +
             "SET status = #{status}, " +
             "    confirmed_at = CASE WHEN #{status} = 'confirmed' THEN #{now} ELSE confirmed_at END, " +

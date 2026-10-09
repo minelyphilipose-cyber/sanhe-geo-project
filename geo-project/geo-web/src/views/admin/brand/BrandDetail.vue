@@ -513,6 +513,7 @@
             <el-tag size="small" :type="selfMediaAccountStatusTag(row)">
               {{ selfMediaAccountStatusLabel(row) }}
             </el-tag>
+            <div v-if="row.platform === 'sohu'" class="table-subtext">自动发文测试中</div>
           </template>
         </el-table-column>
         <el-table-column label="环境登录" width="130">
@@ -1775,6 +1776,7 @@ const subOptions: Record<string, Array<{ label: string; value: string }>> = {
     { label: '小红书', value: 'xiaohongshu' },
     { label: '百家号', value: 'baijiahao' },
     { label: '网易', value: 'netease' },
+    { label: '搜狐', value: 'sohu' },
   ],
   authority_media: [
     { label: '行业媒体', value: 'industry_media' },
@@ -1833,6 +1835,12 @@ const selfMediaPlatformAccountIdPlaceholder = computed(() =>
     : '可填写平台侧账号 ID，便于身份识别与状态回查',
 )
 const selfMediaAccountRequirement = computed(() => {
+  if (selfMediaAccountForm.platform === 'sohu') {
+    return {
+      title: '搜狐账号已开放配置',
+      description: '请填写搜狐后台显示的账号名称，并绑定已登录的 AdsPower 环境。正文优先配3张插图，素材不足时可少配或不配；搜狐账号每天最多发布5篇。套餐额度与今日头条一致，自动发文目前在测试环境验证。',
+    }
+  }
   if (selfMediaAccountForm.platform === 'baijiahao') {
     return {
       title: '百家号必须填写 app_id',
@@ -3269,6 +3277,7 @@ function selfMediaPlatformLoginReportUrl(platform?: string | null, options: {
   if (normalized === 'xiaohongshu') url = 'https://creator.xiaohongshu.com/new/home?source=official'
   if (normalized === 'baijiahao') url = 'https://baijiahao.baidu.com/builder/rc/settings/accountSet'
   if (normalized === 'douyin') url = 'https://creator.douyin.com/creator-micro/home'
+  if (normalized === 'sohu') url = 'https://mp.sohu.com/mpfe/v4/personalCenter/account?curTab=1'
   if (!url) return ''
   return withLoginReportContext(url, {
     platform: normalized,
@@ -3865,6 +3874,7 @@ function isSemiAutoPlatform(platform?: string | null): platform is SemiAutoPlatf
     || normalized === 'zhihu'
     || normalized === 'xiaohongshu'
     || normalized === 'douyin'
+    || normalized === 'sohu'
 }
 
 async function submitSelfMediaAccount() {

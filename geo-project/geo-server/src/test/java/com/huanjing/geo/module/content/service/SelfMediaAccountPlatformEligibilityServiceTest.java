@@ -110,6 +110,44 @@ class SelfMediaAccountPlatformEligibilityServiceTest {
     }
 
     @Test
+    void allowsSohuConfigurationBeforeAutomationAndPackageAreReady() {
+        when(bindingService.activeBinding(20L)).thenReturn(null);
+        when(scheduleCapabilityService.automaticPublishReadiness(anyString()))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(
+                        false, "PLATFORM_CAPABILITY_UNVERIFIED", "平台自动发布能力尚未完成验证", null));
+
+        var sohu = service.listByBrand(10L).stream()
+                .filter(item -> "sohu".equals(item.getPlatform())).findFirst().orElseThrow();
+
+        assertTrue(sohu.getEligible());
+        assertFalse(sohu.getQuotaEnabled());
+        assertFalse(sohu.getScheduleReady());
+        assertEquals("no_active_package", sohu.getQuotaStatus());
+        assertEquals("PLATFORM_CAPABILITY_UNVERIFIED", sohu.getScheduleCode());
+        org.junit.jupiter.api.Assertions.assertNull(sohu.getReason());
+        service.requireEligible(10L, "sohu");
+    }
+
+    @Test
+    void allowsPackagedSohuConfigurationWithoutClaimingPublishingIsVerified() {
+        when(bindingService.activeBinding(20L)).thenReturn(activeBinding("""
+                [{"channelCode":"self_media:sohu","periodType":"week","quotaLimit":3,"enabled":true}]
+                """));
+        when(scheduleCapabilityService.automaticPublishReadiness(anyString()))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(
+                        false, "PLATFORM_CONTRACT_MISSING", "平台发布能力契约尚未接入", null));
+
+        var sohu = service.listByBrand(10L).stream()
+                .filter(item -> "sohu".equals(item.getPlatform())).findFirst().orElseThrow();
+
+        assertTrue(sohu.getEligible());
+        assertTrue(sohu.getQuotaEnabled());
+        assertFalse(sohu.getScheduleReady());
+        assertEquals(3, sohu.getQuotaLimit());
+        assertEquals("PLATFORM_CONTRACT_MISSING", sohu.getScheduleCode());
+    }
+
+    @Test
     void requireEligibleRejectsPlatformOutsideIntersection() {
         CompanyPackageBinding binding = activeBinding("""
                 [{"channelCode":"self_media:baijiahao","periodType":"week","quotaLimit":2,"enabled":true}]

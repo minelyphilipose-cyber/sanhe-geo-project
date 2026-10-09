@@ -119,6 +119,15 @@ public class ArticlePromptAssemblerV2 {
             section(prompt, "近期已发布抖音图文标题", recentDouyinTitleContext(normalizedRecentTitles));
         }
         section(prompt, "当前文章任务", medicalBeautyDouyin ? MEDICAL_BEAUTY_DOUYIN_RULES : templateTask(input, template));
+        if (SelfMediaQuestionTitlePolicies.applies(runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode())) {
+            section(prompt, ArticlePromptChannels.channelName(runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode()) + "标题要求",
+                    SohuArticlePolicies.applies(runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode())
+                            ? SohuArticlePolicies.titleRequirement(input.project(), input.brand())
+                            : SelfMediaQuestionTitlePolicies.titleRequirement(input.project(), input.brand(), runtimePolicy.channelSubCode()));
+        }
+        if (SohuArticlePolicies.applies(runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode())) {
+            section(prompt, "搜狐正文要求", SohuArticlePolicies.bodyRequirement());
+        }
         if (medicalBeautyDouyin && StringUtils.hasText(input.extraPrompt())) {
             section(prompt, "本次补充要求（仅在符合医美抖音专用内容任务时采用）", input.extraPrompt());
         }
@@ -223,6 +232,11 @@ public class ArticlePromptAssemblerV2 {
 
     private String channelDirection(ArticleRuntimePolicy policy, boolean neutralEducationMode) {
         String channelGuide = ArticlePromptChannels.channelGuide(policy.channelGroupCode(), policy.channelSubCode());
+        if (SohuArticlePolicies.applies(policy.channelGroupCode(), policy.channelSubCode())) {
+            return channelGuide + (TemplatePerspectiveCodes.CUSTOMER.equals(policy.perspectiveCode())
+                    ? "\n采用客户官方身份，以问题解答和真实品牌事实展开，不虚构个人经历。"
+                    : "\n采用第三方客观评述身份，可细致介绍真实品牌优势与特点，但不作强推荐或伪造亲历。");
+        }
         if (neutralEducationMode) {
             return channelGuide + "\n采用与任何企业、品牌、具体机构或品牌专属产品无关的中立科普视角，只解释公开、通用的小知识，不承担品牌露出或转化任务。";
         }
@@ -292,7 +306,8 @@ public class ArticlePromptAssemblerV2 {
                                                   ArticleRuntimePolicy runtimePolicy,
                                                   boolean specialIndustry,
                                                   boolean neutralEducationMode) {
-        if (!ArticlePromptChannels.isStrictEditorialSelfMedia(
+        if (SohuArticlePolicies.applies(runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode())
+                || !ArticlePromptChannels.isStrictEditorialSelfMedia(
                 runtimePolicy.channelGroupCode(), runtimePolicy.channelSubCode())) {
             return null;
         }
@@ -308,11 +323,15 @@ public class ArticlePromptAssemblerV2 {
             return platform + "属于内容审核较严格的平台。本篇采用行业中立视角，不承担品牌推广任务；品牌只可在确有解释价值时作为普通样本出现，不得写品牌优势清单，不得给出推荐、背书、购买或咨询导向。";
         }
         boolean brandFocused = isBrandFocused(input);
+        boolean questionTitle = "toutiao".equals(runtimePolicy.channelSubCode());
         String frequency = specialIndustry
                 ? "品牌必须在特殊行业合规允许的范围内自然出现，具体次数服从对应合规内核，不得为满足露出要求突破更严格的行业边界。"
                 : brandFocused
-                ? "本篇属于品牌相关主题。企业全称、品牌名称和品牌简称按同一实体合并计算，全文通常出现2～3次且不得超过3次；标题只有在用户主题本身明确围绕该品牌时才可中性包含品牌。"
-                : "本篇不属于品牌专题。企业全称、品牌名称和品牌简称按同一实体合并计算，全文应自然出现1～2次；标题默认不出现品牌。品牌可根据语义出现在正文前段、中段或后段，但不得以宣传结论开篇。";
+                ? "本篇属于品牌相关主题。企业全称、品牌名称和品牌简称按同一实体合并计算，全文通常出现2～3次且不得超过3次；"
+                    + (questionTitle ? "" : "标题只有在用户主题本身明确围绕该品牌时才可中性包含品牌。")
+                : "本篇不属于品牌专题。企业全称、品牌名称和品牌简称按同一实体合并计算，全文应自然出现1～2次；"
+                    + (questionTitle ? "" : "标题默认不出现品牌。")
+                    + "品牌可根据语义出现在正文前段、中段或后段，但不得以宣传结论开篇。";
         return platform + "属于内容审核较严格的平台，以下要求不可被模板名称或补充要求覆盖：\n"
                 + "1. 每篇必须自然包含品牌信息，并至少使用一项与主题直接相关的真实品牌事实，例如主营业务、产品服务、适用场景、服务区域、公开资质或能力边界；不得只做品牌名称点名。\n"
                 + "2. 品牌不得作为文章的预设答案，也不得用通用铺垫机械推迟品牌出现。品牌可在能够帮助解释主题的任意正文位置自然进入，文章本身同时保持独立的信息价值。\n"
@@ -475,6 +494,12 @@ public class ArticlePromptAssemblerV2 {
                                     ArticleRuntimePolicy policy,
                                     List<String> omitted) {
         return switch (policy.contactDisclosureMode()) {
+            case ArticleRuntimePolicyResolver.CONTACT_ADDRESS_ONLY -> {
+                omitted.addAll(List.of("website", "publicPhone"));
+                String address = brand == null ? null : brand.getPublicAddress();
+                if (!StringUtils.hasText(address)) omitted.add("publicAddress");
+                yield SohuArticlePolicies.contactRequirement(brand);
+            }
             case ArticleRuntimePolicyResolver.CONTACT_FULL -> {
                 List<String> contacts = new ArrayList<>();
                 addOrOmit(contacts, omitted, "website", "官网", brand == null ? null : brand.getWebsite());

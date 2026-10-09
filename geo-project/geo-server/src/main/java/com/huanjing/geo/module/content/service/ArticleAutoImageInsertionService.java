@@ -79,14 +79,20 @@ public class ArticleAutoImageInsertionService {
             return contentMarkdown;
         }
         Set<String> excludedUrls = existingImageUrls(contentMarkdown);
+        boolean sohu = SohuArticlePolicies.applies(channelGroupCode, channelSubCode);
+        boolean insertSohuCover = sohu && StringUtils.hasText(excludedImageUrl)
+                && !excludedUrls.contains(normalizeUrl(excludedImageUrl));
         addExcludedUrl(excludedUrls, excludedImageUrl);
         boolean douyinImageText = isDouyinImageText(channelGroupCode, channelSubCode);
-        int imageCount = douyinImageText ? randomDouyinImageCount() : bodyImageCount(contentMarkdown);
+        int imageCount = sohu
+                ? Math.max(0, LONG_ARTICLE_IMAGE_COUNT - existingImageUrls(contentMarkdown).size() - (insertSohuCover ? 1 : 0))
+                : douyinImageText ? randomDouyinImageCount() : bodyImageCount(contentMarkdown);
         List<ImageRef> images = selectRandomIllustrationImages(project, imageCount, excludedUrls);
-        if (images.isEmpty()) {
-            return contentMarkdown;
-        }
-        return insertImagesAfterParagraphs(contentMarkdown, images, douyinImageText);
+        String result = images.isEmpty() ? contentMarkdown
+                : insertImagesAfterParagraphs(contentMarkdown, images, douyinImageText || sohu);
+        return insertSohuCover
+                ? insertImageAfterOpeningParagraph(result, new ImageRef("封面图", excludedImageUrl.trim()))
+                : result;
     }
 
     public String insertForTargetChannel(Project project, String targetChannel, String contentMarkdown, String excludedImageUrl) {

@@ -15,6 +15,7 @@ public class ArticleRuntimePolicyResolver {
     public static final String CONTACT_SOFT_HINT = "soft_hint";
     public static final String CONTACT_BRAND_ONLY = "brand_only";
     public static final String CONTACT_FULL = "full";
+    public static final String CONTACT_ADDRESS_ONLY = "address_only";
 
     private static final Set<String> CONTACT_MODES = Set.of(
             CONTACT_NONE, CONTACT_SOFT_HINT, CONTACT_BRAND_ONLY, CONTACT_FULL
@@ -45,6 +46,9 @@ public class ArticleRuntimePolicyResolver {
     private String resolveContactMode(ArticlePromptTemplate template, String group, String sub) {
         if (ArticlePromptChannels.AUTHORITY_MEDIA.equals(group)) {
             return CONTACT_BRAND_ONLY;
+        }
+        if (SohuArticlePolicies.applies(group, sub)) {
+            return CONTACT_ADDRESS_ONLY;
         }
         if (ArticlePromptChannels.SELF_MEDIA.equals(group) && !"wechat".equals(sub)) {
             return CONTACT_NONE;

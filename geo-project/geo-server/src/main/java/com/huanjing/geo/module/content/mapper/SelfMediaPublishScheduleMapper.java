@@ -712,6 +712,9 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
               AND planned_publish_at < #{periodEnd}
               AND status = 'pending'
               AND (locked_until IS NULL OR locked_until < #{now})
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'platform-quick-dispatch-%'
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'platform-quick-schedule-%'
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'manual-schedule-%'
             ORDER BY planned_publish_at ASC, id ASC
             LIMIT 1
             """)
@@ -734,6 +737,9 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
               AND platform_schedule_id IS NULL
               AND platform_publish_id IS NULL
               AND (platform_published_url IS NULL OR platform_published_url = '')
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'platform-quick-dispatch-%'
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'platform-quick-schedule-%'
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'manual-schedule-%'
             ORDER BY COALESCE(next_attempt_at, planned_publish_at) ASC, planned_publish_at ASC, id ASC
             LIMIT 1
             """)
@@ -760,6 +766,9 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
               AND planned_publish_at < #{periodEnd}
               AND status = 'pending'
               AND (locked_until IS NULL OR locked_until < #{now})
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'platform-quick-dispatch-%'
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'platform-quick-schedule-%'
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'manual-schedule-%'
             """)
     int cancelReplaceablePendingSchedule(@Param("scheduleId") Long scheduleId,
                                          @Param("brandId") Long brandId,
@@ -788,6 +797,9 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
               AND platform_schedule_id IS NULL
               AND platform_publish_id IS NULL
               AND (platform_published_url IS NULL OR platform_published_url = '')
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'platform-quick-dispatch-%'
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'platform-quick-schedule-%'
+              AND COALESCE(request_idempotency_key, '') NOT LIKE 'manual-schedule-%'
             """)
     int cancelSafeReplaceablePendingSchedule(@Param("scheduleId") Long scheduleId,
                                              @Param("brandId") Long brandId,

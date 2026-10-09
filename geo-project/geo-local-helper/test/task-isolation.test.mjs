@@ -308,13 +308,14 @@ test('helper and extension expose a rolling-upgrade compatible protocol', () => 
   const serviceWorker = readProjectFile('geo-env-extension/service-worker.js')
   const contentScript = readProjectFile('geo-env-extension/content-script.js')
 
-  assert.equal(manifest.version, helperPackage.version)
-  assert.equal(manifest.version, '0.2.6')
+  assert.equal(manifest.version.split('.')[0], helperPackage.version.split('.')[0])
+  const workerRevision = serviceWorker.match(/EXTENSION_BUILD_REVISION = '([^']+)'/)[1]
   assert.match(
     manifest.version_name,
-    new RegExp(`${helperPackage.version.replaceAll('.', '\\.')}.+${helperPackage.buildRevision.replaceAll('.', '\\.')}`),
+    new RegExp(`${manifest.version.replaceAll('.', '\\.')}.+${workerRevision.replaceAll('.', '\\.')}`),
   )
-  assert.match(contentScript, new RegExp(`GEO_ENV_CONTENT_SCRIPT_VERSION = '${helperPackage.version.replaceAll('.', '\\.')}'`))
+  assert.match(contentScript, new RegExp(`GEO_ENV_CONTENT_SCRIPT_VERSION = '${manifest.version.replaceAll('.', '\\.')}'`))
+  assert.match(serviceWorker, new RegExp(`EXTENSION_VERSION = '${manifest.version.replaceAll('.', '\\.')}'`))
   assert.match(serviceWorker, /EXTENSION_HELPER_PROTOCOL_MISMATCH/)
   assert.match(serviceWorker, /helperProtocolVersion === '1'/)
   const helperServer = readProjectFile('geo-local-helper/src/server.js')

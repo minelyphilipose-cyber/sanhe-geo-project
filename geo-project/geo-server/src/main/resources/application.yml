@@ -93,6 +93,17 @@ article:
 semi-auto:
   platforms:
     profiles:
+      sohu:
+        publish-url: ${SEMI_AUTO_SOHU_PUBLISH_URL:https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle?contentStatus=1}
+        cookie-domains:
+          - ".sohu.com"
+        editor-selectors:
+          title: ".publish-title input[placeholder*='标题']"
+          content: "#editor .ql-editor[contenteditable='true']"
+        allowed-html-tags: [p, br, strong, em, u, h1, h2, h3, ul, ol, li, blockquote, a, img]
+        platform-options:
+          sohu:
+            creationStatement: "含有AI生成内容"
       toutiao:
         publish-url: ${SEMI_AUTO_TOUTIAO_PUBLISH_URL:https://mp.toutiao.com/profile_v4/graphic/publish}
         cookie-domains:
@@ -558,8 +569,7 @@ geo:
       hmac-secret: ${FILL_TOKEN_HMAC_SECRET:__REQUIRED_FILL_TOKEN_HMAC_SECRET__}
       ttl-seconds: ${EXTENSION_FILL_TOKEN_TTL_SECONDS:300}
     long-token:
-      ttl-days: ${EXTENSION_LONG_TOKEN_TTL_DAYS:7}
-      slide-renew-threshold-days: ${EXTENSION_LONG_TOKEN_SLIDE_RENEW_THRESHOLD_DAYS:1}
+      ttl-days: ${EXTENSION_LONG_TOKEN_TTL_DAYS:30}
     bind-code:
       length: ${EXTENSION_BIND_CODE_LENGTH:8}
       ttl-seconds: ${EXTENSION_BIND_CODE_TTL_SECONDS:600}

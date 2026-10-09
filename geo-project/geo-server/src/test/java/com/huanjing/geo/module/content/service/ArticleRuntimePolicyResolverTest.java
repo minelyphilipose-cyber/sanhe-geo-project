@@ -43,7 +43,7 @@ class ArticleRuntimePolicyResolverTest {
         template.setContactDisclosureMode("full");
 
         for (String subCode : ArticlePromptChannels.SELF_MEDIA_SUB_CODES) {
-            if ("wechat".equals(subCode)) {
+            if ("wechat".equals(subCode) || "sohu".equals(subCode)) {
                 continue;
             }
             ArticleRuntimePolicy policy = resolver.resolve(template, ArticlePromptChannels.SELF_MEDIA,
@@ -64,6 +64,15 @@ class ArticleRuntimePolicyResolverTest {
 
         assertEquals("douyin", policy.channelSubCode());
         assertEquals("none", policy.contactDisclosureMode());
+        assertFalse(policy.allowContactInfo());
+    }
+
+    @Test
+    void sohuForcesAddressOnlyEvenWhenTemplateRequestsFull() {
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setContactDisclosureMode("full");
+        ArticleRuntimePolicy policy = resolver.resolve(template, "self_media", "sohu", "customer");
+        assertEquals("address_only", policy.contactDisclosureMode());
         assertFalse(policy.allowContactInfo());
     }
 

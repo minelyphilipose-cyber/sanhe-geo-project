@@ -62,7 +62,7 @@ public interface ExtensionSessionMapper extends BaseMapper<ExtensionSession> {
             WHERE id = #{id}
               AND status = 'active'
               AND expires_at > #{now}
-              AND expires_at <= #{renewBefore}
+              AND expires_at < #{renewBefore}
             """)
     int renewActiveExpiry(
             @Param("id") Long id,

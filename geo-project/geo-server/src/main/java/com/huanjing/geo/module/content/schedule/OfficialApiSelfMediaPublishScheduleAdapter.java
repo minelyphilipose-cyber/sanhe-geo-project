@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.util.DatabaseText;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.distribution.TargetContext;
@@ -49,6 +50,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPublishScheduleAdapter {
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
+    private static final int EXTERNAL_STATUS_MAX_LENGTH = 64;
+    private static final int REVIEW_STATUS_MAX_LENGTH = 32;
+    private static final int REVIEW_FEEDBACK_MAX_LENGTH = 1000;
+    private static final int PLATFORM_ID_MAX_LENGTH = 128;
+    private static final int URL_MAX_LENGTH = 1000;
+    private static final int FAILURE_KIND_MAX_LENGTH = 64;
+    private static final int ERROR_MESSAGE_MAX_LENGTH = 1000;
 
     private final SelfMediaPlatformScheduleAdapterRouter platformRouter;
     private final List<AutoSelfMediaAdapter> adapters;
@@ -368,14 +376,14 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         task.setRequestPayload(jsonColumn(result.getRequestPayload()));
         task.setResponsePayload(jsonColumn(result.getResponseBody()));
         task.setPayloadPurgedAt(null);
-        task.setExternalStatus(result.getExternalStatus());
-        task.setReviewStatus(result.getReviewStatus());
-        task.setReviewFeedback(result.getReviewFeedback());
+        task.setExternalStatus(DatabaseText.truncate(result.getExternalStatus(), EXTERNAL_STATUS_MAX_LENGTH));
+        task.setReviewStatus(DatabaseText.truncate(result.getReviewStatus(), REVIEW_STATUS_MAX_LENGTH));
+        task.setReviewFeedback(DatabaseText.truncate(result.getReviewFeedback(), REVIEW_FEEDBACK_MAX_LENGTH));
         if (result.isSuccess()) {
             task.setStatus("submitted");
-            task.setPlatformArticleId(result.getPlatformArticleId());
-            task.setPlatformPublishId(result.getPlatformPublishId());
-            task.setPublishedUrl(result.getPublishedUrl());
+            task.setPlatformArticleId(DatabaseText.truncate(result.getPlatformArticleId(), PLATFORM_ID_MAX_LENGTH));
+            task.setPlatformPublishId(DatabaseText.truncate(result.getPlatformPublishId(), PLATFORM_ID_MAX_LENGTH));
+            task.setPublishedUrl(DatabaseText.truncate(result.getPublishedUrl(), URL_MAX_LENGTH));
             task.setSubmittedAt(now);
             task.setReviewCheckCount(0);
             task.setFailureKind(null);
@@ -383,8 +391,10 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
             task.setNextRetryAt(null);
         } else {
             task.setStatus("failed");
-            task.setFailureKind(firstText(result.getFailureKind(), FailureKind.UNKNOWN));
-            task.setErrorMessage(firstText(result.getErrorMessage(), "official api submit failed"));
+            task.setFailureKind(DatabaseText.truncate(
+                    firstText(result.getFailureKind(), FailureKind.UNKNOWN), FAILURE_KIND_MAX_LENGTH));
+            task.setErrorMessage(DatabaseText.truncate(
+                    firstText(result.getErrorMessage(), "official api submit failed"), ERROR_MESSAGE_MAX_LENGTH));
             task.setNextRetryAt(result.isRetryable() ? now.plusMinutes(5) : null);
         }
         distributionTaskMapper.updateById(task);
@@ -398,19 +408,20 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         if (next == null) {
             return;
         }
-        next.setReviewStatus(SubmitResult.toStorageValue(status.status()));
-        next.setExternalStatus(status.externalStatus());
-        next.setReviewFeedback(status.reviewFeedback());
+        next.setReviewStatus(DatabaseText.truncate(
+                SubmitResult.toStorageValue(status.status()), REVIEW_STATUS_MAX_LENGTH));
+        next.setExternalStatus(DatabaseText.truncate(status.externalStatus(), EXTERNAL_STATUS_MAX_LENGTH));
+        next.setReviewFeedback(DatabaseText.truncate(status.reviewFeedback(), REVIEW_FEEDBACK_MAX_LENGTH));
         next.setResponsePayload(jsonColumn(status.rawResponse()));
         next.setPayloadPurgedAt(null);
         next.setReviewCheckedAt(LocalDateTime.now());
         next.setReviewCheckCount((next.getReviewCheckCount() == null ? 0 : next.getReviewCheckCount()) + 1);
         next.setReviewLockedUntil(null);
         if (StringUtils.hasText(status.platformArticleId())) {
-            next.setPlatformArticleId(status.platformArticleId());
+            next.setPlatformArticleId(DatabaseText.truncate(status.platformArticleId(), PLATFORM_ID_MAX_LENGTH));
         }
         if (StringUtils.hasText(status.publishedUrl())) {
-            next.setPublishedUrl(status.publishedUrl());
+            next.setPublishedUrl(DatabaseText.truncate(status.publishedUrl(), URL_MAX_LENGTH));
         }
         if (ReviewStatusResult.ReviewStatus.PUBLISHED.equals(status.status())) {
             next.setStatus("published");
@@ -419,12 +430,14 @@ public class OfficialApiSelfMediaPublishScheduleAdapter implements SelfMediaPubl
         } else if (ReviewStatusResult.ReviewStatus.REJECTED.equals(status.status())) {
             next.setStatus("failed");
             next.setFailureKind(FailureKind.PLATFORM);
-            next.setErrorMessage(firstText(status.reviewFeedback(), "official api review rejected"));
+            next.setErrorMessage(DatabaseText.truncate(
+                    firstText(status.reviewFeedback(), "official api review rejected"), ERROR_MESSAGE_MAX_LENGTH));
             next.setFinishedAt(LocalDateTime.now());
         } else if (ReviewStatusResult.ReviewStatus.OFFLINE.equals(status.status())) {
             next.setStatus("published");
             next.setFailureKind(FailureKind.PLATFORM);
-            next.setErrorMessage(firstText(status.reviewFeedback(), "official api work offline"));
+            next.setErrorMessage(DatabaseText.truncate(
+                    firstText(status.reviewFeedback(), "official api work offline"), ERROR_MESSAGE_MAX_LENGTH));
             next.setFinishedAt(LocalDateTime.now());
         } else if (status.retryable()) {
             next.setNextReviewCheckAt(LocalDateTime.now().plusMinutes(10));

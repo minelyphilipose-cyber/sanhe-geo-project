@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "GEO 自媒体助手",
   "description": "GEO AdsPower environment task filling extension.",
-  "version": "0.2.6",
-  "version_name": "0.2.6-account-name-whitespace-20260829.1",
+  "version": "0.2.10",
+  "version_name": "0.2.10-authorization-renewal-20261008.3",
   "action": {
     "default_popup": "popup.html"
   },
@@ -29,7 +29,8 @@
     "https://creator.xiaohongshu.com/*",
     "https://www.xiaohongshu.com/*",
     "https://baijiahao.baidu.com/*",
-    "https://creator.douyin.com/*"
+    "https://creator.douyin.com/*",
+    "https://mp.sohu.com/*"
   ],
   "content_scripts": [
     {
@@ -41,7 +42,8 @@
         "https://creator.xiaohongshu.com/*",
         "https://www.xiaohongshu.com/*",
         "https://baijiahao.baidu.com/*",
-        "https://creator.douyin.com/*"
+        "https://creator.douyin.com/*",
+        "https://mp.sohu.com/*"
       ],
       "js": [
         "fill-result.js",
@@ -51,6 +53,7 @@
         "platform-toutiao.js",
         "platform-xiaohongshu.js",
         "platform-zhihu.js",
+        "platform-sohu.js",
         "content-script.js"
       ],
       "run_at": "document_idle",

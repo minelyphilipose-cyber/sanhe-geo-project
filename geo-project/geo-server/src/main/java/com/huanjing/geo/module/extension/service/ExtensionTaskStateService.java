@@ -93,14 +93,14 @@ public class ExtensionTaskStateService {
             if (isSuccessfulAckAlreadyApplied(context.task())) {
                 auditSuccess("SEMI_AUTO_TASK_FILLED_IDEMPOTENT", context, operatorId, extensionSessionId,
                         detail("status", context.task().getStatus(), "reason", "ACK_ALREADY_APPLIED"));
-                applyScheduleAckResult(taskId, request);
+                applyScheduleAckResult(context.task(), request);
                 return new ExtensionTaskStateResponse(taskId, context.task().getStatus());
             }
             auditDenied("SEMI_AUTO_TASK_FILLED", context, operatorId, extensionSessionId, "STALE_STATE");
             throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
         }
         auditSuccess("SEMI_AUTO_TASK_FILLED", context, operatorId, extensionSessionId, detail("filledAt", now));
-        applyScheduleAckResult(taskId, request);
+        applyScheduleAckResult(context.task(), request);
         return new ExtensionTaskStateResponse(taskId, STATUS_FILLED);
     }
 
@@ -109,10 +109,11 @@ public class ExtensionTaskStateService {
             return false;
         }
         String status = task.getStatus();
-        return STATUS_FILLED.equals(status) || STATUS_PUBLISHED.equals(status);
+        return STATUS_FILLED.equals(status) || STATUS_SUBMITTED.equals(status) || STATUS_PUBLISHED.equals(status);
     }
 
-    private void applyScheduleAckResult(Long taskId, Map<String, Object> request) {
+    private void applyScheduleAckResult(DistributionTask task, Map<String, Object> request) {
+        Long taskId = task.getId();
         String diagnosticsJson = diagnosticsJson(request);
         if (hasVerifiedImmediatePublishResult(request)) {
             selfMediaPublishScheduleService.markDistributionTaskPublishedConfirmed(
@@ -120,7 +121,7 @@ public class ExtensionTaskStateService {
                     extractPublishVerificationUrl(request),
                     diagnosticsJson
             );
-        } else if (hasVerifiedScheduledPublishResult(request)) {
+        } else if (hasVerifiedScheduledPublishResult(request) || hasVerifiedSohuSubmission(task, request)) {
             selfMediaPublishScheduleService.markDistributionTaskScheduled(taskId, diagnosticsJson);
         } else {
             selfMediaPublishScheduleService.markDistributionTaskFilled(taskId, diagnosticsJson);
@@ -478,6 +479,20 @@ public class ExtensionTaskStateService {
             return Boolean.TRUE.equals(verificationMap.get("verified"));
         }
         return false;
+    }
+
+    private boolean hasVerifiedSohuSubmission(DistributionTask task, Map<String, Object> request) {
+        if (!"sohu".equals(task.getIntegrationMethod())
+                || !(request != null && request.get("fillResult") instanceof Map<?, ?> result)
+                || !"sohu".equals(result.get("platform"))
+                || !(result.get("publishOptions") instanceof Map<?, ?> options)
+                || !Boolean.TRUE.equals(options.get("submitted"))
+                || !(options.get("publishVerification") instanceof Map<?, ?> verification)) {
+            return false;
+        }
+        return Boolean.TRUE.equals(verification.get("submissionVerified"))
+                && "reviewing".equals(verification.get("platformStatus"))
+                && verification.get("platformPublishId") instanceof String id && id.matches("\\d+");
     }
 
     private String extractPublishVerificationUrl(Map<String, Object> request) {

@@ -97,9 +97,13 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
         imagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
         materialSelectionService = mock(SelfMediaPublishMaterialSelectionService.class);
         capabilityService = mock(SelfMediaScheduleCapabilityService.class);
-        adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
+        adapter = officialAdapter(new FakeOfficialApiAdapter());
+    }
+
+    private OfficialApiSelfMediaPublishScheduleAdapter officialAdapter(AutoSelfMediaAdapter apiAdapter) {
+        return new OfficialApiSelfMediaPublishScheduleAdapter(
                 platformRouter,
-                List.of(new FakeOfficialApiAdapter()),
+                List.of(apiAdapter),
                 scheduleMapper,
                 distributionTaskMapper,
                 articleDraftMapper,
@@ -358,21 +362,7 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
 
     @Test
     void scheduleFailureDiagnosticsIncludeOperationStage() {
-        adapter = new OfficialApiSelfMediaPublishScheduleAdapter(
-                platformRouter,
-                List.of(new SubmitFailingAdapter()),
-                scheduleMapper,
-                distributionTaskMapper,
-                articleDraftMapper,
-                articleDraftVersionMapper,
-                articleBodyProvider,
-                selfMediaAccountMapper,
-                projectMapper,
-                imagePublicUrlRewriter,
-                materialSelectionService,
-                capabilityService,
-                new ObjectMapper()
-        );
+        adapter = officialAdapter(new SubmitFailingAdapter());
         SelfMediaPublishSchedule row = scheduleRow();
         when(scheduleMapper.selectById(10L)).thenReturn(row);
         when(distributionTaskMapper.selectOne(any())).thenReturn(null);
@@ -394,6 +384,37 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
         assertTrue(result.diagnosticsJson().contains("\"operationStage\":\"WECHAT_ADD_DRAFT\""));
         assertTrue(result.diagnosticsJson().contains("\"operationStageLabel\":\"新增公众号草稿\""));
         assertTrue(result.diagnosticsJson().contains("\"platformRawError\":\"api unauthorized rid: draft-rid\""));
+    }
+
+    @Test
+    void scheduleTruncatesOversizedFailureFieldsBeforePersisting() {
+        adapter = officialAdapter(new OversizedFailureAdapter());
+        stubScheduleDependencies();
+
+        ScheduleExecutionResult result = adapter.schedule(SelfMediaPublishScheduleVO.from(scheduleRow()));
+
+        assertEquals(false, result.success());
+        verify(distributionTaskMapper).updateById(ArgumentMatchers.argThat(task ->
+                task.getFailureKind().length() == 64
+                        && task.getErrorMessage().length() == 1000
+                        && task.getExternalStatus().length() == 64
+                        && task.getReviewFeedback().length() == 1000
+        ));
+    }
+
+    @Test
+    void scheduleTruncatesOversizedSuccessIdentifiersBeforePersisting() {
+        adapter = officialAdapter(new OversizedSuccessAdapter());
+        stubScheduleDependencies();
+
+        ScheduleExecutionResult result = adapter.schedule(SelfMediaPublishScheduleVO.from(scheduleRow()));
+
+        assertTrue(result.success());
+        verify(distributionTaskMapper).updateById(ArgumentMatchers.argThat(task ->
+                task.getPlatformArticleId().length() == 128
+                        && task.getPlatformPublishId().length() == 128
+                        && task.getPublishedUrl().length() == 1000
+        ));
     }
 
     @Test
@@ -484,6 +505,21 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
         row.setPlatformScheduledAt(LocalDateTime.now().plusMinutes(5));
         row.setCreatedBy(7L);
         return row;
+    }
+
+    private void stubScheduleDependencies() {
+        when(scheduleMapper.selectById(10L)).thenReturn(scheduleRow());
+        when(distributionTaskMapper.selectOne(any())).thenReturn(null);
+        when(articleDraftMapper.selectById(20L)).thenReturn(article());
+        when(projectMapper.selectById(30L)).thenReturn(project());
+        when(selfMediaAccountMapper.selectById(40L)).thenReturn(account());
+        ArticleDraftVersion version = new ArticleDraftVersion();
+        version.setContentMarkdown("content");
+        when(articleDraftVersionMapper.selectOne(any())).thenReturn(version);
+        when(materialSelectionService.select(any(), any(), eq("content")))
+                .thenReturn(new SelfMediaPublishMaterialSelectionService.Selection(88L, List.of()));
+        when(imagePublicUrlRewriter.rewrite(any(), eq("content"))).thenReturn("content");
+        when(capabilityService.automationOptions("wechat_mp")).thenReturn(Map.of());
     }
 
     private ArticleDraft article() {
@@ -617,6 +653,32 @@ class OfficialApiSelfMediaPublishScheduleAdapterTest {
                     "WECHAT_API_UNAUTHORIZED",
                     false);
             result.setOperationStage("WECHAT_ADD_DRAFT");
+            return result;
+        }
+    }
+
+    private static class OversizedFailureAdapter extends FakeOfficialApiAdapter {
+        @Override
+        public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext.SelfMediaTarget target) {
+            SubmitResult result = SubmitResult.failure(
+                    500,
+                    "{}",
+                    "{}",
+                    "e".repeat(1200),
+                    "F".repeat(100),
+                    false);
+            result.setExternalStatus("s".repeat(100));
+            result.setReviewFeedback("r".repeat(1200));
+            return result;
+        }
+    }
+
+    private static class OversizedSuccessAdapter extends FakeOfficialApiAdapter {
+        @Override
+        public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext.SelfMediaTarget target) {
+            SubmitResult result = SubmitResult.success(200, "{}", "{}", "u".repeat(1200));
+            result.setPlatformArticleId("a".repeat(200));
+            result.setPlatformPublishId("p".repeat(200));
             return result;
         }
     }

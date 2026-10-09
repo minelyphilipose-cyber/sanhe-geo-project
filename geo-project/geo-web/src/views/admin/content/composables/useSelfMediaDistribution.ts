@@ -44,7 +44,7 @@ import {
 } from '@/constants/selfMediaPlatforms'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'baijiahao' | 'toutiao' | 'zhihu' | 'xiaohongshu' | 'netease' | 'sohu'
-type SemiAutoPlatform = 'toutiao' | 'baijiahao' | 'zhihu' | 'xiaohongshu' | 'douyin'
+type SemiAutoPlatform = 'sohu' | 'toutiao' | 'baijiahao' | 'zhihu' | 'xiaohongshu' | 'douyin'
 type PlatformQuickSchedulePlatform = SemiAutoPlatform | 'wechat_mp'
 
 type UseSelfMediaDistributionOptions = {
@@ -121,6 +121,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   const toutiaoAccounts = ref<SelfMediaAccount[]>([])
   const baijiahaoAccounts = ref<SelfMediaAccount[]>([])
   const zhihuAccounts = ref<SelfMediaAccount[]>([])
+  const sohuAccounts = ref<SelfMediaAccount[]>([])
   const xiaohongshuAccounts = ref<SelfMediaAccount[]>([])
   const selfMediaQuotaItems = ref<CompanyDistributionQuotaItem[]>([])
   const checkingSelfMediaAccountId = ref<number | null>(null)
@@ -206,6 +207,8 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
         return baijiahaoAccounts.value
       case 'zhihu':
         return zhihuAccounts.value
+      case 'sohu':
+        return sohuAccounts.value
       case 'xiaohongshu':
         return xiaohongshuAccounts.value
       default:
@@ -282,6 +285,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     toutiaoAccounts.value = []
     baijiahaoAccounts.value = []
     zhihuAccounts.value = []
+    sohuAccounts.value = []
     xiaohongshuAccounts.value = []
     selfMediaQuotaItems.value = []
     brandImageFolders.value = []
@@ -360,6 +364,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     toutiaoAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'toutiao')
     baijiahaoAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'baijiahao')
     zhihuAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'zhihu')
+    sohuAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'sohu')
     xiaohongshuAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'xiaohongshu')
   }
 
@@ -396,6 +401,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       ...toutiaoAccounts.value,
       ...baijiahaoAccounts.value,
       ...zhihuAccounts.value,
+      ...sohuAccounts.value,
       ...xiaohongshuAccounts.value,
     ])
   }
@@ -529,7 +535,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatform {
-    return platform === 'toutiao' || platform === 'baijiahao' || platform === 'zhihu' || platform === 'xiaohongshu' || platform === 'douyin'
+    return platform === 'sohu' || platform === 'toutiao' || platform === 'baijiahao' || platform === 'zhihu' || platform === 'xiaohongshu' || platform === 'douyin'
   }
 
   function distributionQuotaPeriodLabel(value?: string | null) {
@@ -548,6 +554,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     if (platform === 'toutiao') return '头条'
     if (platform === 'baijiahao') return '百家号'
     if (platform === 'zhihu') return '知乎'
+    if (platform === 'sohu') return '搜狐'
     return '小红书'
   }
 
@@ -831,6 +838,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     if (platform === 'toutiao') return toutiaoAccounts.value
     if (platform === 'baijiahao') return baijiahaoAccounts.value
     if (platform === 'zhihu') return zhihuAccounts.value
+    if (platform === 'sohu') return sohuAccounts.value
     return xiaohongshuAccounts.value
   }
 
@@ -1300,6 +1308,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     toutiaoAccounts,
     baijiahaoAccounts,
     zhihuAccounts,
+    sohuAccounts,
     xiaohongshuAccounts,
     checkingSelfMediaAccountId,
     imageFolderScope,

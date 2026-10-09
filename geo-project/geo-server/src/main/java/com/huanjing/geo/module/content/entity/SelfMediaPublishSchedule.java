@@ -48,11 +48,14 @@ public class SelfMediaPublishSchedule {
     private Integer attemptCount;
     private Integer maxAttempts;
     private LocalDateTime lastAttemptAt;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime nextAttemptAt;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime lockedUntil;
 
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String failureCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String failureMessage;
     private String diagnosticsJson;
     private String publishPayloadJson;

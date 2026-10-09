@@ -112,6 +112,48 @@ class BatchArticlePromptBuilderTest {
     }
 
     @Test
+    void toutiaoQuestionsReachLegacyAndTemplatePromptsWithoutStatementTitleOverrides() {
+        ArticleDraft recentDraft = new ArticleDraft();
+        recentDraft.setTitle("阜阳得闲spa服务怎么样？");
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of(recentDraft));
+        when(sysDictItemMapper.selectOne(any())).thenReturn(null);
+        var base = promptInput();
+        base.brand().setCityName("阜阳市");
+        var input = new BatchArticlePromptBuilder.PromptBuildInput(
+                base.project(), base.brand(), base.brandStatement(), base.topicSource(), base.topic(),
+                base.topicAsQuestion(), base.keywordGroupId(), base.keywordGroupName(), base.relatedKeywords(),
+                base.articleType(), "toutiao", base.length(), base.extraPrompt(), 1,
+                base.forbiddenPhrases(), base.titleGuide(), base.perspectiveCode(), base.perspectiveMatchedScope(),
+                base.perspectiveMatchedConfigId(), base.selectedOfferings());
+        var template = template();
+        template.setChannelGroupCode("self_media");
+        template.setChannelSubCode("toutiao");
+        template.setContactDisclosureMode("full");
+        base.brand().setPublicPhone("400-800-1234");
+        var version = version();
+        version.setUserPromptTemplate("围绕{{topic}}拟标题，标题策略：{{titleStrategy}}");
+
+        var legacy = builder.build(input);
+        var fromTemplate = builder.buildFromTemplate(input, template, version);
+        for (var result : List.of(legacy, fromTemplate)) {
+            assertThat(result.systemPrompt())
+                    .contains("今日头条标题要求")
+                    .contains("主体地域“阜阳市”")
+                    .contains("疑问句或反问句")
+                    .contains("把品牌评价留给正文依据事实回答")
+                    .contains("28字上限")
+                    .doesNotContain("72字上限")
+                    .doesNotContain("最多仅可展示已配置的公开地址");
+            assertThat(result.userPrompt())
+                    .doesNotContain("标题给出一个克制判断或结论")
+                    .doesNotContain("标题可以有明确判断")
+                    .doesNotContain("本文标题应使用陈述判断句或场景描述句");
+        }
+        assertThat(legacy.userPrompt()).contains("不为差异化改成品牌肯定句");
+        assertThat(fromTemplate.userPrompt()).contains("400-800-1234");
+    }
+
+    @Test
     void douyinUsesFivePublishedTitlesAsContextWithoutDuplicateJudgement() {
         when(sysDictItemMapper.selectOne(any())).thenReturn(null);
         List<ArticlePublishRecord> records = java.util.stream.LongStream.rangeClosed(1, 6)

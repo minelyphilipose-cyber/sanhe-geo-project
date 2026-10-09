@@ -1,5 +1,7 @@
 # GEO Local Helper PoC
 
+0.2.11 / 20261008.5：搜狐审核失败会回传匹配文章的具体原因；明确的失败证据先持久化，再回传后台。网络中断或助手重启后仅补报失败结论，不重放发文。隔离进程中断测试覆盖上传、提交、成功待回传和审核拒绝待回传；真实平台中断测试仍需另行验证。
+
 这个目录是指纹浏览器方案的本地助手 PoC，只用于验证链路：
 
 后台任务 -> 本地助手 -> AdsPower Local API -> 指定浏览器环境 -> 环境内 PoC 扩展领取任务并填充。
@@ -86,6 +88,8 @@ npm run package:delivery -- -Environment dev
 打包脚本会生成 `geo-local-helper-prod-v{version}.zip` 或 `geo-local-helper-dev-v{version}.zip`，并把包内 `config.example.json` 固定到对应后台环境。
 
 本地助手不在配置文件中保存品牌、自媒体账号与 AdsPower 环境 ID 的业务映射。`providerProfileId` 由后台品牌详情中的指纹浏览器环境绑定关系传入；运营只在后台页面配置环境关系，不需要编辑 `config.local.json`。
+
+0.2.10 / 20261008.4 支持测试和分批上线时限定轮询平台：在助手配置中设置 `"selfMediaSchedulePlatforms": ["sohu"]`，只处理后台已授权平台中的搜狐任务与结果回查。不配置则继续处理后台返回的全部平台；空数组不领取任何平台任务。该设置不能开启后台未授权的平台，非法非数组值会停止本轮领取。轮询周期 `selfMediaSchedulePollIntervalMs` 为负数时关闭，正数时启用；配置在助手启动时读取，修改后须重启。这是部署配置，不改变后台的账号与环境业务映射。
 
 V2 阶段 1 可以显式设置 `"browserObservationEnabled": true` 开启只读浏览器资源观察。开启后：
 

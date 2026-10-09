@@ -12,6 +12,41 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class ArticleAiDraftPromptFilterTest {
+    @Test
+    void sohuRetainsOnlyConfiguredAddressAndPreservesMaterialImages() {
+        ArticleAiDraftPromptFilter filter = new ArticleAiDraftPromptFilter(mock(SysDictItemMapper.class));
+        Brand brand = new Brand();
+        brand.setPublicPhone("13812345678");
+        brand.setPublicAddress("北京市朝阳区测试路88号");
+        brand.setWebsite("https://brand.example.com");
+        String source = """
+                # 北京测试品牌如何整理资料？
+
+                地址：北京市朝阳区测试路88号
+                地址：北京市朝阳区其他路99号
+                电话：13812345678
+                微信：test_wechat
+                QQ：123456
+                邮箱：test@example.com
+                官网：https://brand.example.com
+                [了解品牌](https://brand.example.com/info)
+                其他链接 https://other.example.com
+                ![插图](https://assets.example.com/1.png)
+                正文仍需完整解答标题。
+                """;
+        String prompt = filter.filterOutboundPrompt(source, null, brand, false, true);
+        String content = filter.filterGeneratedContent(source, null, brand, false, true);
+        assertTrue(prompt.contains("北京市朝阳区测试路88号"));
+        assertTrue(content.contains("北京市朝阳区测试路88号"));
+        assertTrue(content.contains("![插图](https://assets.example.com/1.png)"));
+        assertTrue(content.contains("正文仍需完整解答标题"));
+        for (String forbidden : List.of("其他路99号", "13812345678", "test_wechat", "123456", "test@example.com",
+                "brand.example.com", "other.example.com", "_REDACTED]")) {
+            assertFalse(content.contains(forbidden), forbidden);
+        }
+        brand.setPublicAddress(null);
+        assertFalse(filter.filterGeneratedContent(source, null, brand, false, true).contains("测试路88号"));
+    }
 
     @Test
     void bankCardRedactionRequiresLuhnMatch() {

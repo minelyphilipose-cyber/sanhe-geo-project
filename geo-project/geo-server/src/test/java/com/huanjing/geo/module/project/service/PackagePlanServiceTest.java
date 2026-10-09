@@ -12,12 +12,15 @@ import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -54,6 +57,77 @@ class PackagePlanServiceTest {
     }
 
     @Test
+    void savesExplicitSohuPeriodQuotaAndEnabledStateIndependentlyOfToutiao() {
+        var toutiao = request("self_media:toutiao", "month", 12);
+        var sohu = request("self_media:sohu", "week", 0);
+        sohu.setEnabled(false);
+        service.saveChannelQuotaConfigsByPlanId(3L, List.of(toutiao, sohu));
+
+        ArgumentCaptor<PackageChannelQuotaConfig> captor = ArgumentCaptor.forClass(PackageChannelQuotaConfig.class);
+        verify(channelQuotaConfigMapper, atLeastOnce()).insert(captor.capture());
+        var saved = captor.getAllValues().stream()
+                .filter(item -> "self_media:sohu".equals(item.getChannelCode())).findFirst().orElseThrow();
+        assertEquals("week", saved.getPeriodType());
+        assertEquals(0, saved.getQuotaLimit());
+        assertFalse(saved.getEnabled());
+        var savedToutiao = captor.getAllValues().stream()
+                .filter(item -> "self_media:toutiao".equals(item.getChannelCode())).findFirst().orElseThrow();
+        assertEquals("month", savedToutiao.getPeriodType());
+        assertEquals(12, savedToutiao.getQuotaLimit());
+        assertTrue(savedToutiao.getEnabled());
+        assertEquals("week", sohu.getPeriodType());
+        assertEquals(0, sohu.getQuotaLimit());
+    }
+
+    @Test
+    void addsSohuToLegacyPackageInputAndMirrorsDisabledToutiao() {
+        var toutiao = request("self_media:toutiao", "week", 3);
+        toutiao.setEnabled(false);
+        service.saveChannelQuotaConfigsByPlanId(3L, List.of(toutiao));
+
+        ArgumentCaptor<PackageChannelQuotaConfig> captor = ArgumentCaptor.forClass(PackageChannelQuotaConfig.class);
+        verify(channelQuotaConfigMapper, atLeastOnce()).insert(captor.capture());
+        var saved = captor.getAllValues().stream()
+                .filter(item -> "self_media:sohu".equals(item.getChannelCode())).findFirst().orElseThrow();
+        assertEquals("week", saved.getPeriodType());
+        assertEquals(3, saved.getQuotaLimit());
+        assertFalse(saved.getEnabled());
+    }
+
+    @Test
+    void independentSohuQuotaIncreasePreservesExistingCustomerSnapshots() {
+        when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
+        when(channelQuotaConfigMapper.selectList(any())).thenReturn(List.of(
+                quota("self_media:toutiao", "month", 12, true),
+                quota("self_media:sohu", "week", 1, true)));
+
+        service.saveChannelQuotaConfigsByPlanId(3L, List.of(
+                request("self_media:toutiao", "month", 12),
+                request("self_media:sohu", "week", 2)));
+
+        ArgumentCaptor<PackageChannelQuotaConfig> captor = ArgumentCaptor.forClass(PackageChannelQuotaConfig.class);
+        verify(channelQuotaConfigMapper, atLeastOnce()).insert(captor.capture());
+        var saved = captor.getAllValues().stream()
+                .filter(item -> "self_media:sohu".equals(item.getChannelCode())).findFirst().orElseThrow();
+        assertEquals("week", saved.getPeriodType());
+        assertEquals(2, saved.getQuotaLimit());
+        verify(bindingService, never()).syncActiveBindingsForPackagePlan(3L);
+    }
+
+    @Test
+    void independentSohuQuotaCanDecreaseWithoutRefreshingExistingCustomerSnapshots() {
+        when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
+        when(channelQuotaConfigMapper.selectList(any()))
+                .thenReturn(List.of(quota("self_media:sohu", "month", 13, true)));
+
+        service.saveChannelQuotaConfigsByPlanId(3L, List.of(request("self_media:sohu", "month", 12)));
+        ArgumentCaptor<PackageChannelQuotaConfig> captor = ArgumentCaptor.forClass(PackageChannelQuotaConfig.class);
+        verify(channelQuotaConfigMapper).insert(captor.capture());
+        assertEquals(12, captor.getValue().getQuotaLimit());
+        verify(bindingService, never()).syncActiveBindingsForPackagePlan(3L);
+    }
+
+    @Test
     void saveChannelQuotaConfigsRejectsLegacySelfMediaAggregateChannel() {
         BizException ex = assertThrows(BizException.class,
                 () -> service.saveChannelQuotaConfigsByPlanId(3L, List.of(request("self_media", "week", 1))));
@@ -79,15 +153,16 @@ class PackagePlanServiceTest {
     }
 
     @Test
-    void saveChannelQuotaConfigsRejectsQuotaDecreaseForBoundPackagePlan() {
+    void saveChannelQuotaConfigsAllowsQuotaDecreaseForBoundPackagePlan() {
         when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
         when(channelQuotaConfigMapper.selectList(any()))
                 .thenReturn(List.of(quota("official_site", "month", 2, true)));
 
-        BizException ex = assertThrows(BizException.class,
-                () -> service.saveChannelQuotaConfigsByPlanId(3L, List.of(request("official_site", "month", 1))));
-
-        assertEquals("套餐已绑定客户，只允许扩大权益：渠道 official_site 的额度只能增加，不能从 2 调整为 1", ex.getMessage());
+        service.saveChannelQuotaConfigsByPlanId(3L, List.of(request("official_site", "month", 1)));
+        ArgumentCaptor<PackageChannelQuotaConfig> captor = ArgumentCaptor.forClass(PackageChannelQuotaConfig.class);
+        verify(channelQuotaConfigMapper).insert(captor.capture());
+        assertEquals(1, captor.getValue().getQuotaLimit());
+        verify(bindingService, never()).syncActiveBindingsForPackagePlan(3L);
     }
 
     @Test
@@ -157,17 +232,60 @@ class PackagePlanServiceTest {
     }
 
     @Test
-    void saveChannelQuotaConfigsRejectsDisablingBoundChannel() {
+    void saveChannelQuotaConfigsAllowsDisablingBoundChannel() {
         when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
         when(channelQuotaConfigMapper.selectList(any()))
                 .thenReturn(List.of(quota("self_media:wechat", "week", 1, true)));
         PackageChannelQuotaConfigRequest disabled = request("self_media:wechat", "week", 1);
         disabled.setEnabled(false);
 
-        BizException ex = assertThrows(BizException.class,
-                () -> service.saveChannelQuotaConfigsByPlanId(3L, List.of(disabled)));
+        service.saveChannelQuotaConfigsByPlanId(3L, List.of(disabled));
+        ArgumentCaptor<PackageChannelQuotaConfig> captor = ArgumentCaptor.forClass(PackageChannelQuotaConfig.class);
+        verify(channelQuotaConfigMapper).insert(captor.capture());
+        assertFalse(captor.getValue().getEnabled());
+        verify(bindingService, never()).syncActiveBindingsForPackagePlan(3L);
+    }
 
-        assertEquals("套餐已绑定客户，只允许扩大权益：已启用渠道 self_media:wechat 不可删除或停用", ex.getMessage());
+    @ParameterizedTest
+    @MethodSource("periodicChannels")
+    void boundPackageChannelPeriodAndQuotaCanChangeThroughBothSaveEndpoints(String channel) {
+        when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
+        when(channelQuotaConfigMapper.selectList(any()))
+                .thenReturn(List.of(quota(channel, "month", 13, true)));
+        var nextQuota = request(channel, "day", 3);
+
+        service.saveChannelQuotaConfigsByPlanId(3L, List.of(nextQuota));
+        var update = updateRequest();
+        update.setChannelQuotaConfigs(List.of(nextQuota));
+        service.update(3L, update);
+
+        ArgumentCaptor<PackageChannelQuotaConfig> captor = ArgumentCaptor.forClass(PackageChannelQuotaConfig.class);
+        verify(channelQuotaConfigMapper, atLeastOnce()).insert(captor.capture());
+        var saved = captor.getAllValues().stream().filter(item -> channel.equals(item.getChannelCode())).toList();
+        assertEquals(2, saved.size());
+        for (var quota : saved) {
+            assertEquals("day", quota.getPeriodType());
+            assertEquals(3, quota.getQuotaLimit());
+            assertTrue(quota.getEnabled());
+        }
+        verify(bindingService, never()).syncActiveBindingsForPackagePlan(3L);
+    }
+
+    @Test
+    void boundPackageStillRejectsInvalidChannelQuotasBeforeWriting() {
+        when(bindingService.hasBindingsForPackagePlan(3L)).thenReturn(true);
+        assertThrows(BizException.class, () -> service.saveChannelQuotaConfigsByPlanId(3L,
+                List.of(request("self_media:sohu", "day", -1))));
+        var update = updateRequest();
+        update.setChannelQuotaConfigs(List.of(request("self_media:sohu", "total", 3)));
+        assertThrows(BizException.class, () -> service.update(3L, update));
+        verify(channelQuotaConfigMapper, never()).delete(any());
+        verify(packagePlanMapper, never()).updateById(any());
+    }
+
+    private static Stream<String> periodicChannels() {
+        return Stream.concat(Stream.of("official_site", "industry_site", "forum"),
+                ArticlePromptChannels.SELF_MEDIA_SUB_CODES.stream().map(platform -> "self_media:" + platform));
     }
 
     @Test

@@ -757,8 +757,11 @@ class BatchArticleGenerationServiceTest {
         assertEquals(1, updated.getFailedCount());
     }
 
-    @Test
-    void createSystemBatchFreezesRandomThirdPartyBrandProjectAndAQuestionOnTask() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"wechat,true", "sohu,false"})
+    void createSystemBatchFreezesRandomThirdPartyBrandProjectAndAQuestionOnTask(String channel, boolean rotated) {
+        Long subjectBrandId = rotated ? 300L : 30L;
+        Long subjectProjectId = rotated ? 3000L : 10L;
         CapturingExecutor executor = new CapturingExecutor();
         ReflectionTestUtils.setField(service, "articleAiDraftExecutor", executor);
 
@@ -773,29 +776,29 @@ class BatchArticleGenerationServiceTest {
         sourceBrand.setBrandName("Source brand");
         when(projectMapper.selectById(10L)).thenReturn(project);
         when(brandMapper.selectById(30L)).thenReturn(sourceBrand);
-        when(perspectiveService.resolve(30L, "self_media", "wechat"))
+        when(perspectiveService.resolve(30L, "self_media", channel))
                 .thenReturn(new TemplatePerspectiveService.ResolvedPerspective(
                         TemplatePerspectiveCodes.REVIEW_RECOMMEND,
                         TemplatePerspectiveService.MATCH_SCOPE_EXACT,
                         31L
                 ));
         when(subjectRotationService.resolve(project, sourceBrand, "self_media", TemplatePerspectiveCodes.REVIEW_RECOMMEND))
-                .thenReturn(new ThirdPartySubjectRotationService.RotationResult(30L, 10L, 300L, 3000L, true));
+                .thenReturn(new ThirdPartySubjectRotationService.RotationResult(30L, 10L, subjectBrandId, subjectProjectId, rotated));
         KeywordGroupResult selectedQuestion = new KeywordGroupResult();
         selectedQuestion.setKeywordText("智能门锁应该怎么选？");
         selectedQuestion.setSceneCode("decision");
-        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(3000L, "'A'"))
+        when(keywordGroupResultMapper.selectProjectQuestionsByTiers(subjectProjectId, "'A'"))
                 .thenReturn(List.of(selectedQuestion));
 
-        ArticlePromptTemplate template = template(101L, "self_media", "wechat", "industry_article",
+        ArticlePromptTemplate template = template(101L, "self_media", channel, "industry_article",
                 TemplatePerspectiveCodes.REVIEW_RECOMMEND);
         ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
         version.setId(201L);
         version.setTemplateId(101L);
-        when(allocationService.activeTemplates("self_media", "wechat", null,
+        when(allocationService.activeTemplates("self_media", channel, null,
                 TemplatePerspectiveCodes.REVIEW_RECOMMEND))
                 .thenReturn(List.of(new ArticleTemplateAllocationService.TemplateWithVersion(template, version)));
-        when(allocationService.allocate("self_media", "wechat", null,
+        when(allocationService.allocate("self_media", channel, null,
                 TemplatePerspectiveCodes.REVIEW_RECOMMEND, 1))
                 .thenReturn(List.of(new ArticleTemplateAllocationService.AllocatedTemplate(template, version, 1)));
         when(batchMapper.insert(any(BatchArticleGenerationBatch.class))).thenAnswer(invocation -> {
@@ -809,7 +812,7 @@ class BatchArticleGenerationServiceTest {
         req.setTopicSource("manual");
         BatchArticleGenerateRequest.TopicConfig topic = new BatchArticleGenerateRequest.TopicConfig();
         topic.setTopic("第三方品牌评测推荐");
-        topic.setPlatforms(List.of(platform("self_media", "wechat", 1)));
+        topic.setPlatforms(List.of(platform("self_media", channel, 1)));
         req.setTopics(List.of(topic));
 
         BatchArticleGenerateResponse response = service.createSystemBatch(req, null);
@@ -822,8 +825,8 @@ class BatchArticleGenerationServiceTest {
         assertEquals(500L, task.getBatchId());
         assertEquals(10L, task.getProjectId());
         assertEquals(30L, task.getSourceBrandId());
-        assertEquals(300L, task.getSubjectBrandId());
-        assertEquals(3000L, task.getSubjectProjectId());
+        assertEquals(subjectBrandId, task.getSubjectBrandId());
+        assertEquals(subjectProjectId, task.getSubjectProjectId());
         assertEquals(TemplatePerspectiveCodes.REVIEW_RECOMMEND, task.getPerspectiveCode());
         assertEquals(31L, task.getPerspectiveMatchedConfigId());
         assertEquals("智能门锁应该怎么选？", task.getTopic());

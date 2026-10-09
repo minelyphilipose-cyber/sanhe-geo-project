@@ -236,6 +236,20 @@ public class CompanyChannelQuotaService {
         for (BizQuotaReservation reservation : reservations) {
             CompanyChannelQuotaLedger existed = ledgerMapper.selectByBiz(reservation.bizType(), reservation.bizId());
             if (existed != null) {
+                if (BIZ_TYPE_SELF_MEDIA_SCHEDULE.equals(reservation.bizType())
+                        && ("refunded".equals(existed.getStatus()) || "expired".equals(existed.getStatus()))) {
+                    if (!companyId.equals(existed.getCompanyId()) || !reservation.channel().equals(existed.getChannelCode())) {
+                        throw new BizException(409, "Schedule quota reservation owner does not match");
+                    }
+                    SnapshotQuota quota = resolveSnapshotQuota(binding, reservation.channel());
+                    String periodKey = periodKey(quota.periodType(), reservation.quotaDate());
+                    if (ledgerMapper.reserveReleased(existed.getId(), quota.periodType(), periodKey, LocalDateTime.now(BUSINESS_ZONE)) == 1) {
+                        reserveQuotaGroup(companyId, new QuotaGroupKey(reservation.channel(), quota.periodType(), periodKey, quota.quotaLimit()), 1);
+                        existed.setStatus("reserved");
+                        existed.setPeriodType(quota.periodType());
+                        existed.setPeriodKey(periodKey);
+                    }
+                }
                 ledgers.add(existed);
                 continue;
             }
@@ -347,6 +361,45 @@ public class CompanyChannelQuotaService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void confirmSelfMediaSchedule(Long scheduleId) {
         updateReservedLedger(BIZ_TYPE_SELF_MEDIA_SCHEDULE, scheduleId, "confirmed");
+    }
+
+    public void confirmSelfMediaSchedule(Long scheduleId, LocalDate quotaDate) {
+        if (scheduleId == null) return;
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        String dedupeKey = "quota-schedule-confirmation-" + scheduleId;
+        // Quota reconciliation must not roll back a publication already accepted by the platform.
+        try {
+            tx.executeWithoutResult(status -> {
+                if (quotaDate != null) restoreSelfMediaScheduleReservation(scheduleId, quotaDate);
+                updateReservedLedger(BIZ_TYPE_SELF_MEDIA_SCHEDULE, scheduleId, "confirmed");
+            });
+        } catch (RuntimeException ex) {
+            log.error("Published schedule quota confirmation failed, scheduleId={}, quotaDate={}", scheduleId, quotaDate, ex);
+            try {
+                tx.executeWithoutResult(status -> systemAlertService.createRecipientAlert(
+                        "quota_schedule_confirmation_failed", "error", "company_channel_quota",
+                        "平台发文结果已记录，但额度确认失败，请核对任务 #" + scheduleId + " 的额度流水",
+                        Map.of("scheduleId", scheduleId, "quotaDate", String.valueOf(quotaDate),
+                                "reason", String.valueOf(ex.getMessage())),
+                        null, "admin", dedupeKey));
+            } catch (RuntimeException alertFailure) {
+                log.error("Published schedule quota alert failed, scheduleId={}", scheduleId, alertFailure);
+            }
+            return;
+        }
+        try {
+            tx.executeWithoutResult(status -> systemAlertService.resolveOpenByDedupeKey(dedupeKey, null));
+        } catch (RuntimeException ex) {
+            log.warn("Published schedule quota alert resolution failed, scheduleId={}", scheduleId, ex);
+        }
+    }
+
+    public void restoreSelfMediaScheduleReservation(Long scheduleId, LocalDate quotaDate) {
+        CompanyChannelQuotaLedger ledger = findLedger(BIZ_TYPE_SELF_MEDIA_SCHEDULE, scheduleId);
+        if (ledger == null || !("refunded".equals(ledger.getStatus()) || "expired".equals(ledger.getStatus()))) return;
+        reserveSelfMediaSchedule(ledger.getCompanyId(), ledger.getProjectId(),
+                ledger.getChannelCode().substring("self_media:".length()), scheduleId, requireQuotaDate(quotaDate));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

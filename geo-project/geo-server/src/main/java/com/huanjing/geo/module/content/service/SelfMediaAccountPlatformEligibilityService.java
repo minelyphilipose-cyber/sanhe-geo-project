@@ -71,8 +71,11 @@ public class SelfMediaAccountPlatformEligibilityService {
         option.setQuotaStatus(quotaStatus(binding, quota));
         option.setScheduleReady(scheduleReady);
         option.setScheduleCode(readiness.code());
-        option.setEligible(quotaEnabled && scheduleReady);
-        option.setReason(reason(binding, quota, readiness));
+        // Sohu accounts can be configured before publishing is verified. Execution
+        // continues to enforce its own capability, login and quota checks.
+        boolean configurationAvailable = "sohu".equals(platform);
+        option.setEligible(configurationAvailable || (quotaEnabled && scheduleReady));
+        option.setReason(configurationAvailable ? null : reason(binding, quota, readiness));
         return option;
     }
 
