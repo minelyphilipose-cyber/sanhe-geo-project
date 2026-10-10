@@ -10,9 +10,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SelfMediaQuestionTitlePoliciesTest {
     @Test
-    void sharedTitlePolicyOnlyAppliesToSohuAndToutiaoSelfMedia() {
+    void questionTitlePolicyOnlyAppliesToSohuSelfMedia() {
         assertTrue(SelfMediaQuestionTitlePolicies.applies("self_media", "sohu"));
-        assertTrue(SelfMediaQuestionTitlePolicies.applies("self_media", "toutiao"));
+        assertFalse(SelfMediaQuestionTitlePolicies.applies("self_media", "toutiao"));
         for (String platform : List.of("wechat", "douyin", "baijiahao", "zhihu", "xiaohongshu", "netease")) {
             assertFalse(SelfMediaQuestionTitlePolicies.applies("self_media", platform));
         }
@@ -38,15 +38,14 @@ class SelfMediaQuestionTitlePoliciesTest {
 
     @Test
     void missingMetadataDoesNotIntroduceANewToutiaoGenerationFailureOrInventDefaults() {
-        String empty = assertDoesNotThrow(() -> SelfMediaQuestionTitlePolicies.titleRequirement(null, null, "toutiao"));
-        assertTrue(empty.contains("资料缺失时不得虚构地域或品牌"));
-        assertFalse(empty.contains("已提供的主体地域"));
-        assertFalse(empty.contains("已提供的品牌名称"));
+        String empty = assertDoesNotThrow(() -> ToutiaoArticleTitlePolicies.titleRequirement(null, null, null));
+        assertTrue(empty.contains("资料缺失时不得虚构地域"));
+        assertFalse(empty.contains("主体地域“"));
 
         Brand brand = new Brand();
         brand.setBrandName("真实品牌");
-        String partial = SelfMediaQuestionTitlePolicies.titleRequirement(new Project(), brand, "toutiao");
-        assertTrue(partial.contains("已提供的品牌名称：真实品牌"));
-        assertFalse(partial.contains("已提供的主体地域"));
+        String partial = ToutiaoArticleTitlePolicies.titleRequirement(new Project(), brand, "SPA服务流程");
+        assertTrue(partial.contains("标题默认不出现品牌"));
+        assertFalse(partial.contains("主体地域“"));
     }
 }

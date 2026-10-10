@@ -304,7 +304,7 @@ class ArticleGenerationPromptContextFactoryTest {
                 .contains("- 标题五")
                 .doesNotContain("标题六");
         assertThat(result.prompt().promptSnapshot())
-                .contains("\"promptRevision\":\"v2_douyin_natural_20260902\"")
+                .contains("\"promptRevision\":\"v2_douyin_depth_20261010\"")
                 .contains("\"recentTitles\":[\"标题一\",\"标题二\",\"标题三\",\"标题四\",\"标题五\"]");
         verify(articlePublishRecordMapper).selectList(any());
     }

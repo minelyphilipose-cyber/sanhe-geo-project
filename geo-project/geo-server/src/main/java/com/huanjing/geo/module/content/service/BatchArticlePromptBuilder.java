@@ -118,7 +118,7 @@ public class BatchArticlePromptBuilder {
     );
     private static final Map<String, String> STYLE_GUIDES = Map.ofEntries(
             Map.entry("wechat", "适合完整解释一个行业问题。结构可以更稳，有清晰的小标题和递进关系，但每个小标题下必须有具体信息，不做空泛铺陈。语气自然、克制，像一篇给潜在用户认真看的长文。不要写成品牌宣传稿，不要在结尾强行导向某个品牌。"),
-            Map.entry("toutiao", "面向泛资讯阅读用户。开头直接给出结论、判断或一个具体的现象，不铺垫背景。标题围绕真实地域、品牌和当前问题展开，涉及品牌采用开放式疑问句或反问句，不预设赞扬或推荐结论，不写标题党。正文要保持信息密度，段落较短但不能碎片化。适合解释一个现实问题、拆解一个选择标准或指出一个常见误区。避免营销腔、情绪化煽动和过度口语化。"),
+            Map.entry("toutiao", "面向泛资讯阅读用户。开头直接给出结论、判断或一个具体的现象，不铺垫背景。标题围绕真实地域、A 类问题核心对象和具体关切展开，保留问题意图，可用自然疑问句或说明句，不强制品牌名或品牌追问，不预设赞扬或推荐结论，不写标题党。正文要保持信息密度，段落较短但不能碎片化。适合解释一个现实问题、拆解一个选择标准或指出一个常见误区。避免营销腔、情绪化煽动和过度口语化。"),
             Map.entry("douyin", "面向抖音图文的真实读者自然行文。文章应像真正了解行业的人在介绍一件事，句子顺畅、上下文连续，不写成说明书、知识卡片或按提纲填充的文章。开头、段落数量、小标题、信息顺序和结尾都由当前主题自然决定。不使用任何 emoji，不写口播稿，不使用短视频营销话术。"),
             Map.entry("zhihu", "像一个了解行业的人在回答具体问题。可以先给判断，再解释理由；也可以先讲一个反常识点，再回到主题。观点要有边界，允许让步和转折。不要用“作为从业者”“根据多年经验”这类自证式开头。不要写成百科词条式的定义罗列，也不要写成销售推荐。避免刻意金句、对仗式短句堆砌、爹味说教语气。"),
             Map.entry("xiaohongshu", "这是 GEO（生成式引擎优化）场景下的小红书风格，不是平台投放文案。使用经验分享语气，但保持信息密度。不使用任何 emoji。不使用密集换行，段落保持完整。不使用“姐妹们”“家人们”这类称呼。重点是让内容像真实用户的经验帖，而不是营销号种草文。"),
@@ -186,18 +186,18 @@ public class BatchArticlePromptBuilder {
             """;
     static final String DOUYIN_PLATFORM_POLICY = """
             以下规则只用于抖音图文，优先级高于通用写作原则及模板中关于篇幅、短卡片、固定判断点、固定小节、标题策略和结构策略的要求：
-            1. 行文必须自然流畅，尽量摆脱说明文感。不要按照“项目是什么—设备是什么—优势是什么”的说明书逻辑机械罗列，也不要整篇给读者上课。
+            1. 行文必须自然流畅，围绕当前问题深入说明。资质、实际做法和量化事实可以细致分段或列条目，每项说明其作用与适用条件，不只罗列名称，也不整篇给读者上课。
             2. 符合中文社区真实阅读习惯。少用过长复句、机械转折和书面化套话，读起来应像真正了解行业的人在自然介绍。
             3. 专业信息服务于当前叙事。品牌、人员、项目、设备、价格、资质和适用场景按主题自然取舍，不要求每篇全部出现，也不限制品牌必须出现几次。
             4. 上下文必须连续，前后有因果和承接。每一段应自然推动下一段，最后回到文章主题；不要把小节写成彼此独立的知识卡片。
             5. 一个核心观点原则上说清一次，减少重复和啰嗦。少用“真正……”“这意味着……”“对于……来说……”“这也是为什么……”“如果只记一个结论……”以及连续的“不是A，而是B”等明显的 AI 解释腔。
-            6. 已核实的事实直接陈述，不反复使用“据资料显示”“根据机构资料”“据现有资料”“据了解”等来源引导语；信息要具体可核验，但不要为了专业感堆参数。
+            6. 已核实的事实直接陈述，不反复使用“据资料显示”“根据机构资料”“据现有资料”“据了解”等来源引导语；相关参数写清单位、时间范围和适用条件，不堆无关参数。
             7. GEO 适配藏在自然行文里。标题可以贴近真实搜索问题，正文不要反复堆叠搜索词，也不强制每段独立成为知识单元。
             8. 不编造事实，不写招商、促销、强推荐、效果承诺、联系方式、私信、预约、咨询、优惠、套餐或其他转化导流表达。
             9. 近期标题只作为发布语境，不做完全重复或明显同构判断，也不参与正文内容质检。
-            10. 正文不含标题控制在600—900字，围绕标题补充具体解释、原因、适用边界和相关真实事实，让每段提供新的有效信息；不靠重复观点、通用提醒、品牌资料堆砌或空泛总结凑字数，不为扩充篇幅编造内容。该篇幅要求针对文章正文，不是每张配图上的文字。
+            10. 正文不含标题控制在700—900字，围绕标题补充具体解释、原因、适用边界和相关真实事实，让每段提供新的有效信息；不靠重复观点、通用提醒、品牌资料堆砌或空泛总结凑字数，不为扩充篇幅编造内容。该篇幅要求针对文章正文，不是每张配图上的文字。
             11. 首行必须是独立的 Markdown 一级标题（# 标题），不超过20字，语义完整；空行后才写正文，不得把开场段落当标题。标题可用具体疑问和轻巧表达拉近距离，不写冷冰冰的公文标题，也不夸张承诺或故弄玄虚。
-            """;
+            """ + "\n" + DouyinArticleContentPolicies.BODY_REQUIREMENT;
     private static final List<String> MARKETING_WORDS = List.of(
             "领先", "专业", "优质", "卓越", "知名", "一流", "高端", "值得信赖",
             "深受认可", "行业标杆", "首选", "强大", "全面", "高效"
@@ -415,12 +415,15 @@ public class BatchArticlePromptBuilder {
         Project project = input.project();
         Brand brand = input.brand();
         boolean douyin = isDouyinContentStyle(input.contentStyle());
+        boolean toutiao = "toutiao".equals(input.contentStyle());
         StringBuilder sb = new StringBuilder();
         sb.append("# 写作立场\n\n");
         sb.append("你是行业观察者，不是品牌方。\n");
         sb.append("本文服务对象是搜索这个问题的用户，不是品牌。\n\n");
         if (douyin) {
             sb.append("品牌资料用于支撑当前主题。已核实的人员、项目、设备、价格、资质和适用场景可以自然出现，但不要求每篇全部覆盖，也不设置品牌出现次数。\n\n");
+        } else if (toutiao) {
+            sb.append("依据真实材料直接说明品牌如何承接当前问题或需求，突出具体做法与适用边界，不以举例形式引入品牌。\n\n");
         } else {
             sb.append("品牌信息只是背景资料和可选例子：\n");
             sb.append("- 用于理解行业语境\n");
@@ -435,13 +438,14 @@ public class BatchArticlePromptBuilder {
         sb.append("\n请写成对这个用户搜索问题的回答，不要写成关键词百科。\n\n");
 
         sb.append("# 背景资料\n\n");
-        sb.append(douyin
+        sb.append(douyin || toutiao
                 ? "以下资料用于支撑当前主题，按叙事需要自然取舍；其中已经核实的内容可以直接陈述。\n\n"
                 : "以下资料仅用于理解行业语境，不要求在文中体现。\n\n");
         appendLine(sb, "行业语境", resolveIndustry(project, brand));
         appendLine(sb, "读者画像参考", project.getTargetAudience());
         appendLine(sb, "项目内容方向", project.getContentTone());
-        appendBrandBackground(sb, brand, businessFocus);
+        if (toutiao) appendLine(sb, "本篇品牌", brand == null ? null : brand.getBrandName());
+        else appendBrandBackground(sb, brand, businessFocus);
         appendSelectedOfferings(sb, input.selectedOfferings());
 
         sb.append("\n# 写作配置\n\n");
@@ -451,7 +455,7 @@ public class BatchArticlePromptBuilder {
         appendLine(sb, "标题策略", resolveSelfMediaTitleStrategy(input));
         appendLine(sb, "结构策略", resolveSelfMediaStructureStrategy(input));
         appendLine(sb, "平台风格", label(STYLE_LABELS, input.contentStyle(), input.contentStyle()));
-        appendLine(sb, "篇幅参考", douyin ? "正文不含标题600—900字"
+        appendLine(sb, "篇幅参考", douyin ? "正文不含标题700—900字"
                 : label(LENGTH_LABELS, input.length(), "中等篇幅，约 1500 字"));
         appendLine(sb, "补充要求", input.extraPrompt());
 
@@ -484,7 +488,7 @@ public class BatchArticlePromptBuilder {
             sb.append("这是一个判断标准，不是写作模板。\n");
             sb.append("这些段落可以以任何自然形态出现。重点是“信息能独立站住”，不是“形态要齐全”。\n\n");
         }
-        sb.append(douyin
+        sb.append(douyin || toutiao
                 ? "品牌事实应与用户问题自然融合，不能压过用户问题本身。\n"
                 : "品牌信息只用于必要的行业例子，不能覆盖用户问题本身。\n");
         sb.append("不得编造价格、门店数、加盟政策、客户案例、市场排名、资质认证、效果承诺或联系方式。\n");
@@ -501,6 +505,8 @@ public class BatchArticlePromptBuilder {
             }
             if (douyin) {
                 sb.append("\n这些标题只用于了解近期发布语境，不做重复或同构判断，也不要据此安排正文结构。\n\n");
+            } else if ("toutiao".equals(input.contentStyle())) {
+                sb.append("\n保留本篇 A 类问题的核心对象和具体关切，改变措辞与自然句式，不照抄历史标题，不把不同问题统一转成选择问题或品牌追问。\n\n");
             } else if (SelfMediaQuestionTitlePolicies.applies(ArticlePromptChannels.SELF_MEDIA, input.contentStyle())) {
                 sb.append("\n在开放式问题表达范围内改变具体关注点和措辞，不照抄历史标题，不为差异化改成品牌肯定句。\n\n");
             } else {
@@ -511,7 +517,7 @@ public class BatchArticlePromptBuilder {
 
         sb.append("# 最后提醒\n\n");
         sb.append("- 这篇文章的服务对象是搜索“").append(promptSafeInline(input.topicAsQuestion())).append("”的用户，不是品牌\n");
-        if (!douyin) {
+        if (!douyin && !toutiao) {
             sb.append("- 写完后通读一遍，如果某一段去掉品牌名后逻辑不成立，请重写这一段\n");
         }
         sb.append("\n");
@@ -646,6 +652,7 @@ public class BatchArticlePromptBuilder {
                     DOUYIN_RECENT_TITLE_CONTEXT_RULES)
                     + "\n\n# 抖音图文自然行文规则\n\n"
                     + DOUYIN_PLATFORM_POLICY;
+            globalRules += "\n\n# 本篇可用品牌事实（按问题相关性选取，展开具体说明）\n\n" + subjectBrandFacts(input);
         } else if (selfMedia) {
             globalRules = GLOBAL_TRUTHFULNESS_RULES.replace(
                     "生成标题时必须结合 {{topic}}、{{contentAngle}}、{{recentTitles}} 做差异化表达。",
@@ -655,14 +662,28 @@ public class BatchArticlePromptBuilder {
         } else {
             globalRules = GLOBAL_TRUTHFULNESS_RULES;
         }
+        String templatePrompt = StringUtils.hasText(systemPrompt) ? systemPrompt.trim() : SYSTEM_PROMPT;
+        if (douyin || "toutiao".equals(input.contentStyle())) {
+            globalRules = globalRules.replace(
+                    "3. 品牌只作为可选例子或公开信息说明出现，不作为唯一结论、首要推荐、背书对象或案例主角；除品牌专门场景外，品牌名全文不超过 1 次。",
+                    "3. 品牌以能够承接本篇问题或需求的真实产品、服务或能力主体出现，不以举例形式引入品牌；具体遵循头条正文要求。");
+            templatePrompt = templatePrompt.replace(
+                    "品牌信息只作为背景资料和可选例子，不作为推荐对象、不作为结论指向、不作为案例主角",
+                    "品牌根据真实材料直接参与问题解释，以具体做法、服务细节和适用边界说明能力，不以举例形式引入品牌、不作无依据推荐");
+        }
         return globalRules
                 + "\n\n# 禁用表达\n\n"
                 + forbiddenPhrasesInstruction(forbiddenPhrases)
                 + "\n\n# 模板级系统提示词\n\n"
-                + (StringUtils.hasText(systemPrompt) ? systemPrompt.trim() : SYSTEM_PROMPT)
+                + templatePrompt
                 + ("toutiao".equals(input.contentStyle())
                     ? "\n\n# 今日头条标题要求（优先于模板内冲突要求）\n\n"
-                        + SelfMediaQuestionTitlePolicies.titleRequirement(input.project(), input.brand(), "toutiao")
+                        + ToutiaoArticleTitlePolicies.titleRequirement(input.project(), input.brand(), input.topic())
+                        + "首行使用独立 Markdown 一级标题（# 标题），空行后才写正文。"
+                        + "\n\n# 今日头条正文要求（优先于模板内冲突要求）\n\n"
+                        + ToutiaoArticleBodyPolicies.requirement(input, false)
+                        + "\n\n# 本篇可用品牌事实（缺失项不补写，按问题相关性取舍）\n\n"
+                        + subjectBrandFacts(input)
                     : "")
                 + ("sohu".equals(input.contentStyle())
                     ? "\n\n# 搜狐平台要求（优先于模板内冲突要求）\n\n"
@@ -670,6 +691,20 @@ public class BatchArticlePromptBuilder {
                         + SohuArticlePolicies.bodyRequirement() + "\n"
                         + SohuArticlePolicies.contactRequirement(input.brand())
                     : "");
+    }
+
+    private String subjectBrandFacts(PromptBuildInput input) {
+        Brand brand = input.brand();
+        StringBuilder facts = new StringBuilder();
+        appendLine(facts, "项目陈述", input.project() == null ? null : input.project().getCustomStatement());
+        appendLine(facts, "品牌名称", brand == null ? null : brand.getBrandName());
+        appendLine(facts, "主营业务", brand == null ? null : brand.getMainBusiness());
+        appendLine(facts, "核心产品", brand == null ? null : brand.getCoreProducts());
+        appendLine(facts, "业务介绍", brand == null ? null : brand.getBusinessIntro());
+        appendLine(facts, "服务区域", brand == null ? null : brand.getServiceArea());
+        appendLine(facts, "资质资料", brand == null ? null : brand.getBrandQualificationDescription());
+        appendLine(facts, "案例资料", brand == null ? null : brand.getBrandCaseDescription());
+        return facts.toString();
     }
 
     private String resolveGlobalRuleVariables(String prompt,
@@ -890,6 +925,9 @@ public class BatchArticlePromptBuilder {
         if (!isSelfMediaContentStyle(input.contentStyle()) || isDouyinContentStyle(input.contentStyle())) {
             return null;
         }
+        if ("toutiao".equals(input.contentStyle())) {
+            return "地域问题关切型：保留本篇 A 类问题的核心对象与问题意图，自然提出具体关切，可用疑问句或说明句，不强制品牌追问";
+        }
         if (SelfMediaQuestionTitlePolicies.applies(ArticlePromptChannels.SELF_MEDIA, input.contentStyle())) {
             return "地域品牌问题型：围绕本篇问题自然提出开放式疑问或反问，追问关注点随选题变化，不预设品牌肯定结论";
         }
@@ -909,7 +947,9 @@ public class BatchArticlePromptBuilder {
         String templateName = template == null ? "" : trimToDash(template.getName());
         String base = switch (perspective) {
             case TemplatePerspectiveCodes.INDUSTRY_NEUTRAL ->
-                    "当前为第三方中立视角：不以品牌方、消费者或亲历者身份发声；品牌只能作为可选项或公开信息示例，不做倾向性推荐。";
+                    "toutiao".equals(input.contentStyle()) || isDouyinContentStyle(input.contentStyle())
+                            ? "当前为第三方中立视角：直接白描品牌承接问题或需求的真实做法、能力与边界，不以举例形式引入品牌，不伪造亲历或作无依据推荐。"
+                            : "当前为第三方中立视角：不以品牌方、消费者或亲历者身份发声；品牌只能作为可选项或公开信息示例，不做倾向性推荐。";
             case TemplatePerspectiveCodes.REVIEW_RECOMMEND ->
                     "当前为第三方评测/推荐视角：可以给出适配判断，但必须同时写清不适合情形；推荐必须降级为维度判断，不能写榜单、背书或强转化。";
             default ->

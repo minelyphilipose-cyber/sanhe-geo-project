@@ -105,6 +105,7 @@ function isEditorReadyReportLocation() {
 
 function classifyGeoFillFailureCode(message, platform) {
   const text = String(message || '')
+  if (text.startsWith('TOUTIAO_TITLE_INVALID：')) return 'TOUTIAO_TITLE_INVALID'
   const explicit = text.match(/^([A-Z0-9_]{3,80})[：:]/)?.[1]
   if (explicit) return explicit
   if (normalizePlatform(platform) === 'xiaohongshu' || text.includes('小红书')) {
@@ -3986,15 +3987,21 @@ function normalizeTitleForPlatform(title, fillProfile = null) {
 }
 
 function normalizeToutiaoTitle(title) {
-  const chars = Array.from(String(title || '').trim())
-  if (chars.length <= 30) return chars.join('')
-  const truncated = chars.slice(0, 30).join('').replace(/[，,。；;、：:！？!?]+$/g, '').trim()
-  return truncated || chars.slice(0, 30).join('').trim()
+  const text = String(title || '').trim()
+  const length = Array.from(text).length
+  if (length < 2 || length > 30) {
+    throw new Error('TOUTIAO_TITLE_INVALID：头条标题须为2至30字，请修改为完整标题，不会自动截断')
+  }
+  if (/强烈推荐|闭眼选|首选|全城最好|全市最好/.test(text)) {
+    throw new Error('TOUTIAO_TITLE_INVALID：头条标题含强推荐或无依据的排名表达，请围绕地域、问题核心对象和具体关切拟题')
+  }
+  return text
 }
 
 function assertToutiaoTitleReadyForPublish(title = '') {
   const titleElement = findTitleElement(buildFillProfile({ platform: 'toutiao' }))
   const titleText = String(readElementText(titleElement) || title || '').trim()
+  normalizeToutiaoTitle(titleText)
   const length = Array.from(titleText).length
   const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '')
   const invalidText = bodyText.includes('标题长度应在2-30个字之间') || bodyText.includes('标题长度应在2-30字之间')

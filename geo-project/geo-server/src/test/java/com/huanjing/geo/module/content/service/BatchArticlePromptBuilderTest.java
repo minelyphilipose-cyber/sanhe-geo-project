@@ -112,13 +112,15 @@ class BatchArticlePromptBuilderTest {
     }
 
     @Test
-    void toutiaoQuestionsReachLegacyAndTemplatePromptsWithoutStatementTitleOverrides() {
+    void toutiaoQuestionIntentReachesLegacyAndTemplatePromptsWithoutChangingContactRules() {
         ArticleDraft recentDraft = new ArticleDraft();
         recentDraft.setTitle("阜阳得闲spa服务怎么样？");
         when(articleDraftMapper.selectList(any())).thenReturn(List.of(recentDraft));
         when(sysDictItemMapper.selectOne(any())).thenReturn(null);
         var base = promptInput();
         base.brand().setCityName("阜阳市");
+        base.brand().setBusinessIntro("预约前列明服务项目与时长，单次服务60分钟，不含另行确认的附加项目。");
+        base.brand().setBrandCaseDescription("2025年标准服务记录包含120次服务，仅限该记录范围。");
         var input = new BatchArticlePromptBuilder.PromptBuildInput(
                 base.project(), base.brand(), base.brandStatement(), base.topicSource(), base.topic(),
                 base.topicAsQuestion(), base.keywordGroupId(), base.keywordGroupName(), base.relatedKeywords(),
@@ -139,17 +141,35 @@ class BatchArticlePromptBuilderTest {
             assertThat(result.systemPrompt())
                     .contains("今日头条标题要求")
                     .contains("主体地域“阜阳市”")
-                    .contains("疑问句或反问句")
-                    .contains("把品牌评价留给正文依据事实回答")
+                    .contains("核心对象 + 一个具体关切")
+                    .contains("标题默认不出现品牌")
+                    .contains("不改变其核心对象和问题意图")
+                    .contains("可以使用自然疑问句，也可以使用自然说明句")
+                    .contains("其他关联问题词仅作参考")
                     .contains("28字上限")
+                    .contains("今日头条正文要求")
+                    .contains("禁止以举例形式引入品牌")
+                    .contains("以白描呈现与当前需求相关的真实优势")
+                    .contains("写清做了什么、如何解决、适合哪些条件以及能力边界")
+                    .contains("保留单位、时间范围、统计口径和适用条件")
+                    .contains("没有可靠数字时用已有具体事实讲清，不估算、不编造")
+                    .contains(base.brand().getBusinessIntro())
+                    .contains(base.brand().getBrandCaseDescription())
+                    .doesNotContain("品牌名全文不超过 1 次")
+                    .doesNotContain("品牌信息只作为背景资料和可选例子")
                     .doesNotContain("72字上限")
-                    .doesNotContain("最多仅可展示已配置的公开地址");
+                    .doesNotContain("最多仅可展示已配置的公开地址")
+                    .doesNotContain("涉及品牌的表达采用开放式疑问句或反问句");
             assertThat(result.userPrompt())
                     .doesNotContain("标题给出一个克制判断或结论")
                     .doesNotContain("标题可以有明确判断")
+                    .doesNotContain("可以在自然位置作为例子出现")
+                    .doesNotContain("品牌信息只用于必要的行业例子")
+                    .doesNotContain("去掉品牌名后逻辑不成立")
                     .doesNotContain("本文标题应使用陈述判断句或场景描述句");
         }
-        assertThat(legacy.userPrompt()).contains("不为差异化改成品牌肯定句");
+        assertThat(legacy.userPrompt()).contains("保留本篇 A 类问题的核心对象和具体关切").doesNotContain("在开放式问题表达范围内");
+        assertThat(fromTemplate.userPrompt()).contains("地域问题关切型");
         assertThat(fromTemplate.userPrompt()).contains("400-800-1234");
     }
 
@@ -161,17 +181,24 @@ class BatchArticlePromptBuilderTest {
                 .toList();
         when(articlePublishRecordMapper.selectList(any())).thenReturn(records);
 
-        BatchArticlePromptBuilder.PromptBuildResult result = builder.build(douyinPromptInput());
+        var input = douyinPromptInput();
+        input.brand().setBrandQualificationDescription("资质覆盖服务A，限许可范围内项目。");
+        input.brand().setBusinessIntro("服务A时长60分钟，含需求记录和服务说明。");
+        BatchArticlePromptBuilder.PromptBuildResult result = builder.build(input);
 
         assertThat(result.systemPrompt())
                 .contains("抖音图文自然行文规则")
-                .contains("正文不含标题控制在600—900字")
+                .contains("正文不含标题控制在700—900字")
                 .contains("行文必须自然流畅")
                 .contains("不对新标题做完全重复或句式同构判断")
+                .contains(input.brand().getBrandQualificationDescription())
+                .contains(input.brand().getBusinessIntro())
+                .contains("细致梳理资料已有且相关的品牌资质、具体优势及可量化事实")
+                .doesNotContain("品牌信息只作为背景资料和可选例子")
                 .doesNotContain("品牌名全文不超过 1 次")
                 .doesNotContain("结构策略：判断清单型");
         assertThat(result.userPrompt())
-                .contains("篇幅参考：正文不含标题600—900字")
+                .contains("篇幅参考：正文不含标题700—900字")
                 .doesNotContain("中等篇幅，约 1500 字")
                 .contains("近期标题1")
                 .contains("近期标题5")
@@ -180,6 +207,14 @@ class BatchArticlePromptBuilderTest {
                 .doesNotContain("本文的标题不要采用上述任何一个标题的句式结构")
                 .doesNotContain("标题策略：")
                 .doesNotContain("结构策略：");
+        var template = template();
+        template.setChannelGroupCode("self_media");
+        template.setChannelSubCode("douyin");
+        var fromTemplate = builder.buildFromTemplate(input, template, version());
+        assertThat(fromTemplate.userPrompt())
+                .contains("正文不含标题控制在700—900字", input.brand().getBrandQualificationDescription(),
+                        input.brand().getBusinessIntro(), "不使用“以某品牌为例")
+                .doesNotContain("品牌信息只作为背景资料和可选例子");
     }
 
     private BatchArticlePromptBuilder.PromptBuildInput promptInput() {

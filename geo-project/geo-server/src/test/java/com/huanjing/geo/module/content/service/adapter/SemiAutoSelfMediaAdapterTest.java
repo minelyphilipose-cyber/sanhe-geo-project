@@ -72,6 +72,24 @@ class SemiAutoSelfMediaAdapterTest {
     }
 
     @Test
+    void toutiaoFillTaskPreservesQuestionTitleAndRejectsOverlongTitleBeforePublishing() {
+        SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
+        SemiAutoPlatformProperties.Platform profile = new SemiAutoPlatformProperties.Platform();
+        profile.setPublishUrl("https://configured.example/toutiao/publish");
+        profile.setAllowedHtmlTags(List.of("p", "h1"));
+        properties.setProfiles(Map.of(ToutiaoSemiAutoAdapter.PLATFORM, profile));
+        ToutiaoSemiAutoAdapter adapter = new ToutiaoSemiAutoAdapter(properties, new MarkdownToHtmlRenderer());
+        ArticleDraft article = new ArticleDraft();
+        article.setTitle("阜阳SPA价格不同，差别主要在哪里？");
+        SemiAutoFillTask task = adapter.prepareFillTask(article, "# " + article.getTitle() + "\n\n收费项目说明。", adapter.fillProfile());
+        assertEquals(article.getTitle(), task.title());
+        assertEquals("<p>收费项目说明。</p>", task.renderedHtml().trim());
+        article.setTitle("阜阳" + "服务".repeat(15));
+        assertThrows(com.huanjing.geo.common.exception.BizException.class,
+                () -> adapter.prepareFillTask(article, "正文。", adapter.fillProfile()));
+    }
+
+    @Test
     void zhihuPrepareFillTaskUsesConfiguredPublishUrl() {
         SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
         SemiAutoPlatformProperties.Platform profile = new SemiAutoPlatformProperties.Platform();

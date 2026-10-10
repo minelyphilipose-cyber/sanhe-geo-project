@@ -301,7 +301,7 @@ class MedicalArticleGenerationServiceTest {
     }
 
     @Test
-    void medicalBeautyFactsFollowTopicInsteadOfAlwaysPrependingInstitutionAndDoctorLists() throws Exception {
+    void medicalBeautyDouyinProvidesExistingQualificationsAndPersonnelForRelevantDetailedExplanation() throws Exception {
         var context = new MedicalArticleGenerationService.MedicalPromptContext(
                 MedicalArticleConstants.INDUSTRY_MEDICAL_BEAUTY, MedicalArticleConstants.TIER_EDUCATION,
                 null, null, null, null, null, null, null, 5, false, null, false,
@@ -309,17 +309,19 @@ class MedicalArticleGenerationServiceTest {
         var prompt = new BatchArticlePromptBuilder.PromptBuildResult("system", "正文任务", null, null, "{}",
                 "{\"topic\":\"眼综合和单独切开双眼皮哪种更自然\"}");
         var eyeResult = service.applyMedicalPromptV2(prompt, context, false, true);
-        assertThat(eyeResult.userPrompt()).doesNotContain("机构资质原文", "诊疗范围原文", "医生资料原文");
+        assertThat(eyeResult.userPrompt()).contains("机构资质原文", "诊疗范围原文", "医生资料原文",
+                "按与本题的关系细致说明已有资质名称", "不从资质或经验推导效果、安全或推荐结论")
+                .doesNotContain("只摘取与当前论点直接相关的一项或一句");
         assertThat(new ObjectMapper().readTree(eyeResult.inputSnapshot()).path("medicalLicense").asText())
                 .isEqualTo("机构资质原文");
         var qualification = new BatchArticlePromptBuilder.PromptBuildResult("system", "正文任务", null, null, "{}",
                 "{\"topic\":\"怎么核对医生执业资质\"}");
         assertThat(service.applyMedicalPromptV2(qualification, context, false, true).userPrompt())
-                .contains("医生资料原文").doesNotContain("机构资质原文");
+                .contains("医生资料原文", "机构资质原文");
         var institution = new BatchArticlePromptBuilder.PromptBuildResult("system", "正文任务", null, null, "{}",
                 "{\"topic\":\"医美机构资质怎么核验\"}");
         assertThat(service.applyMedicalPromptV2(institution, context, false, true).userPrompt())
-                .contains("机构资质原文").doesNotContain("医生资料原文");
+                .contains("机构资质原文", "医生资料原文");
     }
 
     private Project project() {

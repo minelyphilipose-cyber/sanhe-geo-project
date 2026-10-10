@@ -494,6 +494,37 @@ class ContentArticleServiceTest {
     }
 
     @Test
+    void saveToutiaoRevisionSynchronizesLeadingTitleWithoutChangingBody() {
+        ArticleDraft article = article("approved");
+        article.setChannelGroupCode("self_media");
+        article.setChannelSubCode("toutiao");
+        when(articleDraftMapper.selectById(99L)).thenReturn(article);
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
+        ArticleRevisionSaveRequest request = new ArticleRevisionSaveRequest();
+        request.setTitle("阜阳SPA价格不同，差别主要在哪里？");
+        request.setContentMarkdown("# 阜阳测试品牌收费怎么样？\n\n正文品牌资料保持不变。\n\n## 服务内容\n项目与时长说明。");
+        service.saveRevision(99L, request);
+        var version = org.mockito.ArgumentCaptor.forClass(ArticleDraftVersion.class);
+        verify(articleDraftVersionMapper).insert(version.capture());
+        assertEquals(request.getTitle(), version.getValue().getTitle());
+        assertEquals("# " + request.getTitle() + "\n\n正文品牌资料保持不变。\n\n## 服务内容\n项目与时长说明。",
+                version.getValue().getContentMarkdown());
+    }
+
+    @Test
+    void saveToutiaoRevisionRejectsOverlongTitleBeforeWritingVersion() {
+        ArticleDraft article = article("approved");
+        article.setContentStyle("toutiao");
+        when(articleDraftMapper.selectById(99L)).thenReturn(article);
+        ArticleRevisionSaveRequest request = new ArticleRevisionSaveRequest();
+        request.setTitle("阜阳" + "服务".repeat(15));
+        request.setContentMarkdown("# 原标题\n\n正文。");
+        assertThrows(BizException.class, () -> service.saveRevision(99L, request));
+        verify(articleDraftVersionMapper, never()).insert(any(ArticleDraftVersion.class));
+    }
+
+    @Test
     void reviewWorkflowIsDisabled() {
         ArticleDraft article = article("pending_review");
         when(articleDraftMapper.selectById(99L)).thenReturn(article);

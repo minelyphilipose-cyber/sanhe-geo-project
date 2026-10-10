@@ -24,7 +24,7 @@ class ArticlePromptAssemblerV2Test {
     @ParameterizedTest
     @ValueSource(strings = {TemplatePerspectiveCodes.CUSTOMER, TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
             TemplatePerspectiveCodes.REVIEW_RECOMMEND})
-    void toutiaoUsesRegionalBrandQuestionsWithoutChangingBodyOrContactPolicies(String perspective) throws Exception {
+    void toutiaoConnectsRealBrandCapabilitiesToNeedsAcrossPerspectives(String perspective) throws Exception {
         Project project = new Project();
         project.setCityName("合肥市");
         Brand brand = new Brand();
@@ -32,6 +32,7 @@ class ArticlePromptAssemblerV2Test {
         brand.setBrandShortName("测试");
         brand.setCityName("阜阳市");
         brand.setMainBusiness("企业知识管理服务");
+        brand.setBusinessIntro("按资料梳理、权限配置、内容入库完成交付；基础部署周期为10个工作日，限资料齐备的标准配置项目。");
         var input = new BatchArticlePromptBuilder.PromptBuildInput(
                 project, brand, null, "manual", "企业知识库怎么建设", "企业知识库怎么建设",
                 null, null, List.of(), "faq", "toutiao", "medium", null,
@@ -41,20 +42,28 @@ class ArticlePromptAssemblerV2Test {
 
         assertTrue(result.userPrompt().contains("今日头条标题要求"));
         assertTrue(result.userPrompt().contains("主体地域“阜阳市”"));
-        assertTrue(result.userPrompt().contains("品牌名称“测试品牌”"));
-        assertTrue(result.userPrompt().contains("疑问句或反问句"));
-        assertTrue(result.userPrompt().contains("把品牌评价留给正文依据事实回答"));
-        assertTrue(result.userPrompt().contains("追问与 A 级选题相关"));
+        assertTrue(result.userPrompt().contains("本篇所选 A 类问题：企业知识库怎么建设"));
+        assertTrue(result.userPrompt().contains("核心对象 + 一个具体关切"));
+        assertTrue(result.userPrompt().contains("取消必须带品牌名和必须追问品牌的要求"));
+        assertTrue(result.userPrompt().contains("标题默认不出现品牌"));
+        assertTrue(result.userPrompt().contains("不改变其核心对象和问题意图"));
+        assertTrue(result.userPrompt().contains("可以使用自然疑问句，也可以使用自然说明句"));
         assertTrue(result.userPrompt().contains("28字上限"));
         assertFalse(result.userPrompt().contains("72字上限"));
-        assertFalse(result.userPrompt().contains("标题默认不出现品牌"));
+        assertFalse(result.userPrompt().contains("涉及品牌的表达采用开放式疑问句或反问句"));
         assertFalse(result.userPrompt().contains("标题只有在用户主题本身明确围绕该品牌时"));
         assertFalse(result.userPrompt().contains("搜狐正文要求"));
         assertFalse(result.userPrompt().contains("最多仅可展示已配置的公开地址"));
-        if (TemplatePerspectiveCodes.CUSTOMER.equals(perspective)) {
-            assertTrue(result.userPrompt().contains("全文应自然出现1～2次"));
-            assertTrue(result.userPrompt().contains("至少使用一项与主题直接相关的真实品牌事实"));
-        }
+        assertTrue(result.userPrompt().contains("全文应自然出现1～2次"));
+        assertTrue(result.userPrompt().contains("至少使用一项与主题直接相关的真实品牌事实"));
+        assertTrue(result.userPrompt().contains("禁止以举例形式引入品牌"));
+        assertTrue(result.userPrompt().contains("以白描呈现与当前需求相关的真实优势"));
+        assertTrue(result.userPrompt().contains("写清做了什么、如何解决、适合哪些条件以及能力边界"));
+        assertTrue(result.userPrompt().contains(brand.getBusinessIntro()));
+        assertTrue(result.userPrompt().contains("保留单位、时间范围、统计口径和适用条件"));
+        assertTrue(result.userPrompt().contains("没有可靠数字时用已有具体事实讲清，不估算、不编造"));
+        assertFalse(result.userPrompt().contains("只能作为普通行业样本出现"));
+        assertFalse(result.userPrompt().contains("品牌只可在确有解释价值时作为普通样本出现"));
         assertEquals(policy.contactDisclosureMode(),
                 new ObjectMapper().readTree(result.inputSnapshot()).path("runtimePolicy").path("contactDisclosureMode").asText());
     }
@@ -118,9 +127,9 @@ class ArticlePromptAssemblerV2Test {
         brand.setCoreProducts("品牌核心服务资料");
         brand.setBusinessIntro("品牌业务介绍资料");
         brand.setBrandPositioning("旧宣传定位");
-        brand.setBrandCaseDescription("笼统口碑宣传");
+        brand.setBrandCaseDescription("2025年登记服务项目120项，仅限该年度服务记录，不代表疗效。");
         var offering = new BrandOfferingPromptSelector.SelectedOffering(
-                12L, "皮肤管理服务", List.of(), null, "关注皮肤管理流程", "先记录关注问题，再说明服务流程", null);
+                12L, "皮肤管理服务", List.of(), null, "关注皮肤管理流程", "先记录关注问题，再说明服务流程", "许可范围包含对应皮肤管理服务");
         var input = new BatchArticlePromptBuilder.PromptBuildInput(
                 new Project(), brand, null, "manual", "阜阳哪家医美门诊部服务比较细致", null,
                 null, null, List.of(), "social_note", "douyin", "short", null,
@@ -137,23 +146,25 @@ class ArticlePromptAssemblerV2Test {
         assertTrue(result.userPrompt().contains("不使用“以某品牌为例、比如某品牌、拿某品牌举例、作为行业样本”等举例式引入"));
         assertTrue(result.userPrompt().contains("正文以完整回答或解释最终标题为首要任务"));
         assertTrue(result.userPrompt().contains("这是写作思路，不要求先写科普、再另起品牌段"));
-        assertTrue(result.userPrompt().contains("产品或服务资料只是可选的相关依据，不是必写清单"));
-        assertTrue(result.userPrompt().contains("不因已传入产品资料就强制介绍"));
+        assertTrue(result.userPrompt().contains("相关的名称、流程、服务细节、资质与已有数据应展开解释"));
+        assertTrue(result.userPrompt().contains("不能只写“资质齐全”"));
         assertTrue(result.userPrompt().contains("不为植入品牌改换标题的关注点"));
         assertFalse(result.userPrompt().contains("将该品牌作为实际介绍对象"));
         assertFalse(result.userPrompt().contains("品牌信息介绍视角"));
         assertFalse(result.userPrompt().contains("正文应具体介绍至少一项"));
         assertTrue(result.userPrompt().contains("产品或服务1：名称：皮肤管理服务"));
         assertTrue(result.userPrompt().contains("先记录关注问题，再说明服务流程"));
-        assertFalse(result.userPrompt().contains("品牌核心服务资料"));
-        assertFalse(result.userPrompt().contains("品牌业务介绍资料"));
+        assertTrue(result.userPrompt().contains("品牌核心服务资料"));
+        assertTrue(result.userPrompt().contains("品牌业务介绍资料"));
+        assertTrue(result.userPrompt().contains("许可范围包含对应皮肤管理服务"));
+        assertTrue(result.userPrompt().contains(brand.getBrandCaseDescription()));
+        assertTrue(result.userPrompt().contains("保留单位、时间范围、统计口径和适用条件"));
         assertTrue(result.userPrompt().contains("可以有一点调皮"));
         assertTrue(result.userPrompt().contains("独立的 Markdown 一级标题"));
         assertFalse(result.userPrompt().contains("旧宣传定位"));
-        assertFalse(result.userPrompt().contains("笼统口碑宣传"));
         assertFalse(result.userPrompt().contains("# 全局写作原则"));
         assertTrue(objectMapper.readTree(result.promptSnapshot()).path("omittedMaterialKeys").toString()
-                .contains("brandCaseDescription"));
+                .contains("brandPositioning"));
         assertEquals("皮肤管理服务", objectMapper.readTree(result.inputSnapshot())
                 .path("selectedOfferings").get(0).path("name").asText());
         assertFalse(result.userPrompt().contains("通常出现一次，用一句话结合一项"));
@@ -169,12 +180,12 @@ class ArticlePromptAssemblerV2Test {
         assertTrue(result.userPrompt().contains("不硬接无关项目"));
         assertTrue(result.userPrompt().contains("不给个体诊疗建议"));
         assertTrue(result.userPrompt().contains("不确定时收窄表述"));
-        assertTrue(result.userPrompt().contains("正文不含标题控制在约600～900字"));
+        assertTrue(result.userPrompt().contains("正文不含标题控制在700—900字"));
         assertTrue(result.userPrompt().contains("让读者知道这条信息跟自己的问题有什么关系"));
         var lengthPolicy = objectMapper.readTree(result.promptSnapshot()).path("effectiveLengthPolicy");
-        assertEquals(600, lengthPolicy.path("targetMinChars").asInt());
+        assertEquals(700, lengthPolicy.path("targetMinChars").asInt());
         assertEquals(900, lengthPolicy.path("targetMaxChars").asInt());
-        assertEquals("v2_douyin_medical_beauty_conversation_20260917",
+        assertEquals("v2_douyin_medical_beauty_depth_20261010",
                 objectMapper.readTree(result.promptSnapshot()).path("promptRevision").asText());
 
         brand.setComplianceIndustryCode("oral");
@@ -272,14 +283,18 @@ class ArticlePromptAssemblerV2Test {
         assertTrue(snapshot.path("omittedMaterialKeys").isArray());
     }
 
-    @Test
-    void limitsDouyinTitleToTwentyCharacters() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {TemplatePerspectiveCodes.CUSTOMER, TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
+            TemplatePerspectiveCodes.REVIEW_RECOMMEND})
+    void douyinKeepsShortTitleAndSuppliesDetailedBrandFactsAcrossPerspectives(String perspective) throws Exception {
         Project project = new Project();
         project.setId(1L);
         project.setBrandId(2L);
         Brand brand = new Brand();
         brand.setId(2L);
         brand.setBrandName("测试品牌");
+        brand.setBrandQualificationDescription("认证覆盖知识管理系统交付，限标准版本。");
+        brand.setBusinessIntro("资料齐备时标准配置交付周期为10个工作日，包含权限配置和内容入库。");
         ArticlePromptTemplate template = new ArticlePromptTemplate();
         template.setId(10L);
         template.setName("抖音图文模板");
@@ -290,15 +305,23 @@ class ArticlePromptAssemblerV2Test {
         BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
                 project, brand, null, "manual", "企业知识库怎么建设", null,
                 null, null, List.of(), "social_note", "douyin", "short", null,
-                1, List.of(), null, TemplatePerspectiveCodes.CUSTOMER, "default", null, List.of()
+                1, List.of(), null, perspective, "default", null, List.of()
         );
         ArticleRuntimePolicy policy = new ArticleRuntimePolicy(
                 ArticlePromptChannels.SELF_MEDIA, "douyin",
-                TemplatePerspectiveCodes.CUSTOMER, "none", false);
+                perspective, "none", false);
 
         BatchArticlePromptBuilder.PromptBuildResult result = assembler.assemble(input, template, version, policy);
 
         assertTrue(result.userPrompt().contains("独立的 Markdown 一级标题（# 标题），不超过20字"));
+        assertTrue(result.userPrompt().contains(brand.getBrandQualificationDescription()));
+        assertTrue(result.userPrompt().contains(brand.getBusinessIntro()));
+        assertTrue(result.userPrompt().contains("资质说明写清名称、许可或认证范围"));
+        assertTrue(result.userPrompt().contains("每项说明其作用与适用条件"));
+        assertTrue(result.userPrompt().contains("不限制为一两项事实或一句品牌介绍"));
+        assertTrue(result.userPrompt().contains("保留单位、时间范围、统计口径和适用条件"));
+        assertTrue(result.userPrompt().contains("正文不含标题控制在700—900字"));
+        assertFalse(result.userPrompt().contains("只能作为普通行业样本出现"));
         assertTrue(result.userPrompt().contains("正文篇幅较短时以自然分段为主"));
         assertTrue(result.userPrompt().contains("只有确实存在多个相对独立的信息单元时才使用 Markdown 二级标题"));
         assertFalse(result.userPrompt().contains("不得把整篇长文写成从头到尾没有小标题"));
@@ -695,14 +718,14 @@ class ArticlePromptAssemblerV2Test {
                 List.of("标题一", "标题二", "标题三", "标题四", "标题五", "标题六"));
 
         assertTrue(result.userPrompt().contains("# 抖音图文自然行文规则"));
-        assertTrue(result.userPrompt().contains("不要按照“项目是什么—设备是什么—优势是什么”的说明书逻辑机械罗列"));
+        assertTrue(result.userPrompt().contains("资质、实际做法和量化事实可以细致分段或列条目"));
         assertTrue(result.userPrompt().contains("不要把小节写成彼此独立的知识卡片"));
         assertTrue(result.userPrompt().contains("这些标题只用于了解近期发布语境"));
         assertTrue(result.userPrompt().contains("- 标题五"));
         assertFalse(result.userPrompt().contains("标题六"));
         JsonNode snapshot = objectMapper.readTree(result.promptSnapshot());
         assertEquals(5, snapshot.path("recentTitles").size());
-        assertEquals("v2_douyin_natural_20260902", snapshot.path("promptRevision").asText());
+        assertEquals("v2_douyin_depth_20261010", snapshot.path("promptRevision").asText());
     }
 
     private int occurrences(String source, String target) {

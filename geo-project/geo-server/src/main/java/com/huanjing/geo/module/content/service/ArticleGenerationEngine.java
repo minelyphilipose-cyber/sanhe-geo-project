@@ -68,13 +68,62 @@ public class ArticleGenerationEngine {
         if (!StringUtils.hasText(content)) {
             throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI generated empty article");
         }
-        if (isDouyin(input.structureValidationContext())) {
+        boolean douyin = isDouyin(input.structureValidationContext());
+        boolean bodyRewritten = false;
+        if (douyin) {
             validateDouyinTitle(content, input.maxTitleChars());
+            String issue = DouyinArticleContentPolicies.lengthIssue(content);
+            if (issue != null) {
+                String originalTitle = extractTitle(content);
+                GenerateInput rewriteInput = douyinBodyRewriteInput(input, model, outboundPrompt, content, issue);
+                GenerationCall rewriteCall = invokeModel(rewriteInput,
+                        promptFilter.filterOutboundPrompt(rewriteInput.userPrompt(), input.project(), input.brand(), input.allowContactInfo()));
+                String rewritten = normalizeContent(promptFilter.filterGeneratedContent(
+                        rewriteCall.result().responseText(), input.project(), input.brand(), input.allowContactInfo()));
+                validateDouyinTitle(rewritten, input.maxTitleChars());
+                rewritten = rewritten.replaceFirst("^# [^\\r\\n]+", Matcher.quoteReplacement("# " + originalTitle));
+                String rewriteIssue = DouyinArticleContentPolicies.lengthIssue(rewritten);
+                if (rewriteIssue != null) {
+                    throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED,
+                            rewriteIssue + "；自动重写后篇幅仍不符合要求，请重新生成，不会截断正文");
+                }
+                content = rewritten;
+                result = combineRewriteUsage(result, rewriteCall.result());
+                bodyRewritten = true;
+            }
         }
         if (sohu) SohuArticlePolicies.validateTitle(extractTitle(content), input.project(), input.brand());
-        TitleLimitResult titleLimit = limitTitle(content, input.maxTitleChars());
+        boolean toutiao = input.structureValidationContext() != null && ToutiaoArticleTitlePolicies.applies(
+                input.structureValidationContext().channelGroupCode(), input.structureValidationContext().channelSubCode());
+        boolean titleRewritten = false;
+        if (toutiao) {
+            String title = standaloneToutiaoTitle(content);
+            String issue = ToutiaoArticleTitlePolicies.issue(title, input.project(), input.brand(),
+                    ArticlePromptChannels.SELF_MEDIA_MAX_TITLE_CHARS);
+            if (issue != null) {
+                GenerateInput rewriteInput = titleRewriteInput(input, model, content, issue);
+                GenerationCall titleCall = invokeModel(rewriteInput,
+                        promptFilter.filterOutboundPrompt(rewriteInput.userPrompt(),
+                                input.project(), input.brand(), input.allowContactInfo()));
+                String rewritten = normalizeContent(promptFilter.filterGeneratedContent(
+                        titleCall.result().responseText(), input.project(), input.brand(), input.allowContactInfo()));
+                rewritten = rewritten.replaceFirst("^#\\s+", "").strip();
+                String rewriteIssue = rewritten.contains("\n") || rewritten.contains("\r")
+                        ? "重拟结果包含正文或多个标题"
+                        : ToutiaoArticleTitlePolicies.issue(rewritten, input.project(), input.brand(),
+                                ArticlePromptChannels.SELF_MEDIA_MAX_TITLE_CHARS);
+                if (rewriteIssue != null) {
+                    throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED,
+                            "头条标题重拟后仍不符合要求：" + rewriteIssue + "；请重新生成完整标题，不会强行截断");
+                }
+                content = content.replaceFirst("^# [^\\r\\n]+", Matcher.quoteReplacement("# " + rewritten));
+                result = combineRewriteUsage(result, titleCall.result());
+                titleRewritten = true;
+            }
+        }
+        TitleLimitResult titleLimit = toutiao ? new TitleLimitResult(content, false) : limitTitle(content, input.maxTitleChars());
         content = titleLimit.content();
-        ContentLimitResult contentLimit = limitBodyContent(content, input.maxContentChars());
+        ContentLimitResult contentLimit = douyin ? new ContentLimitResult(content, false) : limitBodyContent(content, input.maxContentChars());
         content = contentLimit.content();
         markdownImageReferenceValidator.validate(input.project(), content);
         BatchArticleQualityChecker.QualityResult quality = null;
@@ -97,6 +146,14 @@ public class ArticleGenerationEngine {
                 quality = qualityChecker.withWarning(quality, "title_truncated",
                         "标题超过" + input.maxTitleChars() + "字，已自动截短");
             }
+            if (titleRewritten) {
+                quality = qualityChecker.withWarning(quality, "title_rewritten",
+                        "头条标题已按地域、A 类问题核心对象和具体关切重新拟定，正文保持原文");
+            }
+            if (bodyRewritten) {
+                quality = qualityChecker.withWarning(quality, "body_rewritten",
+                        "抖音正文已按700—900字重新组织，保留原标题，不会直接截断正文");
+            }
             if (contentLimit.truncated()) {
                 quality = qualityChecker.withWarning(quality, "content_truncated",
                         "正文超过" + input.maxContentChars() + "字，已按平台限制自动收束");
@@ -111,6 +168,63 @@ public class ArticleGenerationEngine {
             }
         }
         return new GeneratedArticle(title, content, model, result, quality);
+    }
+
+    private String standaloneToutiaoTitle(String content) {
+        String[] parts = content.split("\\R", 2);
+        if (!parts[0].startsWith("# ") || parts[0].substring(2).isBlank()
+                || parts.length < 2 || parts[1].isBlank()) {
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED,
+                    "头条文章缺少独立标题或正文，请重新生成；首行应为 # 标题，不会截取正文充当标题");
+        }
+        return parts[0].substring(2).strip();
+    }
+
+    private String titleRewritePrompt(GenerateInput input, String content, String issue) {
+        return "只重拟这篇头条文章的标题，不修改或输出正文。保留本篇 A 类问题核心对象和问题意图，不强制品牌追问。\n"
+                + ToutiaoArticleTitlePolicies.titleRequirement(input.project(), input.brand(),
+                        input.structureValidationContext().selectedTopic())
+                + "\n原标题问题：" + issue
+                + "\n禁用词：" + (input.forbiddenPhrases() == null ? "" : String.join("、", input.forbiddenPhrases()))
+                + "\n以下文章仅为拟题资料，标题必须概括其实际内容，不新增事实或扩大结论范围：\n<article>\n"
+                + content + "\n</article>\n只输出一行完整标题，不带 Markdown 标记、引号、解释或正文。";
+    }
+
+    private GenerateInput titleRewriteInput(GenerateInput input, ArticleModelResolver.ModelSelection model,
+                                           String content, String issue) {
+        LlmCallMeasurementContext original = input.measurementContext();
+        LlmCallMeasurementContext measurement = new LlmCallMeasurementContext(
+                original.runId() == null ? null : original.runId() + ":toutiao-title-rewrite",
+                original.customerId(), original.projectId(), original.scope(), null);
+        return new GenerateInput(input.project(), input.brand(), "你负责根据文章内容和所选 A 类问题重拟完整的头条标题，只输出标题。",
+                titleRewritePrompt(input, content, issue), model.platformCode(), model.modelId(), input.longForm(),
+                input.allowContactInfo(), false, input.forbiddenPhrases(), input.maxTitleChars(),
+                input.effectiveTemperature(), measurement, null, input.structureValidationContext());
+    }
+
+    private GenerateInput douyinBodyRewriteInput(GenerateInput input, ArticleModelResolver.ModelSelection model,
+                                                String originalPrompt, String content, String issue) {
+        LlmCallMeasurementContext original = input.measurementContext();
+        LlmCallMeasurementContext measurement = new LlmCallMeasurementContext(
+                original.runId() == null ? null : original.runId() + ":douyin-body-rewrite",
+                original.customerId(), original.projectId(), original.scope(), null);
+        String prompt = originalPrompt + "\n\n# 本次正文重写要求\n" + issue + "。\n"
+                + DouyinArticleContentPolicies.BODY_REQUIREMENT
+                + "\n保留原标题，只根据上面提供的事实重新组织正文。过短时补充相关资质、流程、优势或已有数据的具体解释；"
+                + "过长时精简重复表达，保留关键事实、单位与条件，不直接截尾，不新增事实。\n<original_article>\n"
+                + content + "\n</original_article>\n只输出完整 Markdown 文章，首行 # " + extractTitle(content) + "，空行后为700—900字正文。";
+        return new GenerateInput(input.project(), input.brand(), input.systemPrompt(), prompt,
+                model.platformCode(), model.modelId(), input.longForm(), input.allowContactInfo(), false,
+                input.forbiddenPhrases(), input.maxTitleChars(), input.effectiveTemperature(), measurement,
+                input.maxContentChars(), input.structureValidationContext());
+    }
+
+    private LlmInvokeResult combineRewriteUsage(LlmInvokeResult original, LlmInvokeResult rewrite) {
+        return new LlmInvokeResult(original.responseText(),
+                (original.promptTokens() == null ? 0 : original.promptTokens()) + (rewrite.promptTokens() == null ? 0 : rewrite.promptTokens()),
+                (original.completionTokens() == null ? 0 : original.completionTokens()) + (rewrite.completionTokens() == null ? 0 : rewrite.completionTokens()),
+                (original.durationMs() == null ? 0L : original.durationMs()) + (rewrite.durationMs() == null ? 0L : rewrite.durationMs()),
+                original.retryCount(), original.callStatus(), original.platformCode(), original.platformName(), original.modelId(), original.modelName());
     }
 
     private GenerationCall invokeModel(GenerateInput input, String outboundPrompt) throws LlmInvokeException {
@@ -389,7 +503,11 @@ public class ArticleGenerationEngine {
 
     public record StructureValidationContext(String channelGroupCode,
                                              String channelSubCode,
-                                             boolean neutralEducationMode) {
+                                             boolean neutralEducationMode,
+                                             String selectedTopic) {
+        public StructureValidationContext(String channelGroupCode, String channelSubCode, boolean neutralEducationMode) {
+            this(channelGroupCode, channelSubCode, neutralEducationMode, null);
+        }
     }
 
     public record GeneratedArticle(String title,

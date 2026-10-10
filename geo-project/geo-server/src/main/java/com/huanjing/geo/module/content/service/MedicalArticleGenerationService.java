@@ -268,23 +268,16 @@ public class MedicalArticleGenerationService {
         if (context == null) {
             return prompt;
         }
-        String topic = medicalBeautyDouyin ? promptTopic(prompt.inputSnapshot()) : "";
-        boolean qualificationTopic = topic.matches("(?s).*(资质|执业|正规|许可|核验|核对).*");
-        boolean practitionerTopic = topic.matches("(?s).*(医生|医师|团队).*");
         List<String> facts = new ArrayList<>();
         if (!neutralEducationMode) {
             appendFact(facts, "特殊行业", specialIndustryService.industryLabel(context.industryCode()));
             appendFact(facts, "项目或服务品类", context.categoryName());
             appendFact(facts, "辅助关注角度", context.topicAngle());
             appendFact(facts, "本篇关注方向", context.focus());
-            if (!medicalBeautyDouyin || (qualificationTopic && !practitionerTopic)) {
-                appendFact(facts, "可选项目或服务资质（仅摘取主题所需部分）", context.qualificationRef());
-                appendFact(facts, "可选主体资质（不得整段复制）", context.medicalLicense());
-                appendFact(facts, "可选服务/业务范围（仅按主题需要引用）", context.diagnosisScope());
-            }
-            if (!medicalBeautyDouyin || practitionerTopic) {
-                appendFact(facts, "可选执业/服务人员公开信息（仅按主题需要引用）", context.practitionerInfoPublic());
-            }
+            appendFact(facts, "可选项目或服务资质（仅摘取主题所需部分）", context.qualificationRef());
+            appendFact(facts, "可选主体资质（不得整段复制）", context.medicalLicense());
+            appendFact(facts, "可选服务/业务范围（仅按主题需要引用）", context.diagnosisScope());
+            appendFact(facts, "可选执业/服务人员公开信息（仅按主题需要引用）", context.practitionerInfoPublic());
         }
 
         StringBuilder specialRules = new StringBuilder("# 特殊行业内容边界\n");
@@ -296,7 +289,7 @@ public class MedicalArticleGenerationService {
                             ? "标题和正文围绕原主题的实际关注点展开；推广或推荐式问句转换为中立知识问题，正文优先完整回答或解释标题，在相关论述中自然融入真实品牌及与标题直接相关的事实，不以举例形式带过品牌，不改写成品牌介绍稿，不作机构推荐。\n"
                             : "以下规则只约束表达方式，不得改变用户主题。标题必须直接回应原主题，不得为了体现行业规则主动加入与主题无关的审核术语或风险标签。\n")
                     .append(medicalBeautyDouyin
-                            ? "事实约束不改变亲切的语气。只使用与本题直接相关的材料，不从资质或经验推导效果、安全或推荐结论；必要的个体差异说明放在相关解释处。\n"
+                            ? "事实约束不改变亲切的语气。按与本题的关系细致说明已有资质名称、许可范围、对应人员或服务、真实优势和量化事实，不仅列名称或一句带过；可分段或用适量条目。不从资质或经验推导效果、安全或推荐结论；必要的个体差异说明放在相关解释处。\n"
                             : V2_SPECIAL_INDUSTRY_COMPLIANCE_DIRECTION);
         }
         if (!facts.isEmpty()) {
@@ -570,16 +563,6 @@ public class MedicalArticleGenerationService {
             return objectMapper.writeValueAsString(map);
         } catch (JsonProcessingException ex) {
             return raw;
-        }
-    }
-
-    private String promptTopic(String snapshot) {
-        if (!StringUtils.hasText(snapshot)) return "";
-        try {
-            var input = objectMapper.readTree(snapshot);
-            return input.path("topic").asText("") + " " + input.path("topicAsQuestion").asText("");
-        } catch (JsonProcessingException ex) {
-            throw new IllegalStateException("无法读取医美文章主题", ex);
         }
     }
 

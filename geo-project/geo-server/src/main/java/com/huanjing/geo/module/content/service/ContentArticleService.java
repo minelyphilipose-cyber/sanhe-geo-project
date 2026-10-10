@@ -43,6 +43,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 
 @Service
@@ -656,6 +657,11 @@ public class ContentArticleService {
         String oldStatus = article.getStatus();
         String content = req.getContentMarkdown().trim();
         String title = StringUtils.hasText(req.getTitle()) ? req.getTitle().trim() : extractTitle(content);
+        if (ToutiaoArticleTitlePolicies.applies(article.getChannelGroupCode(), article.getChannelSubCode())
+                || "toutiao".equals(article.getContentStyle())) {
+            ToutiaoArticleTitlePolicies.validateForPublish(title);
+            content = content.replaceFirst("^# [^\\r\\n]+", Matcher.quoteReplacement("# " + title));
+        }
         int nextVersion = Optional.ofNullable(article.getCurrentVersionNo()).orElse(1) + 1;
         markdownImageReferenceValidator.validate(project, content);
 

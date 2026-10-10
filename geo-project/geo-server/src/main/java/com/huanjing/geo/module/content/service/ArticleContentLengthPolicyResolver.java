@@ -24,7 +24,8 @@ public class ArticleContentLengthPolicyResolver {
         String subCode = ArticlePromptChannels.canonicalSubCode(channelGroupCode, channelSubCode);
         if (ArticlePromptChannels.SELF_MEDIA.equals(channelGroupCode)) {
             return switch (subCode == null ? "" : subCode) {
-                case "douyin" -> policy(requested, 600, 900, SOURCE_CHANNEL_POLICY);
+                case "douyin" -> policy(requested, ArticlePromptChannels.DOUYIN_MIN_CONTENT_CHARS,
+                        ArticlePromptChannels.DOUYIN_MAX_CONTENT_CHARS, SOURCE_CHANNEL_POLICY);
                 case "xiaohongshu" -> neutralEducationMode
                         ? policy(requested, 500, 700, SOURCE_CHANNEL_POLICY)
                         : policy(requested, 600, 900, SOURCE_CHANNEL_POLICY);
@@ -39,6 +40,9 @@ public class ArticleContentLengthPolicyResolver {
     }
 
     public String promptRequirement(ArticleContentLengthPolicy policy) {
+        if (policy.targetMinChars() == 700 && policy.targetMaxChars() == 900) {
+            return "正文不含标题控制在700—900字；不计 Markdown 标记、图片链接和空白字符，不用重复科普、品牌口号或空泛总结凑字数。";
+        }
         if (policy.targetMinChars() == 2000 && policy.targetMaxChars() == 3000) {
             return "正文不含标题不少于2000字，通常控制在2000～3000字；不要通过重复观点、堆砌套话或无关背景凑字数。";
         }

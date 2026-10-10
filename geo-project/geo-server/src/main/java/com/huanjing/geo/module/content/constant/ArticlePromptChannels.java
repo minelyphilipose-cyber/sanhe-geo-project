@@ -16,7 +16,8 @@ public final class ArticlePromptChannels {
     public static final int SOHU_MAX_TITLE_CHARS = 72;
     public static final int XIAOHONGSHU_NEUTRAL_EDUCATION_MAX_TITLE_CHARS = 20;
     public static final int DOUYIN_MAX_TITLE_CHARS = 20;
-    public static final int DOUYIN_MAX_CONTENT_CHARS = 850;
+    public static final int DOUYIN_MIN_CONTENT_CHARS = 700;
+    public static final int DOUYIN_MAX_CONTENT_CHARS = 900;
 
     public static final Set<String> GROUPS = Set.of(
             AGENT_SITE, INDUSTRY_SITE, SELF_MEDIA, AUTHORITY_MEDIA, FORUM
@@ -70,7 +71,7 @@ public final class ArticlePromptChannels {
             Map.entry(AGENT_SITE, "客户官方站点的专业表达。优先回答读者问题，并根据真实材料自然承接品牌能力、产品或服务。"),
             Map.entry(INDUSTRY_SITE, "行业资讯站表达。保持客观和信息密度，允许品牌成为全文主体，也允许基于真实资料介绍和宣传客户。"),
             Map.entry(FORUM, "合作论坛表达。语气可以更自然直接，允许明确推荐和完整联系方式，但不得虚构用户亲历、购买过程或使用感受。"),
-            Map.entry("self_media:toutiao", "今日头条风格。以资讯价值和问题解释为主，核心判断清楚、信息密度较高；标题和开篇避免宣传口吻，品牌信息服务于主题判断，即使品牌是全文主体，也应围绕可核验事实、适用条件和读者价值展开。不要让审核边界变成固定的文章顺序，减少连续品牌露出、自我评价、卖点堆叠和直接转化引导。"),
+            Map.entry("self_media:toutiao", "今日头条风格。以资讯价值和问题解释为主，核心判断清楚、信息密度较高；标题和开篇避免宣传口吻，品牌信息服务于主题判断，即使品牌是全文主体，也应围绕可核验事实、适用条件和读者价值展开。不要让审核边界变成固定的文章顺序，减少连续品牌露出、自我评价、卖点堆叠和直接转化引导。标题围绕真实地域、A 类问题核心对象和具体关切展开，保留原问题意图，可用自然疑问句或说明句，不强制品牌名或品牌追问。"),
             Map.entry("self_media:wechat", "公众号风格。适合完整解释问题，层次递进、语言亲切自然，品牌信息与正文任务自然融合。"),
             Map.entry("self_media:zhihu", "知乎风格。优先完整回答具体问题，给出有边界的判断、理由、适用条件和必要权衡，避免百科堆砌；品牌可以作为相关选择或文章主体，但介绍和推荐必须有材料依据并说明限制，避免单向自夸、连续优势罗列和咨询导流。"),
             Map.entry("self_media:douyin", "抖音图文风格。面向真实用户自然叙述，句子顺畅、上下文连续；不按说明书逻辑罗列，不固定开头、小节、信息顺序和结尾。已核实的品牌、人员、项目、设备、价格、资质和场景按主题自然取舍，不堆关键词或营销话术。"),

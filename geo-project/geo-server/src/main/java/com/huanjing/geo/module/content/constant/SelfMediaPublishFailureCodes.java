@@ -81,6 +81,7 @@ public final class SelfMediaPublishFailureCodes {
     );
 
     private static final Map<String, FailureMetadata> METADATA = Map.ofEntries(
+            entry("TOUTIAO_TITLE_INVALID", "头条标题需要修改", false, "围绕地域、A 类问题核心对象和具体关切拟定完整标题，去掉强推荐表达，再创建发布任务。", "OPEN_ARTICLE", "修改标题", "navigate"),
             entry("SOHU_DAILY_LIMIT_REACHED", "搜狐今日发文额度已用完", false, "搜狐账号每天最多发5篇，请次日重新安排；不要重复提交。"),
             entry("SOHU_DAILY_QUOTA_NOT_CONFIRMED", "搜狐剩余额度未确认", false, "打开搜狐编辑页核对今日剩余发文额度，再恢复原任务。"),
             entry("SOHU_IMAGE_UPLOAD_NOT_CONFIRMED", "搜狐正文插图上传未确认", false, "检查正文插图是否完整上传并显示，确认后恢复原任务。"),

@@ -1211,7 +1211,8 @@ public class BatchArticleGenerationService {
                                 new ArticleGenerationEngine.StructureValidationContext(
                                         task.getChannelGroupCode(),
                                         task.getChannelSubCode(),
-                                        XiaohongshuArticlePolicies.isNeutralEducationTemplate(promptContext.template())
+                                        XiaohongshuArticlePolicies.isNeutralEducationTemplate(promptContext.template()),
+                                        promptContext.promptInput() == null ? task.getTopic() : promptContext.promptInput().topic()
                                 )
                         )
                 );

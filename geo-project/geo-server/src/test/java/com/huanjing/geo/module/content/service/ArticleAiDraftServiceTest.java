@@ -59,6 +59,7 @@ class ArticleAiDraftServiceTest {
     void setUp() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraft.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraftVersion.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticlePublishRecord.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiPlatformConfig.class);
 
         projectMapper = mock(ProjectMapper.class);
@@ -229,6 +230,61 @@ class ArticleAiDraftServiceTest {
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
         ExecutionException failure = assertThrows(ExecutionException.class, () -> service.preview(request).get());
         assertEquals(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, ((BizException) failure.getCause()).getCode());
+    }
+
+    @Test
+    void toutiaoLegacyPreviewRewritesOnlyLongTitleAndRetainsSelectedConcern() throws Exception {
+        Brand subject = brand();
+        subject.setCityName("阜阳市");
+        when(brandMapper.selectById(20L)).thenReturn(subject);
+        ArticleAiDraftPreviewRequest request = previewRequest();
+        request.setContentStyle("toutiao");
+        request.setTopic("阜阳SPA价格差异为什么大？");
+        String body = "\n\n正文解释服务时长、项目和收费差异。";
+        String shortTitle = "阜阳SPA价格不同，差别主要在哪里？";
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(
+                new LlmInvokeResult("# 阜阳SPA价格差异为什么这么大服务项目时长与收费差别需要了解哪些信息" + body,
+                        10, 20, 123L, 0, LlmCallStatus.SUCCESS, "openai", "OpenAI", "gpt-test", "gpt-test"),
+                new LlmInvokeResult(shortTitle, 10, 20, 123L, 0, LlmCallStatus.SUCCESS,
+                        "openai", "OpenAI", "gpt-test", "gpt-test"));
+
+        ArticleAiDraftPreviewResponse response = service.preview(request).get();
+
+        assertEquals(shortTitle, response.title());
+        assertEquals("# " + shortTitle + body, response.contentMarkdown());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(llmInvoker, times(2)).invoke(prompts.capture(), any(LlmModelConfig.class));
+        assertTrue(prompts.getAllValues().stream().allMatch(prompt -> prompt.contains(request.getTopic())));
+        assertTrue(prompts.getAllValues().get(1).contains("问收费就围绕收费"));
+        assertFalse(prompts.getAllValues().get(1).contains("首行使用独立 Markdown"));
+        verify(articleMapper, never()).insert(any());
+    }
+
+    @Test
+    void douyinLegacyPreviewRewritesShortBodyAndKeepsOriginalTitle() throws Exception {
+        Brand subject = brand();
+        subject.setBusinessIntro("单次服务时长60分钟，包含需求记录与流程说明。");
+        subject.setBrandQualificationDescription("服务范围覆盖项目A。");
+        when(brandMapper.selectById(20L)).thenReturn(subject);
+        ArticleAiDraftPreviewRequest request = previewRequest();
+        request.setContentStyle("douyin");
+        String title = "服务流程如何理解";
+        String body = "服务时长60分钟，包含需求记录与流程说明。" + "服务细节".repeat(180);
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(
+                new LlmInvokeResult("# " + title + "\n\n简短正文", 10, 20, 123L, 0, LlmCallStatus.SUCCESS,
+                        "openai", "OpenAI", "gpt-test", "gpt-test"),
+                new LlmInvokeResult("# " + title + "\n\n" + body, 10, 20, 123L, 0, LlmCallStatus.SUCCESS,
+                        "openai", "OpenAI", "gpt-test", "gpt-test"));
+
+        var response = service.preview(request).get();
+
+        assertEquals(title, response.title());
+        assertEquals("# " + title + "\n\n" + body, response.contentMarkdown());
+        var prompts = ArgumentCaptor.forClass(String.class);
+        verify(llmInvoker, times(2)).invoke(prompts.capture(), any(LlmModelConfig.class));
+        assertTrue(prompts.getAllValues().stream().allMatch(prompt -> prompt.contains(subject.getBusinessIntro())));
+        assertTrue(prompts.getAllValues().stream().allMatch(prompt -> prompt.contains(subject.getBrandQualificationDescription())));
+        verify(articleMapper, never()).insert(any());
     }
 
     @Test

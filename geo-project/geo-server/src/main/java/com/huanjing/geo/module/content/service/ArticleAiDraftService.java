@@ -173,7 +173,7 @@ public class ArticleAiDraftService {
 
         return CompletableFuture.supplyAsync(
                 () -> previewInWorker(project, operator, prompt, inputSnapshot,
-                        req.getModelPlatformCode(), req.getModelId(), allowContactInfo, "sohu".equals(req.getContentStyle())),
+                        req.getModelPlatformCode(), req.getModelId(), allowContactInfo, req.getContentStyle(), req.getTopic()),
                 articleAiDraftExecutor
         );
     }
@@ -398,7 +398,19 @@ public class ArticleAiDraftService {
                                                           String requestedPlatformCode,
                                                           String requestedModelId,
                                                           boolean allowContactInfo,
-                                                          boolean sohu) {
+                                                          String contentStyle,
+                                                          String selectedTopic) {
+        boolean sohu = "sohu".equals(contentStyle);
+        boolean toutiao = "toutiao".equals(contentStyle);
+        boolean douyin = "douyin".equals(ArticlePromptChannels.canonicalSubCode("self_media", contentStyle));
+        Integer maxTitleChars = null;
+        Integer maxContentChars = null;
+        if (sohu) maxTitleChars = ArticlePromptChannels.SOHU_MAX_TITLE_CHARS;
+        else if (toutiao) maxTitleChars = ArticlePromptChannels.SELF_MEDIA_MAX_TITLE_CHARS;
+        else if (douyin) {
+            maxTitleChars = ArticlePromptChannels.DOUYIN_MAX_TITLE_CHARS;
+            maxContentChars = ArticlePromptChannels.DOUYIN_MAX_CONTENT_CHARS;
+        }
         long started = System.nanoTime();
         ArticleModelResolver.ModelSelection model = null;
         try {
@@ -414,10 +426,11 @@ public class ArticleAiDraftService {
                             sohu ? false : allowContactInfo,
                             false,
                             List.of(),
-                            sohu ? ArticlePromptChannels.SOHU_MAX_TITLE_CHARS : null,
+                            maxTitleChars,
                             ArticleGenerationTemperatures.DEFAULT,
-                            (Integer) null,
-                            sohu ? new ArticleGenerationEngine.StructureValidationContext("self_media", "sohu", false) : null
+                            maxContentChars,
+                            sohu || toutiao || douyin ? new ArticleGenerationEngine.StructureValidationContext(
+                                    "self_media", contentStyle, false, selectedTopic) : null
                     )
             );
             model = generated.model();
@@ -673,7 +686,8 @@ public class ArticleAiDraftService {
         return new ArticleGenerationEngine.StructureValidationContext(
                 context.channelGroupCode(),
                 context.channelSubCode(),
-                isNeutralEducationMode(context)
+                isNeutralEducationMode(context),
+                context.promptInput() == null ? context.topicAsQuestion() : context.promptInput().topic()
         );
     }
 

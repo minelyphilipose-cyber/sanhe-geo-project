@@ -13,7 +13,7 @@ final class SelfMediaQuestionTitlePolicies {
 
     static boolean applies(String group, String sub) {
         return ArticlePromptChannels.SELF_MEDIA.equals(group)
-                && ("sohu".equals(sub) || "toutiao".equals(sub));
+                && "sohu".equals(sub);
     }
 
     static List<String> brandNames(Project project, Brand brand) {
@@ -52,9 +52,6 @@ final class SelfMediaQuestionTitlePolicies {
                 + "避免把品牌写成解答者或肯定结论，例如“品牌帮你理清”“品牌说清楚”；"
                 + "也不以“先看懂、再判断”等说明式导语替代品牌追问。"
                 + "也避免“为什么这么受欢迎”“为什么值得信赖”等预设赞扬的问法，以及首选、强烈推荐、闭眼选等强推荐表达。"
-                + "地域和品牌都计入" + maxTitleChars + "字上限，不能为缩短标题而省略。"
-                + ("toutiao".equals(platform)
-                    ? "优先用一句完整、具体的疑问表达；两句仅在字数允许且各自完整时使用。缩短非必要措辞，不堆叠多个追问。"
-                    : "");
+                + "地域和品牌都计入" + maxTitleChars + "字上限，不能为缩短标题而省略。";
     }
 }

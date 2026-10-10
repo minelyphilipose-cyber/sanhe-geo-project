@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.content.service.adapter;
 
 import com.huanjing.geo.module.content.config.SemiAutoPlatformProperties;
+import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.service.ToutiaoArticleTitlePolicies;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -37,6 +39,12 @@ public class ToutiaoSemiAutoAdapter implements SemiAutoSelfMediaAdapter {
     @Override
     public String renderContent(String markdown, String title, PlatformFillProfile profile) {
         return SemiAutoSelfMediaAdapter.super.renderContent(stripImageReferences(markdown), title, profile);
+    }
+
+    @Override
+    public SemiAutoFillTask prepareFillTask(ArticleDraft article, String contentMarkdown, PlatformFillProfile profile) {
+        ToutiaoArticleTitlePolicies.validateForPublish(article == null ? null : article.getTitle());
+        return SemiAutoSelfMediaAdapter.super.prepareFillTask(article, contentMarkdown, profile);
     }
 
     private String stripImageReferences(String markdown) {
