@@ -24,6 +24,17 @@ public interface ProjectSelfMediaScheduleBatchMapper extends BaseMapper<ProjectS
     @Select("""
             SELECT *
             FROM project_self_media_schedule_batch
+            WHERE project_id = #{projectId}
+              AND target_month = #{targetMonth}
+            LIMIT 1
+            FOR UPDATE
+            """)
+    ProjectSelfMediaScheduleBatch selectByProjectAndMonthForUpdate(@Param("projectId") Long projectId,
+                                                                 @Param("targetMonth") String targetMonth);
+
+    @Select("""
+            SELECT *
+            FROM project_self_media_schedule_batch
             WHERE status IN ('planned', 'processing')
             ORDER BY updated_at ASC, id ASC
             LIMIT #{limit}

@@ -37,8 +37,8 @@ public class SelfMediaPublishScheduleCreateRequest {
     private Integer minIntervalMinutes;
 
     /**
-     * Automatic monthly planning may use a second daily slot when the task count
-     * exceeds the available publish-day count. The daily hard limit remains two.
+     * Retained for older callers and idempotency payload compatibility.
+     * Scheduling no longer imposes a daily article-count limit.
      */
     private Boolean allowSecondDailySchedule;
 }

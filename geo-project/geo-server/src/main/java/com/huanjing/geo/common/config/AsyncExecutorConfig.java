@@ -88,6 +88,20 @@ public class AsyncExecutorConfig {
     @Value("${geo.llm.measurement.executor.queue-capacity:1000}")
     private int llmMeasurementQueueCapacity;
 
+    @Bean("selfMediaPlanningExecutor")
+    public Executor selfMediaPlanningExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(0);
+        executor.setThreadNamePrefix("self-media-planning-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
+
     @Bean("taskExecutor")
     public Executor taskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

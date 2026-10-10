@@ -208,7 +208,7 @@
                 </div>
               </el-form-item>
               <el-form-item label="工作日规则">
-                <el-checkbox v-model="selfMediaScheduleForm.includeAdjustedWorkdays" :disabled="!canUpdateProject">允许排入调休工作日</el-checkbox>
+                <el-checkbox v-model="selfMediaScheduleForm.includeAdjustedWorkdays" :disabled="!canUpdateProject" @change="selfMediaPreview = null">允许排入调休工作日</el-checkbox>
               </el-form-item>
               <el-form-item label="备注">
                 <el-input
@@ -238,6 +238,7 @@
                     format="YYYY-MM"
                     placeholder="选择月份"
                     class="auto-schedule-month"
+                    :disabled="selfMediaScheduleCreating"
                     @change="handleSelfMediaScheduleMonthChange"
                   />
                 </label>
@@ -250,7 +251,9 @@
                     collapse-tags-tooltip
                     clearable
                     class="auto-schedule-accounts"
+                    :disabled="selfMediaScheduleCreating"
                     placeholder="默认全部启用账号"
+                    @change="selfMediaPreview = null"
                   >
                     <el-option
                       v-for="account in activeSelfMediaAccounts"
@@ -290,7 +293,7 @@
             <div v-loading="selfMediaAutomationOverviewLoading" class="auto-schedule-health">
               <div class="auto-schedule-health-head">
                 <div>
-                  <strong>运行概况</strong>
+                  <strong>运行概况（当前可见范围）</strong>
                   <small>{{ selfMediaAutomationSummaryText }}</small>
                 </div>
                 <el-button link type="primary" :loading="selfMediaAutomationOverviewLoading" @click="loadSelfMediaAutomationOverview">
@@ -365,7 +368,7 @@
                 <el-tag :type="selfMediaBatchTagType(selfMediaScheduleBatch.status)" effect="light">
                   {{ selfMediaBatchStatusLabel(selfMediaScheduleBatch.status) }}
                 </el-tag>
-                <span>计划 {{ selfMediaScheduleBatch.plannedCount || 0 }}，已排 {{ selfMediaScheduleBatch.createdCount || 0 }}，失败 {{ selfMediaScheduleBatch.rejectedCount || 0 }}</span>
+                <span>本月累计计划 {{ selfMediaScheduleBatch.plannedCount || 0 }}，已排 {{ selfMediaScheduleBatch.createdCount || 0 }}，失败 {{ selfMediaScheduleBatch.rejectedCount || 0 }}</span>
                 <span v-if="selfMediaScheduleBatch.requestedCount != null">
                   请求 {{ selfMediaScheduleBatch.requestedCount || 0 }}，缺口 {{ selfMediaScheduleBatch.deficitCount || 0 }}，结转 {{ selfMediaScheduleBatch.carryOverCount || 0 }}
                 </span>
@@ -377,11 +380,11 @@
             </div>
 
             <el-alert
-              v-if="selfMediaScheduleBatch?.failureMessage"
+              v-if="selfMediaBatchFailureText"
               type="warning"
               :closable="false"
               class="auto-schedule-alert"
-              :title="selfMediaScheduleBatch.failureMessage"
+              :title="selfMediaBatchFailureText"
             />
             <el-alert
               v-if="selfMediaScheduleBatch?.decisionReason"
@@ -389,6 +392,20 @@
               :closable="false"
               class="auto-schedule-alert"
               :title="`结转原因：${selfMediaScheduleBatch.decisionReason}`"
+            />
+            <el-alert
+              v-if="selfMediaPlanningMessage"
+              :type="selfMediaPlanningTask?.status === 'failed' || selfMediaPlanningError ? 'warning' : selfMediaPlanningPending ? 'info' : 'success'"
+              :closable="false"
+              class="auto-schedule-alert"
+              :title="selfMediaPlanningMessage"
+            />
+            <el-alert
+              v-if="selfMediaScheduleNoRemainingDemand"
+              type="info"
+              :closable="false"
+              class="auto-schedule-alert"
+              title="所选账号本月没有新增待排计划，已有排期已保留。"
             />
             <el-alert
               v-if="selfMediaPreview && selfMediaPreview.enough === false"
@@ -409,7 +426,7 @@
               v-if="selfMediaPreview && ((selfMediaPreview.normalRequiredCount || 0) > 0 || (selfMediaPreview.pendingCarryOverCount || 0) > 0 || (selfMediaPreview.carryOverSources || []).length)"
               class="auto-schedule-demand-summary"
             >
-              <span>正常额度 {{ selfMediaPreview.normalRequiredCount || 0 }}</span>
+              <span>{{ isSelfMediaScheduleSupplementMode ? '本次待补' : '本次待排' }} {{ selfMediaPreview.normalRequiredCount || 0 }}</span>
               <span>历史结转 {{ selfMediaPreview.pendingCarryOverCount || 0 }}</span>
               <span v-if="selfMediaPreview.unavailableCarryOverCount">不可用结转 {{ selfMediaPreview.unavailableCarryOverCount }}</span>
               <span
@@ -427,7 +444,7 @@
                 :class="{ 'is-warning': !group.enough }"
               >
                 <div class="auto-schedule-precheck-main">
-                  <strong>{{ group.platformLabel || selfMediaPlatformLabel(group.platform) }}</strong>
+                  <strong>{{ selfMediaPlatformLabel(group.platform) }}</strong>
                   <span>
                     需要 {{ group.requestedCount || 0 }} / 可排 {{ group.availableSlotCount || 0 }}
                     <template v-if="group.deficitCount"> / 缺口 {{ group.deficitCount }}</template>
@@ -452,7 +469,7 @@
               </div>
             </div>
             <div class="auto-schedule-submit">
-              <el-button :loading="selfMediaPreviewLoading" @click="previewSelfMediaSchedule">预检排期</el-button>
+              <el-button :loading="selfMediaPreviewLoading" :disabled="selfMediaPlanningPending || selfMediaScheduleCreating" @click="previewSelfMediaSchedule">预检排期</el-button>
               <el-button
                 v-if="selfMediaPreviewHasInsufficientSlots && isSelfMediaScheduleCurrentMonth"
                 plain
@@ -464,7 +481,7 @@
               <el-button
                 type="primary"
                 :disabled="!canCreateSelfMediaSchedule"
-                :loading="selfMediaScheduleCreating"
+                :loading="selfMediaScheduleCreating || selfMediaPlanningPending"
                 @click="createSelfMediaSchedule"
               >
                 {{ selfMediaScheduleSubmitLabel }}
@@ -1133,6 +1150,7 @@ import type {
   ProjectSelfMediaScheduleBatchDetail,
   ProjectSelfMediaScheduleBatchDetailItem,
   ProjectSelfMediaScheduleConfig,
+  ProjectSelfMediaPlanningTask,
 } from '@/api/project'
 import {
   getContentArticleDetail,
@@ -1155,6 +1173,7 @@ import type {
 import { regionDisplayFromPayload } from '@/constants/region'
 import { isSelfMediaQuotaChannel } from '@/constants/distributionChannels'
 import { selfMediaPlatformLabel } from '@/constants/selfMediaPlatforms'
+import { useProjectSelfMediaPlanning } from '@/composables/useProjectSelfMediaPlanning'
 import { nullableText } from '@/utils/form'
 import { canManageQuestionPolling as canManageQuestionPollingForProject, isQuestionPollingEnabled, questionPollingLabel } from '@/utils/keywordQuestionPolling'
 import MobileDashboardCompetitorPanel from './MobileDashboardCompetitorPanel.vue'
@@ -1542,32 +1561,68 @@ const selfMediaDetailPlatformGroups = computed(() => {
   })
   return Array.from(groups.values())
 })
+const {
+  task: selfMediaPlanningTask,
+  pending: selfMediaPlanningPending,
+  checking: selfMediaPlanningChecking,
+  error: selfMediaPlanningError,
+  refresh: refreshSelfMediaPlanning,
+  track: trackSelfMediaPlanning,
+} = useProjectSelfMediaPlanning(
+  () => project.value && canViewSelfMediaSchedulePanel.value && selfMediaScheduleMonth.value
+    ? { projectId: project.value.id, month: selfMediaScheduleMonth.value }
+    : null,
+  handleSelfMediaPlanningFinished,
+)
+const selfMediaPlanningMessage = computed(() => {
+  if (selfMediaPlanningError.value) return selfMediaPlanningError.value
+  const task = selfMediaPlanningTask.value
+  if (!task) return ''
+  if (task.status === 'pending') return '后台排期中，完成后会自动更新结果。可以离开页面，已有排期会保留。'
+  if (task.status === 'failed') return `本次排期失败：${task.failureMessage || '请稍后重试'}。已有排期已保留。`
+  const result = task.result
+  const carryOverText = result?.carryOverCount ? `，结转 ${result.carryOverCount} 条到 ${result.carryOverTargetMonth || '下月'}` : ''
+  return `最近一次${task.supplementExistingBatch ? '补充' : '创建'}排期完成：新增 ${result?.plannedCount || 0} 条计划${carryOverText}，文章将在处理当天生成。`
+})
 const canCreateSelfMediaSchedule = computed(() => {
+  if (selfMediaScheduleCreating.value || selfMediaPlanningPending.value || selfMediaPlanningChecking.value || selfMediaPlanningError.value) return false
   if (!canUpdateProject.value || !selfMediaScheduleForm.autoScheduleEnabled) return false
   if (!selfMediaScheduleMonth.value) return false
   if (!activeSelfMediaAccounts.value.length) return false
   if (selfMediaCalendarMissing.value) return false
+  if (selfMediaScheduleNoRemainingDemand.value) return false
   const status = selfMediaScheduleBatch.value?.status
-  if (status === 'planned' || status === 'processing') return false
+  if (status === 'processing') return false
   if (selfMediaPreviewHasInsufficientSlots.value) return canDecideSelfMediaScheduleCarryOver.value
   return true
 })
-const isSelfMediaScheduleSupplementMode = computed(() => ['created', 'partial_failed'].includes(selfMediaScheduleBatch.value?.status || ''))
-const selfMediaScheduleSubmitLabel = computed(() => isSelfMediaScheduleSupplementMode.value ? '补充排期' : '创建排期')
+const selfMediaScheduleNoRemainingDemand = computed(() => selfMediaPreview.value?.requestedCount === 0)
+const selfMediaBatchFailureText = computed(() => {
+  const batch = selfMediaScheduleBatch.value
+  const count = batch?.rejectedCount || 0
+  return count > 0
+    ? `本月批次累计有 ${count} 条失败计划，请查看明细定位原因；补充排期不会自动重试这些任务。`
+    : batch?.failureMessage || ''
+})
+const isSelfMediaScheduleSupplementMode = computed(() => ['planned', 'created', 'partial_failed'].includes(selfMediaScheduleBatch.value?.status || ''))
+const selfMediaScheduleSubmitLabel = computed(() => selfMediaPlanningPending.value ? '后台排期中' : isSelfMediaScheduleSupplementMode.value ? '补充排期' : '创建排期')
 const selfMediaScheduleCreateDisabledReason = computed(() => {
+  if (selfMediaPlanningPending.value) return '后台排期任务正在处理，无需重复提交。'
+  if (selfMediaPlanningError.value) return '请等待排期任务状态恢复后再操作。'
+  if (selfMediaPlanningChecking.value) return '正在查询后台排期任务状态。'
   if (canCreateSelfMediaSchedule.value) {
     if (selfMediaScheduleForm.autoScheduleEnabled && !selfMediaScheduleConfig.value?.autoScheduleEnabled) {
       return '点击创建时会先保存当前自动排期配置。'
     }
-    return ''
+    return isSelfMediaScheduleSupplementMode.value ? '按所选账号的剩余额度补充本月计划，保留已有排期。' : ''
   }
   if (!canUpdateProject.value) return '当前账号缺少项目更新权限，无法创建自动排期。'
   if (!selfMediaScheduleForm.autoScheduleEnabled) return '请先开启自动创建排期。'
   if (!selfMediaScheduleMonth.value) return '请选择目标月份。'
   if (!activeSelfMediaAccounts.value.length) return '当前品牌暂无启用的自媒体账号。'
   if (selfMediaCalendarMissing.value) return '目标年份工作日历缺失，暂不能创建排期。'
+  if (selfMediaScheduleNoRemainingDemand.value) return '所选账号本月没有新增待排计划，已有排期已保留。'
   const status = selfMediaScheduleBatch.value?.status
-  if (status === 'planned') return '当前月份已锁定排期时间，文章将在执行当天自动生成。'
   if (status === 'processing') return '当前月份批次正在处理中，请完成后再补充排期。'
   if (selfMediaPreviewHasInsufficientSlots.value && !canDecideSelfMediaScheduleCarryOver.value) {
     return '目标月份可用排期容量不足，请联系交付负责人确认结转补排。'
@@ -1975,12 +2030,16 @@ function selfMediaSchedulePayload(extra?: Partial<ProjectSelfMediaAutoSchedulePa
 }
 
 async function loadSelfMediaScheduleBatch() {
-  if (!project.value || !selfMediaScheduleMonth.value) return
+  const current = project.value
+  const month = selfMediaScheduleMonth.value
+  if (!current || !month) return
   try {
-    const { data } = await getProjectSelfMediaScheduleBatch(project.value.id, selfMediaScheduleMonth.value)
+    const { data } = await getProjectSelfMediaScheduleBatch(current.id, month)
+    if (current.id !== project.value?.id || month !== selfMediaScheduleMonth.value) return
     selfMediaScheduleBatch.value = data.data || null
     selfMediaBatchDetail.value = null
   } catch {
+    if (current.id !== project.value?.id || month !== selfMediaScheduleMonth.value) return
     selfMediaScheduleBatch.value = null
     selfMediaBatchDetail.value = null
   }
@@ -2398,9 +2457,11 @@ async function persistSelfMediaScheduleConfig(showSuccess: boolean) {
 async function previewSelfMediaSchedule() {
   const current = project.value
   if (!current || !selfMediaScheduleMonth.value) return
+  const month = selfMediaScheduleMonth.value
   selfMediaPreviewLoading.value = true
   try {
     const { data } = await previewProjectSelfMediaAutoSchedule(current.id, selfMediaSchedulePayload())
+    if (current.id !== project.value?.id || month !== selfMediaScheduleMonth.value) return
     selfMediaPreview.value = data.data
   } finally {
     selfMediaPreviewLoading.value = false
@@ -2424,6 +2485,7 @@ async function createSelfMediaSchedule() {
   const current = project.value
   if (!current || !canCreateSelfMediaSchedule.value) return
   const supplementMode = isSelfMediaScheduleSupplementMode.value
+  selfMediaScheduleCreating.value = true
   try {
     if (selfMediaScheduleForm.autoScheduleEnabled && !selfMediaScheduleConfig.value?.autoScheduleEnabled) {
       await persistSelfMediaScheduleConfig(false)
@@ -2450,7 +2512,6 @@ async function createSelfMediaSchedule() {
         },
       )
       const decisionReason = String(value || '').trim()
-      selfMediaScheduleCreating.value = true
       const idempotencyPrefix = supplementMode
         ? `project-self-media-${current.id}-${selfMediaScheduleMonth.value}-supplement-carry-over`
         : `project-self-media-${current.id}-${selfMediaScheduleMonth.value}-carry-over`
@@ -2463,9 +2524,10 @@ async function createSelfMediaSchedule() {
         }),
         idempotencyKey,
       )
-      selfMediaPreview.value = data.data
-      ElMessage.success(`自动排期已提交，已结转 ${data.data?.carryOverCount || deficit} 条到 ${data.data?.carryOverTargetMonth || '下月'}`)
-      await loadSelfMediaScheduleBatch()
+      selfMediaPreview.value = null
+      trackSelfMediaPlanning(data.data)
+      if (data.data.status === 'pending') ElMessage.success('排期任务已提交，正在后台处理，完成后会自动更新结果')
+      else await handleSelfMediaPlanningFinished(data.data)
       return
     }
     await ElMessageBox.confirm(
@@ -2475,21 +2537,32 @@ async function createSelfMediaSchedule() {
       supplementMode ? '补充自动排期' : '创建自动排期',
       { type: 'warning', confirmButtonText: supplementMode ? '确认补排' : '确认创建', cancelButtonText: '取消' },
     )
-    selfMediaScheduleCreating.value = true
     const idempotencyKey = createIdempotencyKey(
       supplementMode
         ? `project-self-media-${current.id}-${selfMediaScheduleMonth.value}-supplement`
         : `project-self-media-${current.id}-${selfMediaScheduleMonth.value}`,
     )
     const { data } = await createProjectSelfMediaAutoSchedule(current.id, selfMediaSchedulePayload(), idempotencyKey)
-    selfMediaPreview.value = data.data
-    const carryOverText = data.data?.carryOverCount ? `，已结转 ${data.data.carryOverCount} 条到 ${data.data.carryOverTargetMonth || '下月'}` : ''
-    ElMessage.success(`${supplementMode ? '补充排期' : '自动排期'}已提交，已锁定发布时间，文章将在处理当天生成${carryOverText}`)
-    await loadSelfMediaScheduleBatch()
+    selfMediaPreview.value = null
+    trackSelfMediaPlanning(data.data)
+    if (data.data.status === 'pending') ElMessage.success('排期任务已提交，正在后台处理，完成后会自动更新结果')
+    else await handleSelfMediaPlanningFinished(data.data)
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
+    await refreshSelfMediaPlanning()
   } finally {
     selfMediaScheduleCreating.value = false
+  }
+}
+
+async function handleSelfMediaPlanningFinished(task: ProjectSelfMediaPlanningTask) {
+  if (task.projectId !== project.value?.id || task.targetMonth !== selfMediaScheduleMonth.value) return
+  selfMediaPreview.value = null
+  await loadSelfMediaScheduleBatch()
+  if (task.projectId !== project.value?.id || task.targetMonth !== selfMediaScheduleMonth.value) return
+  if (task.status === 'success') {
+    ElMessage.success(`${task.supplementExistingBatch ? '补充' : '创建'}排期完成，新增 ${task.result?.plannedCount || 0} 条计划`)
+    await previewSelfMediaSchedule()
   }
 }
 

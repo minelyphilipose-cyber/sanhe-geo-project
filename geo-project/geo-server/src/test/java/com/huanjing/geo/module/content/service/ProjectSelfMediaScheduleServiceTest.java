@@ -59,6 +59,9 @@ import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -142,6 +145,9 @@ class ProjectSelfMediaScheduleServiceTest {
         brandMapper = mock(BrandMapper.class);
         configMapper = mock(ProjectSelfMediaScheduleConfigMapper.class);
         batchMapper = mock(ProjectSelfMediaScheduleBatchMapper.class);
+        when(batchMapper.selectByProjectAndMonthForUpdate(any(), anyString()))
+                .thenAnswer(invocation -> batchMapper.selectByProjectAndMonth(
+                        invocation.getArgument(0), invocation.getArgument(1)));
         carryOverMapper = mock(ProjectSelfMediaScheduleCarryOverMapper.class);
         planMapper = mock(ProjectSelfMediaSchedulePlanMapper.class);
         scheduleItemMapper = mock(ProjectSelfMediaScheduleItemMapper.class);
@@ -251,7 +257,7 @@ class ProjectSelfMediaScheduleServiceTest {
     }
 
     @Test
-    void updatePlanItemRejectsAccountDailyLimitConflict() {
+    void updatePlanItemAllowsAdditionalArticlesOnSameDay() {
         ProjectSelfMediaScheduleItem item = storedItem();
         item.setId(302L);
         item.setBatchId(11L);
@@ -264,13 +270,72 @@ class ProjectSelfMediaScheduleServiceTest {
         when(batchMapper.selectById(11L)).thenReturn(batch);
         when(selfMediaAccountMapper.selectById(41L)).thenReturn(account);
         when(scheduleItemMapper.countActivePlanItemsForAccountDay(eq(41L), eq(302L), any(), any()))
-                .thenReturn(1L);
+                .thenReturn(3L);
+        ProjectSelfMediaScheduleItemUpdateRequest request = new ProjectSelfMediaScheduleItemUpdateRequest();
+        request.setSelfMediaAccountId(41L);
+        request.setPlannedExecutionAt(LocalDateTime.of(2026, 6, 11, 9, 0));
+        request.setPlannedPublishAt(LocalDateTime.of(2026, 6, 11, 10, 0));
+
+        service.updatePlanItem(7L, 302L, request);
+
+        assertEquals(request.getPlannedExecutionAt(), item.getPlannedExecutionAt());
+        assertEquals(request.getPlannedPublishAt(), item.getPlannedPublishAt());
+        verify(scheduleItemMapper).updateById(item);
+    }
+
+    @Test
+    void updatePlanItemStillRejectsOccupiedExecutionTime() {
+        ProjectSelfMediaScheduleItem item = storedItem();
+        item.setId(302L);
+        item.setBatchId(11L);
+        item.setSelfMediaAccountId(41L);
+        SelfMediaAccount account = account(41L, "active");
+        account.setPlatform("zhihu");
+        when(scheduleItemMapper.selectById(302L)).thenReturn(item);
+        when(batchMapper.selectById(11L)).thenReturn(storedBatch());
+        when(selfMediaAccountMapper.selectById(41L)).thenReturn(account);
+        when(scheduleItemMapper.countActivePlanItemsAtExecution(eq(41L), eq(302L), any())).thenReturn(1L);
         ProjectSelfMediaScheduleItemUpdateRequest request = new ProjectSelfMediaScheduleItemUpdateRequest();
         request.setSelfMediaAccountId(41L);
         request.setPlannedExecutionAt(LocalDateTime.of(2026, 6, 11, 9, 0));
         request.setPlannedPublishAt(LocalDateTime.of(2026, 6, 11, 10, 0));
 
         assertThrows(BizException.class, () -> service.updatePlanItem(7L, 302L, request));
+        verify(scheduleItemMapper, never()).updateById(item);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"planned", "processing"})
+    void createForProjectStillRejectsDuplicateCreationOrSupplementWhileProcessing(String status) {
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setStatus(status);
+        batch.setRequestPayload(null);
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setSupplementExistingBatch("processing".equals(status));
+
+        assertThrows(BizException.class, () -> service.createForProject(7L, request, "manual", "new-key"));
+        verify(scheduleItemMapper, never()).insert(any(ProjectSelfMediaScheduleItem.class));
+        verify(companyChannelQuotaService, never()).reserveProjectSelfMediaPlan(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void supplementPlannedBatchStillRejectsExhaustedQuota() {
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setStatus("planned");
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
+                        "self_media:toutiao", "month", "2026-06", 2, 2));
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setSupplementExistingBatch(true);
+
+        assertThrows(BizException.class, () -> service.createForProject(7L, request, "manual", "new-key"));
+        verify(scheduleItemMapper, never()).insert(any(ProjectSelfMediaScheduleItem.class));
+        verify(batchMapper, never()).updateById(batch);
     }
 
     @Test
@@ -776,8 +841,9 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals(0, updated.getRejectedCount());
     }
 
-    @Test
-    void createForProjectSupplementsExistingCreatedBatch() {
+    @ParameterizedTest
+    @CsvSource({"created,toutiao", "planned,toutiao", "planned,sohu"})
+    void createForProjectSupplementsExistingBatchWithoutChangingOriginalPlans(String status, String platform) throws Exception {
         when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
         ProjectSelfMediaScheduleBatch batch = new ProjectSelfMediaScheduleBatch();
         batch.setId(33L);
@@ -785,7 +851,7 @@ class ProjectSelfMediaScheduleServiceTest {
         batch.setBrandId(8L);
         batch.setCompanyId(6L);
         batch.setTargetMonth("2026-06");
-        batch.setStatus("created");
+        batch.setStatus(status);
         batch.setPlannedCount(1);
         batch.setCreatedCount(1);
         batch.setRequestedCount(1);
@@ -796,16 +862,18 @@ class ProjectSelfMediaScheduleServiceTest {
                   "scheduleStrategy": "platform_schedule",
                   "includeAdjustedWorkdays": false,
                   "plans": [
-                    {"generationBatchId": 44, "generationTaskId": 55, "selfMediaAccountId": 20, "platform": "toutiao"}
+                    {"generationBatchId": 44, "generationTaskId": 55, "selfMediaAccountId": 20, "platform": "toutiao",
+                     "plannedExecutionAt": "2026-06-11T09:00:00", "plannedPublishAt": "2026-06-11T10:00:00"}
                   ]
                 }
                 """);
         when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
         SelfMediaAccount newAccount = account(21L, "active");
+        newAccount.setPlatform(platform);
         when(selfMediaAccountMapper.selectById(21L)).thenReturn(newAccount);
-        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("toutiao"), any()))
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq(platform), any()))
                 .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView(
-                        "self_media:toutiao", "month", "2026-06", 0, 1));
+                        "self_media:" + platform, "month", "2026-06", 0, 1));
         when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
                 eq(8L), eq("toutiao"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyList()))
                 .thenReturn(0L);
@@ -828,6 +896,12 @@ class ProjectSelfMediaScheduleServiceTest {
         request.setArticleIds(List.of());
         request.setSelfMediaAccountIds(List.of(21L));
         request.setSupplementExistingBatch(true);
+        request.setScheduleStrategy(SelfMediaPublishAutoScheduleService.STRATEGY_PLATFORM_SPECIFIC);
+        if ("sohu".equals(platform)) {
+            var adapter = new com.huanjing.geo.module.content.service.adapter.SohuPlatformScheduleAdapter();
+            when(scheduleAdapterRouter.contract("sohu")).thenReturn(Optional.of(adapter.capabilityContract()));
+            when(scheduleAdapterRouter.rules("sohu", "backend_delayed_publish")).thenReturn(adapter.scheduleRules("backend_delayed_publish"));
+        }
         var response = service.createForProject(7L, request, "manual", "supplement-key");
 
         assertTrue(response.getCreated());
@@ -838,9 +912,28 @@ class ProjectSelfMediaScheduleServiceTest {
         assertEquals("planned", updated.getStatus());
         assertEquals(2, updated.getPlannedCount());
         assertTrue(updated.getRequestPayload().contains("\"generationTaskId\":55"));
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        var originalPlan = mapper.readTree(updated.getRequestPayload()).get("plans").get(0);
+        assertEquals(LocalDateTime.of(2026, 6, 11, 9, 0),
+                mapper.convertValue(originalPlan.get("plannedExecutionAt"), LocalDateTime.class));
+        assertEquals(LocalDateTime.of(2026, 6, 11, 10, 0),
+                mapper.convertValue(originalPlan.get("plannedPublishAt"), LocalDateTime.class));
+        verify(scheduleItemMapper, never()).updateById(org.mockito.ArgumentMatchers.argThat(
+                (ProjectSelfMediaScheduleItem row) -> Long.valueOf(20L).equals(row.getSelfMediaAccountId())));
         assertTrue(updated.getRequestPayload().contains("\"generationTaskId\":null"));
         assertTrue(updated.getRequestPayload().contains("\"selfMediaAccountId\":21"));
+        var newPlan = mapper.readTree(updated.getRequestPayload()).get("plans").get(1);
+        assertEquals(platform, newPlan.get("platform").asText());
+        if ("sohu".equals(platform)) {
+            assertEquals(newPlan.get("plannedExecutionAt"), newPlan.get("plannedPublishAt"));
+        }
         assertTrue(updated.getRequestPayload().contains("\"idempotencyKey\":\"supplement-key\""));
+        var retry = service.createForProject(7L, request, "manual", "supplement-key");
+        assertEquals(2, retry.getPlannedCount());
+        verify(batchMapper, times(1)).updateById(batch);
+        verify(scheduleItemMapper, times(1)).insert(any(ProjectSelfMediaScheduleItem.class));
+        verify(companyChannelQuotaService, times(1)).reserveProjectSelfMediaPlan(
+                eq(6L), eq(7L), eq(platform), any(), any());
     }
 
     @Test
@@ -1021,6 +1114,211 @@ class ProjectSelfMediaScheduleServiceTest {
 
         assertEquals(1, recovered);
         verify(planMapper).update(eq(null), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"sohu", "toutiao"})
+    void dailyQuotaExpandsAcrossEveryRemainingBusinessDay(String platform) {
+        prepareDailyQuota(platform, 2, List.of(slot(11, 10), slot(11, 15), slot(12, 10), slot(12, 15)));
+
+        var response = service.previewForProject(7L, dailyQuotaRequest());
+
+        assertEquals(4, response.getRequestedCount());
+        assertTrue(response.getEnough());
+        var selected = response.getSlotGroups().get(0).getSelectedSlots();
+        assertEquals(4, selected.size());
+        assertEquals(2, selected.stream().filter(slot -> slot.getExecutionAt().toLocalDate()
+                .equals(LocalDate.of(2026, 6, 11))).count());
+        assertEquals(2, selected.stream().filter(slot -> slot.getExecutionAt().toLocalDate()
+                .equals(LocalDate.of(2026, 6, 12))).count());
+    }
+
+    @Test
+    void dailyQuotaDeductsUsagePerDateInsteadOfMonthlyTotal() {
+        prepareDailyQuota("sohu", 2, List.of(slot(11, 10), slot(11, 15), slot(12, 10), slot(12, 15)));
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("sohu"), any()))
+                .thenAnswer(invocation -> {
+                    LocalDate date = invocation.getArgument(2);
+                    return new CompanyChannelQuotaService.DistributionQuotaView(
+                            "self_media:sohu", "day", date.toString(), date.getDayOfMonth() == 11 ? 2 : 0, 2);
+                });
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                eq(8L), eq("sohu"), eq(LocalDateTime.of(2026, 6, 1, 0, 0)), any(), anyList())).thenReturn(8L);
+
+        var response = service.previewForProject(7L, dailyQuotaRequest());
+
+        assertEquals(2, response.getRequestedCount());
+        assertTrue(response.getSlotGroups().get(0).getSelectedSlots().stream()
+                .allMatch(slot -> slot.getExecutionAt().toLocalDate().equals(LocalDate.of(2026, 6, 12))));
+    }
+
+    @Test
+    void dailyQuotaCanUseMoreThanTwoTimesInsideBusinessWindows() {
+        prepareDailyQuota("sohu", 5, List.of(slot(11, 10), slot(11, 15), slot(12, 10), slot(12, 15)));
+
+        var response = service.previewForProject(7L, dailyQuotaRequest());
+
+        assertEquals(10, response.getRequestedCount());
+        assertTrue(response.getEnough());
+        assertEquals(10, response.getSlotGroups().get(0).getSelectedSlots().stream()
+                .map(slot -> slot.getExecutionAt()).distinct().count());
+    }
+
+    @Test
+    void supplementDailyQuotaPreservesOriginalPlansAndConsumesOnlyMissingDailyQuota() throws Exception {
+        prepareDailyQuota("sohu", 2, List.of(slot(11, 10), slot(11, 15), slot(12, 10), slot(12, 15)));
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setId(33L);
+        batch.setStatus("planned");
+        batch.setPlannedCount(2);
+        batch.setRequestedCount(2);
+        batch.setRejectedCount(2);
+        batch.setRequestPayload("""
+                {"targetMonth":"2026-06","scheduleStrategy":"platform_specific","includeAdjustedWorkdays":false,
+                 "plans":[
+                   {"selfMediaAccountId":20,"platform":"sohu","plannedExecutionAt":"2026-06-11T10:00:00","plannedPublishAt":"2026-06-11T10:00:00"},
+                   {"selfMediaAccountId":20,"platform":"sohu","plannedExecutionAt":"2026-06-12T10:00:00","plannedPublishAt":"2026-06-12T10:00:00"}]}
+                """);
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        java.util.Map<LocalDate, Integer> used = new java.util.HashMap<>();
+        used.put(LocalDate.of(2026, 6, 11), 1);
+        used.put(LocalDate.of(2026, 6, 12), 1);
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq("sohu"), any()))
+                .thenAnswer(invocation -> {
+                    LocalDate date = invocation.getArgument(2);
+                    return new CompanyChannelQuotaService.DistributionQuotaView(
+                            "self_media:sohu", "day", date.toString(), used.getOrDefault(date, 0), 2);
+                });
+        doAnswer(invocation -> {
+            LocalDate date = invocation.getArgument(4);
+            used.merge(date, 1, Integer::sum);
+            return null;
+        }).when(companyChannelQuotaService).reserveProjectSelfMediaPlan(any(), any(), any(), any(), any());
+        List<ProjectSelfMediaScheduleItem> originals = new java.util.ArrayList<>();
+        for (int day : List.of(11, 12)) {
+            ProjectSelfMediaScheduleItem item = storedItem();
+            item.setId((long) day);
+            item.setSelfMediaAccountId(20L);
+            item.setPlatform("sohu");
+            item.setPlannedExecutionAt(LocalDateTime.of(2026, 6, day, 10, 0));
+            item.setPlannedPublishAt(item.getPlannedExecutionAt());
+            originals.add(item);
+        }
+        when(scheduleItemMapper.selectList(any())).thenReturn(originals);
+        ProjectSelfMediaAutoScheduleRequest request = dailyQuotaRequest();
+        request.setSupplementExistingBatch(true);
+
+        var response = service.createForProject(7L, request, "manual", "daily-supplement");
+
+        assertEquals(2, response.getPlannedCount());
+        assertEquals(4, batch.getPlannedCount());
+        assertEquals(2, batch.getRejectedCount());
+        verify(scheduleItemMapper, times(2)).insert(any(ProjectSelfMediaScheduleItem.class));
+        verify(companyChannelQuotaService).reserveProjectSelfMediaPlan(eq(6L), eq(7L), eq("sohu"), any(), eq(LocalDate.of(2026, 6, 11)));
+        verify(companyChannelQuotaService).reserveProjectSelfMediaPlan(eq(6L), eq(7L), eq("sohu"), any(), eq(LocalDate.of(2026, 6, 12)));
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        var savedPlans = mapper.readTree(batch.getRequestPayload()).get("plans");
+        for (int i = 0; i < 2; i++) {
+            assertEquals(originals.get(i).getPlannedExecutionAt(),
+                    mapper.convertValue(savedPlans.get(i).get("plannedExecutionAt"), LocalDateTime.class));
+            verify(scheduleItemMapper, never()).updateById(originals.get(i));
+        }
+        ArgumentCaptor<ProjectSelfMediaScheduleItem> inserted = ArgumentCaptor.forClass(ProjectSelfMediaScheduleItem.class);
+        verify(scheduleItemMapper, times(2)).insert(inserted.capture());
+        assertTrue(inserted.getAllValues().stream().allMatch(item -> item.getPlannedExecutionAt().getHour() == 15));
+        assertEquals(0, service.previewForProject(7L, request).getRequestedCount());
+        service.createForProject(7L, request, "manual", "daily-supplement");
+        verify(scheduleItemMapper, times(2)).insert(any(ProjectSelfMediaScheduleItem.class));
+        assertThrows(BizException.class, () -> service.createForProject(7L, request, "manual", "new-key"));
+    }
+
+    @Test
+    void dailyQuotaOnlyUsesFutureTimesAndProjectServiceDates() {
+        prepareDailyQuota("sohu", 2, List.of(slot(11, 10), slot(12, 10), slot(12, 15), slot(13, 10)));
+        service.setClock(fixedClock(LocalDateTime.of(2026, 6, 12, 11, 0)));
+        Project project = project();
+        project.setEndDate(LocalDate.of(2026, 6, 12));
+        when(projectMapper.selectById(7L)).thenReturn(project);
+
+        var response = service.previewForProject(7L, dailyQuotaRequest());
+
+        assertEquals(2, response.getRequestedCount());
+        assertTrue(response.getSlotGroups().get(0).getSelectedSlots().stream()
+                .allMatch(slot -> slot.getExecutionAt().isAfter(LocalDateTime.of(2026, 6, 12, 11, 0))
+                        && slot.getExecutionAt().toLocalDate().equals(LocalDate.of(2026, 6, 12))));
+    }
+
+    @Test
+    void dailyQuotaStillChecksActiveSchedulesOnEachPublishDate() {
+        prepareDailyQuota("sohu", 2, List.of(slot(11, 10), slot(12, 10)));
+        when(selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(eq(8L), eq("sohu"),
+                eq(LocalDateTime.of(2026, 6, 11, 0, 0)), eq(LocalDateTime.of(2026, 6, 12, 0, 0)), anyList()))
+                .thenReturn(2L);
+
+        var response = service.previewForProject(7L, dailyQuotaRequest());
+
+        assertEquals(2, response.getRequestedCount());
+        assertTrue(response.getSlotGroups().get(0).getSelectedSlots().stream()
+                .allMatch(slot -> slot.getExecutionAt().toLocalDate().equals(LocalDate.of(2026, 6, 12))));
+    }
+
+    @Test
+    void dailyQuotaIsSharedBySelectedAccountsRatherThanMultipliedPerAccount() {
+        prepareDailyQuota("sohu", 2, List.of(slot(11, 10), slot(11, 15), slot(12, 10), slot(12, 15)));
+        SelfMediaAccount second = account(21L, "active");
+        second.setPlatform("sohu");
+        when(selfMediaAccountMapper.selectById(21L)).thenReturn(second);
+        ProjectSelfMediaAutoScheduleRequest request = dailyQuotaRequest();
+        request.setSelfMediaAccountIds(List.of(20L, 21L));
+
+        var response = service.previewForProject(7L, request);
+
+        assertEquals(4, response.getRequestedCount());
+        assertEquals(2, response.getPlannedItems().stream().filter(item -> item.getSelfMediaAccountId() == 20L).count());
+        assertEquals(2, response.getPlannedItems().stream().filter(item -> item.getSelfMediaAccountId() == 21L).count());
+    }
+
+    @Test
+    void dailyQuotaPrioritizesHistoricalCarryOverWithinDailyBudget() {
+        prepareDailyQuota("sohu", 2, List.of(slot(11, 10), slot(11, 15), slot(12, 10), slot(12, 15)));
+        ProjectSelfMediaScheduleCarryOver pending = carryOver(88L, "2026-05", "2026-06", 1);
+        pending.setCarryOverPlanJson("[{\"accountId\":20,\"platform\":\"sohu\"}]");
+        when(carryOverMapper.selectList(any())).thenReturn(List.of(pending));
+
+        var response = service.previewForProject(7L, dailyQuotaRequest());
+
+        assertEquals(4, response.getRequestedCount());
+        assertEquals(3, response.getNormalRequiredCount());
+        assertEquals(1, response.getPendingCarryOverCount());
+        assertTrue(response.getEnough());
+    }
+
+    @Test
+    void supplementDailyQuotaCarriesOnlyPlansWithoutAnAvailableTime() {
+        prepareDailyQuota("sohu", 2, List.of(slot(11, 10)));
+        var onlyTime = new BusinessCalendarService.PublishSlot(LocalDate.of(2026, 6, 11), "上午",
+                LocalTime.of(10, 0), LocalTime.of(10, 0), LocalDateTime.of(2026, 6, 11, 10, 0), 0, "工作日", 4, false);
+        when(businessCalendarService.allPublishSlots(any(), anyBoolean())).thenReturn(List.of(onlyTime));
+        ProjectSelfMediaScheduleBatch batch = storedBatch();
+        batch.setId(33L);
+        batch.setStatus("planned");
+        batch.setPlannedCount(0);
+        batch.setRequestedCount(0);
+        batch.setRequestPayload("{\"targetMonth\":\"2026-06\",\"plans\":[]}");
+        when(batchMapper.selectByProjectAndMonth(7L, "2026-06")).thenReturn(batch);
+        ProjectSelfMediaAutoScheduleRequest request = dailyQuotaRequest();
+        request.setSupplementExistingBatch(true);
+        assertThrows(BizException.class, () -> service.createForProject(7L, request, "manual", "without-decision"));
+        request.setDecisionStrategy("carry_over");
+        request.setDecisionReason("发布窗口不足");
+
+        var response = service.createForProject(7L, request, "manual", "with-decision");
+
+        assertEquals(1, response.getPlannedCount());
+        assertEquals(1, response.getCarryOverCount());
+        verify(scheduleItemMapper, times(1)).insert(any(ProjectSelfMediaScheduleItem.class));
+        verify(companyChannelQuotaService, times(1)).reserveProjectSelfMediaPlan(
+                eq(6L), eq(7L), eq("sohu"), any(), eq(LocalDate.of(2026, 6, 11)));
     }
 
     @Test
@@ -2724,6 +3022,36 @@ class ProjectSelfMediaScheduleServiceTest {
     private Clock fixedClock(LocalDateTime value) {
         ZoneId zone = ZoneId.systemDefault();
         return Clock.fixed(value.atZone(zone).toInstant(), zone);
+    }
+
+    private ProjectSelfMediaAutoScheduleRequest dailyQuotaRequest() {
+        ProjectSelfMediaAutoScheduleRequest request = request();
+        request.setArticleIds(List.of());
+        request.setScheduleStrategy(SelfMediaPublishAutoScheduleService.STRATEGY_PLATFORM_SPECIFIC);
+        return request;
+    }
+
+    private void prepareDailyQuota(String platform, int limit, List<BusinessCalendarService.PublishSlot> slots) {
+        when(configMapper.selectByProjectId(7L)).thenReturn(config(true));
+        SelfMediaAccount account = account();
+        account.setPlatform(platform);
+        when(selfMediaAccountMapper.selectById(20L)).thenReturn(account);
+        when(businessCalendarService.allPublishSlots(any(), anyBoolean())).thenReturn(slots.stream()
+                .map(slot -> new BusinessCalendarService.PublishSlot(slot.date(), slot.windowName(),
+                        slot.plannedAt().toLocalTime(), slot.plannedAt().toLocalTime().plusHours(2), slot.plannedAt(),
+                        slot.dayType(), slot.dayName(), slot.week(), slot.adjustedWorkday())).toList());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(eq(6L), eq(platform), any()))
+                .thenAnswer(invocation -> {
+                    LocalDate date = invocation.getArgument(2);
+                    return new CompanyChannelQuotaService.DistributionQuotaView(
+                            "self_media:" + platform, "day", date.toString(), 0, limit);
+                });
+        if ("sohu".equals(platform)) {
+            var adapter = new com.huanjing.geo.module.content.service.adapter.SohuPlatformScheduleAdapter();
+            when(scheduleAdapterRouter.contract(platform)).thenReturn(Optional.of(adapter.capabilityContract()));
+            when(scheduleAdapterRouter.rules(platform, "backend_delayed_publish"))
+                    .thenReturn(adapter.scheduleRules("backend_delayed_publish"));
+        }
     }
 
     private ProjectSelfMediaAutoScheduleRequest request() {

@@ -73,6 +73,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.Clock;
@@ -494,24 +495,6 @@ public class ProjectSelfMediaScheduleService {
         if (scheduleItemMapper.countActivePlanItemsAtExecution(
                 account.getId(), item.getId(), request.getPlannedExecutionAt()) > 0) {
             throw new BizException(ERROR_CODE, "该账号在所选处理时间已有其他计划");
-        }
-        LocalDateTime dayStart = request.getPlannedPublishAt().toLocalDate().atStartOfDay();
-        long storedPlans = scheduleItemMapper.countActivePlanItemsForAccountDay(
-                account.getId(), item.getId(), dayStart, dayStart.plusDays(1));
-        long createdSchedules = selfMediaPublishScheduleMapper.countOccupiedByBrandAccountAndPublishDay(
-                batch.getBrandId(), account.getId(), dayStart, dayStart.plusDays(1),
-                List.of("cancelled", "canceled", "skipped", "failed"));
-        boolean batchUsesTwoDailySlots = payload != null && payload.plans() != null
-                && payload.plans().stream()
-                .filter(plan -> Objects.equals(plan.selfMediaAccountId(), account.getId()))
-                .collect(java.util.stream.Collectors.groupingBy(plan -> plan.plannedPublishAt().toLocalDate(),
-                        java.util.stream.Collectors.counting()))
-                .values().stream().anyMatch(count -> count > 1);
-        int dailyLimit = batchUsesTwoDailySlots ? 2 : 1;
-        if (storedPlans + createdSchedules >= dailyLimit) {
-            throw new BizException(ERROR_CODE, dailyLimit > 1
-                    ? "该账号当天已达到两篇排期上限"
-                    : "该账号当天已有排期，每天最多一篇");
         }
     }
 
@@ -989,7 +972,7 @@ public class ProjectSelfMediaScheduleService {
         List<Long> accountIds = autoRequest.getSelfMediaAccountIds().isEmpty()
                 ? selectBrandAccountIds(project.getBrandId())
                 : autoRequest.getSelfMediaAccountIds();
-        AccountPublishPlanResult planResult = buildAccountPublishPlans(project, autoRequest.getTargetMonth(), accountIds);
+        AccountPublishPlanResult planResult = buildAccountPublishPlans(project, autoRequest, accountIds);
         List<AccountPublishPlan> plans = planResult.plans();
         SelfMediaPublishAutoScheduleResponse response = evaluateCapacity(autoRequest, plans);
         applyPlanBuildWarnings(response, planResult);
@@ -1021,14 +1004,16 @@ public class ProjectSelfMediaScheduleService {
         SelfMediaPublishAutoScheduleRequest autoRequest = toAutoRequest(project, config, request);
         YearMonth targetMonth = parseTargetMonth(autoRequest.getTargetMonth());
         ensureProjectSchedulable(project, targetMonth);
-        ProjectSelfMediaScheduleBatch existed = batchMapper.selectByProjectAndMonth(projectId, autoRequest.getTargetMonth());
+        // Keep the same lock order as carry-over decisions when appending monthly plans.
+        lockProjectScheduleScope(projectId);
+        ProjectSelfMediaScheduleBatch existed = batchMapper.selectByProjectAndMonthForUpdate(projectId, autoRequest.getTargetMonth());
         existed = settleTerminalGenerationFailure(existed);
         if (isActiveOrCompletedBatch(existed)) {
             if (sameIdempotencyKey(existed, idempotencyKey)) {
                 return acceptedExistingBatchResponse(autoRequest, existed);
             }
             if (Boolean.TRUE.equals(request.getSupplementExistingBatch())) {
-                if (List.of(STATUS_PLANNED, STATUS_PROCESSING).contains(normalizeText(existed.getStatus()))) {
+                if (STATUS_PROCESSING.equals(normalizeText(existed.getStatus()))) {
                     throw new BizException(ERROR_CODE, "该项目本月自动化排期正在处理中，请等待完成后再补排");
                 }
                 return supplementGenerationBatch(project, config, request, triggerMode, operator.getId(), existed, idempotencyKey);
@@ -1052,7 +1037,7 @@ public class ProjectSelfMediaScheduleService {
         List<Long> accountIds = autoRequest.getSelfMediaAccountIds().isEmpty()
                 ? selectBrandAccountIds(project.getBrandId())
                 : autoRequest.getSelfMediaAccountIds();
-        AccountPublishPlanResult planResult = buildAccountPublishPlans(project, autoRequest.getTargetMonth(), accountIds);
+        AccountPublishPlanResult planResult = buildAccountPublishPlans(project, autoRequest, accountIds);
         List<AccountPublishPlan> plans = planResult.plans();
         if (plans.isEmpty()) {
             throw new BizException(ERROR_CODE, "该项目本月没有可补排的自媒体账号或剩余额度");
@@ -1715,7 +1700,7 @@ public class ProjectSelfMediaScheduleService {
         List<Long> accountIds = autoRequest.getSelfMediaAccountIds().isEmpty()
                 ? selectBrandAccountIds(project.getBrandId())
                 : autoRequest.getSelfMediaAccountIds();
-        AccountPublishPlanResult planResult = buildAccountPublishPlans(project, autoRequest.getTargetMonth(), accountIds);
+        AccountPublishPlanResult planResult = buildAccountPublishPlans(project, autoRequest, accountIds);
         List<AccountPublishPlan> plans = planResult.plans();
         if (plans.isEmpty()) {
             throw new BizException(ERROR_CODE, "该项目本月自媒体平台剩余额度为 0，无法创建自动化排期");
@@ -1776,7 +1761,9 @@ public class ProjectSelfMediaScheduleService {
 
         List<ProjectSelfMediaScheduleItem> newlyReservedItems = new ArrayList<>();
         try {
-            List<GenerationPlan> newGenerationPlans = buildDeferredGenerationPlans(plans, capacity);
+            SelfMediaPublishAutoScheduleResponse generationCapacity = Boolean.TRUE.equals(capacity.getEnough())
+                    ? capacity : evaluateCapacity(autoRequest, plans);
+            List<GenerationPlan> newGenerationPlans = buildDeferredGenerationPlans(plans, generationCapacity);
             newlyReservedItems.addAll(createAndReservePlanItems(batch, newGenerationPlans, operatorId));
             List<GenerationPlan> mergedPlans = new ArrayList<>(existingPlans);
             mergedPlans.addAll(newGenerationPlans);
@@ -2023,11 +2010,13 @@ public class ProjectSelfMediaScheduleService {
                 createdItems.add(item);
             }
         } catch (RuntimeException ex) {
-            for (Long itemId : reservedItemIds) {
-                try {
-                    companyChannelQuotaService.refundProjectSelfMediaPlan(itemId);
-                } catch (RuntimeException refundError) {
-                    log.error("project self-media plan quota refund failed itemId={}", itemId, refundError);
+            if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+                for (Long itemId : reservedItemIds) {
+                    try {
+                        companyChannelQuotaService.refundProjectSelfMediaPlan(itemId);
+                    } catch (RuntimeException refundError) {
+                        log.error("project self-media plan quota refund failed itemId={}", itemId, refundError);
+                    }
                 }
             }
             throw ex;
@@ -2036,6 +2025,8 @@ public class ProjectSelfMediaScheduleService {
     }
 
     private void refundPlanItemReservations(List<ProjectSelfMediaScheduleItem> items) {
+        // Failed planning transactions roll back new reservations; a separate refund would contend with their locks.
+        if (TransactionSynchronizationManager.isActualTransactionActive()) return;
         if (items == null || items.isEmpty()) {
             return;
         }
@@ -3150,6 +3141,13 @@ public class ProjectSelfMediaScheduleService {
                     .filter(slot -> isFutureExecutableSlot(slot, platform, scheduleStrategy, now))
                     .sorted(Comparator.comparing(BusinessCalendarService.PublishSlot::plannedAt))
                     .toList();
+            boolean dailyQuota = entry.getValue().stream().anyMatch(AccountPublishPlan::dailyQuota);
+            if (dailyQuota) {
+                platformSlots = entry.getValue().stream()
+                        .map(AccountPublishPlan::executionSlot)
+                        .filter(Objects::nonNull)
+                        .toList();
+            }
             int requestedCount = entry.getValue().size();
             int availableSlotCount = platformSlots.size();
             SelfMediaPublishAutoScheduleResponse.SlotGroup group = new SelfMediaPublishAutoScheduleResponse.SlotGroup();
@@ -3167,9 +3165,10 @@ public class ProjectSelfMediaScheduleService {
             group.setMessage(Boolean.TRUE.equals(group.getEnough())
                     ? "可满足目标月份自动排期"
                     : platformLabel(platform) + "目标月份剩余可自动排期时间不足，请选择其他月份或减少排期数量");
-            List<BusinessCalendarService.PublishSlot> selectedSlots = group.getEnough()
-                    ? selectEvenlyFromSlots(platformSlots, requestedCount)
-                    : List.of();
+            List<BusinessCalendarService.PublishSlot> selectedSlots = List.of();
+            if (Boolean.TRUE.equals(group.getEnough())) {
+                selectedSlots = dailyQuota ? platformSlots : selectEvenlyFromSlots(platformSlots, requestedCount);
+            }
             for (BusinessCalendarService.PublishSlot slot : selectedSlots) {
                 SelfMediaPublishAutoScheduleResponse.SlotPreview preview = new SelfMediaPublishAutoScheduleResponse.SlotPreview();
                 preview.setExecutionAt(slot.plannedAt());
@@ -3301,6 +3300,10 @@ public class ProjectSelfMediaScheduleService {
                 .toList();
         for (AccountPublishPlan plan : orderedPlans) {
             String platform = firstText(normalizePlatform(plan.platform()), "unknown");
+            if (plan.dailyQuota()) {
+                (plan.executionSlot() == null ? carryOver : current).add(plan);
+                continue;
+            }
             int remaining = remainingByPlatform.getOrDefault(platform, 0);
             if (remaining > 0) {
                 current.add(plan);
@@ -3323,7 +3326,7 @@ public class ProjectSelfMediaScheduleService {
             return null;
         }
         String targetMonth = YearMonth.parse(sourceMonth).plusMonths(1).toString();
-        lockCarryOverDecisionScope(project.getId());
+        lockProjectScheduleScope(project.getId());
         ProjectSelfMediaScheduleCarryOver existed = findPendingCarryOver(project.getId(), sourceMonth, targetMonth);
         if (existed != null) {
             return new CarryOverResult(
@@ -3363,7 +3366,7 @@ public class ProjectSelfMediaScheduleService {
         );
     }
 
-    private void lockCarryOverDecisionScope(Long projectId) {
+    private void lockProjectScheduleScope(Long projectId) {
         if (projectId == null) {
             return;
         }
@@ -3755,7 +3758,10 @@ public class ProjectSelfMediaScheduleService {
         return article != null && article.getSubjectBrandId() != null ? article.getSubjectBrandId() : sourceBrandId;
     }
 
-    private AccountPublishPlanResult buildAccountPublishPlans(Project project, String targetMonth, List<Long> accountIds) {
+    private AccountPublishPlanResult buildAccountPublishPlans(Project project,
+                                                            SelfMediaPublishAutoScheduleRequest request,
+                                                            List<Long> accountIds) {
+        String targetMonth = request.getTargetMonth();
         YearMonth month = parseTargetMonth(targetMonth);
         LocalDateTime periodStart = month.atDay(1).atStartOfDay();
         LocalDateTime periodEnd = month.plusMonths(1).atDay(1).atStartOfDay();
@@ -3784,6 +3790,14 @@ public class ProjectSelfMediaScheduleService {
                             month.atDay(1)
                     );
             String publishPlatform = firstText(ArticlePromptChannels.normalizeSelfMediaPublishPlatform(platform), platform);
+            if ("day".equals(quota.periodType())) {
+                List<AccountPublishPlan> pending = plans.stream()
+                        .filter(plan -> platform.equals(plan.platform()) && plan.carryOverId() != null)
+                        .toList();
+                plans.removeAll(pending);
+                plans.addAll(buildDailyQuotaPlans(project, request, platform, accounts, pending));
+                return;
+            }
             long activeSchedules = selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
                     project.getBrandId(),
                     publishPlatform,
@@ -3810,6 +3824,101 @@ public class ProjectSelfMediaScheduleService {
                 carryOverLoad.warnings(),
                 carryOverLoad.sources()
         );
+    }
+
+    private List<AccountPublishPlan> buildDailyQuotaPlans(Project project,
+                                                        SelfMediaPublishAutoScheduleRequest request,
+                                                        String platform,
+                                                        List<SelfMediaAccount> accounts,
+                                                        List<AccountPublishPlan> pendingCarryOvers) {
+        YearMonth month = YearMonth.parse(request.getTargetMonth());
+        LocalDateTime now = LocalDateTime.now(clock);
+        String strategy = resolveItemStrategy(request.getScheduleStrategy(), platform);
+        Map<LocalDate, List<BusinessCalendarService.PublishSlot>> windowsByDay = new LinkedHashMap<>();
+        businessCalendarService.allPublishSlots(month, Boolean.TRUE.equals(request.getIncludeAdjustedWorkdays()))
+                .stream()
+                .filter(slot -> slot.date().atTime(slot.windowEnd()).isAfter(now))
+                .filter(slot -> project.getStartDate() == null || !slot.date().isBefore(project.getStartDate()))
+                .filter(slot -> project.getEndDate() == null || !slot.date().isAfter(project.getEndDate()))
+                .sorted(Comparator.comparing(BusinessCalendarService.PublishSlot::plannedAt))
+                .forEach(slot -> windowsByDay.computeIfAbsent(slot.date(), ignored -> new ArrayList<>()).add(slot));
+        List<LocalDateTime> occupied = occupiedExecutionTimes(project.getBrandId(), platform, month, strategy);
+        List<AccountPublishPlan> result = new ArrayList<>();
+        int carryOverCursor = 0;
+        int accountCursor = 0;
+        for (Map.Entry<LocalDate, List<BusinessCalendarService.PublishSlot>> entry : windowsByDay.entrySet()) {
+            LocalDate date = entry.getKey();
+            var quota = companyChannelQuotaService.selfMediaDistributionQuota(project.getCompanyId(), platform, date);
+            long active = selfMediaPublishScheduleMapper.countActiveByBrandPlatformAndPeriod(
+                    project.getBrandId(), platform, date.atStartOfDay(), date.plusDays(1).atStartOfDay(),
+                    new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES));
+            int used = Math.max(quota.usedCount(), Math.toIntExact(Math.min(active, Integer.MAX_VALUE)));
+            int remaining = Math.max(0, quota.quotaLimit() - used);
+            List<BusinessCalendarService.PublishSlot> slots = dailyQuotaSlots(
+                    entry.getValue(), remaining, platform, strategy, now, occupied);
+            for (int i = 0; i < remaining; i++) {
+                AccountPublishPlan carried = carryOverCursor < pendingCarryOvers.size()
+                        ? pendingCarryOvers.get(carryOverCursor++) : null;
+                Long accountId = carried == null ? accounts.get(accountCursor++ % accounts.size()).getId() : carried.accountId();
+                result.add(new AccountPublishPlan(accountId, platform, carried == null ? null : carried.carryOverId(),
+                        true, i < slots.size() ? slots.get(i) : null));
+            }
+        }
+        for (; carryOverCursor < pendingCarryOvers.size(); carryOverCursor++) {
+            AccountPublishPlan carried = pendingCarryOvers.get(carryOverCursor);
+            result.add(new AccountPublishPlan(carried.accountId(), platform, carried.carryOverId(), true, null));
+        }
+        return result;
+    }
+
+    private List<LocalDateTime> occupiedExecutionTimes(Long brandId, String platform, YearMonth month, String strategy) {
+        LocalDateTime from = month.atDay(1).atStartOfDay();
+        LocalDateTime to = month.plusMonths(1).atDay(1).atStartOfDay();
+        List<LocalDateTime> occupied = new ArrayList<>();
+        scheduleItemMapper.selectList(new QueryWrapper<ProjectSelfMediaScheduleItem>()
+                        .eq("brand_id", brandId).eq("platform", platform)
+                        .ge("planned_execution_at", from).lt("planned_execution_at", to)
+                        .in("status", ITEM_STATUS_PLANNED, ITEM_STATUS_GENERATING, ITEM_STATUS_GENERATED,
+                                ITEM_STATUS_SCHEDULED, ITEM_STATUS_SCHEDULE_FAILED))
+                .stream().map(ProjectSelfMediaScheduleItem::getPlannedExecutionAt)
+                .filter(Objects::nonNull).forEach(occupied::add);
+        selfMediaPublishScheduleMapper.selectBrandActiveScheduleSlots(brandId, from, to,
+                        new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES))
+                .stream().filter(schedule -> platform.equals(schedule.getPlatform()))
+                .map(schedule -> schedule.getNextAttemptAt() != null ? schedule.getNextAttemptAt()
+                        : schedule.getPlannedPublishAt() == null ? null : schedule.getPlannedPublishAt()
+                        .minusMinutes(Math.max(0, scheduleAdapterRouter.rules(platform, strategy).fillLeadMinutes())))
+                .filter(Objects::nonNull).forEach(occupied::add);
+        return occupied;
+    }
+
+    private List<BusinessCalendarService.PublishSlot> dailyQuotaSlots(List<BusinessCalendarService.PublishSlot> windows,
+                                                                    int count, String platform, String strategy,
+                                                                    LocalDateTime now, List<LocalDateTime> occupied) {
+        List<BusinessCalendarService.PublishSlot> result = new ArrayList<>();
+        // Reuse the calendar windows and the shared three-minute execution spacing.
+        for (int offset = 0; result.size() < count; offset += 3) {
+            boolean insideWindow = false;
+            for (BusinessCalendarService.PublishSlot window : windows) {
+                LocalDateTime at = window.plannedAt().plusMinutes(offset);
+                if (at.toLocalDate().equals(window.date()) && !at.toLocalTime().isAfter(window.windowEnd())) {
+                    insideWindow = true;
+                    var slot = new BusinessCalendarService.PublishSlot(window.date(), window.windowName(),
+                            window.windowStart(), window.windowEnd(), at, window.dayType(), window.dayName(),
+                            window.week(), window.adjustedWorkday());
+                    if (!at.toLocalTime().isBefore(window.windowStart())
+                            && isFutureExecutableSlot(slot, platform, strategy, now)
+                            && occupied.stream().noneMatch(time -> Math.abs(java.time.Duration.between(time, at).toSeconds()) < 180)) {
+                        result.add(slot);
+                        occupied.add(at);
+                        if (result.size() == count) break;
+                    }
+                }
+            }
+            if (!insideWindow) break;
+        }
+        result.sort(Comparator.comparing(BusinessCalendarService.PublishSlot::plannedAt));
+        return result;
     }
 
     private CarryOverLoadResult loadPendingCarryOverPlans(Project project,
@@ -4738,6 +4847,8 @@ public class ProjectSelfMediaScheduleService {
             case "zhihu" -> "知乎";
             case "xiaohongshu" -> "小红书";
             case "douyin" -> "抖音图文";
+            case "sohu" -> "搜狐";
+            case "netease" -> "网易";
             case "wechat", "wechat_mp" -> "微信公众号";
             default -> StringUtils.hasText(platform) ? platform : "自媒体平台";
         };
@@ -4747,9 +4858,14 @@ public class ProjectSelfMediaScheduleService {
         this.clock = clock == null ? Clock.systemDefaultZone() : clock;
     }
 
-    private record AccountPublishPlan(Long accountId, String platform, Long carryOverId) {
+    private record AccountPublishPlan(Long accountId, String platform, Long carryOverId,
+                                      boolean dailyQuota, BusinessCalendarService.PublishSlot executionSlot) {
         private AccountPublishPlan(Long accountId, String platform) {
-            this(accountId, platform, null);
+            this(accountId, platform, null, false, null);
+        }
+
+        private AccountPublishPlan(Long accountId, String platform, Long carryOverId) {
+            this(accountId, platform, carryOverId, false, null);
         }
     }
 

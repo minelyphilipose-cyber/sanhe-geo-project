@@ -126,10 +126,6 @@ public class SelfMediaPublishScheduleService {
     private static final int FAILURE_MESSAGE_MAX_LENGTH = 512;
     private static final int FAILURE_CODE_MAX_LENGTH = 64;
     private static final int[] SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES = {3, 8};
-    private static final List<String> DAILY_LIMIT_EXCLUDED_STATUSES = List.of(
-            SelfMediaPublishScheduleConstants.STATUS_CANCELLED,
-            SelfMediaPublishScheduleConstants.STATUS_ROUTED_TO_SEMI_AUTO
-    );
     private static final Set<String> RECONCILABLE_ARTICLE_STATUSES =
             Set.of("approved", "unpublished", "distributing", "failed");
     private static final Set<String> DISTRIBUTABLE_ARTICLE_STATUSES = Set.of("approved", "unpublished");
@@ -407,7 +403,6 @@ public class SelfMediaPublishScheduleService {
                     operator.getId(),
                     idempotencyKeyHeader,
                     true,
-                    false,
                     false
             );
             return new QuickDispatchCreateResult(createResponse, replacedInTransaction);
@@ -499,14 +494,7 @@ public class SelfMediaPublishScheduleService {
                             "SCHEDULE_EXECUTION_WINDOW_FULL", "执行填充时间窗口已满，请扩大时间窗口或减少排期数量", null));
                     continue;
                 }
-                if (accountPublishDayLimitReached(
-                        validated.brandId(), accountId, plannedCursor, validated.dailyScheduleLimit())) {
-                    response.getRejectedItems().add(rejected(articleId, accountId, publishPlatform,
-                            "ACCOUNT_DAILY_SCHEDULE_LIMIT",
-                            dailyScheduleLimitMessage(validated.dailyScheduleLimit()),
-                            null));
-                    continue;
-                }
+                scheduleMapper.lockSelfMediaAccountForScheduling(accountId);
                 int requiredLeadMinutes = requiredPlatformScheduleCreateLeadMinutes(
                         validated.strategy(),
                         publishPlatform
@@ -800,7 +788,7 @@ public class SelfMediaPublishScheduleService {
                 fail("REPLACE_TARGET_NOT_AVAILABLE", "待生成计划已变化或开始处理，请刷新后重试");
             }
             SelfMediaPublishScheduleCreateResponse result = createQuickSchedule(plan, operatorId,
-                    idempotencyKeyHeader, dispatch, false, !dispatch);
+                    idempotencyKeyHeader, dispatch, false);
             if (result.getCreatedSchedules().size() != 1) {
                 fail("QUICK_SCHEDULE_NOT_CREATED", firstRejectedMessage(result));
             }
@@ -825,15 +813,14 @@ public class SelfMediaPublishScheduleService {
                                                                       String idempotencyKeyHeader,
                                                                       boolean enforceQuickDispatchQueueLimit) {
         return createQuickSchedule(plan, operatorId, idempotencyKeyHeader,
-                enforceQuickDispatchQueueLimit, true, true);
+                enforceQuickDispatchQueueLimit, true);
     }
 
     private SelfMediaPublishScheduleCreateResponse createQuickSchedule(QuickSchedulePlan plan,
                                                                       Long operatorId,
                                                                       String idempotencyKeyHeader,
                                                                       boolean enforceQuickDispatchQueueLimit,
-                                                                      boolean reserveQuotaImmediately,
-                                                                      boolean enforceDailyScheduleLimit) {
+                                                                      boolean reserveQuotaImmediately) {
         QuickScheduleData data = plan.data();
         ValidatedRequest validated = new ValidatedRequest(
                 plan.response().getBrandId(),
@@ -874,21 +861,7 @@ public class SelfMediaPublishScheduleService {
             requestMapper.updateById(requestRow);
             return response;
         }
-        if (enforceDailyScheduleLimit && accountPublishDayLimitReached(plan.response().getBrandId(),
-                plan.response().getSelfMediaAccountId(), data.plannedPublishAt(), 1)) {
-            response.getRejectedItems().add(rejected(
-                    plan.response().getArticleId(),
-                    plan.response().getSelfMediaAccountId(),
-                    plan.response().getPlatform(),
-                    "ACCOUNT_DAILY_SCHEDULE_LIMIT",
-                    "同一自媒体账号每天只能排期一篇文章，请选择其他日期",
-                    null
-            ));
-            requestRow.setScheduleCount(0);
-            requestRow.setStatus("completed");
-            requestMapper.updateById(requestRow);
-            return response;
-        }
+        scheduleMapper.lockSelfMediaAccountForScheduling(plan.response().getSelfMediaAccountId());
         SelfMediaPublishSchedule inserted = createScheduleRow(requestRow, operatorId, data.candidate(),
                 data.plannedPublishAt(), data.nextAttemptAt(), data.strategy(), true, data.publishSnapshot());
         if (inserted == null) {
@@ -4586,31 +4559,6 @@ public class SelfMediaPublishScheduleService {
         } catch (DuplicateKeyException duplicate) {
             return null;
         }
-    }
-
-    private boolean accountPublishDayLimitReached(Long brandId,
-                                                  Long selfMediaAccountId,
-                                                  LocalDateTime plannedPublishAt,
-                                                  int dailyScheduleLimit) {
-        if (brandId == null || selfMediaAccountId == null || plannedPublishAt == null) {
-            return false;
-        }
-        scheduleMapper.lockSelfMediaAccountForScheduling(selfMediaAccountId);
-        LocalDateTime dayStart = plannedPublishAt.toLocalDate().atStartOfDay();
-        long occupied = scheduleMapper.countOccupiedByBrandAccountAndPublishDay(
-                brandId,
-                selfMediaAccountId,
-                dayStart,
-                dayStart.plusDays(1),
-                DAILY_LIMIT_EXCLUDED_STATUSES
-        );
-        return occupied >= Math.max(1, Math.min(2, dailyScheduleLimit));
-    }
-
-    private String dailyScheduleLimitMessage(int dailyScheduleLimit) {
-        return dailyScheduleLimit > 1
-                ? "任务数超过工作日数时，同一自媒体账号每天最多排期两篇文章，请选择其他日期"
-                : "同一自媒体账号每天只能排期一篇文章，请选择其他日期";
     }
 
     private SelfMediaPublishScheduleCreateResponse responseForExistingRequest(SelfMediaPublishScheduleRequest requestRow) {

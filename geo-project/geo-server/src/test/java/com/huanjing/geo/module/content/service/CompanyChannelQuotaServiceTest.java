@@ -355,6 +355,42 @@ class CompanyChannelQuotaServiceTest {
         assertEquals(13, quota.quotaLimit());
     }
 
+    @ParameterizedTest
+    @CsvSource({"sohu,false", "toutiao,false", "zhihu,false", "sohu,true", "toutiao,true", "zhihu,true"})
+    void projectPlanQuotaCommitsOrRollsBackWithThePlan(String platform, boolean rollback) throws java.sql.SQLException {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource(
+                "jdbc:h2:mem:plan_quota_" + java.util.UUID.randomUUID() + ";MODE=MySQL", "sa", "");
+        var manager = new DataSourceTransactionManager(dataSource);
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        try (java.sql.Connection connection = dataSource.getConnection()) {
+            jdbc.execute("CREATE TABLE plan_item (id BIGINT PRIMARY KEY)");
+            jdbc.execute("CREATE TABLE quota_ledger (biz_id VARCHAR(32) PRIMARY KEY, status VARCHAR(32))");
+            jdbc.execute("CREATE TABLE quota_usage (used_count INT, quota_limit INT)");
+            jdbc.update("INSERT INTO quota_usage VALUES (0, 2)");
+            CompanyPackageBinding binding = new CompanyPackageBinding();
+            binding.setChannelQuotaSnapshot("[{\"channelCode\":\"self_media:" + platform + "\",\"periodType\":\"day\",\"quotaLimit\":2,\"enabled\":true}]");
+            when(bindingService.requireActiveBinding(7L)).thenReturn(binding);
+            when(ledgerMapper.selectByBiz("project_self_media_plan", "900")).thenReturn(null);
+            when(usageMapper.tryReserve(7L, "self_media:" + platform, "day", "2026-10-12")).thenAnswer(invocation ->
+                    jdbc.update("UPDATE quota_usage SET used_count=used_count+1 WHERE used_count<quota_limit"));
+            when(ledgerMapper.insert(any(CompanyChannelQuotaLedger.class))).thenAnswer(invocation -> {
+                CompanyChannelQuotaLedger ledger = invocation.getArgument(0);
+                return jdbc.update("INSERT INTO quota_ledger VALUES (?,?)", ledger.getBizId(), ledger.getStatus());
+            });
+            var quota = new CompanyChannelQuotaService(bindingService, usageMapper, ledgerMapper, distributionTaskMapper,
+                    selfMediaAccountMapper, systemAlertService, manager);
+            new TransactionTemplate(manager).executeWithoutResult(status -> {
+                jdbc.update("INSERT INTO plan_item VALUES (900)");
+                quota.reserveProjectSelfMediaPlan(7L, 9L, platform, 900L, LocalDate.of(2026, 10, 12));
+                if (rollback) status.setRollbackOnly();
+            });
+            int expected = rollback ? 0 : 1;
+            assertEquals(expected, jdbc.queryForObject("SELECT COUNT(*) FROM plan_item", Integer.class));
+            assertEquals(expected, jdbc.queryForObject("SELECT COUNT(*) FROM quota_ledger", Integer.class));
+            assertEquals(expected, jdbc.queryForObject("SELECT used_count FROM quota_usage", Integer.class));
+        }
+    }
+
     @Test
     void reserveProjectSelfMediaPlanUsesPlannedPublishDatePeriod() {
         CompanyPackageBinding binding = new CompanyPackageBinding();

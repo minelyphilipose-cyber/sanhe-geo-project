@@ -32,6 +32,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
@@ -157,6 +158,19 @@ public class CompanyChannelQuotaService {
                                                                  LocalDate quotaDate) {
         if (planItemId == null) {
             throw new BizException(400, "plan_item_id is required for quota reservation");
+        }
+        // A plan and its reservation must commit together when the caller has a planning transaction.
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            try {
+                return reserveForBizBatchInTransaction(companyId, List.of(new BizQuotaReservation(
+                        projectId, resolveSelfMediaPlatformChannel(platform), BIZ_TYPE_PROJECT_SELF_MEDIA_PLAN,
+                        String.valueOf(planItemId), requireQuotaDate(quotaDate)))).get(0);
+            } catch (RuntimeException ex) {
+                if (isTransientQuotaLockFailure(ex)) {
+                    throw new BizException(409, "渠道配额正在被其它排期任务占用，请稍后重试", ex);
+                }
+                throw ex;
+            }
         }
         return reserveForBiz(
                 companyId,

@@ -1,4 +1,5 @@
 ﻿import request from './request'
+import type { GeoRequestConfig } from './request'
 import type {
   R,
   PageResult,
@@ -409,8 +410,22 @@ export function previewProjectSelfMediaAutoSchedule(id: number, data: ProjectSel
   return request.post<R<ProjectSelfMediaAutoScheduleResponse>>(`/projects/${id}/self-media-schedules/auto-preview`, data)
 }
 
+export interface ProjectSelfMediaPlanningTask {
+  id: number
+  projectId: number
+  targetMonth: string
+  status: 'pending' | 'success' | 'failed'
+  supplementExistingBatch?: boolean
+  result?: ProjectSelfMediaAutoScheduleResponse
+  failureMessage?: string
+}
+
+export function getProjectSelfMediaPlanningTask(id: number, targetMonth: string) {
+  return request.get<R<ProjectSelfMediaPlanningTask | null>>(`/projects/${id}/self-media-planning-tasks/${targetMonth}/latest`, { silentError: true } as GeoRequestConfig)
+}
+
 export function createProjectSelfMediaAutoSchedule(id: number, data: ProjectSelfMediaAutoSchedulePayload, idempotencyKey?: string) {
-  return request.post<R<ProjectSelfMediaAutoScheduleResponse>>(`/projects/${id}/self-media-schedules/auto-create`, data, {
+  return request.post<R<ProjectSelfMediaPlanningTask>>(`/projects/${id}/self-media-schedules/auto-create-async`, data, {
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
   })
 }
